@@ -1,16 +1,20 @@
 """Exercise source selection and shard discovery without remote CI side effects."""
+
 import importlib.util
 import re
-from pathlib import Path
-import subprocess
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 import run_tests
 
-SPEC = importlib.util.spec_from_file_location("release_source", Path(__file__).resolve().parents[1] / ".github/scripts/release_source.py")
+SPEC = importlib.util.spec_from_file_location(
+    "release_source",
+    Path(__file__).resolve().parents[1] / ".github/scripts/release_source.py",
+)
 release_source = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release_source)
 
@@ -20,7 +24,9 @@ class WorkflowSourceTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
         dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
-        workflow = (root / ".github/workflows/publish-container.yml").read_text(encoding="utf-8")
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("package-ecosystem: pip", dependabot)
         self.assertIn('directory: "/"', dependabot)
 
@@ -28,7 +34,9 @@ class WorkflowSourceTests(unittest.TestCase):
             content = (root / path).read_text(encoding="utf-8")
             return {
                 match.group(1).lower().replace("_", "-"): match.group(2)
-                for match in re.finditer(r"(?m)^([A-Za-z0-9_.-]+)==([^\\\s;]+)", content)
+                for match in re.finditer(
+                    r"(?m)^([A-Za-z0-9_.-]+)==([^\\\s;]+)", content
+                )
             }
 
         for manifest, lock in (
@@ -44,7 +52,9 @@ class WorkflowSourceTests(unittest.TestCase):
             if manifest == "requirements-dev.in":
                 manifests.update(pinned_requirements("requirements.in"))
             for name, version in manifests.items():
-                self.assertEqual(lock_pins.get(name), version, f"{name} differs in {lock}")
+                self.assertEqual(
+                    lock_pins.get(name), version, f"{name} differs in {lock}"
+                )
 
         self.assertIn("COPY requirements.txt /app/requirements.txt", dockerfile)
         self.assertIn("--require-hashes -r /app/requirements.txt", dockerfile)
@@ -53,13 +63,17 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertNotIn("requirements.lock", dockerfile + workflow)
 
     def test_daily_release_limits_default_token_permissions(self):
-        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml").read_text(encoding="utf-8")
+        workflow = (
+            Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml"
+        ).read_text(encoding="utf-8")
         self.assertIn("permissions:\n  contents: read", workflow)
 
     def test_executed_source_is_bound_to_the_workflow_event(self):
         root = Path(__file__).resolve().parents[1]
-        workflow = (root / ".github/workflows/publish-container.yml").read_text(encoding="utf-8")
-        checkout_refs = re.findall(r"^          ref: (.+)$", workflow, re.M)
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
+        checkout_refs = re.findall(r"^          ref: (.+)$", workflow, re.MULTILINE)
         self.assertEqual(len(checkout_refs), 8)
         self.assertTrue(all(ref == "${{ github.sha }}" for ref in checkout_refs[1:]))
         self.assertIn("'refs/heads/main' || github.sha", checkout_refs[0])
@@ -67,59 +81,97 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("SOURCE_REF: ${{ github.sha }}", workflow)
         self.assertIn("TESTED_SHA: ${{ needs.source.outputs.source_sha }}", workflow)
         self.assertIn('release_source.py --verify "$TESTED_SHA"', workflow)
-        self.assertIn("github.ref == 'refs/heads/main' && inputs.publish_container == true", workflow)
+        self.assertIn(
+            "github.ref == 'refs/heads/main' && inputs.publish_container == true",
+            workflow,
+        )
 
     def test_browser_results_are_aggregated_before_publishing(self):
-        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/publish-container.yml").read_text(encoding="utf-8")
-        browser = workflow.split("  browser:\n", 1)[1].split("  build-and-push:\n", 1)[0]
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/publish-container.yml"
+        ).read_text(encoding="utf-8")
+        browser = workflow.split("  browser:\n", 1)[1].split("  build-and-push:\n", 1)[
+            0
+        ]
         self.assertIn("needs: e2e", browser)
-        self.assertIn('E2E_RESULT: ${{ needs.e2e.result }}', browser)
+        self.assertIn("E2E_RESULT: ${{ needs.e2e.result }}", browser)
         self.assertIn("needs: [source, test, e2e, browser, quality]", workflow)
 
     def test_published_tags_are_verified_against_the_signed_digest(self):
-        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/publish-container.yml").read_text(encoding="utf-8")
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/publish-container.yml"
+        ).read_text(encoding="utf-8")
         self.assertIn("verify published tag digest parity", workflow)
         self.assertIn("docker buildx imagetools inspect", workflow)
         self.assertIn("Verify image signature", workflow)
         self.assertIn("cosign verify", workflow)
 
     def test_release_pr_dispatch_selects_its_own_branch_without_source_override(self):
-        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml").read_text(encoding="utf-8")
-        dispatch = workflow.split("trigger_release_test() {", 1)[1].split("ensure_release_test() {", 1)[0]
+        workflow = (
+            Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml"
+        ).read_text(encoding="utf-8")
+        dispatch = workflow.split("trigger_release_test() {", 1)[1].split(
+            "ensure_release_test() {", 1
+        )[0]
         self.assertIn('--ref "$source_ref"', dispatch)
         self.assertIn('--field "publish_container=false"', dispatch)
         self.assertNotIn('--field "source_ref=', dispatch)
 
     def test_main_push_test_can_create_the_release_after_promotion_merge(self):
-        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml").read_text(encoding="utf-8")
-        create_release = workflow.split("  create-release:", 1)[1].split("    runs-on:", 1)[0]
+        workflow = (
+            Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml"
+        ).read_text(encoding="utf-8")
+        create_release = workflow.split("  create-release:", 1)[1].split(
+            "    runs-on:", 1
+        )[0]
         self.assertNotIn("workflow_dispatch", create_release)
         self.assertNotIn("chore/release-promotion-", create_release)
         self.assertIn("github.event.workflow_run.event == 'push'", create_release)
         self.assertIn("github.event.workflow_run.head_branch == 'main'", create_release)
         self.assertIn("TESTED_SHA: ${{ github.event.workflow_run.head_sha }}", workflow)
-        self.assertIn('tested_tree="$(git show -s --format=\'%T\' "$TESTED_SHA")"', workflow)
-        self.assertIn('current_main_tree="$(git rev-parse refs/remotes/origin/main^{tree})"', workflow)
+        self.assertIn(
+            'tested_tree="$(git show -s --format=\'%T\' "$TESTED_SHA")"', workflow
+        )
+        self.assertIn(
+            'current_main_tree="$(git rev-parse refs/remotes/origin/main^{tree})"',
+            workflow,
+        )
         self.assertIn('if [[ "$current_main_tree" != "$tested_tree" ]]', workflow)
-        self.assertNotIn('git merge-base --is-ancestor "$TESTED_SHA" refs/remotes/origin/main', workflow)
-        self.assertNotIn('PROMOTION_BRANCH', workflow)
-        self.assertNotIn('sleep 10', workflow)
-        self.assertIn('queue: max', workflow)
+        self.assertNotIn(
+            'git merge-base --is-ancestor "$TESTED_SHA" refs/remotes/origin/main',
+            workflow,
+        )
+        self.assertNotIn("PROMOTION_BRANCH", workflow)
+        self.assertNotIn("sleep 10", workflow)
+        self.assertIn("queue: max", workflow)
         self.assertIn("branches: [main, 'chore/release-version-*']", workflow)
 
 
 class CodexReviewWorkflowTests(unittest.TestCase):
     def test_dependabot_automerge_is_limited_to_develop(self):
         root = Path(__file__).resolve().parents[1]
-        workflow = (root / ".github/workflows/dependabot-automerge.yml").read_text(encoding="utf-8")
-        self.assertIn("github.event.pull_request.user.login == 'dependabot[bot]'", workflow)
+        workflow = (root / ".github/workflows/dependabot-automerge.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "github.event.pull_request.user.login == 'dependabot[bot]'", workflow
+        )
         self.assertIn("github.event.pull_request.base.ref == 'develop'", workflow)
-        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", workflow)
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            workflow,
+        )
 
     def test_codex_gate_uses_subscription_review_and_required_check_context(self):
         root = Path(__file__).resolve().parents[1]
-        workflow = (root / ".github/workflows/codex-code-review.yml").read_text(encoding="utf-8")
-        action = (root / ".github/actions/codex-review-gate/action.yml").read_text(encoding="utf-8")
+        workflow = (root / ".github/workflows/codex-code-review.yml").read_text(
+            encoding="utf-8"
+        )
+        action = (root / ".github/actions/codex-review-gate/action.yml").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("pull_request_target:", workflow)
         self.assertIn("ready_for_review", workflow)
@@ -135,33 +187,53 @@ class CodexReviewWorkflowTests(unittest.TestCase):
             r"(?ms)  gate:.*?    permissions:\n      contents: read\n      issues: read\n      pull-requests: read\n      checks: write",
         )
         self.assertNotIn("github.rest.issues.createComment", workflow)
-        self.assertNotIn("Request a fresh Codex review for pull-request events", workflow)
+        self.assertNotIn(
+            "Request a fresh Codex review for pull-request events", workflow
+        )
         self.assertNotIn("steps.request_review.outputs.requested_at", workflow)
         self.assertIn("const dependabotLogin = 'dependabot[bot]'", workflow)
         self.assertIn("pullRequest.user?.login === dependabotLogin &&", workflow)
         self.assertIn("pullRequest.base?.ref === 'develop'", workflow)
         self.assertIn("const releaseBotLogin = 'ai-coach-release-bot[bot]'", workflow)
         self.assertIn("pullRequest.base?.ref === 'develop'", workflow)
-        self.assertIn("pullRequest.title === `chore(release): set application version to ${versionMatch[1]}`", workflow)
-        self.assertIn("const skipCodexReview = shouldSkipCodexReview(pullRequest)", workflow)
-        self.assertIn("Mark trusted Dependabot or release-bot PR as Codex-exempt", workflow)
+        self.assertIn(
+            "pullRequest.title === `chore(release): set application version to ${versionMatch[1]}`",
+            workflow,
+        )
+        self.assertIn(
+            "const skipCodexReview = shouldSkipCodexReview(pullRequest)", workflow
+        )
+        self.assertIn(
+            "Mark trusted Dependabot or release-bot PR as Codex-exempt", workflow
+        )
         self.assertIn("matrix.skipCodexReview == true", workflow)
         self.assertIn("matrix.skipCodexReview != true", workflow)
-        self.assertIn("Codex review skipped for trusted Dependabot or release-bot PR", workflow)
-        self.assertIn("The Dependabot Codex exemption requires a same-repository develop pull request", workflow)
-        self.assertIn("![dependabotLogin, releaseBotLogin].includes(authorLogin)", workflow)
+        self.assertIn(
+            "Codex review skipped for trusted Dependabot or release-bot PR", workflow
+        )
+        self.assertIn(
+            "The Dependabot Codex exemption requires a same-repository develop pull request",
+            workflow,
+        )
+        self.assertIn(
+            "![dependabotLogin, releaseBotLogin].includes(authorLogin)", workflow
+        )
         self.assertIn("github.rest.pulls.listCommits", workflow)
         self.assertIn("commit.author?.login === dependabotLogin", workflow)
         self.assertIn("allowedDependencyFiles", workflow)
         self.assertIn("'requirements.in'", workflow)
         self.assertIn("actionPinLinePattern", workflow)
-        self.assertIn("const manualReviewCheckName = 'Codex manual review request'", workflow)
+        self.assertIn(
+            "const manualReviewCheckName = 'Codex manual review request'", workflow
+        )
         self.assertIn("getManualReviewRequest", workflow)
         self.assertIn("Manual Codex review requested", workflow)
         self.assertIn("pushReviewRequestedAt", workflow)
         self.assertIn("/^chore\\/release-version-(\\d+\\.\\d+\\.\\d+)$/", workflow)
         self.assertIn("pullRequest.data.title !== expectedTitle", workflow)
-        self.assertIn("pullRequest.data.head.repo?.full_name !== expectedHeadRepository", workflow)
+        self.assertIn(
+            "pullRequest.data.head.repo?.full_name !== expectedHeadRepository", workflow
+        )
         self.assertIn("github.rest.pulls.listFiles", workflow)
         self.assertIn("file.filename !== 'server.py'", workflow)
         self.assertIn("file.additions !== 1", workflow)
@@ -172,27 +244,55 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("conclusion: 'success'", workflow)
         self.assertIn("push:", workflow)
         self.assertIn("edited", workflow)
-        self.assertIn("const baseChanged = context.payload.action === 'edited'", workflow)
-        self.assertIn("const titleChanged = context.payload.action === 'edited'", workflow)
-        self.assertIn("const releaseBotTitleChanged = titleChanged && pullRequest.user?.login === releaseBotLogin", workflow)
-        self.assertIn("const reviewBaselineChanged = baseChanged || releaseBotTitleChanged || context.payload.action === 'reopened'", workflow)
-        self.assertIn("context.payload.changes.base", workflow.replace("changes?.base", "changes.base"))
-        self.assertIn("context.payload.changes.title", workflow.replace("changes?.title", "changes.title"))
+        self.assertIn(
+            "const baseChanged = context.payload.action === 'edited'", workflow
+        )
+        self.assertIn(
+            "const titleChanged = context.payload.action === 'edited'", workflow
+        )
+        self.assertIn(
+            "const releaseBotTitleChanged = titleChanged && pullRequest.user?.login === releaseBotLogin",
+            workflow,
+        )
+        self.assertIn(
+            "const reviewBaselineChanged = baseChanged || releaseBotTitleChanged || context.payload.action === 'reopened'",
+            workflow,
+        )
+        self.assertIn(
+            "context.payload.changes.base",
+            workflow.replace("changes?.base", "changes.base"),
+        )
+        self.assertIn(
+            "context.payload.changes.title",
+            workflow.replace("changes?.title", "changes.title"),
+        )
         self.assertIn("Explicit Codex review required", workflow)
         self.assertIn("A subscription usage limit is an explicit", workflow)
         self.assertIn("matrix.runCodexReview == true", workflow)
         self.assertIn("getUnresolvedCodexReviewIds", workflow)
         self.assertIn("hasCompletedCleanReaction", workflow)
-        self.assertIn("reviewAllowed = ['initial', 'p1'].includes(reviewRequirement)", workflow)
+        self.assertIn(
+            "reviewAllowed = ['initial', 'p1'].includes(reviewRequirement)", workflow
+        )
         self.assertIn("context.payload.comment?.user?.type !== 'Bot'", workflow)
         self.assertIn("['OWNER', 'MEMBER', 'COLLABORATOR'].includes", workflow)
-        self.assertIn("pull_requests: ${{ steps.resolve_base.outputs.pull_requests }}", workflow)
-        self.assertIn("has_pull_requests: ${{ steps.resolve_base.outputs.has_pull_requests }}", workflow)
-        self.assertIn("core.setOutput('has_pull_requests', affectedPullRequests.length > 0 ? 'true' : 'false')", workflow)
+        self.assertIn(
+            "pull_requests: ${{ steps.resolve_base.outputs.pull_requests }}", workflow
+        )
+        self.assertIn(
+            "has_pull_requests: ${{ steps.resolve_base.outputs.has_pull_requests }}",
+            workflow,
+        )
+        self.assertIn(
+            "core.setOutput('has_pull_requests', affectedPullRequests.length > 0 ? 'true' : 'false')",
+            workflow,
+        )
         self.assertIn("fromJSON(needs.discover.outputs.pull_requests)", workflow)
         self.assertIn("pullRequestNumber: 0", workflow)
         self.assertIn("skip: true", workflow)
-        self.assertIn("if: needs.discover.outputs.has_pull_requests == 'true'", workflow)
+        self.assertIn(
+            "if: needs.discover.outputs.has_pull_requests == 'true'", workflow
+        )
         self.assertIn("matrix.pullRequestNumber", workflow)
         self.assertIn("matrix.baseRef", workflow)
         self.assertNotIn("ref: develop", workflow)
@@ -201,7 +301,10 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("EXPECTED_BASE_REF: ${{ matrix.baseRef }}", workflow)
         self.assertIn("cancel-in-progress: true", workflow)
         self.assertIn("review-requested-at: ${{ matrix.reviewRequestedAt }}", workflow)
-        self.assertIn("checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review'", workflow)
+        self.assertIn(
+            "checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review'",
+            workflow,
+        )
         self.assertIn("CHECK_NAME: ${{ matrix.checkName }}", workflow)
         self.assertIn("check-name: ${{ matrix.checkName }}", workflow)
         self.assertIn("skipCodexReview: false", workflow)
@@ -238,7 +341,9 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("Math.min(currentPollSeconds * 2, 120)", action)
         self.assertIn("pull_request_review_id", action)
         self.assertNotIn("review.commit_id !== headSha", action)
-        self.assertIn("comments.length > 0 && !unresolvedReviewIds.has(review.id)", action)
+        self.assertIn(
+            "comments.length > 0 && !unresolvedReviewIds.has(review.id)", action
+        )
         self.assertNotIn("comment.commit_id === headSha", action)
         self.assertIn("reaction.content === '+1'", action)
         self.assertIn("waiting for a submitted review or clean reaction", action)
@@ -277,9 +382,16 @@ class DiscoveryTests(unittest.TestCase):
     def test_direct_cli_discovers_backend_modules_from_any_working_directory(self):
         runner = Path(run_tests.__file__).resolve()
         with tempfile.TemporaryDirectory() as directory:
-            output = subprocess.check_output([sys.executable, str(runner), "--list"], cwd=directory, text=True, stderr=subprocess.PIPE)
+            output = subprocess.check_output(
+                [sys.executable, str(runner), "--list"],
+                cwd=directory,
+                text=True,
+                stderr=subprocess.PIPE,
+            )
         ids = output.splitlines()
-        self.assertTrue(any(test_id.startswith("test_coach_dialogue.") for test_id in ids))
+        self.assertTrue(
+            any(test_id.startswith("test_coach_dialogue.") for test_id in ids)
+        )
         self.assertTrue(any(test_id.startswith("test_db_manager.") for test_id in ids))
         self.assertEqual(ids, sorted(set(ids)))
 
@@ -287,10 +399,17 @@ class DiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name in ("intent", "db", "new_module"):
-                (root / f"test_{name}.py").write_text("import unittest\nclass Case(unittest.TestCase):\n def test_example(self): pass\n", encoding="utf-8")
+                (root / f"test_{name}.py").write_text(
+                    "import unittest\nclass Case(unittest.TestCase):\n def test_example(self): pass\n",
+                    encoding="utf-8",
+                )
             tests = run_tests.discover_tests(root)
             expected = [test.id() for test in tests]
-            actual = [test.id() for shard in range(1, 5) for test in run_tests.select_shard(tests, shard, 4)]
+            actual = [
+                test.id()
+                for shard in range(1, 5)
+                for test in run_tests.select_shard(tests, shard, 4)
+            ]
             self.assertEqual(len(expected), 3)
             self.assertCountEqual(actual, expected)
             self.assertEqual(len(actual), len(set(actual)))
@@ -298,12 +417,17 @@ class DiscoveryTests(unittest.TestCase):
     def test_discovery_import_failure_is_fatal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "test_broken_fixture.py").write_text("raise RuntimeError('synthetic import failure')", encoding="utf-8")
+            (root / "test_broken_fixture.py").write_text(
+                "raise RuntimeError('synthetic import failure')", encoding="utf-8"
+            )
             with self.assertRaisesRegex(RuntimeError, "synthetic import failure"):
                 run_tests.discover_tests(root)
 
 
-@unittest.skipUnless(shutil.which("git"), "Git fixture contracts run in native CI; Git is not an application runtime dependency")
+@unittest.skipUnless(
+    shutil.which("git"),
+    "Git fixture contracts run in native CI; Git is not an application runtime dependency",
+)
 class ReleaseSourceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -319,10 +443,14 @@ class ReleaseSourceTests(unittest.TestCase):
         self.git("update-ref", "refs/remotes/origin/main", self.sha)
 
     def git(self, *args):
-        return subprocess.check_output(["git", "-C", str(self.root), *args], text=True, stderr=subprocess.PIPE).strip()
+        return subprocess.check_output(
+            ["git", "-C", str(self.root), *args], text=True, stderr=subprocess.PIPE
+        ).strip()
 
     def commit(self, version):
-        (self.root / "server.py").write_text(f'APP_VERSION = "{version}"\n', encoding="utf-8")
+        (self.root / "server.py").write_text(
+            f'APP_VERSION = "{version}"\n', encoding="utf-8"
+        )
         self.git("add", "server.py")
         self.git("commit", "-m", "test: fixture")
 
@@ -338,20 +466,46 @@ class ReleaseSourceTests(unittest.TestCase):
 
     def test_read_only_release_pr_can_resolve_before_its_tag_exists(self):
         self.commit("1.7.3")
-        self.assertEqual(release_source.resolve(self.root, "develop"), self.git("rev-parse", "HEAD"))
+        self.assertEqual(
+            release_source.resolve(self.root, "develop"), self.git("rev-parse", "HEAD")
+        )
 
     def test_read_only_release_pr_version_must_match_application(self):
         self.commit("1.7.3")
         result = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve().parents[1] / ".github/scripts/release_source.py"),
-             "--source", "develop", "--expected-version", "1.7.3"],
-            cwd=self.root, capture_output=True, text=True, check=False,
+            [
+                sys.executable,
+                str(
+                    Path(__file__).resolve().parents[1]
+                    / ".github/scripts/release_source.py"
+                ),
+                "--source",
+                "develop",
+                "--expected-version",
+                "1.7.3",
+            ],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         mismatch = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve().parents[1] / ".github/scripts/release_source.py"),
-             "--source", "develop", "--expected-version", "1.7.4"],
-            cwd=self.root, capture_output=True, text=True, check=False,
+            [
+                sys.executable,
+                str(
+                    Path(__file__).resolve().parents[1]
+                    / ".github/scripts/release_source.py"
+                ),
+                "--source",
+                "develop",
+                "--expected-version",
+                "1.7.4",
+            ],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         self.assertNotEqual(mismatch.returncode, 0)
 
@@ -385,7 +539,10 @@ class ReleaseSourceTests(unittest.TestCase):
 
     def test_build_verification_requires_fetching_the_release_tag(self):
         clone = self.root / "checkout"
-        subprocess.check_output(["git", "clone", "--depth=1", "--no-tags", self.root.as_uri(), str(clone)], stderr=subprocess.PIPE)
+        subprocess.check_output(
+            ["git", "clone", "--depth=1", "--no-tags", self.root.as_uri(), str(clone)],
+            stderr=subprocess.PIPE,
+        )
         with self.assertRaises(subprocess.CalledProcessError):
             release_source.verify(clone, self.sha, "1.7.2")
         release_source.git(clone, "fetch", "--unshallow", "--tags", "origin")
@@ -401,11 +558,14 @@ class ReleaseWorkflowTests(unittest.TestCase):
             / "workflows"
             / "daily-release.yml"
         ).read_text(encoding="utf-8")
-        release_counting = workflow.split(
-            'if [[ -n "$latest_tag" ]]', 1
-        )[1].split('echo "Commits since latest release:', 1)[0]
+        release_counting = workflow.split('if [[ -n "$latest_tag" ]]', 1)[1].split(
+            'echo "Commits since latest release:', 1
+        )[0]
 
-        self.assertIn('release_tree="$(git show -s --format=\'%T\' "$latest_tag")"', release_counting)
+        self.assertIn(
+            'release_tree="$(git show -s --format=\'%T\' "$latest_tag")"',
+            release_counting,
+        )
         self.assertIn("git log HEAD --format='%H %T'", release_counting)
         self.assertNotIn('git merge-base "$latest_tag" HEAD', release_counting)
         self.assertIn("count_releaseable_commits()", workflow)
@@ -413,4 +573,6 @@ class ReleaseWorkflowTests(unittest.TestCase):
             r"!/^chore\(release\): set application version to [0-9]+\.[0-9]+\.[0-9]+( \(#[0-9]+\))?$/",
             workflow,
         )
-        self.assertEqual(workflow.count('commit_count="$(count_releaseable_commits '), 2)
+        self.assertEqual(
+            workflow.count('commit_count="$(count_releaseable_commits '), 2
+        )

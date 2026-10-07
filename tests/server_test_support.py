@@ -1,4 +1,5 @@
 """Safe shared application setup for server integration tests."""
+
 from __future__ import annotations
 
 import os
@@ -10,39 +11,51 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+from support import (
+    create_test_session,  # noqa: F401 - compatibility export for tests
+    reset_application_state,
+)
+
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.performance import context as performance_context
 from backend.performance import garmin_metrics as performance_garmin_metrics
-from support import create_test_session, reset_application_state
 
 # Give the application deterministic, fake configuration before importing it.
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
-os.environ.update({
-    "AI_PROVIDER": "openai",
-    "GEMINI_API_KEY": "",
-    "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
-    "GEMINI_MODEL": "gemini-3.8-flash",
-    "OPENAI_API_KEY": "test-openai-key",
-    "OPENAI_BASE_URL": "https://api.openai.com/v1",
-    "OPENAI_MODEL": "gpt-6-luna",
-    "INTERVALS_API_KEY": "test-intervals-key",
-    "INTERVALS_ATHLETE_ID": "0",
-    "GARMIN_EMAIL": "test-garmin@example.invalid",
-    "GARMIN_PASSWORD": "test-garmin-password",
-    "GARMINTOKENS": os.path.join(os.environ["DATA_DIR"], "garmin_tokens"),
-    "GARMIN_FIXTURE_PATH": os.path.join(os.environ["DATA_DIR"], "missing-garmin-fixture.json"),
-    "CALENDAR_ICAL_URL": "https://calendar.example.invalid/feed.ics",
-    "APP_PASSWORD": "test-password-123",
-    "DATA_RETENTION_DAYS": "-1",
-    "PORT": "8090",
-    "COOKIE_SECURE": "false",
-})
+os.environ.update(
+    {
+        "AI_PROVIDER": "openai",
+        "GEMINI_API_KEY": "",
+        "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
+        "GEMINI_MODEL": "gemini-3.8-flash",
+        "OPENAI_API_KEY": "test-openai-key",
+        "OPENAI_BASE_URL": "https://api.openai.com/v1",
+        "OPENAI_MODEL": "gpt-6-luna",
+        "INTERVALS_API_KEY": "test-intervals-key",
+        "INTERVALS_ATHLETE_ID": "0",
+        "GARMIN_EMAIL": "test-garmin@example.invalid",
+        "GARMIN_PASSWORD": "test-garmin-password",
+        "GARMINTOKENS": os.path.join(os.environ["DATA_DIR"], "garmin_tokens"),
+        "GARMIN_FIXTURE_PATH": os.path.join(
+            os.environ["DATA_DIR"], "missing-garmin-fixture.json"
+        ),
+        "CALENDAR_ICAL_URL": "https://calendar.example.invalid/feed.ics",
+        "APP_PASSWORD": "test-password-123",
+        "DATA_RETENTION_DAYS": "-1",
+        "PORT": "8090",
+        "COOKIE_SECURE": "false",
+    }
+)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 _original_read_text = Path.read_text
+
+
 def _isolated_read_text(path, *args, **kwargs):
     if path.name == ".env":
         return ""
     return _original_read_text(path, *args, **kwargs)
+
+
 with patch.object(Path, "read_text", _isolated_read_text):
     import server
 
@@ -58,6 +71,7 @@ _BASE_LOGGER_LEVEL = server.LOGGER.level
 _BASE_LOGGER_PROPAGATE = server.LOGGER.propagate
 _BASE_LOGGER_DISABLED = server.LOGGER.disabled
 
+
 def _transcribe_via_http_route(audio: bytes, content_type: str) -> dict[str, str]:
     from types import SimpleNamespace
     from unittest.mock import Mock
@@ -71,19 +85,26 @@ def _transcribe_via_http_route(audio: bytes, content_type: str) -> dict[str, str
         raise AssertionError("transcription route was not handled")
     return handler.send_json.call_args.args[1]
 
+
 def _garmin_metrics(snapshot):
     return performance_garmin_metrics.garmin_performance_metrics(
         snapshot, server.ATHLETE_CLOCK.now().date()
     )
 
+
 def _current_performance_context(snapshot=None):
-    effective_snapshot = snapshot if snapshot is not None else server.SYNC_PERSISTENCE.state_repository().latest_snapshot()
+    effective_snapshot = (
+        snapshot
+        if snapshot is not None
+        else server.SYNC_PERSISTENCE.state_repository().latest_snapshot()
+    )
     return performance_context.current_performance_context(
         effective_snapshot,
         server.GARMIN_ASSEMBLY.payload_service().snapshot(),
         server.ATHLETE_DATA.profile().get(),
         server.ATHLETE_CLOCK.now().date(),
     )
+
 
 class ServerTestCase(unittest.TestCase):
     @classmethod
@@ -94,8 +115,12 @@ class ServerTestCase(unittest.TestCase):
         cls._original_db_path = server.DB_PATH
         cls._original_log_path = server.LOG_PATH
         server.CONFIG = replace(server.CONFIG, app_password="")
-        cls._template_dir = Path(tempfile.mkdtemp(prefix="intervals-coach-test-template-"))
-        cls._class_data_dir = Path(tempfile.mkdtemp(prefix="intervals-coach-test-class-"))
+        cls._template_dir = Path(
+            tempfile.mkdtemp(prefix="intervals-coach-test-template-")
+        )
+        cls._class_data_dir = Path(
+            tempfile.mkdtemp(prefix="intervals-coach-test-class-")
+        )
         server.DATA_DIR = cls._template_dir
         server.DB_PATH = cls._template_dir / "intervals-coach.db"
         server.LOG_PATH = cls._template_dir / "intervals-coach.log"

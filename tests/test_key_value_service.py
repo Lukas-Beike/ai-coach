@@ -1,5 +1,5 @@
-from contextlib import contextmanager
 import unittest
+from contextlib import contextmanager
 from unittest.mock import Mock
 
 from backend.db.key_value import KeyValueService

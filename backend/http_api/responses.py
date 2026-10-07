@@ -7,10 +7,9 @@ already-authorized response values and headers.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
 import json
+from collections.abc import Iterator, Mapping
 from typing import Any
-
 
 HeaderValue = str | list[str] | tuple[str, ...]
 
@@ -20,7 +19,9 @@ def json_bytes(payload: Any) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
-def header_items(headers: Mapping[str, HeaderValue] | None) -> Iterator[tuple[str, str]]:
+def header_items(
+    headers: Mapping[str, HeaderValue] | None,
+) -> Iterator[tuple[str, str]]:
     """Expand scalar and repeated headers without changing their order."""
     for key, value in (headers or {}).items():
         if isinstance(value, (list, tuple)):
@@ -30,7 +31,9 @@ def header_items(headers: Mapping[str, HeaderValue] | None) -> Iterator[tuple[st
             yield key, value
 
 
-def response_headers(content_type: str, content_length: int, *, cache_control: str = "no-store") -> tuple[tuple[str, str], ...]:
+def response_headers(
+    content_type: str, content_length: int, *, cache_control: str = "no-store"
+) -> tuple[tuple[str, str], ...]:
     """Return the common anti-caching and browser-hardening headers."""
     return (
         ("Content-Type", content_type),

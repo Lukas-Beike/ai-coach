@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date
-import json
 from typing import Any
 
 from backend.db import DatabaseManager
@@ -19,9 +19,7 @@ _REPAIR_REQUEST_ERROR = (
 _REVISION_CONFLICT = (
     "Lies die aktuelle Planung vor der vollstaendigen Reparatur erneut."
 )
-_SELECTION_CONFLICT = (
-    "Die Reparaturauswahl umfasst nicht den vollstaendigen Zeitraum. Nutze die aktuelle expected_revision ohne entries fuer das komplette serverseitige Manifest."
-)
+_SELECTION_CONFLICT = "Die Reparaturauswahl umfasst nicht den vollstaendigen Zeitraum. Nutze die aktuelle expected_revision ohne entries fuer das komplette serverseitige Manifest."
 _STALE_SELECTION = (
     "Die ausgewaehlte Planung wurde geaendert. Lies den aktuellen Stand erneut."
 )
@@ -54,12 +52,18 @@ class PlanRepairManifestService:
         if not isinstance(period, dict) or intent.get("_sync_all_pending"):
             raise AppError(400, _REPAIR_REQUEST_ERROR, reason="request_sync")
         start, end = period.get("start"), period.get("end")
+        if not isinstance(start, str) or not isinstance(end, str):
+            raise AppError(400, _REPAIR_REQUEST_ERROR, reason="request_sync")
         try:
             start_day = date.fromisoformat(start)
             end_day = date.fromisoformat(end)
         except (TypeError, ValueError) as exc:
             raise AppError(400, _REPAIR_REQUEST_ERROR, reason="request_sync") from exc
-        if start_day.isoformat() != start or end_day.isoformat() != end or start_day > end_day:
+        if (
+            start_day.isoformat() != start
+            or end_day.isoformat() != end
+            or start_day > end_day
+        ):
             raise AppError(400, _REPAIR_REQUEST_ERROR, reason="request_sync")
         return {"start": start, "end": end}
 
@@ -77,7 +81,9 @@ class PlanRepairManifestService:
         return [
             {
                 "library_workout_id": row["local_id"],
-                "expected_payload_hash": planning_library.library_payload_hash(row["payload"]),
+                "expected_payload_hash": planning_library.library_payload_hash(
+                    row["payload"]
+                ),
             }
             for row in rows
         ]
@@ -100,7 +106,7 @@ class PlanRepairManifestService:
         if supplied is None:
             expected_revision = arguments.get("expected_revision")
             supplied_entries = None
-            groups = (("local_plan",),)
+            groups: tuple[tuple[str, ...], ...] = (("local_plan",),)
         else:
             selected = planning_library.library_bulk_request_entries(
                 supplied, require_hash=True
@@ -108,16 +114,26 @@ class PlanRepairManifestService:
             if {item["library_workout_id"] for item in selected} != {
                 row["local_id"] for row in rows
             }:
-                raise AppError(409, _SELECTION_CONFLICT, reason="incomplete_repair_selection")
+                raise AppError(
+                    409, _SELECTION_CONFLICT, reason="incomplete_repair_selection"
+                )
             supplied_entries = selected
             expected_revision = None
             groups = tuple(
-                (f"planned_unit:{entry['library_workout_id']}", f"library_workout:{entry['library_workout_id']}")
+                (
+                    f"planned_unit:{entry['library_workout_id']}",
+                    f"library_workout:{entry['library_workout_id']}",
+                )
                 for entry in entries
             )
 
         return PreparedRepairManifest(
-            period, entries, expected_revision, current_revision, supplied_entries, groups
+            period,
+            entries,
+            expected_revision,
+            current_revision,
+            supplied_entries,
+            groups,
         )
 
     def execute(self, prepared: PreparedRepairManifest) -> list[dict[str, str]]:
@@ -130,9 +146,13 @@ class PlanRepairManifestService:
                 or prepared.expected_revision != current_revision
                 or current_revision != prepared.revision_snapshot
             ):
-                raise AppError(409, _REVISION_CONFLICT, reason="planning_revision_conflict")
+                raise AppError(
+                    409, _REVISION_CONFLICT, reason="planning_revision_conflict"
+                )
             if current_entries != prepared.entries:
-                raise AppError(409, _STALE_SELECTION, reason="planning_revision_conflict")
+                raise AppError(
+                    409, _STALE_SELECTION, reason="planning_revision_conflict"
+                )
             if prepared.supplied_entries is not None:
                 selected_hashes = {
                     entry["library_workout_id"]: entry["expected_payload_hash"]
@@ -143,7 +163,9 @@ class PlanRepairManifestService:
                     != entry["expected_payload_hash"]
                     for entry in current_entries
                 ):
-                    raise AppError(409, _STALE_SELECTION, reason="planning_revision_conflict")
+                    raise AppError(
+                        409, _STALE_SELECTION, reason="planning_revision_conflict"
+                    )
 
             for row in rows:
                 workout = json.loads(row["payload"])
@@ -161,11 +183,15 @@ class PlanRepairManifestService:
                     (entry["library_workout_id"],),
                 ).fetchone()
                 if not row:
-                    raise AppError(409, _STALE_SELECTION, reason="planning_revision_conflict")
+                    raise AppError(
+                        409, _STALE_SELECTION, reason="planning_revision_conflict"
+                    )
                 refreshed.append(
                     {
                         "library_workout_id": entry["library_workout_id"],
-                        "expected_payload_hash": planning_library.library_payload_hash(row["payload"]),
+                        "expected_payload_hash": planning_library.library_payload_hash(
+                            row["payload"]
+                        ),
                     }
                 )
             return refreshed

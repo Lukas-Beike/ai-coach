@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from backend.coach.structured_tool_round import (
@@ -69,7 +68,9 @@ class CoachStructuredToolRoundAssembly:
         state: StructuredToolRoundState
         conversation: StructuredToolRoundConversation
 
-    def __init__(self, *, dependencies: "CoachStructuredToolRoundAssembly.Inputs") -> None:
+    def __init__(
+        self, *, dependencies: CoachStructuredToolRoundAssembly.Inputs
+    ) -> None:
         runtime = dependencies.runtime
         contract = dependencies.contract
         services = dependencies.services
@@ -118,7 +119,9 @@ class CoachStructuredToolRoundAssembly:
 
     def replay_service(self) -> CoachStructuredToolReplayService:
         return CoachStructuredToolReplayService(
-            self._database_manager(), self._database_lock, frozenset(self._read_only_tools())
+            self._database_manager(),
+            self._database_lock,
+            frozenset(self._read_only_tools()),
         )
 
     def preparation_service(self) -> CoachStructuredToolPreparationService:

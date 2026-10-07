@@ -14,6 +14,20 @@ def current_source(observed_at="2026-08-31"):
 
 
 class PerformanceHistoryTests(unittest.TestCase):
+    def test_historical_ftp_rows_are_added_without_backfilling_current_ftp(self):
+        payload = {
+            "cycling_ftp_history": [
+                {"calendarDate": "2026-08-30", "functionalThresholdPower": 270}
+            ],
+            "cycling_ftp": {"functionalThresholdPower": 310},
+            "source_freshness": {},
+        }
+        append_garmin_performance_history(payload, None, date(2026, 9, 1))
+        self.assertEqual(
+            payload["performance_history"],
+            [{"date": "2026-08-30", "metrics": {"cycling_ftp_watts": 270}}],
+        )
+
     def test_merges_previous_and_payload_history_with_later_metrics_overwriting(self):
         payload = {
             "performance_history": [

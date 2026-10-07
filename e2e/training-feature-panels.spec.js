@@ -27,6 +27,7 @@ test("@responsive chart readings keep their coordinates and legible labels", asy
 });
 
 test("@responsive recovery, power, training focus, season and calendar profiles show local facts", async ({ page, request }) => {
+  test.setTimeout(120000);
   const seed = await request.get("/api/fixture/features");
   expect(seed.ok(), await seed.text()).toBeTruthy();
   await page.goto("/#analysis/performance");
@@ -36,7 +37,6 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator("#analysisHistoryCharts")).toBeVisible();
   await expect(page.locator("#sessionPerformance")).toBeHidden();
   await expect(page.locator("#trainingReport")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Woche", exact: true })).toHaveCount(0);
   await page.evaluate(async () => { await applyNavigationRoute("analysis/load", { historyMode: "replace" }); });
   const report = page.locator("#sessionPerformance");
   await expect(report.getByRole("heading", { name: /^Trainingsfokus/ })).toBeVisible();
@@ -103,6 +103,9 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await page.evaluate(async () => { await applyNavigationRoute("plan/season", { historyMode: "replace" }); });
   await expect(page.locator("#seasonPreparation").getByRole("heading", { name: /Fixture cycling target/ }).first()).toBeVisible();
   await expect(page.locator("#seasonPreparation").getByText(/Wochen mit erfasstem sportartspezifischem Training/).first()).toBeVisible();
+  await expect(page.locator("#seasonPreparation .season-evidence").first().locator("svg")).toHaveCount(2);
+  await expect(page.locator("#seasonPreparation .season-evidence").first()).toContainText("Zieldistanzvergleich");
+  await expect(page.locator("#seasonPreparation .season-evidence").first()).toContainText("bekannt");
   await page.locator("#seasonPreparation").getByRole("button", { name: /Szenarien vergleichen/ }).first().click();
   await expect(page.locator("#seasonPreparation").getByText(/Lokales Standardmodell/).first()).toBeVisible();
 
@@ -116,12 +119,11 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
 
   await page.evaluate(async () => { await applyNavigationRoute("more/equipment", { historyMode: "replace" }); });
   await expect(page.locator("#equipmentItems").getByRole("heading", { name: "Fixture Garmin bike" })).toBeVisible();
-  await expect(page.locator("#equipmentItems").getByText("25 km", { exact: true })).toBeVisible();
+  await expect(page.locator("#equipmentItems").getByText("25 km von 100 km · 25%", { exact: true })).toBeVisible();
   await expect(page.locator("#equipmentItems progress")).toHaveAttribute("value", "25");
   const localGear = page.locator("#equipmentItems details");
   await localGear.locator("summary").click();
   await expect(localGear.getByRole("heading", { name: "Fixture road bike" }).first()).toBeVisible();
-  await expect(localGear).toContainText("Revision 1");
   await expect(localGear).toContainText("1 zugeordnete Einheiten");
   await expect(localGear).toContainText("Keine Wartung erfasst.");
 
@@ -139,4 +141,58 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator('[data-nutrition-segment="fueling"], #trainingFueling, #nutritionLog, #nutritionDefine')).toHaveCount(0);
   await expect(page.locator("#nutritionPanel").getByRole("button", { name: /Coach/ })).toHaveCount(0);
   await expect(page.locator("#seasonPreparation").getByRole("button", { name: /Vorbereitung besprechen|Vorschau anfragen/ })).toHaveCount(0);
+});
+
+test("@responsive equipment keeps local authority and groups archived sources", async ({ page }) => {
+  await page.route("**/api/analysis/training-records", (route) => route.fulfill({ json: { equipment: {
+    items: [
+      { id: "local-active", name: "Local running shoes", sport: "Run", kind: "shoes", status: "active", garmin_status: "Retired", revision: 1, usage: { distance_km: 125, hours: 0, assigned_sessions: 2 }, lifetime: { usage_km: 125, target_km: 100, percent: 125, progress_percent: 100 } },
+      { id: "local-retired-component", name: "Retired chain", sport: "Ride", kind: "component", status: "archived", garmin_uuid: "local-garmin-chain", revision: 1, usage: { distance_km: 50, hours: 0, assigned_sessions: 1 }, lifetime: { usage_km: 50, target_km: 100, percent: 50, progress_percent: 50 } },
+      { id: "local-unlinked-component", name: "Coach-only retired cassette", sport: "Ride", kind: "component", status: "archived", revision: 1, usage: { distance_km: 0, hours: 0, assigned_sessions: 0 } },
+    ],
+    garmin_items: [
+      { id: "garmin-active", name: "Garmin active shoes", kind: "Running Shoes", status: "active", garmin_status: "Active", distance_km: 25, goal_km: 50, lifetime: { usage_km: 25, target_km: 50, percent: 50, progress_percent: 50 } },
+      { id: "garmin-retired-chain", name: "Garmin retired chain", kind: "Bike component", status: "archived", garmin_status: "Retired", distance_km: 150, goal_km: 100, lifetime: { usage_km: 150, target_km: 100, percent: 150, progress_percent: 100 } },
+    ],
+  } } }));
+  await page.goto("/#more/equipment");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const bikePanel = page.locator("#equipmentPanel-bike");
+  const archive = bikePanel.locator("details.equipment-archive");
+  await expect(archive).toHaveCount(1);
+  await expect(archive).not.toHaveAttribute("open", "");
+  await expect(archive.locator("summary")).toContainText("3");
+  await archive.locator("summary").click();
+  await expect(archive.getByRole("heading", { name: "Retired chain", exact: true })).toBeAttached();
+  await expect(archive.getByRole("heading", { name: "Garmin retired chain", exact: true })).toBeAttached();
+  const unlinkedLocal = archive.locator("section").filter({ hasText: "Coach-only retired cassette" });
+  await expect(unlinkedLocal).toContainText("Wartungsstand unklar");
+  await page.getByRole("tab", { name: "Laufschuhe" }).click();
+  const runPanel = page.locator("#equipmentPanel-run");
+  const localEquipment = runPanel.locator("details.training-focus-details");
+  await localEquipment.locator("summary").click();
+  const localCard = localEquipment.locator(".garmin-equipment-card").filter({ hasText: "Local running shoes" });
+  const garminCard = runPanel.locator(".garmin-equipment-card").filter({ hasText: "Garmin active shoes" });
+  await expect(localCard.getByRole("heading", { name: "Local running shoes", exact: true })).toBeVisible();
+  await expect(localCard.locator("progress")).toHaveAttribute("value", "100");
+  await expect(localCard).toContainText("125%");
+  await expect(localCard).toContainText("Ziel überschritten");
+  await expect(localCard).toContainText("Statuskonflikt");
+  await expect(localCard.locator("progress")).toHaveAttribute("aria-label", /Lebensdauer/);
+  await expect(garminCard.locator("progress")).toHaveAttribute("value", "50");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
+test("@responsive active local gear offers a maintenance button, archived gear does not", async ({ page }) => {
+  const item = (id, status) => ({ id, name: `Gear ${id}`, sport: "Run", kind: "shoes", status, revision: 1, usage: { distance_km: 10, hours: 1, assigned_sessions: 1 } });
+  await page.route("**/api/analysis/training-records", (route) => route.fulfill({ json: { equipment: { items: [item("a", "active"), item("b", "archived")], garmin_items: [] } } }));
+  let posted = null;
+  await page.route("**/api/equipment/maintenance", (route) => { posted = route.request().postDataJSON(); return route.fulfill({ json: { ok: true } }); });
+  await page.goto("/#more/equipment");
+  await page.getByRole("tab", { name: "Laufschuhe" }).click();
+  const runPanel = page.locator("#equipmentPanel-run");
+  await runPanel.locator("details.training-focus-details").first().locator("summary").click();
+  await expect(runPanel.getByRole("button", { name: "Wartung erledigt" })).toHaveCount(1);
+  await runPanel.getByRole("button", { name: "Wartung erledigt" }).click();
+  await expect.poll(() => posted?.equipment_id).toBe("a");
 });

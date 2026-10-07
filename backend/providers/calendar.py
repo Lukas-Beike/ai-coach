@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from backend.calendar.markers import has_marker
 from backend.errors import UNSUPPORTED_BYDAY_ERROR, AppError
 from backend.runtime.socket_deadline import SocketDeadline
 
@@ -400,27 +401,38 @@ def _ical_temporal_value(
 
 
 def _ical_description_contains(description: Any, marker: str) -> bool:
-    return marker.casefold() in str(description or "").casefold()
+    return has_marker(description, marker)
 
 
-def ical_training_impact(description: Any) -> bool:
+def _ical_marker_text(description: Any, name: Any = "") -> str:
+    return f"{name or ''} {description or ''}"
+
+
+def ical_training_impact(description: Any, name: Any = "") -> bool:
+    text = _ical_marker_text(description, name)
     return any(
-        _ical_description_contains(description, marker)
-        for marker in ICAL_TRAINING_MARKERS
+        _ical_description_contains(text, marker) for marker in ICAL_TRAINING_MARKERS
     )
 
 
-def ical_training_relevant(description: Any) -> bool:
-    text = str(description or "").strip()
-    return bool(text) and not _ical_description_contains(text, ICAL_NO_TRAINING_MARKER)
+def ical_training_relevant(description: Any, name: Any = "") -> bool:
+    description_text = str(description or "").strip()
+    marker_text = _ical_marker_text(description, name)
+    return bool(description_text) and not _ical_description_contains(
+        marker_text, ICAL_NO_TRAINING_MARKER
+    )
 
 
-def ical_no_intensity(description: Any) -> bool:
-    return _ical_description_contains(description, ICAL_NO_INTENSITY_MARKER)
+def ical_no_intensity(description: Any, name: Any = "") -> bool:
+    return _ical_description_contains(
+        _ical_marker_text(description, name), ICAL_NO_INTENSITY_MARKER
+    )
 
 
-def ical_short_only(description: Any) -> bool:
-    return _ical_description_contains(description, ICAL_SHORT_ONLY_MARKER)
+def ical_short_only(description: Any, name: Any = "") -> bool:
+    return _ical_description_contains(
+        _ical_marker_text(description, name), ICAL_SHORT_ONLY_MARKER
+    )
 
 
 def _ical_rule_values(raw: str) -> dict[str, str]:
@@ -885,10 +897,20 @@ def _ical_instances(
             "end_local": end.isoformat(),
             "duration_minutes": max(1, round(duration.total_seconds() / 60)),
             "all_day": bool(event.get("all_day")),
-            "training_impact": ical_training_impact(event.get("description")),
-            "training_relevant": ical_training_relevant(event.get("description")),
-            "no_intensity": ical_no_intensity(event.get("description")),
-            "short_only": ical_short_only(event.get("description")),
+            "training_impact": ical_training_impact(
+                event.get("description"), event.get("name")
+            ),
+            "training_relevant": ical_training_relevant(
+                event.get("description"), event.get("name")
+            ),
+            "no_training": _ical_description_contains(
+                _ical_marker_text(event.get("description"), event.get("name")),
+                ICAL_NO_TRAINING_MARKER,
+            ),
+            "no_intensity": ical_no_intensity(
+                event.get("description"), event.get("name")
+            ),
+            "short_only": ical_short_only(event.get("description"), event.get("name")),
         }
 
 

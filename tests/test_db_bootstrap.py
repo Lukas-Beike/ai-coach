@@ -11,7 +11,11 @@ from pathlib import Path
 import backend
 from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import KeyValueRepository
-from backend.db.schema import database_schema_is_current, initialize_schema
+from backend.db.schema import (
+    CURRENT_SCHEMA_VERSION,
+    database_schema_is_current,
+    initialize_schema,
+)
 
 
 class DatabaseBootstrapTests(unittest.TestCase):
@@ -116,6 +120,7 @@ class DatabaseBootstrapTests(unittest.TestCase):
         initialize_schema(db)
         db.execute("INSERT INTO nutrition_logs(id, meal_date, logged_at, meal_type, description, kcal, created_at, updated_at) VALUES ('meal-1', '2026-09-15', ?, 'lunch', 'Synthetic meal', 500, ?, ?)", (self.now, self.now, self.now))
         db.execute("DROP TABLE nutrition_products")
+        db.execute("ALTER TABLE external_calendar_events DROP COLUMN no_training")
         db.execute("PRAGMA user_version = 1")
         db.commit()
 
@@ -123,7 +128,9 @@ class DatabaseBootstrapTests(unittest.TestCase):
 
         self.assertTrue(database_schema_is_current(db))
         self.assertEqual(db.execute("SELECT description FROM nutrition_logs WHERE id='meal-1'").fetchone()[0], "Synthetic meal")
-        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
         db.execute("INSERT INTO nutrition_products(id, name, basis_amount, basis_unit, source, created_at, updated_at) VALUES ('product-1', 'Synthetic oats', 100, 'g', 'manual', ?, ?)", (self.now, self.now))
         self.assertEqual(db.execute("SELECT name FROM nutrition_products").fetchone()[0], "Synthetic oats")
 

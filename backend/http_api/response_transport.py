@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 import time
+from pathlib import Path
 from typing import Any
 
 from backend.errors import ClientDisconnected
@@ -43,9 +43,7 @@ class HttpResponseTransport:
         data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         try:
             prefix = f"id: {event_id}\n" if event_id is not None else ""
-            handler.wfile.write(
-                f"{prefix}event: {event}\ndata: {data}\n\n".encode("utf-8")
-            )
+            handler.wfile.write(f"{prefix}event: {event}\ndata: {data}\n\n".encode())
             handler.wfile.flush()
         except handler.client_disconnect_errors as exc:
             handler.log_client_disconnect()
@@ -60,7 +58,9 @@ class HttpResponseTransport:
     ) -> None:
         data = json_bytes(payload)
         handler.send_response(status)
-        for key, value in response_headers("application/json; charset=utf-8", len(data)):
+        for key, value in response_headers(
+            "application/json; charset=utf-8", len(data)
+        ):
             handler.send_header(key, value)
         for key, value in header_items(headers):
             handler.send_header(key, value)
@@ -97,7 +97,9 @@ class HttpResponseTransport:
             handler.send_response(200)
             handler.send_header("Content-Type", content_type)
             handler.send_header("Content-Length", str(size))
-            handler.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            handler.send_header(
+                "Content-Disposition", f'attachment; filename="{filename}"'
+            )
             handler.send_header("Cache-Control", "no-store")
             handler.send_header("X-Content-Type-Options", "nosniff")
             handler.send_header("X-Frame-Options", "DENY")

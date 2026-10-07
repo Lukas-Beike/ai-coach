@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import logging
 import threading
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -74,7 +73,7 @@ class SyncSchedulerAssembly:
         policy: SyncSchedulePolicy
         daily_loop: DailySyncLoopSettings
 
-    def __init__(self, *, dependencies: "SyncSchedulerAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: SyncSchedulerAssembly.Inputs) -> None:
         owners = dependencies.owners
         persistence = dependencies.persistence
         controls = dependencies.controls

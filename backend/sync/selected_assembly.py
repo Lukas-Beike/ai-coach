@@ -40,7 +40,7 @@ class SelectedWorkoutSyncAssembly:
     def __init__(
         self,
         *,
-        dependencies: "SelectedWorkoutSyncAssembly.Inputs",
+        dependencies: SelectedWorkoutSyncAssembly.Inputs,
     ) -> None:
         providers = dependencies.providers
         controls = dependencies.controls
@@ -48,7 +48,9 @@ class SelectedWorkoutSyncAssembly:
         self._database_manager = providers.database_manager
         self._workout_library_sync_service = providers.workout_library_sync_service
         self._planned_calendar_sync_service = providers.planned_calendar_sync_service
-        self._planned_calendar_repair_service = providers.planned_calendar_repair_service
+        self._planned_calendar_repair_service = (
+            providers.planned_calendar_repair_service
+        )
         self._redactor = controls.redactor
         self._lock = controls.lock
         self._wait_seconds = controls.wait_seconds

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +65,7 @@ class BackupAssembly:
         validation: RestoreValidationDependencies
         lifecycle: RestoreLifecycleDependencies
 
-    def __init__(self, *, dependencies: "BackupAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: BackupAssembly.Inputs) -> None:
         storage = dependencies.storage
         validation = dependencies.validation
         lifecycle = dependencies.lifecycle

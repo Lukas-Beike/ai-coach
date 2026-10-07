@@ -32,7 +32,9 @@ class PlanRepairManifestServiceTests(unittest.TestCase):
                 "sync_state TEXT NOT NULL DEFAULT 'local', sync_dirty INTEGER NOT NULL DEFAULT 1, "
                 "sync_error TEXT, updated_at TEXT NOT NULL DEFAULT '')"
             )
-            db.execute("CREATE TABLE planning_state (id INTEGER PRIMARY KEY, revision INTEGER NOT NULL)")
+            db.execute(
+                "CREATE TABLE planning_state (id INTEGER PRIMARY KEY, revision INTEGER NOT NULL)"
+            )
             db.execute("INSERT INTO planning_state(id, revision) VALUES (1, 7)")
         self.authority = Mock()
         self.service = PlanRepairManifestService(self.manager, self.authority)
@@ -52,7 +54,10 @@ class PlanRepairManifestServiceTests(unittest.TestCase):
         }
         raw = json.dumps(payload, sort_keys=True)
         with self.manager.unit_of_work() as db:
-            db.execute("INSERT INTO planned_units(local_id, payload) VALUES (?, ?)", (local_id, raw))
+            db.execute(
+                "INSERT INTO planned_units(local_id, payload) VALUES (?, ?)",
+                (local_id, raw),
+            )
         return library_payload_hash(raw)
 
     def selected(self, *items: tuple[str, str]) -> list[dict[str, str]]:
@@ -63,12 +68,14 @@ class PlanRepairManifestServiceTests(unittest.TestCase):
 
     def read_payload(self, local_id: str) -> dict[str, object]:
         with self.manager.reader() as db:
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            row = db.execute(
+                "SELECT payload FROM planned_units WHERE local_id=?", (local_id,)
+            ).fetchone()
         return json.loads(row["payload"])
 
     def test_partial_selection_fails_with_conflict(self) -> None:
         first = self.add(UNIT_A)
-        second = self.add(UNIT_B, date="2026-09-10")
+        self.add(UNIT_B, date="2026-09-10")
         with self.assertRaises(AppError) as caught:
             self.service.prepare({"entries": self.selected((UNIT_A, first))}, INTENT)
         self.assertEqual(caught.exception.status, 409)
@@ -126,7 +133,10 @@ class PlanRepairManifestServiceTests(unittest.TestCase):
 
         def mark_then_fail(local_ids: list[str]) -> None:
             with self.manager.unit_of_work() as db:
-                row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_ids[0],)).fetchone()
+                row = db.execute(
+                    "SELECT payload FROM planned_units WHERE local_id=?",
+                    (local_ids[0],),
+                ).fetchone()
                 payload = json.loads(row["payload"])
                 payload["sync_status"] = "local"
                 db.execute(
@@ -148,7 +158,10 @@ class PlanRepairManifestServiceTests(unittest.TestCase):
 
         def mark(local_ids: list[str]) -> None:
             with self.manager.unit_of_work() as db:
-                row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_ids[0],)).fetchone()
+                row = db.execute(
+                    "SELECT payload FROM planned_units WHERE local_id=?",
+                    (local_ids[0],),
+                ).fetchone()
                 payload = json.loads(row["payload"])
                 payload["sync_status"] = "local"
                 db.execute(
@@ -159,7 +172,10 @@ class PlanRepairManifestServiceTests(unittest.TestCase):
         self.authority.mark_planning_authoritative.side_effect = mark
         manifest = self.service.execute(prepared)
         self.assertNotEqual(manifest[0]["expected_payload_hash"], payload_hash)
-        self.assertEqual(manifest[0]["expected_payload_hash"], library_payload_hash(json.dumps(self.read_payload(UNIT_A), sort_keys=True)))
+        self.assertEqual(
+            manifest[0]["expected_payload_hash"],
+            library_payload_hash(json.dumps(self.read_payload(UNIT_A), sort_keys=True)),
+        )
 
     def test_toctou_change_between_prepare_and_execute_conflicts(self) -> None:
         self.add(UNIT_A)
@@ -172,7 +188,9 @@ class PlanRepairManifestServiceTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "planning_revision_conflict")
         self.authority.mark_planning_authoritative.assert_not_called()
 
-    def test_item_hash_selection_is_not_blocked_by_unrelated_revision_change(self) -> None:
+    def test_item_hash_selection_is_not_blocked_by_unrelated_revision_change(
+        self,
+    ) -> None:
         payload_hash = self.add(UNIT_A)
         prepared = self.service.prepare(
             {"entries": self.selected((UNIT_A, payload_hash))}, INTENT
@@ -195,13 +213,20 @@ class PlanRepairManifestServiceTests(unittest.TestCase):
 
     def test_archived_and_deleted_workouts_skip_description_validation(self) -> None:
         archived_hash = self.add(UNIT_A, description="invalid", archived=True)
-        deleted_hash = self.add(UNIT_B, description="invalid", local_deleted=True, date="2026-09-10")
+        deleted_hash = self.add(
+            UNIT_B, description="invalid", local_deleted=True, date="2026-09-10"
+        )
         prepared = self.service.prepare(
-            {"entries": self.selected((UNIT_A, archived_hash), (UNIT_B, deleted_hash))}, INTENT
+            {"entries": self.selected((UNIT_A, archived_hash), (UNIT_B, deleted_hash))},
+            INTENT,
         )
         manifest = self.service.execute(prepared)
-        self.assertEqual({item["library_workout_id"] for item in manifest}, {UNIT_A, UNIT_B})
-        self.authority.mark_planning_authoritative.assert_called_once_with([UNIT_A, UNIT_B])
+        self.assertEqual(
+            {item["library_workout_id"] for item in manifest}, {UNIT_A, UNIT_B}
+        )
+        self.authority.mark_planning_authoritative.assert_called_once_with(
+            [UNIT_A, UNIT_B]
+        )
 
 
 if __name__ == "__main__":

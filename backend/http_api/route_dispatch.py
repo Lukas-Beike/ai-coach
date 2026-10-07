@@ -5,8 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Protocol
 
-from backend.errors import AppError, NOT_FOUND_ERROR
-
+from backend.errors import NOT_FOUND_ERROR, AppError
 
 
 class GetRoute(Protocol):

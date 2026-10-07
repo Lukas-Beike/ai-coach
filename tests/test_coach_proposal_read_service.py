@@ -11,14 +11,14 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import Mock
 
-from backend.db import DatabaseManager, row_factory
-from backend.db.schema import initialize_schema
 from backend.coach.proposals import (
     CoachProposalReadService,
     coach_action_hash,
     coach_action_view,
     prune_expired_coach_proposals,
 )
+from backend.db import DatabaseManager, row_factory
+from backend.db.schema import initialize_schema
 
 
 class CoachProposalReadServiceTests(unittest.TestCase):
@@ -96,9 +96,9 @@ class CoachProposalReadServiceTests(unittest.TestCase):
         self._insert("still-stored-but-no-longer-current", expires_at=150)
         now = Mock(side_effect=[100, 200])
 
-        proposals = CoachProposalReadService(
-            self.database_manager, now=now
-        ).current("session-a")
+        proposals = CoachProposalReadService(self.database_manager, now=now).current(
+            "session-a"
+        )
 
         self.assertEqual(proposals, [])
         self.assertEqual(now.call_count, 2)
@@ -154,15 +154,15 @@ class CoachProposalReadServiceTests(unittest.TestCase):
         ).hexdigest()
 
         self.assertEqual(coach_action_hash(payload), expected)
-        self.assertEqual(
-            coach_action_hash({"a": [1, 2], "z": "ä"}), expected
-        )
+        self.assertEqual(coach_action_hash({"a": [1, 2], "z": "ä"}), expected)
         self.assertEqual(
             coach_action_hash({"value": date(2026, 9, 23)}),
             coach_action_hash({"value": "2026-09-23"}),
         )
 
-    def test_action_view_and_prune_helpers_preserve_field_and_boundary_semantics(self) -> None:
+    def test_action_view_and_prune_helpers_preserve_field_and_boundary_semantics(
+        self,
+    ) -> None:
         row = {
             "id": "visible",
             "action_type": "undo_change",

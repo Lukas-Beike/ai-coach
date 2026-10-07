@@ -42,7 +42,7 @@ class HistoryAssembly:
     def __init__(
         self,
         *,
-        dependencies: "HistoryAssembly.Inputs",
+        dependencies: HistoryAssembly.Inputs,
     ) -> None:
         self._database_manager = dependencies.persistence.database_manager
         self._profile_repository = dependencies.persistence.profile_repository
@@ -51,17 +51,21 @@ class HistoryAssembly:
         self._workout_library_service = dependencies.planning.workout_library_service
         self._planned_unit_service = dependencies.planning.planned_unit_service
         self._training_plan_service = dependencies.planning.training_plan_service
-        self._planning_revision_service = dependencies.planning.planning_revision_service
+        self._planning_revision_service = (
+            dependencies.planning.planning_revision_service
+        )
 
     def change_history_service(self) -> ChangeHistoryService:
-        return ChangeHistoryService(
-            self._database_manager(), self._profile_repository
-        )
+        return ChangeHistoryService(self._database_manager(), self._profile_repository)
 
     def undo_service(self) -> HistoryUndoService:
         return HistoryUndoService(
-            self._database_manager(), self.change_history_service(),
-            self._profile_service(), self._workout_library_service(),
-            self._competition_service(), self._planned_unit_service(),
-            self._training_plan_service(), self._planning_revision_service,
+            self._database_manager(),
+            self.change_history_service(),
+            self._profile_service(),
+            self._workout_library_service(),
+            self._competition_service(),
+            self._planned_unit_service(),
+            self._training_plan_service(),
+            self._planning_revision_service,
         )

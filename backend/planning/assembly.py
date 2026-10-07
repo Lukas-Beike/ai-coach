@@ -58,7 +58,7 @@ class PlanningDataAssembly:
     def __init__(
         self,
         *,
-        dependencies: "PlanningDataAssembly.Inputs",
+        dependencies: "PlanningDataAssembly.Inputs",  # noqa: UP037
     ) -> None:
         repositories = dependencies.repositories
         runtime = dependencies.runtime
@@ -119,4 +119,5 @@ class PlanningDataAssembly:
             self._planning_revision_service,
             self._local_date,
             self._utc_now,
+            self._calendar_conflict_service(),
         )

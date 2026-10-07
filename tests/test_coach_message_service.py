@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 
 from backend.coach.conversation import CoachMessageService
@@ -14,7 +14,6 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import ChatRepository
 from backend.db.schema import initialize_schema
 from backend.runtime.events import StateEventBuffer
-
 
 NOW = "2026-09-23T08:00:00+00:00"
 
@@ -71,7 +70,10 @@ class CoachMessageServiceTests(unittest.TestCase):
             persisted = db.execute(
                 "SELECT id, role, content FROM messages WHERE id = ?", (result["id"],)
             ).fetchone()
-        self.assertEqual(dict(persisted), {"id": result["id"], "role": "user", "content": "Hallo Coach"})
+        self.assertEqual(
+            dict(persisted),
+            {"id": result["id"], "role": "user", "content": "Hallo Coach"},
+        )
         self.assertEqual(
             self.events.since()["events"][0]["data"],
             {"message_id": result["id"], "role": "user"},
@@ -82,7 +84,9 @@ class CoachMessageServiceTests(unittest.TestCase):
             self.service.add("system", "not allowed")
 
         with self.database_manager.reader() as db:
-            count = db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()["count"]
+            count = db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()[
+                "count"
+            ]
         self.assertEqual(count, 0)
         self.assertEqual(self.events.since()["events"], [])
 
@@ -93,27 +97,39 @@ class CoachMessageServiceTests(unittest.TestCase):
         with self.database_manager.unit_of_work() as db:
             db.execute(
                 "UPDATE messages SET attachments = ? WHERE id = ?",
-                (json.dumps([{"name": "run.fit"}, {"name": "notes.txt"}]), second["id"]),
+                (
+                    json.dumps([{"name": "run.fit"}, {"name": "notes.txt"}]),
+                    second["id"],
+                ),
             )
 
         messages = self.service.list(limit=2)
 
-        self.assertEqual([message["id"] for message in messages], [second["id"], third["id"]])
+        self.assertEqual(
+            [message["id"] for message in messages], [second["id"], third["id"]]
+        )
         self.assertEqual(messages[0]["attachment_names"], '["run.fit","notes.txt"]')
         self.assertNotIn("client_turn_id", messages[0])
         self.assertNotIn("attachment_names", messages[1])
-        self.assertEqual([message["id"] for message in self.service.list()], [first["id"], second["id"], third["id"]])
+        self.assertEqual(
+            [message["id"] for message in self.service.list()],
+            [first["id"], second["id"], third["id"]],
+        )
 
     def test_list_is_read_only_and_does_not_publish_events(self) -> None:
         self.service.add("user", "existing")
         events_before = self.events.since()
         with self.database_manager.reader() as db:
-            count_before = db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()["count"]
+            count_before = db.execute(
+                "SELECT COUNT(*) AS count FROM messages"
+            ).fetchone()["count"]
 
         self.service.list()
 
         with self.database_manager.reader() as db:
-            count_after = db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()["count"]
+            count_after = db.execute(
+                "SELECT COUNT(*) AS count FROM messages"
+            ).fetchone()["count"]
         self.assertEqual(count_after, count_before)
         self.assertEqual(self.events.since(), events_before)
 
@@ -128,7 +144,9 @@ class CoachMessageServiceTests(unittest.TestCase):
             failing_service.add("user", "rolled back")
 
         with self.database_manager.reader() as db:
-            count = db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()["count"]
+            count = db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()[
+                "count"
+            ]
         self.assertEqual(count, 0)
         self.assertEqual(self.events.since()["events"], [])
 

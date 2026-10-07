@@ -1,16 +1,17 @@
 """Resolve and verify the immutable source used by every release check and build."""
+
 from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import re
 import subprocess
+from pathlib import Path
 
 SAFE_SOURCE_PATTERN = re.compile(r"^[\da-zA-Z][\da-zA-Z._/-]*$")
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 COMMIT_SHA_PATTERN = re.compile(r"^[\da-f]{40}$")
-APP_VERSION_PATTERN = re.compile(r'^APP_VERSION = "(\d+\.\d+\.\d+)"$', re.M)
+APP_VERSION_PATTERN = re.compile(r'^APP_VERSION = "(\d+\.\d+\.\d+)"$', re.MULTILINE)
 SAFE_ARG_PATTERN = re.compile(r"^[\da-zA-Z._/:@=^{}-]+$")
 
 
@@ -47,7 +48,12 @@ def _resolve_commit(repository: Path, source_ref: str) -> str:
     try:
         return git(repository, "rev-parse", "--verify", f"{source_ref}^{{commit}}")
     except subprocess.CalledProcessError:
-        return git(repository, "rev-parse", "--verify", f"refs/remotes/origin/{source_ref}^{{commit}}")
+        return git(
+            repository,
+            "rev-parse",
+            "--verify",
+            f"refs/remotes/origin/{source_ref}^{{commit}}",
+        )
 
 
 def _verify_release_integrity(repository: Path, source: str, release_tag: str) -> None:
@@ -55,17 +61,29 @@ def _verify_release_integrity(repository: Path, source: str, release_tag: str) -
         raise ValueError("Release tag must be an application version")
     if not COMMIT_SHA_PATTERN.fullmatch(source):
         raise ValueError("Release source must be its tag or an immutable commit SHA")
-    tagged = git(repository, "rev-parse", "--verify", f"refs/tags/{release_tag}^{{commit}}")
+    tagged = git(
+        repository, "rev-parse", "--verify", f"refs/tags/{release_tag}^{{commit}}"
+    )
     if source != tagged:
         raise ValueError("source_ref and release_tag identify different commits")
     try:
-        git(repository, "merge-base", "--is-ancestor", source, "refs/remotes/origin/main")
+        git(
+            repository,
+            "merge-base",
+            "--is-ancestor",
+            source,
+            "refs/remotes/origin/main",
+        )
     except subprocess.CalledProcessError as error:
-        raise ValueError("Release source must belong to protected main history") from error
+        raise ValueError(
+            "Release source must belong to protected main history"
+        ) from error
     content = git(repository, "show", f"{source}:server.py")
     version = APP_VERSION_PATTERN.search(content)
     if not version or version.group(1) != release_tag:
-        raise ValueError("Release tag does not match APP_VERSION at the resolved source")
+        raise ValueError(
+            "Release tag does not match APP_VERSION at the resolved source"
+        )
 
 
 def resolve(repository: Path, source_ref: str, release_tag: str = "") -> str:
@@ -90,7 +108,9 @@ def main() -> None:
     parser.add_argument("--source", default=os.environ.get("SOURCE_REF", ""))
     parser.add_argument("--release-tag", default=os.environ.get("RELEASE_TAG", ""))
     parser.add_argument("--verify", default="")
-    parser.add_argument("--expected-version", default=os.environ.get("EXPECTED_VERSION", ""))
+    parser.add_argument(
+        "--expected-version", default=os.environ.get("EXPECTED_VERSION", "")
+    )
     args = parser.parse_args()
     repository = Path.cwd()
     if args.verify:
@@ -100,9 +120,13 @@ def main() -> None:
     if args.expected_version:
         if not VERSION_PATTERN.fullmatch(args.expected_version):
             raise ValueError("Expected version must be an application version")
-        version = APP_VERSION_PATTERN.search(git(repository, "show", f"{source}:server.py"))
+        version = APP_VERSION_PATTERN.search(
+            git(repository, "show", f"{source}:server.py")
+        )
         if not version or version.group(1) != args.expected_version:
-            raise ValueError("Expected release version does not match APP_VERSION at the resolved source")
+            raise ValueError(
+                "Expected release version does not match APP_VERSION at the resolved source"
+            )
     print(f"Resolved source: {source}")
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:

@@ -8,7 +8,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from backend.planning import adaptive
+from backend.planning import adaptive, calendar
 from backend.planning.context import external_calendar_event_dates
 from backend.weather.adaptive import weather_adaptive_reason
 
@@ -47,7 +47,11 @@ def _calendar_context(
 ) -> tuple[list[str], dict[str, list[dict[str, Any]]]]:
     events_by_date: dict[str, list[dict[str, Any]]] = {}
     for event in events:
-        if not bool(event.get("training_relevant", True)):
+        if not bool(event.get("training_relevant", True)) and not bool(
+            event.get("no_training")
+            or event.get("no_intensity")
+            or event.get("short_only")
+        ):
             continue
         for event_date in external_calendar_event_dates(
             event, today=today_date, window_days=window_days
@@ -83,9 +87,9 @@ def _calendar_limits(
     draft: dict[str, Any],
     calendar_events: list[dict[str, Any]],
     duration: float | None,
-) -> tuple[int | None, str, bool, bool]:
+) -> tuple[int | None, str, bool, bool, bool]:
     if not calendar_events:
-        return None, "", False, False
+        return None, "", False, False, False
     total_minutes = sum(
         int(event.get("duration_minutes") or 0) for event in calendar_events
     )
@@ -107,11 +111,20 @@ def _calendar_limits(
     no_intensity = [
         event for event in calendar_events if bool(event.get("no_intensity"))
     ]
-    no_intensity_limited = bool(no_intensity) and adaptive.workout_is_hard(draft)
+    no_intensity_limited = bool(
+        no_intensity
+    ) and not calendar.workout_is_explicitly_easy(draft)
+    no_training = any(bool(event.get("no_training")) for event in calendar_events)
     calendar_limited = adaptive.workout_is_hard(draft) or (
         duration is not None and duration > calendar_limit
     )
-    return calendar_limit, calendar_reason, no_intensity_limited, calendar_limited
+    return (
+        calendar_limit,
+        calendar_reason,
+        no_intensity_limited,
+        calendar_limited,
+        no_training,
+    )
 
 
 def _reasons(
@@ -126,6 +139,7 @@ def _reasons(
     calendar_reason: str,
     calendar_limited: bool,
     no_intensity_limited: bool,
+    no_training: bool,
     weather_reason: str,
 ) -> tuple[list[str], list[str]]:
     reasons: list[str] = []
@@ -145,11 +159,12 @@ def _reasons(
         reasons.append(f"only {available_minutes} minutes are available")
     if calendar_limited:
         reasons.append(calendar_reason)
-        blocking_triggers.append("calendar")
+    if no_training:
+        reasons.append("calendar marker [NO_TRAINING] blocks training")
     if no_intensity_limited:
         reasons.append("calendar marker [NO_INTENSITY] requests an easy session")
-        if "calendar" not in blocking_triggers:
-            blocking_triggers.append("calendar")
+    if calendar_limited or no_training or no_intensity_limited:
+        blocking_triggers.append("calendar")
     if weather_reason:
         reasons.append(weather_reason)
         blocking_triggers.append("weather")
@@ -173,9 +188,13 @@ def _change_state(
     available_minutes = _as_number(feedback.get("available_minutes"))
     motivation = _as_number(feedback.get("motivation"))
     calendar_events = events_by_date.get(str(draft.get("date") or ""), [])
-    calendar_limit, calendar_reason, no_intensity_limited, calendar_limited = (
-        _calendar_limits(draft, calendar_events, duration)
-    )
+    (
+        calendar_limit,
+        calendar_reason,
+        no_intensity_limited,
+        calendar_limited,
+        no_training,
+    ) = _calendar_limits(draft, calendar_events, duration)
     return {
         "illness_active": bool(
             illness_pause
@@ -199,6 +218,7 @@ def _change_state(
         "calendar_limit": calendar_limit,
         "calendar_reason": calendar_reason,
         "no_intensity_limited": no_intensity_limited,
+        "no_training": no_training,
         "calendar_limited": calendar_limited,
     }
 
@@ -216,6 +236,14 @@ def _replacement(
     ]
     if state["illness_active"]:
         replacement = adaptive.illness_pause_replacement(draft, reason)
+    elif state["no_training"]:
+        replacement = {
+            **draft,
+            "archived": True,
+            "duration_minutes": 0,
+            "description": "Sportpause; die geplante Einheit wird archiviert.",
+            "rationale": f"Calendar [NO_TRAINING]: {reason}. The original stays in local history.",
+        }
     else:
         replacement = adaptive.adaptive_recovery_replacement(
             draft,
@@ -240,6 +268,7 @@ def _needs_change(draft: dict[str, Any], state: dict[str, Any]) -> bool:
         or state["limited"]
         or state["calendar_limited"]
         or state["no_intensity_limited"]
+        or state["no_training"]
         or state["weather_reason"]
     )
 
@@ -312,6 +341,7 @@ def _change(
         state["calendar_reason"],
         state["calendar_limited"],
         state["no_intensity_limited"],
+        state["no_training"],
         state["weather_reason"],
     )
     reason = "; ".join(reasons)

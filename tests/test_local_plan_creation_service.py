@@ -70,6 +70,7 @@ class LocalPlanCreationServiceTests(unittest.TestCase):
         self.revisions = RevisionSpy()
         self.calendar_conflicts = Mock()
         self.calendar_conflicts.conflicts.return_value = []
+        self.calendar_conflicts.constraints.return_value = []
         self.library_service = WorkoutLibraryService(
             self.database_manager, lambda: NOW, lambda: TEMPLATE_ID, Mock()
         )

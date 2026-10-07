@@ -14,8 +14,8 @@ from backend.db.repositories import CompetitionRepository, KeyValueRepository
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.planning import competitions as planning_competitions
 from backend.planning.competition_service import CompetitionService
-from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.sync.authority import competition_push_manifest
+from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 
 NOW = "2026-09-20T12:00:00+00:00"
 IMPORT_ID = "00000000-0000-0000-0000-000000000099"

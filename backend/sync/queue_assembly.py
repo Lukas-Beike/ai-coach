@@ -52,7 +52,7 @@ class SyncJobQueueAssembly:
     def __init__(
         self,
         *,
-        dependencies: "SyncJobQueueAssembly.Inputs",
+        dependencies: SyncJobQueueAssembly.Inputs,
     ) -> None:
         persistence = dependencies.persistence
         worker = dependencies.worker

@@ -27,6 +27,7 @@ class WorkoutLibraryProvider:
     database_manager: Callable[[], DatabaseManager]
     intervals_client: Callable[[], Any]
     workout_library_service: Callable[[], WorkoutLibraryService]
+    calendar_conflict_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,7 @@ class WorkoutLibrarySyncAssembly:
     def __init__(
         self,
         *,
-        dependencies: "WorkoutLibrarySyncAssembly.Inputs",
+        dependencies: "WorkoutLibrarySyncAssembly.Inputs",  # noqa: UP037
     ) -> None:
         provider = dependencies.provider
         state = dependencies.state
@@ -57,6 +58,7 @@ class WorkoutLibrarySyncAssembly:
         self._database_manager = provider.database_manager
         self._intervals_client = provider.intervals_client
         self._workout_library_service = provider.workout_library_service
+        self._calendar_conflict_service = provider.calendar_conflict_service
         self._key_values = state.key_values
         self._event_buffer = state.event_buffer
         self._redactor = state.redactor
@@ -95,5 +97,10 @@ class WorkoutLibrarySyncAssembly:
     def sync_service(self) -> WorkoutLibrarySyncService:
         """Create explicit single-entry remote synchronization."""
         return WorkoutLibrarySyncService(
-            self._config(), self._intervals_client, self.sync_state_service()
+            self._config(),
+            self._intervals_client,
+            self.sync_state_service(),
+            self._calendar_conflict_service()
+            if self._calendar_conflict_service
+            else None,
         )
