@@ -38,7 +38,8 @@ async function scenario(options = {}) {
       const native = [];
       if (options.active || (requested && options.limit)) native.push({
         user: { login: options.impostor ? 'other-bot' : bot },
-        created_at: new Clock(options.old ? epoch - 1000 : epoch + elapsed).toISOString(),
+        created_at: new Clock(options.old || options.updated ? epoch - 1000 : epoch + elapsed).toISOString(),
+        ...(options.updated ? { updated_at: new Clock(epoch + elapsed).toISOString() } : {}),
         body: options.blocked ? '### Blocked: Required Secret Scanner Is Unavailable' :
           options.limit ? 'You have reached your Codex usage limits' :
           options.progress ? 'Codex review started' : options.unrelated ? 'Unrelated comment' :
@@ -112,9 +113,11 @@ test('rerun never posts a second request for the same PR head', async () => {
 });
 
 test('watchdog resumes when Codex posts a late comment or review', () => {
+  assert.match(workflow, /types: \[opened, synchronize, reopened, ready_for_review, edited\]/);
   assert.match(workflow, /issue_comment:\n\s+types: \[created\]/);
   assert.match(workflow, /pull_request_review:\n\s+types: \[submitted\]/);
   assert.match(workflow, /github\.event\.comment\.user\.login == 'chatgpt-codex-connector\[bot\]'/);
+  assert.match(workflow, /github\.event\.review\.user\.login == 'chatgpt-codex-connector\[bot\]'/);
   assert.match(workflow, /github\.event\.issue\.number \|\| inputs\.pull_request_number/);
   assert.match(workflow, /codex-watchdog-\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.issue\.number \|\| inputs\.pull_request_number \}\}/);
   assert.doesNotMatch(workflow, /current\.base\.sha !== base/);
@@ -125,6 +128,12 @@ test('untrusted and old bot comments cannot prove activity', async () => {
     const result = await scenario(options);
     assert.equal(result.results[0].conclusion, 'failure');
   }
+});
+
+test('updated native summaries prove current activity', async () => {
+  const result = await scenario({ active: true, updated: true });
+  assert.equal(result.writes.length, 0);
+  assert.equal(result.results[0].conclusion, 'success');
 });
 
 test('integration-blocked comments fail and are not treated as usage exhaustion', async () => {

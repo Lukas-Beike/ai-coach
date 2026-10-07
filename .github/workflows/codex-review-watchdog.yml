@@ -3,7 +3,7 @@ name: Native Codex review watchdog
 on:
   pull_request_target:
     branches: [develop, main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
     inputs:
       pull_request_number:
@@ -25,9 +25,12 @@ jobs:
   availability:
     name: Native Codex watchdog
     if: >-
-      github.event_name != 'issue_comment' ||
+      (github.event_name != 'issue_comment' ||
       github.event.comment.user.login == 'chatgpt-codex-connector[bot]' ||
-      github.event.comment.user.login == 'chatgpt-codex-connector'
+      github.event.comment.user.login == 'chatgpt-codex-connector') &&
+      (github.event_name != 'pull_request_review' ||
+      github.event.review.user.login == 'chatgpt-codex-connector[bot]' ||
+      github.event.review.user.login == 'chatgpt-codex-connector')
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
@@ -87,7 +90,8 @@ jobs:
               const since = Date.parse(process.env.EVENT_TIME || initial.updated_at);
               if (!Number.isFinite(since)) throw new Error('Invalid PR event timestamp');
               const marker = `<!-- codex-watchdog:${number}:${head} -->`;
-              const recent = (item) => Date.parse(item.created_at || item.submitted_at) >= since;
+              const activityTime = (item) => Date.parse(item.updated_at || item.created_at || item.submitted_at);
+              const recent = (item) => activityTime(item) >= since;
               const comments = async () => github.paginate(github.rest.issues.listComments, {
                 ...repo, issue_number: number, per_page: 100,
               });
@@ -113,9 +117,9 @@ jobs:
                 const limit = /(?:usage limits for code reviews|reached (?:your )?Codex usage limits)/i;
                 const blocked = /(?:blocked:|could not safely inspect|secret scanner|unable to (?:read|review|inspect)|review unavailable)/i;
                 if (native.some(item => blocked.test(item.body || '') &&
-                    (!fallbackAt || Date.parse(item.created_at) >= fallbackAt))) return 'blocked';
+                    (!fallbackAt || activityTime(item) >= fallbackAt))) return 'blocked';
                 if (native.some(item => limit.test(item.body || '') &&
-                    (!fallbackAt || Date.parse(item.created_at) >= fallbackAt))) return 'limit';
+                    (!fallbackAt || activityTime(item) >= fallbackAt))) return 'limit';
                 if (!fallbackAt && native.length > 0) return 'active';
                 if (native.some(item => /(?:^Codex Review:|<!-- codex-pull-request-review-summary -->)/m.test(item.body || ''))) return 'active';
                 return 'silent';
