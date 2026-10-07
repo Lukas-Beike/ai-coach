@@ -35,6 +35,10 @@ def _records(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     if isinstance(value, dict):
+        for key in ("enduranceScoreDTO", "enduranceScoreDTOList"):
+            nested = value.get(key)
+            if isinstance(nested, (dict, list)):
+                return _records(nested)
         return [value]
     return []
 

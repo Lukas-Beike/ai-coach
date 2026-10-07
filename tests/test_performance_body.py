@@ -111,6 +111,24 @@ class BodyHistoryTests(unittest.TestCase):
             ]
         )
 
+    def test_historical_ftp_keeps_history_freshness_timestamp(self):
+        result = body_history(
+            {"recent_activities": []},
+            {
+                "cycling_ftp_history": [
+                    {"date": "2026-10-05", "functionalThresholdPower": 280}
+                ],
+                "source_freshness": {
+                    "cycling_ftp": {"fetched_at": "current-fetch"},
+                    "cycling_ftp_history": {"fetched_at": "history-fetch"},
+                },
+                "cycling_ftp": 300,
+            },
+            TODAY,
+        )
+        points = _series(result, "14d", "cycling_w_per_kg", "Garmin Connect")["points"]
+        self.assertEqual(points[-2]["ftp_synced_at"], "history-fetch")
+
     def test_manual_profile_values_are_not_historical_and_invalid_garmin_values_drop(
         self,
     ):

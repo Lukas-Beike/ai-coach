@@ -132,6 +132,7 @@ def _garmin_ftp(
 ) -> dict[date, tuple[float, str, Any]]:
     result: dict[date, tuple[float, str, Any]] = {}
     synced_at = _sync_timestamp(garmin, "cycling_ftp")
+    history_synced_at = _sync_timestamp(garmin, "cycling_ftp_history")
     for row in garmin_metric_history.ftp_points(
         garmin.get("cycling_ftp_history"),
         start=today - timedelta(days=89),
@@ -139,8 +140,8 @@ def _garmin_ftp(
     ):
         observed = _day(row["date"])
         if observed is not None:
-            result[observed] = (float(row["value"]), row["date"], synced_at)
-    _append_performance_ftp(garmin, today, synced_at, result)
+            result[observed] = (float(row["value"]), row["date"], history_synced_at)
+    _append_performance_ftp(garmin, today, history_synced_at, result)
     direct = garmin.get("cycling_ftp")
     freshness = garmin.get("source_freshness")
     fallback_day = _day(

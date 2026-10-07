@@ -11,6 +11,23 @@ START = date(2026, 7, 9)
 
 
 class GarminHistoricMetricCollectorTests(unittest.TestCase):
+    def test_endurance_score_dto_range_is_unwrapped(self):
+        points = metric_points(
+            {
+                "enduranceScoreDTO": {
+                    "calendarDate": "2026-10-05",
+                    "overallScore": 712,
+                    "timestamp": 123,
+                }
+            },
+            start=START,
+            end=TODAY,
+        )
+        self.assertEqual(points[0]["date"], "2026-10-05")
+        self.assertEqual(
+            points[0]["values"], {"overallScore": 712.0, "timestamp": 123.0}
+        )
+
     def test_known_sdk_methods_get_bounded_dates_and_explicit_aggregation(self):
         calls = []
 
