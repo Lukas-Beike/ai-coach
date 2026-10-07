@@ -236,7 +236,7 @@ def training_report(
             for item in (activity_feedback or [])
             if str(item.get("activity_id")) == str(activity.get("id"))
         ][:100],
-        "coverage_note": "Totals include known local records only. Missing loads remain unknown; an empty day does not prove rest or a confirmed training pause. The current period is not comparable to a complete previous period.",
+        "coverage_note": "Summen enthalten nur bekannte lokale Einträge. Fehlende Belastungen bleiben unbekannt; ein leerer Tag belegt keine Ruhe oder Trainingspause. Die laufende Woche ist nicht mit einer abgeschlossenen Vorwoche vergleichbar.",
     }
 
 

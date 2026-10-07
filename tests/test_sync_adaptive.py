@@ -11,9 +11,9 @@ from backend.calendar.canonical import ISO_MIDNIGHT_SUFFIX
 from backend.config import load_config
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.sync.adaptive import (
-    AdaptivePreviewFollowupService,
     ILLNESS_CALENDAR_CATEGORY,
     ILLNESS_EVENT_EXTERNAL_PREFIX,
+    AdaptivePreviewFollowupService,
     IllnessPauseSyncService,
 )
 
@@ -53,7 +53,10 @@ class AdaptivePreviewFollowupServiceTests(unittest.TestCase):
     def test_preview_failure_logs_and_returns_current_status(self):
         preview_service = Mock()
         preview_service.preview.side_effect = RuntimeError("preview failed")
-        preview_service.status.return_value = {"needs_replan": True, "replan_changes": 4}
+        preview_service.status.return_value = {
+            "needs_replan": True,
+            "replan_changes": 4,
+        }
         logger = Mock()
         service = AdaptivePreviewFollowupService(preview_service, logger)
 
@@ -92,13 +95,17 @@ class IllnessPauseSyncServiceTests(unittest.TestCase):
         self.root = Path(self.temporary_directory.name)
 
     def make_config(self, intervals_api_key: str = "fake-intervals-key"):
-        return load_config(self.root, self.root, {"INTERVALS_API_KEY": intervals_api_key})
+        return load_config(
+            self.root, self.root, {"INTERVALS_API_KEY": intervals_api_key}
+        )
 
     def make_apply_service(self, result):
         apply_service = Mock()
         apply_service.apply.return_value = result
         competitions = Mock()
-        competitions.list.return_value = [{"name": "race", "event_date": "2026-10-01", "priority": 1}]
+        competitions.list.return_value = [
+            {"name": "race", "event_date": "2026-10-01", "priority": 1}
+        ]
         preview = Mock()
         preview.latest_preview.return_value = {"id": "preview"}
         preview.status.return_value = {"illness_pause_pending": False}
@@ -131,7 +138,11 @@ class IllnessPauseSyncServiceTests(unittest.TestCase):
         writer.upsert_calendar_events.assert_not_called()
 
     def test_sync_passes_exact_event_builder_arguments_and_returns_exact_result(self):
-        pause = {"start_date": "2026-09-21", "end_date": "2026-09-22", "illness": " flu "}
+        pause = {
+            "start_date": "2026-09-21",
+            "end_date": "2026-09-22",
+            "illness": " flu ",
+        }
         events = [{"event": "one"}, {"event": "two"}]
         pushed = [{"id": "remote-one"}, {"id": "remote-two"}, {"id": "remote-three"}]
         writer = Mock()
@@ -237,7 +248,9 @@ class IllnessPauseSyncServiceTests(unittest.TestCase):
             "illness_pause": {"illness": "flu", "approved": False},
         }
         service, _, _, _, _ = self.make_service(applied)
-        service.sync = Mock(return_value={"status": "ok", "synced": 2, "category": "SICK"})
+        service.sync = Mock(
+            return_value={"status": "ok", "synced": 2, "category": "SICK"}
+        )
 
         result = service.apply("adjustment", sync_illness_to_intervals=True)
 
@@ -268,7 +281,7 @@ class IllnessPauseSyncServiceTests(unittest.TestCase):
 
     def test_apply_returns_already_applied_status_without_remote_sync(self):
         applied = {"status": "already_applied", "id": "adjustment"}
-        service, apply_service, competitions, _, _ = self.make_service(applied)
+        service, _apply_service, competitions, _, _ = self.make_service(applied)
         service.sync = Mock()
 
         result = service.apply("adjustment", sync_illness_to_intervals=True)

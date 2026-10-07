@@ -96,6 +96,31 @@ test("sparse FTP uses a current value line alongside a dense eFTP series", async
   await expect(page.locator("#analysisHistoryCharts")).toContainText("Seit 01.09.2026: +10 W");
 });
 
+test("@responsive best windows table and endurance efficiency chart are compact and link-free", async ({ page }) => {
+  await page.route("**/api/analysis/endurance", (route) => route.fulfill({ json: { status: "ok", activities: [
+    { activity_id: "r1", sport: "Ride", date: "2026-09-10", name: "A", aerobic: { efficiency: 1.42, unit: "W/bpm", drift_percent: 3 } },
+    { activity_id: "r2", sport: "Ride", date: "2026-09-24", name: "B", aerobic: { efficiency: 1.5, unit: "W/bpm", drift_percent: 2 } },
+    { activity_id: "u1", sport: "Run", date: "2026-09-20", name: "C", aerobic: { efficiency: null, reason: "x" } },
+  ] } }));
+  await page.route("**/api/analysis/power-profiles", (route) => route.fulfill({ json: { status: "ok", best: [
+    { sport: "Ride", duration_seconds: 300, watts: 280, date: "2026-09-20", activity_id: "r1" },
+    { sport: "Ride", duration_seconds: 5, watts: 700, date: "2026-09-21", activity_id: "r2" },
+  ], activities: [] } }));
+  await performanceFixture(page, {}, "performance");
+  const root = page.locator("#existingPerformanceReports");
+  await expect(root.getByRole("heading", { name: "Beste Fenster je Aktivit\u00e4t" })).toBeVisible();
+  await expect(root.locator("section", { hasText: "Beste Fenster" }).locator("tbody tr")).toHaveCount(2);
+  await expect(root.locator("section", { hasText: "Beste Fenster" }).locator("tbody tr").first()).toContainText("5 s");
+  await expect(root.getByRole("heading", { name: /Ausdauer-Effizienz/ })).toBeVisible();
+  await expect(root.locator("svg")).toHaveCount(1);
+  await expect(root).not.toContainText("Quelle/Methode");
+  await expect(root).not.toContainText("Leistungsprofil");
+  await expect(root.locator("tbody button, tbody a")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const AxeBuilder = require("@axe-core/playwright").default;
+  expect((await new AxeBuilder({ page }).include("#existingPerformanceReports").analyze()).violations).toEqual([]);
+});
+
 test("@responsive pace ticks stay distinct and faster pace is higher", async ({ page }) => {
   await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-15", load: { points: [] }, metrics: {
     run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 300 }, { date: "2026-09-08", value: 295 }, { date: "2026-09-15", value: 290 }] }],
@@ -204,7 +229,7 @@ test("@responsive performance keeps predictions in the dedicated table", async (
   await expect(page.locator("#performanceSummary")).toBeHidden();
 });
 
-test("@responsive provider metrics and sleep regularity keep source, raw fields and unknown gaps", async ({ page }) => {
+test("@responsive provider metrics render as charts without raw text", async ({ page }) => {
   await performanceFixture(page, {
     history: {
       start: "2026-09-01", end: "2026-10-01", load: { points: [] }, metrics: {},
@@ -219,27 +244,21 @@ test("@responsive provider metrics and sleep regularity keep source, raw fields 
         method: "sleep-regularity-v1", timezone: "Europe/Berlin", status: "provisional", series: [{
           source: "Garmin Connect", method: "sleepStartTimestampGMT/sleepEndTimestampGMT", status: "provisional",
           coverage: { baseline_nights: 3, required_nights: 14 },
-          points_14: [{ date: "2026-10-01", onset_at: "2026-09-30T22:15:00+02:00", wake_at: "2026-10-01T06:45:00+02:00", duration_hours: 8.5 }, { date: "2026-09-30" }],
+          points_14: [{ date: "2026-10-01", onset_at: "2026-09-30T22:15:00+02:00", wake_at: "2026-10-01T06:45:00+02:00", duration_hours: 8.5, onset_deviation_minutes: 15, wake_deviation_minutes: -10 }, { date: "2026-09-30" }],
           points_84: [],
         }],
       },
     },
   });
   const performance = page.locator("#analysisHistoryCharts");
-  await expect(performance).toContainText("Endurance Score");
-  await expect(performance).toContainText("Running Tolerance");
-  await expect(performance).toContainText("Garmin Connect");
-  await expect(performance).toContainText("enduranceScore");
-  await expect(performance).toContainText("Einheit: unbekannt");
-  await expect(performance).toContainText("veraltet (stale)");
-  await expect(performance).toContainText("fehlgeschlagen (failed)");
+  await expect(performance.getByRole("heading", { name: "Endurance Score" })).toBeVisible();
+  await expect(performance.getByRole("heading", { name: "Running Tolerance" })).toHaveCount(0);
+  await expect(performance).not.toContainText("Garmin-Provider-Metriken");
+  await expect(performance).not.toContainText("Rohfeld");
   await page.evaluate(async () => { await applyNavigationRoute("analysis/recovery", { historyMode: "replace" }); });
   const recovery = page.locator("#personalRecovery");
-  await expect(recovery).toContainText("Schlafdefizit: unbekannt");
-  await expect(recovery).toContainText("sleep-regularity-v1");
-  await expect(recovery).toContainText("Basisabdeckung: 3/14");
-  await expect(recovery).toContainText("22:15");
-  await expect(recovery).toContainText("unbekannt");
-  await expect(recovery.locator(".recovery-regularity svg")).toHaveCount(2);
+  await expect(recovery).not.toContainText("Schlafdefizit");
+  await expect(recovery).not.toContainText("Schlafregelm");
+  await expect(page.locator("#analysisTagImpact, #analysisComparisons")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

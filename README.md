@@ -107,7 +107,7 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 - **Rolling 8-Week Event Horizon**: Bounded calendar expansion mapping external life events across an 8-week (56-day) forward-looking window.
 - **RFC 5545 Recurrence Engine**: Comprehensive expansion of standard recurring rules (daily, weekly, monthly, yearly) and Google Calendar recurrence exceptions capped at 1,000 instances.
 - **Bounded Calendar Processing**: Feeds are limited to 5 MB and 10,000 parsed event components; folded lines, RDATE deduplication and recurrence-exception lookup are processed linearly. Instance records are generated incrementally and feeds exceeding 1,000 unique events in the sync window are rejected. Connected calendar HTTP transfers have a 30-second total deadline.
-- **Calendar Training Constraints**: `[NO_TRAINING]`, `[NO_INTENSITY]`, and `[SHORT_ONLY]` are recognized in event titles and descriptions. `[NO_TRAINING]` and `[NO_INTENSITY]` are enforced against planned-workout changes on the affected local calendar day: training is blocked for the former, and the latter requires an explicitly easy workout.
+- **Calendar Training Constraints**: `[NO_TRAINING]`, `[NO_INTENSITY]`, and `[SHORT_ONLY]` are recognized in event titles and descriptions. `[NO_TRAINING]` and `[NO_INTENSITY]` are enforced against planned-workout changes on the affected local calendar day: training is blocked for the former, the latter requires an explicitly easy workout, and `[SHORT_ONLY]` blocks workouts longer than 60 minutes.
 - **Visual Schedule Conflict Markers**: Distinctive visual indicators on the planned calendar alerting the athlete to busy days and potential scheduling conflicts.
 - **Adaptive Session Replanning**: Heuristic session adjustments that suggest shorter durations or lower-intensity replacements for scheduled workouts on congested days.
 
@@ -582,6 +582,14 @@ athlete data are read. The seed is idempotent and carries a version marker so
 an older demo seed is upgraded in place when the disposable database is reused.
 Use a fresh fixture browser profile and check the mobile-small and mobile
 projects when reviewing this preview.
+
+`scripts/demo-container.ps1` builds the image and starts a disposable demo
+container that seeds this data itself on every start (`FIXTURE_AUTO_SEED=1`;
+idempotent). Run it with
+`powershell -ExecutionPolicy Bypass -File scripts/demo-container.ps1`; add
+`-Persist` to keep the data in a named volume and `-Port`/`-Name` to adjust the
+container. The login password is the fixture password
+`e2e-fixture-password-1234`. Never point it at a real `/data` directory.
 
 ### Dependency lock maintenance
 

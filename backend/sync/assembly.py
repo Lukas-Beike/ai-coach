@@ -49,7 +49,7 @@ class ProviderSyncAssembly:
     def __init__(
         self,
         *,
-        dependencies: "ProviderSyncAssembly.Inputs",
+        dependencies: ProviderSyncAssembly.Inputs,
     ) -> None:
         persistence = dependencies.persistence
         runtime = dependencies.runtime

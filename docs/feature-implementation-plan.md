@@ -1,6 +1,6 @@
 # Umsetzungsplan für Trainingsanalysen und neue Funktionen
 
-Stand: 6. Oktober 2026. Grundlage ist der aktuelle Planungsstand auf Commit `33e244011039d051d1af6f4a3dd047b82aead2d9`. Status: erste Lieferung lokal umgesetzt und geprüft; weitere Analysepakete bleiben geplant.
+Stand: 7. Oktober 2026. Grundlage ist Commit `db23598d` plus nicht committete lokale Arbeit. Status: Pakete 1 bis 5, 7, 11 und 12 weitgehend lokal umgesetzt; Pakete 6, 8, 9 und 10 haben Backend/API, aber noch keine Oberfläche beziehungsweise Coach-Anbindung.
 
 Der Plan ergänzt Intervals Coach um nachvollziehbare Trainingsanalysen, persönliche Erholung, Wettkampfvorbereitung und praktische Trainingsfunktionen. Neu aufgenommen sind der Analyse-Tab **Body**, die verlässliche Auswertung beider Kalender-Flags **`[NO_TRAINING]` und `[NO_INTENSITY]`** sowie der Garmin-Tagesverbrauch im Ernährungstagebuch. Die nächste Lieferung behebt zuerst die Kalenderregeln und ergänzt danach Body und Tagesenergie. Bestehende Pakete für Kalenderdetails, Wochenrückblick, Intervallqualität, Ausdauerentwicklung, Erholung, Leistungsprofile, Planungsszenarien, Verpflegung, Einflussanalysen und Ausrüstung werden gezielt erweitert.
 
@@ -33,7 +33,7 @@ Die Hauptnavigation bleibt `Coach`, `Geplant`, `Analyse`, `Ernährung`, `Mehr`. 
 | --- | --- |
 | Analyse → Leistung | Vorhandene Diagramme, Ausdauerentwicklung, Leistungsprofil und wiederkehrende Trainings |
 | Analyse → Body | Drei Diagramme für Gewicht, KFA und W/kg; Zeiträume 14 Tage und 12 Wochen; Messzeit, Quelle und Datenlücken sichtbar |
-| Analyse → Aktuelle Woche | Automatischer Bericht der aktuellen Woche, ohne Zeitraumwahl, Filter oder Buttons |
+| Analyse → Belastung | Diagramm Trainingszeit (Summe der Bewegungszeit) neben der akuten Belastung; 14 Tage täglich, 12 Wochen als Wochensumme. Ein eigener Wochen-Tab entfällt |
 | Analyse → Erholung | Heutige Einordnung, persönliche Normalbereiche, Schlafverläufe und später persönliche Einflussanalyse |
 | Geplant → Übersicht → absolvierte Einheit | Detailansicht mit Zusammenfassung, Diagrammen, Trainingsqualität, Vergleich und Feedback; Rückkehr zum gleichen Kalendertag |
 | Geplant → Übersicht → heutiger Tag | Kompakte Erholungseinordnung mit Link auf die vollständige Auswertung |
@@ -113,7 +113,7 @@ Die nächste Umsetzung beginnt mit **0 → 5a → 5b**, gefolgt von den gezielte
 
 **Metriken:** Zeit in dokumentierten Intensitätsbereichen, Verteilung harter Trainingstage und Änderungen von Umfang/Belastung. Historische Zonen und Schwellen müssen bekannt sein. Für jede Zonenverteilung die auswertbare Dauer relativ zur gesamten passenden Trainingsdauer anzeigen. Krafttraining wird nicht aus einer Herzfrequenzverteilung als Ausdauerreiz klassifiziert. Eine 80/20-Verteilung ist keine feste Bewertungsvorgabe.
 
-**Oberfläche und Coach:** Analyse → Aktuelle Woche zeigt automatisch die aktuelle Woche von Montag bis Sonntag in der Athletenzeitzone, über alle Sportarten. Zusammenfassung und Belege sind direkt sichtbar, ohne Buttons, Filter, Zeitraumwahl oder aufzuklappende Berichtsteile. Fakten lassen sich ohne AI lesen. Der Coach kann Berichte weiterhin über seinen bestehenden Leseweg besprechen. Berechenbare Diagrammdaten werden wiederverwendet statt separat dauerhaft dupliziert.
+**Oberfläche und Coach:** Es gibt keine eigene Wochenansicht in der Oberfläche; die Trainingszeit erscheint als Diagramm unter Analyse → Belastung. Der Wochenbericht bleibt als Datenquelle für den Coach (`get_training_report`) bestehen. Der Coach kann Berichte weiterhin über seinen bestehenden Leseweg besprechen. Berechenbare Diagrammdaten werden wiederverwendet statt separat dauerhaft dupliziert.
 
 **Owner:** `backend/performance/` für Berechnungen, `backend/activities/matching.py` und `calendar_projection.py` für Paarung, `backend/coach/` für Erklärung, `public/analysis.js` für Darstellung. Ein Wochenbericht bleibt ein begrenztes Domänenmodul.
 
@@ -359,4 +359,16 @@ Worker: gpt-6-luna, Reasoning high; Prüfung und Übernahme durch den Orchestrat
 | Standard-Testdaten | Versionierte synthetische Fixture, idempotenter Seed und Upgrade |
 | Zusätzliche API-Features | Bewerteter Backlog; noch keine Umsetzung |
 
-Abnahme: 3.289 Unit-Tests (16 übersprungen), 11 SQLCipher-Migrationsprüfungen, sechs Standard-Fixture-Tests sowie Body-, Ernährungs- und Ausrüstungs-Browserabläufe auf 320 px, 390 px und Desktop. PWA-Offline- und Markdown-Verträge bestanden. Ruff, gezieltes mypy, Syntaxprüfung und Docker-Build bestanden. Die Vorschau läuft lokal auf http://127.0.0.1:8091 in der mobilen Ansicht. Keine PR, Veröffentlichung oder produktive Bereitstellung wurde ausgelöst.
+Abnahme: 3.308 Unit-Tests (16 übersprungen), 11 SQLCipher-Migrationsprüfungen, sechs Standard-Fixture-Tests sowie Body-, Ernährungs- und Ausrüstungs-Browserabläufe auf 320 px, 390 px und Desktop. PWA-Offline- und Markdown-Verträge bestanden. Ruff, gezieltes mypy, Syntaxprüfung und Docker-Build bestanden. Die Vorschau läuft lokal auf http://127.0.0.1:8091 in der mobilen Ansicht. Keine PR, Veröffentlichung oder produktive Bereitstellung wurde ausgelöst.
+
+## Offene Punkte (Stand 7. Oktober 2026)
+
+Erledigt: Der Wochen-Tab wurde entfernt. Stattdessen zeigt Analyse → Belastung ein Trainingszeit-Diagramm (14 Tage täglich, 12 Wochen als Wochensumme; Quelle `history.training_time`). Trainingsverpflegung, Körperverlauf und Schlafregelmäßigkeit im Coach sind umgesetzt. Auf Wunsch aus der Analyse-UI entfernt: Vergleichbare Einheiten, Einfluss von Check-in-Tags, Schlafdefizit und Schlafregelmäßigkeit (die Backend-Endpunkte bleiben bestehen). Versionen: analysis v88, styles v276, nutrition v17, Cache v357.
+
+- Paket 12 (Ausrüstung): Umhängen (`assign`, überschreibt die Zuordnung) und Wartungszähler zurücksetzen (`maintain`, neues Wartungsdatum) sind im Backend und über die Coach-Tools vorhanden und getestet; eine eigene UI-Schaltfläche ist bewusst offen. Dubletten Garmin/lokal werden über `garmin_uuid` verknüpft.
+- `[SHORT_ONLY]` ist erledigt: zentral in `calendar_constraint_decision` (blockiert Einheiten über 60 min, unbekannte Dauer bleibt erlaubt).
+- Playwright `analysis-info` und `training-feature-panels` (mobile) wurden ausgeführt; drei Abweichungen wurden behoben (Spec-Texte, NaN bei unbekannter Wartungsnutzung).
+
+Erledigt (Analyse → Leistung): Garmin-Provider-Metriken ohne Rohtexte, nun je Metrik ein Diagramm (Endurance Score, Running Tolerance). Ausdauer-Effizienz als Diagramm je Sportart (ab 2 Datenpunkten). Beste Fenster je Aktivität als schlichte Tabelle ohne Buttons. Leistungsprofil mit 28- und 90-Tage-Fenstern entfernt. Versionen: analysis v89, styles v277, Cache v358.
+
+Erledigt: Seed-Skript `scripts/demo-container.ps1` (Demo-Container seedet beim Start selbst, optional mit Volume). Wartung erledigt: Button an aktiver lokaler Ausrüstung über `POST /api/equipment/maintenance`; Umhängen bleibt über den Coach. Ruff: Die offenen Meldungen in geänderten Dateien kamen aus `tests/test_server_frontend.py` und sind bereinigt, die übrigen Repo-Meldungen waren schon vorher vorhanden. Versionen: analysis v90, styles v277, Cache v359.

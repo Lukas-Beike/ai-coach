@@ -47,7 +47,7 @@ class ProviderTransportAssembly:
     def __init__(
         self,
         *,
-        dependencies: "ProviderTransportAssembly.Inputs",
+        dependencies: ProviderTransportAssembly.Inputs,
     ) -> None:
         http = dependencies.http
         operation = dependencies.operation

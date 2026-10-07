@@ -6,6 +6,8 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from backend.calendar.markers import has_marker
+
 _UTC_OFFSET_SUFFIX = "+00:00"
 _HARD_EFFORT_PATTERN = re.compile(
     r"\b(?:intervals?|vo2(?:max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b|\b(?:z(?:one)?\s*[2-9])\b|\b(?:9[0-9]|1[0-9]{2}|[2-9][0-9]{2})%"
@@ -53,13 +55,35 @@ def workout_is_rest(workout: dict[str, Any]) -> bool:
     return bool(re.search(r"\b(?:rest|ruhetag|sportpause)\b", text))
 
 
+SHORT_ONLY_MAX_MINUTES = 60
+
+
+def _workout_minutes(workout: dict[str, Any]) -> float | None:
+    for key, factor in (("duration_minutes", 1), ("moving_time", 1 / 60)):
+        value = workout.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            return float(value) * factor
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def calendar_constraint_decision(
     workout: dict[str, Any], event: dict[str, Any]
 ) -> dict[str, Any] | None:
     """Centralize external event constraints used by every planning mutation."""
     marker_text = f"{event.get('name', '')} {event.get('description', '')}".casefold()
-    no_training = bool(event.get("no_training")) or "[no_training]" in marker_text
-    no_intensity = bool(event.get("no_intensity")) or "[no_intensity]" in marker_text
+    no_training = bool(event.get("no_training")) or has_marker(
+        marker_text, "[NO_TRAINING]"
+    )
+    no_intensity = bool(event.get("no_intensity")) or has_marker(
+        marker_text, "[NO_INTENSITY]"
+    )
+    short_only = bool(event.get("short_only")) or has_marker(
+        marker_text, "[SHORT_ONLY]"
+    )
     if no_training and not workout_is_rest(workout):
         return {
             "blocked": True,
@@ -71,6 +95,13 @@ def calendar_constraint_decision(
             "blocked": True,
             "reason": "no_intensity",
             "marker": "[NO_INTENSITY]",
+        }
+    minutes = _workout_minutes(workout)
+    if short_only and minutes is not None and minutes > SHORT_ONLY_MAX_MINUTES:
+        return {
+            "blocked": True,
+            "reason": "short_only",
+            "marker": "[SHORT_ONLY]",
         }
     return None
 

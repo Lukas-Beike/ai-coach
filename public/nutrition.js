@@ -292,6 +292,7 @@ async function loadNutrition() {
     document.querySelector("#nutritionEntries").replaceChildren(...day.entries.map((item) => nutritionCard(item, false)));
     const templates = document.querySelector("#nutritionTemplates");
     templates.replaceChildren(...saved.templates.map((item) => nutritionCard(item, true)));
+    void loadNutritionFueling();
     if (!saved.templates.length) templates.textContent = "Noch keine gespeicherten Mahlzeiten. Definiere dein erstes Standardfrühstück mit dem Coach.";
   } catch (error) {
     if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) {
@@ -301,6 +302,77 @@ async function loadNutrition() {
   }
 }
 
+function nutritionFuelingSection() {
+  let section = document.querySelector("#nutritionFueling");
+  if (section) return section;
+  section = document.createElement("section");
+  section.id = "nutritionFueling";
+  section.className = "nutrition-tools";
+  section.setAttribute("aria-label", "Trainingsverpflegung");
+  const heading = document.createElement("h3");
+  heading.textContent = "Trainingsverpflegung";
+  const label = document.createElement("label");
+  label.textContent = "Geplante Ausdauereinheit";
+  const select = document.createElement("select");
+  select.id = "nutritionFuelingUnit";
+  label.append(select);
+  const output = document.createElement("div");
+  output.id = "nutritionFuelingPlan";
+  output.setAttribute("aria-live", "polite");
+  section.append(heading, label, output);
+  document.querySelector("#nutritionTemplates").insertAdjacentElement("afterend", section);
+  select.addEventListener("change", () => void loadNutritionFuelingPlan(select.value));
+  return section;
+}
+
+function nutritionFuelingRange(range, unit) {
+  return Array.isArray(range) ? `${range[0]}\u2013${range[1]} ${unit}` : range == null ? "unbekannt" : `${range} ${unit}`;
+}
+
+function renderNutritionFuelingPlan(plan) {
+  const output = document.querySelector("#nutritionFuelingPlan");
+  const rows = [];
+  const add = (tag, text, className) => { const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; rows.push(node); };
+  if (plan.status !== "suggestion") {
+    add("p", "Die Dauer dieser Einheit ist unbekannt. Ohne Dauer gibt es keinen Vorschlag.", "muted");
+  } else {
+    add("p", `${plan.name || "Einheit"} \u00b7 ${plan.date ? dateLabel(plan.date) : "Datum unbekannt"} \u00b7 ${nutritionNumber(plan.duration_hours * 60)} min`);
+    add("p", `Kohlenhydrate: ${nutritionFuelingRange(plan.carbs_g_per_hour, "g/h")} \u00b7 Fl\u00fcssigkeit: ${nutritionFuelingRange(plan.fluid_ml_per_hour, "ml/h")}`);
+    (plan.timeline || []).forEach((line) => add("p", line, "fine-print"));
+    add("p", `Vertr\u00e4glichkeit: ${plan.tolerance}`, "fine-print");
+  }
+  if (plan.saved_plan) {
+    const saved = plan.saved_plan;
+    add("p", `Gespeicherter Plan: ${saved.carbs_g_per_hour} g/h Kohlenhydrate, ${saved.fluid_ml_per_hour} ml/h Fl\u00fcssigkeit${plan.saved_stale ? " \u00b7 Einheit hat sich seitdem ge\u00e4ndert, bitte pr\u00fcfen" : ""}`);
+  }
+  add("p", "Anpassen oder speichern kannst du den Plan mit dem Coach. Erfasst wird dabei kein Verzehr.", "fine-print");
+  output.replaceChildren(...rows);
+}
+
+async function loadNutritionFuelingPlan(unitId) {
+  const output = document.querySelector("#nutritionFuelingPlan");
+  if (!unitId) { output.replaceChildren(); return; }
+  try {
+    renderNutritionFuelingPlan(await api(`/api/nutrition/fueling?planned_unit_id=${encodeURIComponent(unitId)}`));
+  } catch (error) {
+    output.textContent = `Verpflegung konnte nicht geladen werden: ${error.message}`;
+  }
+}
+
+async function loadNutritionFueling() {
+  const section = nutritionFuelingSection();
+  const select = section.querySelector("select");
+  try {
+    const { units = [] } = await api("/api/nutrition/fueling");
+    const today = new Date().toISOString().slice(0, 10);
+    const upcoming = units.filter((unit) => !unit.date || String(unit.date).slice(0, 10) >= today).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    select.replaceChildren(...upcoming.map((unit) => { const option = document.createElement("option"); option.value = unit.id; option.textContent = `${unit.date ? dateLabel(String(unit.date).slice(0, 10)) : "?"} \u00b7 ${unit.name || "Einheit"}`; return option; }));
+    section.hidden = !upcoming.length;
+    if (upcoming.length) await loadNutritionFuelingPlan(select.value);
+  } catch (error) {
+    section.hidden = true;
+  }
+}
 document.querySelector("#nutritionDate").addEventListener("change", () => void loadNutrition());
 for (const [id, offset] of [["nutritionPrevious", -1], ["nutritionNext", 1]]) {
   document.getElementById(id).addEventListener("click", () => {

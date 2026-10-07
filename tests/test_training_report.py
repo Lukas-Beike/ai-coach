@@ -13,17 +13,144 @@ from backend.performance.training_report import training_report
 
 
 class TrainingReportTests(unittest.TestCase):
+    def test_power_profile_windows_keep_sport_provenance_and_cache_gaps(self):
+        records = [
+            {
+                "activity_id": "outdoor",
+                "date": "2026-10-01",
+                "sport": "Ride",
+                "activity_type": "Ride",
+                "source": "Intervals.icu",
+                "device": "Wahoo ELEMNT",
+                "power_profile": {
+                    "status": "ok",
+                    "duration_curve": [{"duration_seconds": 60, "watts": 240}],
+                },
+            },
+            {
+                "activity_id": "indoor",
+                "date": "2026-10-01",
+                "sport": "VirtualRide",
+                "activity_type": "VirtualRide",
+                "source": "Intervals.icu",
+                "device": "Zwift",
+                "power_profile": {
+                    "status": "ok",
+                    "duration_curve": [{"duration_seconds": 60, "watts": 300}],
+                },
+            },
+            {
+                "activity_id": "unknown",
+                "date": "2026-10-01",
+                "sport": "Ride",
+                "activity_type": "Ride",
+                "source": "Intervals.icu",
+                "device": "Garmin",
+                "power_profile": {"status": "insufficient_data", "duration_curve": []},
+            },
+        ]
+        result = TrainingReportService._profile_window(records, date(2026, 10, 2), 28)
+        self.assertEqual(3, result["cache_coverage"]["records"])
+        self.assertEqual(2, result["cache_coverage"]["usable_records"])
+        self.assertEqual(1, result["cache_coverage"]["unknown_records"])
+        power = [point for point in result["power"] if point["duration_seconds"] == 60]
+        self.assertEqual(
+            {"Ride": 240, "VirtualRide": 300},
+            {point["sport"]: point["watts"] for point in power},
+        )
+        outdoor = next(point for point in power if point["sport"] == "Ride")
+        indoor = next(point for point in power if point["sport"] == "VirtualRide")
+        self.assertEqual("outdoor", outdoor["environment"])
+        self.assertEqual("indoor", indoor["environment"])
+        self.assertEqual("Wahoo ELEMNT", outdoor["device"])
+        self.assertEqual("Zwift", indoor["device"])
+        self.assertEqual("Intervals.icu", outdoor["source"])
+
+    def test_running_speed_selects_fastest_effort_and_distance_selects_shortest(self):
+        records = [
+            {
+                "activity_id": "steady",
+                "date": "2026-10-01",
+                "sport": "Run",
+                "activity_type": "Run",
+                "running_profile": {
+                    "status": "ok",
+                    "speed": [{"duration_seconds": 60, "speed_mps": 3.0}],
+                    "distance": [{"distance_meters": 1000, "seconds": 330}],
+                },
+            },
+            {
+                "activity_id": "fast",
+                "date": "2026-10-01",
+                "sport": "Run",
+                "activity_type": "Run",
+                "running_profile": {
+                    "status": "ok",
+                    "speed": [{"duration_seconds": 60, "speed_mps": 4.0}],
+                    "distance": [{"distance_meters": 1000, "seconds": 300}],
+                },
+            },
+        ]
+        result = TrainingReportService._profile_window(records, date(2026, 10, 2), 28)
+        self.assertEqual(
+            4.0,
+            next(
+                point
+                for point in result["running"]["speed"]
+                if point["duration_seconds"] == 60
+            )["speed_mps"],
+        )
+        self.assertEqual(
+            300,
+            next(
+                point
+                for point in result["running"]["distance"]
+                if point["distance_meters"] == 1000
+            )["seconds"],
+        )
+
     def test_eight_week_load_totals_keep_missing_zero_duplicates_and_boundaries(self):
-        old = {"id": "old", "type": "Ride", "start_date_local": "2026-08-10", "icu_training_load": 90}
-        result = self.report([
-            old, old,
-            {"id": "outside", "start_date_local": "2026-08-09", "icu_training_load": 100},
-            {"id": "last-sunday", "start_date_local": "2026-09-27", "icu_training_load": 10},
-            {"id": "monday", "type": "Run", "start_date": "2026-09-27T23:30:00Z", "icu_training_load": 30},
-            {"id": "missing", "type": "Ride", "start_date_local": "2026-09-29"},
-            {"id": "zero", "type": "Ride", "start_date_local": "2026-09-30", "icu_training_load": 0},
-            {"id": "future", "start_date_local": "2026-10-03", "icu_training_load": 50},
-        ], timezone="Europe/Berlin")
+        old = {
+            "id": "old",
+            "type": "Ride",
+            "start_date_local": "2026-08-10",
+            "icu_training_load": 90,
+        }
+        result = self.report(
+            [
+                old,
+                old,
+                {
+                    "id": "outside",
+                    "start_date_local": "2026-08-09",
+                    "icu_training_load": 100,
+                },
+                {
+                    "id": "last-sunday",
+                    "start_date_local": "2026-09-27",
+                    "icu_training_load": 10,
+                },
+                {
+                    "id": "monday",
+                    "type": "Run",
+                    "start_date": "2026-09-27T23:30:00Z",
+                    "icu_training_load": 30,
+                },
+                {"id": "missing", "type": "Ride", "start_date_local": "2026-09-29"},
+                {
+                    "id": "zero",
+                    "type": "Ride",
+                    "start_date_local": "2026-09-30",
+                    "icu_training_load": 0,
+                },
+                {
+                    "id": "future",
+                    "start_date_local": "2026-10-03",
+                    "icu_training_load": 50,
+                },
+            ],
+            timezone="Europe/Berlin",
+        )
         weeks = result["weekly_load"]
         self.assertEqual(len(weeks), 8)
         self.assertEqual(weeks[0]["start"], "2026-08-10")
@@ -31,25 +158,56 @@ class TrainingReportTests(unittest.TestCase):
         self.assertEqual(weeks[0]["training_load"]["total_sessions"], 1)
         self.assertIsNone(weeks[1]["training_load"]["value"])
         self.assertEqual(weeks[-2]["training_load"]["value"], 10)
-        self.assertEqual(weeks[-1]["training_load"], {"value": 30, "measured_sessions": 2, "total_sessions": 3})
+        self.assertEqual(
+            weeks[-1]["training_load"],
+            {"value": 30, "measured_sessions": 2, "total_sessions": 3},
+        )
         self.assertTrue(weeks[-1]["partial_period"])
         self.assertFalse(weeks[-2]["partial_period"])
-        ride = self.report([{ "id": "zero", "type": "Ride", "start_date_local": "2026-09-28", "icu_training_load": 0}], sport="Ride")
+        ride = self.report(
+            [
+                {
+                    "id": "zero",
+                    "type": "Ride",
+                    "start_date_local": "2026-09-28",
+                    "icu_training_load": 0,
+                }
+            ],
+            sport="Ride",
+        )
         self.assertEqual(ride["weekly_load"][-1]["training_load"]["value"], 0)
 
     def test_daily_chart_keeps_unknown_duration_future_and_timezone_boundaries(self):
-        result = self.report([
-            {"id": "one", "name": "Easy run", "type": "Run", "start_date": "2026-09-27T23:30:00Z", "moving_time": 1800, "icu_training_load": 25},
-            {"id": "two", "type": "Ride", "start_date_local": "2026-09-28"},
-            {"id": "future", "type": "Run", "start_date_local": "2026-10-04", "moving_time": 3600},
-        ], timezone="Europe/Berlin")
+        result = self.report(
+            [
+                {
+                    "id": "one",
+                    "name": "Easy run",
+                    "type": "Run",
+                    "start_date": "2026-09-27T23:30:00Z",
+                    "moving_time": 1800,
+                    "icu_training_load": 25,
+                },
+                {"id": "two", "type": "Ride", "start_date_local": "2026-09-28"},
+                {
+                    "id": "future",
+                    "type": "Run",
+                    "start_date_local": "2026-10-04",
+                    "moving_time": 3600,
+                },
+            ],
+            timezone="Europe/Berlin",
+        )
         self.assertEqual(len(result["daily"]), 7)
         monday = result["daily"][0]
         self.assertEqual(monday["date"], "2026-09-28")
         self.assertEqual(monday["totals"]["sessions"], 2)
         self.assertEqual(monday["cumulative_training_load"]["value"], 25)
         self.assertEqual(monday["cumulative_training_load"]["measured_sessions"], 1)
-        self.assertEqual(result["daily"][1]["cumulative_training_load"], monday["cumulative_training_load"])
+        self.assertEqual(
+            result["daily"][1]["cumulative_training_load"],
+            monday["cumulative_training_load"],
+        )
         self.assertIsNone(result["daily"][-1]["cumulative_training_load"]["value"])
         self.assertEqual(monday["activities"][0]["name"], "Easy run")
         self.assertEqual(monday["activities"][0]["training_load"], 25)
@@ -62,26 +220,56 @@ class TrainingReportTests(unittest.TestCase):
         self.assertTrue(result["daily"][-1]["future"])
         self.assertEqual(result["daily"][-1]["totals"]["sessions"], 0)
 
-    def test_cumulative_week_load_is_flat_without_sessions_and_increases_by_contributions(self):
-        result = self.report([
-            {"id": "wed", "type": "Run", "start_date_local": "2026-09-30", "icu_training_load": 30},
-            {"id": "fri", "type": "Ride", "start_date_local": "2026-10-02", "icu_training_load": 50},
-            {"id": "prior", "start_date_local": "2026-09-27", "icu_training_load": 100},
-        ])
-        self.assertEqual([day["cumulative_training_load"]["value"] for day in result["daily"]], [0, 0, 30, 30, 80, None, None])
+    def test_cumulative_week_load_is_flat_without_sessions_and_increases_by_contributions(
+        self,
+    ):
+        result = self.report(
+            [
+                {
+                    "id": "wed",
+                    "type": "Run",
+                    "start_date_local": "2026-09-30",
+                    "icu_training_load": 30,
+                },
+                {
+                    "id": "fri",
+                    "type": "Ride",
+                    "start_date_local": "2026-10-02",
+                    "icu_training_load": 50,
+                },
+                {
+                    "id": "prior",
+                    "start_date_local": "2026-09-27",
+                    "icu_training_load": 100,
+                },
+            ]
+        )
+        self.assertEqual(
+            [day["cumulative_training_load"]["value"] for day in result["daily"]],
+            [0, 0, 30, 30, 80, None, None],
+        )
         self.assertEqual(result["weekly_load"][-1]["training_load"]["value"], 80)
 
-    def test_feedback_follows_exact_current_activity_reference_and_preserves_zero_rpe(self):
+    def test_feedback_follows_exact_current_activity_reference_and_preserves_zero_rpe(
+        self,
+    ):
         result = self.report(
             [{"id": "one", "type": "Run", "start_date_local": "2026-09-28"}],
             activity_feedback=[
-                {"activity_id": "one", "notes": "Easy", "session_rpe": 0, "deviation_reason": "shortened"},
+                {
+                    "activity_id": "one",
+                    "notes": "Easy",
+                    "session_rpe": 0,
+                    "deviation_reason": "shortened",
+                },
                 {"activity_id": "outside", "notes": "Excluded"},
             ],
         )
         self.assertEqual(len(result["activity_feedback"]), 1)
         self.assertEqual(result["activity_feedback"][0]["session_rpe"], 0)
-        self.assertEqual(result["activity_feedback"][0]["deviation_reason"], "shortened")
+        self.assertEqual(
+            result["activity_feedback"][0]["deviation_reason"], "shortened"
+        )
 
     def report(self, rows, **kwargs):
         return training_report(

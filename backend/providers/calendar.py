@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from backend.calendar.markers import has_marker
 from backend.errors import UNSUPPORTED_BYDAY_ERROR, AppError
 from backend.runtime.socket_deadline import SocketDeadline
 
@@ -400,7 +401,7 @@ def _ical_temporal_value(
 
 
 def _ical_description_contains(description: Any, marker: str) -> bool:
-    return marker.casefold() in str(description or "").casefold()
+    return has_marker(description, marker)
 
 
 def _ical_marker_text(description: Any, name: Any = "") -> str:

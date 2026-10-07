@@ -33,7 +33,11 @@ CapabilitySuccess = Callable[[str], None]
 class GarminCollectionOptions:
     include_recovery: bool = True
     include_current_metrics: bool = True
-    include_historic_metrics: bool = True
+    # ``None`` follows the collection profile: full/default collections include
+    # historic metrics, while recovery/current-metric-free activity or
+    # historical-minimal collections remain activities-only.  Callers can set
+    # an explicit boolean to override that profile.
+    include_historic_metrics: bool | None = None
 
 
 class GarminClientFactory:
@@ -648,7 +652,14 @@ def collect_garmin_data(
         )
     if collection_options.include_current_metrics:
         _collect_current_metrics(client, today, payload, external_call, redact, warn)
-    if collection_options.include_historic_metrics:
+    include_historic_metrics = collection_options.include_historic_metrics
+    if include_historic_metrics is None:
+        include_historic_metrics = (
+            options is None
+            or collection_options.include_recovery
+            or collection_options.include_current_metrics
+        )
+    if include_historic_metrics:
         _collect_historic_metrics(
             client,
             today,

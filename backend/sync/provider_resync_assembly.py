@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import logging
-import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.runtime.events import StateEventBuffer
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.sync.full_resync import (
@@ -70,7 +67,7 @@ class ProviderResyncAssembly:
         persistence: ProviderResyncPersistence
         runtime: ProviderResyncRuntime
 
-    def __init__(self, *, dependencies: "ProviderResyncAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: ProviderResyncAssembly.Inputs) -> None:
         competition = dependencies.competition
         resync = dependencies.resync
         persistence = dependencies.persistence

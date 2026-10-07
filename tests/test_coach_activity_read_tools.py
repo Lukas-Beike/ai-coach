@@ -16,8 +16,12 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
     def test_report_defaults_to_requested_period_without_unrelated_analysis_reads(self):
         reports = Mock()
         reports.read.return_value = {"start": "2026-09-01", "totals": {"sessions": 2}}
-        service = CoachActivityReadToolService(Mock(), Mock(), Mock(), date.today, reports)
-        result = service.execute("get_training_report", {"start": "2026-09-01", "days": 7})
+        service = CoachActivityReadToolService(
+            Mock(), Mock(), Mock(), date.today, reports
+        )
+        result = service.execute(
+            "get_training_report", {"start": "2026-09-01", "days": 7}
+        )
         self.assertEqual(result["report"]["totals"]["sessions"], 2)
         reports.endurance.assert_not_called()
         reports.impact.assert_not_called()
@@ -26,12 +30,28 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
     def test_report_can_select_comparisons_and_rejects_unknown_section(self):
         reports = Mock()
         reports.comparisons.return_value = {"status": "insufficient_data", "groups": []}
-        service = CoachActivityReadToolService(Mock(), Mock(), Mock(), date.today, reports)
+        service = CoachActivityReadToolService(
+            Mock(), Mock(), Mock(), date.today, reports
+        )
         result = service.execute("get_training_report", {"sections": ["comparisons"]})
         self.assertEqual(result["comparisons"]["status"], "insufficient_data")
         reports.read.assert_not_called()
         with self.assertRaises(AppError):
             service.execute("get_training_report", {"sections": ["unknown"]})
+
+    def test_report_can_select_body_history_and_sleep_regularity(self):
+        reports = Mock()
+        reports.body_history.return_value = {"weight": []}
+        reports.sleep_regularity.return_value = {"status": "ok"}
+        service = CoachActivityReadToolService(
+            Mock(), Mock(), Mock(), date.today, reports
+        )
+        result = service.execute(
+            "get_training_report", {"sections": ["body_history", "sleep_regularity"]}
+        )
+        self.assertEqual(result["body_history"], {"weight": []})
+        self.assertEqual(result["sleep_regularity"]["status"], "ok")
+        reports.read.assert_not_called()
 
     def test_recent_activities_applies_defaults_bounds_and_today(self):
         activity_read = Mock()
@@ -53,7 +73,10 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         service = CoachActivityReadToolService(Mock(), Mock(), Mock(), date.today)
 
         for arguments in ({"days": "bad"}, {"limit": None}):
-            with self.subTest(arguments=arguments), self.assertRaises(AppError) as caught:
+            with (
+                self.subTest(arguments=arguments),
+                self.assertRaises(AppError) as caught,
+            ):
                 service.execute("list_recent_activities", arguments)
             self.assertEqual(caught.exception.status, 400)
             self.assertEqual(
@@ -77,11 +100,13 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         manager = MagicMock()
         manager.unit_of_work.return_value.__enter__.return_value = object()
         snapshot_repository = Mock()
-        snapshot_repository.latest_payload.return_value = json.dumps({
-            "synced_at": "synthetic-sync",
-            "recent_activities": [{"id": "synthetic-1", "type": "Run"}],
-            "raw_provider_data": {"activities": [raw_activity]},
-        })
+        snapshot_repository.latest_payload.return_value = json.dumps(
+            {
+                "synced_at": "synthetic-sync",
+                "recent_activities": [{"id": "synthetic-1", "type": "Run"}],
+                "raw_provider_data": {"activities": [raw_activity]},
+            }
+        )
         feedback = Mock()
         feedback.list.return_value = []
         activity_read = ActivityReadService(manager, snapshot_repository, feedback)
@@ -94,9 +119,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             activity_read, garmin, profile, lambda: today
         )
 
-        result = service.execute(
-            "get_activity_details", {"activity_id": "synthetic-1"}
-        )
+        result = service.execute("get_activity_details", {"activity_id": "synthetic-1"})
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["snapshot_synced_at"], "synthetic-sync")
@@ -108,13 +131,17 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             result["data_scope"],
             "bounded sanitized detail projection of exactly one Intervals.icu activity",
         )
-        self.assertEqual(result["activity_validation"]["activity"]["activity_id"], "synthetic-1")
+        self.assertEqual(
+            result["activity_validation"]["activity"]["activity_id"], "synthetic-1"
+        )
         garmin.snapshot.assert_called_once_with()
         profile.get.assert_called_once_with()
 
     def test_unknown_tool_is_unclaimed_and_invalid_detail_ids_keep_error(self):
         activity_read = Mock()
-        service = CoachActivityReadToolService(activity_read, Mock(), Mock(), date.today)
+        service = CoachActivityReadToolService(
+            activity_read, Mock(), Mock(), date.today
+        )
         self.assertIsNone(service.execute("list_workout_library", {}))
         activity_read.detail.side_effect = AppError(
             400,

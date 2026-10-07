@@ -241,6 +241,10 @@ class StandardFixtureDataTests(unittest.TestCase):
                     old_snapshot = json.loads(
                         server.SNAPSHOT_REPOSITORY.latest_payload(db)
                     )
+                    detail_rows = db.execute(
+                        "SELECT value FROM kv WHERE key LIKE 'activity_detail:%'"
+                    ).fetchall()
+                    detail_values = [json.loads(row["value"]) for row in detail_rows]
                     for row in old_snapshot["recent_wellness"]:
                         row.pop("weight", None)
                         row.pop("bodyFat", None)
@@ -286,14 +290,82 @@ class StandardFixtureDataTests(unittest.TestCase):
                     ).fetchone()["count"]
             finally:
                 DATABASE_MANAGER_CACHE.reset()
-                server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH = original
+                server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH = (
+                    original
+                )
 
         self.assertEqual(first, {"ready": True})
-        self.assertEqual(upgraded["seed_version"], fixture_runtime.FIXTURE_DEMO_SEED_VERSION)
+        self.assertEqual(
+            upgraded["seed_version"], fixture_runtime.FIXTURE_DEMO_SEED_VERSION
+        )
         self.assertEqual(repeated, {"ready": True})
         self.assertEqual(seed_version, fixture_runtime.FIXTURE_DEMO_SEED_VERSION)
         self.assertEqual(len(snapshot["recent_wellness"]), 90)
         self.assertEqual(len(snapshot["raw_provider_data"]["wellness"]), 90)
+        self.assertTrue(
+            {"VirtualRide", "Ride", "Run"}.issubset(
+                {row.get("type") for row in snapshot["recent_activities"]}
+            )
+        )
+        profiles_by_sport = {}
+        for item in detail_values:
+            sport = (item.get("activity") or {}).get("type")
+            profiles_by_sport.setdefault(sport, []).append(
+                item.get("session_analysis") or {}
+            )
+        self.assertTrue({"VirtualRide", "Ride", "Run"}.issubset(profiles_by_sport))
+        for sport in ("Ride", "VirtualRide"):
+            self.assertTrue(
+                any(
+                    (analysis.get("power_profile") or {}).get("status") == "ok"
+                    and any(
+                        point.get("duration_seconds") == 3600
+                        and point.get("watts") is not None
+                        for point in (analysis.get("power_profile") or {}).get(
+                            "duration_curve", []
+                        )
+                    )
+                    for analysis in profiles_by_sport[sport]
+                )
+            )
+        running_profile = next(
+            analysis.get("running_profile") or {}
+            for analysis in profiles_by_sport["Run"]
+            if (analysis.get("running_profile") or {}).get("status") == "ok"
+        )
+        self.assertEqual("ok", running_profile.get("status"))
+        self.assertTrue(
+            any(
+                point.get("distance_meters") == 5000
+                and point.get("seconds") is not None
+                for point in running_profile.get("distance", [])
+            )
+        )
+        run_detail = next(
+            item
+            for item in detail_values
+            if (item.get("activity") or {}).get("type") == "Run"
+        )
+        for detail in detail_values:
+            activity = detail["activity"]
+            streams = activity["streams"]
+            self.assertEqual(activity["moving_time"], streams["time"][-1])
+            self.assertEqual(activity["moving_time"] + 1, len(streams["time"]))
+        self.assertGreater(len(run_detail["activity"]["streams"]["distance"]), 1000)
+        self.assertIn("velocity_smooth", run_detail["activity"]["streams"])
+        self.assertAlmostEqual(
+            run_detail["activity"]["distance"],
+            run_detail["activity"]["streams"]["distance"][-1],
+            places=6,
+        )
+        self.assertTrue(
+            any(
+                len((item.get("activity") or {}).get("streams", {}).get("time", []))
+                >= 3601
+                and (item.get("activity") or {}).get("type") in {"Ride", "VirtualRide"}
+                for item in detail_values
+            )
+        )
         self.assertEqual(len(stored_garmin["daily_stats"]), 90)
         self.assertEqual(calendar_count, 7)
         self.assertEqual(upgraded_calendar_count, calendar_count)
@@ -303,9 +375,17 @@ class StandardFixtureDataTests(unittest.TestCase):
         self.assertEqual(repeated_nutrition_count, upgraded_nutrition_count)
         self.assertEqual(repeated_equipment_count, upgraded_equipment_count)
         self.assertTrue(any(item.get("kind") == "component" for item in equipment))
-        chain = next(item for item in equipment if item["name"] == "Fixture Garmin-linked chain")
-        bike = next(item for item in equipment if item["name"] == "Fixture Garmin linked bike")
-        shoes = next(item for item in equipment if item["name"] == "Fixture Garmin archived shoes")
+        chain = next(
+            item for item in equipment if item["name"] == "Fixture Garmin-linked chain"
+        )
+        bike = next(
+            item for item in equipment if item["name"] == "Fixture Garmin linked bike"
+        )
+        shoes = next(
+            item
+            for item in equipment
+            if item["name"] == "Fixture Garmin archived shoes"
+        )
         self.assertEqual(chain["lifetime_target_km"], 200)
         self.assertEqual(chain["lifetime_target_source"], "local")
         self.assertEqual(chain["usage"]["distance_km"], 0)

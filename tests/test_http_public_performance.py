@@ -2,12 +2,11 @@ import unittest
 from datetime import date
 from unittest.mock import Mock, patch
 
-from backend.performance.chart_history import analysis_history
-
 from backend.http_api.public_performance import (
     PublicFeedbackStateService,
     PublicPerformanceStateService,
 )
+from backend.performance.chart_history import analysis_history
 
 
 class PublicPerformanceStateTests(unittest.TestCase):

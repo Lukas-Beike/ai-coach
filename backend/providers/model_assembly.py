@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from backend.config import Config
 from backend.observability import DiagnosticCapture
 from backend.providers import audio as audio_provider
 from backend.providers import gemini as gemini_provider
-from backend.providers.http import JsonHttpClient
 from backend.providers import openai as openai_provider
+from backend.providers.http import JsonHttpClient
 from backend.providers.state import ProviderStateService
 
 
@@ -75,7 +74,7 @@ class ModelTransportAssembly:
         background: ModelBackgroundPolicy
         clock: ModelTransportClock
 
-    def __init__(self, *, dependencies: "ModelTransportAssembly.Inputs") -> None:
+    def __init__(self, *, dependencies: ModelTransportAssembly.Inputs) -> None:
         providers = dependencies.providers
         endpoints = dependencies.endpoints
         audio = dependencies.audio

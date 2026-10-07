@@ -1,6 +1,6 @@
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
-import threading
 
 from backend.athlete.clock import AthleteLocalClock
 from backend.db.manager import DATABASE_LOCK
@@ -77,7 +77,9 @@ class AthleteLocalClockTests(unittest.TestCase):
             failing_clock,
         )
 
-        self.assertEqual(clock.now(), datetime(2026, 1, 15, 12, tzinfo=timezone.utc).astimezone())
+        self.assertEqual(
+            clock.now(), datetime(2026, 1, 15, 12, tzinfo=timezone.utc).astimezone()
+        )
 
 
 if __name__ == "__main__":

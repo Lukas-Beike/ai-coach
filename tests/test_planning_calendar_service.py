@@ -216,6 +216,25 @@ class CalendarConflictServiceTests(unittest.TestCase):
             [],
         )
 
+    def test_short_only_rejects_long_workouts_but_allows_short_ones(self) -> None:
+        self.external_reader.events = [
+            {
+                "id": "short",
+                "name": "[SHORT_ONLY] Dinner",
+                "event_date": "2026-10-04",
+                "short_only": True,
+            }
+        ]
+        long_conflicts = self.service.conflicts(
+            {"date": "2026-10-04", "name": "Endurance", "duration_minutes": 90}
+        )
+        self.assertEqual(long_conflicts[0]["constraint"], "[SHORT_ONLY]")
+        for workout in (
+            {"date": "2026-10-04", "name": "Endurance", "duration_minutes": 45},
+            {"date": "2026-10-04", "name": "Unknown length"},
+        ):
+            self.assertEqual(self.service.constraints(workout), [])
+
     def test_no_training_dominates_and_preserves_source_freshness_evidence(
         self,
     ) -> None:

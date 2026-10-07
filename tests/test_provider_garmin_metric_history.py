@@ -39,7 +39,9 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
             external_call=lambda _service, _op, fn, _details: fn(),
             redact=str,
             options=GarminCollectionOptions(
-                include_recovery=False, include_current_metrics=False
+                include_recovery=False,
+                include_current_metrics=False,
+                include_historic_metrics=True,
             ),
         )
 
@@ -76,7 +78,9 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
             external_call=lambda _service, _op, fn, _details: fn(),
             redact=str,
             options=GarminCollectionOptions(
-                include_recovery=False, include_current_metrics=False
+                include_recovery=False,
+                include_current_metrics=False,
+                include_historic_metrics=True,
             ),
         )
         for source in ("cycling_ftp_history", "endurance_score", "running_tolerance"):
@@ -109,7 +113,9 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
             external_call=lambda _service, _op, fn, _details: fn(),
             redact=lambda _value: "redacted",
             options=GarminCollectionOptions(
-                include_recovery=False, include_current_metrics=False
+                include_recovery=False,
+                include_current_metrics=False,
+                include_historic_metrics=True,
             ),
         )
         self.assertEqual(
@@ -141,7 +147,9 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
             external_call=lambda _service, _op, fn, _details: fn(),
             redact=str,
             options=GarminCollectionOptions(
-                include_recovery=False, include_current_metrics=False
+                include_recovery=False,
+                include_current_metrics=False,
+                include_historic_metrics=True,
             ),
         )
         self.assertEqual(result["errors"][0]["source"], "cycling_ftp_history")

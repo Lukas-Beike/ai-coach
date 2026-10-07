@@ -208,7 +208,9 @@ class MorningBatteryRetryPolicy:
 class MorningBatteryEvents:
     """Own sanitized provider state events and refresh warning logs."""
 
-    def __init__(self, publish_event: Callable[[str, dict[str, Any]], None], logger: Any):
+    def __init__(
+        self, publish_event: Callable[[str, dict[str, Any]], None], logger: Any
+    ):
         self._publish_event = publish_event
         self._logger = logger
 
@@ -261,7 +263,10 @@ class MorningBodyBatteryService:
                 return cached
             with self._execution_gate.shared_lock() as acquired:
                 if not acquired:
-                    return {"status": "already_running", "sleep_date": checkin_date.isoformat()}
+                    return {
+                        "status": "already_running",
+                        "sleep_date": checkin_date.isoformat(),
+                    }
                 return self._sync_locked(checkin_date)
 
     def refresh(self, checkin_date: date | None = None) -> None:

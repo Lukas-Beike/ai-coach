@@ -59,6 +59,36 @@ def _load_history(dates: list[str], garmin: dict[str, Any]) -> list[dict[str, An
     return [{"date": day, "value": observations.get(day)} for day in dates]
 
 
+def _training_time_history(
+    raw: dict[str, Any], snapshot: dict[str, Any], dates: list[str]
+) -> list[dict[str, Any]]:
+    """Daily moving time in hours; each activity counts once, unknown stays a gap."""
+    seconds: dict[str, float] = {}
+    seen: set[str] = set()
+    for row in _rows(raw.get("activities")) + _rows(snapshot.get("recent_activities")):
+        key = str(row.get("id") or "")
+        day = _day(str(row.get("start_date_local") or "")[:10])
+        value = row.get("moving_time")
+        if (
+            day is None
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not 0 < value <= 86400
+            or (key and key in seen)
+        ):
+            continue
+        if key:
+            seen.add(key)
+        seconds[day.isoformat()] = seconds.get(day.isoformat(), 0) + float(value)
+    return [
+        {
+            "date": day,
+            "value": round(seconds[day] / 3600, 2) if day in seconds else None,
+        }
+        for day in dates
+    ]
+
+
 def _garmin_values(
     key: str, garmin: dict[str, Any], start: date, today: date
 ) -> dict[str, float]:
@@ -131,6 +161,12 @@ def analysis_history(
             "start": load_dates[0],
             "end": load_dates[-1],
             "points": load,
+        },
+        "training_time": {
+            "source": INTERVALS_SOURCE,
+            "start": load_dates[0],
+            "end": load_dates[-1],
+            "points": _training_time_history(raw, snapshot, load_dates),
         },
         # PublicPerformanceStateService exposes this as performance.history.body;
         # the UI can render it in the separate Body tab without another request.

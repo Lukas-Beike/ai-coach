@@ -49,7 +49,7 @@ class WeatherAssembly:
     def __init__(
         self,
         *,
-        dependencies: "WeatherAssembly.Inputs",
+        dependencies: WeatherAssembly.Inputs,
     ) -> None:
         state = dependencies.state
         provider = dependencies.provider
