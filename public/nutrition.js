@@ -368,13 +368,13 @@ async function loadNutritionFueling() {
   const select = section.querySelector("select");
   try {
     const { units = [] } = await api("/api/nutrition/fueling");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = timezoneDateKey(state.data?.profile?.timezone, new Date());
     const upcoming = units.filter((unit) => !unit.date || String(unit.date).slice(0, 10) >= today).sort((a, b) => String(a.date).localeCompare(String(b.date)));
     select.replaceChildren(...upcoming.map((unit) => { const option = document.createElement("option"); option.value = unit.id; option.textContent = `${unit.date ? dateLabel(String(unit.date).slice(0, 10)) : "?"} \u00b7 ${unit.name || "Einheit"}`; return option; }));
     section.hidden = !upcoming.length;
     if (upcoming.length) await loadNutritionFuelingPlan(select.value);
   } catch (error) {
-    // Fueling is optional: keep the diary usable when its request fails.
+    // Intentionally ignored: fueling is optional and the diary remains usable.
     section.hidden = true;
   }
 }

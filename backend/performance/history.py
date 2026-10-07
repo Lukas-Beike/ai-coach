@@ -70,40 +70,58 @@ def _merged_history(history: list) -> dict[str, dict[str, Any]]:
 def _provider_metrics(
     payload: dict[str, Any], start: date, current_date: date
 ) -> dict[str, Any]:
-    provider_metrics = {}
-    for key, aggregation, source in (
-        ("endurance_score", "weekly", "endurance_score"),
-        ("running_tolerance", "weekly", "running_tolerance"),
-    ):
-        details = (payload.get("source_freshness") or {}).get(source, {})
-        pagination = ((payload.get("provider_sync") or {}).get("pagination") or {}).get(
-            source, {}
+    return {
+        source: _project_provider_metric(
+            payload, source, aggregation, start, current_date
         )
-        error_sources = {
-            item.get("source")
-            for item in payload.get("errors") or []
-            if isinstance(item, dict)
-        }
-        state = "unknown"
-        if pagination.get("available") is False:
-            state = "unsupported"
-        if source in error_sources or pagination.get("status") == "failed":
-            state = "failed"
-        if details.get("freshness") == "stale":
-            state = "stale"
-        data = garmin_metric_history.projected_metric(
-            payload.get(source),
-            start=start,
-            end=current_date,
-            aggregation=aggregation,
-            metric=source,
-            synced_at=payload.get("synced_at"),
+        for source, aggregation in (
+            ("endurance_score", "weekly"),
+            ("running_tolerance", "weekly"),
         )
-        if data["points"]:
-            data["status"] = (
-                "current" if details.get("freshness") == "current" else state
-            )
-        else:
-            data["status"] = state
-        provider_metrics[source] = data
-    return provider_metrics
+    }
+
+
+def _project_provider_metric(
+    payload: dict[str, Any],
+    source: str,
+    aggregation: str,
+    start: date,
+    current_date: date,
+) -> dict[str, Any]:
+    details = (payload.get("source_freshness") or {}).get(source, {})
+    pagination = ((payload.get("provider_sync") or {}).get("pagination") or {}).get(
+        source, {}
+    )
+    error_sources = {
+        item.get("source")
+        for item in payload.get("errors") or []
+        if isinstance(item, dict)
+    }
+    state = _provider_metric_state(source, details, pagination, error_sources)
+    data = garmin_metric_history.projected_metric(
+        payload.get(source),
+        start=start,
+        end=current_date,
+        aggregation=aggregation,
+        metric=source,
+        synced_at=payload.get("synced_at"),
+    )
+    data["status"] = (
+        "current" if data["points"] and details.get("freshness") == "current" else state
+    )
+    return data
+
+
+def _provider_metric_state(
+    source: str,
+    details: dict[str, Any],
+    pagination: dict[str, Any],
+    error_sources: set[Any],
+) -> str:
+    if details.get("freshness") == "stale":
+        return "stale"
+    if source in error_sources or pagination.get("status") == "failed":
+        return "failed"
+    if pagination.get("available") is False:
+        return "unsupported"
+    return "unknown"

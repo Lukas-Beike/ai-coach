@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.errors import AppError
 from backend.planning import calendar, context
 
 
@@ -18,6 +19,7 @@ class CalendarConflictService:
         self, workout: dict[str, Any], events: list[dict[str, Any]] | None = None
     ) -> list[dict[str, Any]]:
         """Return current marker decisions with source and freshness evidence."""
+        self._require_current_calendar_constraints()
         conflicts = []
         source_events = (
             self._external_calendar_reader.list_events(
@@ -47,6 +49,24 @@ class CalendarConflictService:
                 }
             )
         return conflicts
+
+    def _require_current_calendar_constraints(self) -> None:
+        with self._database_manager.unit_of_work() as db:
+            # Some lightweight domain test fixtures omit unrelated durable tables.
+            has_kv = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kv'"
+            ).fetchone()
+            if not has_kv:
+                return
+            required = db.execute(
+                "SELECT value FROM kv WHERE key='external_calendar_constraints_refresh_required'"
+            ).fetchone()
+        if required and required["value"] == "1":
+            raise AppError(
+                409,
+                "Bitte den Kalender synchronisieren, bevor Kalenderbeschränkungen geprüft werden können.",
+                reason="calendar_refresh_required",
+            )
 
     def conflicts(
         self,
@@ -83,8 +103,10 @@ class CalendarConflictService:
             is_marked = bool(
                 event.get("no_training")
                 or event.get("no_intensity")
+                or event.get("short_only")
                 or "[no_training]" in marker_text
                 or "[no_intensity]" in marker_text
+                or "[short_only]" in marker_text
             )
             event_matches, _match = calendar._calendar_items_conflict(workout, event)
             if not event_matches or not is_marked:

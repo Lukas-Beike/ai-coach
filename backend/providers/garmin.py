@@ -451,26 +451,54 @@ def _collect_historic_metrics(
         }
         if key == "cycling_ftp_history":
             details["sport"] = "CYCLING"
-        try:
-            value = external_call("garmin", key, partial(invoke, fetch), details)
-            _validate_historic_metric(value, key)
-            payload[key] = value
-            stats.update(
-                {
-                    "records": len(value) if isinstance(value, list) else 1,
-                    "status": "complete",
-                    "completed_windows": [details],
-                }
-            )
-            if capability_success:
-                capability_success(key)
-        except Exception as exc:  # noqa: BLE001 - optional metric failures are isolated.
-            stats.update(
-                {"complete": False, "status": "failed", "error": redact(str(exc))[:500]}
-            )
-            if capability_failure:
-                capability_failure(key, exc)
-            _add_error(payload, key, exc, redact, warn)
+        _fetch_historic_metric(
+            key,
+            fetch,
+            invoke,
+            details,
+            stats,
+            payload,
+            external_call,
+            redact,
+            warn,
+            capability_failure,
+            capability_success,
+        )
+
+
+def _fetch_historic_metric(
+    key,
+    fetch,
+    invoke,
+    details,
+    stats,
+    payload,
+    external_call,
+    redact,
+    warn,
+    capability_failure,
+    capability_success,
+) -> None:
+    try:
+        value = external_call("garmin", key, partial(invoke, fetch), details)
+        _validate_historic_metric(value, key)
+        payload[key] = value
+        stats.update(
+            {
+                "records": len(value) if isinstance(value, list) else 1,
+                "status": "complete",
+                "completed_windows": [details],
+            }
+        )
+        if capability_success:
+            capability_success(key)
+    except Exception as exc:  # noqa: BLE001 - optional metric failures are isolated.
+        stats.update(
+            {"complete": False, "status": "failed", "error": redact(str(exc))[:500]}
+        )
+        if capability_failure:
+            capability_failure(key, exc)
+        _add_error(payload, key, exc, redact, warn)
 
 
 def _gear_inventory(client: Any, external_call: ExternalCall) -> list[dict[str, Any]]:

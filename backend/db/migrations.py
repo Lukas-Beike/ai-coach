@@ -94,9 +94,16 @@ def _upgrade_legacy_schema(db: Any, old_schema: bool) -> None:
         "ALTER TABLE external_calendar_events "
         "ADD COLUMN no_training INTEGER NOT NULL DEFAULT 0"
     )
-    # v2 discarded descriptions but retained NO_TRAINING as training_relevant=0.
-    # Preserve this safety signal until a successful sync supplies fresh markers.
+    # v2 discarded descriptions; irrelevant rows can be ordinary appointments
+    # or description-only NO_TRAINING markers. Require fresh evidence rather
+    # than assigning a hard marker to an ambiguous row.
     db.execute(
         "UPDATE external_calendar_events SET no_training=1 "
-        "WHERE training_relevant=0 OR instr(upper(name), '[NO_TRAINING]') > 0"
+        "WHERE instr(upper(name), '[NO_TRAINING]') > 0"
+    )
+    db.execute(
+        "INSERT OR REPLACE INTO kv(key, value, updated_at) "
+        "SELECT 'external_calendar_constraints_refresh_required', '1', MAX(updated_at) "
+        "FROM external_calendar_events WHERE training_relevant=0 AND no_training=0 "
+        "HAVING COUNT(*) > 0"
     )

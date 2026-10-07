@@ -293,29 +293,38 @@ class StructuredTrainingChangeValidator:
                 and final_active.get(identity, True)
             ] or [{"date": candidate_date}]
             for candidate in candidates:
-                if hasattr(
-                    self.calendar_conflict_service, "constraints"
-                ) and self.calendar_conflict_service.constraints(candidate):
-                    raise AppError(
-                        409,
-                        f"F\u00fcr den {candidate_date} gilt eine Kalenderbeschr\u00e4nkung.",
-                        reason="plan_date_conflict",
-                    )
-                conflict_candidate = (
-                    candidate
-                    if hasattr(self.calendar_conflict_service, "constraints")
-                    else {"date": candidate_date}
+                self._validate_calendar_candidate(
+                    candidate, candidate_date, ordinary_conflict_dates, batch_ids
                 )
-                if candidate_date not in ordinary_conflict_dates:
-                    continue
-                if self.calendar_conflict_service.conflicts(
-                    conflict_candidate, batch_ids
-                ):
-                    raise AppError(
-                        409,
-                        f"F\u00fcr den {candidate_date} existiert bereits eine lokale Kalendereinheit.",
-                        reason="plan_date_conflict",
-                    )
+
+    def _validate_calendar_candidate(
+        self,
+        candidate: dict[str, Any],
+        candidate_date: str,
+        ordinary_conflict_dates: set[str],
+        batch_ids: set[str],
+    ) -> None:
+        if hasattr(
+            self.calendar_conflict_service, "constraints"
+        ) and self.calendar_conflict_service.constraints(candidate):
+            raise AppError(
+                409,
+                f"F\u00fcr den {candidate_date} gilt eine Kalenderbeschr\u00e4nkung.",
+                reason="plan_date_conflict",
+            )
+        conflict_candidate = (
+            candidate
+            if hasattr(self.calendar_conflict_service, "constraints")
+            else {"date": candidate_date}
+        )
+        if candidate_date not in ordinary_conflict_dates:
+            return
+        if self.calendar_conflict_service.conflicts(conflict_candidate, batch_ids):
+            raise AppError(
+                409,
+                f"F\u00fcr den {candidate_date} existiert bereits eine lokale Kalendereinheit.",
+                reason="plan_date_conflict",
+            )
 
     def _validate_training_change_batch(
         self, changes: list[dict[str, Any]], db: Any

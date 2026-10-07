@@ -159,15 +159,12 @@ def _reasons(
         reasons.append(f"only {available_minutes} minutes are available")
     if calendar_limited:
         reasons.append(calendar_reason)
-        blocking_triggers.append("calendar")
     if no_training:
         reasons.append("calendar marker [NO_TRAINING] blocks training")
-        if "calendar" not in blocking_triggers:
-            blocking_triggers.append("calendar")
     if no_intensity_limited:
         reasons.append("calendar marker [NO_INTENSITY] requests an easy session")
-        if "calendar" not in blocking_triggers:
-            blocking_triggers.append("calendar")
+    if calendar_limited or no_training or no_intensity_limited:
+        blocking_triggers.append("calendar")
     if weather_reason:
         reasons.append(weather_reason)
         blocking_triggers.append("weather")

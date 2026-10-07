@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.db.manager import DatabaseManager
+from backend.errors import AppError
 from backend.planning.calendar_service import CalendarConflictService
 
 
@@ -350,6 +351,44 @@ class CalendarConflictServiceTests(unittest.TestCase):
             }
         )
         self.assertEqual(conflicts[0]["constraint"], "[NO_TRAINING]")
+
+    def test_ambiguous_legacy_constraints_require_refresh_until_success(self):
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+            )
+            db.execute(
+                "INSERT INTO kv VALUES ('external_calendar_constraints_refresh_required', '1', 'before')"
+            )
+        with self.assertRaises(AppError) as raised:
+            self.service.constraints({"date": "2026-10-04"})
+        self.assertEqual(raised.exception.reason, "calendar_refresh_required")
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE kv SET value='' WHERE key='external_calendar_constraints_refresh_required'"
+            )
+        self.assertEqual(self.service.constraints({"date": "2026-10-04"}), [])
+
+    def test_short_only_is_not_an_ordinary_conflict_when_duration_is_allowed(self):
+        self.external_reader.events = [
+            {
+                "id": "short-only",
+                "name": "Travel [SHORT_ONLY]",
+                "event_date": "2026-10-04",
+                "short_only": True,
+            }
+        ]
+        self.assertEqual(
+            self.service.conflicts(
+                {
+                    "date": "2026-10-04",
+                    "name": "Easy recovery",
+                    "description": "Z1",
+                    "duration_minutes": 30,
+                }
+            ),
+            [],
+        )
 
     def test_multi_day_no_training_event_blocks_each_overlapped_day(self) -> None:
         self.external_reader.events = [

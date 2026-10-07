@@ -815,15 +815,7 @@ def _fixture_equipment_definitions(road_id):
 def _fixture_seed_equipment(today, garmin_snapshot):
     """Seed local and Garmin-linked gear, including boundary counter examples."""
     service = server.ATHLETE_DATA.equipment()
-    garmin_distances_km = {}
-    for row in garmin_snapshot.get("gear") or []:
-        if not isinstance(row, dict) or not row.get("gearUUID"):
-            continue
-        stats = row.get("stats")
-        distance = stats.get("totalDistance") if isinstance(stats, dict) else None
-        if not isinstance(distance, (int, float)) or isinstance(distance, bool):
-            continue
-        garmin_distances_km[str(row["gearUUID"])] = round(distance / 1000, 2)
+    garmin_distances_km = _fixture_gear_distances(garmin_snapshot)
     items = service.read().get("items", [])
     existing = {item.get("name"): item for item in items}
     road = existing.get(FIXTURE_BIKE_NAME)
@@ -858,18 +850,9 @@ def _fixture_seed_equipment(today, garmin_snapshot):
             existing[name] = item
             if name == FIXTURE_BIKE_NAME:
                 road_id = item["id"]
-        item.update(
-            {"lifetime_target_km": target_km, "garmin_maximum_meters": maximum_meters}
+        _fixture_gear_metadata(
+            item, name, target_km, maximum_meters, garmin_uuid, garmin_distances_km
         )
-        if target_km is not None:
-            item["lifetime_target_source"] = "local"
-        elif maximum_meters is not None:
-            item["lifetime_target_source"] = "garmin"
-        if name == FIXTURE_BIKE_NAME:
-            item["initial_distance_km"] = 0
-        if garmin_uuid:
-            item["garmin_uuid"] = garmin_uuid
-            item["garmin_distance_km"] = garmin_distances_km.get(garmin_uuid)
         saved[item["id"]] = item
     now = server.runtime_clock.utc_now()
     with server.database_manager().unit_of_work() as db:
@@ -885,6 +868,36 @@ def _fixture_seed_equipment(today, garmin_snapshot):
     ):
         service.assign({"activity_id": "feature-ride-1", "equipment_id": road_id})
     return saved
+
+
+def _fixture_gear_distances(garmin_snapshot):
+    garmin_distances_km = {}
+    for row in garmin_snapshot.get("gear") or []:
+        if not isinstance(row, dict) or not row.get("gearUUID"):
+            continue
+        stats = row.get("stats")
+        distance = stats.get("totalDistance") if isinstance(stats, dict) else None
+        if not isinstance(distance, (int, float)) or isinstance(distance, bool):
+            continue
+        garmin_distances_km[str(row["gearUUID"])] = round(distance / 1000, 2)
+    return garmin_distances_km
+
+
+def _fixture_gear_metadata(
+    item, name, target_km, maximum_meters, garmin_uuid, garmin_distances_km
+):
+    item.update(
+        {"lifetime_target_km": target_km, "garmin_maximum_meters": maximum_meters}
+    )
+    if target_km is not None:
+        item["lifetime_target_source"] = "local"
+    elif maximum_meters is not None:
+        item["lifetime_target_source"] = "garmin"
+    if name == FIXTURE_BIKE_NAME:
+        item["initial_distance_km"] = 0
+    if garmin_uuid:
+        item["garmin_uuid"] = garmin_uuid
+        item["garmin_distance_km"] = garmin_distances_km.get(garmin_uuid)
 
 
 def _fixture_calendar_payload(today):
@@ -973,9 +986,6 @@ def _fixture_seed_wave2(today, snapshot, garmin):
     IDs and payload values are fixture-owned; ``INSERT OR REPLACE`` style
     persistence through the existing services makes v1/v2 upgrades repeatable.
     """
-    from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
-    from backend.performance.power_profile import power_profile, running_profile
-    from backend.performance.session_analysis import aerobic_analysis, interval_quality
 
     # The v1 upgrade contract test supplies a deliberately minimal mocked
     # database connection; broad wave2 records are only meaningful with the
@@ -984,165 +994,10 @@ def _fixture_seed_wave2(today, snapshot, garmin):
         if not hasattr(probe, "execute"):
             return
 
-    activities = [
-        item
-        for item in (snapshot.get("recent_activities") or [])
-        if isinstance(item, dict)
-    ]
-    by_id = {str(item.get("id") or item.get("activityId")): item for item in activities}
-    for offset in range(90):
-        day = today - timedelta(days=offset)
-        sport, subtype = (
-            ("VirtualRide", "indoor")
-            if offset % 3 == 0
-            else (("Ride", "outdoor") if offset % 3 == 1 else ("Run", "outdoor"))
-        )
-        activity_id = f"wave2-{offset:03d}"
-        row = {
-            "id": activity_id,
-            "activityId": activity_id,
-            "name": f"Synthetic {subtype} {sport.lower()} {offset:03d}",
-            "type": sport,
-            "sport": sport,
-            "sub_sport": subtype,
-            "device_name": (
-                "Zwift Synthetic Trainer"
-                if sport == "VirtualRide"
-                else "Garmin Edge Synthetic"
-                if sport == "Ride"
-                else "Garmin Forerunner Synthetic"
-            ),
-            "start_date_local": f"{day.isoformat()}T{('06:30:00' if sport == 'Run' else '18:00:00')}",
-            "moving_time": (35 + offset % 5 * 10) * 60,
-            "distance": (6000 + offset * 37)
-            if sport == "Run"
-            else (24000 + offset * 111),
-            "icu_training_load": 24 + (offset * 7) % 75,
-            "icu_rpe": (offset % 11) if offset % 7 else None,
-            "source": FIXTURE_SOURCE,
-        }
-        by_id[activity_id] = row
-    merged = sorted(
-        by_id.values(),
-        key=lambda item: str(item.get("start_date_local") or ""),
-        reverse=True,
-    )
-    snapshot["recent_activities"] = merged
-    raw = (
-        snapshot.get("raw_provider_data")
-        if isinstance(snapshot.get("raw_provider_data"), dict)
-        else {}
-    )
-    snapshot["raw_provider_data"] = {**raw, "activities": merged}
-    snapshot.setdefault("synced_at", server.runtime_clock.utc_now())
-    with server.database_manager().unit_of_work() as db:
-        server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
-    for offset in range(0, 90, 9):
-        activity = by_id[f"wave2-{offset:03d}"]
-        payload = {
-            "activity_name": activity["name"],
-            "activity_date": activity["start_date_local"][:10],
-            "notes": "Synthetic session feedback" if offset % 18 else "",
-            "session_rpe": 0
-            if offset == 0
-            else (None if offset == 18 else offset % 10),
-            "deviation_reason": "fixture" if offset % 18 == 0 else "",
-        }
-        # Use the repository in the current fixture transaction so this helper
-        # also works in the lightweight upgrade unit test with a mocked manager.
-        with server.database_manager().unit_of_work() as db:
-            server.ACTIVITY_FEEDBACK_REPOSITORY.upsert(
-                db, {"activity_id": activity["id"], **payload}
-            )
-    store = ActivityDetailStore(server.database_manager())
-    targets = {
-        "steps": [{"duration": 300, "target": "200W", "kind": "power"}],
-        "basis": {},
-        "observed_at": server.runtime_clock.utc_now(),
-        "matching": "synthetic exact fixture",
-        "planned_unit_id": "wave2-target",
-    }
-    # Cache representative full-resolution analyses. The summary fingerprint
-    # is computed from exactly the summary object stored in the snapshot.
-    detail_offsets = (0, 1, 2, 9, 28, 29, 81, 82, 83)
-    for offset in detail_offsets:
-        activity = by_id[f"wave2-{offset:03d}"]
-        n = int(activity["moving_time"]) + 1
-        if activity["type"] == "Run":
-            watts = [None] * n
-            heart_rate = [135 + ((i // 60) % 5) for i in range(n)]
-            base_speed = [
-                3.1 + ((i // 180) % 4) * 0.12 + ((offset % 3) * 0.03) for i in range(n)
-            ]
-            scale = activity["distance"] / sum(base_speed[:-1])
-            speed = [value * scale for value in base_speed]
-            distance = [0.0]
-            for value in speed[:-1]:
-                distance.append(distance[-1] + value)
-            streams = {
-                "time": list(range(n)),
-                "watts": watts,
-                "heartrate": heart_rate,
-                "velocity_smooth": speed,
-                "distance": distance,
-                "moving": [1] * n,
-            }
-        else:
-            watts = [170 + ((i // 45) % 4) * 30 for i in range(n)]
-            heart_rate = [125 + ((i // 90) % 6) * 5 for i in range(n)]
-            streams = {
-                "time": list(range(n)),
-                "watts": watts,
-                "heartrate": heart_rate,
-                "moving": [1] * n,
-            }
-        detailed = {
-            **activity,
-            "icu_ftp": 260,
-            "streams": streams,
-            "laps": [{"start_time": 0, "end_time": n - 1}],
-        }
-        store.save(
-            activity["id"],
-            {
-                "activity_id": activity["id"],
-                "activity": detailed,
-                "summary_sha256": summary_fingerprint(activity),
-                "target_snapshot": targets,
-                "session_analysis": {
-                    "aerobic": aerobic_analysis(detailed),
-                    "interval_quality": interval_quality(detailed, targets),
-                    "power_profile": power_profile(detailed),
-                    "running_profile": running_profile(detailed),
-                },
-                "source": FIXTURE_SOURCE,
-                "observed_at": server.runtime_clock.utc_now(),
-                "full_resolution": True,
-                "available_streams": sorted(streams),
-            },
-        )
-    # Local competitions are durable athlete targets; update by name to avoid
-    # duplicate rows on every browser reload or v1/v2 upgrade.
-    existing = {
-        item.get("name") for item in server.PLANNING_DATA.competition().list(100)
-    }
-    for name, days, sport, distance, target in (
-        ("Synthetic Half Marathon", 45, "Run", "21.1 km", "01:45:00"),
-        ("Synthetic Marathon", 120, "Run", "42.2 km", "03:45:00"),
-        ("Synthetic Bike Gran Fondo", 75, "Ride", "150 km", "04:30:00"),
-    ):
-        if name not in existing:
-            server.PLANNING_DATA.competition().save(
-                {
-                    "name": name,
-                    "event_date": (today + timedelta(days=days)).isoformat(),
-                    "sport": sport,
-                    "priority": "A",
-                    "distance": distance,
-                    "target": target,
-                    "notes": "Synthetic fixture race target",
-                }
-            )
+    by_id = _fixture_wave2_summaries(today, snapshot)
+    _fixture_wave2_feedback(by_id)
+    _fixture_wave2_details(by_id)
+    _fixture_wave2_competitions(today)
     garmin.update(
         {
             "source": FIXTURE_SOURCE,
@@ -1242,6 +1097,183 @@ def _fixture_seed_wave2(today, snapshot, garmin):
     append_garmin_performance_history(garmin, None, today)
     with server.database_manager().unit_of_work() as db:
         server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(garmin))
+
+
+def _fixture_wave2_summaries(today, snapshot):
+    activities = [
+        item
+        for item in (snapshot.get("recent_activities") or [])
+        if isinstance(item, dict)
+    ]
+    by_id = {str(item.get("id") or item.get("activityId")): item for item in activities}
+    for offset in range(90):
+        day = today - timedelta(days=offset)
+        sport, subtype = (
+            ("VirtualRide", "indoor"),
+            ("Ride", "outdoor"),
+            ("Run", "outdoor"),
+        )[offset % 3]
+        activity_id = f"wave2-{offset:03d}"
+        row = {
+            "id": activity_id,
+            "activityId": activity_id,
+            "name": f"Synthetic {subtype} {sport.lower()} {offset:03d}",
+            "type": sport,
+            "sport": sport,
+            "sub_sport": subtype,
+            "device_name": {
+                "VirtualRide": "Zwift Synthetic Trainer",
+                "Ride": "Garmin Edge Synthetic",
+                "Run": "Garmin Forerunner Synthetic",
+            }[sport],
+            "start_date_local": f"{day.isoformat()}T{('06:30:00' if sport == 'Run' else '18:00:00')}",
+            "moving_time": (35 + offset % 5 * 10) * 60,
+            "distance": (6000 + offset * 37)
+            if sport == "Run"
+            else (24000 + offset * 111),
+            "icu_training_load": 24 + (offset * 7) % 75,
+            "icu_rpe": (offset % 11) if offset % 7 else None,
+            "source": FIXTURE_SOURCE,
+        }
+        by_id[activity_id] = row
+    merged = sorted(
+        by_id.values(),
+        key=lambda item: str(item.get("start_date_local") or ""),
+        reverse=True,
+    )
+    snapshot["recent_activities"] = merged
+    raw = (
+        snapshot.get("raw_provider_data")
+        if isinstance(snapshot.get("raw_provider_data"), dict)
+        else {}
+    )
+    snapshot["raw_provider_data"] = {**raw, "activities": merged}
+    snapshot.setdefault("synced_at", server.runtime_clock.utc_now())
+    with server.database_manager().unit_of_work() as db:
+        server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
+    return by_id
+
+
+def _fixture_wave2_feedback(by_id):
+    for offset in range(0, 90, 9):
+        activity = by_id[f"wave2-{offset:03d}"]
+        rpe = offset % 10
+        if offset == 0:
+            rpe = 0
+        elif offset == 18:
+            rpe = None
+        payload = {
+            "activity_name": activity["name"],
+            "activity_date": activity["start_date_local"][:10],
+            "notes": "Synthetic session feedback" if offset % 18 else "",
+            "session_rpe": rpe,
+            "deviation_reason": "fixture" if offset % 18 == 0 else "",
+        }
+        # Use the repository in the current fixture transaction so this helper
+        # also works in the lightweight upgrade unit test with a mocked manager.
+        with server.database_manager().unit_of_work() as db:
+            server.ACTIVITY_FEEDBACK_REPOSITORY.upsert(
+                db, {"activity_id": activity["id"], **payload}
+            )
+
+
+def _fixture_wave2_details(by_id):
+    from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
+    from backend.performance.power_profile import power_profile, running_profile
+    from backend.performance.session_analysis import aerobic_analysis, interval_quality
+
+    store = ActivityDetailStore(server.database_manager())
+    targets = {
+        "steps": [{"duration": 300, "target": "200W", "kind": "power"}],
+        "basis": {},
+        "observed_at": server.runtime_clock.utc_now(),
+        "matching": "synthetic exact fixture",
+        "planned_unit_id": "wave2-target",
+    }
+    # Cache representative full-resolution analyses. The summary fingerprint
+    # is computed from exactly the summary object stored in the snapshot.
+    detail_offsets = (0, 1, 2, 9, 28, 29, 81, 82, 83)
+    for offset in detail_offsets:
+        activity = by_id[f"wave2-{offset:03d}"]
+        n = int(activity["moving_time"]) + 1
+        if activity["type"] == "Run":
+            watts = [None] * n
+            heart_rate = [135 + ((i // 60) % 5) for i in range(n)]
+            base_speed = [
+                3.1 + ((i // 180) % 4) * 0.12 + ((offset % 3) * 0.03) for i in range(n)
+            ]
+            scale = activity["distance"] / sum(base_speed[:-1])
+            speed = [value * scale for value in base_speed]
+            distance = [0.0]
+            for value in speed[:-1]:
+                distance.append(distance[-1] + value)
+            streams = {
+                "time": list(range(n)),
+                "watts": watts,
+                "heartrate": heart_rate,
+                "velocity_smooth": speed,
+                "distance": distance,
+                "moving": [1] * n,
+            }
+        else:
+            watts = [170 + ((i // 45) % 4) * 30 for i in range(n)]
+            heart_rate = [125 + ((i // 90) % 6) * 5 for i in range(n)]
+            streams = {
+                "time": list(range(n)),
+                "watts": watts,
+                "heartrate": heart_rate,
+                "moving": [1] * n,
+            }
+        detailed = {
+            **activity,
+            "icu_ftp": 260,
+            "streams": streams,
+            "laps": [{"start_time": 0, "end_time": n - 1}],
+        }
+        store.save(
+            activity["id"],
+            {
+                "activity_id": activity["id"],
+                "activity": detailed,
+                "summary_sha256": summary_fingerprint(activity),
+                "target_snapshot": targets,
+                "session_analysis": {
+                    "aerobic": aerobic_analysis(detailed),
+                    "interval_quality": interval_quality(detailed, targets),
+                    "power_profile": power_profile(detailed),
+                    "running_profile": running_profile(detailed),
+                },
+                "source": FIXTURE_SOURCE,
+                "observed_at": server.runtime_clock.utc_now(),
+                "full_resolution": True,
+                "available_streams": sorted(streams),
+            },
+        )
+
+
+def _fixture_wave2_competitions(today):
+    # Local competitions are durable athlete targets; update by name to avoid
+    # duplicate rows on every browser reload or v1/v2 upgrade.
+    existing = {
+        item.get("name") for item in server.PLANNING_DATA.competition().list(100)
+    }
+    for name, days, sport, distance, target in (
+        ("Synthetic Half Marathon", 45, "Run", "21.1 km", "01:45:00"),
+        ("Synthetic Marathon", 120, "Run", "42.2 km", "03:45:00"),
+        ("Synthetic Bike Gran Fondo", 75, "Ride", "150 km", "04:30:00"),
+    ):
+        if name not in existing:
+            server.PLANNING_DATA.competition().save(
+                {
+                    "name": name,
+                    "event_date": (today + timedelta(days=days)).isoformat(),
+                    "sport": sport,
+                    "priority": "A",
+                    "distance": distance,
+                    "target": target,
+                    "notes": "Synthetic fixture race target",
+                }
+            )
 
 
 def _upgrade_preview_demo(today):

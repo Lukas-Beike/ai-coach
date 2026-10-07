@@ -673,7 +673,7 @@ function renderBodyAnalysis(body) {
   for (const [metric, title, unit] of metrics) {
     const entries = window.metrics?.[metric] || [];
     const series = entries.map((item, index) => ({
-      label: `${item.power_method ? `${item.power_method} · ` : ""}${item.source}`,
+      label: [item.power_method, item.source].filter(Boolean).join(" \u00b7 "),
       legendLabel: item.source,
       source: item.source,
       unit,

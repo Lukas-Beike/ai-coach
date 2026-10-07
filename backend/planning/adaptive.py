@@ -329,8 +329,8 @@ class AdaptiveReplanApplyService:
             calendar_archive = archived and "calendar" in (
                 change.get("blocking_triggers") or []
             )
-            changed = calendar_archive and not any(
-                event.get("reason") == "no_training" for event in blockers
+            changed = calendar_archive and not self._original_calendar_blocker_present(
+                change, blockers
             )
             if changed or (not archived and blockers):
                 stale.append(
@@ -343,6 +343,21 @@ class AdaptiveReplanApplyService:
             else:
                 applicable.append(change)
         return applicable, stale
+
+    @staticmethod
+    def _original_calendar_blocker_present(
+        change: dict[str, Any], blockers: list[dict[str, Any]]
+    ) -> bool:
+        original_ids = {
+            str(event["id"])
+            for event in change.get("external_events") or []
+            if isinstance(event, dict) and event.get("id") and event.get("no_training")
+        }
+        return any(
+            event.get("reason") == "no_training"
+            and str(event.get("id") or "") in original_ids
+            for event in blockers
+        )
 
     @staticmethod
     def _illness_checkin_values(

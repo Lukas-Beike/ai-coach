@@ -140,6 +140,21 @@ def _garmin_ftp(
         observed = _day(row["date"])
         if observed is not None:
             result[observed] = (float(row["value"]), row["date"], synced_at)
+    _append_performance_ftp(garmin, today, synced_at, result)
+    direct = garmin.get("cycling_ftp")
+    freshness = garmin.get("source_freshness")
+    fallback_day = _day(
+        freshness.get("cycling_ftp", {}).get("observed_at")
+        if isinstance(freshness, dict)
+        and isinstance(freshness.get("cycling_ftp"), dict)
+        else None
+    )
+
+    _append_direct_ftp(direct, today, fallback_day, synced_at, result)
+    return result
+
+
+def _append_performance_ftp(garmin, today, synced_at, result) -> None:
     for row in _rows(garmin.get("performance_history")):
         observed = _day(row.get("date"))
         metrics = row.get("metrics")
@@ -152,15 +167,9 @@ def _garmin_ftp(
         )
         if observed is not None and observed <= today and value is not None:
             result[observed] = (float(value), observed.isoformat(), synced_at)
-    direct = garmin.get("cycling_ftp")
-    freshness = garmin.get("source_freshness")
-    fallback_day = _day(
-        freshness.get("cycling_ftp", {}).get("observed_at")
-        if isinstance(freshness, dict)
-        and isinstance(freshness.get("cycling_ftp"), dict)
-        else None
-    )
 
+
+def _append_direct_ftp(direct, today, fallback_day, synced_at, result) -> None:
     budget = [2000]
 
     def visit(value: Any, inherited: date | None = None, depth: int = 0) -> None:
@@ -168,29 +177,9 @@ def _garmin_ftp(
             return
         budget[0] -= 1
         if isinstance(value, dict):
-            observed = (
-                _day(
-                    value.get("calendarDate")
-                    or value.get("summaryDate")
-                    or value.get("date")
-                    or value.get("timestamp")
-                )
-                or inherited
-                or fallback_day
+            observed = _direct_ftp_record(
+                value, inherited or fallback_day, today, synced_at, result
             )
-            candidate = next(
-                (
-                    value.get(key)
-                    for key in ("functionalThresholdPower", "ftp", "power")
-                    if value.get(key) not in (None, "")
-                ),
-                None,
-            )
-            number = activity_validation.bounded_performance_metric(
-                "cycling_ftp_watts", candidate
-            )
-            if observed is not None and observed <= today and number is not None:
-                result[observed] = (float(number), observed.isoformat(), synced_at)
             for child in value.values():
                 if isinstance(child, (dict, list)):
                     visit(child, observed, depth + 1)
@@ -199,7 +188,32 @@ def _garmin_ftp(
                 visit(child, inherited, depth + 1)
 
     visit(direct)
-    return result
+
+
+def _direct_ftp_record(value, fallback_day, today, synced_at, result):
+    observed = (
+        _day(
+            value.get("calendarDate")
+            or value.get("summaryDate")
+            or value.get("date")
+            or value.get("timestamp")
+        )
+        or fallback_day
+    )
+    candidate = next(
+        (
+            value.get(key)
+            for key in ("functionalThresholdPower", "ftp", "power")
+            if value.get(key) not in (None, "")
+        ),
+        None,
+    )
+    number = activity_validation.bounded_performance_metric(
+        "cycling_ftp_watts", candidate
+    )
+    if observed is not None and observed <= today and number is not None:
+        result[observed] = (float(number), observed.isoformat(), synced_at)
+    return observed
 
 
 def _point(day: date, record: tuple[float, str, Any] | None) -> dict[str, Any]:
