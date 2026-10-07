@@ -27,6 +27,10 @@ sys.path.insert(0, "/app")
 import server
 from backend.http_api import auth as http_auth
 
+FIXTURE_SOURCE = "synthetic fixture"
+
+FIXTURE_BIKE_NAME = "Fixture road bike"
+
 
 def blocked_provider(*args, **kwargs):
     raise server.AppError(
@@ -550,7 +554,7 @@ def seed_training_features():
     )
     equipment = server.ATHLETE_DATA.equipment().save(
         {
-            "name": "Fixture road bike",
+            "name": FIXTURE_BIKE_NAME,
             "sport": "Ride",
             "kind": "bike",
             "start_date": (now.date() - timedelta(days=10)).isoformat(),
@@ -654,7 +658,7 @@ def _fixture_demo_garmin(today, history):
                 )
             weight.append(row)
     return {
-        "source": "synthetic fixture",
+        "source": FIXTURE_SOURCE,
         "synced_at": server.runtime_clock.utc_now(),
         "source_freshness": {
             "daily_stats": {
@@ -744,7 +748,7 @@ def _fixture_demo_garmin(today, history):
 def _fixture_equipment_definitions(road_id):
     """Return active/archived gear and target boundary examples."""
     return [
-        (road_id, "Fixture road bike", "Ride", "bike", "active", None, 20, None),
+        (road_id, FIXTURE_BIKE_NAME, "Ride", "bike", "active", None, 20, None),
         (
             "00000000-0000-4000-8000-000000000002",
             "Fixture archived trainer",
@@ -822,7 +826,7 @@ def _fixture_seed_equipment(today, garmin_snapshot):
         garmin_distances_km[str(row["gearUUID"])] = round(distance / 1000, 2)
     items = service.read().get("items", [])
     existing = {item.get("name"): item for item in items}
-    road = existing.get("Fixture road bike")
+    road = existing.get(FIXTURE_BIKE_NAME)
     road_id = road["id"] if road else None
     saved = {}
     for (
@@ -852,7 +856,7 @@ def _fixture_seed_equipment(today, garmin_snapshot):
             result = service.save(payload)
             item = result["equipment"]
             existing[name] = item
-            if name == "Fixture road bike":
+            if name == FIXTURE_BIKE_NAME:
                 road_id = item["id"]
         item.update(
             {"lifetime_target_km": target_km, "garmin_maximum_meters": maximum_meters}
@@ -861,7 +865,7 @@ def _fixture_seed_equipment(today, garmin_snapshot):
             item["lifetime_target_source"] = "local"
         elif maximum_meters is not None:
             item["lifetime_target_source"] = "garmin"
-        if name == "Fixture road bike":
+        if name == FIXTURE_BIKE_NAME:
             item["initial_distance_km"] = 0
         if garmin_uuid:
             item["garmin_uuid"] = garmin_uuid
@@ -1015,7 +1019,7 @@ def _fixture_seed_wave2(today, snapshot, garmin):
             else (24000 + offset * 111),
             "icu_training_load": 24 + (offset * 7) % 75,
             "icu_rpe": (offset % 11) if offset % 7 else None,
-            "source": "synthetic fixture",
+            "source": FIXTURE_SOURCE,
         }
         by_id[activity_id] = row
     merged = sorted(
@@ -1111,7 +1115,7 @@ def _fixture_seed_wave2(today, snapshot, garmin):
                     "power_profile": power_profile(detailed),
                     "running_profile": running_profile(detailed),
                 },
-                "source": "synthetic fixture",
+                "source": FIXTURE_SOURCE,
                 "observed_at": server.runtime_clock.utc_now(),
                 "full_resolution": True,
                 "available_streams": sorted(streams),
@@ -1141,7 +1145,7 @@ def _fixture_seed_wave2(today, snapshot, garmin):
             )
     garmin.update(
         {
-            "source": "synthetic fixture",
+            "source": FIXTURE_SOURCE,
             "source_freshness": {
                 **(garmin.get("source_freshness") or {}),
                 **{

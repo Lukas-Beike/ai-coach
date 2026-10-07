@@ -11,6 +11,8 @@ from backend.performance.training_report import activity_day, canonical_rows, nu
 from backend.planning.competitions import supported_competition_sport
 from backend.planning.season import season_plan_summary
 
+ACTIVITY_SOURCE = "Intervals.icu recorded activities"
+
 
 def season_preparation(
     snapshot: dict[str, Any],
@@ -55,7 +57,7 @@ def season_preparation(
             ),
             "specificity_evidence": _specificity_evidence(eligible, analyses),
             "source_counts": {
-                "Intervals.icu recorded activities": len(eligible),
+                ACTIVITY_SOURCE: len(eligible),
                 "cached activity analyses": len(
                     [row for row in eligible if str(row.get("id")) in analyses]
                 ),
@@ -122,7 +124,7 @@ def _weekly_volume(weeks: list[dict[str, Any]]) -> dict[str, Any]:
         "distance_known_sessions": sum(
             week["distance_known_sessions"] for week in weeks
         ),
-        "source": "Intervals.icu recorded activities",
+        "source": ACTIVITY_SOURCE,
     }
 
 
@@ -142,7 +144,7 @@ def _long_session_evidence(sessions: list[dict[str, Any]]) -> dict[str, Any]:
         "duration_known_sessions": len(durations),
         "distance_meters": max(distances) if distances else None,
         "distance_known_sessions": len(distances),
-        "source": "Intervals.icu recorded activities",
+        "source": ACTIVITY_SOURCE,
     }
 
 

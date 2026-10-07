@@ -21,11 +21,11 @@ if (docker ps -aq --filter "name=^$Name$") {
     docker stop $Name | Out-Null
     docker rm $Name | Out-Null   # never -v
 }
-$args = @("run", "-d", "--name", $Name, "-p", "127.0.0.1:${Port}:8090",
+$dockerArguments = @("run", "-d", "--name", $Name, "-p", "127.0.0.1:${Port}:8090",
     "-e", "FIXTURE_AUTO_SEED=1", "-v", "${PWD}\e2e:/app/e2e:ro")
-if ($Persist) { $args += @("-v", "${Name}-data:/data") }
-$args += @("ai-coach:local", "python", "/app/e2e/fixture_runtime.py")
-docker @args | Out-Null
+if ($Persist) { $dockerArguments += @("-v", "${Name}-data:/data") }
+$dockerArguments += @("ai-coach:local", "python", "/app/e2e/fixture_runtime.py")
+docker @dockerArguments | Out-Null
 
 for ($i = 0; $i -lt 60; $i++) {
     try {

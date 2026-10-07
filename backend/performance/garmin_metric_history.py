@@ -6,6 +6,8 @@ import math
 from datetime import date
 from typing import Any
 
+GARMIN_SOURCE = "Garmin Connect"
+
 _DATE_KEYS = ("date", "calendarDate", "summaryDate")
 _IGNORED_NUMERIC_KEYS = {"id", "activityId", "userId"}
 
@@ -67,7 +69,7 @@ def ftp_points(value: Any, *, start: date, end: date) -> list[dict[str, Any]]:
         points[observed.isoformat()] = {
             "date": observed.isoformat(),
             "value": round(candidate, 2),
-            "source": "Garmin Connect",
+            "source": GARMIN_SOURCE,
             "field": "functionalThresholdPower",
         }
     return [points[key] for key in sorted(points)]
@@ -85,7 +87,7 @@ def metric_points(value: Any, *, start: date, end: date) -> list[dict[str, Any]]
             continue
         point = points.setdefault(
             observed.isoformat(),
-            {"date": observed.isoformat(), "values": {}, "source": "Garmin Connect"},
+            {"date": observed.isoformat(), "values": {}, "source": GARMIN_SOURCE},
         )
         point["values"].update(fields)
     return [points[key] for key in sorted(points)]
@@ -104,7 +106,7 @@ def projected_metric(
     return {
         "status": "current" if points else "unavailable",
         "aggregation": aggregation,
-        "source": "Garmin Connect",
+        "source": GARMIN_SOURCE,
         "unit": "unknown",
         "points": points,
         "observed_at": points[-1]["date"] if points else None,
