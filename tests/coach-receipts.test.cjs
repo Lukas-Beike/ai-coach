@@ -123,6 +123,7 @@ test("approved nutrition product write refreshes and opens the product catalog",
   let request = 0;
   const context = vm.createContext({
     state: { coachActionProposals: [{ id: "proposal-1" }] },
+    document: { querySelector: () => ({ dataset: { panel: "chatPanel" } }) },
     api: async () => (++request === 1
       ? { action_token: "token", proposed_action: { payload_hash: "hash" } }
       : { ok: true, status: "applied" }),
@@ -141,6 +142,31 @@ test("approved nutrition product write refreshes and opens the product catalog",
   assert.equal(JSON.stringify(routes), JSON.stringify([["nutrition/products", { historyMode: "push" }]]));
 });
 
+test("post-approval navigation does not override a panel the athlete opened during the reload", async () => {
+  const start = source.indexOf("function coachActionReceipt(");
+  const end = source.indexOf("\nfunction createPendingMessage", start);
+  const routes = [];
+  let request = 0;
+  let activePanel = "chatPanel";
+  const context = vm.createContext({
+    state: { coachActionProposals: [{ id: "proposal-1" }] },
+    document: { querySelector: () => ({ dataset: { panel: activePanel } }) },
+    api: async () => (++request === 1
+      ? { action_token: "token", proposed_action: { payload_hash: "hash" } }
+      : { ok: true, status: "applied" }),
+    renderCoachActionReview() {},
+    addCoachReceipt() {},
+    toast() {},
+    load: async () => { activePanel = "nutritionPanel"; },
+    applyNavigationRoute: async (...args) => { routes.push(args); },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  await context.executeCoachActionProposal(
+    { id: "proposal-1", action_type: "local_coach_write", object_ids: { operation: "save_nutrition_template" }, status: "ready" },
+    { disabled: false },
+  );
+  assert.equal(routes.length, 0);
+});
 test("approval preview renders every bound remote-write value as text", () => {
   const start = source.indexOf("function coachActionDiff(");
   const end = source.indexOf("\nfunction coachActionButtons", start);

@@ -1700,6 +1700,7 @@ async function executeCoachActionProposal(proposal, button) {
   if (!proposal?.id || button.disabled || !["preview", "ready"].includes(proposal.status)) return;
   button.disabled = true;
   try {
+    const confirmPanel = document.querySelector(".nav-item.active")?.dataset.panel;
     const confirmed = await api("/api/coach/actions/confirm", {
       method: "POST",
       body: JSON.stringify({ proposal_id: proposal.id }),
@@ -1715,6 +1716,7 @@ async function executeCoachActionProposal(proposal, button) {
     addCoachReceipt(receipt);
     toast(receipt.message);
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);
+    if (document.querySelector(".nav-item.active")?.dataset.panel !== confirmPanel) return;
     if (receipt.nutritionProductWrite) void applyNavigationRoute("nutrition/products", { historyMode: "push" });
     else if (receipt.localWrite) void applyNavigationRoute("nutrition/meals", { historyMode: "push" });
     else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) void applyNavigationRoute("plan", { historyMode: "push" });
