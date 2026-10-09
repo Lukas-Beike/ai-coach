@@ -39,10 +39,10 @@
     </header>
 
     <main>
-      <section id="statusCard" class="status-card" role="status" aria-live="polite">
-        <div><span class="pulse"></span><strong id="statusTitle">Verbindung wird hergestellt…</strong></div>
+      <output id="statusCard" class="status-card" aria-live="polite">
+        <span class="status-card-row"><span class="pulse"></span><strong id="statusTitle">Verbindung wird hergestellt…</strong></span>
         <span id="statusDetail">Trainingsbereich wird geprüft</span>
-      </section>
+      </output>
       <section id="connectivityNotice" class="connectivity-notice" aria-live="polite" hidden></section>
       <section id="providerAttentionBanner" class="provider-attention-banner" role="alert" aria-live="assertive" hidden>
         <div><strong>Anbindung benötigt Aufmerksamkeit</strong><span id="providerAttentionDetail"></span></div>
@@ -54,7 +54,7 @@
           <div><strong>Deine Planung braucht eine Anpassung</strong><small>Bitte den Coach, die nächsten Einheiten zu prüfen.</small></div>
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Coach fragen</button>
         </div>
-        <div id="chatOperationStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+        <output id="chatOperationStatus" class="sr-only" aria-live="polite" aria-atomic="true" hidden></output>
         <div id="messages" class="messages"></div>
         <section id="coachActionReview" class="coach-action-review" aria-labelledby="coachActionReviewTitle" hidden>
           <div class="coach-action-review-heading">
@@ -283,7 +283,7 @@
         </section>
         <details class="settings-section collapsible-section" data-more-segment-panel="connections">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
-          <section id="connectionsSyncProgress" class="connections-sync-progress" role="status" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></section>
+          <output id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></output>
           <div class="connection-cards">
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
@@ -396,7 +396,7 @@
     </nav>
   </div>
 
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <output id="toast" class="toast" aria-live="polite"></output>
   <div id="authLoading" class="auth-loading" aria-live="polite">Trainingsbereich wird gepr&uuml;ft&hellip;</div>
   <dialog id="loginDialog" aria-labelledby="loginTitle">
     <form id="loginForm" method="dialog">

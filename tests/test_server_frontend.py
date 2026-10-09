@@ -427,7 +427,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('fetch("/api/', app + coach)
         self.assertNotIn("completed.error_class", app)
         self.assertNotIn('id="messages" class="messages" aria-live=', index)
-        self.assertIn('id="chatOperationStatus" class="sr-only" role="status" aria-live="polite"', index)
+        self.assertIn('<output id="chatOperationStatus" class="sr-only" aria-live="polite"', index)
         self.assertIn("if (!status || status.textContent === message) return;", coach)
         self.assertIn('announceChatStatus("Antwort fertig.")', coach)
 

@@ -92,6 +92,14 @@ globalThis.AppRouter = (() => {
     else if (historyMode === "replace") globalThis.history.replaceState({ route: panelRoute }, "", targetHash);
   }
 
+  function rememberLeavingChat(state, currentPanel, mainRoute, historyMode) {
+    if (currentPanel !== "chatPanel" || mainRoute === "coach") return;
+    if (state.data && !state.chatInitialScrollPending && historyMode === "push") {
+      state.chatScrollY = globalThis.scrollY;
+    }
+    if (state.chatRequest || state.chatServerOperationId) state.chatResponseScrollPending = true;
+  }
+
   async function navigate(route, { historyMode = "none", focus = true } = {}) {
     if (!configured) throw new Error("AppRouter is not configured");
     const state = AppState.state;
@@ -105,10 +113,7 @@ globalThis.AppRouter = (() => {
       handlers.discardUnsavedChanges();
     }
     const returningToChat = currentPanel !== "chatPanel" && mainRoute === "coach";
-    if (state.data && !state.chatInitialScrollPending && historyMode === "push" && currentPanel === "chatPanel" && mainRoute !== "coach") {
-      state.chatScrollY = globalThis.scrollY;
-    }
-    if (currentPanel === "chatPanel" && mainRoute !== "coach" && (state.chatRequest || state.chatServerOperationId)) state.chatResponseScrollPending = true;
+    rememberLeavingChat(state, currentPanel, mainRoute, historyMode);
     const panel = activatePanel(panelRoute, navigationRoute);
     if (!panel) return false;
     state.plannedTodayFocusPending = shouldFocusPlannedToday;
