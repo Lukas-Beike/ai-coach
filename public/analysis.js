@@ -19,7 +19,18 @@ function analysisValue(value, unit) {
     return `${Number(value) < 0 ? "−" : ""}${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")} h`;
   }
   const suffix = unit ? ` ${unit}` : "";
-  return `${AppFormat.number(value)}${suffix}`;
+  return `${analysisNumber(value, unit)}${suffix}`;
+}
+
+function analysisRatioUnit(unit) {
+  return /\/bpm$/.test(String(unit || ""));
+}
+
+// Ratio units such as W/bpm keep three significant digits so small efficiencies are not rounded to zero.
+function analysisNumber(value, unit) {
+  const numeric = Number(value);
+  if (!analysisRatioUnit(unit) || !numeric) return AppFormat.number(numeric);
+  return AppFormat.number(numeric, { digits: Math.max(1, 2 - Math.floor(Math.log10(Math.abs(numeric)))) });
 }
 
 function analysisLegendText(item, latest, unit) {
@@ -38,6 +49,39 @@ function analysisLatestPoint(item) {
 
 let analysisInfoId = 0;
 
+function analysisPopoverPosition(anchor, popover, viewport) {
+  const margin = 12, gap = 8;
+  const width = Math.min(popover.width, viewport.width - margin * 2);
+  const height = Math.min(popover.height, viewport.height - margin * 2);
+  const left = Math.max(margin, Math.min(anchor.left, viewport.width - width - margin));
+  const below = anchor.bottom + gap;
+  const above = anchor.top - gap - height;
+  const fitsBelow = below + height <= viewport.height - margin;
+  const top = fitsBelow || above < margin ? Math.max(margin, Math.min(below, viewport.height - height - margin)) : above;
+  return { left, top };
+}
+
+function positionAnalysisPopover(button, info) {
+  const rect = button.getBoundingClientRect();
+  const { left, top } = analysisPopoverPosition(
+    { left: rect.left, top: rect.top, bottom: rect.bottom },
+    { width: info.offsetWidth, height: info.offsetHeight },
+    { width: innerWidth, height: innerHeight });
+  info.style.left = `${left}px`;
+  info.style.top = `${top}px`;
+}
+
+function bindAnalysisPopover(button, info) {
+  info.setAttribute("popover", "auto");
+  info.setAttribute("role", "tooltip");
+  button.setAttribute("popovertarget", info.id);
+  button.setAttribute("aria-expanded", "false");
+  info.addEventListener("toggle", (event) => {
+    button.setAttribute("aria-expanded", String(event.newState === "open"));
+    if (event.newState === "open") positionAnalysisPopover(button, info);
+  });
+}
+
 function analysisChart(title, series, unit, start, end, note, {
   sparse = false, zeroCentered = false, showLegend = true,
 } = {}) {
@@ -54,22 +98,13 @@ function analysisChart(title, series, unit, start, end, note, {
     const label = item.legendLabel || item.label;
     const button = reportNode("button", label, "analysis-legend-info");
     button.type = "button";
+    button.setAttribute("aria-label", `Erklärung zu ${label}`);
     const sourceInfo = item.source ? " · Quelle: " + item.source : "";
     const info = reportNode("div", `${analysisLegendText(item, latest, unit)}${sourceInfo}. ${item.explanation || note}`, "analysis-info-tooltip");
     info.dataset.series = String(index);
     info.id = `analysis-info-${++analysisInfoId}`;
-    info.setAttribute("popover", "auto");
-    info.setAttribute("role", "tooltip");
-    button.setAttribute("popovertarget", info.id);
+    bindAnalysisPopover(button, info);
     button.setAttribute("aria-describedby", info.id);
-    button.setAttribute("aria-expanded", "false");
-    info.addEventListener("toggle", (event) => {
-      button.setAttribute("aria-expanded", String(event.newState === "open"));
-      if (event.newState !== "open") return;
-      const rect = button.getBoundingClientRect();
-      info.style.left = `${Math.max(12, Math.min(rect.left, innerWidth - info.offsetWidth - 12))}px`;
-      info.style.top = `${Math.max(12, Math.min(rect.bottom + 8, innerHeight - info.offsetHeight - 12))}px`;
-    });
     entry.append(button, info);
     const sourceSuffix = item.source ? " · " + item.source : "";
     if (latest) info.append(reportNode("span", `${dateLabel(latest.observedDate || latest.date)}${sourceSuffix}`, "analysis-metric-meta"));
@@ -176,7 +211,7 @@ function analysisPlotScales(series, start, end, { unit = "", zeroCentered = fals
   let low = Math.min(...values), high = Math.max(...values);
   if (zeroCentered) { const extent = Math.max(Math.abs(low), Math.abs(high), 1); low = -extent; high = extent; }
   if (series.some((item) => item.bars)) low = Math.min(0, low);
-  const padding = Math.max((high - low) * .12, unit === "s/km" ? 5 : 1);
+  const padding = Math.max((high - low) * .12, unit === "s/km" ? 5 : analysisRatioUnit(unit) ? Math.abs(high) * .02 : 1);
   const rawStep = (high - low + padding * 2) / 4;
   const magnitude = 10 ** Math.floor(Math.log10(rawStep));
   let step = [1, 2, 5, 10].find((factor) => factor * magnitude >= rawStep) * magnitude;
@@ -193,7 +228,7 @@ function analysisPlotScales(series, start, end, { unit = "", zeroCentered = fals
 function analysisAxisLabel(value, unit) {
   if (unit === "s/km") return formatPace(value).split(" ")[0];
   if (unit === "s") return formatDuration(Math.round(value));
-  return AppFormat.number(Number(value.toFixed(3)));
+  return analysisNumber(analysisRatioUnit(unit) ? value : Number(value.toFixed(3)), unit);
 }
 
 function appendAnalysisAxes(svg, unit, { min, max, step, chartRight, y }) {
@@ -427,13 +462,13 @@ function analysisChartGroup(title, charts, series, note) {
     const help = reportNode("button", "i", "analysis-legend-info");
     help.type = "button"; help.setAttribute("aria-label", `${title}: Informationen`);
     const info = reportNode("div", null, "analysis-info-tooltip");
-    info.id = `group-info-${++analysisInfoId}`; info.setAttribute("popover", "auto"); info.setAttribute("role", "tooltip");
+    info.id = `group-info-${++analysisInfoId}`;
     series.forEach((item) => {
       const details = [item.source, item.coverage, item.referenceLabel].filter(Boolean).join(" · ");
       if (details) info.append(reportNode("p", `${item.legendLabel || item.label}: ${details}`));
     });
     if (note) info.append(reportNode("p", note));
-    help.setAttribute("popovertarget", info.id); heading.append(help); group.append(info);
+    bindAnalysisPopover(help, info); heading.append(help); group.append(info);
   }
   group.append(heading);
   if (note) charts.forEach((chart) => chart.querySelectorAll(".analysis-legend-info + .analysis-info-tooltip").forEach((info) => info.append(reportNode("p", note))));
@@ -1028,8 +1063,8 @@ function renderTrainingFocus(report) {
   const info = reportNode("button", "i", "analysis-legend-info");
   info.type = "button"; info.setAttribute("aria-label", "Trainingsfokus: Informationen");
   const explanation = reportNode("div", `Letzte 4 Wochen: ${dateLabel(report.start)} bis ${dateLabel(report.end)}. ${report.coverage?.known_sessions ?? 0} erfasste Garmin-Einheiten im Zeitraum${report.coverage?.observed_start && report.coverage?.observed_end ? ` · erfasste Daten ${dateLabel(report.coverage.observed_start)} bis ${dateLabel(report.coverage.observed_end)}` : ""}. Garmin: aufgezeichnete Belastung nach der Hauptwirkung der Einheit (Training Effect). Keine aus Zonen abgeleitete Einteilung und nicht Garmins separat berechnete Load-Focus-Metrik. ${report.unclassified_sessions || 0} Einheiten ohne bekannte Wirkung oder Belastung bleiben ausgeschlossen.`, "analysis-info-tooltip"); // NOSONAR
-  explanation.id = `focus-info-${++analysisInfoId}`; explanation.setAttribute("popover", "auto"); explanation.setAttribute("role", "tooltip");
-  info.setAttribute("popovertarget", explanation.id); root.firstChild.append(info); root.append(explanation);
+  explanation.id = `focus-info-${++analysisInfoId}`;
+  bindAnalysisPopover(info, explanation); root.firstChild.append(info); root.append(explanation);
   appendTrainingFocusShare(report, categories, root);
   appendTrainingFocusZones(report, zones);
 }
@@ -1134,7 +1169,7 @@ function seasonEventCard(event, generation) {
     button.type = "button";
     button.addEventListener("click", () => globalThis.ActivityDetails.open({ id:item.activity_id, name:item.name }, { api, showDialog:showAccessibleDialog }));
     section.append(button);
-    if (item.aerobic?.status === "ok") section.append(reportNode("p", `Gleichmäßige Belastung: lokale Herzfrequenzdrift ${item.aerobic.drift_percent}% · Effizienz ${item.aerobic.efficiency} ${item.aerobic.unit}`, "muted"));
+    if (item.aerobic?.status === "ok") section.append(reportNode("p", `Gleichmäßige Belastung: lokale Herzfrequenzdrift ${item.aerobic.drift_percent}% · Effizienz ${analysisValue(item.aerobic.efficiency, item.aerobic.unit)}`, "muted"));
   }
   section.append(reportNode("p", "Absolviertes Training ist ein Beleg, keine Wettkampffreigabe oder Zeitprognose. Gelände, spezifische Intensität und erprobte Verpflegung bleiben ohne passende Nachweise offen.", "muted"));
   if (event.days_until > 0 && event.days_until <= 180) {
