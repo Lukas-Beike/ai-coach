@@ -1192,6 +1192,14 @@
     },
     {
       "tool": "mypy",
+      "path": "backend/http_api/sync_commands.py",
+      "line": 100,
+      "column": 16,
+      "code": "arg-type",
+      "message_sha256": "b56eabb6d44884efdb0061ff020af3a73cfab3aeabdd645b01b9e03a91c6cf87"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/architecture_analysis.py",
       "line": 124,
       "column": 16,
@@ -1237,14 +1245,6 @@
       "column": 16,
       "code": "arg-type",
       "message_sha256": "1f0507db8f39955b7380d5ccd6ca09cdc2a0398a644e3e54cd387a5169d01c1a"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/http_api/sync_commands.py",
-      "line": 89,
-      "column": 16,
-      "code": "arg-type",
-      "message_sha256": "b56eabb6d44884efdb0061ff020af3a73cfab3aeabdd645b01b9e03a91c6cf87"
     },
     {
       "tool": "mypy",
