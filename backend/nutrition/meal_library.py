@@ -140,13 +140,12 @@ class NutritionMealLibraryService:
                 **payload,
                 **self.food_database.calculate(payload["food_ingredients"]),
             }
-        kind = (
-            "packaging_label"
-            if packaging_label
-            else "estimate"
-            if payload.get("source") in {"coach", "photo", "voice"}
-            else "manual"
-        )
+        if packaging_label:
+            kind = "packaging_label"
+        elif payload.get("source") in {"coach", "photo", "voice"}:
+            kind = "estimate"
+        else:
+            kind = "manual"
         return {**payload, "nutrition_basis": {"kind": kind}}
 
     def list_templates(self) -> list[dict[str, Any]]:

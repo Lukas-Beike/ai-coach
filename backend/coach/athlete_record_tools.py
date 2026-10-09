@@ -16,6 +16,8 @@ from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.planning.competition_service import CompetitionService
 
+_NUTRITION_UNAVAILABLE = "NutritionService ist nicht verfügbar."
+
 
 class CoachAthleteRecordToolService:
     """Own local Coach mutations for check-ins, feedback, competitions, and nutrition."""
@@ -151,20 +153,9 @@ class CoachAthleteRecordToolService:
         self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any]:
         self._authorize_nutrition_operation(name, intent)
-        if name == "save_nutrition_product":
-            product_id = str(
-                structured_action_payload(arguments).get("id") or ""
-            ).strip()
-            require_coach_scope(
-                intent,
-                f"nutrition_product:{product_id}"
-                if product_id
-                else "local_nutrition_product",
-            )
-        else:
-            require_coach_scope(intent, "local_nutrition")
+        require_coach_scope(intent, self._nutrition_scope(name, arguments))
         if not self._nutrition_diary or not self._nutrition_meal_library:
-            raise AppError(500, "NutritionService ist nicht verfügbar.")
+            raise AppError(500, _NUTRITION_UNAVAILABLE)
         if name == "save_fueling_plan":
             return self._nutrition_diary.fueling().save(
                 structured_action_payload(arguments)
@@ -194,6 +185,17 @@ class CoachAthleteRecordToolService:
             return self._save_or_update_nutrition_entry(name, arguments)
         entry_id = str(arguments.get("id") or arguments.get("entry_id") or "").strip()
         return {"ok": True, **self._nutrition_diary.delete_meal(entry_id)}
+
+    @staticmethod
+    def _nutrition_scope(name: str, arguments: dict[str, Any]) -> str:
+        if name != "save_nutrition_product":
+            return "local_nutrition"
+        product_id = str(structured_action_payload(arguments).get("id") or "").strip()
+        return (
+            f"nutrition_product:{product_id}"
+            if product_id
+            else "local_nutrition_product"
+        )
 
     def _authorize_nutrition_operation(self, name: str, intent: dict[str, Any]) -> None:
         message = (
@@ -236,12 +238,12 @@ class CoachAthleteRecordToolService:
 
     def _nutrition_diary_service(self) -> NutritionDiaryService:
         if self._nutrition_diary is None:
-            raise AppError(500, "NutritionService ist nicht verfügbar.")
+            raise AppError(500, _NUTRITION_UNAVAILABLE)
         return self._nutrition_diary
 
     def _nutrition_meal_library_service(self) -> NutritionMealLibraryService:
         if self._nutrition_meal_library is None:
-            raise AppError(500, "NutritionService ist nicht verfügbar.")
+            raise AppError(500, _NUTRITION_UNAVAILABLE)
         return self._nutrition_meal_library
 
     @staticmethod
