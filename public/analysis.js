@@ -507,7 +507,7 @@ const analysisReportCache = new Map();
 
 function analysisReportVersionKey() {
   const versions = state.data?.state_versions || {};
-  return JSON.stringify(Object.keys(versions).sort().map((key) => [key, versions[key]]));
+  return JSON.stringify(Object.keys(versions).sort((left, right) => left.localeCompare(right)).map((key) => [key, versions[key]]));
 }
 
 function requestAnalysisReport(path, { force = false } = {}) {
