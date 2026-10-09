@@ -34,7 +34,9 @@ test("chat status announcements update once and keep history outside the live re
   });
 
   await expect(page.locator("#messages")).not.toHaveAttribute("aria-live", /.+/);
-  await expect(page.locator("#chatOperationStatus")).toHaveAttribute("role", "status");
+  // <output> carries the implicit "status" role, so assert the native element
+  // instead of an explicit role attribute.
+  await expect(page.locator("output#chatOperationStatus")).toHaveCount(1);
   await expect(page.locator("#chatOperationStatus")).toHaveText("Coach arbeitet an deiner Antwort…");
   expect(mutations).toBe(1);
 });
