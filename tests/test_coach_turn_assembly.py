@@ -16,8 +16,15 @@ from backend.coach.turn_assembly import (
 class CoachTurnAssemblyTests(unittest.TestCase):
     def make_assembly(self):
         names = (
-            "database_manager", "attachments", "dialogue",
-            "payload", "transport", "rounds", "jobs", "failure", "conversation",
+            "database_manager",
+            "attachments",
+            "dialogue",
+            "payload",
+            "transport",
+            "rounds",
+            "jobs",
+            "failure",
+            "conversation",
         )
         deps = {name: Mock(name=name) for name in names}
         manager = Mock(name="manager")
@@ -72,14 +79,18 @@ class CoachTurnAssemblyTests(unittest.TestCase):
                 ),
             )
         )
-        return assembly, deps, {
-            "manager": manager,
-            "lock": lock,
-            "settings": settings,
-            "conversation_gate": conversation_gate,
-            "maintenance_gate": maintenance_gate,
-            "conversation_service": conversation_service,
-        }
+        return (
+            assembly,
+            deps,
+            {
+                "manager": manager,
+                "lock": lock,
+                "settings": settings,
+                "conversation_gate": conversation_gate,
+                "maintenance_gate": maintenance_gate,
+                "conversation_service": conversation_service,
+            },
+        )
 
     def test_chat_turn_keeps_structured_turn_lazy_and_current_conversation_owner(self):
         assembly, deps, owners = self.make_assembly()
@@ -104,13 +115,19 @@ class CoachTurnAssemblyTests(unittest.TestCase):
 
         service = assembly.structured_turn_service()
 
-        self.assertIs(service._deps.opening._database_manager, deps["database_manager"].return_value)
+        self.assertIs(
+            service._deps.opening._database_manager,
+            deps["database_manager"].return_value,
+        )
         self.assertIs(service._deps.attachments, deps["attachments"].return_value)
         self.assertIs(service._deps.dialogue, deps["dialogue"].return_value)
         self.assertIs(service._deps.payload, deps["payload"].return_value)
         self.assertIs(service._deps.response._transport, deps["transport"].return_value)
         self.assertIs(service._deps.rounds, deps["rounds"].return_value)
-        self.assertIs(service._deps.outcome._database_manager, deps["database_manager"].return_value)
+        self.assertIs(
+            service._deps.outcome._database_manager,
+            deps["database_manager"].return_value,
+        )
         self.assertIs(service._deps.failure, deps["failure"].return_value)
         self.assertEqual(deps["jobs"].call_count, 2)
 

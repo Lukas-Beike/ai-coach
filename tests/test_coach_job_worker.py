@@ -42,16 +42,22 @@ class CoachJobWorkerTests(unittest.TestCase):
             self.worker.stop()
 
         self.runner.run.side_effect = execute
-        self.worker.run_forever(lambda: self.jobs, lambda: self.runner, self.gate, Mock())
+        self.worker.run_forever(
+            lambda: self.jobs, lambda: self.runner, self.gate, Mock()
+        )
 
         self.jobs.claim.assert_called_once_with()
         self.runner.run.assert_called_once_with(job)
         self.assertEqual(self.gate.state()["running_operations"], 0)
 
     def test_maintenance_rejection_does_not_claim_and_wakes_for_shutdown(self) -> None:
-        self.worker.wake_event.wait = Mock(side_effect=lambda seconds: self.worker.stop())
+        self.worker.wake_event.wait = Mock(
+            side_effect=lambda seconds: self.worker.stop()
+        )
         with self.gate.restore():
-            self.worker.run_forever(lambda: self.jobs, lambda: self.runner, self.gate, Mock())
+            self.worker.run_forever(
+                lambda: self.jobs, lambda: self.runner, self.gate, Mock()
+            )
 
         self.jobs.claim.assert_not_called()
         self.worker.wake_event.wait.assert_called_once_with(5)
@@ -63,7 +69,9 @@ class CoachJobWorkerTests(unittest.TestCase):
         ]
         self.runner.run.side_effect = lambda _job: self.worker.stop()
 
-        self.worker.run_forever(lambda: self.jobs, lambda: self.runner, self.gate, Mock())
+        self.worker.run_forever(
+            lambda: self.jobs, lambda: self.runner, self.gate, Mock()
+        )
 
         self.assertEqual(self.jobs.claim.call_count, 2)
         self.runner.run.assert_called_once()
@@ -75,14 +83,20 @@ class CoachJobWorkerTests(unittest.TestCase):
         self.runner.run.side_effect = lambda _job: self.worker.stop()
 
         with patch("backend.coach.job_worker._LOGGER.error") as log_error:
-            self.worker.run_forever(lambda: self.jobs, lambda: self.runner, self.gate, Mock())
+            self.worker.run_forever(
+                lambda: self.jobs, lambda: self.runner, self.gate, Mock()
+            )
 
         self.assertEqual(self.jobs.claim.call_count, 2)
         self.runner.run.assert_called_once_with(job)
-        self.assertEqual(log_error.call_args.kwargs["extra"]["error_class"], "OperationalError")
+        self.assertEqual(
+            log_error.call_args.kwargs["extra"]["error_class"], "OperationalError"
+        )
         self.assertNotIn("private detail", repr(log_error.call_args))
 
-    def test_runner_error_leaves_claimed_job_unreplayed_and_worker_polling(self) -> None:
+    def test_runner_error_leaves_claimed_job_unreplayed_and_worker_polling(
+        self,
+    ) -> None:
         job = {"client_turn_id": "synthetic"}
         self.jobs.claim.side_effect = [job, None]
         self.runner.run.side_effect = RuntimeError("private detail")
@@ -98,20 +112,28 @@ class CoachJobWorkerTests(unittest.TestCase):
         self.worker.wake_event.wait = Mock(side_effect=wait_until_second_poll)
 
         with patch("backend.coach.job_worker._LOGGER.error") as log_error:
-            self.worker.run_forever(lambda: self.jobs, lambda: self.runner, self.gate, recovery)
+            self.worker.run_forever(
+                lambda: self.jobs, lambda: self.runner, self.gate, recovery
+            )
 
         self.assertEqual(self.jobs.claim.call_count, 2)
         self.runner.run.assert_called_once_with(job)
         recovery.assert_called_once_with()
         self.assertEqual(self.worker.wake_event.wait.call_args_list[0].args, (5,))
-        self.assertEqual(log_error.call_args.kwargs["extra"]["error_class"], "RuntimeError")
+        self.assertEqual(
+            log_error.call_args.kwargs["extra"]["error_class"], "RuntimeError"
+        )
         self.assertNotIn("private detail", repr(log_error.call_args))
 
     def test_stop_during_claim_recovery_wait_exits_without_reclaiming(self) -> None:
         self.jobs.claim.side_effect = sqlite3.OperationalError("private detail")
-        self.worker.wake_event.wait = Mock(side_effect=lambda _seconds: self.worker.stop())
+        self.worker.wake_event.wait = Mock(
+            side_effect=lambda _seconds: self.worker.stop()
+        )
 
-        self.worker.run_forever(lambda: self.jobs, lambda: self.runner, self.gate, Mock())
+        self.worker.run_forever(
+            lambda: self.jobs, lambda: self.runner, self.gate, Mock()
+        )
 
         self.jobs.claim.assert_called_once_with()
         self.runner.run.assert_not_called()
@@ -132,11 +154,15 @@ class CoachJobWorkerTests(unittest.TestCase):
 
         self.worker.wake_event.wait = Mock(side_effect=wait_until_recovery_completes)
         with patch("backend.coach.job_worker._LOGGER.error") as log_error:
-            self.worker.run_forever(lambda: self.jobs, lambda: self.runner, self.gate, recovery)
+            self.worker.run_forever(
+                lambda: self.jobs, lambda: self.runner, self.gate, recovery
+            )
 
         self.assertEqual(recovery.call_count, 2)
         self.assertEqual(self.jobs.claim.call_count, 2)
-        self.assertEqual(log_error.call_args.kwargs["extra"]["event"], "coach_worker_recovery_failed")
+        self.assertEqual(
+            log_error.call_args.kwargs["extra"]["event"], "coach_worker_recovery_failed"
+        )
 
 
 if __name__ == "__main__":

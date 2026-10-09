@@ -33,7 +33,9 @@ _STALE_PLAN_ERROR = (
 _ALL_PENDING_MAX_ENTRIES = 5000
 
 
-def _query_rows(connection: Connection, query: str, params: tuple[str, ...]) -> list[Any]:
+def _query_rows(
+    connection: Connection, query: str, params: tuple[str, ...]
+) -> list[Any]:
     return connection.execute(query, params).fetchall()
 
 
@@ -131,7 +133,9 @@ class StructuredPlanSyncService:
             max_entries=max_entries,
         )
         entity_by_id = {
-            str(entry.get("library_workout_id") or entry.get("local_id") or ""): entry.get("entity")
+            str(
+                entry.get("library_workout_id") or entry.get("local_id") or ""
+            ): entry.get("entity")
             for entry in entries
             if isinstance(entry, dict)
         }
@@ -154,7 +158,9 @@ class StructuredPlanSyncService:
                 for entry in self._authority.pending_plan_push_entries()
             }
             if normalized_ids != pending_ids:
-                raise AppError(403, _ALL_PENDING_SCOPE_ERROR, reason="intent_scope_denied")
+                raise AppError(
+                    403, _ALL_PENDING_SCOPE_ERROR, reason="intent_scope_denied"
+                )
             groups = (("local_plan",),)
         else:
             groups = self._scope_groups(normalized, intent)
@@ -166,9 +172,7 @@ class StructuredPlanSyncService:
     def _scope_groups(
         entries: list[dict[str, Any]], intent: dict[str, Any] | None = None
     ) -> tuple[tuple[str, ...], ...]:
-        scopes = {
-            str(value) for value in (intent or {}).get("authorization_scope", [])
-        }
+        scopes = {str(value) for value in (intent or {}).get("authorization_scope", [])}
         if not scopes:
             return tuple(
                 (
@@ -178,10 +182,19 @@ class StructuredPlanSyncService:
                 for entry in entries
             )
         return tuple(
-            (next((token for token in (
-                f"planned_unit:{entry['library_workout_id']}",
-                f"library_workout:{entry['library_workout_id']}",
-            ) if token in scopes), f"planned_unit:{entry['library_workout_id']}"),)
+            (
+                next(
+                    (
+                        token
+                        for token in (
+                            f"planned_unit:{entry['library_workout_id']}",
+                            f"library_workout:{entry['library_workout_id']}",
+                        )
+                        if token in scopes
+                    ),
+                    f"planned_unit:{entry['library_workout_id']}",
+                ),
+            )
             for entry in entries
         )
 
@@ -220,7 +233,9 @@ class StructuredPlanSyncService:
                     (entry["library_workout_id"],),
                 ).fetchone()
                 if row:
-                    entry["expected_payload_hash"] = planning_library.library_payload_hash(row["payload"])
+                    entry["expected_payload_hash"] = (
+                        planning_library.library_payload_hash(row["payload"])
+                    )
         return entries
 
     @staticmethod

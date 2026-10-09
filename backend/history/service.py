@@ -33,7 +33,7 @@ class ChangeHistoryService:
             payload = self._profile_repository.get(db)
             try:
                 value = normalize_profile(json.loads(payload or "{}"))
-            except (TypeError, json.JSONDecodeError):
+            except TypeError, json.JSONDecodeError:
                 value = dict(DEFAULT_PROFILE)
         else:
             value = self._current_record(db, entity_type, entity_id)

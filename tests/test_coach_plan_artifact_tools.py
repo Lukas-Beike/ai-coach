@@ -15,7 +15,9 @@ class CoachPlanArtifactToolServiceTests(unittest.TestCase):
         self.factory = Mock(return_value=self.artifacts)
         self.service = CoachPlanArtifactToolService(self.factory)
 
-    def test_stage_authorizes_operation_and_local_plan_scope_before_service_call(self) -> None:
+    def test_stage_authorizes_operation_and_local_plan_scope_before_service_call(
+        self,
+    ) -> None:
         result = self.service.execute(
             "stage_training_plan",
             {"payload": {"workouts": []}},
@@ -30,34 +32,56 @@ class CoachPlanArtifactToolServiceTests(unittest.TestCase):
             {"payload": {"workouts": []}}, "conversation-1", "turn-1"
         )
 
-    def test_stage_rejects_missing_authorization_without_constructing_artifact_service(self) -> None:
+    def test_stage_rejects_missing_authorization_without_constructing_artifact_service(
+        self,
+    ) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "stage_training_plan", {}, {"operation": "other", "authorization_scope": ["local_plan"]},
-                "conversation-1", "turn-1",
+                "stage_training_plan",
+                {},
+                {"operation": "other", "authorization_scope": ["local_plan"]},
+                "conversation-1",
+                "turn-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.factory.assert_not_called()
 
-    def test_stage_rejects_missing_local_plan_scope_without_constructing_artifact_service(self) -> None:
+    def test_stage_rejects_missing_local_plan_scope_without_constructing_artifact_service(
+        self,
+    ) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "stage_training_plan", {}, {"operation": "stage_training_plan", "authorization_scope": []},
-                "conversation-1", "turn-1",
+                "stage_training_plan",
+                {},
+                {"operation": "stage_training_plan", "authorization_scope": []},
+                "conversation-1",
+                "turn-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.factory.assert_not_called()
 
     def test_commit_requires_classified_artifact_id(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "commit_training_plan", {}, {"operation": "commit_training_plan"},
-                "conversation-1", "turn-1",
+                "commit_training_plan",
+                {},
+                {"operation": "commit_training_plan"},
+                "conversation-1",
+                "turn-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (400, "artifact_required"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (400, "artifact_required"),
+        )
         self.factory.assert_not_called()
 
     def test_commit_rejects_argument_id_mismatch(self) -> None:
@@ -74,7 +98,10 @@ class CoachPlanArtifactToolServiceTests(unittest.TestCase):
                 "turn-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.factory.assert_not_called()
 
     def test_commit_requires_artifact_scope(self) -> None:
@@ -82,12 +109,19 @@ class CoachPlanArtifactToolServiceTests(unittest.TestCase):
             self.service.execute(
                 "commit_training_plan",
                 {"artifact_id": "artifact-1"},
-                {"operation": "commit_training_plan", "artifact_id": "artifact-1", "authorization_scope": []},
+                {
+                    "operation": "commit_training_plan",
+                    "artifact_id": "artifact-1",
+                    "authorization_scope": [],
+                },
                 "conversation-1",
                 "turn-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.factory.assert_not_called()
 
     def test_commit_passes_matching_id_explicit_flag_and_conversation(self) -> None:
@@ -110,8 +144,12 @@ class CoachPlanArtifactToolServiceTests(unittest.TestCase):
             "artifact-1", "conversation-1", explicit_artifact=True
         )
 
-    def test_unknown_tool_name_returns_none_without_constructing_artifact_service(self) -> None:
-        result = self.service.execute("some_other_tool", {}, {}, "conversation-1", "turn-1")
+    def test_unknown_tool_name_returns_none_without_constructing_artifact_service(
+        self,
+    ) -> None:
+        result = self.service.execute(
+            "some_other_tool", {}, {}, "conversation-1", "turn-1"
+        )
 
         self.assertIsNone(result)
         self.factory.assert_not_called()

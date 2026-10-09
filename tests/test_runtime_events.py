@@ -37,9 +37,13 @@ class StateEventBufferTests(unittest.TestCase):
         self.assertEqual(gap["latest_event_id"], 5)
         self.assertTrue(gap["gap"])
         self.assertEqual(gap["events"], [])
-        self.assertEqual([item["event_id"] for item in buffer.since(2)["events"]], [3, 4, 5])
+        self.assertEqual(
+            [item["event_id"] for item in buffer.since(2)["events"]], [3, 4, 5]
+        )
         self.assertEqual([item["event_id"] for item in buffer.since(-10)["events"]], [])
-        self.assertEqual([item["event_id"] for item in buffer.since("4")["events"]], [5])
+        self.assertEqual(
+            [item["event_id"] for item in buffer.since("4")["events"]], [5]
+        )
 
     def test_invalid_cursor_is_app_error(self):
         buffer = StateEventBuffer()
@@ -63,7 +67,10 @@ class StateEventBufferTests(unittest.TestCase):
             for index in range(events_per_worker):
                 buffer.publish("sync", {"worker": worker, "index": index})
 
-        threads = [threading.Thread(target=publish_events, args=(worker,)) for worker in range(workers)]
+        threads = [
+            threading.Thread(target=publish_events, args=(worker,))
+            for worker in range(workers)
+        ]
         for thread in threads:
             thread.start()
         for thread in threads:
@@ -72,7 +79,9 @@ class StateEventBufferTests(unittest.TestCase):
         self.assertTrue(all(not thread.is_alive() for thread in threads))
         events = buffer.since()["events"]
         self.assertEqual(len(events), workers * events_per_worker)
-        self.assertEqual([item["event_id"] for item in events], list(range(1, len(events) + 1)))
+        self.assertEqual(
+            [item["event_id"] for item in events], list(range(1, len(events) + 1))
+        )
 
     def test_wait_is_notified_by_publish_and_times_out(self):
         buffer = StateEventBuffer()
@@ -99,7 +108,9 @@ class StateEventBufferTests(unittest.TestCase):
 
         buffer.clear()
 
-        self.assertEqual(buffer.since(), {"events": [], "latest_event_id": 0, "gap": False})
+        self.assertEqual(
+            buffer.since(), {"events": [], "latest_event_id": 0, "gap": False}
+        )
         self.assertEqual(buffer.publish("planning")["event_id"], 1)
 
 

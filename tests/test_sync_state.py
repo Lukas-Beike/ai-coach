@@ -98,9 +98,7 @@ class SyncStateRepositoryTests(unittest.TestCase):
                 self.repository.set_sync_period(source, value, ALL_DAYS)
         with self.assertRaises(KeyError):
             self.repository.sync_period("other", DEFAULTS, ALL_DAYS)
-        self.assertEqual(
-            self.repository.set_sync_period("other", 90, ALL_DAYS), 90
-        )
+        self.assertEqual(self.repository.set_sync_period("other", 90, ALL_DAYS), 90)
         with self.database_manager.unit_of_work() as db:
             self.assertEqual(self.key_values.get(db, "other_sync_days"), "90")
 

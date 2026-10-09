@@ -411,7 +411,7 @@ def decode_payload(value: Any) -> Any:
     """Decode a JSON payload, returning an empty object for invalid input."""
     try:
         return json.loads(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
 
 

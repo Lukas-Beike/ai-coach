@@ -12,7 +12,9 @@ from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
 
 
 class TrainingTemplateToolTests(unittest.TestCase):
-    def test_restore_batch_uses_current_manager_and_rolls_back_prior_write(self) -> None:
+    def test_restore_batch_uses_current_manager_and_rolls_back_prior_write(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             old_manager = DatabaseManager(Path(directory) / "old.db", sqlite3)
             current_manager = DatabaseManager(Path(directory) / "current.db", sqlite3)
@@ -44,11 +46,18 @@ class TrainingTemplateToolTests(unittest.TestCase):
                 library_resolutions.append(active_manager[0])
                 return Library()
 
-            service = TrainingTemplateToolService(manager_factory, lock, library_factory)
-            active_manager[0] = current_manager  # Simulate manager replacement after restore.
+            service = TrainingTemplateToolService(
+                manager_factory, lock, library_factory
+            )
+            active_manager[0] = (
+                current_manager  # Simulate manager replacement after restore.
+            )
             intent = {
                 "operation": "manage_training_templates",
-                "authorization_scope": ["library_workout:restored", "library_workout:bad"],
+                "authorization_scope": [
+                    "library_workout:restored",
+                    "library_workout:bad",
+                ],
             }
 
             with self.assertRaisesRegex(AppError, "invalid template"):
@@ -70,7 +79,9 @@ class TrainingTemplateToolTests(unittest.TestCase):
             old_manager.close()
             current_manager.close()
 
-    def test_requires_operation_and_template_scope_before_manager_resolution(self) -> None:
+    def test_requires_operation_and_template_scope_before_manager_resolution(
+        self,
+    ) -> None:
         manager_calls = []
         service = TrainingTemplateToolService(
             lambda: manager_calls.append("manager"),

@@ -13,7 +13,10 @@ class PrivacyRestorePostRoutesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.auth_service = Mock()
         self.auth_service.require_auth.return_value = {"user": "athlete"}
-        self.auth_service.session_cookie_headers.return_value = ["cookie1=clear", "cookie2=clear"]
+        self.auth_service.session_cookie_headers.return_value = [
+            "cookie1=clear",
+            "cookie2=clear",
+        ]
         self.restore_service = Mock()
         self.restore_service.restore.return_value = {"restored": True}
         self.routes = PrivacyRestorePostRoutes(
@@ -30,7 +33,9 @@ class PrivacyRestorePostRoutesTests(unittest.TestCase):
         handled = self.routes.handle(self.handler, "/api/privacy/restore")
         self.assertTrue(handled)
         self.auth_service.require_auth.assert_called_once_with(self.handler)
-        self.auth_service.require_csrf.assert_called_once_with(self.handler, {"user": "athlete"})
+        self.auth_service.require_csrf.assert_called_once_with(
+            self.handler, {"user": "athlete"}
+        )
         self.handler.read_body.assert_called_once_with(10_000)
         self.restore_service.restore.assert_called_once_with(b"synthetic-backup-data")
         self.auth_service.session_cookie_headers.assert_called_once_with(clear=True)

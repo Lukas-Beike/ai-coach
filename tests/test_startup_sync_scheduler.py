@@ -75,7 +75,9 @@ class StartupSyncSchedulerTests(unittest.TestCase):
                 garmin.refresh_days = days
                 scheduler = self.make_scheduler(garmin=garmin)
                 scheduler.schedule()
-                job = next(job for job in self.queue.jobs if job[:2] == ("garmin", "refresh"))
+                job = next(
+                    job for job in self.queue.jobs if job[:2] == ("garmin", "refresh")
+                )
                 self.assertEqual(job[2]["days"], days)
 
     def test_startup_queues_capped_contiguous_garmin_window(self):
@@ -132,7 +134,11 @@ class StartupSyncSchedulerTests(unittest.TestCase):
                 (
                     "intervals",
                     "historical_backfill",
-                    {"days": 45, "reason": "startup historical backfill", "end_date": "2026-07-31"},
+                    {
+                        "days": 45,
+                        "reason": "startup historical backfill",
+                        "end_date": "2026-07-31",
+                    },
                     "startup",
                 ),
                 ("garmin", "refresh", {"days": 9, "reason": "startup"}, "startup"),
@@ -203,7 +209,14 @@ class StartupSyncSchedulerTests(unittest.TestCase):
         cases = (
             (None, {"days": 45, "reason": "startup historical backfill"}),
             ("not-a-date", {"days": 45, "reason": "startup historical backfill"}),
-            ("2026-08-01T12:30:00", {"days": 45, "reason": "startup historical backfill", "end_date": "2026-07-31"}),
+            (
+                "2026-08-01T12:30:00",
+                {
+                    "days": 45,
+                    "reason": "startup historical backfill",
+                    "end_date": "2026-07-31",
+                },
+            ),
         )
         for cursor, expected in cases:
             with self.subTest(cursor=cursor):

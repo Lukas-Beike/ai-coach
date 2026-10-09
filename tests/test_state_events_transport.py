@@ -30,21 +30,34 @@ class StateEventTransportTests(unittest.TestCase):
                 set_connection_timeout=lambda value: calls.append(("timeout", value)),
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (400, "invalid_event_cursor"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (400, "invalid_event_cursor"),
+        )
         self.assertEqual(calls, [])
 
     def test_initial_events_are_sent_before_ready_and_disconnect_ends_loop(self):
-        buffer = FakeEventBuffer([
-            {
-                "events": [
-                    {"event_id": 4, "event": "provider", "data": {"status": "running"}},
-                    {"event_id": 5, "event": "job", "data": {"status": "completed"}},
-                ],
-                "latest_event_id": 5,
-                "gap": False,
-            },
-            {"events": [], "latest_event_id": 5, "gap": False},
-        ])
+        buffer = FakeEventBuffer(
+            [
+                {
+                    "events": [
+                        {
+                            "event_id": 4,
+                            "event": "provider",
+                            "data": {"status": "running"},
+                        },
+                        {
+                            "event_id": 5,
+                            "event": "job",
+                            "data": {"status": "completed"},
+                        },
+                    ],
+                    "latest_event_id": 5,
+                    "gap": False,
+                },
+                {"events": [], "latest_event_id": 5, "gap": False},
+            ]
+        )
         events = []
 
         def send_event(*event):
@@ -75,11 +88,13 @@ class StateEventTransportTests(unittest.TestCase):
         self.assertEqual(buffer.wait_timeouts, [15])
 
     def test_gap_reset_and_heartbeat_preserve_cursor_sequence(self):
-        buffer = FakeEventBuffer([
-            {"events": [], "latest_event_id": 3, "gap": False},
-            {"events": [], "latest_event_id": 9, "gap": True},
-            {"events": [], "latest_event_id": 9, "gap": False},
-        ])
+        buffer = FakeEventBuffer(
+            [
+                {"events": [], "latest_event_id": 3, "gap": False},
+                {"events": [], "latest_event_id": 9, "gap": True},
+                {"events": [], "latest_event_id": 9, "gap": False},
+            ]
+        )
         events = []
 
         def send_event(*event):

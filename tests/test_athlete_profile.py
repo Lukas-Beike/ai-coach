@@ -42,7 +42,9 @@ class AthleteProfileTests(unittest.TestCase):
         self.assertNotIn("admin", result)
 
     def test_known_values_are_stringified_trimmed_and_limited(self):
-        result = normalize_profile({"name": "  Ada  ", "weight_kg": 72, "goals": " x " * 5000})
+        result = normalize_profile(
+            {"name": "  Ada  ", "weight_kg": 72, "goals": " x " * 5000}
+        )
         self.assertEqual(result["name"], "Ada")
         self.assertEqual(result["weight_kg"], "72")
         self.assertEqual(len(result["goals"]), 4000)
@@ -58,7 +60,10 @@ class AthleteProfileTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             timezone_name("Mars/NotAZone", strict=True)
         self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(raised.exception.message, "Die Zeitzone muss eine gültige IANA-Zeitzone sein.")
+        self.assertEqual(
+            raised.exception.message,
+            "Die Zeitzone muss eine gültige IANA-Zeitzone sein.",
+        )
 
     def test_normalize_profile_validates_timezone_only_when_requested(self):
         invalid = {"timezone": "Mars/NotAZone"}
@@ -68,7 +73,10 @@ class AthleteProfileTests(unittest.TestCase):
 
     def test_normalize_profile_does_not_mutate_input(self):
         value = {"name": "  Ada  ", "timezone": "UTC", "unknown": ["keep"]}
-        original = {key: item.copy() if isinstance(item, list) else item for key, item in value.items()}
+        original = {
+            key: item.copy() if isinstance(item, list) else item
+            for key, item in value.items()
+        }
         normalize_profile(value, validate_timezone=True)
         self.assertEqual(value, original)
 

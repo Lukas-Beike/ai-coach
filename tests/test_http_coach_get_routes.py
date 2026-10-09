@@ -105,7 +105,10 @@ class CoachGetRoutesTests(unittest.TestCase):
         self.auth.require_auth.assert_called_once_with(first)
         second_auth.require_auth.assert_called_once_with(second)
         self.jobs.stream_status.assert_has_calls(
-            [unittest.mock.call("csrf-session-one"), unittest.mock.call("csrf-session-two")]
+            [
+                unittest.mock.call("csrf-session-one"),
+                unittest.mock.call("csrf-session-two"),
+            ]
         )
 
     def test_unknown_path_has_no_auth_or_service_calls(self) -> None:

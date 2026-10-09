@@ -127,9 +127,7 @@ class ProviderRefreshCommandServiceTests(unittest.TestCase):
         self.intervals.sync.return_value = {"status": "already_running"}
 
         with self.assertRaises(AppError) as error:
-            self.service.start(
-                "intervals", {"days": 30, "_wait_for_completion": True}
-            )
+            self.service.start("intervals", {"days": 30, "_wait_for_completion": True})
 
         self.assertEqual(error.exception.status, 503)
         self.assertEqual(error.exception.reason, "provider_busy")
@@ -142,9 +140,7 @@ class ProviderRefreshCommandServiceTests(unittest.TestCase):
         ]
 
         with self.assertRaises(AppError) as error:
-            self.service.start(
-                "intervals", {"days": 30, "_wait_for_completion": True}
-            )
+            self.service.start("intervals", {"days": 30, "_wait_for_completion": True})
 
         self.assertEqual(error.exception.status, 503)
         self.assertEqual(error.exception.reason, "provider_busy")

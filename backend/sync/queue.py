@@ -86,7 +86,9 @@ class SyncJobQueueService:
             if created:
                 self._wake_event.set()
                 self._publish_created_sync_job(result["id"], result)
-            requested = str(requested_by or "system").strip().casefold()[:40] or "system"
+            requested = (
+                str(requested_by or "system").strip().casefold()[:40] or "system"
+            )
             if (
                 requested in {"startup", "scheduler"}
                 and envelope["type"] == "refresh"

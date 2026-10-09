@@ -17,7 +17,9 @@ from backend.sync.queue import SyncJobQueueService
 
 
 class _StateVersionProvider(Protocol):
-    def versions(self, snapshot_metadata: dict[str, Any] | None = None) -> dict[str, str]: ...
+    def versions(
+        self, snapshot_metadata: dict[str, Any] | None = None
+    ) -> dict[str, str]: ...
 
 
 class SyncOperationStateWriter:
@@ -102,7 +104,7 @@ def project_sync_status(
     status = get_value("sync_operation_status") or ("running" if running else "idle")
     try:
         progress = max(0, min(int(get_value("sync_operation_progress") or 0), 100))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         progress = 0
     return {
         "status": status,

@@ -66,7 +66,7 @@ class PrivacyDataExportService:
             value = dependencies.key_value_repository.get(db, key)
         try:
             return json.loads(value or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return {}
 
     def export(self) -> dict[str, Any]:
@@ -122,7 +122,7 @@ class PrivacyDataExportService:
             value = row["value"]
             try:
                 application_state[key] = json.loads(value)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 application_state[key] = value
 
         garmin_data = self._stored_json("garmin_snapshot")

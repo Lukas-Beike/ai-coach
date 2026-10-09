@@ -21,20 +21,31 @@ from backend.errors import AppError
 class StructuredToolCallMetadataTests(unittest.TestCase):
     tools: ClassVar[list[dict[str, str]]] = [{"name": "update_profile"}]
 
-    def item(self, *, call_id: str = "call-1", arguments: str = '{"timezone":"UTC"}') -> dict[str, str]:
+    def item(
+        self, *, call_id: str = "call-1", arguments: str = '{"timezone":"UTC"}'
+    ) -> dict[str, str]:
         return {"name": "update_profile", "call_id": call_id, "arguments": arguments}
 
-    def assert_app_error(self, expected_status: int, expected_reason: str, call, *args) -> None:
+    def assert_app_error(
+        self, expected_status: int, expected_reason: str, call, *args
+    ) -> None:
         with self.assertRaises(AppError) as raised:
             call(*args)
         self.assertEqual(raised.exception.status, expected_status)
         self.assertEqual(raised.exception.reason, expected_reason)
 
     def test_projects_fresh_arguments_and_stable_keys(self) -> None:
-        item = self.item(arguments=json.dumps({
-            "timezone": "UTC",
-            "_request": {"scope": ["profile", "activities"], "period": "next_week"},
-        }))
+        item = self.item(
+            arguments=json.dumps(
+                {
+                    "timezone": "UTC",
+                    "_request": {
+                        "scope": ["profile", "activities"],
+                        "period": "next_week",
+                    },
+                }
+            )
+        )
         projected = structured_tool_call_metadata(item, self.tools, [])
         repeated = structured_tool_call_metadata(item, self.tools, [])
         arguments = json.loads(item["arguments"])
@@ -43,18 +54,36 @@ class StructuredToolCallMetadataTests(unittest.TestCase):
         self.assertIsNot(projected["arguments"], arguments)
         self.assertEqual(projected["name"], "update_profile")
         self.assertEqual(projected["call_id"], "call-1")
-        self.assertEqual(projected["action"], {"operation": "update_profile", "authorization_scope": []})
-        self.assertEqual(projected["effect_key"], dialogue_effect_key("update_profile", arguments))
+        self.assertEqual(
+            projected["action"],
+            {"operation": "update_profile", "authorization_scope": []},
+        )
+        self.assertEqual(
+            projected["effect_key"], dialogue_effect_key("update_profile", arguments)
+        )
         self.assertEqual(projected["repair_key"], repair_key)
-        self.assertEqual(projected["scope_repair_key"], dialogue_scope_repair_key("update_profile", arguments))
-        self.assertEqual(projected["request_binding_key"], dialogue_request_binding_key(arguments))
-        self.assertEqual(projected["plan_effect_key"], dialogue_plan_effect_key("update_profile", arguments))
-        self.assertEqual(projected["step_key"], coach_action_hash({
-            "name": "update_profile",
-            "scope": ["activities", "profile"],
-            "period": "next_week",
-            "repair_key": repair_key,
-        }))
+        self.assertEqual(
+            projected["scope_repair_key"],
+            dialogue_scope_repair_key("update_profile", arguments),
+        )
+        self.assertEqual(
+            projected["request_binding_key"], dialogue_request_binding_key(arguments)
+        )
+        self.assertEqual(
+            projected["plan_effect_key"],
+            dialogue_plan_effect_key("update_profile", arguments),
+        )
+        self.assertEqual(
+            projected["step_key"],
+            coach_action_hash(
+                {
+                    "name": "update_profile",
+                    "scope": ["activities", "profile"],
+                    "period": "next_week",
+                    "repair_key": repair_key,
+                }
+            ),
+        )
         self.assertEqual(
             {key: value for key, value in projected.items() if key != "call_id"},
             {key: value for key, value in repeated.items() if key != "call_id"},
@@ -73,7 +102,9 @@ class StructuredToolCallMetadataTests(unittest.TestCase):
                 )
 
     def test_accepts_maximum_call_id_length(self) -> None:
-        projected = structured_tool_call_metadata(self.item(call_id="x" * 200), self.tools, [])
+        projected = structured_tool_call_metadata(
+            self.item(call_id="x" * 200), self.tools, []
+        )
         self.assertEqual(len(projected["call_id"]), 200)
 
     def test_command_limit_allows_only_existing_replay_id(self) -> None:

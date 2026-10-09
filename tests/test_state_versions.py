@@ -51,7 +51,9 @@ class StateVersionServiceTests(unittest.TestCase):
             self.manager, self.key_values, self.snapshot_repository, lambda: NOW
         )
         self.profile = ProfileService(
-            self.manager, ProfileRepository(self.key_values), self.key_values,
+            self.manager,
+            ProfileRepository(self.key_values),
+            self.key_values,
             on_location_changed=lambda *args, **kwargs: None,
         )
         self.service = StateVersionService(

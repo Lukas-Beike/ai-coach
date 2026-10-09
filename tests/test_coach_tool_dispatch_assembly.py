@@ -18,41 +18,57 @@ class CoachToolDispatchAssemblyTests(unittest.TestCase):
         dependencies = {
             name: Mock(name=name)
             for name in (
-                "read_tools", "profile_update", "athlete_records", "artifacts",
-                "plan_replacement", "training_changes", "manager", "db_lock",
-                "library", "library_plans", "sync_tools", "adaptive_preview",
-                "adaptive_apply", "training_plan", "history_undo", "proposal_creation",
+                "read_tools",
+                "profile_update",
+                "athlete_records",
+                "artifacts",
+                "plan_replacement",
+                "training_changes",
+                "manager",
+                "db_lock",
+                "library",
+                "library_plans",
+                "sync_tools",
+                "adaptive_preview",
+                "adaptive_apply",
+                "training_plan",
+                "history_undo",
+                "proposal_creation",
             )
         }
-        assembly = CoachToolDispatchAssembly(dependencies=CoachToolDispatchAssembly.Inputs(
-            reads=CoachReadToolOwners(
-                read_tools=dependencies["read_tools"],
-                profile_update=dependencies["profile_update"],
-                athlete_records=dependencies["athlete_records"],
-            ),
-            planning=CoachPlanningToolOwners(
-                training_plan_artifacts=dependencies["artifacts"],
-                training_plan_replacement=dependencies["plan_replacement"],
-                training_changes=dependencies["training_changes"],
-                database_manager=dependencies["manager"],
-                database_lock=dependencies["db_lock"],
-                workout_library_service=dependencies["library"],
-                training_plan_service=dependencies["training_plan"],
-            ),
-            sync=CoachSyncToolOwners(
-                library_plan_tools=dependencies["library_plans"],
-                sync_tools=dependencies["sync_tools"],
-                history_undo=dependencies["history_undo"],
-            ),
-            proposals=CoachProposalToolOwners(
-                adaptive_preview=dependencies["adaptive_preview"],
-                adaptive_apply=dependencies["adaptive_apply"],
-                proposal_creation=dependencies["proposal_creation"],
-            ),
-        ))
+        assembly = CoachToolDispatchAssembly(
+            dependencies=CoachToolDispatchAssembly.Inputs(
+                reads=CoachReadToolOwners(
+                    read_tools=dependencies["read_tools"],
+                    profile_update=dependencies["profile_update"],
+                    athlete_records=dependencies["athlete_records"],
+                ),
+                planning=CoachPlanningToolOwners(
+                    training_plan_artifacts=dependencies["artifacts"],
+                    training_plan_replacement=dependencies["plan_replacement"],
+                    training_changes=dependencies["training_changes"],
+                    database_manager=dependencies["manager"],
+                    database_lock=dependencies["db_lock"],
+                    workout_library_service=dependencies["library"],
+                    training_plan_service=dependencies["training_plan"],
+                ),
+                sync=CoachSyncToolOwners(
+                    library_plan_tools=dependencies["library_plans"],
+                    sync_tools=dependencies["sync_tools"],
+                    history_undo=dependencies["history_undo"],
+                ),
+                proposals=CoachProposalToolOwners(
+                    adaptive_preview=dependencies["adaptive_preview"],
+                    adaptive_apply=dependencies["adaptive_apply"],
+                    proposal_creation=dependencies["proposal_creation"],
+                ),
+            )
+        )
         return assembly, dependencies
 
-    def test_assembly_caches_stateless_dispatcher_and_preserves_deferred_factories(self):
+    def test_assembly_caches_stateless_dispatcher_and_preserves_deferred_factories(
+        self,
+    ):
         assembly, dependencies = self.make_assembly()
         constructors = (
             "CoachPlanArtifactToolService",
@@ -61,7 +77,9 @@ class CoachToolDispatchAssemblyTests(unittest.TestCase):
             "CoachPlanningActionToolService",
             "CoachToolDispatchService",
         )
-        with patch.multiple(tool_dispatch_assembly, **{name: DEFAULT for name in constructors}) as factories:
+        with patch.multiple(
+            tool_dispatch_assembly, **{name: DEFAULT for name in constructors}
+        ) as factories:
             first = assembly.service()
             second = assembly.service()
 
@@ -82,7 +100,9 @@ class CoachToolDispatchAssemblyTests(unittest.TestCase):
             dependencies["manager"], dependencies["db_lock"], dependencies["library"]
         )
         self.assertEqual(factories["CoachPlanArtifactToolService"].call_count, 1)
-        factories["CoachPlanArtifactToolService"].assert_called_with(dependencies["artifacts"])
+        factories["CoachPlanArtifactToolService"].assert_called_with(
+            dependencies["artifacts"]
+        )
         self.assertEqual(factories["CoachPlanningChangeToolService"].call_count, 1)
         factories["CoachPlanningChangeToolService"].assert_called_with(
             dependencies["plan_replacement"], dependencies["training_changes"]

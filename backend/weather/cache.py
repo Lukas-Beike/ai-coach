@@ -31,7 +31,7 @@ def _record(value: Any) -> dict[str, Any]:
         return value.copy()
     try:
         parsed = json.loads(value or "{}") if isinstance(value, str) else {}
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
 
@@ -39,7 +39,7 @@ def _record(value: Any) -> dict[str, Any]:
 def _failure_count(failure: dict[str, Any]) -> int:
     try:
         return max(0, int(failure.get("count") or 0))
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return 0
 
 
@@ -72,7 +72,7 @@ def cache_state(
             if cache_matches
             else float("inf")
         )
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         cache_age = float("inf")
     error = (
         "Wetterdaten sind veraltet."
@@ -95,7 +95,7 @@ def retry_wait(failure: Any, *, now: datetime) -> float:
         return (
             _parse_utc(_record(failure).get("retry_at")) - _as_utc(now)
         ).total_seconds()
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return 0
 
 

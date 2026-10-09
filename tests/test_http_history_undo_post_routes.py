@@ -21,7 +21,10 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
         preview = {
             "status": "preview",
             "undo_target_hash": "synthetic-target-hash",
-            "proposal": {"action_type": "undo_change", "payload": {"change_id": "synthetic-change-id"}},
+            "proposal": {
+                "action_type": "undo_change",
+                "payload": {"change_id": "synthetic-change-id"},
+            },
         }
         proposed_action = {"id": "synthetic-proposal-id", "status": "preview"}
         self.handler.read_json.return_value = request
@@ -37,7 +40,10 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
         self.undo.preview.assert_called_once_with("synthetic-change-id")
         self.proposal_factory.assert_called_once_with()
         self.proposal.create.assert_called_once_with(
-            {"action_type": "undo_change", "payload": {"change_id": "synthetic-change-id"}},
+            {
+                "action_type": "undo_change",
+                "payload": {"change_id": "synthetic-change-id"},
+            },
             "synthetic-session-hash",
         )
         self.handler.read_json.assert_called_once_with()
@@ -51,12 +57,17 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
         )
 
     def test_apply_passes_whole_payload_and_sends_result(self) -> None:
-        payload = {"change_id": "synthetic-change-id", "expected_current_hash": "synthetic-hash"}
+        payload = {
+            "change_id": "synthetic-change-id",
+            "expected_current_hash": "synthetic-hash",
+        }
         result = {"status": "undone", "remote_untouched": True}
         self.handler.read_json.return_value = payload
         self.undo.apply.return_value = result
 
-        handled = self.routes.handle(self.handler, "/api/change-history/undo", self.session)
+        handled = self.routes.handle(
+            self.handler, "/api/change-history/undo", self.session
+        )
 
         self.assertTrue(handled)
         self.undo_factory.assert_called_once_with()
@@ -82,10 +93,17 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
         second_proposal.create.return_value = {"proposed_action": {"id": "second"}}
         self.undo_factory.side_effect = [first_undo, second_undo]
         self.proposal_factory.side_effect = [first_proposal, second_proposal]
-        self.handler.read_json.side_effect = [{"change_id": "first"}, {"change_id": "second"}]
+        self.handler.read_json.side_effect = [
+            {"change_id": "first"},
+            {"change_id": "second"},
+        ]
 
-        self.routes.handle(self.handler, "/api/change-history/undo/preview", self.session)
-        self.routes.handle(self.handler, "/api/change-history/undo/preview", self.session)
+        self.routes.handle(
+            self.handler, "/api/change-history/undo/preview", self.session
+        )
+        self.routes.handle(
+            self.handler, "/api/change-history/undo/preview", self.session
+        )
 
         self.undo_factory.assert_has_calls([call(), call()])
         self.proposal_factory.assert_has_calls([call(), call()])

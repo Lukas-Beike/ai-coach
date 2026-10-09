@@ -31,7 +31,7 @@ def _number(value: Any, maximum: float) -> float | None:
         return None
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return (
         round(number, 4) if math.isfinite(number) and 0 <= number <= maximum else None
@@ -229,7 +229,7 @@ class OpenFoodFactsClient:
             )
         except HTTPError as exc:
             self._raise_http_error(exc)
-        except (URLError, OSError, ProviderInvalidResponse, ProviderResponseTooLarge):
+        except URLError, OSError, ProviderInvalidResponse, ProviderResponseTooLarge:
             raise AppError(
                 502, UNAVAILABLE, reason="food_database_unavailable"
             ) from None

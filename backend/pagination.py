@@ -15,7 +15,7 @@ def api_page_limit(
 ) -> int:
     try:
         return max(1, min(int(raw), maximum))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 
@@ -30,5 +30,5 @@ def decode_page_cursor(value: Any) -> Any | None:
     try:
         padding = "=" * (-len(str(value)) % 4)
         return json.loads(base64.urlsafe_b64decode(f"{value}{padding}"))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None

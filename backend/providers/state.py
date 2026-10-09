@@ -180,9 +180,7 @@ class ProviderStateService:
 
     def record_rate_limits(self, headers: Any) -> None:
         with self._lock, self._manager.unit_of_work() as db:
-            snapshot = rate_limit_snapshot(
-                headers, updated_at=_timestamp(self._now())
-            )
+            snapshot = rate_limit_snapshot(headers, updated_at=_timestamp(self._now()))
             if snapshot:
                 self._repository.set(db, _OPENAI_RATE_LIMITS_KEY, _json(snapshot))
 

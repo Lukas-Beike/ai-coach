@@ -81,13 +81,15 @@ class ServerRuntimeTests(ServerTestCase):
         self.assertEqual(gate.state(), {"active": False, "running_operations": 0})
 
     def test_more_segments_group_settings_and_localize_sensitive_inputs(self):
-        app = (Path(__file__).resolve().parents[1] / "public" / "settings.js").read_text(
-            encoding="utf-8"
-        )
+        app = (
+            Path(__file__).resolve().parents[1] / "public" / "settings.js"
+        ).read_text(encoding="utf-8")
         forms = (Path(__file__).resolve().parents[1] / "public" / "forms.js").read_text(
             encoding="utf-8"
         )
-        views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(encoding="utf-8")
+        views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(
+            encoding="utf-8"
+        )
         navigation = (
             Path(__file__).resolve().parents[1] / "public" / "navigation.js"
         ).read_text(encoding="utf-8")
@@ -97,13 +99,15 @@ class ServerRuntimeTests(ServerTestCase):
         for segment in ("profile", "connections", "coach", "privacy", "operations"):
             self.assertIn(f'"more/{segment}"', navigation)
             self.assertIn(f'href="#more/{segment}"', index)
-        self.assertIn("function moreSegmentFromRoute(route = AppState.state.route)", navigation)
         self.assertIn(
-            "function renderMoreSegments(segment)", views
+            "function moreSegmentFromRoute(route = AppState.state.route)", navigation
         )
+        self.assertIn("function renderMoreSegments(segment)", views)
         self.assertIn('formData.getAll("sports")', app)
         self.assertNotIn("function collectCompetitions()", forms)
-        plan_views = (Path(__file__).resolve().parents[1] / "public" / "plan-views.js").read_text(encoding="utf-8")
+        plan_views = (
+            Path(__file__).resolve().parents[1] / "public" / "plan-views.js"
+        ).read_text(encoding="utf-8")
         self.assertIn("function competitionCard(", plan_views)
         self.assertNotIn("function competitionCard(", app)
         self.assertIn('name="sports" multiple', index)
@@ -111,7 +115,8 @@ class ServerRuntimeTests(ServerTestCase):
         self.assertIn('id="profileContextNotice"', index)
         self.assertIn("Erwartete Dauer (hh:mm)", plan_views)
         self.assertIn(
-            'competitionFact("Distanz", distanceLabel(competition.distance))', plan_views
+            'competitionFact("Distanz", distanceLabel(competition.distance))',
+            plan_views,
         )
         self.assertIn('data-more-segment-panel="privacy"', index)
         self.assertIn('data-more-segment-panel="operations"', index)

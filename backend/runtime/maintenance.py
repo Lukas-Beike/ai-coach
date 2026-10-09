@@ -22,7 +22,10 @@ class MaintenanceGate:
     def operation(self, expected_generation: int | None = None):
         with self.condition:
             depth = getattr(self.local, "depth", 0)
-            if expected_generation is not None and expected_generation != self.generation:
+            if (
+                expected_generation is not None
+                and expected_generation != self.generation
+            ):
                 raise AppError(
                     409,
                     "Der Auftrag wurde durch eine Datenlöschung verworfen.",

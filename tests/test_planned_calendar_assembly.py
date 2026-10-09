@@ -14,16 +14,21 @@ from backend.sync.planned_calendar_assembly import (
 
 class PlannedCalendarSyncAssemblyTests(unittest.TestCase):
     def _assembly(self, callbacks):
-        return PlannedCalendarSyncAssembly(dependencies=PlannedCalendarSyncAssembly.Inputs(
-            provider=PlannedCalendarProvider(
-                callbacks["config"], callbacks["database_manager"],
-                callbacks["intervals_client"],
-            ),
-            local_state=PlannedCalendarLocalState(
-                callbacks["state_writer"], callbacks["utc_now"], callbacks["today"],
-            ),
-            future_days=35,
-        ))
+        return PlannedCalendarSyncAssembly(
+            dependencies=PlannedCalendarSyncAssembly.Inputs(
+                provider=PlannedCalendarProvider(
+                    callbacks["config"],
+                    callbacks["database_manager"],
+                    callbacks["intervals_client"],
+                ),
+                local_state=PlannedCalendarLocalState(
+                    callbacks["state_writer"],
+                    callbacks["utc_now"],
+                    callbacks["today"],
+                ),
+                future_days=35,
+            )
+        )
 
     def test_construction_does_not_resolve_runtime_dependencies(self):
         callbacks = {
@@ -51,9 +56,12 @@ class PlannedCalendarSyncAssemblyTests(unittest.TestCase):
         }
         assembly = self._assembly(callbacks)
 
-        with patch.object(assembly_module, "PlannedCalendarSyncService") as sync_type, patch.object(
-            assembly_module, "PlannedCalendarRepairService"
-        ) as repair_type:
+        with (
+            patch.object(assembly_module, "PlannedCalendarSyncService") as sync_type,
+            patch.object(
+                assembly_module, "PlannedCalendarRepairService"
+            ) as repair_type,
+        ):
             sync_service = assembly.sync_service()
             repair_service = assembly.repair_service()
 

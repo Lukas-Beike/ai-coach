@@ -11,15 +11,23 @@ from backend.errors import AppError
 
 
 class CoachClarificationService:
-    def __init__(self, database_manager: DatabaseManager, key_values: KeyValueRepository, db_lock: Any) -> None:
+    def __init__(
+        self,
+        database_manager: DatabaseManager,
+        key_values: KeyValueRepository,
+        db_lock: Any,
+    ) -> None:
         self._database_manager = database_manager
         self._key_values = key_values
         self._db_lock = db_lock
 
-    def save_question(self, arguments: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    def save_question(
+        self, arguments: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         ids = arguments.get("source_message_ids")
         user_ids = {
-            item["id"] for item in context["messages"]
+            item["id"]
+            for item in context["messages"]
             if item["role"] == "user" and type(item["id"]) is int
         }
         current_user_id = context["current_user_message_id"]
@@ -59,5 +67,7 @@ class CoachClarificationService:
             "status": "needs_clarification",
         }
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            self._key_values.set(db, "coach_pending_request", json.dumps(pending, ensure_ascii=False))
+            self._key_values.set(
+                db, "coach_pending_request", json.dumps(pending, ensure_ascii=False)
+            )
         return {"ok": True, "status": "needs_clarification", "question": question}

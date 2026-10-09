@@ -23,13 +23,13 @@ def timestamp(value: Any) -> datetime | None:
     """Normalize Garmin epoch seconds/milliseconds and ISO timestamps to UTC."""
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         number = None
     if number is not None and math.isfinite(number):
         try:
             seconds = number / 1000 if number > 10_000_000_000 else number
             return datetime.fromtimestamp(seconds, timezone.utc)
-        except (OSError, OverflowError, ValueError):
+        except OSError, OverflowError, ValueError:
             return None
     if not isinstance(value, str):
         return None
@@ -79,7 +79,7 @@ def sleep_bounds(payload: Any) -> tuple[datetime | None, datetime | None]:
 def _number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -180,7 +180,7 @@ def cached_result(
         return {"status": "already_loaded", "sleep_date": sleep_date}
     try:
         attempts = int(record.get("attempts") or 1)
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         attempts = 1
     if attempts >= max_attempts:
         return {"status": "attempts_exhausted", "sleep_date": sleep_date}

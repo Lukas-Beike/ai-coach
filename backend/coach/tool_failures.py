@@ -47,7 +47,9 @@ class CoachStructuredToolFailureService:
             else "Die Werkzeugargumente sind ungültig. Prüfe das Schema und den aktuellen Zustand und korrigiere den Aufruf.",
         }
         validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
-        if validation_reason and re.fullmatch(r"request_[a-z_]{1,72}", validation_reason):
+        if validation_reason and re.fullmatch(
+            r"request_[a-z_]{1,72}", validation_reason
+        ):
             result["validation_reason"] = validation_reason
         if not result["reason"]:
             result["reason"] = (

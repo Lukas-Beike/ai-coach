@@ -456,18 +456,23 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
                     (
                         f"archived-{index:03d}",
                         f"archived-{index:03d}",
-                        json.dumps({
-                            "type": "Ride", "name": f"000 archived {index:03d}",
-                            "archived": True,
-                        }),
+                        json.dumps(
+                            {
+                                "type": "Ride",
+                                "name": f"000 archived {index:03d}",
+                                "archived": True,
+                            }
+                        ),
                         NOW,
                     )
                     for index in range(100)
                 ]
                 + [
                     (
-                        "active-after-limit", "active-after-limit",
-                        json.dumps({"type": "Ride", "name": "zzz active"}), NOW,
+                        "active-after-limit",
+                        "active-after-limit",
+                        json.dumps({"type": "Ride", "name": "zzz active"}),
+                        NOW,
                     )
                 ],
             )
@@ -479,8 +484,12 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
         self.assertEqual(len(self.service.list(limit=100, include_archived=True)), 101)
 
     def test_list_uses_id_to_stabilize_equal_template_sort_keys(self) -> None:
-        self._insert_payload("tie-z", json.dumps({"id": "tie-z", "type": "Ride", "name": "Same"}))
-        self._insert_payload("tie-a", json.dumps({"id": "tie-a", "type": "Ride", "name": "Same"}))
+        self._insert_payload(
+            "tie-z", json.dumps({"id": "tie-z", "type": "Ride", "name": "Same"})
+        )
+        self._insert_payload(
+            "tie-a", json.dumps({"id": "tie-a", "type": "Ride", "name": "Same"})
+        )
 
         self.assertEqual(
             [entry["id"] for entry in self.service.list()], ["tie-a", "tie-z"]

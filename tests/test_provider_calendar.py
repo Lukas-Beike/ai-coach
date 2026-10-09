@@ -50,12 +50,22 @@ def parse(payload: bytes, *, start=date(2026, 9, 1), end=None, zone=UTC):
 class CalendarProviderTests(unittest.TestCase):
     def test_provider_returns_dto_and_domain_maps_constraints_without_mutation(self):
         records = provider_calendar_events(
-            feed("UID:synthetic\r\nDTSTART:20260901T100000Z\r\nSUMMARY:Trip\r\nDESCRIPTION:[NO_TRAINING] [NO_INTENSITY] [SHORT_ONLY]"),
+            feed(
+                "UID:synthetic\r\nDTSTART:20260901T100000Z\r\nSUMMARY:Trip\r\nDESCRIPTION:[NO_TRAINING] [NO_INTENSITY] [SHORT_ONLY]"
+            ),
             local_zone=UTC,
             today=date(2026, 9, 1),
         )
         original = dict(records[0])
-        self.assertTrue({"training_impact", "training_relevant", "no_training", "no_intensity", "short_only"}.isdisjoint(original))
+        self.assertTrue(
+            {
+                "training_impact",
+                "training_relevant",
+                "no_training",
+                "no_intensity",
+                "short_only",
+            }.isdisjoint(original)
+        )
         mapped = calendar_event_constraints(records[0])
         self.assertEqual(records[0], original)
         self.assertNotIn("description", mapped)

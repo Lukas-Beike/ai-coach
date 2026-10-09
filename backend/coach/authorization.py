@@ -20,22 +20,48 @@ def coach_session_key(session_csrf_hash: str) -> str:
 REQUEST_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["summary", "source_message_ids", "target", "scope", "period", "constraints", "remote_write", "sync_scope"],
+    "required": [
+        "summary",
+        "source_message_ids",
+        "target",
+        "scope",
+        "period",
+        "constraints",
+        "remote_write",
+        "sync_scope",
+    ],
     "properties": {
         "summary": {"type": "string", "maxLength": 2000},
-        "source_message_ids": {"type": "array", "items": {"type": "integer"}, "minItems": 1, "maxItems": 24},
-        "target": {"type": "string", "enum": ["local", "intervals", "garmin", "calendar", "weather"]},
+        "source_message_ids": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "minItems": 1,
+            "maxItems": 24,
+        },
+        "target": {
+            "type": "string",
+            "enum": ["local", "intervals", "garmin", "calendar", "weather"],
+        },
         "scope": {"type": "array", "items": {"type": "string"}, "maxItems": 400},
-        "period": {"type": ["object", "null"], "additionalProperties": False,
-                   "properties": {"start": {"type": "string"}, "end": {"type": "string"}}, "required": ["start", "end"]},
+        "period": {
+            "type": ["object", "null"],
+            "additionalProperties": False,
+            "properties": {"start": {"type": "string"}, "end": {"type": "string"}},
+            "required": ["start", "end"],
+        },
         "constraints": {"type": "array", "items": {"type": "string"}, "maxItems": 24},
         "remote_write": {"type": "boolean"},
-        "sync_scope": {"type": ["string", "null"], "enum": ["created", "selected", "all_pending", None]},
+        "sync_scope": {
+            "type": ["string", "null"],
+            "enum": ["created", "selected", "all_pending", None],
+        },
     },
 }
 
 
-def _validate_request_provenance(value: dict[str, Any], user_ids: set[int], current_user_id: int) -> None:
+def _validate_request_provenance(
+    value: dict[str, Any], user_ids: set[int], current_user_id: int
+) -> None:
     ids = value["source_message_ids"]
     valid = isinstance(ids, list) and 1 <= len(ids) <= 24
     valid = valid and all(type(item) is int and item in user_ids for item in ids)
@@ -52,13 +78,21 @@ def _validate_request_text(value: dict[str, Any]) -> None:
     for key, count, length in (("scope", 400, 160), ("constraints", 24, 1000)):
         items = value[key]
         valid = isinstance(items, list) and len(items) <= count
-        valid = valid and all(isinstance(item, str) and item.strip() and len(item) <= length for item in items)
+        valid = valid and all(
+            isinstance(item, str) and item.strip() and len(item) <= length
+            for item in items
+        )
         if not valid:
             raise ValueError("request_" + key)
 
 
 def _validate_request_sync(value: dict[str, Any]) -> None:
-    if type(value["remote_write"]) is not bool or value["sync_scope"] not in {None, "created", "selected", "all_pending"}:
+    if type(value["remote_write"]) is not bool or value["sync_scope"] not in {
+        None,
+        "created",
+        "selected",
+        "all_pending",
+    }:
         raise ValueError("request_sync")
 
 
@@ -68,11 +102,17 @@ def _validate_request_period(period: Any) -> None:
     if not isinstance(period, dict) or set(period) != {"start", "end"}:
         raise ValueError("request_period")
     start, end = date.fromisoformat(period["start"]), date.fromisoformat(period["end"])
-    if start.isoformat() != period["start"] or end.isoformat() != period["end"] or not 0 <= (end - start).days <= 730:
+    if (
+        start.isoformat() != period["start"]
+        or end.isoformat() != period["end"]
+        or not 0 <= (end - start).days <= 730
+    ):
         raise ValueError("request_period")
 
 
-def validate_request(value: Any, user_ids: set[int], current_user_id: int) -> dict[str, Any]:
+def validate_request(
+    value: Any, user_ids: set[int], current_user_id: int
+) -> dict[str, Any]:
     """Validate provenance and bounds, never the user's choice of words."""
     if not isinstance(value, dict) or set(value) != set(REQUEST_SCHEMA["required"]):
         raise ValueError("request_fields")
@@ -83,7 +123,9 @@ def validate_request(value: Any, user_ids: set[int], current_user_id: int) -> di
     return deepcopy(value)
 
 
-def dialogue_tools(tools: list[dict[str, Any]], read_tools: set[str]) -> list[dict[str, Any]]:
+def dialogue_tools(
+    tools: list[dict[str, Any]], read_tools: set[str]
+) -> list[dict[str, Any]]:
     result = deepcopy(tools)
     for tool in result:
         if tool["name"] not in read_tools:
@@ -96,27 +138,49 @@ def scope_values(intent: dict[str, Any]) -> set[str]:
     scope = intent.get("authorization_scope")
     if not isinstance(scope, list):
         return set()
-    return {str(value).strip()[:120] for value in scope if isinstance(value, str) and value.strip()}
+    return {
+        str(value).strip()[:120]
+        for value in scope
+        if isinstance(value, str) and value.strip()
+    }
 
 
-def coach_execution_scope(action: dict[str, Any] | None, *, background_horizon_days: int) -> dict[str, Any]:
+def coach_execution_scope(
+    action: dict[str, Any] | None, *, background_horizon_days: int
+) -> dict[str, Any]:
     """Describe the local planning workload implied by a structured action."""
     period = (action or {}).get("period")
-    days = (date.fromisoformat(period["end"]) - date.fromisoformat(period["start"])).days + 1 if period else None
-    return {"planning": bool(period), "horizon_days": days, "planned_units": None,
-            "bulk_change": bool(days and days > background_horizon_days), "background": True}
+    days = (
+        (date.fromisoformat(period["end"]) - date.fromisoformat(period["start"])).days
+        + 1
+        if period
+        else None
+    )
+    return {
+        "planning": bool(period),
+        "horizon_days": days,
+        "planned_units": None,
+        "bulk_change": bool(days and days > background_horizon_days),
+        "background": True,
+    }
 
 
 def require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
     if not require_scope(intent, *tokens):
-        raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.", reason="intent_scope_denied")
+        raise AppError(
+            403,
+            "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.",
+            reason="intent_scope_denied",
+        )
 
 
 def authorized_operations(intent: dict[str, Any]) -> set[str]:
     operations = {str(intent.get("operation") or "").strip()}
     follow_ups = intent.get("follow_up_operations")
     if isinstance(follow_ups, list):
-        operations.update(str(value).strip() for value in follow_ups if str(value).strip())
+        operations.update(
+            str(value).strip() for value in follow_ups if str(value).strip()
+        )
     return operations
 
 

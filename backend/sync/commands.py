@@ -37,7 +37,11 @@ class ProviderRefreshCommandService:
             job = self._queue_service.enqueue(
                 provider,
                 "refresh",
-                {key: value for key, value in arguments.items() if key != "_wait_for_completion"},
+                {
+                    key: value
+                    for key, value in arguments.items()
+                    if key != "_wait_for_completion"
+                },
                 requested_by="coach",
             )
             return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
@@ -59,7 +63,7 @@ class ProviderRefreshCommandService:
         self._raise_if_busy(result)
         try:
             completed_days = int(result.get("activity_days"))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             completed_days = 0
 
         if result.get("waited_for_existing") and not self._covers_window(
@@ -68,7 +72,7 @@ class ProviderRefreshCommandService:
             result = self._retry_intervals_refresh(activity_days, cancel_event)
             try:
                 completed_days = int(result.get("activity_days"))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 completed_days = activity_days
 
         return {
@@ -79,9 +83,7 @@ class ProviderRefreshCommandService:
             "synchronous_refresh": True,
         }
 
-    def queue_performance_refresh(
-        self, arguments: Mapping[str, Any]
-    ) -> dict[str, Any]:
+    def queue_performance_refresh(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         job = self._queue_service.enqueue(
             "intervals",
             "performance_refresh",
@@ -130,8 +132,10 @@ class ProviderRefreshCommandService:
 
     def _covers_window(self, completed_days: int, requested_days: int) -> bool:
         return (
-            completed_days == self._all_sync_days and requested_days >= 1
-        ) or (
-            requested_days == self._all_sync_days
-            and completed_days == self._all_sync_days
-        ) or (requested_days >= 1 and completed_days >= requested_days)
+            (completed_days == self._all_sync_days and requested_days >= 1)
+            or (
+                requested_days == self._all_sync_days
+                and completed_days == self._all_sync_days
+            )
+            or (requested_days >= 1 and completed_days >= requested_days)
+        )

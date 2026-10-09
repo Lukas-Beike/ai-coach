@@ -46,7 +46,10 @@ class CoachPlanningChangeToolServiceTests(unittest.TestCase):
         self.service.execute(
             "replace_training_plan",
             {"payload": {}},
-            {"operation": "replace_training_plan", "authorization_scope": ["local_plan"]},
+            {
+                "operation": "replace_training_plan",
+                "authorization_scope": ["local_plan"],
+            },
         )
 
         self.replacement.replace.assert_called_once_with(
@@ -56,10 +59,15 @@ class CoachPlanningChangeToolServiceTests(unittest.TestCase):
     def test_replace_rejects_unauthorized_operation_before_factory(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "replace_training_plan", {}, {"operation": "other", "authorization_scope": ["local_plan"]}
+                "replace_training_plan",
+                {},
+                {"operation": "other", "authorization_scope": ["local_plan"]},
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.replacement_factory.assert_not_called()
 
     def test_replace_rejects_multiple_plan_scopes(self) -> None:
@@ -69,23 +77,36 @@ class CoachPlanningChangeToolServiceTests(unittest.TestCase):
                 {},
                 {
                     "operation": "replace_training_plan",
-                    "authorization_scope": ["training_plan:plan-1", "training_plan:plan-2"],
+                    "authorization_scope": [
+                        "training_plan:plan-1",
+                        "training_plan:plan-2",
+                    ],
                 },
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (400, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (400, "intent_scope_denied"),
+        )
         self.replacement_factory.assert_not_called()
 
     def test_replace_requires_named_plan_or_local_plan_scope(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "replace_training_plan", {}, {"operation": "replace_training_plan", "authorization_scope": []}
+                "replace_training_plan",
+                {},
+                {"operation": "replace_training_plan", "authorization_scope": []},
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.replacement_factory.assert_not_called()
 
-    def test_apply_passes_revision_and_authorized_plan_and_checks_create_and_update_scopes(self) -> None:
+    def test_apply_passes_revision_and_authorized_plan_and_checks_create_and_update_scopes(
+        self,
+    ) -> None:
         arguments = {
             "changes": [
                 {"action": "create", "plan_id": "plan-1"},
@@ -95,7 +116,9 @@ class CoachPlanningChangeToolServiceTests(unittest.TestCase):
         intent = {
             "operation": "apply_training_changes",
             "authorization_scope": [
-                "training_plan:plan-1", "local_plan_create", "planned_unit:unit-1"
+                "training_plan:plan-1",
+                "local_plan_create",
+                "planned_unit:unit-1",
             ],
             "bulk_change": True,
         }
@@ -133,7 +156,9 @@ class CoachPlanningChangeToolServiceTests(unittest.TestCase):
                 "apply_training_changes", {}, {"operation": "apply_training_changes"}
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (400, "invalid_change"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason), (400, "invalid_change")
+        )
         self.changes_factory.assert_not_called()
 
     def test_apply_rejects_unauthorized_operation_before_factory(self) -> None:
@@ -142,7 +167,10 @@ class CoachPlanningChangeToolServiceTests(unittest.TestCase):
                 "apply_training_changes", {"changes": []}, {"operation": "other"}
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.changes_factory.assert_not_called()
 
     def test_apply_rejects_multiple_plan_scopes(self) -> None:
@@ -152,11 +180,17 @@ class CoachPlanningChangeToolServiceTests(unittest.TestCase):
                 {"changes": []},
                 {
                     "operation": "apply_training_changes",
-                    "authorization_scope": ["training_plan:plan-1", "training_plan:plan-2"],
+                    "authorization_scope": [
+                        "training_plan:plan-1",
+                        "training_plan:plan-2",
+                    ],
                 },
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (400, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (400, "intent_scope_denied"),
+        )
         self.changes_factory.assert_not_called()
 
     def test_apply_rejects_unauthorized_create_or_requested_plan(self) -> None:
@@ -174,7 +208,10 @@ class CoachPlanningChangeToolServiceTests(unittest.TestCase):
                     {"changes": [{"action": "create", "plan_id": "plan-2"}]},
                     intent,
                 )
-            self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+            self.assertEqual(
+                (raised.exception.status, raised.exception.reason),
+                (403, "intent_scope_denied"),
+            )
         self.changes_factory.assert_not_called()
 
     def test_apply_rejects_update_outside_planned_unit_scope(self) -> None:
@@ -185,10 +222,15 @@ class CoachPlanningChangeToolServiceTests(unittest.TestCase):
                 {"operation": "apply_training_changes", "authorization_scope": []},
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.changes_factory.assert_not_called()
 
-    def test_unknown_tool_name_returns_none_without_constructing_planning_services(self) -> None:
+    def test_unknown_tool_name_returns_none_without_constructing_planning_services(
+        self,
+    ) -> None:
         result = self.service.execute("read_training_state", {}, {})
 
         self.assertIsNone(result)

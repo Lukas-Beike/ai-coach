@@ -17,7 +17,9 @@ class StateEventBuffer:
         self._events: deque[dict[str, Any]] = deque(maxlen=maxlen)
         self._next_id = 0
 
-    def publish(self, event: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def publish(
+        self, event: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Publish one event and return its shallow top-level copy."""
         if not isinstance(event, str) or event not in self._ALLOWED_EVENTS:
             raise ValueError("invalid state event")
@@ -38,7 +40,9 @@ class StateEventBuffer:
         try:
             cursor = max(0, int(since))
         except (TypeError, ValueError) as exc:
-            raise AppError(400, "Die Event-ID ist ungültig.", reason="invalid_event_cursor") from exc
+            raise AppError(
+                400, "Die Event-ID ist ungültig.", reason="invalid_event_cursor"
+            ) from exc
         with self._condition:
             latest = self._next_id
             retained = list(self._events)
@@ -46,7 +50,9 @@ class StateEventBuffer:
             return {"events": [], "latest_event_id": latest, "gap": False}
         oldest = int(retained[0]["event_id"])
         gap = cursor < oldest - 1
-        events = [] if gap else [item for item in retained if int(item["event_id"]) > cursor]
+        events = (
+            [] if gap else [item for item in retained if int(item["event_id"]) > cursor]
+        )
         return {"events": events, "latest_event_id": latest, "gap": gap}
 
     def wait(self, timeout: float | None = None) -> bool:

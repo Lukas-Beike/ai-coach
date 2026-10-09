@@ -112,8 +112,12 @@ class DailySyncMarkerServiceTests(unittest.TestCase):
 
     def test_attempt_suppresses_refresh_for_one_hour(self):
         self.service.mark_attempt("garmin", self.local_time)
-        self.assertFalse(self.service.is_due("garmin", self.local_time + timedelta(minutes=59)))
-        self.assertTrue(self.service.is_due("garmin", self.local_time + timedelta(hours=1)))
+        self.assertFalse(
+            self.service.is_due("garmin", self.local_time + timedelta(minutes=59))
+        )
+        self.assertTrue(
+            self.service.is_due("garmin", self.local_time + timedelta(hours=1))
+        )
 
     def test_invalid_sources_raise_value_error_without_key_value_access(self):
         for source in ("activities", "Garmin", "calendar "):

@@ -29,9 +29,7 @@ class OpenAIErrorClassifier:
             return None
         state = self._provider_state()
         state.record_rate_limits(headers)
-        details = error_details(
-            status, raw_body, headers, updated_at=self._now()
-        )
+        details = error_details(status, raw_body, headers, updated_at=self._now())
         state.record_status(
             "openai",
             state=details.get("state"),

@@ -1334,7 +1334,7 @@ def _upgrade_preview_demo(today):
             day = datetime.fromisoformat(
                 str(row.get("id") or row.get("date"))[:10]
             ).date()
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         offset = (today - day).days
         if not 0 <= offset < 90:

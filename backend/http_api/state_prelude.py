@@ -59,27 +59,44 @@ class PublicStateLocalPrelude:
         with self._database_lock, self._database_manager.unit_of_work():
             snapshot = self._sync_state.latest_snapshot()
             activities = self._activity_feedback.attach_to_activities(
-                snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
+                snapshot.get("recent_activities", [])
+                if isinstance(snapshot, dict)
+                else []
             )
             local_planned = self._planned_units.list()
             canonical_planned = calendar_canonical.canonical_planned_workouts(
                 [], local_planned
             )
-            provider_sync = snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}
-            calendar_window = provider_sync.get("calendar_window") if isinstance(provider_sync, dict) else None
+            provider_sync = (
+                snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}
+            )
+            calendar_window = (
+                provider_sync.get("calendar_window")
+                if isinstance(provider_sync, dict)
+                else None
+            )
             if not isinstance(calendar_window, dict):
                 today = self._today()
                 calendar_window = {
-                    "start": (today - timedelta(days=self._window.history_days)).isoformat(),
-                    "end": (today + timedelta(days=self._window.future_days)).isoformat(),
+                    "start": (
+                        today - timedelta(days=self._window.history_days)
+                    ).isoformat(),
+                    "end": (
+                        today + timedelta(days=self._window.future_days)
+                    ).isoformat(),
                 }
             weather = (
                 self._weather.state(canonical_planned, refresh=False)
-                if local_only else None
+                if local_only
+                else None
             )
         return LocalStatePrelude(
-            snapshot, activities, local_planned, canonical_planned,
-            calendar_window, weather,
+            snapshot,
+            activities,
+            local_planned,
+            canonical_planned,
+            calendar_window,
+            weather,
         )
 
 
@@ -93,11 +110,13 @@ class PublicStateWeatherPrelude:
         self._adaptive_followup = adaptive_followup
 
     def project(
-        self, canonical_planned: list[dict[str, Any]],
+        self,
+        canonical_planned: list[dict[str, Any]],
         local_weather: dict[str, Any] | None,
     ) -> dict[str, Any]:
         weather = (
-            local_weather if local_weather is not None
+            local_weather
+            if local_weather is not None
             else self._weather.state(canonical_planned, refresh=True)
         )
         if weather.pop("_refreshed", False):

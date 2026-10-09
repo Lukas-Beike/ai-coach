@@ -192,9 +192,7 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
         self.assertTrue(prepare_planned_workout_date(retimed, current))
 
         self.assertEqual(moved["start_date_local"], "2026-09-23T07:30:00+02:00")
-        self.assertEqual(
-            retimed["start_date_local"], "2026-09-23T08:15:00+02:00"
-        )
+        self.assertEqual(retimed["start_date_local"], "2026-09-23T08:15:00+02:00")
         with self.assertRaises(AppError) as raised:
             planned_workout_update_candidate(
                 current,

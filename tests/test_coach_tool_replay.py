@@ -29,13 +29,17 @@ class TrackingLock:
 
 class LockCheckingDatabaseManager(DatabaseManager):
     def __init__(self, path: Path, lock: TrackingLock) -> None:
-        super().__init__(path, sqlite3, row_factory=sqlite3.Row, persist_connections=False)
+        super().__init__(
+            path, sqlite3, row_factory=sqlite3.Row, persist_connections=False
+        )
         self._tracking_lock = lock
 
     @contextmanager
     def unit_of_work(self) -> Iterator[Any]:
         if not self._tracking_lock.held:
-            raise AssertionError("database unit of work must run under the injected lock")
+            raise AssertionError(
+                "database unit of work must run under the injected lock"
+            )
         with super().unit_of_work() as db:
             yield db
 
@@ -60,7 +64,12 @@ class StructuredToolReplayTests(unittest.TestCase):
         )
 
     @staticmethod
-    def metadata(*, call_id: str = "call-new", name: str = "update_training_plan", effect_key: str = "effect-1") -> dict[str, str]:
+    def metadata(
+        *,
+        call_id: str = "call-new",
+        name: str = "update_training_plan",
+        effect_key: str = "effect-1",
+    ) -> dict[str, str]:
         return {"call_id": call_id, "name": name, "effect_key": effect_key}
 
     @staticmethod
@@ -71,9 +80,16 @@ class StructuredToolReplayTests(unittest.TestCase):
         effect_key: str = "effect-1",
         result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {"call_id": call_id, "tool": name, "effect_key": effect_key, "result": result or {"ok": True}}
+        return {
+            "call_id": call_id,
+            "tool": name,
+            "effect_key": effect_key,
+            "result": result or {"ok": True},
+        }
 
-    def seed_artifact(self, artifact_id: str, *, status: str = "draft", base_revision: int = 3) -> None:
+    def seed_artifact(
+        self, artifact_id: str, *, status: str = "draft", base_revision: int = 3
+    ) -> None:
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute(
                 "INSERT INTO coach_plan_artifacts(id, status, base_revision) VALUES (?, ?, ?)",
@@ -88,9 +104,13 @@ class StructuredToolReplayTests(unittest.TestCase):
         self.assert_app_error_for_changed_call_id_effect(receipts)
         self.assertEqual(receipts, [cached])
 
-    def assert_app_error_for_changed_call_id_effect(self, receipts: list[dict[str, Any]]) -> None:
+    def assert_app_error_for_changed_call_id_effect(
+        self, receipts: list[dict[str, Any]]
+    ) -> None:
         with self.assertRaises(AppError) as raised:
-            self.service.lookup(self.metadata(call_id="call-1", effect_key="effect-2"), receipts)
+            self.service.lookup(
+                self.metadata(call_id="call-1", effect_key="effect-2"), receipts
+            )
         self.assertEqual(raised.exception.status, 409)
         self.assertEqual(raised.exception.reason, "tool_call_conflict")
 
@@ -129,14 +149,18 @@ class StructuredToolReplayTests(unittest.TestCase):
     def test_replays_draft_when_base_revision_matches_current_state(self) -> None:
         self.seed_artifact("current", base_revision=3)
         cached = self.receipt(result={"ok": True, "artifact_id": "current"})
-        result = self.service.lookup(self.metadata(name="stage_training_plan"), [cached])
+        result = self.service.lookup(
+            self.metadata(name="stage_training_plan"), [cached]
+        )
         self.assertIs(result, cached)
         self.assertFalse(self.lock.held)
 
     def test_replays_nondraft_artifact_when_base_revision_differs(self) -> None:
         self.seed_artifact("committed", status="committed", base_revision=2)
         cached = self.receipt(result={"ok": True, "artifact_id": "committed"})
-        result = self.service.lookup(self.metadata(name="stage_training_plan"), [cached])
+        result = self.service.lookup(
+            self.metadata(name="stage_training_plan"), [cached]
+        )
         self.assertIs(result, cached)
         self.assertFalse(self.lock.held)
 

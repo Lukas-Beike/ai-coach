@@ -81,7 +81,9 @@ class AthleteContextServiceTests(unittest.TestCase):
         )
         self.key_values = KeyValueRepository(lambda: "2026-09-20T12:00:00+00:00")
         self.profile_service = ProfileService(
-            _Manager(self.db), ProfileRepository(self.key_values), self.key_values,
+            _Manager(self.db),
+            ProfileRepository(self.key_values),
+            self.key_values,
             on_location_changed=lambda *args, **kwargs: None,
         )
         self._new_ids = iter(("tombstone-1", "tombstone-2", "tombstone-3"))

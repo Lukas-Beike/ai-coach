@@ -14,7 +14,9 @@ class CoachActionsPostRoutes:
 
     def __init__(
         self,
-        coach_proposal_confirmation_service: Callable[[], CoachProposalConfirmationService],
+        coach_proposal_confirmation_service: Callable[
+            [], CoachProposalConfirmationService
+        ],
         coach_proposal_execution_service: Callable[[], CoachProposalExecutionService],
     ) -> None:
         self._coach_proposal_confirmation_service = coach_proposal_confirmation_service

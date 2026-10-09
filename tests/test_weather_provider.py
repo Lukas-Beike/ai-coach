@@ -37,7 +37,13 @@ class WeatherProviderTests(unittest.TestCase):
         }
 
     def make_client(
-        self, location, forecast, *, icon_forecast=None, icon_error=None, forecast_days=14
+        self,
+        location,
+        forecast,
+        *,
+        icon_forecast=None,
+        icon_error=None,
+        forecast_days=14,
     ):
         requests = []
 

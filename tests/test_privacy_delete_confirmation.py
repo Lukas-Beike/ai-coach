@@ -24,7 +24,9 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
         )
         return PrivacyDeleteService(dependencies), dependencies
 
-    def test_missing_or_wrong_confirmation_fails_before_any_dependency_access(self) -> None:
+    def test_missing_or_wrong_confirmation_fails_before_any_dependency_access(
+        self,
+    ) -> None:
         for confirmation in (None, "wrong"):
             with self.subTest(confirmation=confirmation):
                 service, dependencies = self.service()
@@ -53,8 +55,14 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["local_data_deleted"])
-        self.assertIn("DELETE FROM nutrition_templates", [call.args[0] for call in db.execute.call_args_list])
-        self.assertIn("DELETE FROM nutrition_products", [call.args[0] for call in db.execute.call_args_list])
+        self.assertIn(
+            "DELETE FROM nutrition_templates",
+            [call.args[0] for call in db.execute.call_args_list],
+        )
+        self.assertIn(
+            "DELETE FROM nutrition_products",
+            [call.args[0] for call in db.execute.call_args_list],
+        )
         dependencies.maintenance_gate.restore.assert_called_once_with()
         self.assertEqual(dependencies.database_manager.unit_of_work.call_count, 2)
         dependencies.planning_revision_service.mark_reset_pending.assert_called_once_with()

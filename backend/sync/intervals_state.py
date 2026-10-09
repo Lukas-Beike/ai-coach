@@ -51,7 +51,7 @@ def decode_pagination(value: Any) -> dict[str, Any]:
         return value
     try:
         decoded = json.loads(value or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
     return decoded if isinstance(decoded, dict) else {}
 

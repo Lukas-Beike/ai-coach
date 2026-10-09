@@ -26,14 +26,18 @@ class SyncPersistenceAssemblyTests(unittest.TestCase):
 
         with patch.object(persistence_assembly, "SyncStateRepository") as state_factory:
             state = assembly.state_repository()
-        with patch.object(persistence_assembly, "DailySyncMarkerService") as marker_factory:
+        with patch.object(
+            persistence_assembly, "DailySyncMarkerService"
+        ) as marker_factory:
             markers = assembly.daily_markers()
 
         self.assertIs(state, state_factory.return_value)
         self.assertIs(markers, marker_factory.return_value)
         state_factory.assert_called_once_with(manager, key_values, snapshots, utc_now)
         athlete_clock.assert_called_once_with()
-        marker_factory.assert_called_once_with(manager, key_values, athlete_clock.return_value.now)
+        marker_factory.assert_called_once_with(
+            manager, key_values, athlete_clock.return_value.now
+        )
         self.assertEqual(manager_provider.call_count, 2)
 
 
