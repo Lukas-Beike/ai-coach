@@ -59,6 +59,79 @@ function competitionFact(labelText, value) {
   return item;
 }
 
+function calendarEntryStatus(entry, dateKey, todayKey) {
+  if (calendarActualActivity(entry)) return "completed";
+  if (entry?.compliance?.status === "missed") return "missed";
+  return dateKey === todayKey ? "today" : "planned";
+}
+
+function calendarStatusLabel(entry, dateKey, todayKey) {
+  const status = calendarEntryStatus(entry, dateKey, todayKey);
+  if (status === "completed") return entry.is_completed_activity ? "✓ Zusätzlich absolviert" : "✓ Abgeschlossen";
+  if (status === "missed") return "Nicht absolviert";
+  return status === "today" ? "Heute geplant" : "Geplant";
+}
+
+function calendarRpeLabel(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && number <= 10 ? calendarMetricNumber(number) : null;
+}
+
+function appendPlannedExecution(cardSummary, entry, status) {
+  const percentage = calendarMetricNumber(entry.compliance?.percentage);
+  const measurable = percentage != null && ["training_load", "duration"].includes(entry.compliance?.basis);
+  if (status !== "missed" && !measurable) return;
+  const execution = document.createElement("span");
+  const value = status === "missed" ? 0 : Number(entry.compliance.percentage);
+  let executionState = "is-on-target";
+  if (value < 80 || value > 120) executionState = "is-deviation";
+  if (value === 0) executionState = "is-zero";
+  execution.className = `planned-execution ${executionState}`;
+  execution.textContent = `${value === 0 ? "✕" : "✓"} ${status === "missed" ? "0" : percentage} %`;
+  const basis = { training_load: "Belastung", duration: "Dauer" }[entry.compliance?.basis];
+  execution.title = basis ? `Ausführung gegenüber Plan (${basis})` : "Ausführung gegenüber Plan";
+  execution.setAttribute("aria-label", [`${value} Prozent des Plans`, basis].filter(Boolean).join(" · "));
+  cardSummary.append(execution);
+  if (status !== "missed") {
+    const meter = document.createElement("span");
+    meter.className = "planned-execution-track";
+    meter.setAttribute("aria-hidden", "true");
+    const fill = document.createElement("span");
+    fill.style.width = `${Math.max(0, Math.min(100, value))}%`;
+    meter.append(fill);
+    cardSummary.append(meter);
+  }
+}
+
+function plannedDayNotes(dayContext) {
+  const notes = document.createElement("div");
+  notes.className = "planned-day-notes";
+  const appointments = (Array.isArray(dayContext.appointments) ? dayContext.appointments : [])
+    .filter((event) => event && event.training_relevant !== false)
+    .map(plannedAppointmentLabel)
+    .filter(Boolean);
+  if (appointments.length) {
+    const calendarNotice = document.createElement("p");
+    calendarNotice.className = "planned-day-context planned-day-calendar";
+    calendarNotice.textContent = `Kalender: ${appointments.join(", ")}`;
+    notes.append(calendarNotice);
+  }
+  const checkin = dayContext.checkin && typeof dayContext.checkin === "object" ? dayContext.checkin : {};
+  const illness = String(checkin.illness || "").trim();
+  const pain = String(checkin.pain || "").trim();
+  if (illness || pain) {
+    const healthNotice = document.createElement("p");
+    healthNotice.className = "planned-day-context planned-day-health";
+    healthNotice.textContent = [
+      illness ? `Krankheit: ${illness}` : "",
+      pain ? `Verletzung/Beschwerden: ${pain}` : "",
+    ].filter(Boolean).join(" · ");
+    notes.append(healthNotice);
+  }
+  return notes;
+}
+
 function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
@@ -247,25 +320,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return `${units} · ${load.join(" · ")}`;
   }
 
-  function calendarEntryStatus(entry, dateKey, todayKey) {
-    if (calendarActualActivity(entry)) return "completed";
-    if (entry?.compliance?.status === "missed") return "missed";
-    return dateKey === todayKey ? "today" : "planned";
-  }
-
-  function calendarStatusLabel(entry, dateKey, todayKey) {
-    const status = calendarEntryStatus(entry, dateKey, todayKey);
-    if (status === "completed") return entry.is_completed_activity ? "✓ Zusätzlich absolviert" : "✓ Abgeschlossen";
-    if (status === "missed") return "Nicht absolviert";
-    return status === "today" ? "Heute geplant" : "Geplant";
-  }
-
-  function calendarRpeLabel(value) {
-    if (value == null || value === "") return null;
-    const number = Number(value);
-    return Number.isFinite(number) && number >= 0 && number <= 10 ? calendarMetricNumber(number) : null;
-  }
-
   function calendarPaceLabel(activity) {
     if (activitySportLabel(activity) !== "Laufen") return null;
     const duration = Number(activity?.moving_time);
@@ -375,32 +429,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     ].filter(Boolean).join(" · ");
     cardSummary.append(header);
     if (metrics.textContent) cardSummary.append(metrics);
-  }
-
-  function appendPlannedExecution(cardSummary, entry, status) {
-    const percentage = calendarMetricNumber(entry.compliance?.percentage);
-    const measurable = percentage != null && ["training_load", "duration"].includes(entry.compliance?.basis);
-    if (status !== "missed" && !measurable) return;
-    const execution = document.createElement("span");
-    const value = status === "missed" ? 0 : Number(entry.compliance.percentage);
-    let executionState = "is-on-target";
-    if (value < 80 || value > 120) executionState = "is-deviation";
-    if (value === 0) executionState = "is-zero";
-    execution.className = `planned-execution ${executionState}`;
-    execution.textContent = `${value === 0 ? "✕" : "✓"} ${status === "missed" ? "0" : percentage} %`;
-    const basis = { training_load: "Belastung", duration: "Dauer" }[entry.compliance?.basis];
-    execution.title = basis ? `Ausführung gegenüber Plan (${basis})` : "Ausführung gegenüber Plan";
-    execution.setAttribute("aria-label", [`${value} Prozent des Plans`, basis].filter(Boolean).join(" · "));
-    cardSummary.append(execution);
-    if (status !== "missed") {
-      const meter = document.createElement("span");
-      meter.className = "planned-execution-track";
-      meter.setAttribute("aria-hidden", "true");
-      const fill = document.createElement("span");
-      fill.style.width = `${Math.max(0, Math.min(100, value))}%`;
-      meter.append(fill);
-      cardSummary.append(meter);
-    }
   }
 
   let calendarProfileSequence = 0;
@@ -555,34 +583,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       heading.append(weatherMissing);
     }
     day.append(heading);
-  }
-
-  function plannedDayNotes(dayContext) {
-    const notes = document.createElement("div");
-    notes.className = "planned-day-notes";
-    const appointments = (Array.isArray(dayContext.appointments) ? dayContext.appointments : [])
-      .filter((event) => event && event.training_relevant !== false)
-      .map(plannedAppointmentLabel)
-      .filter(Boolean);
-    if (appointments.length) {
-      const calendarNotice = document.createElement("p");
-      calendarNotice.className = "planned-day-context planned-day-calendar";
-      calendarNotice.textContent = `Kalender: ${appointments.join(", ")}`;
-      notes.append(calendarNotice);
-    }
-    const checkin = dayContext.checkin && typeof dayContext.checkin === "object" ? dayContext.checkin : {};
-    const illness = String(checkin.illness || "").trim();
-    const pain = String(checkin.pain || "").trim();
-    if (illness || pain) {
-      const healthNotice = document.createElement("p");
-      healthNotice.className = "planned-day-context planned-day-health";
-      healthNotice.textContent = [
-        illness ? `Krankheit: ${illness}` : "",
-        pain ? `Verletzung/Beschwerden: ${pain}` : "",
-      ].filter(Boolean).join(" · ");
-      notes.append(healthNotice);
-    }
-    return notes;
   }
 
   function renderPlannedDay(view, dateKey) {
