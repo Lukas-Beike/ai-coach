@@ -138,7 +138,7 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 - **Installable Progressive Web App**: Responsive PWA optimized for mobile, tablet, and desktop viewports, installable on iOS, Android, macOS, and Windows.
 - **Reliable Hash-Based Navigation**: Accessible URL routing (`#coach`, `#plan`, `#analysis`, `#more`) preserving browser history, deep links, and screen-reader announcements.
 - **Immutable Static Asset Caching**: Versioned static asset serving with one-year immutable cache headers, accompanied by instant service worker cache eviction on updates.
-- **Resilient Offline App Shell**: Pre-cached application shell allowing view navigation and inspection of previously loaded training data during network drops.
+- **Resilient Offline App Shell**: Pre-cached application shell allowing view navigation and inspection of previously loaded training data during network drops. Changes are not queued while offline: saving shows a connection message and nothing is sent later.
 - **Auto-Reconnecting SSE Streaming**: Server-Sent Events stream with exponential backoff (capping at 30 seconds) ensuring smooth recovery after connection drops.
 - **Touch-Friendly Collapsible Views**: Ergonomic mobile interface featuring collapsible profile headers, compact calendar cards, and thumb-friendly bottom navigation.
 - **Light and Dark Appearance**: Choose the system setting, light mode, or dark mode under More → Appearance; the choice is stored on this device.

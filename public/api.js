@@ -2,6 +2,7 @@
   const REQUEST_TIMEOUT_MS = 25_000;
   const REMOTE_ACTION_TIMEOUT_MS = 55_000;
   const TRANSCRIPTION_TIMEOUT_MS = 100_000;
+  const NETWORK_ERROR_MESSAGE = "Keine Verbindung zum Coach-Server. Prüfe dein Netzwerk und versuche es erneut.";
   const UPSTREAM_MESSAGES = Object.freeze({
     upstream_auth: "Die Anmeldung beim externen Dienst ist fehlgeschlagen. Bitte die Verbindungseinstellungen prüfen.",
     upstream_rate_limited: "Der externe Dienst ist gerade ausgelastet. Bitte später erneut versuchen.",
@@ -51,11 +52,30 @@
     return fallback || `Anfrage fehlgeschlagen (${response.status})`;
   }
 
+  function networkError() {
+    const error = new Error(NETWORK_ERROR_MESSAGE);
+    error.status = 0;
+    error.reason = "network_error";
+    error.retryAfter = null;
+    return error;
+  }
+
+  // fetch() rejects with a raw TypeError when no response arrives. Replace it
+  // with a user-facing message; aborts (timeouts, caller cancellation) pass through.
+  async function fetchOrNetworkError(path, init) {
+    try {
+      return await fetch(path, init);
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      throw networkError();
+    }
+  }
+
   async function send(path, fetchOptions, onUnauthorized) {
     const method = String(fetchOptions.method || "GET").toUpperCase();
     const headers = new Headers(fetchOptions.headers || {});
     if (method !== "GET" && method !== "HEAD") headers.set("X-CSRF-Token", cookie("ic_csrf"));
-    const response = await fetch(path, { credentials: "same-origin", ...fetchOptions, method, headers });
+    const response = await fetchOrNetworkError(path, { credentials: "same-origin", ...fetchOptions, method, headers });
     if (response.status === 401) onUnauthorized?.();
     if (response.status === 403 && method !== "GET" && method !== "HEAD") {
       const sentToken = headers.get("X-CSRF-Token");
@@ -63,7 +83,7 @@
       const refreshedToken = cookie("ic_csrf");
       if (refreshedToken && refreshedToken !== sentToken) {
         headers.set("X-CSRF-Token", refreshedToken);
-        const retry = await fetch(path, { credentials: "same-origin", ...fetchOptions, method, headers });
+        const retry = await fetchOrNetworkError(path, { credentials: "same-origin", ...fetchOptions, method, headers });
         if (retry.status === 401) onUnauthorized?.();
         return retry;
       }
