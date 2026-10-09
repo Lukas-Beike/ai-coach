@@ -609,6 +609,24 @@ and active, archived, component, zero-target, no-target, and over-target gear.
 All values are synthetic and providers remain blocked; no credentials or live
 athlete data are read. The seed is idempotent and carries a version marker so
 an older demo seed is upgraded in place when the disposable database is reused.
+Version 6 adds review scenarios on top of the v5 data: a rest day and a sick
+day with illness text in the check-ins, a planned 30-minute Swim unit with
+planned load next to a 20-minute swim at 11:00 and a fitting 30-minute swim at
+18:00 on the same day (activity matching ambiguity), a
+`[NO_INTENSITY]` camp day with a hard planned unit, a weekly `[SHORT_ONLY]`
+series with a 90-minute ride. Upgrades from v5 add these records once; repeated
+seeds and restarts keep the counts stable. The default seed does not add a long
+chat history; longer conversations are added on demand for specific scenarios.
+
+`FIXTURE_OPENAI_MODE` controls the simulated OpenAI path. The default
+`canned` keeps the canned Coach replies. `offline` makes each Coach
+request fail as an unreachable OpenAI endpoint (`network_error`) without any
+network call; the simulated failure does not reproduce the original transport
+error details. Unknown values stop the fixture at startup. OpenAI stays
+deliberately configured with a fake key (`OPENAI_API_KEY="e2e-fixture-openai-key"`)
+in every mode, so Coach requests still take the normal Responses API path and no
+real credential is needed.
+
 Use a fresh fixture browser profile and check the mobile-small and mobile
 projects when reviewing this preview.
 

@@ -4,11 +4,14 @@ import json
 import os
 import sys
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
-FIXTURE_DEMO_SEED_VERSION = "5"
+FIXTURE_DEMO_SEED_VERSION = "6"
 FIXTURE_TRAINING_FEATURES_SEED_VERSION = "1"
+# canned keeps the canned Coach replies; offline simulates an unreachable OpenAI.
+FIXTURE_OPENAI_MODES = ("canned", "offline")
 
 # This file is mounted only in disposable test containers, never normal startup.
 os.environ.update(
@@ -293,15 +296,44 @@ def fixture_coach_response(payload, **kwargs):
     }
 
 
+def fixture_openai_mode():
+    """Return the simulated OpenAI mode from FIXTURE_OPENAI_MODE."""
+    mode = (os.environ.get("FIXTURE_OPENAI_MODE") or "canned").strip()
+    mode = mode.casefold()
+    if mode not in FIXTURE_OPENAI_MODES:
+        raise ValueError(f"Unsupported FIXTURE_OPENAI_MODE: {mode}")
+    return mode
+
+
+def _fixture_simulate_openai_mode():
+    """Fail like an unreachable OpenAI endpoint without any network call.
+
+    The real classifier and error factory are reused, so the stored provider
+    status and the HTTP-facing reason match a genuine network failure. Transport
+    details such as the original exception text are not simulated.
+    """
+    if fixture_openai_mode() != "offline":
+        return
+    from backend.errors import provider_error
+    from backend.providers.openai_error_classifier import OpenAIErrorClassifier
+
+    OpenAIErrorClassifier(
+        server.provider_state_service, server.runtime_clock.utc_now
+    ).on_network_error("openai")
+    raise provider_error("openai", "network")
+
+
 class FixtureResponseTransport:
     """Provider-free adapter for the canned browser conversation fixture."""
 
     def request(self, payload):
+        _fixture_simulate_openai_mode()
         return fixture_coach_response(payload)
 
     def background_request(
         self, payload, *, response_id=None, on_response_id=None, cancel_event=None
     ):
+        _fixture_simulate_openai_mode()
         return fixture_coach_response(
             payload,
             response_id=response_id,
@@ -314,6 +346,7 @@ class FixtureResponseTransport:
     ):
         # Only "E2E fixture: slow stream" emits synthetic text deltas (~3 s);
         # every other message keeps the previous no-delta behavior.
+        _fixture_simulate_openai_mode()
         return fixture_coach_response(
             payload,
             on_text_delta=on_text_delta,
@@ -401,6 +434,7 @@ def stage_fixture_artifact():
 
 
 def initialise_fixture():
+    fixture_openai_mode()
     initialise()
     # Opt-in standard data for the demo container. The demo seed is versioned
     # and seeds the training features once, so restarts leave the data as-is.
@@ -1423,6 +1457,155 @@ def _fixture_wave2_competitions(today):
             )
 
 
+FIXTURE_V6_REST_OFFSET = 9
+FIXTURE_V6_SICK_OFFSET = 13
+FIXTURE_V6_SWIM_OFFSET = 12
+FIXTURE_V6_CAMP_HARD_OFFSET = 7
+FIXTURE_V6_SHORT_ONLY_OFFSET = 16
+
+
+def _fixture_v6_checkin(day, **overrides):
+    return {
+        "checkin_date": day.isoformat(),
+        "soreness": 1,
+        "stress": 2,
+        "motivation": 7,
+        "available_minutes": 90,
+        "day_form": "Erholt",
+        "day_status": "unknown",
+        "tag_answers": {"travel": False, "late_meal": False, "high_stress": False},
+        **overrides,
+    }
+
+
+def _fixture_v6_unit_id(name):
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"intervals-coach-fixture:v6:{name}"))
+
+
+def _fixture_v6_units(today):
+    """Planned units that cover ambiguity, planned load and calendar markers."""
+    specs = [
+        # Same-day swim ambiguity (P2-04): a short 11:00 swim and a fitting 18:00 swim.
+        (
+            "swim-ambiguity",
+            -FIXTURE_V6_SWIM_OFFSET,
+            "Fixture swim intervals",
+            "Swim",
+            30,
+            "- 30m 70%",
+            40,
+        ),
+        # Camp day with [NO_INTENSITY]: hard steps must be flagged by constraints.
+        (
+            "camp-hard-no-intensity",
+            FIXTURE_V6_CAMP_HARD_OFFSET,
+            "Fixture hard intervals",
+            "Ride",
+            60,
+            "- 10m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 35m 50%",
+            75,
+        ),
+        # Weekly [SHORT_ONLY] series: a 90 minute ride exceeds the short limit.
+        (
+            "short-only-ride",
+            FIXTURE_V6_SHORT_ONLY_OFFSET,
+            "Fixture short-only ride",
+            "Ride",
+            90,
+            "- 90m 65%",
+            85,
+        ),
+    ]
+    return [
+        (
+            name,
+            {
+                "date": (today + timedelta(days=offset)).isoformat(),
+                "name": title,
+                "sport": sport,
+                "duration_minutes": duration,
+                "description": description,
+                "icu_training_load": load,
+                "target": "AUTO",
+                "rationale": "Synthetische Vorschau",
+            },
+        )
+        for name, offset, title, sport, duration, description, load in specs
+    ]
+
+
+def _fixture_database_is_real():
+    """The v1 contract test supplies a bare mocked connection without ``execute``."""
+    with server.database_manager().unit_of_work() as probe:
+        return hasattr(probe, "execute")
+
+
+def _fixture_seed_v6(today):
+    """Add v6 check-ins, swim activities and marker units through existing services.
+
+    Every record has a fixed identifier or key, so repeated upgrades and restarts
+    replace or skip the same fixture rows instead of duplicating them.
+    Returns False when the mocked contract-test connection cannot persist data.
+    """
+    from backend import change_history
+    from backend.planning import planned_units, workouts
+
+    if not _fixture_database_is_real():
+        return False
+    rest_day = today - timedelta(days=FIXTURE_V6_REST_OFFSET)
+    sick_day = today - timedelta(days=FIXTURE_V6_SICK_OFFSET)
+    server.ATHLETE_DATA.checkin().save(
+        _fixture_v6_checkin(rest_day, day_status="rest", day_form="Erholt")
+    )
+    server.ATHLETE_DATA.checkin().save(
+        _fixture_v6_checkin(
+            sick_day,
+            day_status="pause",
+            soreness=3,
+            motivation=3,
+            day_form="Krank, synthetisch",
+            illness="Erkältung, synthetisch",
+        )
+    )
+    swim_day = (today - timedelta(days=FIXTURE_V6_SWIM_OFFSET)).isoformat()
+    _merge_snapshot_activities(
+        [
+            {
+                "id": f"fixture-v6-swim-{suffix}",
+                "name": f"Fixture swim {suffix.upper()}",
+                "type": "Swim",
+                "start_date_local": f"{swim_day}T{start}",
+                "moving_time": minutes * 60,
+                "distance": minutes * 50,
+                "icu_training_load": load,
+            }
+            for suffix, start, minutes, load in (
+                ("a", "11:00:00", 20, 25),
+                ("b", "18:00:00", 30, 40),
+            )
+        ]
+    )
+    planned = server.PLANNING_DATA.planned_unit()
+    with server.database_manager().unit_of_work() as db:
+        for name, workout in _fixture_v6_units(today):
+            unit_id = _fixture_v6_unit_id(name)
+            if db.execute(
+                "SELECT 1 FROM planned_units WHERE id = ?", (unit_id,)
+            ).fetchone():
+                continue
+            entry = planned_units.normalize_planned_unit(
+                workout, local_id=unit_id, external_id=None, sync_status="local"
+            )
+            workouts.validate_workout_description(entry)
+            # Insert directly: marker-day units must exist to test constraints.
+            planned.insert(db, entry)
+            change_history.record_change(
+                db, "planned_unit", unit_id, "create", None, entry, source="fixture"
+            )
+            server.PLANNING_REVISION_SERVICE.bump(db)
+    return True
+
+
 def _upgrade_preview_demo(today):
     """Add the expanded standard-fixture records without duplicating v1 data."""
     with server.database_manager().unit_of_work() as db:
@@ -1488,6 +1671,7 @@ def _upgrade_preview_demo(today):
     _fixture_seed_equipment(today, garmin)
     _fixture_seed_calendar(today)
     _fixture_seed_wave2(today, snapshot, garmin)
+    _fixture_seed_v6(today)
     with server.database_manager().unit_of_work() as db:
         server.KEY_VALUE_REPOSITORY.set(
             db, "preview_demo_seed_version", FIXTURE_DEMO_SEED_VERSION
@@ -1602,6 +1786,7 @@ def seed_preview_demo():
         payload = server.SNAPSHOT_REPOSITORY.latest_payload(db)
         snapshot = json.loads(payload) if payload else snapshot
     _fixture_seed_wave2(today, snapshot, garmin)
+    _fixture_seed_v6(today)
     with server.database_manager().unit_of_work() as db:
         server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(garmin))
         for role, content in [

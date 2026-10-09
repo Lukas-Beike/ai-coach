@@ -2,7 +2,10 @@
 
 import json
 import threading
+import os
 import unittest
+from collections import Counter
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -18,6 +21,12 @@ from backend.performance.body import body_history
 from backend.performance.daily_health import garmin_daily_expenditure
 from backend.providers.calendar import parse_ical_calendar
 from e2e import fixture_runtime
+
+V6_UNIT_NAMES = {
+    "Fixture swim intervals",
+    "Fixture hard intervals",
+    "Fixture short-only ride",
+}
 
 
 class StandardFixtureDataTests(unittest.TestCase):
@@ -460,13 +469,21 @@ class StandardFixtureDataTests(unittest.TestCase):
                     "SELECT COUNT(*) AS count FROM kv WHERE key LIKE 'equipment%'"
                 ).fetchone()["count"]
             competitions = server.PLANNING_DATA.competition().list(100)
+            units = server.PLANNING_DATA.planned_unit().list(500)
             return {
                 "activities": len(snapshot["recent_activities"]),
+                "swim_activities": sum(
+                    str(item.get("id", "")).startswith("fixture-v6-swim-")
+                    for item in snapshot["recent_activities"]
+                ),
                 "competitions": len(competitions),
                 "cycling_targets": sum(
                     item["name"] == "Fixture cycling target" for item in competitions
                 ),
-                "units": len(server.PLANNING_DATA.planned_unit().list(500)),
+                "units": len(units),
+                "scenario_units": sum(
+                    item.get("name") in V6_UNIT_NAMES for item in units
+                ),
                 "equipment_keys": equipment_keys,
             }
 
@@ -496,26 +513,19 @@ class StandardFixtureDataTests(unittest.TestCase):
                 )
 
         self.assertEqual(restarted, first)
+        self.assertEqual(first["scenario_units"], 3)
+        self.assertEqual(first["swim_activities"], 2)
         self.assertEqual(first["cycling_targets"], 1)
         self.assertEqual(features["cycling_targets"], 1)
         self.assertEqual(features["competitions"], first["competitions"])
         self.assertEqual(features["units"], first["units"])
         self.assertEqual(feature_ids, demo_ids)
 
-    def test_reseeding_on_a_later_date_moves_the_single_cycling_target(self):
+    @contextmanager
+    def _temporary_fixture_database(self, prefix):
         server = fixture_runtime.server
         original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)
-        seed_day = self.today
-        reseed_day = self.today + timedelta(days=3)
-
-        def cycling_targets():
-            return [
-                item
-                for item in server.PLANNING_DATA.competition().list(100)
-                if item["name"] == "Fixture cycling target"
-            ]
-
-        with TemporaryDirectory(prefix="fixture-reseed-test-") as directory:
+        with TemporaryDirectory(prefix=prefix) as directory:
             root = Path(directory)
             try:
                 DATABASE_MANAGER_CACHE.reset()
@@ -523,28 +533,43 @@ class StandardFixtureDataTests(unittest.TestCase):
                 server.DATA_DIR = root
                 server.DB_PATH = root / "fixture.db"
                 server.LOG_PATH = root / "fixture.log"
-                fixture_runtime.initialise_fixture()
-                with patch.object(
-                    server.ATHLETE_CLOCK,
-                    "now",
-                    return_value=datetime.combine(seed_day, time()),
-                ):
-                    fixture_runtime.seed_training_features()
-                first_targets = cycling_targets()
-                competitions_before = len(server.PLANNING_DATA.competition().list(100))
-                with patch.object(
-                    server.ATHLETE_CLOCK,
-                    "now",
-                    return_value=datetime.combine(reseed_day, time()),
-                ):
-                    fixture_runtime.seed_training_features()
-                reseeded_targets = cycling_targets()
-                competitions_after = len(server.PLANNING_DATA.competition().list(100))
+                yield server
             finally:
                 DATABASE_MANAGER_CACHE.reset()
                 server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH = (
                     original
                 )
+
+    def test_reseeding_on_a_later_date_moves_the_single_cycling_target(self):
+        seed_day = self.today
+        reseed_day = self.today + timedelta(days=3)
+
+        with self._temporary_fixture_database("fixture-reseed-test-") as server:
+
+            def cycling_targets():
+                return [
+                    item
+                    for item in server.PLANNING_DATA.competition().list(100)
+                    if item["name"] == "Fixture cycling target"
+                ]
+
+            fixture_runtime.initialise_fixture()
+            with patch.object(
+                server.ATHLETE_CLOCK,
+                "now",
+                return_value=datetime.combine(seed_day, time()),
+            ):
+                fixture_runtime.seed_training_features()
+            first_targets = cycling_targets()
+            competitions_before = len(server.PLANNING_DATA.competition().list(100))
+            with patch.object(
+                server.ATHLETE_CLOCK,
+                "now",
+                return_value=datetime.combine(reseed_day, time()),
+            ):
+                fixture_runtime.seed_training_features()
+            reseeded_targets = cycling_targets()
+            competitions_after = len(server.PLANNING_DATA.competition().list(100))
 
         self.assertEqual(len(first_targets), 1)
         self.assertEqual(len(reseeded_targets), 1)
@@ -557,6 +582,166 @@ class StandardFixtureDataTests(unittest.TestCase):
             first_targets[0]["event_date"], reseeded_targets[0]["event_date"]
         )
         self.assertEqual(competitions_after, competitions_before)
+
+    def _v6_scenarios(self, server, today):
+        """Read back every v6 scenario through the public services and snapshot."""
+        with server.database_manager().unit_of_work() as db:
+            snapshot = json.loads(server.SNAPSHOT_REPOSITORY.latest_payload(db))
+            version = server.KEY_VALUE_REPOSITORY.get(db, "preview_demo_seed_version")
+        checkins = {
+            item["checkin_date"]: item
+            for item in server.ATHLETE_DATA.checkin().list(100)
+        }
+        units = server.PLANNING_DATA.planned_unit().list(500)
+        names = Counter(item.get("name") for item in units)
+        swim_day = (
+            today - timedelta(days=fixture_runtime.FIXTURE_V6_SWIM_OFFSET)
+        ).isoformat()
+        sick_day = (
+            today - timedelta(days=fixture_runtime.FIXTURE_V6_SICK_OFFSET)
+        ).isoformat()
+        rest_day = (
+            today - timedelta(days=fixture_runtime.FIXTURE_V6_REST_OFFSET)
+        ).isoformat()
+        return {
+            "version": version,
+            "rest_day": checkins.get(rest_day, {}).get("day_status"),
+            "sick_day_status": checkins.get(sick_day, {}).get("day_status"),
+            "sick_illness": checkins.get(sick_day, {}).get("illness"),
+            "swims": sorted(
+                (item["id"], item["start_date_local"], item["type"])
+                for item in snapshot["recent_activities"]
+                if str(item.get("id", "")).startswith("fixture-v6-swim-")
+            ),
+            "swim_unit": [
+                item for item in units if item.get("name") == "Fixture swim intervals"
+            ],
+            "swim_day": swim_day,
+            "camp_units": [
+                item for item in units if item.get("name") == "Fixture hard intervals"
+            ],
+            "short_units": [
+                item for item in units if item.get("name") == "Fixture short-only ride"
+            ],
+            "unit_name_counts": {
+                name: count for name, count in names.items() if name in V6_UNIT_NAMES
+            },
+        }
+
+    def test_v6_fresh_seed_contains_each_scenario(self):
+        with self._temporary_fixture_database("fixture-v6-fresh-") as server:
+            fixture_runtime.initialise_fixture()
+            result = fixture_runtime.seed_preview_demo()
+            today = server.ATHLETE_CLOCK.now().date()
+            scenarios = self._v6_scenarios(server, today)
+
+        self.assertEqual(result, {"ready": True})
+        self.assertEqual(
+            scenarios["version"], fixture_runtime.FIXTURE_DEMO_SEED_VERSION
+        )
+        self.assertEqual(scenarios["rest_day"], "rest")
+        self.assertEqual(scenarios["sick_day_status"], "pause")
+        self.assertEqual(scenarios["sick_illness"], "Erkältung, synthetisch")
+        self.assertEqual(
+            scenarios["swims"],
+            [
+                ("fixture-v6-swim-a", f"{scenarios['swim_day']}T11:00:00", "Swim"),
+                ("fixture-v6-swim-b", f"{scenarios['swim_day']}T18:00:00", "Swim"),
+            ],
+        )
+        self.assertEqual(len(scenarios["swim_unit"]), 1)
+        self.assertEqual(scenarios["swim_unit"][0]["sport"], "Swim")
+        self.assertEqual(scenarios["swim_unit"][0]["date"], scenarios["swim_day"])
+        self.assertEqual(scenarios["swim_unit"][0]["icu_training_load"], 40)
+        self.assertEqual(len(scenarios["camp_units"]), 1)
+        self.assertEqual(scenarios["camp_units"][0]["icu_training_load"], 75)
+        self.assertEqual(len(scenarios["short_units"]), 1)
+        self.assertEqual(scenarios["short_units"][0]["duration_minutes"], 90)
+        self.assertEqual(scenarios["short_units"][0]["icu_training_load"], 85)
+        self.assertEqual(
+            scenarios["unit_name_counts"],
+            {name: 1 for name in V6_UNIT_NAMES},
+        )
+
+    def test_v5_database_upgrades_to_v6_scenarios_without_duplicates(self):
+        with self._temporary_fixture_database("fixture-v6-upgrade-") as server:
+            fixture_runtime.initialise_fixture()
+            today = server.ATHLETE_CLOCK.now().date()
+            with (
+                patch.object(fixture_runtime, "FIXTURE_DEMO_SEED_VERSION", "5"),
+                patch.object(fixture_runtime, "_fixture_seed_v6", return_value=True),
+            ):
+                fixture_runtime.seed_preview_demo()
+            before = self._v6_scenarios(server, today)
+
+            upgraded = fixture_runtime.seed_preview_demo()
+            after = self._v6_scenarios(server, today)
+
+            # Repeating every v6 helper directly must not add rows.
+            fixture_runtime._fixture_seed_v6(today)
+            repeated = self._v6_scenarios(server, today)
+
+        self.assertEqual(before["version"], "5")
+        self.assertEqual(before["swims"], [])
+        self.assertEqual(before["camp_units"], [])
+        self.assertEqual(upgraded, {"ready": True, "seed_version": "6"})
+        self.assertEqual(after["version"], "6")
+        self.assertEqual(after["sick_illness"], "Erkältung, synthetisch")
+        self.assertEqual(len(after["swims"]), 2)
+        self.assertEqual(after["unit_name_counts"], {name: 1 for name in V6_UNIT_NAMES})
+        self.assertEqual(repeated, after)
+
+    def test_offline_openai_mode_records_network_failure_without_canned_reply(self):
+        server = fixture_runtime.server
+        transport = fixture_runtime.FixtureResponseTransport()
+        state = Mock()
+        calls = [
+            lambda: transport.request({"input": "{}"}),
+            lambda: transport.background_request({"input": "{}"}),
+            lambda: transport.stream_request({"input": "{}"}, lambda _delta: None),
+        ]
+        with (
+            patch.dict(os.environ, {"FIXTURE_OPENAI_MODE": "offline"}),
+            patch.object(server, "provider_state_service", return_value=state),
+            patch.object(fixture_runtime, "fixture_coach_response") as canned,
+        ):
+            for call in calls:
+                with self.assertRaises(server.AppError) as raised:
+                    call()
+                self.assertEqual(raised.exception.status, 502)
+                self.assertEqual(raised.exception.reason, "network_error")
+
+        canned.assert_not_called()
+        self.assertEqual(state.record_status.call_count, len(calls))
+        state.record_status.assert_called_with(
+            "openai",
+            state="error",
+            reason="network_error",
+            message=unittest.mock.ANY,
+        )
+
+    def test_default_openai_mode_keeps_canned_coach_replies(self):
+        transport = fixture_runtime.FixtureResponseTransport()
+        with (
+            patch.dict(os.environ),
+            patch.object(
+                fixture_runtime,
+                "fixture_coach_response",
+                return_value={"output_text": "canned"},
+            ) as canned,
+        ):
+            os.environ.pop("FIXTURE_OPENAI_MODE", None)
+            result = transport.request({"input": "{}"})
+
+        self.assertEqual(result, {"output_text": "canned"})
+        canned.assert_called_once()
+
+    def test_unknown_openai_mode_is_rejected_at_startup(self):
+        with (
+            patch.dict(os.environ, {"FIXTURE_OPENAI_MODE": "chat"}),
+            self.assertRaises(ValueError),
+        ):
+            fixture_runtime.fixture_openai_mode()
 
     def test_explicit_activity_seed_merges_into_existing_snapshot(self):
         server = fixture_runtime.server
