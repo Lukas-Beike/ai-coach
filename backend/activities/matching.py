@@ -3,11 +3,23 @@
 from __future__ import annotations
 
 import math
+import re
+from datetime import datetime
 from typing import Any
 
 from backend.activities.identity import activity_datetime as _activity_datetime
 from backend.activities.identity import activity_kind as _activity_kind
 from backend.athlete.local_date import iso_date_prefix
+
+# Planned units without a start time are stored as a bare date or as the
+# midnight placeholder used by the planning and calendar modules.
+_DATE_ONLY_PATTERN = re.compile(
+    r"\d{4}-\d{2}-\d{2}(?:[T ]00:00(?::00(?:\.0+)?)?)?", re.ASCII
+)
+_PLANNED_START_KEYS = ("start_date_local", "date", "start")
+_ACTIVITY_START_KEYS = ("start_date_local", "start_date", "start")
+_DURATION_KEYS = ("moving_time", "elapsed_time")
+_LOAD_KEYS = ("icu_training_load", "training_load", "tss")
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -89,19 +101,22 @@ def _paired_activity_match(
     )
 
 
-def _unpaired_activity_match(
-    event: dict[str, Any], activity_rows: list[dict[str, Any]], unused: set[int]
-) -> int | None:
-    event_date = record_date(
-        _first_present(event, ("start_date_local", "date", "start"))
-    )
-    event_kind = _activity_kind(event)
-    if event_kind == "other":
-        return None
-    event_start = _activity_datetime(
-        _first_present(event, ("start_date_local", "date", "start"))
-    )
-    candidates: list[tuple[float, int]] = []
+def _is_date_only(value: Any) -> bool:
+    return _DATE_ONLY_PATTERN.fullmatch(str(value or "").strip()) is not None
+
+
+def _non_negative_number(record: Any, keys: tuple[str, ...]) -> float | int | None:
+    number = _as_number(_first_present(record, keys))
+    return number if number is not None and number >= 0 else None
+
+
+def _unpaired_candidates(
+    event_date: str,
+    event_kind: str,
+    activity_rows: list[dict[str, Any]],
+    unused: set[int],
+) -> list[int]:
+    candidates: list[int] = []
     for activity_index in unused:
         activity = activity_rows[activity_index]
         if _first_present(activity, ("paired_event_id", "pairedEventId")) not in (
@@ -109,25 +124,81 @@ def _unpaired_activity_match(
             "",
         ):
             continue
-        if (
-            record_date(
-                _first_present(activity, ("start_date_local", "start_date", "start"))
-            )
-            != event_date
-        ):
+        if record_date(_first_present(activity, _ACTIVITY_START_KEYS)) != event_date:
             continue
         if _activity_kind(activity) != event_kind:
             continue
+        candidates.append(activity_index)
+    return candidates
+
+
+def _planned_duration_seconds(event: dict[str, Any]) -> float | int | None:
+    # Local library units carry duration_minutes; provider events carry seconds.
+    seconds = _non_negative_number(event, _DURATION_KEYS)
+    if seconds is not None:
+        return seconds
+    minutes = _non_negative_number(event, ("duration_minutes",))
+    return minutes * 60 if minutes is not None else None
+
+
+def _date_only_fit_key(
+    event: dict[str, Any], activity: dict[str, Any], activity_index: int
+) -> tuple[float, float, tuple[int, datetime | None], int]:
+    """Rank a same-day activity for a planned unit without a start time.
+
+    Sport family is already enforced by the caller. Smaller keys fit better:
+    relative duration gap, then absolute load gap, then earliest start, then
+    the original index as a deterministic tie-break. Missing data ranks last.
+    """
+    planned_duration = _planned_duration_seconds(event)
+    actual_duration = _non_negative_number(activity, _DURATION_KEYS)
+    duration_gap = (
+        abs(actual_duration - planned_duration) / planned_duration
+        if planned_duration and actual_duration is not None
+        else math.inf
+    )
+    planned_load = _non_negative_number(event, _LOAD_KEYS)
+    actual_load = _non_negative_number(activity, _LOAD_KEYS)
+    load_gap = (
+        abs(actual_load - planned_load)
+        if planned_load is not None and actual_load is not None
+        else math.inf
+    )
+    start = _activity_datetime(_first_present(activity, _ACTIVITY_START_KEYS))
+    # Known starts sort before unknown ones; (1, None) ties fall to the index.
+    start_key = (0, start) if start is not None else (1, None)
+    return (duration_gap, load_gap, start_key, activity_index)
+
+
+def _unpaired_activity_match(
+    event: dict[str, Any], activity_rows: list[dict[str, Any]], unused: set[int]
+) -> int | None:
+    event_value = _first_present(event, _PLANNED_START_KEYS)
+    event_date = record_date(event_value)
+    event_kind = _activity_kind(event)
+    if event_kind == "other":
+        return None
+    candidates = _unpaired_candidates(event_date, event_kind, activity_rows, unused)
+    if not candidates:
+        return None
+    if _is_date_only(event_value):
+        return min(
+            candidates,
+            key=lambda index: _date_only_fit_key(event, activity_rows[index], index),
+        )
+    event_start = _activity_datetime(event_value)
+    ranked: list[tuple[float, int]] = []
+    for activity_index in candidates:
         activity_start = _activity_datetime(
-            _first_present(activity, ("start_date_local", "start_date", "start"))
+            _first_present(activity_rows[activity_index], _ACTIVITY_START_KEYS)
         )
         distance = (
             abs((activity_start - event_start).total_seconds())
             if activity_start and event_start
             else 0
         )
-        candidates.append((distance, activity_index))
-    return min(candidates)[1] if candidates else None
+        ranked.append((distance, activity_index))
+    return min(ranked)[1]
 
 
 def match_planned_workouts(

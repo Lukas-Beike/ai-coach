@@ -142,6 +142,135 @@ class ActivityMatchingTests(unittest.TestCase):
             1,
         )
 
+    def test_date_only_unit_uses_best_fit_ranking(self):
+        def planned(kind, duration, load=None):
+            unit = {
+                "category": "WORKOUT",
+                "type": kind,
+                "date": "2026-09-20",
+                "moving_time": duration,
+            }
+            if load is not None:
+                unit["icu_training_load"] = load
+            return unit
+
+        def activity(kind, start, duration, load=None, **extra):
+            row = {
+                "type": kind,
+                "start_date_local": f"2026-09-20T{start}",
+                "moving_time": duration,
+                **extra,
+            }
+            if load is not None:
+                row["icu_training_load"] = load
+            return row
+
+        midnight_unit = {
+            "category": "WORKOUT",
+            "type": "Run",
+            "start_date_local": "2026-09-20T00:00:00",
+            "moving_time": 1800,
+        }
+        timed_unit = {
+            "category": "WORKOUT",
+            "type": "Run",
+            "start_date_local": "2026-09-20T10:00:00",
+            "moving_time": 1800,
+        }
+        cases = [
+            (
+                "different sports pick the compatible activity",
+                planned("Run", 1800),
+                [activity("Ride", "07:00:00", 1800), activity("Run", "09:00:00", 5400)],
+                1,
+            ),
+            (
+                "same sport prefers the closer duration",
+                planned("Run", 1800),
+                [activity("Run", "07:00:00", 5400), activity("Run", "10:00:00", 2100)],
+                1,
+            ),
+            (
+                "equal duration is decided by load",
+                planned("Ride", 3600, 60),
+                [
+                    activity("Ride", "07:00:00", 3600, 90),
+                    activity("Ride", "10:00:00", 3600, 55),
+                ],
+                1,
+            ),
+            (
+                "equal duration and load is decided by start time",
+                planned("Run", 1800, 30),
+                [
+                    activity("Run", "11:00:00", 1800, 30),
+                    activity("Run", "08:00:00", 1800, 30),
+                ],
+                1,
+            ),
+            (
+                "ride family includes virtual and e-bike rides",
+                planned("VirtualRide", 3600),
+                [
+                    activity("Ride", "07:00:00", 5400),
+                    activity("EBikeRide", "10:00:00", 3600),
+                ],
+                1,
+            ),
+            (
+                "ride family matches a single virtual ride",
+                planned("Ride", 3600),
+                [activity("VirtualRide", "10:00:00", 3600)],
+                0,
+            ),
+            (
+                "already paired activity is never selected",
+                planned("Run", 1800),
+                [
+                    activity("Run", "08:00:00", 1800, paired_event_id="other-event"),
+                    activity("Run", "10:00:00", 5400),
+                ],
+                1,
+            ),
+            (
+                "single candidate is unchanged",
+                planned("Run", 1800),
+                [activity("Run", "07:00:00", 9000)],
+                0,
+            ),
+            (
+                "local library units rank by duration_minutes",
+                {
+                    "category": "WORKOUT",
+                    "type": "Run",
+                    "date": "2026-09-20",
+                    "duration_minutes": 30,
+                },
+                [activity("Run", "07:00:00", 5400), activity("Run", "10:00:00", 1800)],
+                1,
+            ),
+            (
+                "midnight placeholder is treated as date-only",
+                midnight_unit,
+                [activity("Run", "07:00:00", 5400), activity("Run", "10:00:00", 1800)],
+                1,
+            ),
+            (
+                "unit with a start time keeps nearest-start matching",
+                timed_unit,
+                [activity("Run", "12:00:00", 1800), activity("Run", "10:01:00", 5400)],
+                1,
+            ),
+        ]
+        for name, event, activities, expected in cases:
+            with self.subTest(name):
+                self.assertEqual(
+                    _unpaired_activity_match(
+                        event, activities, set(range(len(activities)))
+                    ),
+                    expected,
+                )
+
     def test_invalid_timestamps_are_safe_and_inputs_are_not_mutated(self):
         planned = [{"category": "WORKOUT", "type": "Run", "start": "invalid"}]
         activities = [{"id": "bad", "type": "Run", "start": "invalid"}, "ignored"]
