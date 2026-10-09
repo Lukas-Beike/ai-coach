@@ -71,14 +71,16 @@ def _candidate(current: dict[str, Any], values: dict[str, Any]) -> dict[str, Any
     if candidate["status"] not in TRAINING_PLAN_STATUSES:
         raise AppError(400, "Ungültiger Trainingsplanstatus.")
     try:
-        start = LocalDate.parse(candidate["start_date"]).to_date()
-        end = LocalDate.parse(candidate["end_date"]).to_date()
+        start_date = LocalDate.parse(candidate["start_date"], allow_datetime=False)
+        end_date = LocalDate.parse(candidate["end_date"], allow_datetime=False)
     except (TypeError, ValueError) as exc:
         raise AppError(
             400, "Start- und Enddatum müssen das Format JJJJ-MM-TT haben."
         ) from exc
-    if start > end:
+    if start_date.to_date() > end_date.to_date():
         raise AppError(400, "Das Startdatum darf nicht nach dem Enddatum liegen.")
+    candidate["start_date"] = start_date.isoformat()
+    candidate["end_date"] = end_date.isoformat()
     return candidate
 
 

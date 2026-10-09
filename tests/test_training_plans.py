@@ -153,6 +153,15 @@ class TrainingPlanServiceTests(unittest.TestCase):
             self.assertEqual(raised.exception.status, status)
             self.assertEqual(str(raised.exception), message)
 
+    def test_update_rejects_datetime_bounds(self):
+        for field in ("start_date", "end_date"):
+            values = {"start_date": "2026-01-01", "end_date": "2026-01-04"}
+            values[field] = "2026-01-02T08:00:00"
+            with self.subTest(field=field), self.assertRaises(AppError) as raised:
+                self.service.update(self.plan_id, values)
+            self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(self.revision(), 0)
+
     def test_list_includes_persisted_constraints(self):
         constraints = [{"kind": "rest_day", "date": "2026-01-02"}]
         self.key_values.set(
