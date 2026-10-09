@@ -9,6 +9,7 @@ from pathlib import Path
 
 from backend.athlete.profile import ProfileService
 from backend.db import DatabaseManager, row_factory
+from backend.db.key_value import KeyValueService
 from backend.db.repositories import (
     KeyValueRepository,
     ProfileRepository,
@@ -53,7 +54,10 @@ class StateVersionServiceTests(unittest.TestCase):
             self.manager, ProfileRepository(self.key_values), self.key_values
         )
         self.service = StateVersionService(
-            self.manager, self.key_values, self.snapshot_repository, self.profile
+            self.manager,
+            KeyValueService(self.manager, self.key_values),
+            self.snapshot_repository,
+            self.profile,
         )
 
     def tearDown(self) -> None:
@@ -209,6 +213,7 @@ class StateVersionServiceTests(unittest.TestCase):
             self.assertEqual(
                 self.snapshot_repository.latest_metadata(db)["synced_at"], "before"
             )
+
         def fail_if_decoded(_db):
             raise AssertionError("decoded snapshot")
 

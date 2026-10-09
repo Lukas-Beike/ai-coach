@@ -1,7 +1,7 @@
 import unittest
 from datetime import date
 
-from backend.athlete.local_date import LocalDate
+from backend.athlete.local_date import LocalDate, iso_date_prefix
 
 
 class LocalDateTests(unittest.TestCase):
@@ -13,7 +13,14 @@ class LocalDateTests(unittest.TestCase):
             value.value = date(2026, 1, 1)
 
     def test_rejects_invalid_and_truncated_dates(self):
-        for value in ("2026-02-29", "2026-1-01", "2026-02-30", "2026-02-01junk"):
+        for value in (
+            "",
+            "2026-02-29",
+            "2026-1-01",
+            "2026-02-30",
+            "2026-02-01junk",
+            "2026-10-08T12:00:00+02:00junk",
+        ):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 LocalDate.parse(value)
 
@@ -27,3 +34,9 @@ class LocalDateTests(unittest.TestCase):
         self.assertEqual(
             LocalDate.parse("2026-10-08T23:15:00+02:00").isoformat(), "2026-10-08"
         )
+
+    def test_iso_date_prefix_parses_dates_timestamps_and_legacy_values(self):
+        self.assertEqual(iso_date_prefix("2026-10-08"), "2026-10-08")
+        self.assertEqual(iso_date_prefix("2026-10-08T23:15:00+02:00"), "2026-10-08")
+        self.assertEqual(iso_date_prefix("invalid-value"), "invalid-va")
+        self.assertEqual(iso_date_prefix("2026-02-30"), "2026-02-30")

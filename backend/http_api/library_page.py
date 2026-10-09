@@ -6,15 +6,20 @@ import json
 from typing import Any
 
 from backend.db import DatabaseManager
-from backend.db.repositories import LibraryPageRepository
 from backend.http_api import pagination
 
 
 class LibraryPageService:
-    def __init__(self, database_manager: DatabaseManager, *, maximum: int = 100):
+    def __init__(
+        self,
+        database_manager: DatabaseManager,
+        workout_library: Any,
+        *,
+        maximum: int = 100,
+    ):
         self._database_manager = database_manager
+        self._workout_library = workout_library
         self._maximum = maximum
-        self._repository = LibraryPageRepository()
 
     def page(self, cursor: Any = None, limit: Any = None) -> dict[str, Any]:
         decoded = pagination.decode_page_cursor(cursor)
@@ -25,7 +30,9 @@ class LibraryPageService:
             limit, pagination.API_PAGE_DEFAULT, self._maximum
         )
         with self._database_manager.reader() as db:
-            rows = self._repository.page(db, decoded_cursor, page_size + 1)
+            rows = self._workout_library.page_in_transaction(
+                db, decoded_cursor, page_size + 1
+            )
         page = rows[:page_size]
         return {
             "workouts": [json.loads(row["payload"]) for row in page],

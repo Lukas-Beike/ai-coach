@@ -11,6 +11,7 @@ from backend.activities.identity import (
     activity_kind,
     intervals_activity_device_source,
 )
+from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
 
 _DUPLICATE_DELETE_STALE_ERROR = (
@@ -44,7 +45,7 @@ def duplicate_delete_action(pair: dict[str, Any]) -> dict[str, Any]:
                 "type": "delete",
                 "id": pair["duplicate_id"],
                 "name": pair["duplicate_name"],
-                "date": str(pair.get("start_date_local") or "")[:10],
+                "date": iso_date_prefix(str(pair.get("start_date_local") or "")),
                 "source": "Garmin",
                 "kept_source": "Wahoo",
             }
@@ -116,7 +117,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def _number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None

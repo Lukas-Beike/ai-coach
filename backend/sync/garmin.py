@@ -12,6 +12,7 @@ from backend.activities.duplicates import (
     deduplicate_api_records,
     garmin_activity_duplicates_intervals,
 )
+from backend.athlete.local_date import iso_date_prefix
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -74,7 +75,7 @@ def _fixture_sleep_dates(value: Any) -> list[date]:
         for key, item in value.items():
             if key in ("calendarDate", "summaryDate") and isinstance(item, str):
                 try:
-                    dates.append(date.fromisoformat(item[:10]))
+                    dates.append(date.fromisoformat(iso_date_prefix(item)))
                 except ValueError:
                     pass
             elif isinstance(item, (dict, list)):
@@ -94,7 +95,9 @@ def _shift_fixture_sleep_dates(value: Any, shift: timedelta) -> Any:
         raw = normalized.get(key)
         if isinstance(raw, str):
             try:
-                normalized[key] = (date.fromisoformat(raw[:10]) + shift).isoformat()
+                normalized[key] = (
+                    date.fromisoformat(iso_date_prefix(raw)) + shift
+                ).isoformat()
             except ValueError:
                 pass
     return normalized
@@ -141,7 +144,7 @@ class GarminPayloadService:
             serialized = self._key_value_repository.get(db, "garmin_snapshot")
         try:
             value = json.loads(serialized or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return {}
         return value if isinstance(value, dict) else {}
 
@@ -162,7 +165,7 @@ class GarminPayloadService:
             try:
                 start = date.fromisoformat(coverage["synced_start"])
                 end = date.fromisoformat(coverage["synced_end"])
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 return max(minimum_days, GARMIN_INITIAL_SYNC_DAYS), None
             if (end - start).days + 1 < GARMIN_INITIAL_SYNC_DAYS:
                 return max(minimum_days, GARMIN_INITIAL_SYNC_DAYS), None
@@ -337,7 +340,7 @@ def _merge_collection_coverage(
     try:
         start = date.fromisoformat(payload["start"])
         end = date.fromisoformat(payload["end"])
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         return previous
     if previous:
         prior_start = date.fromisoformat(previous["synced_start"])
@@ -405,7 +408,7 @@ class GarminSyncStateService:
     def capability_state(self, source: str) -> dict[str, Any]:
         try:
             value = json.loads(self._get(f"garmin_capability_{source}") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             value = {}
         return value if isinstance(value, dict) else {}
 
@@ -417,7 +420,7 @@ class GarminSyncStateService:
                 datetime.fromisoformat(paused_until.replace("Z", "+00:00"))
                 <= self._current_time()
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return True
 
     def record_capability_failure(self, source: str, error: BaseException) -> None:
@@ -445,7 +448,7 @@ class GarminSyncStateService:
     def error_entries(self) -> list[dict[str, Any]]:
         try:
             errors = json.loads(self._get("last_garmin_error") or "[]")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             errors = []
         return (
             [entry for entry in errors if isinstance(entry, dict)]
@@ -499,7 +502,7 @@ class GarminSyncStateService:
             self._sync_state_repository.update_cursor(
                 "garmin",
                 "data",
-                str(payload.get("end") or fallback_end.isoformat())[:10],
+                iso_date_prefix(str(payload.get("end") or fallback_end.isoformat())),
                 synced_at,
             )
             if end_date is not None and historical_cursor is not None:

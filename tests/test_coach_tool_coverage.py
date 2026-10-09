@@ -3,6 +3,7 @@ Model responses and provider reads are scripted; the real chat loop, request
 validation, tools, transactions and receipts execute against disposable state.
 Each coverage claim must be observed as a successful tool receipt at runtime.
 """
+
 import functools
 import json
 import unittest
@@ -26,21 +27,38 @@ def covers(*cases):
         @functools.wraps(test)
         def checked(self):
             test(self)
-            self.assertFalse(set(cases) - self.observed, "Declared successful tool cases were not executed: " +
-                             ", ".join(sorted(set(cases) - self.observed)))
+            self.assertFalse(
+                set(cases) - self.observed,
+                "Declared successful tool cases were not executed: "
+                + ", ".join(sorted(set(cases) - self.observed)),
+            )
+
         checked.tool_cases = frozenset(cases)
         return checked
+
     return decorate
 
 
 REQUIRED_VARIANTS = {
     "manage_training_templates": {"create", "update", "archive", "restore", "delete"},
-    "apply_training_patch": {"create", "update", "move", "archive", "restore", "delete"},
+    "apply_training_patch": {
+        "create",
+        "update",
+        "move",
+        "archive",
+        "restore",
+        "delete",
+    },
     "save_competition": {"create", "update"},
     "update_training_plan": {"update", "archive", "delete"},
     "start_provider_refresh": {"intervals", "garmin", "calendar", "weather"},
     "start_intervals_plan_sync": {"selected", "created", "all_pending"},
-    "resolve_training_sync_conflict": {"keep_local", "adopt_remote", "retry_push", "retry_read"},
+    "resolve_training_sync_conflict": {
+        "keep_local",
+        "adopt_remote",
+        "retry_push",
+        "retry_read",
+    },
     "apply_adaptive_replan": {"local", "intervals"},
     "sync_nutrition": {"date", "pending"},
 }
@@ -60,7 +78,11 @@ def variants(name, arguments, result):
         return {"update" if arguments["payload"].get("competition_id") else "create"}
     if name == "update_training_plan":
         payload = arguments["payload"]
-        return {"archive" if payload.get("status") == "archived" else payload.get("action", "update")}
+        return {
+            "archive"
+            if payload.get("status") == "archived"
+            else payload.get("action", "update")
+        }
     if name == "start_provider_refresh":
         return {arguments["_request"]["target"]}
     if name == "start_intervals_plan_sync":
@@ -68,7 +90,11 @@ def variants(name, arguments, result):
     if name == "resolve_training_sync_conflict":
         if arguments.get("local_id"):
             return {arguments["strategy"]}
-        return {"retry_push" if result["job"]["type"] in {"plan_push", "competition_push"} else "retry_read"}
+        return {
+            "retry_push"
+            if result["job"]["type"] in {"plan_push", "competition_push"}
+            else "retry_read"
+        }
     if name == "apply_adaptive_replan":
         return {"intervals" if arguments.get("sync_illness_to_intervals") else "local"}
     if name == "sync_nutrition":
@@ -81,16 +107,25 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     def test_training_report_returns_same_local_facts_without_mutation(self):
         self.seed_activity()
         before = self.athlete_state()
-        result = self.run_tool("get_training_report", {"start": "2026-09-01", "days": 7, "sport": "Run"})
+        result = self.run_tool(
+            "get_training_report", {"start": "2026-09-01", "days": 7, "sport": "Run"}
+        )
         self.assertEqual(1, result["report"]["totals"]["sessions"])
         self.assertEqual(before, self.athlete_state())
 
     def test_garmin_catch_up_tool_schema_requires_explicit_history_window(self):
-        refresh = next(tool for tool in server.COACH_DIALOGUE_TOOLS if tool["name"] == "start_provider_refresh")
+        refresh = next(
+            tool
+            for tool in server.COACH_DIALOGUE_TOOLS
+            if tool["name"] == "start_provider_refresh"
+        )
         self.assertIn("read-only provider refresh", refresh["description"])
         self.assertIn("Garmin catch-up", refresh["description"])
         self.assertIn("days=30", refresh["description"])
-        self.assertIn("explicitly requested Garmin catch-up", refresh["parameters"]["properties"]["days"]["description"])
+        self.assertIn(
+            "explicitly requested Garmin catch-up",
+            refresh["parameters"]["properties"]["days"]["description"],
+        )
 
     def setUp(self):
         super().setUp()
@@ -102,7 +137,13 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             (gemini_provider, "urlopen"),
             (openai_provider, "urlopen"),
         ):
-            guard = patch.object(owner, name, side_effect=AssertionError("Unexpected network access in synthetic Coach test"))
+            guard = patch.object(
+                owner,
+                name,
+                side_effect=AssertionError(
+                    "Unexpected network access in synthetic Coach test"
+                ),
+            )
             guard.start()
             self.addCleanup(guard.stop)
 
@@ -116,102 +157,274 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         receipt, model = super().turn(*args, **kwargs)
         for step in receipt.get("command_receipts", []):
             if step.get("result", {}).get("ok") and step["call_id"] in self.issued:
-                for variant in variants(step["tool"], self.issued[step["call_id"]], step["result"]):
+                for variant in variants(
+                    step["tool"], self.issued[step["call_id"]], step["result"]
+                ):
                     self.observed.add(step["tool"] + ":" + variant)
         return receipt, model
 
-    def run_tool(self, name, arguments=None, scope=None, message="Bitte so ausführen.", **kwargs):
-        receipt, _ = self.turn(message, [lambda _: self.call(name, arguments, scope, **kwargs),
-                                       {"output_text": "Synthetischer Ergebnistext."}])
-        self.assertEqual(receipt["status"], "completed", [step["result"].get("reason") for step in receipt["command_receipts"]])
+    def run_tool(
+        self, name, arguments=None, scope=None, message="Bitte so ausführen.", **kwargs
+    ):
+        receipt, _ = self.turn(
+            message,
+            [
+                lambda _: self.call(name, arguments, scope, **kwargs),
+                {"output_text": "Synthetischer Ergebnistext."},
+            ],
+        )
+        self.assertEqual(
+            receipt["status"],
+            "completed",
+            [step["result"].get("reason") for step in receipt["command_receipts"]],
+        )
         step = receipt["command_receipts"][0]
         self.assertTrue(step["result"]["ok"])
         return step["result"]
 
     def athlete_state(self):
         """Exclude dialogue bookkeeping, include all state the tools can change."""
-        tables = ("planned_units", "workout_library", "training_plans", "competitions", "competition_sync_tombstones",
-                  "athlete_checkins", "activity_feedback", "plan_adjustments", "change_history", "sync_jobs",
-                  "sync_job_items", "coach_plan_artifacts", "coach_action_proposals", "planning_state", "snapshots")
+        tables = (
+            "planned_units",
+            "workout_library",
+            "training_plans",
+            "competitions",
+            "competition_sync_tombstones",
+            "athlete_checkins",
+            "activity_feedback",
+            "plan_adjustments",
+            "change_history",
+            "sync_jobs",
+            "sync_job_items",
+            "coach_plan_artifacts",
+            "coach_action_proposals",
+            "planning_state",
+            "snapshots",
+        )
         with server.database_manager().unit_of_work() as db:
             feature_records = [
                 dict(row)
                 for row in db.execute(
                     "SELECT key, value, updated_at FROM kv WHERE key LIKE 'fueling:%' "
-
                     "OR key LIKE 'equipment:%' OR key LIKE 'equipment_assignment:%' "
                     "OR key LIKE 'equipment_maintenance:%' OR key LIKE 'checkin_tags:%' OR key LIKE 'checkin_day_status:%'"
                 )
             ]
-            return {"profile": server.ATHLETE_DATA.profile().get(), "feature_records": feature_records,
-                    **{table: [dict(row) for row in db.execute("SELECT * FROM " + table)] for table in tables}}
+            return {
+                "profile": server.ATHLETE_DATA.profile().get(),
+                "feature_records": feature_records,
+                **{
+                    table: [dict(row) for row in db.execute("SELECT * FROM " + table)]
+                    for table in tables
+                },
+            }
 
     def seed_activity(self):
-        activity = {"id": "synthetic-run", "type": "Run", "name": "Synthetic run", "start_date_local": "2026-09-06T10:00:00",
-                    "moving_time": 1800, "distance": 5000}
-        server.SYNC_PERSISTENCE.state_repository().save_view({
-            "recent_activities": [activity], "recent_wellness": [], "planned_workouts": [],
-            "raw_provider_data": {"activities": [{**activity, "raw_detail": "Synthetic complete provider record"}]},
-        })
+        activity = {
+            "id": "synthetic-run",
+            "type": "Run",
+            "name": "Synthetic run",
+            "start_date_local": "2026-09-06T10:00:00",
+            "moving_time": 1800,
+            "distance": 5000,
+        }
+        server.SYNC_PERSISTENCE.state_repository().save_view(
+            {
+                "recent_activities": [activity],
+                "recent_wellness": [],
+                "planned_workouts": [],
+                "raw_provider_data": {
+                    "activities": [
+                        {**activity, "raw_detail": "Synthetic complete provider record"}
+                    ]
+                },
+            }
+        )
         return activity
 
     @covers("read_profile:success", "update_profile:success")
     def test_permanent_profile_acceptance_reads_and_preserves_existing_facts(self):
-        server.ATHLETE_DATA.profile().save({"name": "Synthetic athlete", "training_background": "Regular cycling.", "equipment": "Indoor bike"})
+        server.ATHLETE_DATA.profile().save(
+            {
+                "name": "Synthetic athlete",
+                "training_background": "Regular cycling.",
+                "equipment": "Indoor bike",
+            }
+        )
         before = self.athlete_state()
-        self.turn("Spaziergänge gehören bei mir zum Alltag.", [{"output_text": "Soll ich tägliche Spaziergänge dauerhaft im Profil ergänzen?"}])
+        self.turn(
+            "Spaziergänge gehören bei mir zum Alltag.",
+            [
+                {
+                    "output_text": "Soll ich tägliche Spaziergänge dauerhaft im Profil ergänzen?"
+                }
+            ],
+        )
         self.assertEqual(self.athlete_state(), before)
+
         def save(payload):
             profile = json.loads(payload["input"][0]["output"])["profile"]
-            return self.call("update_profile", {"changes": [{"field": "training_background", "expected_value": profile["training_background"],
-                "value": profile["training_background"] + " Daily walking."}]}, ["local_profile"])
-        receipt, _ = self.turn("Ja, bitte dauerhaft hinzufügen.", [lambda _: self.call("read_profile"), save, {"output_text": "Gespeichert."}])
+            return self.call(
+                "update_profile",
+                {
+                    "changes": [
+                        {
+                            "field": "training_background",
+                            "expected_value": profile["training_background"],
+                            "value": profile["training_background"] + " Daily walking.",
+                        }
+                    ]
+                },
+                ["local_profile"],
+            )
+
+        receipt, _ = self.turn(
+            "Ja, bitte dauerhaft hinzufügen.",
+            [
+                lambda _: self.call("read_profile"),
+                save,
+                {"output_text": "Gespeichert."},
+            ],
+        )
         self.assertEqual(receipt["status"], "completed")
-        self.assertEqual(server.ATHLETE_DATA.profile().get()["training_background"], "Regular cycling. Daily walking.")
-        self.assertEqual(server.ATHLETE_DATA.profile().get()["equipment"], "Indoor bike")
+        self.assertEqual(
+            server.ATHLETE_DATA.profile().get()["training_background"],
+            "Regular cycling. Daily walking.",
+        )
+        self.assertEqual(
+            server.ATHLETE_DATA.profile().get()["equipment"], "Indoor bike"
+        )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
-    @covers("read_coach_context:success", "read_training_state:success", "list_planned_workouts:success", "list_workout_library:success",
-            "list_training_plans:success", "list_competitions:success", "list_change_history:success", "list_recent_activities:success",
-            "get_activity_details:success")
+    @covers(
+        "read_coach_context:success",
+        "read_training_state:success",
+        "list_planned_workouts:success",
+        "list_workout_library:success",
+        "list_training_plans:success",
+        "list_competitions:success",
+        "list_change_history:success",
+        "list_recent_activities:success",
+        "get_activity_details:success",
+    )
     def test_read_tools_return_seeded_objects_without_mutating_them(self):
-        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()], plan_name="Synthetic plan")[0]
-        server.PLANNING_DATA.workout_library().create_template({"name": "Synthetic template", "sport": "Run", "description": "- 30m 60% Easy", "duration_minutes": 30})
-        server.PLANNING_DATA.competition().save({"name": "Synthetic race", "event_date": "2026-10-03", "sport": "Run", "priority": "A"})
+        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout()], plan_name="Synthetic plan"
+        )[0]
+        server.PLANNING_DATA.workout_library().create_template(
+            {
+                "name": "Synthetic template",
+                "sport": "Run",
+                "description": "- 30m 60% Easy",
+                "duration_minutes": 30,
+            }
+        )
+        server.PLANNING_DATA.competition().save(
+            {
+                "name": "Synthetic race",
+                "event_date": "2026-10-03",
+                "sport": "Run",
+                "priority": "A",
+            }
+        )
         self.seed_activity()
         before = self.athlete_state()
-        for tool, expected in (("read_training_state", planned["id"]), ("list_planned_workouts", planned["id"]),
-                               ("list_workout_library", "Synthetic template"), ("list_training_plans", "Synthetic plan"),
-                               ("list_competitions", "Synthetic race"), ("list_change_history", "entity_type"),
-                               ("list_recent_activities", "synthetic-run"), ("get_activity_details", "Synthetic run")):
+        for tool, expected in (
+            ("read_training_state", planned["id"]),
+            ("list_planned_workouts", planned["id"]),
+            ("list_workout_library", "Synthetic template"),
+            ("list_training_plans", "Synthetic plan"),
+            ("list_competitions", "Synthetic race"),
+            ("list_change_history", "entity_type"),
+            ("list_recent_activities", "synthetic-run"),
+            ("get_activity_details", "Synthetic run"),
+        ):
             with self.subTest(tool=tool):
-                arguments = {"activity_id": "synthetic-run"} if tool == "get_activity_details" else None
-                message = "Analysiere bitte diese konkrete Einheit im Detail." if tool == "get_activity_details" else "Zeig mir den aktuellen Stand."
+                arguments = (
+                    {"activity_id": "synthetic-run"}
+                    if tool == "get_activity_details"
+                    else None
+                )
+                message = (
+                    "Analysiere bitte diese konkrete Einheit im Detail."
+                    if tool == "get_activity_details"
+                    else "Zeig mir den aktuellen Stand."
+                )
                 result = self.run_tool(tool, arguments, message=message)
                 self.assertIn(expected, json.dumps(result))
                 self.assertEqual(self.athlete_state(), before)
-        result = self.run_tool("read_coach_context", {"sections": ["garmin"]}, message="Zeig Garmin-Kontext.")
+        result = self.run_tool(
+            "read_coach_context",
+            {"sections": ["garmin"]},
+            message="Zeig Garmin-Kontext.",
+        )
         self.assertEqual(set(result["context"]), {"garmin"})
         self.assertEqual(self.athlete_state(), before)
 
-    @covers("manage_training_templates:create", "manage_training_templates:update", "manage_training_templates:archive",
-            "manage_training_templates:restore", "manage_training_templates:delete", "apply_workout_library_plan:success")
+    @covers(
+        "manage_training_templates:create",
+        "manage_training_templates:update",
+        "manage_training_templates:archive",
+        "manage_training_templates:restore",
+        "manage_training_templates:delete",
+        "apply_workout_library_plan:success",
+    )
     def test_template_lifecycle_and_scheduling_preserve_the_scheduled_copy(self):
-        self.run_tool("manage_training_templates", {"templates": [{"action": "create", "name": "Synthetic easy run", "sport": "Run",
-            "description": "- 30m 60% Synthetic easy instructions", "duration_minutes": 30}]}, ["local_template"], message="Speichere das als wiederverwendbare Vorlage.")
+        self.run_tool(
+            "manage_training_templates",
+            {
+                "templates": [
+                    {
+                        "action": "create",
+                        "name": "Synthetic easy run",
+                        "sport": "Run",
+                        "description": "- 30m 60% Synthetic easy instructions",
+                        "duration_minutes": 30,
+                    }
+                ]
+            },
+            ["local_template"],
+            message="Speichere das als wiederverwendbare Vorlage.",
+        )
         template = server.PLANNING_DATA.workout_library().list()[0]
         local_id = template["id"]
         self.assertFalse(template.get("date"))
-        self.run_tool("manage_training_templates", {"templates": [{"action": "update", "local_id": local_id, "duration_minutes": 40, "description": "- 40m 60%"}]}, ["library_workout:" + local_id])
-        self.assertEqual(server.PLANNING_DATA.workout_library().list()[0]["duration_minutes"], 40)
-        self.run_tool("apply_workout_library_plan", {"entries": [{"library_workout_id": local_id, "date": "2026-09-09"}]},
-                      ["library_workout:" + local_id], period={"start": "2026-09-09", "end": "2026-09-09"}, message="Plane diese Vorlage am Mittwoch ein.")
+        self.run_tool(
+            "manage_training_templates",
+            {
+                "templates": [
+                    {
+                        "action": "update",
+                        "local_id": local_id,
+                        "duration_minutes": 40,
+                        "description": "- 40m 60%",
+                    }
+                ]
+            },
+            ["library_workout:" + local_id],
+        )
+        self.assertEqual(
+            server.PLANNING_DATA.workout_library().list()[0]["duration_minutes"], 40
+        )
+        self.run_tool(
+            "apply_workout_library_plan",
+            {"entries": [{"library_workout_id": local_id, "date": "2026-09-09"}]},
+            ["library_workout:" + local_id],
+            period={"start": "2026-09-09", "end": "2026-09-09"},
+            message="Plane diese Vorlage am Mittwoch ein.",
+        )
         planned_before = self.state()["planned_units"]
         self.assertEqual(len(planned_before), 1)
         self.assertEqual(planned_before[0]["date"], "2026-09-09")
         for action in ("archive", "restore", "delete"):
-            self.run_tool("manage_training_templates", {"templates": [{"action": action, "local_id": local_id}]}, ["library_workout:" + local_id])
-            templates = server.PLANNING_DATA.workout_library().list(include_archived=True)
+            self.run_tool(
+                "manage_training_templates",
+                {"templates": [{"action": action, "local_id": local_id}]},
+                ["library_workout:" + local_id],
+            )
+            templates = server.PLANNING_DATA.workout_library().list(
+                include_archived=True
+            )
             if action == "delete":
                 self.assertEqual(templates, [])
             else:
@@ -219,88 +432,239 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             self.assertEqual(self.state()["planned_units"], planned_before)
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
-    @covers("apply_training_patch:create", "apply_training_patch:update", "apply_training_patch:move",
-            "apply_training_patch:archive", "apply_training_patch:restore", "apply_training_patch:delete")
+    @covers(
+        "apply_training_patch:create",
+        "apply_training_patch:update",
+        "apply_training_patch:move",
+        "apply_training_patch:archive",
+        "apply_training_patch:restore",
+        "apply_training_patch:delete",
+    )
     def test_planned_unit_lifecycle_keeps_identity_until_deleted(self):
         period = {"start": "2026-09-09", "end": "2026-09-11"}
-        self.run_tool("apply_training_patch", {"workouts": [self.workout()], "expected_revision": self.state()["planning_revision"]}, ["local_plan"], period=period)
+        self.run_tool(
+            "apply_training_patch",
+            {
+                "workouts": [self.workout()],
+                "expected_revision": self.state()["planning_revision"],
+            },
+            ["local_plan"],
+            period=period,
+        )
         local_id = self.state()["planned_units"][0]["local_id"]
-        for action, extra in (("update", {"name": "Synthetic renamed", "date": "2026-09-11"}), ("archive", {}), ("restore", {}), ("delete", {})):
+        for action, extra in (
+            ("update", {"name": "Synthetic renamed", "date": "2026-09-11"}),
+            ("archive", {}),
+            ("restore", {}),
+            ("delete", {}),
+        ):
             with server.database_manager().unit_of_work() as db:
-                row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
-            self.run_tool("apply_training_patch", {"changes": [{"local_id": local_id, "action": action, **extra,
-                "expected_payload_hash": planning_library.library_payload_hash(row["payload"])}], "expected_revision": self.state()["planning_revision"]},
-                ["planned_unit:" + local_id], period=period)
+                row = db.execute(
+                    "SELECT payload FROM planned_units WHERE local_id=?", (local_id,)
+                ).fetchone()
+            self.run_tool(
+                "apply_training_patch",
+                {
+                    "changes": [
+                        {
+                            "local_id": local_id,
+                            "action": action,
+                            **extra,
+                            "expected_payload_hash": planning_library.library_payload_hash(
+                                row["payload"]
+                            ),
+                        }
+                    ],
+                    "expected_revision": self.state()["planning_revision"],
+                },
+                ["planned_unit:" + local_id],
+                period=period,
+            )
             units = self.state()["planned_units"]
             if action in {"archive", "delete"}:
                 self.assertEqual(units, [])
             else:
-                self.assertEqual([(u["local_id"], u["date"], u["name"]) for u in units], [(local_id, "2026-09-11", "Synthetic renamed")])
+                self.assertEqual(
+                    [(u["local_id"], u["date"], u["name"]) for u in units],
+                    [(local_id, "2026-09-11", "Synthetic renamed")],
+                )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
-    @covers("stage_training_plan:success", "commit_training_plan:success", "update_training_plan:update",
-            "update_training_plan:archive", "update_training_plan:delete")
+    @covers(
+        "stage_training_plan:success",
+        "commit_training_plan:success",
+        "update_training_plan:update",
+        "update_training_plan:archive",
+        "update_training_plan:delete",
+    )
     def test_requested_draft_commit_and_metadata_lifecycle(self):
         period = {"start": "2026-09-09", "end": "2026-09-09"}
-        draft = self.run_tool("stage_training_plan", {"payload": {"plan_name": "Synthetic draft", "goal": "Easy week", "workouts": [self.workout()]}},
-                              ["local_plan"], period=period, message="Erstelle zunächst nur einen Entwurf.")
+        draft = self.run_tool(
+            "stage_training_plan",
+            {
+                "payload": {
+                    "plan_name": "Synthetic draft",
+                    "goal": "Easy week",
+                    "workouts": [self.workout()],
+                }
+            },
+            ["local_plan"],
+            period=period,
+            message="Erstelle zunächst nur einen Entwurf.",
+        )
         self.assertEqual(self.state()["planned_units"], [])
-        source = [m["id"] for m in server.COACH_CONVERSATION.message_service().list() if m["role"] == "user"][-1]
+        source = [
+            m["id"]
+            for m in server.COACH_CONVERSATION.message_service().list()
+            if m["role"] == "user"
+        ][-1]
+
         def commit(_):
-            response = self.call("commit_training_plan", {"artifact_id": draft["artifact_id"]}, ["artifact:" + draft["artifact_id"]], period=period)
+            response = self.call(
+                "commit_training_plan",
+                {"artifact_id": draft["artifact_id"]},
+                ["artifact:" + draft["artifact_id"]],
+                period=period,
+            )
             args = json.loads(response["output"][0]["arguments"])
             args["_request"]["source_message_ids"].append(source)
             response["output"][0]["arguments"] = json.dumps(args)
             return response
-        result, _ = self.turn("Ja, diesen Entwurf speichern.", [commit, {"output_text": "Gespeichert."}])
+
+        result, _ = self.turn(
+            "Ja, diesen Entwurf speichern.", [commit, {"output_text": "Gespeichert."}]
+        )
         self.assertEqual(result["status"], "completed")
         plan_id = server.PLANNING_DATA.training_plan().list()[0]["id"]
         units = self.state()["planned_units"]
-        for payload in ({"name": "Synthetic renamed plan"}, {"status": "archived"}, {"action": "delete"}):
-            self.run_tool("update_training_plan", {"payload": {"plan_id": plan_id, **payload}}, ["training_plan:" + plan_id])
+        for payload in (
+            {"name": "Synthetic renamed plan"},
+            {"status": "archived"},
+            {"action": "delete"},
+        ):
+            self.run_tool(
+                "update_training_plan",
+                {"payload": {"plan_id": plan_id, **payload}},
+                ["training_plan:" + plan_id],
+            )
             self.assertEqual(self.state()["planned_units"], units)
             if "name" in payload:
-                self.assertEqual(server.PLANNING_DATA.training_plan().list()[0]["name"], payload["name"])
+                self.assertEqual(
+                    server.PLANNING_DATA.training_plan().list()[0]["name"],
+                    payload["name"],
+                )
             elif "status" in payload:
-                self.assertEqual(server.PLANNING_DATA.training_plan().list()[0]["status"], "archived")
+                self.assertEqual(
+                    server.PLANNING_DATA.training_plan().list()[0]["status"], "archived"
+                )
         self.assertEqual(server.PLANNING_DATA.training_plan().list(), [])
 
     @covers("replace_training_plan:success")
     def test_replacement_changes_only_requested_period(self):
-        units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout(), self.workout("2026-10-05", "Synthetic later")])
-        self.run_tool("replace_training_plan", {"payload": {"plan_name": "Synthetic replacement", "goal": "Easy",
-            "workouts": [self.workout("2026-09-11", "Synthetic replacement workout")]}, "expected_revision": self.state()["planning_revision"]},
-            ["local_plan"], period={"start": "2026-09-07", "end": "2026-09-13"}, message="Plane nur diese Woche neu.")
+        units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout(), self.workout("2026-10-05", "Synthetic later")]
+        )
+        self.run_tool(
+            "replace_training_plan",
+            {
+                "payload": {
+                    "plan_name": "Synthetic replacement",
+                    "goal": "Easy",
+                    "workouts": [
+                        self.workout("2026-09-11", "Synthetic replacement workout")
+                    ],
+                },
+                "expected_revision": self.state()["planning_revision"],
+            },
+            ["local_plan"],
+            period={"start": "2026-09-07", "end": "2026-09-13"},
+            message="Plane nur diese Woche neu.",
+        )
         result = self.state()["planned_units"]
         self.assertEqual([u["date"] for u in result], ["2026-09-11", "2026-10-05"])
         self.assertEqual(result[-1]["local_id"], units[-1]["id"])
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
-    @covers("save_checkin:success", "save_activity_feedback:success", "delete_activity_feedback:success")
+    @covers(
+        "save_checkin:success",
+        "save_activity_feedback:success",
+        "delete_activity_feedback:success",
+    )
     def test_daily_feedback_and_activity_feedback_are_separate_from_profile(self):
         self.seed_activity()
         profile = server.ATHLETE_DATA.profile().get()
-        self.run_tool("save_checkin", {"payload": {"soreness": 6, "notes": "Synthetic heavy legs"}}, ["local_checkin"], message="Heute sind die Beine schwer.")
+        self.run_tool(
+            "save_checkin",
+            {"payload": {"soreness": 6, "notes": "Synthetic heavy legs"}},
+            ["local_checkin"],
+            message="Heute sind die Beine schwer.",
+        )
         self.assertEqual(server.ATHLETE_DATA.checkin().list()[0]["soreness"], 6)
-        self.run_tool("save_activity_feedback", {"payload": {"activity_id": "synthetic-run", "activity_name": "Synthetic run",
-            "activity_date": "2026-09-06", "notes": "Synthetic easy finish"}}, ["activity_feedback"], message="Notiere zum gestrigen Lauf: entspanntes Ende.")
+        self.run_tool(
+            "save_activity_feedback",
+            {
+                "payload": {
+                    "activity_id": "synthetic-run",
+                    "activity_name": "Synthetic run",
+                    "activity_date": "2026-09-06",
+                    "notes": "Synthetic easy finish",
+                }
+            },
+            ["activity_feedback"],
+            message="Notiere zum gestrigen Lauf: entspanntes Ende.",
+        )
         self.assertEqual(
             server.ATHLETE_DATA.activity_feedback().list()[0]["notes"],
             "Synthetic easy finish",
         )
-        self.run_tool("delete_activity_feedback", {"activity_id": "synthetic-run"}, ["activity_feedback"], message="Entferne diese Notiz wieder.")
+        self.run_tool(
+            "delete_activity_feedback",
+            {"activity_id": "synthetic-run"},
+            ["activity_feedback"],
+            message="Entferne diese Notiz wieder.",
+        )
         self.assertEqual(server.ATHLETE_DATA.activity_feedback().list(), [])
         self.assertEqual(server.ATHLETE_DATA.checkin().list()[0]["soreness"], 6)
         self.assertEqual(server.ATHLETE_DATA.profile().get(), profile)
 
-    @covers("save_competition:create", "save_competition:update", "delete_competition:success", "sync_competitions:success")
+    @covers(
+        "save_competition:create",
+        "save_competition:update",
+        "delete_competition:success",
+        "sync_competitions:success",
+    )
     def test_competition_lifecycle_syncs_only_after_explicit_followup(self):
-        self.run_tool("save_competition", {"payload": {"name": "Synthetic race", "event_date": "2026-10-03", "sport": "Run", "priority": "A"}}, ["local_competitions"])
+        self.run_tool(
+            "save_competition",
+            {
+                "payload": {
+                    "name": "Synthetic race",
+                    "event_date": "2026-10-03",
+                    "sport": "Run",
+                    "priority": "A",
+                }
+            },
+            ["local_competitions"],
+        )
         competition_id = server.PLANNING_DATA.competition().list()[0]["id"]
-        self.run_tool("save_competition", {"payload": {"competition_id": competition_id, "event_date": "2026-10-04"}}, ["competition:" + competition_id], message="Den bitte einen Tag später.")
-        self.assertEqual(server.PLANNING_DATA.competition().list()[0]["event_date"], "2026-10-04")
+        self.run_tool(
+            "save_competition",
+            {"payload": {"competition_id": competition_id, "event_date": "2026-10-04"}},
+            ["competition:" + competition_id],
+            message="Den bitte einen Tag später.",
+        )
+        self.assertEqual(
+            server.PLANNING_DATA.competition().list()[0]["event_date"], "2026-10-04"
+        )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
-        self.run_tool("sync_competitions", {}, ["local_competitions", "intervals_sync"], target="intervals", remote_write=True, message="Übertrage die Wettkämpfe zu Intervals.")
+        self.run_tool(
+            "sync_competitions",
+            {},
+            ["local_competitions", "intervals_sync"],
+            target="intervals",
+            remote_write=True,
+            message="Übertrage die Wettkämpfe zu Intervals.",
+        )
         self.assertEqual(
             [
                 (job["provider"], job["type"])
@@ -308,23 +672,55 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             ],
             [("intervals", "competition_push")],
         )
-        self.run_tool("delete_competition", {"competition_id": competition_id}, ["competition:" + competition_id], message="Entferne diesen Wettkampf lokal.")
+        self.run_tool(
+            "delete_competition",
+            {"competition_id": competition_id},
+            ["competition:" + competition_id],
+            message="Entferne diesen Wettkampf lokal.",
+        )
         self.assertEqual(server.PLANNING_DATA.competition().list(), [])
         self.assertEqual(len(server.SYNC_JOB_QUEUE.service().list()), 1)
 
-    @covers("start_provider_refresh:intervals", "start_provider_refresh:garmin", "start_provider_refresh:calendar",
-            "start_provider_refresh:weather", "refresh_current_performance:success", "get_sync_job:success")
+    @covers(
+        "start_provider_refresh:intervals",
+        "start_provider_refresh:garmin",
+        "start_provider_refresh:calendar",
+        "start_provider_refresh:weather",
+        "refresh_current_performance:success",
+        "get_sync_job:success",
+    )
     def test_provider_reads_and_job_status_use_correct_provider(self):
-        with patch.object(IntervalsSyncService, "sync", return_value={"status": "ok", "activity_days": 7}) as sync:
-            result = self.run_tool("start_provider_refresh", {"days": 7}, ["intervals_refresh"], target="intervals")
+        with patch.object(
+            IntervalsSyncService,
+            "sync",
+            return_value={"status": "ok", "activity_days": 7},
+        ) as sync:
+            result = self.run_tool(
+                "start_provider_refresh",
+                {"days": 7},
+                ["intervals_refresh"],
+                target="intervals",
+            )
             self.assertEqual(result["status"], "completed")
             sync.assert_called_once()
             self.assertEqual(sync.call_args.kwargs["activity_days"], 7)
         for provider in ("garmin", "calendar", "weather"):
-            result = self.run_tool("start_provider_refresh", {"days": 7} if provider == "garmin" else {}, [provider + "_refresh"], target=provider)
-            job = self.run_tool("get_sync_job", {"job_id": result["sync_job_id"]})["job"]
-            self.assertEqual((job["provider"], job["type"], job["status"]), (provider, "refresh", "queued"))
-        result = self.run_tool("refresh_current_performance", {}, ["intervals_refresh"], target="intervals")
+            result = self.run_tool(
+                "start_provider_refresh",
+                {"days": 7} if provider == "garmin" else {},
+                [provider + "_refresh"],
+                target=provider,
+            )
+            job = self.run_tool("get_sync_job", {"job_id": result["sync_job_id"]})[
+                "job"
+            ]
+            self.assertEqual(
+                (job["provider"], job["type"], job["status"]),
+                (provider, "refresh", "queued"),
+            )
+        result = self.run_tool(
+            "refresh_current_performance", {}, ["intervals_refresh"], target="intervals"
+        )
         self.assertEqual(
             server.SYNC_JOB_QUEUE.service().state(result["sync_job_id"])["type"],
             "performance_refresh",
@@ -336,38 +732,104 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             )
         )
 
-    @covers("start_intervals_plan_sync:created", "start_intervals_plan_sync:selected", "start_intervals_plan_sync:all_pending")
+    @covers(
+        "start_intervals_plan_sync:created",
+        "start_intervals_plan_sync:selected",
+        "start_intervals_plan_sync:all_pending",
+    )
     def test_new_plan_sync_and_later_selected_sync_use_real_ids(self):
         period = {"start": "2026-09-09", "end": "2026-09-09"}
-        result, _ = self.turn("Mittwoch locker trainieren und anschließend übertragen.", [
-            lambda _: self.call("apply_training_patch", {"workouts": [self.workout()], "expected_revision": self.state()["planning_revision"]}, ["local_plan"], period=period),
-            lambda _: self.call("start_intervals_plan_sync", {}, ["intervals_sync"], target="intervals", remote_write=True, sync_scope="created"),
-            {"output_text": "Lokal gespeichert, Übertragung beauftragt."}])
+        result, _ = self.turn(
+            "Mittwoch locker trainieren und anschließend übertragen.",
+            [
+                lambda _: self.call(
+                    "apply_training_patch",
+                    {
+                        "workouts": [self.workout()],
+                        "expected_revision": self.state()["planning_revision"],
+                    },
+                    ["local_plan"],
+                    period=period,
+                ),
+                lambda _: self.call(
+                    "start_intervals_plan_sync",
+                    {},
+                    ["intervals_sync"],
+                    target="intervals",
+                    remote_write=True,
+                    sync_scope="created",
+                ),
+                {"output_text": "Lokal gespeichert, Übertragung beauftragt."},
+            ],
+        )
         self.assertEqual(result["status"], "completed")
         local_id = self.state()["planned_units"][0]["local_id"]
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-13", "Synthetic preserved Sunday")])
-        entry = next(e for e in server.SYNC_COMMANDS.authority().pending_plan_push_entries() if e["library_workout_id"] == local_id)
-        selected = self.run_tool("start_intervals_plan_sync", {"entries": [entry]}, ["planned_unit:" + local_id, "intervals_sync"],
-                                 target="intervals", remote_write=True, sync_scope="selected", message="Nur diese Einheit erneut übertragen.")
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout("2026-09-13", "Synthetic preserved Sunday")]
+        )
+        entry = next(
+            e
+            for e in server.SYNC_COMMANDS.authority().pending_plan_push_entries()
+            if e["library_workout_id"] == local_id
+        )
+        selected = self.run_tool(
+            "start_intervals_plan_sync",
+            {"entries": [entry]},
+            ["planned_unit:" + local_id, "intervals_sync"],
+            target="intervals",
+            remote_write=True,
+            sync_scope="selected",
+            message="Nur diese Einheit erneut übertragen.",
+        )
         self.assertEqual(selected["entries"], 1)
         with server.database_manager().unit_of_work() as db:
-            job = db.execute("SELECT payload FROM sync_jobs WHERE id=?", (selected["sync_job_ids"][0],)).fetchone()
-        self.assertEqual([e["library_workout_id"] for e in json.loads(job["payload"])["entries"]], [local_id])
-        all_pending = self.run_tool("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"], target="intervals", remote_write=True,
-                                    sync_scope="all_pending", message="Jetzt alle offenen Einheiten übertragen.")
+            job = db.execute(
+                "SELECT payload FROM sync_jobs WHERE id=?",
+                (selected["sync_job_ids"][0],),
+            ).fetchone()
+        self.assertEqual(
+            [e["library_workout_id"] for e in json.loads(job["payload"])["entries"]],
+            [local_id],
+        )
+        all_pending = self.run_tool(
+            "start_intervals_plan_sync",
+            {},
+            ["local_plan", "intervals_sync"],
+            target="intervals",
+            remote_write=True,
+            sync_scope="all_pending",
+            message="Jetzt alle offenen Einheiten übertragen.",
+        )
         self.assertEqual(all_pending["entries"], 2)
 
-    @covers("resolve_training_sync_conflict:keep_local", "resolve_training_sync_conflict:adopt_remote",
-            "resolve_training_sync_conflict:retry_push", "resolve_training_sync_conflict:retry_read")
+    @covers(
+        "resolve_training_sync_conflict:keep_local",
+        "resolve_training_sync_conflict:adopt_remote",
+        "resolve_training_sync_conflict:retry_push",
+        "resolve_training_sync_conflict:retry_read",
+    )
     def test_conflict_choices_and_failed_job_retries(self):
-        local_id = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])[0]["id"]
+        local_id = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout()]
+        )[0]["id"]
         for strategy in ("keep_local", "adopt_remote"):
             with server.database_manager().unit_of_work() as db:
-                db.execute("UPDATE planned_units SET sync_state='conflict', sync_conflict=? WHERE local_id=?",
-                           (json.dumps({"type": "remote_missing", "remote": None}), local_id))
-            self.run_tool("resolve_training_sync_conflict", {"local_id": local_id, "strategy": strategy}, ["planned_unit:" + local_id])
-            self.assertEqual(len(self.state()["planned_units"]), 1 if strategy == "keep_local" else 0)
-        for provider, kind, remote in (("intervals", "competition_push", True), ("garmin", "refresh", False)):
+                db.execute(
+                    "UPDATE planned_units SET sync_state='conflict', sync_conflict=? WHERE local_id=?",
+                    (json.dumps({"type": "remote_missing", "remote": None}), local_id),
+                )
+            self.run_tool(
+                "resolve_training_sync_conflict",
+                {"local_id": local_id, "strategy": strategy},
+                ["planned_unit:" + local_id],
+            )
+            self.assertEqual(
+                len(self.state()["planned_units"]), 1 if strategy == "keep_local" else 0
+            )
+        for provider, kind, remote in (
+            ("intervals", "competition_push", True),
+            ("garmin", "refresh", False),
+        ):
             job = server.SYNC_JOB_QUEUE.service().enqueue(
                 provider,
                 kind,
@@ -378,23 +840,48 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 requested_by="coach",
             )
             with server.database_manager().unit_of_work() as db:
-                db.execute("UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],))
-            self.run_tool("resolve_training_sync_conflict", {"job_id": job["id"]}, ["sync_job:" + job["id"], "intervals_sync" if remote else "garmin_refresh"], target=provider, remote_write=remote)
+                db.execute(
+                    "UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],)
+                )
+            self.run_tool(
+                "resolve_training_sync_conflict",
+                {"job_id": job["id"]},
+                [
+                    "sync_job:" + job["id"],
+                    "intervals_sync" if remote else "garmin_refresh",
+                ],
+                target=provider,
+                remote_write=remote,
+            )
             self.assertEqual(
                 server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "queued"
             )
 
     @covers("preview_adaptive_replan:success", "apply_adaptive_replan:local")
     def test_adaptive_preview_requires_later_acceptance_before_changing_workout(self):
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{**self.workout(), "duration_minutes": 90}])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [{**self.workout(), "duration_minutes": 90}]
+        )
         server.ATHLETE_DATA.checkin().save({"soreness": 8, "available_minutes": 30})
         before = self.state()["planned_units"]
-        preview = self.run_tool("preview_adaptive_replan", {}, ["adaptive_replan"], message="Was würdest du wegen meiner müden Beine anpassen?")
+        preview = self.run_tool(
+            "preview_adaptive_replan",
+            {},
+            ["adaptive_replan"],
+            message="Was würdest du wegen meiner müden Beine anpassen?",
+        )
         self.assertTrue(preview["changes"])
         self.assertEqual(self.state()["planned_units"], before)
-        applied = self.run_tool("apply_adaptive_replan", {"adjustment_id": preview["id"]}, ["adaptive_replan:" + preview["id"]], message="Ja, diese vorgeschlagene Anpassung übernehmen.")
+        applied = self.run_tool(
+            "apply_adaptive_replan",
+            {"adjustment_id": preview["id"]},
+            ["adaptive_replan:" + preview["id"]],
+            message="Ja, diese vorgeschlagene Anpassung übernehmen.",
+        )
         self.assertEqual(applied["updated"], 1)
-        self.assertLess(server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"], 90)
+        self.assertLess(
+            server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"], 90
+        )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     @covers("apply_adaptive_replan:intervals")
@@ -404,14 +891,31 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         preview = self.run_tool("preview_adaptive_replan", {}, ["adaptive_replan"])
         before = self.state()["planned_units"]
         arguments = {"adjustment_id": preview["id"], "sync_illness_to_intervals": True}
-        with patch.object(IllnessPauseSyncService, "sync", return_value={"status": "ok", "synced": 3}) as remote:
-            denied, _ = self.turn("Nur lokal übernehmen.", [lambda _: self.call("apply_adaptive_replan", arguments, ["adaptive_replan:" + preview["id"]]),
-                                                          {"output_text": "Nicht übertragen."}])
+        with patch.object(
+            IllnessPauseSyncService, "sync", return_value={"status": "ok", "synced": 3}
+        ) as remote:
+            denied, _ = self.turn(
+                "Nur lokal übernehmen.",
+                [
+                    lambda _: self.call(
+                        "apply_adaptive_replan",
+                        arguments,
+                        ["adaptive_replan:" + preview["id"]],
+                    ),
+                    {"output_text": "Nicht übertragen."},
+                ],
+            )
             self.assertEqual(denied["status"], "failed")
             self.assertEqual(self.state()["planned_units"], before)
             remote.assert_not_called()
-            result = self.run_tool("apply_adaptive_replan", arguments, ["adaptive_replan:" + preview["id"], "intervals_sync"],
-                                   target="intervals", remote_write=True, message="Diese Pause übernehmen und zu Intervals übertragen.")
+            result = self.run_tool(
+                "apply_adaptive_replan",
+                arguments,
+                ["adaptive_replan:" + preview["id"], "intervals_sync"],
+                target="intervals",
+                remote_write=True,
+                message="Diese Pause übernehmen und zu Intervals übertragen.",
+            )
             remote.assert_called_once()
         self.assertEqual(result["updated"], 1)
         self.assertGreater(result["updated_checkins"], 0)
@@ -419,35 +923,78 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     @covers("undo_training_change:success")
     def test_undo_is_a_bound_preview_until_explicit_confirmation(self):
-        server.PLANNING_DATA.workout_library().create_template({"name": "Synthetic undo template", "description": "- 30m 60% Easy", "duration_minutes": 30})
+        server.PLANNING_DATA.workout_library().create_template(
+            {
+                "name": "Synthetic undo template",
+                "description": "- 30m 60% Easy",
+                "duration_minutes": 30,
+            }
+        )
         change = server.HISTORY.change_history_service().list()[0]
         before = server.PLANNING_DATA.workout_library().list()
-        result = self.run_tool("undo_training_change", {"change_id": change["id"]}, ["change:" + change["id"]], message="Das möchte ich rückgängig machen.")
+        result = self.run_tool(
+            "undo_training_change",
+            {"change_id": change["id"]},
+            ["change:" + change["id"]],
+            message="Das möchte ich rückgängig machen.",
+        )
         self.assertEqual(result["proposed_action"]["status"], "preview")
         self.assertEqual(server.PLANNING_DATA.workout_library().list(), before)
 
     @covers("inspect_activity_duplicates:success")
     def test_duplicate_inspection_returns_preview_without_deleting_provider_data(self):
-        common = {"type": "Ride", "start_date_local": "2026-09-06T10:00:00", "moving_time": 3600, "distance": 30000}
-        snapshot = {"recent_activities": [{**common, "id": "synthetic-wahoo", "source": "Wahoo"}, {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"}]}
+        common = {
+            "type": "Ride",
+            "start_date_local": "2026-09-06T10:00:00",
+            "moving_time": 3600,
+            "distance": 30000,
+        }
+        snapshot = {
+            "recent_activities": [
+                {**common, "id": "synthetic-wahoo", "source": "Wahoo"},
+                {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"},
+            ]
+        }
         server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
-        result = self.run_tool("inspect_activity_duplicates", message="Ist die letzte Radausfahrt doppelt vorhanden?")
+        result = self.run_tool(
+            "inspect_activity_duplicates",
+            message="Ist die letzte Radausfahrt doppelt vorhanden?",
+        )
         self.assertIsNotNone(result["duplicate"])
         self.assertEqual(result["duplicate"]["canonical_id"], "synthetic-wahoo")
-        self.assertEqual(result["proposed_action"]["action_type"], "delete_duplicate_intervals_activity")
+        self.assertEqual(
+            result["proposed_action"]["action_type"],
+            "delete_duplicate_intervals_activity",
+        )
         self.assertEqual(result["proposed_action"]["status"], "preview")
         self.assertEqual(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["recent_activities"],
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()[
+                "recent_activities"
+            ],
             snapshot["recent_activities"],
         )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     @covers("delete_duplicate_intervals_activity:success")
     def test_delete_duplicate_intervals_activity(self):
-        common = {"type": "Ride", "start_date_local": "2026-09-06T10:00:00", "moving_time": 3600, "distance": 30000}
-        snapshot = {"recent_activities": [{**common, "id": "synthetic-wahoo", "source": "Wahoo"}, {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"}]}
+        common = {
+            "type": "Ride",
+            "start_date_local": "2026-09-06T10:00:00",
+            "moving_time": 3600,
+            "distance": 30000,
+        }
+        snapshot = {
+            "recent_activities": [
+                {**common, "id": "synthetic-wahoo", "source": "Wahoo"},
+                {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"},
+            ]
+        }
         server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
-        with patch.object(intervals_client_module.IntervalsClient, "delete_activity", return_value=None):
+        with patch.object(
+            intervals_client_module.IntervalsClient,
+            "delete_activity",
+            return_value=None,
+        ):
             result = self.run_tool(
                 "delete_duplicate_intervals_activity",
                 {"duplicate_id": "synthetic-garmin", "canonical_id": "synthetic-wahoo"},
@@ -461,49 +1008,106 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     @covers("clarify_coach_request:success", "cancel_coach_request:success")
     def test_clarification_and_cancellation_preserve_athlete_data(self):
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout(), self.workout("2026-09-11")])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout(), self.workout("2026-09-11")]
+        )
         before = self.athlete_state()
+
         def ask(_):
-            return self.call("clarify_coach_request", {"source_message_ids": self.request([])["source_message_ids"],
-                "summary": "Eine der beiden Einheiten verschieben", "question": "Die Einheit am Mittwoch oder Freitag?"})
-        result, _ = self.turn("Diese Einheit bitte verschieben.", [ask, {"output_text": "Welche Einheit?"}])
+            return self.call(
+                "clarify_coach_request",
+                {
+                    "source_message_ids": self.request([])["source_message_ids"],
+                    "summary": "Eine der beiden Einheiten verschieben",
+                    "question": "Die Einheit am Mittwoch oder Freitag?",
+                },
+            )
+
+        result, _ = self.turn(
+            "Diese Einheit bitte verschieben.",
+            [ask, {"output_text": "Welche Einheit?"}],
+        )
         self.assertTrue(result["awaiting_clarification"])
-        self.assertIsNotNone(json.loads(server.key_value_service().get("coach_pending_request")))
-        result, _ = self.turn("Lass es unverändert.", [lambda _: self.call("cancel_coach_request"), {"output_text": "Abgebrochen."}])
+        self.assertIsNotNone(
+            json.loads(server.key_value_service().get("coach_pending_request"))
+        )
+        result, _ = self.turn(
+            "Lass es unverändert.",
+            [
+                lambda _: self.call("cancel_coach_request"),
+                {"output_text": "Abgebrochen."},
+            ],
+        )
         self.assertEqual(result["status"], "cancelled")
-        self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
+        self.assertIsNone(
+            json.loads(server.key_value_service().get("coach_pending_request"))
+        )
         self.assertEqual(self.athlete_state(), before)
 
-    def test_matrix_has_observed_success_case_for_every_available_tool_and_variant(self):
-        declared = set().union(*(getattr(getattr(type(self), name), "tool_cases", set()) for name in dir(type(self)) if name.startswith("test_")))
+    def test_matrix_has_observed_success_case_for_every_available_tool_and_variant(
+        self,
+    ):
+        declared = set().union(
+            *(
+                getattr(getattr(type(self), name), "tool_cases", set())
+                for name in dir(type(self))
+                if name.startswith("test_")
+            )
+        )
         tools = {tool["name"] for tool in server.COACH_DIALOGUE_TOOLS}
         self.assertEqual({case.split(":")[0] for case in declared}, tools)
         for tool, required in REQUIRED_VARIANTS.items():
-            self.assertLessEqual({tool + ":" + variant for variant in required}, declared, tool)
-        document = (Path(__file__).resolve().parents[1] / "docs" / "coach-tool-coverage.md").read_text(encoding="utf-8")
+            self.assertLessEqual(
+                {tool + ":" + variant for variant in required}, declared, tool
+            )
+        document = (
+            Path(__file__).resolve().parents[1] / "docs" / "coach-tool-coverage.md"
+        ).read_text(encoding="utf-8")
         documented = set()
         for line in document.splitlines():
             if line.startswith("| `"):
                 name, variants_text, _ = line.split("|")[1:4]
-                documented.update(name.strip().strip("`") + ":" + value.strip().strip("`") for value in variants_text.split(","))
+                documented.update(
+                    name.strip().strip("`") + ":" + value.strip().strip("`")
+                    for value in variants_text.split(",")
+                )
         self.assertEqual(documented, declared)
 
-    def test_capability_catalog_covers_each_schema_dispatch_owner_and_effect_policy(self):
+    def test_capability_catalog_covers_each_schema_dispatch_owner_and_effect_policy(
+        self,
+    ):
         catalog = server.COACH_TOOL_CAPABILITIES
         dialogue_names = {tool["name"] for tool in server.COACH_DIALOGUE_TOOLS}
         canonical_names = {tool["name"] for tool in server.COACH_STRUCTURED_TOOLS}
         self.assertEqual(set(catalog), dialogue_names | canonical_names)
-        self.assertTrue(all(item["schema"]["name"] == name for name, item in catalog.items()))
-        self.assertTrue(all(item["owner"] and item["receipt"] for item in catalog.values()))
+        self.assertTrue(
+            all(item["schema"]["name"] == name for name, item in catalog.items())
+        )
+        self.assertTrue(
+            all(item["owner"] and item["receipt"] for item in catalog.values())
+        )
         for name in server.STRUCTURED_READ_ONLY_TOOLS:
             self.assertEqual(catalog[name]["effect"], "read")
             self.assertEqual(catalog[name]["authorization"], "none")
-        for name in ("start_intervals_plan_sync", "sync_competitions", "sync_nutrition"):
+        for name in (
+            "start_intervals_plan_sync",
+            "sync_competitions",
+            "sync_nutrition",
+        ):
             self.assertEqual(catalog[name]["effect"], "remote_write")
-            self.assertEqual(catalog[name]["authorization"], "request_scope+athlete_approval")
-        self.assertEqual(catalog["apply_adaptive_replan"]["effect"], "conditional_remote_write")
-        self.assertEqual(catalog["resolve_training_sync_conflict"]["effect"], "conditional_remote_write")
-        self.assertEqual(catalog["start_provider_refresh"]["effect"], "provider_read_job")
+            self.assertEqual(
+                catalog[name]["authorization"], "request_scope+athlete_approval"
+            )
+        self.assertEqual(
+            catalog["apply_adaptive_replan"]["effect"], "conditional_remote_write"
+        )
+        self.assertEqual(
+            catalog["resolve_training_sync_conflict"]["effect"],
+            "conditional_remote_write",
+        )
+        self.assertEqual(
+            catalog["start_provider_refresh"]["effect"], "provider_read_job"
+        )
         self.assertEqual(catalog["apply_training_patch"]["surface"], "dialogue_only")
         self.assertIn("apply_training_changes", server.COACH_CANONICAL_TOOL_NAMES)
         self.assertEqual(catalog["apply_training_changes"]["surface"], "canonical_only")
@@ -525,102 +1129,232 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             changes_schema["properties"]["start_date_local"]["type"], "string"
         )
+
     @covers("lookup_food:success", "calculate_food_nutrition:success")
     def test_food_database_read_tools_calculate_without_writing(self):
         foods = self.run_tool("lookup_food", {"query": "Haferflocken"})
         self.assertTrue(foods["foods"])
-        result = self.run_tool("calculate_food_nutrition", {"ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]})
+        result = self.run_tool(
+            "calculate_food_nutrition",
+            {"ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]},
+        )
         self.assertEqual(result["kcal"], 174)
         self.assertEqual(result["nutrition_basis"]["kind"], "database")
-        self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_today_summary()["entry_count"], 0)
+        self.assertEqual(
+            server.NUTRITION_ASSEMBLY.diary_service().get_today_summary()[
+                "entry_count"
+            ],
+            0,
+        )
 
-        mixed = self.run_tool("calculate_food_nutrition", {"components": [
-            {"kind": "database", "food_id": "bls:C133000", "amount": 50, "unit": "g"},
-            {"kind": "estimate", "name": "Synthetic banana", "amount": 1, "unit": "portion",
-             "kcal": 90, "carbs_g": 20, "protein_g": 1, "fat_g": 0},
-        ]})
+        mixed = self.run_tool(
+            "calculate_food_nutrition",
+            {
+                "components": [
+                    {
+                        "kind": "database",
+                        "food_id": "bls:C133000",
+                        "amount": 50,
+                        "unit": "g",
+                    },
+                    {
+                        "kind": "estimate",
+                        "name": "Synthetic banana",
+                        "amount": 1,
+                        "unit": "portion",
+                        "kcal": 90,
+                        "carbs_g": 20,
+                        "protein_g": 1,
+                        "fat_g": 0,
+                    },
+                ]
+            },
+        )
         self.assertEqual(mixed["nutrition_basis"]["kind"], "composite")
         self.assertEqual(len(mixed["nutrition_basis"]["components"]), 2)
-        self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_today_summary()["entry_count"], 0)
+        self.assertEqual(
+            server.NUTRITION_ASSEMBLY.diary_service().get_today_summary()[
+                "entry_count"
+            ],
+            0,
+        )
 
         schemas = {tool["name"]: tool for tool in server.COACH_DIALOGUE_TOOLS}
-        self.assertIn("components", schemas["calculate_food_nutrition"]["parameters"]["properties"])
-        self.assertIn("components", schemas["save_nutrition_entry"]["parameters"]["properties"]["payload"]["properties"])
-        self.assertIn("components", schemas["update_nutrition_entry"]["parameters"]["properties"]["changes"]["properties"])
+        self.assertIn(
+            "components",
+            schemas["calculate_food_nutrition"]["parameters"]["properties"],
+        )
+        self.assertIn(
+            "components",
+            schemas["save_nutrition_entry"]["parameters"]["properties"]["payload"][
+                "properties"
+            ],
+        )
+        self.assertIn(
+            "components",
+            schemas["update_nutrition_entry"]["parameters"]["properties"]["changes"][
+                "properties"
+            ],
+        )
 
-        database_component = schemas["calculate_food_nutrition"]["parameters"]["properties"]["components"]["items"]["anyOf"][1]
+        database_component = schemas["calculate_food_nutrition"]["parameters"][
+            "properties"
+        ]["components"]["items"]["anyOf"][1]
         self.assertEqual(database_component["properties"]["unit"]["enum"], ["g", "ml"])
 
-        template_payload = schemas["save_nutrition_template"]["parameters"]["properties"]["payload"]
+        template_payload = schemas["save_nutrition_template"]["parameters"][
+            "properties"
+        ]["payload"]
         alternatives = {tuple(item["required"]) for item in template_payload["anyOf"]}
-        self.assertEqual(alternatives, {("components",), ("food_ingredients",), ("kcal",), ("id",)})
+        self.assertEqual(
+            alternatives, {("components",), ("food_ingredients",), ("kcal",), ("id",)}
+        )
         self.assertTrue(any("components" in required for required in alternatives))
-        self.assertTrue(any("food_ingredients" in required for required in alternatives))
+        self.assertTrue(
+            any("food_ingredients" in required for required in alternatives)
+        )
         self.assertTrue(any("kcal" in required for required in alternatives))
         self.assertTrue(any("id" in required for required in alternatives))
 
-        component_schema = schemas["calculate_food_nutrition"]["parameters"]["properties"]["components"]
+        component_schema = schemas["calculate_food_nutrition"]["parameters"][
+            "properties"
+        ]["components"]
         estimate_schema = component_schema["items"]["anyOf"][2]
         self.assertEqual(estimate_schema["properties"]["kcal"]["type"], "number")
-        entry_payload = schemas["save_nutrition_entry"]["parameters"]["properties"]["payload"]
-        component_form = next(branch for branch in entry_payload["oneOf"] if "required" in branch and "components" in branch["required"])
+        entry_payload = schemas["save_nutrition_entry"]["parameters"]["properties"][
+            "payload"
+        ]
+        component_form = next(
+            branch
+            for branch in entry_payload["oneOf"]
+            if "required" in branch and "components" in branch["required"]
+        )
         self.assertEqual(component_form["required"], ["components", "description"])
         self.assertIn("anyOf", component_form["not"])
 
     def test_mixed_origin_meal_is_saved_once_with_frozen_source_components(self):
-        product = self.run_tool("save_nutrition_product", {"payload": {
-            "name": "Synthetic meal yogurt", "basis_amount": 100, "basis_unit": "g",
-            "kcal": 60, "carbs_g": 4, "protein_g": 5, "fat_g": 2,
-            "source": "packaging_label",
-        }}, ["local_nutrition_product"],
-            message="Die angezeigten Angaben stimmen; speichere dieses Produkt lokal.") ["product"]
+        product = self.run_tool(
+            "save_nutrition_product",
+            {
+                "payload": {
+                    "name": "Synthetic meal yogurt",
+                    "basis_amount": 100,
+                    "basis_unit": "g",
+                    "kcal": 60,
+                    "carbs_g": 4,
+                    "protein_g": 5,
+                    "fat_g": 2,
+                    "source": "packaging_label",
+                }
+            },
+            ["local_nutrition_product"],
+            message="Die angezeigten Angaben stimmen; speichere dieses Produkt lokal.",
+        )["product"]
         components = [
-            {"kind": "local_product", "product_id": product["id"], "amount": 150, "unit": "g"},
+            {
+                "kind": "local_product",
+                "product_id": product["id"],
+                "amount": 150,
+                "unit": "g",
+            },
             {"kind": "database", "food_id": "bls:C133000", "amount": 40, "unit": "g"},
-            {"kind": "estimate", "name": "Synthetic berries", "amount": 30, "unit": "g",
-             "kcal": 15, "carbs_g": 3, "protein_g": 0.3, "fat_g": 0.1},
+            {
+                "kind": "estimate",
+                "name": "Synthetic berries",
+                "amount": 30,
+                "unit": "g",
+                "kcal": 15,
+                "carbs_g": 3,
+                "protein_g": 0.3,
+                "fat_g": 0.1,
+            },
         ]
         preview = self.run_tool("calculate_food_nutrition", {"components": components})
         self.assertEqual(preview["nutrition_basis"]["kind"], "composite")
-        entry = self.run_tool("save_nutrition_entry", {"payload": {
-            "meal_date": "2026-09-07", "meal_type": "breakfast", "description": "Synthetic mixed-origin bowl",
-            "components": components,
-        }}, ["local_nutrition"], message="Ich habe diese Mahlzeit gegessen; erfasse sie einmal.")["entry"]
+        entry = self.run_tool(
+            "save_nutrition_entry",
+            {
+                "payload": {
+                    "meal_date": "2026-09-07",
+                    "meal_type": "breakfast",
+                    "description": "Synthetic mixed-origin bowl",
+                    "components": components,
+                }
+            },
+            ["local_nutrition"],
+            message="Ich habe diese Mahlzeit gegessen; erfasse sie einmal.",
+        )["entry"]
         self.assertEqual(entry["kcal"], preview["kcal"])
         self.assertEqual(entry["nutrition_basis"]["kind"], "composite")
-        self.assertEqual([item["kind"] for item in entry["nutrition_basis"]["components"]],
-                         ["local_product", "database", "estimate"])
-        self.assertEqual(entry["nutrition_basis"]["components"][0]["nutrition_basis"]["product"]["id"], product["id"])
+        self.assertEqual(
+            [item["kind"] for item in entry["nutrition_basis"]["components"]],
+            ["local_product", "database", "estimate"],
+        )
+        self.assertEqual(
+            entry["nutrition_basis"]["components"][0]["nutrition_basis"]["product"][
+                "id"
+            ],
+            product["id"],
+        )
         day = self.run_tool("read_nutrition", {"date": "2026-09-07"})
         self.assertEqual(day["entry_count"], 1)
 
-    @covers("save_nutrition_template:success", "log_nutrition_template:success", "delete_nutrition_template:success")
+    @covers(
+        "save_nutrition_template:success",
+        "log_nutrition_template:success",
+        "delete_nutrition_template:success",
+    )
     def test_saved_meals_run_through_authorized_coach_and_receipts(self):
-        template = self.run_tool("save_nutrition_template", {"payload": {"name": "Synthetic breakfast", "description": "80 g oats", "kcal": 400}}, ["local_nutrition"], message="Ja, speichere diese Mahlzeitvorlage.")["template"]
+        template = self.run_tool(
+            "save_nutrition_template",
+            {
+                "payload": {
+                    "name": "Synthetic breakfast",
+                    "description": "80 g oats",
+                    "kcal": 400,
+                }
+            },
+            ["local_nutrition"],
+            message="Ja, speichere diese Mahlzeitvorlage.",
+        )["template"]
         read = self.run_tool("read_nutrition", {})
         self.assertEqual(read["templates"][0]["id"], template["id"])
         self.assertEqual(read["entry_count"], 0)
-        entry = self.run_tool("log_nutrition_template", {"id": template["id"], "portions": 0.5}, ["local_nutrition"], message="Ich habe eine halbe Portion gegessen, erfasse sie.")["entry"]
+        entry = self.run_tool(
+            "log_nutrition_template",
+            {"id": template["id"], "portions": 0.5},
+            ["local_nutrition"],
+            message="Ich habe eine halbe Portion gegessen, erfasse sie.",
+        )["entry"]
         self.assertEqual(entry["kcal"], 200)
-        self.run_tool("delete_nutrition_template", {"id": template["id"]}, ["local_nutrition"], message="Lösche diese Mahlzeitvorlage.")
-        self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_meal(entry["id"])["kcal"], 200)
+        self.run_tool(
+            "delete_nutrition_template",
+            {"id": template["id"]},
+            ["local_nutrition"],
+            message="Lösche diese Mahlzeitvorlage.",
+        )
+        self.assertEqual(
+            server.NUTRITION_ASSEMBLY.diary_service().get_meal(entry["id"])["kcal"], 200
+        )
 
     @covers("save_nutrition_product:success")
     def test_confirmed_product_is_saved_locally_through_authorized_coach_receipt(self):
         saved = self.run_tool(
             "save_nutrition_product",
-            {"payload": {
-                "name": "Synthetic cocoa whey",
-                "brand": "Synthetic brand",
-                "barcode": "4006381333931",
-                "basis_amount": 100,
-                "basis_unit": "g",
-                "kcal": 382,
-                "carbs_g": 8.2,
-                "protein_g": 76,
-                "fat_g": 5.1,
-                "source": "packaging_label",
-            }},
+            {
+                "payload": {
+                    "name": "Synthetic cocoa whey",
+                    "brand": "Synthetic brand",
+                    "barcode": "4006381333931",
+                    "basis_amount": 100,
+                    "basis_unit": "g",
+                    "kcal": 382,
+                    "carbs_g": 8.2,
+                    "protein_g": 76,
+                    "fat_g": 5.1,
+                    "source": "packaging_label",
+                }
+            },
             ["local_nutrition_product"],
             message="Die angezeigten Angaben stimmen; speichere das Produkt lokal.",
         )["product"]
@@ -630,19 +1364,21 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(saved["source"], "packaging_label")
         updated = self.run_tool(
             "save_nutrition_product",
-            {"payload": {
-                "id": saved["id"],
-                "name": "Synthetic cocoa whey, corrected",
-                "brand": "Synthetic brand",
-                "barcode": "4006381333931",
-                "basis_amount": 100,
-                "basis_unit": "g",
-                "kcal": 380,
-                "carbs_g": 8.2,
-                "protein_g": 76,
-                "fat_g": 5.1,
-                "source": "packaging_label",
-            }},
+            {
+                "payload": {
+                    "id": saved["id"],
+                    "name": "Synthetic cocoa whey, corrected",
+                    "brand": "Synthetic brand",
+                    "barcode": "4006381333931",
+                    "basis_amount": 100,
+                    "basis_unit": "g",
+                    "kcal": 380,
+                    "carbs_g": 8.2,
+                    "protein_g": 76,
+                    "fat_g": 5.1,
+                    "source": "packaging_label",
+                }
+            },
             ["local_nutrition_product", f"nutrition_product:{saved['id']}"],
             message="Der korrigierte Produktname und die Kalorien stimmen; aktualisiere das lokale Produkt.",
         )["product"]
@@ -650,18 +1386,33 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(updated["name"], "Synthetic cocoa whey, corrected")
         self.assertEqual(updated["kcal"], 380)
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.service().get_product(saved["id"]), updated
+            server.NUTRITION_ASSEMBLY.meal_library_service().get_product(saved["id"]),
+            updated,
         )
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.service().get_today_summary()["entry_count"], 0
+            server.NUTRITION_ASSEMBLY.diary_service().get_today_summary()[
+                "entry_count"
+            ],
+            0,
         )
 
-    @covers("save_nutrition_entry:success", "read_nutrition:success", "delete_nutrition_entry:success")
+    @covers(
+        "save_nutrition_entry:success",
+        "read_nutrition:success",
+        "delete_nutrition_entry:success",
+    )
     def test_nutrition_entries_can_be_saved_read_and_deleted(self):
         saved = self.run_tool(
             "save_nutrition_entry",
-            {"payload": {"meal_date": "2026-09-07", "meal_type": "lunch",
-                         "description": "Synthetic pasta", "kcal": 620, "carbs_g": 80}},
+            {
+                "payload": {
+                    "meal_date": "2026-09-07",
+                    "meal_type": "lunch",
+                    "description": "Synthetic pasta",
+                    "kcal": 620,
+                    "carbs_g": 80,
+                }
+            },
             ["local_nutrition"],
             message="Ich habe Pasta gegessen; speichere das lokal.",
         )
@@ -670,25 +1421,47 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(read["total_kcal"], 620)
         self.assertEqual(read["entries"][0]["id"], entry_id)
         deleted = self.run_tool(
-            "delete_nutrition_entry", {"id": entry_id}, ["local_nutrition"],
+            "delete_nutrition_entry",
+            {"id": entry_id},
+            ["local_nutrition"],
             message="Entferne den Ernährungseintrag lokal.",
         )
         self.assertEqual(deleted["deleted_id"], entry_id)
-        self.assertEqual(server.NUTRITION_ASSEMBLY.service().get_day_summary("2026-09-07")["entry_count"], 0)
+        self.assertEqual(
+            server.NUTRITION_ASSEMBLY.diary_service().get_day_summary("2026-09-07")[
+                "entry_count"
+            ],
+            0,
+        )
 
-    @covers("update_nutrition_entry:success", "sync_nutrition:date", "sync_nutrition:pending")
+    @covers(
+        "update_nutrition_entry:success",
+        "sync_nutrition:date",
+        "sync_nutrition:pending",
+    )
     def test_nutrition_correction_preserves_fields_and_sync_is_explicitly_queued(self):
         entry = self.run_tool(
             "save_nutrition_entry",
-            {"payload": {"meal_date": "2026-09-08", "meal_type": "lunch",
-                          "description": "Synthetic rice bowl", "kcal": 700,
-                          "carbs_g": 90, "protein_g": 25, "fat_g": 18}},
-            ["local_nutrition"], message="Speichere mein Mittagessen lokal.",
+            {
+                "payload": {
+                    "meal_date": "2026-09-08",
+                    "meal_type": "lunch",
+                    "description": "Synthetic rice bowl",
+                    "kcal": 700,
+                    "carbs_g": 90,
+                    "protein_g": 25,
+                    "fat_g": 18,
+                }
+            },
+            ["local_nutrition"],
+            message="Speichere mein Mittagessen lokal.",
         )["entry"]
         self.run_tool("read_nutrition", {"date": "2026-09-08"})
         corrected = self.run_tool(
-            "update_nutrition_entry", {"id": entry["id"], "changes": {"kcal": 600}},
-            ["local_nutrition"], message="Korrigiere die Kalorien auf 600.",
+            "update_nutrition_entry",
+            {"id": entry["id"], "changes": {"kcal": 600}},
+            ["local_nutrition"],
+            message="Korrigiere die Kalorien auf 600.",
         )["entry"]
         self.assertEqual(corrected["id"], entry["id"])
         self.assertEqual(corrected["kcal"], 600)
@@ -699,14 +1472,20 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(reread["entries"][0]["id"], entry["id"])
         self.assertEqual(reread["entries"][0]["kcal"], 600)
         date_job = self.run_tool(
-            "sync_nutrition", {"date": "2026-09-08"}, ["local_nutrition", "intervals_sync"],
+            "sync_nutrition",
+            {"date": "2026-09-08"},
+            ["local_nutrition", "intervals_sync"],
             message="Synchronisiere die Ernährung für den 8. September.",
-            target="intervals", remote_write=True,
+            target="intervals",
+            remote_write=True,
         )
         pending_job = self.run_tool(
-            "sync_nutrition", {"pending_limit": 2}, ["local_nutrition", "intervals_sync"],
+            "sync_nutrition",
+            {"pending_limit": 2},
+            ["local_nutrition", "intervals_sync"],
             message="Synchronisiere die zwei ältesten ausstehenden Ernährungstage.",
-            target="intervals", remote_write=True,
+            target="intervals",
+            remote_write=True,
         )
         self.assertEqual(date_job["status"], "queued")
         self.assertEqual(pending_job["status"], "queued")
@@ -723,75 +1502,157 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(manifests[0][0]["total_kcal"], 600)
         self.assertEqual(manifests[0][0]["entry_count"], 1)
 
-    @covers("read_training_records:success",
-            "save_equipment:success", "assign_activity_equipment:success", "log_equipment_maintenance:success",
-            "read_nutrition:success", "save_fueling_plan:success")
-    def test_training_records_fueling_and_equipment_tools_use_confirmed_local_state(self):
+    @covers(
+        "read_training_records:success",
+        "save_equipment:success",
+        "assign_activity_equipment:success",
+        "log_equipment_maintenance:success",
+        "read_nutrition:success",
+        "save_fueling_plan:success",
+    )
+    def test_training_records_fueling_and_equipment_tools_use_confirmed_local_state(
+        self,
+    ):
         self.seed_activity()
         planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [{"date": "2026-10-03", "name": "Synthetic endurance", "sport": "Run",
-              "description": "- 90m 60% Easy endurance", "duration_minutes": 90, "target": "AUTO",
-              "rationale": "Synthetic local test"}]
+            [
+                {
+                    "date": "2026-10-03",
+                    "name": "Synthetic endurance",
+                    "sport": "Run",
+                    "description": "- 90m 60% Easy endurance",
+                    "duration_minutes": 90,
+                    "target": "AUTO",
+                    "rationale": "Synthetic local test",
+                }
+            ]
         )[0]
-        server.SYNC_PERSISTENCE.state_repository().save_view({
-            "recent_activities": [
-                {"id": "synthetic-run", "type": "Run", "name": "Synthetic run",
-                 "start_date_local": "2026-09-06T10:00:00", "moving_time": 1800, "distance": 5000},
-            ],
-            "recent_wellness": [], "planned_workouts": [],
-            "raw_provider_data": {"activities": [
-                {"id": "synthetic-run", "type": "Run", "name": "Synthetic run",
-                 "start_date_local": "2026-09-06T10:00:00", "moving_time": 1800, "distance": 5000},
-            ]},
-        })
+        server.SYNC_PERSISTENCE.state_repository().save_view(
+            {
+                "recent_activities": [
+                    {
+                        "id": "synthetic-run",
+                        "type": "Run",
+                        "name": "Synthetic run",
+                        "start_date_local": "2026-09-06T10:00:00",
+                        "moving_time": 1800,
+                        "distance": 5000,
+                    },
+                ],
+                "recent_wellness": [],
+                "planned_workouts": [],
+                "raw_provider_data": {
+                    "activities": [
+                        {
+                            "id": "synthetic-run",
+                            "type": "Run",
+                            "name": "Synthetic run",
+                            "start_date_local": "2026-09-06T10:00:00",
+                            "moving_time": 1800,
+                            "distance": 5000,
+                        },
+                    ]
+                },
+            }
+        )
         before = self.athlete_state()
         records = self.run_tool("read_training_records", {})
         self.assertEqual(records["ok"], True)
         self.assertEqual(before, self.athlete_state())
         equipment = self.run_tool(
             "save_equipment",
-            {"payload": {"name": "Synthetic shoes", "sport": "Run", "kind": "shoes",
-                          "start_date": "2026-09-01", "initial_distance_km": 0, "initial_hours": 0}},
-            ["local_equipment"], message="Lege die Laufschuhe lokal an.",
+            {
+                "payload": {
+                    "name": "Synthetic shoes",
+                    "sport": "Run",
+                    "kind": "shoes",
+                    "start_date": "2026-09-01",
+                    "initial_distance_km": 0,
+                    "initial_hours": 0,
+                }
+            },
+            ["local_equipment"],
+            message="Lege die Laufschuhe lokal an.",
         )["equipment"]
         assigned = self.run_tool(
             "assign_activity_equipment",
-            {"payload": {"activity_id": "synthetic-run", "equipment_id": equipment["id"]}},
-            ["local_equipment"], message="Ordne die Laufschuhe dieser Einheit zu.",
+            {
+                "payload": {
+                    "activity_id": "synthetic-run",
+                    "equipment_id": equipment["id"],
+                }
+            },
+            ["local_equipment"],
+            message="Ordne die Laufschuhe dieser Einheit zu.",
         )
         self.assertEqual(assigned["assignment"]["equipment_id"], equipment["id"])
         maintenance = self.run_tool(
             "log_equipment_maintenance",
-            {"payload": {"equipment_id": equipment["id"], "date": "2026-09-07", "notes": "Synthetic"}},
-            ["local_equipment"], message="Protokolliere die Wartung.",
+            {
+                "payload": {
+                    "equipment_id": equipment["id"],
+                    "date": "2026-09-07",
+                    "notes": "Synthetic",
+                }
+            },
+            ["local_equipment"],
+            message="Protokolliere die Wartung.",
         )
         self.assertTrue(maintenance["stored_locally"])
-        fueling = self.run_tool("read_nutrition", {"planned_unit_id": planned["id"]})["fueling"]
+        fueling = self.run_tool("read_nutrition", {"planned_unit_id": planned["id"]})[
+            "fueling"
+        ]
         saved_fueling = self.run_tool(
             "save_fueling_plan",
-            {"payload": {"planned_unit_id": planned["id"], "unit_sha256": fueling["unit_sha256"],
-                          "carbs_g_per_hour": 60, "fluid_ml_per_hour": 500}},
-            ["local_nutrition"], message="Speichere diesen bestätigten Verpflegungsplan lokal.",
+            {
+                "payload": {
+                    "planned_unit_id": planned["id"],
+                    "unit_sha256": fueling["unit_sha256"],
+                    "carbs_g_per_hour": 60,
+                    "fluid_ml_per_hour": 500,
+                }
+            },
+            ["local_nutrition"],
+            message="Speichere diesen bestätigten Verpflegungsplan lokal.",
         )
         self.assertFalse(saved_fueling["consumption_logged"])
 
-    def test_every_mutating_tool_rejects_missing_user_authorization_without_effect(self):
-        exceptions = server.STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
+    def test_every_mutating_tool_rejects_missing_user_authorization_without_effect(
+        self,
+    ):
+        exceptions = server.STRUCTURED_READ_ONLY_TOOLS | {
+            "clarify_coach_request",
+            "cancel_coach_request",
+        }
         for tool in server.COACH_DIALOGUE_TOOLS:
             if tool["name"] in exceptions:
                 continue
             with self.subTest(tool=tool["name"]):
                 before = self.athlete_state()
-                result, _ = self.turn("Nur eine hypothetische Frage.", [lambda _, name=tool["name"]: self.call(name, {}), {"output_text": "Keine Änderung."}])
+                result, _ = self.turn(
+                    "Nur eine hypothetische Frage.",
+                    [
+                        lambda _, name=tool["name"]: self.call(name, {}),
+                        {"output_text": "Keine Änderung."},
+                    ],
+                )
                 self.assertEqual(result["status"], "failed")
-                self.assertEqual(result["command_receipts"][0]["result"]["reason"], "request_invalid")
+                self.assertEqual(
+                    result["command_receipts"][0]["result"]["reason"], "request_invalid"
+                )
                 self.assertEqual(self.athlete_state(), before)
 
     def test_advice_and_negation_scripts_leave_state_unchanged(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
         before = self.athlete_state()
-        for message in ("Was wäre, wenn ich Freitag laufen würde?", "Bitte noch nichts speichern.", "Nicht zu Intervals übertragen."):
-            result, _ = self.turn(message, [{"output_text": "Synthetische Beratung ohne Werkzeugaufruf."}])
+        for message in (
+            "Was wäre, wenn ich Freitag laufen würde?",
+            "Bitte noch nichts speichern.",
+            "Nicht zu Intervals übertragen.",
+        ):
+            result, _ = self.turn(
+                message, [{"output_text": "Synthetische Beratung ohne Werkzeugaufruf."}]
+            )
             self.assertEqual(result["command_receipts"], [])
             self.assertEqual(self.athlete_state(), before)
 
@@ -800,13 +1661,22 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         before_jobs = server.SYNC_JOB_QUEUE.service().list()
         self.auto_approve_remote_proposals = False
 
-        receipt, _ = self.turn("Nicht zu Intervals übertragen.", [
-            lambda _: self.call(
-                "start_intervals_plan_sync", {}, ["intervals_sync", "local_plan"],
-                target="intervals", remote_write=True, sync_scope="all_pending",
-            ),
-            {"output_text": "Die geplante Synchronisierung braucht deine Freigabe."},
-        ])
+        receipt, _ = self.turn(
+            "Nicht zu Intervals übertragen.",
+            [
+                lambda _: self.call(
+                    "start_intervals_plan_sync",
+                    {},
+                    ["intervals_sync", "local_plan"],
+                    target="intervals",
+                    remote_write=True,
+                    sync_scope="all_pending",
+                ),
+                {
+                    "output_text": "Die geplante Synchronisierung braucht deine Freigabe."
+                },
+            ],
+        )
 
         result = receipt["command_receipts"][0]["result"]
         self.assertEqual(result["status"], "approval_required")
@@ -816,27 +1686,42 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(proposals[0]["action_type"], "remote_coach_write")
 
     def test_all_pending_approval_does_not_expand_to_units_added_after_preview(self):
-        first = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])[0]
+        first = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout()]
+        )[0]
         self.auto_approve_remote_proposals = False
-        receipt, _ = self.turn("Alle offenen Einheiten synchronisieren.", [
-            lambda _: self.call(
-                "start_intervals_plan_sync", {}, ["intervals_sync", "local_plan"],
-                target="intervals", remote_write=True, sync_scope="all_pending",
-            ),
-            {"output_text": "Prüfe die Freigabe."},
-        ])
+        receipt, _ = self.turn(
+            "Alle offenen Einheiten synchronisieren.",
+            [
+                lambda _: self.call(
+                    "start_intervals_plan_sync",
+                    {},
+                    ["intervals_sync", "local_plan"],
+                    target="intervals",
+                    remote_write=True,
+                    sync_scope="all_pending",
+                ),
+                {"output_text": "Prüfe die Freigabe."},
+            ],
+        )
         proposal = receipt["command_receipts"][0]["result"]["proposed_action"]
-        self.assertTrue(any(first["id"] in value for value in proposal["object_ids"].get("targets", [])))
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([
-            self.workout("2026-09-11", "Added after approval preview")
-        ])
+        self.assertTrue(
+            any(
+                first["id"] in value
+                for value in proposal["object_ids"].get("targets", [])
+            )
+        )
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout("2026-09-11", "Added after approval preview")]
+        )
         confirmation = server.COACH_PROPOSALS.confirmation_service().confirm(
             proposal["id"], "synthetic-session"
         )
 
         with self.assertRaises(server.AppError) as rejected:
             server.COACH_PROPOSALS.execution_service().execute(
-                confirmation["action_token"], "synthetic-session",
+                confirmation["action_token"],
+                "synthetic-session",
                 confirmation["proposed_action"]["payload_hash"],
             )
 
@@ -844,107 +1729,374 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     def test_friday_correction_retry_and_sync_keep_sunday_unchanged(self):
-        units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-11", "Synthetic Friday strength"),
-                                                     self.workout("2026-09-13", "Synthetic Sunday strength")])
+        units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [
+                self.workout("2026-09-11", "Synthetic Friday strength"),
+                self.workout("2026-09-13", "Synthetic Sunday strength"),
+            ]
+        )
         friday, sunday = units[0]["id"], units[1]["id"]
         initial = self.state()
-        sunday_before = next(u for u in initial["planned_units"] if u["local_id"] == sunday)
+        sunday_before = next(
+            u for u in initial["planned_units"] if u["local_id"] == sunday
+        )
         period = {"start": "2026-09-11", "end": "2026-09-13"}
-        change = {"local_id": friday, "action": "update", "sport": "Run", "name": "Synthetic easy 8 km run",
-                  "description": "- 50m Z1 HR Synthetic very easy run", "duration_minutes": 50,
-                  "expected_payload_hash": next(u["expected_payload_hash"] for u in initial["planned_units"] if u["local_id"] == friday)}
+        change = {
+            "local_id": friday,
+            "action": "update",
+            "sport": "Run",
+            "name": "Synthetic easy 8 km run",
+            "description": "- 50m Z1 HR Synthetic very easy run",
+            "duration_minutes": 50,
+            "expected_payload_hash": next(
+                u["expected_payload_hash"]
+                for u in initial["planned_units"]
+                if u["local_id"] == friday
+            ),
+        }
         corrected = {}
+
         def repair(payload):
             self.assertEqual(self.state()["planned_units"], initial["planned_units"])
             current = json.loads(payload["input"][0]["output"])
-            corrected.update(changes=[change], expected_revision=current["planning_revision"])
-            return self.call("apply_training_patch", corrected, ["planned_unit:" + friday], period=period)
+            corrected.update(
+                changes=[change], expected_revision=current["planning_revision"]
+            )
+            return self.call(
+                "apply_training_patch",
+                corrected,
+                ["planned_unit:" + friday],
+                period=period,
+            )
+
         original_apply = CoachTrainingPatchService.apply
-        with patch.object(CoachTrainingPatchService, "apply", autospec=True) as patch_apply:
-            patch_apply.side_effect = lambda service, *args: original_apply(service, *args)
-            result, _ = self.turn("Freitag lieber einen sehr lockeren 8-km-Lauf, Sonntag Kraft behalten.", [
-                lambda _: self.call("apply_training_patch", {"changes": [change], "expected_revision": -1}, ["planned_unit:" + friday], period=period),
-                lambda _: self.call("read_training_state"), repair,
-                lambda _: self.call("apply_training_patch", corrected, ["planned_unit:" + friday], period=period),
-                {"output_text": "Freitag geändert, Sonntag bleibt bestehen."},
-            ], turn="friday-repair")
+        with patch.object(
+            CoachTrainingPatchService, "apply", autospec=True
+        ) as patch_apply:
+            patch_apply.side_effect = lambda service, *args: original_apply(
+                service, *args
+            )
+            result, _ = self.turn(
+                "Freitag lieber einen sehr lockeren 8-km-Lauf, Sonntag Kraft behalten.",
+                [
+                    lambda _: self.call(
+                        "apply_training_patch",
+                        {"changes": [change], "expected_revision": -1},
+                        ["planned_unit:" + friday],
+                        period=period,
+                    ),
+                    lambda _: self.call("read_training_state"),
+                    repair,
+                    lambda _: self.call(
+                        "apply_training_patch",
+                        corrected,
+                        ["planned_unit:" + friday],
+                        period=period,
+                    ),
+                    {"output_text": "Freitag geändert, Sonntag bleibt bestehen."},
+                ],
+                turn="friday-repair",
+            )
         self.assertEqual(result["status"], "completed")
         self.assertTrue(result["command_receipts"][0]["resolved"])
-        self.assertEqual(patch_apply.call_count, 2)  # Rejected attempt, successful write; replay is cached.
-        self.assertEqual(self.state()["planning_revision"], initial["planning_revision"] + 1)
-        self.assertEqual(next(u for u in self.state()["planned_units"] if u["local_id"] == sunday), sunday_before)
-        self.assertEqual(next(u["sport"] for u in self.state()["planned_units"] if u["local_id"] == friday), "Run")
+        self.assertEqual(
+            patch_apply.call_count, 2
+        )  # Rejected attempt, successful write; replay is cached.
+        self.assertEqual(
+            self.state()["planning_revision"], initial["planning_revision"] + 1
+        )
+        self.assertEqual(
+            next(u for u in self.state()["planned_units"] if u["local_id"] == sunday),
+            sunday_before,
+        )
+        self.assertEqual(
+            next(
+                u["sport"]
+                for u in self.state()["planned_units"]
+                if u["local_id"] == friday
+            ),
+            "Run",
+        )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
-        replay, model = self.turn("Freitag lieber einen sehr lockeren 8-km-Lauf, Sonntag Kraft behalten.", [], turn="friday-repair")
+        replay, model = self.turn(
+            "Freitag lieber einen sehr lockeren 8-km-Lauf, Sonntag Kraft behalten.",
+            [],
+            turn="friday-repair",
+        )
         model.assert_not_called()
         self.assertEqual(replay, result)
+
         def sync_read_selection(payload):
             current = json.loads(payload["input"][0]["output"])
             entry = next(u for u in current["planned_units"] if u["local_id"] == friday)
-            return self.call("start_intervals_plan_sync", {"entries": [{"library_workout_id": entry["local_id"], "expected_payload_hash": entry["expected_payload_hash"]}]},
-                             ["intervals_sync", "planned_unit:" + friday], target="intervals", remote_write=True, sync_scope="selected")
-        synced, _ = self.turn("Bitte diese geänderte Einheit zu Intervals synchronisieren.", [lambda _: self.call("read_training_state"), sync_read_selection,
-                                                                                             {"output_text": "Synchronisierung beauftragt."}])
+            return self.call(
+                "start_intervals_plan_sync",
+                {
+                    "entries": [
+                        {
+                            "library_workout_id": entry["local_id"],
+                            "expected_payload_hash": entry["expected_payload_hash"],
+                        }
+                    ]
+                },
+                ["intervals_sync", "planned_unit:" + friday],
+                target="intervals",
+                remote_write=True,
+                sync_scope="selected",
+            )
+
+        synced, _ = self.turn(
+            "Bitte diese geänderte Einheit zu Intervals synchronisieren.",
+            [
+                lambda _: self.call("read_training_state"),
+                sync_read_selection,
+                {"output_text": "Synchronisierung beauftragt."},
+            ],
+        )
         self.assertEqual(synced["status"], "completed")
         with server.database_manager().unit_of_work() as db:
-            job = db.execute("SELECT payload FROM sync_jobs WHERE id=?", (synced["sync_job_ids"][0],)).fetchone()
-        self.assertEqual([e["library_workout_id"] for e in json.loads(job["payload"])["entries"]], [friday])
-        self.assertEqual(next(u for u in self.state()["planned_units"] if u["local_id"] == sunday), sunday_before)
+            job = db.execute(
+                "SELECT payload FROM sync_jobs WHERE id=?", (synced["sync_job_ids"][0],)
+            ).fetchone()
+        self.assertEqual(
+            [e["library_workout_id"] for e in json.loads(job["payload"])["entries"]],
+            [friday],
+        )
+        self.assertEqual(
+            next(u for u in self.state()["planned_units"] if u["local_id"] == sunday),
+            sunday_before,
+        )
 
-    def test_short_answer_completes_persisted_clarification_after_an_intervening_read(self):
-        units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout("2026-09-09"), self.workout("2026-09-11")])
+    def test_short_answer_completes_persisted_clarification_after_an_intervening_read(
+        self,
+    ):
+        units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout("2026-09-09"), self.workout("2026-09-11")]
+        )
         before = self.state()
+
         def ask(_):
-            return self.call("clarify_coach_request", {"source_message_ids": self.request([])["source_message_ids"],
-                "summary": "Eine Oberkörpereinheit auf Samstag verschieben; die andere erhalten.", "question": "Die erste am Mittwoch oder die zweite am Freitag?"})
-        self.turn("Verschiebe eine der Oberkörpereinheiten auf Samstag.", [ask, {"output_text": "Welche Einheit?"}])
+            return self.call(
+                "clarify_coach_request",
+                {
+                    "source_message_ids": self.request([])["source_message_ids"],
+                    "summary": "Eine Oberkörpereinheit auf Samstag verschieben; die andere erhalten.",
+                    "question": "Die erste am Mittwoch oder die zweite am Freitag?",
+                },
+            )
+
+        self.turn(
+            "Verschiebe eine der Oberkörpereinheiten auf Samstag.",
+            [ask, {"output_text": "Welche Einheit?"}],
+        )
         pending = json.loads(server.key_value_service().get("coach_pending_request"))
         self.run_tool("list_planned_workouts", message="Zeig mir die Woche nochmal.")
-        self.assertEqual(json.loads(server.key_value_service().get("coach_pending_request")), pending)
+        self.assertEqual(
+            json.loads(server.key_value_service().get("coach_pending_request")), pending
+        )
+
         def choose(payload):
             context = json.loads(payload["input"])["dialogue"]
             self.assertEqual(context["pending_request"], pending)
             selected = before["planned_units"][1]
-            response = self.call("apply_training_patch", {"expected_revision": before["planning_revision"], "changes": [{
-                "local_id": selected["local_id"], "action": "update", "date": "2026-09-12", "expected_payload_hash": selected["expected_payload_hash"]}]},
-                ["planned_unit:" + selected["local_id"]], period={"start": "2026-09-11", "end": "2026-09-12"})
+            response = self.call(
+                "apply_training_patch",
+                {
+                    "expected_revision": before["planning_revision"],
+                    "changes": [
+                        {
+                            "local_id": selected["local_id"],
+                            "action": "update",
+                            "date": "2026-09-12",
+                            "expected_payload_hash": selected["expected_payload_hash"],
+                        }
+                    ],
+                },
+                ["planned_unit:" + selected["local_id"]],
+                period={"start": "2026-09-11", "end": "2026-09-12"},
+            )
             args = json.loads(response["output"][0]["arguments"])
             args["_request"]["source_message_ids"] += pending["source_message_ids"]
             response["output"][0]["arguments"] = json.dumps(args)
             return response
-        result, _ = self.turn("Die zweite.", [choose, {"output_text": "Die Freitagseinheit liegt jetzt am Samstag."}])
+
+        result, _ = self.turn(
+            "Die zweite.",
+            [choose, {"output_text": "Die Freitagseinheit liegt jetzt am Samstag."}],
+        )
         self.assertEqual(result["status"], "completed")
-        self.assertEqual([(u["local_id"], u["date"]) for u in self.state()["planned_units"]], [(units[0]["id"], "2026-09-09"), (units[1]["id"], "2026-09-12")])
-        self.assertIsNone(json.loads(server.key_value_service().get("coach_pending_request")))
+        self.assertEqual(
+            [(u["local_id"], u["date"]) for u in self.state()["planned_units"]],
+            [(units[0]["id"], "2026-09-09"), (units[1]["id"], "2026-09-12")],
+        )
+        self.assertIsNone(
+            json.loads(server.key_value_service().get("coach_pending_request"))
+        )
 
     def test_invalid_arguments_and_missing_objects_do_not_partially_write(self):
-        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()], plan_name="Synthetic validation plan")[0]
-        server.PLANNING_DATA.workout_library().create_template({"name": "Synthetic template", "description": "- 30m 60% Easy", "duration_minutes": 30})
+        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout()], plan_name="Synthetic validation plan"
+        )[0]
+        server.PLANNING_DATA.workout_library().create_template(
+            {
+                "name": "Synthetic template",
+                "description": "- 30m 60% Easy",
+                "duration_minutes": 30,
+            }
+        )
         template_id = server.PLANNING_DATA.workout_library().list()[0]["id"]
         plan_id = server.PLANNING_DATA.training_plan().list()[0]["id"]
         period = {"start": "2026-09-09", "end": "2026-09-09"}
         cases = [
-            ("update_profile", {"changes": [{"field": "name", "expected_value": "", "value": None}]}, ["local_profile"], {}),
-            ("manage_training_templates", {"templates": [{"action": "create", "name": "Must roll back", "description": "Easy"}, {"action": "invalid"}]}, ["local_template"], {}),
+            (
+                "update_profile",
+                {"changes": [{"field": "name", "expected_value": "", "value": None}]},
+                ["local_profile"],
+                {},
+            ),
+            (
+                "manage_training_templates",
+                {
+                    "templates": [
+                        {
+                            "action": "create",
+                            "name": "Must roll back",
+                            "description": "Easy",
+                        },
+                        {"action": "invalid"},
+                    ]
+                },
+                ["local_template"],
+                {},
+            ),
             ("save_checkin", {"payload": {"soreness": 11}}, ["local_checkin"], {}),
-            ("save_activity_feedback", {"payload": {"activity_id": "missing", "notes": "Synthetic"}}, ["activity_feedback"], {}),
-            ("delete_activity_feedback", {"activity_id": ""}, ["activity_feedback"], {}),
-            ("save_competition", {"payload": {"name": "Synthetic", "event_date": "2026-99-99", "sport": "Run"}}, ["local_competitions"], {}),
-            ("delete_competition", {"competition_id": "missing"}, ["competition:missing"], {}),
-            ("stage_training_plan", {"payload": {"plan_name": "Invalid draft", "goal": "Synthetic", "workouts": []}}, ["local_plan"], {"period": period}),
-            ("commit_training_plan", {"artifact_id": "missing"}, ["artifact:missing"], {"period": period}),
-            ("replace_training_plan", {"payload": {"plan_name": "Invalid replacement", "goal": "Synthetic", "workouts": [self.workout()]}, "expected_revision": -1}, ["local_plan"], {"period": period}),
-            ("apply_training_patch", {"workouts": [self.workout()], "expected_revision": -1}, ["local_plan"], {"period": period}),
-            ("apply_workout_library_plan", {"entries": [{"library_workout_id": template_id, "date": "2026-99-99"}]}, ["library_workout:" + template_id], {"period": period}),
-            ("update_training_plan", {"payload": {"plan_id": plan_id, "start_date": "invalid"}}, ["training_plan:" + plan_id], {}),
+            (
+                "save_activity_feedback",
+                {"payload": {"activity_id": "missing", "notes": "Synthetic"}},
+                ["activity_feedback"],
+                {},
+            ),
+            (
+                "delete_activity_feedback",
+                {"activity_id": ""},
+                ["activity_feedback"],
+                {},
+            ),
+            (
+                "save_competition",
+                {
+                    "payload": {
+                        "name": "Synthetic",
+                        "event_date": "2026-99-99",
+                        "sport": "Run",
+                    }
+                },
+                ["local_competitions"],
+                {},
+            ),
+            (
+                "delete_competition",
+                {"competition_id": "missing"},
+                ["competition:missing"],
+                {},
+            ),
+            (
+                "stage_training_plan",
+                {
+                    "payload": {
+                        "plan_name": "Invalid draft",
+                        "goal": "Synthetic",
+                        "workouts": [],
+                    }
+                },
+                ["local_plan"],
+                {"period": period},
+            ),
+            (
+                "commit_training_plan",
+                {"artifact_id": "missing"},
+                ["artifact:missing"],
+                {"period": period},
+            ),
+            (
+                "replace_training_plan",
+                {
+                    "payload": {
+                        "plan_name": "Invalid replacement",
+                        "goal": "Synthetic",
+                        "workouts": [self.workout()],
+                    },
+                    "expected_revision": -1,
+                },
+                ["local_plan"],
+                {"period": period},
+            ),
+            (
+                "apply_training_patch",
+                {"workouts": [self.workout()], "expected_revision": -1},
+                ["local_plan"],
+                {"period": period},
+            ),
+            (
+                "apply_workout_library_plan",
+                {
+                    "entries": [
+                        {"library_workout_id": template_id, "date": "2026-99-99"}
+                    ]
+                },
+                ["library_workout:" + template_id],
+                {"period": period},
+            ),
+            (
+                "update_training_plan",
+                {"payload": {"plan_id": plan_id, "start_date": "invalid"}},
+                ["training_plan:" + plan_id],
+                {},
+            ),
             ("undo_training_change", {"change_id": "missing"}, ["change:missing"], {}),
-            ("resolve_training_sync_conflict", {"local_id": unit["id"], "strategy": "keep_local"}, ["planned_unit:" + unit["id"]], {}),
-            ("apply_adaptive_replan", {"adjustment_id": "missing"}, ["adaptive_replan:missing"], {}),
-            ("start_provider_refresh", {"days": 4000}, ["garmin_refresh"], {"target": "garmin"}),
-            ("refresh_current_performance", {}, ["weather_refresh"], {"target": "weather"}),
-            ("start_intervals_plan_sync", {"entries": [{"library_workout_id": unit["id"], "expected_payload_hash": "invalid"}]},
-             ["intervals_sync", "planned_unit:" + unit["id"]], {"target": "intervals", "remote_write": True, "sync_scope": "selected"}),
-            ("sync_competitions", {}, ["intervals_sync"], {"target": "intervals", "remote_write": True}),
+            (
+                "resolve_training_sync_conflict",
+                {"local_id": unit["id"], "strategy": "keep_local"},
+                ["planned_unit:" + unit["id"]],
+                {},
+            ),
+            (
+                "apply_adaptive_replan",
+                {"adjustment_id": "missing"},
+                ["adaptive_replan:missing"],
+                {},
+            ),
+            (
+                "start_provider_refresh",
+                {"days": 4000},
+                ["garmin_refresh"],
+                {"target": "garmin"},
+            ),
+            (
+                "refresh_current_performance",
+                {},
+                ["weather_refresh"],
+                {"target": "weather"},
+            ),
+            (
+                "start_intervals_plan_sync",
+                {
+                    "entries": [
+                        {
+                            "library_workout_id": unit["id"],
+                            "expected_payload_hash": "invalid",
+                        }
+                    ]
+                },
+                ["intervals_sync", "planned_unit:" + unit["id"]],
+                {"target": "intervals", "remote_write": True, "sync_scope": "selected"},
+            ),
+            (
+                "sync_competitions",
+                {},
+                ["intervals_sync"],
+                {"target": "intervals", "remote_write": True},
+            ),
         ]
         for name, args, scope, kwargs in cases:
             with self.subTest(tool=name):
@@ -952,11 +2104,21 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 previous_auto_approval = self.auto_approve_remote_proposals
                 if kwargs.get("remote_write"):
                     self.auto_approve_remote_proposals = False
-                result, _ = self.turn("Synthetischer Auftrag mit ungültigem Argument.", [lambda _, n=name, a=args, s=scope, k=kwargs: self.call(n, a, s, **k),
-                                                                                        {"output_text": "Nicht ausgeführt."}])
+                result, _ = self.turn(
+                    "Synthetischer Auftrag mit ungültigem Argument.",
+                    [
+                        lambda _, n=name, a=args, s=scope, k=kwargs: self.call(
+                            n, a, s, **k
+                        ),
+                        {"output_text": "Nicht ausgeführt."},
+                    ],
+                )
                 self.auto_approve_remote_proposals = previous_auto_approval
                 if kwargs.get("remote_write"):
-                    self.assertEqual(result["command_receipts"][0]["result"]["status"], "approval_required")
+                    self.assertEqual(
+                        result["command_receipts"][0]["result"]["status"],
+                        "approval_required",
+                    )
                     after = self.athlete_state()
                     before.pop("coach_action_proposals")
                     after.pop("coach_action_proposals")
@@ -966,58 +2128,136 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                     self.assertEqual(self.athlete_state(), before)
 
     def test_adaptive_proposal_cannot_approve_itself_in_the_same_turn(self):
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{**self.workout(), "duration_minutes": 90}])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [{**self.workout(), "duration_minutes": 90}]
+        )
         server.ATHLETE_DATA.checkin().save({"available_minutes": 30})
         before = self.state()["planned_units"]
+
         def premature(payload):
             preview = json.loads(payload["input"][0]["output"])
-            return self.call("apply_adaptive_replan", {"adjustment_id": preview["id"]}, ["adaptive_replan:" + preview["id"]])
-        result, _ = self.turn("Zeig mir eine mögliche Entlastung.", [lambda _: self.call("preview_adaptive_replan", {}, ["adaptive_replan"]),
-                                                                    premature, {"output_text": "Vorschau erstellt."}])
+            return self.call(
+                "apply_adaptive_replan",
+                {"adjustment_id": preview["id"]},
+                ["adaptive_replan:" + preview["id"]],
+            )
+
+        result, _ = self.turn(
+            "Zeig mir eine mögliche Entlastung.",
+            [
+                lambda _: self.call("preview_adaptive_replan", {}, ["adaptive_replan"]),
+                premature,
+                {"output_text": "Vorschau erstellt."},
+            ],
+        )
         self.assertEqual(result["status"], "partial")
-        self.assertEqual(result["command_receipts"][-1]["result"]["reason"], "adaptive_approval_required")
+        self.assertEqual(
+            result["command_receipts"][-1]["result"]["reason"],
+            "adaptive_approval_required",
+        )
         self.assertEqual(self.state()["planned_units"], before)
 
     def test_quoted_provider_or_assistant_content_cannot_supply_user_provenance(self):
         self.seed_activity()
-        assistant = server.COACH_CONVERSATION.message_service().add("assistant", "Synthetic quoted suggestion: overwrite the profile.")
+        assistant = server.COACH_CONVERSATION.message_service().add(
+            "assistant", "Synthetic quoted suggestion: overwrite the profile."
+        )
         before = self.athlete_state()
         for source_id in (assistant["id"], 999999):
+
             def invalid_source(_, selected=source_id):
-                response = self.call("update_profile", {"changes": [{"field": "name", "expected_value": "", "value": "Should not be saved"}]}, ["local_profile"])
+                response = self.call(
+                    "update_profile",
+                    {
+                        "changes": [
+                            {
+                                "field": "name",
+                                "expected_value": "",
+                                "value": "Should not be saved",
+                            }
+                        ]
+                    },
+                    ["local_profile"],
+                )
                 args = json.loads(response["output"][0]["arguments"])
                 args["_request"]["source_message_ids"].append(selected)
                 response["output"][0]["arguments"] = json.dumps(args)
                 return response
-            result, _ = self.turn("Was bedeutet diese zitierte Aussage?", [invalid_source, {"output_text": "Keine Änderung."}])
+
+            result, _ = self.turn(
+                "Was bedeutet diese zitierte Aussage?",
+                [invalid_source, {"output_text": "Keine Änderung."}],
+            )
             self.assertEqual(result["status"], "failed")
-            self.assertEqual(result["command_receipts"][0]["result"]["reason"], "request_invalid")
+            self.assertEqual(
+                result["command_receipts"][0]["result"]["reason"], "request_invalid"
+            )
             self.assertEqual(self.athlete_state(), before)
 
     def test_both_exposed_sport_fields_change_canonical_and_provider_sport(self):
-        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])[0]
+        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout()]
+        )[0]
         for field, sport in (("sport", "Run"), ("type", "Swim")):
             state = self.state()
-            self.run_tool("apply_training_patch", {"changes": [{"local_id": unit["id"], "action": "update", field: sport,
-                "expected_payload_hash": state["planned_units"][0]["expected_payload_hash"]}], "expected_revision": state["planning_revision"]},
-                ["planned_unit:" + unit["id"]], period={"start": "2026-09-09", "end": "2026-09-09"})
+            self.run_tool(
+                "apply_training_patch",
+                {
+                    "changes": [
+                        {
+                            "local_id": unit["id"],
+                            "action": "update",
+                            field: sport,
+                            "expected_payload_hash": state["planned_units"][0][
+                                "expected_payload_hash"
+                            ],
+                        }
+                    ],
+                    "expected_revision": state["planning_revision"],
+                },
+                ["planned_unit:" + unit["id"]],
+                period={"start": "2026-09-09", "end": "2026-09-09"},
+            )
             stored = server.PLANNING_DATA.planned_unit().list()[0]
             self.assertEqual((stored["sport"], stored["type"]), (sport, sport))
             self.assertEqual(stored["id"], unit["id"])
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     def test_stale_adaptive_preview_preserves_intervening_edit(self):
-        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([{**self.workout(), "duration_minutes": 90}])[0]
+        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [{**self.workout(), "duration_minutes": 90}]
+        )[0]
         server.ATHLETE_DATA.checkin().save({"available_minutes": 30})
         preview = self.run_tool("preview_adaptive_replan", {}, ["adaptive_replan"])
         current = self.state()
-        self.run_tool("apply_training_patch", {"changes": [{"local_id": unit["id"], "action": "update", "duration_minutes": 45,
-            "expected_payload_hash": current["planned_units"][0]["expected_payload_hash"]}], "expected_revision": current["planning_revision"]},
-            ["planned_unit:" + unit["id"]], period={"start": "2026-09-09", "end": "2026-09-09"})
-        result = self.run_tool("apply_adaptive_replan", {"adjustment_id": preview["id"]}, ["adaptive_replan:" + preview["id"]])
+        self.run_tool(
+            "apply_training_patch",
+            {
+                "changes": [
+                    {
+                        "local_id": unit["id"],
+                        "action": "update",
+                        "duration_minutes": 45,
+                        "expected_payload_hash": current["planned_units"][0][
+                            "expected_payload_hash"
+                        ],
+                    }
+                ],
+                "expected_revision": current["planning_revision"],
+            },
+            ["planned_unit:" + unit["id"]],
+            period={"start": "2026-09-09", "end": "2026-09-09"},
+        )
+        result = self.run_tool(
+            "apply_adaptive_replan",
+            {"adjustment_id": preview["id"]},
+            ["adaptive_replan:" + preview["id"]],
+        )
         self.assertEqual(result["updated"], 0)
         self.assertEqual(result["status"], "stale")
-        self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"], 45)
+        self.assertEqual(
+            server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"], 45
+        )
 
 
 if __name__ == "__main__":

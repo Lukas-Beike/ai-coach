@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.db import DatabaseManager
 from backend.planning import planned_units
 from backend.planning.planned_unit_service import PlannedUnitService
@@ -88,7 +89,7 @@ class RemotePlannedUnitReconciler:
                     continue
                 incoming, remote_id, identity = prepared
                 seen_ids.add(remote_id)
-                incoming_dates.append(str(incoming.get("date") or "")[:10])
+                incoming_dates.append(iso_date_prefix(str(incoming.get("date") or "")))
                 imported_delta, updated_delta, conflict_delta, mutated_delta = (
                     self._upsert_event(db, incoming, remote_id, identity, now)
                 )
@@ -223,8 +224,8 @@ class RemotePlannedUnitReconciler:
         valid_dates = [
             value for value in incoming_dates if re.fullmatch(_DATE_ONLY_PATTERN, value)
         ]
-        start_value = str(calendar_start or "")[:10]
-        end_value = str(calendar_end or "")[:10]
+        start_value = iso_date_prefix(str(calendar_start or ""))
+        end_value = iso_date_prefix(str(calendar_end or ""))
         if re.fullmatch(_DATE_ONLY_PATTERN, start_value):
             window_start = start_value
         else:
@@ -265,10 +266,10 @@ class RemotePlannedUnitReconciler:
     ) -> tuple[int, bool]:
         try:
             payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 0, False
         remote_id = str(payload.get("remote_event_id") or "")
-        row_date = str(payload.get("date") or "")[:10]
+        row_date = iso_date_prefix(str(payload.get("date") or ""))
         if (
             not remote_id
             or remote_id in seen_ids

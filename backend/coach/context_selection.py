@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+
 CONTEXT_SECTIONS = frozenset(
     {
         "durable_profile",
@@ -120,12 +122,14 @@ class CoachContextSelection:
             for item in items
             if not isinstance(item, dict)
             or not (
-                value := str(
-                    item.get("date")
-                    or item.get("event_date")
-                    or item.get("start_date_local")
-                    or ""
-                )[:10]
+                value := iso_date_prefix(
+                    str(
+                        item.get("date")
+                        or item.get("event_date")
+                        or item.get("start_date_local")
+                        or ""
+                    )
+                )
             )
             or first <= value <= last
         ]

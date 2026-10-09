@@ -12,9 +12,9 @@ from http.cookies import CookieError, SimpleCookie
 from typing import Any
 
 from backend import config as app_config
+from backend.athlete.sessions import AthleteSessionService
 from backend.config import Config
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import SessionRepository
 from backend.errors import AppError
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.responses import session_cookies
@@ -33,7 +33,10 @@ class SessionAuthServiceCache:
 
     def __init__(self) -> None:
         self._service: SessionAuthService | None = None
-        self._signature: tuple[DatabaseManager, Config, bool] | None = None
+        self._signature: (
+            tuple[DatabaseManager, Config, bool, AthleteSessionService] | None
+        ) = None
+        self._sessions = AthleteSessionService()
 
     def get(
         self,
@@ -42,9 +45,11 @@ class SessionAuthServiceCache:
         config: Config,
         sqlcipher_available: bool,
         rate_limiter: RateLimiter,
+        sessions: AthleteSessionService | None = None,
     ) -> SessionAuthService:
         with database_lock:
-            signature = (database_manager, config, sqlcipher_available)
+            sessions = sessions or self._sessions
+            signature = (database_manager, config, sqlcipher_available, sessions)
             if self._service is None or self._signature != signature:
                 self._service = SessionAuthService(
                     database_manager,
@@ -52,6 +57,7 @@ class SessionAuthServiceCache:
                     config,
                     sqlcipher_available,
                     rate_limiter,
+                    sessions,
                 )
                 self._signature = signature
             return self._service
@@ -65,6 +71,7 @@ def get_session_auth_service(
     database_lock: threading.RLock,
     config: Config,
     sqlcipher_available: bool,
+    sessions: AthleteSessionService | None = None,
 ) -> SessionAuthService:
     """Return the auth service owned by the current persistence config."""
     with database_lock:
@@ -74,6 +81,7 @@ def get_session_auth_service(
             config,
             sqlcipher_available,
             RATE_LIMITER,
+            sessions,
         )
 
 
@@ -87,13 +95,14 @@ class SessionAuthService:
         config: Config,
         sqlcipher_available: bool,
         rate_limiter: RateLimiter,
+        sessions: AthleteSessionService | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._database_lock = database_lock
         self._config = config
         self._sqlcipher_available = sqlcipher_available
         self._rate_limiter = rate_limiter
-        self._sessions = SessionRepository()
+        self._sessions = sessions or AthleteSessionService()
         self._session_lock = threading.RLock()
         self._last_cleanup_monotonic = 0.0
 

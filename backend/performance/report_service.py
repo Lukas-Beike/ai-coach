@@ -1,9 +1,7 @@
-"""Cohesive training report read and archive use cases."""
+"""Cohesive local training analysis read use cases."""
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 import uuid
 from collections.abc import Callable
@@ -13,12 +11,12 @@ from typing import Any
 
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.identity import intervals_activity_device_source
+from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.season_preparation import load_scenarios, season_preparation
 from backend.performance.tag_impact import tag_impact
 from backend.performance.training_report import canonical_rows, training_report
-from backend.runtime.clock import utc_now as system_utc_now
 
 
 class TrainingRecordsService:
@@ -69,7 +67,7 @@ class TrainingRecordsService:
             records.append(
                 {
                     **stored,
-                    "date": str(row.get("start_date_local") or "")[:10],
+                    "date": iso_date_prefix(str(row.get("start_date_local") or "")),
                     "sport": row.get("type") or row.get("sport"),
                     "activity_type": row.get("type") or row.get("sport"),
                     "source": row.get("source") or "Intervals.icu",
@@ -393,48 +391,6 @@ class TrainingSeasonReadService:
         )
 
 
-class TrainingReportArchiveService:
-    def __init__(
-        self,
-        *,
-        database_manager: Any,
-        read_report: Callable[[dict[str, Any]], dict[str, Any]],
-        utc_now: Callable[[], str] = system_utc_now,
-    ) -> None:
-        self._database_manager = database_manager
-        self._read_report = read_report
-        self._utc_now = utc_now
-
-    def archive(self, values: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(values, dict):
-            raise AppError(400, "Der Berichtsauftrag muss ein Objekt sein.")
-        if set(values) - {"start", "days", "sport"}:
-            raise AppError(400, "Der Berichtsauftrag enthält unbekannte Felder.")
-        report = self._read_report(values)
-        serialized = json.dumps(
-            report, sort_keys=True, ensure_ascii=False, allow_nan=False
-        )
-        report_id = hashlib.sha256(serialized.encode()).hexdigest()
-        with self._database_manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO NOTHING",
-                (f"training_report:{report_id}", serialized, self._utc_now()),
-            )
-        return {"ok": True, "report_id": report_id, "report": report}
-
-    def archives(self) -> dict[str, Any]:
-        with self._database_manager.unit_of_work() as db:
-            rows = db.execute(
-                "SELECT key, value FROM kv WHERE key LIKE 'training_report:%' ORDER BY updated_at DESC, key LIMIT 50"
-            ).fetchall()
-        return {
-            "reports": [
-                {"id": row["key"].split(":", 1)[1], "report": json.loads(row["value"])}
-                for row in rows
-            ]
-        }
-
-
 @dataclass(frozen=True)
 class TrainingReportServices:
     records: TrainingRecordsService
@@ -442,7 +398,6 @@ class TrainingReportServices:
     report: TrainingReportReadService
     derived: TrainingDerivedReadService
     season: TrainingSeasonReadService
-    archive: TrainingReportArchiveService
     timezone: Callable[[], str]
 
 

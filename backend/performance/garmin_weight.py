@@ -4,6 +4,8 @@ import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+
 UTC_OFFSET_SUFFIX = "+00:00"
 GARMIN_PERFORMANCE_SOURCE = "Garmin Connect"
 
@@ -27,7 +29,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -73,11 +75,11 @@ def _garmin_record_date(value: Any) -> str | None:
                 .date()
                 .isoformat()
             )
-        except (OverflowError, OSError, ValueError):
+        except OverflowError, OSError, ValueError:
             return None
     try:
-        return str(value).replace("Z", UTC_OFFSET_SUFFIX)[:10]
-    except (AttributeError, TypeError):
+        return iso_date_prefix(str(value).replace("Z", UTC_OFFSET_SUFFIX))
+    except AttributeError, TypeError:
         return None
 
 
@@ -91,7 +93,7 @@ def _garmin_record_timestamp(item: dict[str, Any]) -> float | None:
             return datetime.fromtimestamp(
                 float(value) / scale, timezone.utc
             ).timestamp()
-        except (OverflowError, OSError, ValueError):
+        except OverflowError, OSError, ValueError:
             return None
     if isinstance(value, str) and len(value.strip()) > 10:
         try:
@@ -192,7 +194,7 @@ def garmin_weight_daily_records(
 def _garmin_body_fat_pct(value: Any, unit: Any = None) -> float | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -294,7 +296,9 @@ def garmin_weight_average(
     for record_date, weight in garmin_weight_records(snapshot):
         try:
             record_day = (
-                date.fromisoformat(str(record_date)[:10]) if record_date else None
+                date.fromisoformat(iso_date_prefix(str(record_date)))
+                if record_date
+                else None
             )
         except ValueError:
             record_day = None

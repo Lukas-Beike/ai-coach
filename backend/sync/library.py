@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.config import Config
 from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -511,7 +512,7 @@ class WorkoutLibrarySyncStateService:
         raw_payload = str(row.get("payload") or "")
         payload_data = cls._parse_payload(raw_payload)
         planned_date = (
-            str(payload_data.get("date") or "").strip()[:10]
+            iso_date_prefix(str(payload_data.get("date") or "").strip())
             if isinstance(payload_data, dict)
             else ""
         )
@@ -607,7 +608,7 @@ class WorkoutLibrarySyncService:
     def sync_calendar_entry(
         self, local_id: str, synced: dict[str, Any]
     ) -> dict[str, Any] | None:
-        planned_date = str(synced.get("date") or "").strip()[:10]
+        planned_date = iso_date_prefix(str(synced.get("date") or "").strip())
         if not planned_date:
             return None
         if self._calendar_conflict_service is not None:

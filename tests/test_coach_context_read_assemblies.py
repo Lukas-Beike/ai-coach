@@ -189,7 +189,9 @@ class CoachReadToolsAssemblyTests(unittest.TestCase):
                     deps["competitions"],
                     deps["training_plans"],
                 ),
-                policy=CoachReadToolPolicy(deps["nutrition"], deps["limit"]),
+                policy=CoachReadToolPolicy(
+                    deps["nutrition"], deps["nutrition"], deps["limit"]
+                ),
             )
         )
 

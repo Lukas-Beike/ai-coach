@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.runtime.clock import utc_now as system_utc_now
 
 PROVIDERS = frozenset({"intervals", "garmin", "calendar", "weather"})
@@ -480,7 +481,7 @@ def _normalize_refresh_force(value: Any) -> bool:
 
 def _normalize_refresh_end_date(value: Any) -> str:
     try:
-        return date.fromisoformat(str(value)[:10]).isoformat()
+        return date.fromisoformat(iso_date_prefix(str(value))).isoformat()
     except (TypeError, ValueError) as exc:
         raise JobValidationError("Das Backfill-Enddatum ist ungültig.") from exc
 

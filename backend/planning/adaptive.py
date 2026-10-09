@@ -11,7 +11,7 @@ from typing import Any
 
 from backend import change_history
 from backend.athlete.checkins import CHECKIN_TEXT_LIMITS
-from backend.athlete.local_date import LocalDate
+from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
 from backend.planning.planned_unit_service import UPDATE_SQL as PLANNED_UNIT_UPDATE_SQL
@@ -93,7 +93,7 @@ def private_calendar_adjustment_context(
         "events": [
             {
                 "name": str(event.get("name") or "Privater Termin")[:200],
-                "event_date": str(event.get("event_date") or "")[:10],
+                "event_date": iso_date_prefix(str(event.get("event_date") or "")),
                 "duration_minutes": int(event.get("duration_minutes") or 0),
                 "no_intensity": bool(event.get("no_intensity")),
                 "short_only": bool(event.get("short_only")),

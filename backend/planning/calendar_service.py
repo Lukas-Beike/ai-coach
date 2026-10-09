@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import markers
 from backend.errors import AppError
 from backend.planning import calendar, context
@@ -39,9 +40,9 @@ class CalendarConflictService:
             matches = calendar_items_share_local_day(workout, event)
             if not matches or not decision:
                 continue
-            event_date = str(event.get("event_date") or event.get("start_local") or "")[
-                :10
-            ]
+            event_date = iso_date_prefix(
+                str(event.get("event_date") or event.get("start_local") or "")
+            )
             conflicts.append(
                 {
                     "id": event.get("id"),

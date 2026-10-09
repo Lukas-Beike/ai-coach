@@ -12,7 +12,8 @@ from backend.coach.authorization import (
     structured_action_payload,
 )
 from backend.errors import AppError
-from backend.nutrition.service import NutritionService
+from backend.nutrition.diary import NutritionDiaryService
+from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.planning.competition_service import CompetitionService
 
 
@@ -24,14 +25,16 @@ class CoachAthleteRecordToolService:
         checkins: CheckinService,
         activity_feedback: ActivityFeedbackService,
         competitions: CompetitionService,
-        nutrition: NutritionService | None = None,
+        nutrition_diary: NutritionDiaryService | None = None,
+        nutrition_meal_library: NutritionMealLibraryService | None = None,
         *,
         equipment: Any = None,
     ) -> None:
         self._checkins = checkins
         self._activity_feedback = activity_feedback
         self._competitions = competitions
-        self._nutrition = nutrition
+        self._nutrition_diary = nutrition_diary
+        self._nutrition_meal_library = nutrition_meal_library
         self._equipment = equipment
 
     def execute(
@@ -160,10 +163,12 @@ class CoachAthleteRecordToolService:
             )
         else:
             require_coach_scope(intent, "local_nutrition")
-        if not self._nutrition:
+        if not self._nutrition_diary or not self._nutrition_meal_library:
             raise AppError(500, "NutritionService ist nicht verfügbar.")
         if name == "save_fueling_plan":
-            return self._nutrition.fueling().save(structured_action_payload(arguments))
+            return self._nutrition_diary.fueling().save(
+                structured_action_payload(arguments)
+            )
         if name == "save_nutrition_template":
             return self._save_nutrition_template(arguments)
         if name == "save_nutrition_product":
@@ -171,12 +176,14 @@ class CoachAthleteRecordToolService:
         if name == "delete_nutrition_template":
             return {
                 "ok": True,
-                **self._nutrition.delete_template(str(arguments.get("id") or "")),
+                **self._nutrition_meal_library.delete_template(
+                    str(arguments.get("id") or "")
+                ),
             }
         if name == "log_nutrition_template":
             return {
                 "ok": True,
-                "entry": self._nutrition.log_template(
+                "entry": self._nutrition_diary.log_template(
                     str(arguments.get("id") or ""),
                     arguments.get("portions", 1),
                     meal_date=arguments.get("meal_date"),
@@ -186,7 +193,7 @@ class CoachAthleteRecordToolService:
         if name in {"save_nutrition_entry", "update_nutrition_entry"}:
             return self._save_or_update_nutrition_entry(name, arguments)
         entry_id = str(arguments.get("id") or arguments.get("entry_id") or "").strip()
-        return {"ok": True, **self._nutrition.delete_meal(entry_id)}
+        return {"ok": True, **self._nutrition_diary.delete_meal(entry_id)}
 
     def _authorize_nutrition_operation(self, name: str, intent: dict[str, Any]) -> None:
         message = (
@@ -199,7 +206,7 @@ class CoachAthleteRecordToolService:
     def _save_nutrition_product(
         self, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any]:
-        nutrition = self._nutrition_service()
+        nutrition = self._nutrition_meal_library_service()
         payload = structured_action_payload(arguments)
         product_id = str(payload.get("id") or "").strip()
         if product_id:
@@ -214,7 +221,7 @@ class CoachAthleteRecordToolService:
     def _save_or_update_nutrition_entry(
         self, name: str, arguments: dict[str, Any]
     ) -> dict[str, Any]:
-        nutrition = self._nutrition_service()
+        nutrition = self._nutrition_diary_service()
         if name == "save_nutrition_entry":
             return {
                 "ok": True,
@@ -227,10 +234,15 @@ class CoachAthleteRecordToolService:
             ),
         }
 
-    def _nutrition_service(self) -> NutritionService:
-        if self._nutrition is None:
+    def _nutrition_diary_service(self) -> NutritionDiaryService:
+        if self._nutrition_diary is None:
             raise AppError(500, "NutritionService ist nicht verfügbar.")
-        return self._nutrition
+        return self._nutrition_diary
+
+    def _nutrition_meal_library_service(self) -> NutritionMealLibraryService:
+        if self._nutrition_meal_library is None:
+            raise AppError(500, "NutritionService ist nicht verfügbar.")
+        return self._nutrition_meal_library
 
     @staticmethod
     def _authorize(intent: dict[str, Any], operation: str, message: str) -> None:
@@ -238,13 +250,13 @@ class CoachAthleteRecordToolService:
             raise AppError(403, message, reason="intent_scope_denied")
 
     def _save_nutrition_template(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        assert self._nutrition is not None
+        meal_library = self._nutrition_meal_library_service()
         template_payload = structured_action_payload(arguments)
         if not template_payload.get("id"):
             template_payload.setdefault("source", "coach")
         return {
             "ok": True,
-            "template": self._nutrition.save_template(
+            "template": meal_library.save_template(
                 template_payload,
                 **(
                     {"expected_calculation": arguments["_food_calculation"]}

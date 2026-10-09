@@ -108,6 +108,23 @@ class AthleteLocalClockTests(unittest.TestCase):
         self.assertEqual(clock.now().isoformat(), "2026-03-29T01:30:00+01:00")
         self.assertEqual(clock.now().isoformat(), "2026-03-29T03:30:00+02:00")
 
+    def test_local_date_advances_across_dst_midnight(self):
+        profile = Profile("Europe/Berlin")
+        utc_times = iter(
+            (
+                datetime(2026, 10, 24, 21, 59, tzinfo=UTC),
+                datetime(2026, 10, 24, 22, 0, tzinfo=UTC),
+                datetime(2026, 10, 25, 1, 0, tzinfo=UTC),
+            )
+        )
+        clock = AthleteLocalClock(
+            profile, lambda zone=None: next(utc_times).astimezone(zone)
+        )
+
+        self.assertEqual(clock.now().isoformat(), "2026-10-24T23:59:00+02:00")
+        self.assertEqual(clock.now().isoformat(), "2026-10-25T00:00:00+02:00")
+        self.assertEqual(clock.now().isoformat(), "2026-10-25T02:00:00+01:00")
+
 
 if __name__ == "__main__":
     unittest.main()

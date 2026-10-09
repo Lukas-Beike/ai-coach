@@ -19,7 +19,8 @@ class NutritionHttpApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.handler = Mock()
         self.auth = Mock()
-        self.nutrition_service = Mock()
+        self.diary_service = Mock()
+        self.meal_library_service = Mock()
         self.sync_service = Mock()
         self.sync_job_queue = Mock()
         self.sync_job_queue.enqueue.return_value = {"id": "nutrition-job-1"}
@@ -27,20 +28,23 @@ class NutritionHttpApiTests(unittest.TestCase):
 
         self.get_routes = NutritionGetRoutes(
             session_auth_service=lambda: self.auth,
-            nutrition_service=lambda: self.nutrition_service,
+            diary_service=lambda: self.diary_service,
+            meal_library_service=lambda: self.meal_library_service,
             local_now=self.local_now,
         )
         self.post_routes = NutritionPostRoutes(
-            nutrition_service=lambda: self.nutrition_service,
+            diary_service=lambda: self.diary_service,
+            meal_library_service=lambda: self.meal_library_service,
             sync_job_queue=lambda: self.sync_job_queue,
         )
         self.put_routes = NutritionPutRoutes(
-            nutrition_service=lambda: self.nutrition_service,
+            diary_service=lambda: self.diary_service,
+            meal_library_service=lambda: self.meal_library_service,
         )
 
     def test_templates_route_requires_authentication(self) -> None:
         self.handler.path = "/api/nutrition/templates"
-        self.nutrition_service.list_templates.return_value = [{"id": "template-1"}]
+        self.meal_library_service.list_templates.return_value = [{"id": "template-1"}]
         self.assertTrue(
             self.get_routes.handle(self.handler, "/api/nutrition/templates")
         )
@@ -51,7 +55,7 @@ class NutritionHttpApiTests(unittest.TestCase):
 
     def test_get_day_route(self) -> None:
         self.handler.path = "/api/nutrition/day?date=2026-09-24"
-        self.nutrition_service.get_day_summary.return_value = {
+        self.diary_service.get_day_summary.return_value = {
             "date": "2026-09-24",
             "total_kcal": 2000,
             "entry_count": 3,
@@ -59,7 +63,7 @@ class NutritionHttpApiTests(unittest.TestCase):
         handled = self.get_routes.handle(self.handler, "/api/nutrition/day")
         self.assertTrue(handled)
         self.auth.require_auth.assert_called_once_with(self.handler)
-        self.nutrition_service.get_day_summary.assert_called_once_with("2026-09-24")
+        self.diary_service.get_day_summary.assert_called_once_with("2026-09-24")
         self.handler.send_json.assert_called_once_with(
             200,
             {"ok": True, "date": "2026-09-24", "total_kcal": 2000, "entry_count": 3},
@@ -67,13 +71,13 @@ class NutritionHttpApiTests(unittest.TestCase):
 
     def test_get_range_route(self) -> None:
         self.handler.path = "/api/nutrition/range?start=2026-09-20&end=2026-09-24"
-        self.nutrition_service.get_range_summary.return_value = [
+        self.diary_service.get_range_summary.return_value = [
             {"date": "2026-09-20", "total_kcal": 1800},
             {"date": "2026-09-24", "total_kcal": 2000},
         ]
         handled = self.get_routes.handle(self.handler, "/api/nutrition/range")
         self.assertTrue(handled)
-        self.nutrition_service.get_range_summary.assert_called_once_with(
+        self.diary_service.get_range_summary.assert_called_once_with(
             "2026-09-20", "2026-09-24"
         )
         self.handler.send_json.assert_called_once_with(
@@ -93,14 +97,14 @@ class NutritionHttpApiTests(unittest.TestCase):
             "description": "Porridge",
             "kcal": 350,
         }
-        self.nutrition_service.log_meal.return_value = {
+        self.diary_service.log_meal.return_value = {
             "id": "entry-123",
             "description": "Porridge",
             "kcal": 350,
         }
         handled = self.post_routes.handle(self.handler, "/api/nutrition/entry")
         self.assertTrue(handled)
-        self.nutrition_service.log_meal.assert_called_once()
+        self.diary_service.log_meal.assert_called_once()
         self.handler.send_json.assert_called_once_with(
             200,
             {
@@ -111,13 +115,13 @@ class NutritionHttpApiTests(unittest.TestCase):
 
     def test_post_delete_route(self) -> None:
         self.handler.read_json.return_value = {"id": "entry-123"}
-        self.nutrition_service.delete_meal.return_value = {
+        self.diary_service.delete_meal.return_value = {
             "status": "ok",
             "deleted_id": "entry-123",
         }
         handled = self.post_routes.handle(self.handler, "/api/nutrition/entry/delete")
         self.assertTrue(handled)
-        self.nutrition_service.delete_meal.assert_called_once_with("entry-123")
+        self.diary_service.delete_meal.assert_called_once_with("entry-123")
         self.handler.send_json.assert_called_once_with(
             200, {"ok": True, "status": "ok", "deleted_id": "entry-123"}
         )
@@ -157,14 +161,14 @@ class NutritionHttpApiTests(unittest.TestCase):
             "description": "Updated meal",
             "kcal": 500,
         }
-        self.nutrition_service.update_meal.return_value = {
+        self.diary_service.update_meal.return_value = {
             "id": "entry-123",
             "description": "Updated meal",
             "kcal": 500,
         }
         handled = self.put_routes.handle(self.handler, "/api/nutrition/entry")
         self.assertTrue(handled)
-        self.nutrition_service.update_meal.assert_called_once()
+        self.diary_service.update_meal.assert_called_once()
         self.handler.send_json.assert_called_once_with(
             200,
             {
@@ -283,7 +287,7 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
         sync_service = IntervalsNutritionSyncService(
             config=mock_config,
             api_client=mock_api,
-            nutrition_service=mock_nutrition,
+            diary_service=mock_nutrition,
         )
 
         result = sync_service.sync_day("2026-09-24")
@@ -391,7 +395,7 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
         sync_service = IntervalsNutritionSyncService(
             config=mock_config,
             api_client=mock_api,
-            nutrition_service=mock_nutrition,
+            diary_service=mock_nutrition,
         )
 
         res = sync_service.sync_pending()

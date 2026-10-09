@@ -6,6 +6,7 @@ import math
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
 from backend.performance.training_report import activity_day, canonical_rows, number
 from backend.planning.competitions import supported_competition_sport
@@ -247,7 +248,7 @@ def load_scenarios(
         if not row.get("is_completed_activity")
         and not (row.get("compliance") or {}).get("actual_activity")
         and today.isoformat()
-        <= str(row.get("start_date_local") or row.get("date") or "")[:10]
+        <= iso_date_prefix(str(row.get("start_date_local") or row.get("date") or ""))
         <= end.isoformat()
     ]
     if any(number(row.get("icu_training_load")) is None for row in calendar):

@@ -20,37 +20,76 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         self.provider_refresh = Mock()
         self.nutrition = Mock()
         self.service = CoachSyncToolService(
-            self.queue, self.authority, self.conflicts,
-            self.plan_sync, self.plan_repair, self.plan_push, self.provider_refresh,
-            nutrition_service=self.nutrition,
+            self.queue,
+            self.authority,
+            self.conflicts,
+            self.plan_sync,
+            self.plan_repair,
+            self.plan_push,
+            self.provider_refresh,
+            nutrition_diary=self.nutrition,
         )
 
     def test_provider_refresh_checks_scope_and_preserves_cancel_and_job_tracking(self):
-        intent = {"operation": "start_provider_refresh", "target_system": "garmin", "authorization_scope": []}
+        intent = {
+            "operation": "start_provider_refresh",
+            "target_system": "garmin",
+            "authorization_scope": [],
+        }
         jobs = []
         with self.assertRaises(AppError):
-            self.service.execute("start_provider_refresh", {}, intent=intent, sync_job_ids=jobs)
+            self.service.execute(
+                "start_provider_refresh", {}, intent=intent, sync_job_ids=jobs
+            )
         self.provider_refresh.start.assert_not_called()
         intent["authorization_scope"] = ["garmin_refresh"]
-        self.provider_refresh.start.return_value = {"status": "queued", "sync_job_id": "job-2"}
+        self.provider_refresh.start.return_value = {
+            "status": "queued",
+            "sync_job_id": "job-2",
+        }
         cancel = threading.Event()
-        self.service.execute("start_provider_refresh", {"days": 3}, intent=intent, sync_job_ids=jobs, cancel_event=cancel)
-        self.provider_refresh.start.assert_called_once_with("garmin", {"days": 3}, cancel_event=cancel)
+        self.service.execute(
+            "start_provider_refresh",
+            {"days": 3},
+            intent=intent,
+            sync_job_ids=jobs,
+            cancel_event=cancel,
+        )
+        self.provider_refresh.start.assert_called_once_with(
+            "garmin", {"days": 3}, cancel_event=cancel
+        )
         self.assertEqual(jobs, ["job-2"])
         self.provider_refresh.start.return_value = {"status": "complete"}
-        self.service.execute("start_provider_refresh", {}, intent=intent, sync_job_ids=jobs)
+        self.service.execute(
+            "start_provider_refresh", {}, intent=intent, sync_job_ids=jobs
+        )
         self.assertEqual(jobs, ["job-2"])
 
     def test_performance_refresh_requires_intervals_scope_before_enqueue(self):
-        intent = {"operation": "refresh_current_performance", "target_system": "garmin", "authorization_scope": ["intervals_refresh"]}
+        intent = {
+            "operation": "refresh_current_performance",
+            "target_system": "garmin",
+            "authorization_scope": ["intervals_refresh"],
+        }
         jobs = []
         with self.assertRaises(AppError):
-            self.service.execute("refresh_current_performance", {}, intent=intent, sync_job_ids=jobs)
+            self.service.execute(
+                "refresh_current_performance", {}, intent=intent, sync_job_ids=jobs
+            )
         self.provider_refresh.queue_performance_refresh.assert_not_called()
         intent["target_system"] = "intervals"
-        self.provider_refresh.queue_performance_refresh.return_value = {"sync_job_id": "job-3"}
-        self.service.execute("refresh_current_performance", {"reason": "now"}, intent=intent, sync_job_ids=jobs)
-        self.provider_refresh.queue_performance_refresh.assert_called_once_with({"reason": "now"})
+        self.provider_refresh.queue_performance_refresh.return_value = {
+            "sync_job_id": "job-3"
+        }
+        self.service.execute(
+            "refresh_current_performance",
+            {"reason": "now"},
+            intent=intent,
+            sync_job_ids=jobs,
+        )
+        self.provider_refresh.queue_performance_refresh.assert_called_once_with(
+            {"reason": "now"}
+        )
         self.assertEqual(jobs, ["job-3"])
 
     def test_plan_repair_checks_object_scopes_before_mutation(self):
@@ -64,20 +103,28 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         )
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "start_intervals_plan_sync", {"repair": True},
-                intent=intent, sync_job_ids=[],
+                "start_intervals_plan_sync",
+                {"repair": True},
+                intent=intent,
+                sync_job_ids=[],
             )
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.plan_repair.execute.assert_not_called()
         self.plan_push.enqueue.assert_not_called()
 
     def test_competition_push_marks_authority_only_after_scope_check(self):
         intent = {
-            "operation": "sync_competitions", "target_system": "intervals",
+            "operation": "sync_competitions",
+            "target_system": "intervals",
             "authorization_scope": [],
         }
         with self.assertRaises(AppError):
-            self.service.execute("sync_competitions", {}, intent=intent, sync_job_ids=[])
+            self.service.execute(
+                "sync_competitions", {}, intent=intent, sync_job_ids=[]
+            )
         self.authority.mark_competitions_authoritative.assert_not_called()
         self.queue.enqueue.assert_not_called()
 
@@ -86,13 +133,19 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         self.queue.enqueue.return_value = {"id": "job-1"}
         jobs = []
         result = self.service.execute(
-            "sync_competitions", {"_approval_manifest": []}, intent=intent, sync_job_ids=jobs,
+            "sync_competitions",
+            {"_approval_manifest": []},
+            intent=intent,
+            sync_job_ids=jobs,
         )
-        self.assertEqual(result, {"ok": True, "status": "queued", "sync_job_id": "job-1"})
+        self.assertEqual(
+            result, {"ok": True, "status": "queued", "sync_job_id": "job-1"}
+        )
         self.assertEqual(jobs, ["job-1"])
         self.authority.mark_competitions_authoritative.assert_called_once_with([])
         self.queue.enqueue.assert_called_once_with(
-            "intervals", "competition_push",
+            "intervals",
+            "competition_push",
             {"reason": "Bestätigter Coach-Auftrag", "approval_manifest": []},
             requested_by="coach",
         )
@@ -110,7 +163,11 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         with self.assertRaises(AppError):
             self.service.execute(
                 "sync_competitions",
-                {"_approval_manifest": [{"type": "competition", "id": "race-1", "sha256": "approved"}]},
+                {
+                    "_approval_manifest": [
+                        {"type": "competition", "id": "race-1", "sha256": "approved"}
+                    ]
+                },
                 intent=intent,
                 sync_job_ids=[],
             )
@@ -129,18 +186,27 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         self.conflicts.is_push_job.return_value = True
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "resolve_training_sync_conflict", {"job_id": "job-1"},
-                intent=intent, sync_job_ids=[],
+                "resolve_training_sync_conflict",
+                {"job_id": "job-1"},
+                intent=intent,
+                sync_job_ids=[],
             )
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "request_target"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason), (403, "request_target")
+        )
         self.conflicts.retry_job.assert_not_called()
 
     def test_delete_duplicate_intervals_activity_requires_scope_and_executes(self):
         duplicate_service = Mock()
         intervals_client = Mock()
         service = CoachSyncToolService(
-            self.queue, self.authority, self.conflicts,
-            self.plan_sync, self.plan_repair, self.plan_push, self.provider_refresh,
+            self.queue,
+            self.authority,
+            self.conflicts,
+            self.plan_sync,
+            self.plan_repair,
+            self.plan_push,
+            self.provider_refresh,
             duplicate_activity=duplicate_service,
             intervals_client_factory=lambda: intervals_client,
         )
@@ -150,7 +216,12 @@ class CoachSyncToolServiceTests(unittest.TestCase):
             "authorization_scope": [],
         }
         with self.assertRaises(AppError) as raised:
-            service.execute("delete_duplicate_intervals_activity", {}, intent=intent, sync_job_ids=[])
+            service.execute(
+                "delete_duplicate_intervals_activity",
+                {},
+                intent=intent,
+                sync_job_ids=[],
+            )
         self.assertEqual(raised.exception.reason, "intent_scope_denied")
 
         intent["authorization_scope"] = ["intervals_sync"]
@@ -182,10 +253,16 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         }
         result = service.execute(
             "delete_duplicate_intervals_activity",
-            {"duplicate_id": "garmin-1", "canonical_id": "wahoo-1", "_approval_manifest": {
-                "canonical_id": "wahoo-1", "duplicate_id": "garmin-1",
-                "snapshot_synced_at": "2026-09-26T12:00:00Z", "date": "2026-09-26T10:00:00",
-            }},
+            {
+                "duplicate_id": "garmin-1",
+                "canonical_id": "wahoo-1",
+                "_approval_manifest": {
+                    "canonical_id": "wahoo-1",
+                    "duplicate_id": "garmin-1",
+                    "snapshot_synced_at": "2026-09-26T12:00:00Z",
+                    "date": "2026-09-26T10:00:00",
+                },
+            },
             intent=intent,
             sync_job_ids=[],
         )
@@ -211,14 +288,18 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         self.queue.state.return_value = {"id": "job-1"}
         self.assertEqual(
             self.service.execute(
-                "get_sync_job", {"job_id": "job-1"},
-                intent={"authorization_scope": []}, sync_job_ids=["job-1"],
+                "get_sync_job",
+                {"job_id": "job-1"},
+                intent={"authorization_scope": []},
+                sync_job_ids=["job-1"],
             ),
             {"ok": True, "job": {"id": "job-1"}},
         )
         with self.assertRaises(AppError):
             self.service.execute(
-                "get_sync_job", {"job_id": "job-2"},
-                intent={"authorization_scope": []}, sync_job_ids=["job-1"],
+                "get_sync_job",
+                {"job_id": "job-2"},
+                intent={"authorization_scope": []},
+                sync_job_ids=["job-1"],
             )
         self.queue.state.assert_called_once_with("job-1")

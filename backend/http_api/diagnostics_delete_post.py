@@ -22,14 +22,14 @@ class DiagnosticsDeletePostRoutes:
         self._diagnostic_report_service = diagnostic_report_service
 
     def handle(self, handler: Any, path: str) -> bool:
-        if path in {"/api/logs/delete", "/api/logs/clear"}:
+        if path == "/api/logs/delete":
             try:
                 result = self._recent_log_entries_service().clear()
             except OSError as exc:
                 raise AppError(500, "Logs konnten nicht gelöscht werden.") from exc
             handler.send_json(200, result)
             return True
-        if path in {"/api/diagnostics/delete", "/api/diagnostics/clear"}:
+        if path == "/api/diagnostics/delete":
             try:
                 result = self._diagnostic_report_service().clear()
             except Exception as exc:

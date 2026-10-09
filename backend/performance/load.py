@@ -4,6 +4,8 @@ import math
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
     if not isinstance(item, dict):
@@ -18,7 +20,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -27,7 +29,9 @@ def _as_number(value: Any) -> float | int | None:
 
 def _activity_rollup_date(activity: dict[str, Any]) -> date | None:
     try:
-        return date.fromisoformat(str(activity.get("start_date_local") or "")[:10])
+        return date.fromisoformat(
+            iso_date_prefix(str(activity.get("start_date_local") or ""))
+        )
     except ValueError:
         return None
 
@@ -35,7 +39,7 @@ def _activity_rollup_date(activity: dict[str, Any]) -> date | None:
 def _activity_rollup_number(activity: dict[str, Any], key: str) -> float:
     try:
         return float(activity.get(key) or 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0.0
 
 
@@ -79,9 +83,9 @@ def _atl_wellness_rows(
     for row in wellness_rows:
         try:
             row_date = date.fromisoformat(
-                str(row.get("id") or row.get("date") or "")[:10]
+                iso_date_prefix(str(row.get("id") or row.get("date") or ""))
             )
-        except (AttributeError, TypeError, ValueError):
+        except AttributeError, TypeError, ValueError:
             continue
         if (
             isinstance(row, dict)
@@ -99,9 +103,9 @@ def _activity_load_by_date(activities: list[Any], anchor: date) -> dict[date, fl
             continue
         try:
             activity_date = date.fromisoformat(
-                str(activity.get("start_date_local") or "")[:10]
+                iso_date_prefix(str(activity.get("start_date_local") or ""))
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if activity_date > anchor:
             continue

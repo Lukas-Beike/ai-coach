@@ -4,6 +4,7 @@ import math
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.performance import freshness as performance_freshness
 from backend.performance import recovery as performance_recovery
 
@@ -64,7 +65,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -156,7 +157,7 @@ def garmin_daily_health_metrics(
     values: dict[str, list[float]] = {key: [] for key in GARMIN_DAILY_HEALTH_FIELDS}
     for record_date, health in garmin_daily_health_by_date(snapshot).items():
         try:
-            current = date.fromisoformat(record_date[:10])
+            current = date.fromisoformat(iso_date_prefix(record_date))
         except ValueError:
             continue
         if not cutoff <= current <= end_date:

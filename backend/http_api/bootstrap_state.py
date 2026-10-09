@@ -9,7 +9,6 @@ from typing import Any
 
 from backend.config import Config
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import KeyValueRepository
 
 
 @dataclass(frozen=True)
@@ -19,7 +18,7 @@ class PublicBootstrapDependencies:
     config: Config
     app_name: str
     app_version: str
-    key_values: KeyValueRepository
+    key_values: Any
     sync_state_repository: Callable[[], Any]
     planned_unit_service: Callable[[], Any]
     competition_service: Callable[[], Any]
@@ -153,17 +152,23 @@ class PublicBootstrapService:
                     configured=bool(deps.config.intervals_api_key),
                     running=deps.intervals_sync_lock.locked()
                     or deps.workout_library_sync_running(),
-                    status=deps.key_values.get(db, "sync_status") or None,
-                    last_sync_at=deps.key_values.get(db, "last_sync_at"),
-                    last_sync_error=deps.key_values.get(db, "last_sync_error") or None,
-                    last_library_sync_at=deps.key_values.get(
+                    status=deps.key_values.get_in_transaction(db, "sync_status")
+                    or None,
+                    last_sync_at=deps.key_values.get_in_transaction(db, "last_sync_at"),
+                    last_sync_error=deps.key_values.get_in_transaction(
+                        db, "last_sync_error"
+                    )
+                    or None,
+                    last_library_sync_at=deps.key_values.get_in_transaction(
                         db, "last_library_sync_at"
                     ),
-                    last_library_sync_error=deps.key_values.get(
+                    last_library_sync_error=deps.key_values.get_in_transaction(
                         db, "last_library_sync_error"
                     )
                     or None,
-                    pagination_value=deps.key_values.get(db, "last_sync_pagination"),
+                    pagination_value=deps.key_values.get_in_transaction(
+                        db, "last_sync_pagination"
+                    ),
                     snapshot=snapshot,
                     library_sync_state=deps.workout_library_sync_state_service().summary(),
                     today=deps.local_date(),
@@ -174,7 +179,10 @@ class PublicBootstrapService:
                 "provider_states": bootstrap_provider_states(freshness),
                 "garmin_sync": {
                     "running": deps.garmin_sync_service().running(),
-                    "status": deps.key_values.get(db, "garmin_sync_status") or None,
+                    "status": deps.key_values.get_in_transaction(
+                        db, "garmin_sync_status"
+                    )
+                    or None,
                 },
                 "provider_resync": {
                     "intervals": deps.full_provider_resync_service().state(
@@ -191,8 +199,12 @@ class PublicBootstrapService:
                     job for job in jobs if job.get("status") in {"queued", "running"}
                 ],
                 "library_sync": {
-                    "last_sync_at": deps.key_values.get(db, "last_library_sync_at"),
-                    "last_error": deps.key_values.get(db, "last_library_sync_error")
+                    "last_sync_at": deps.key_values.get_in_transaction(
+                        db, "last_library_sync_at"
+                    ),
+                    "last_error": deps.key_values.get_in_transaction(
+                        db, "last_library_sync_error"
+                    )
                     or None,
                     "state": deps.workout_library_sync_state_service().summary(),
                 },
@@ -206,21 +218,33 @@ class PublicBootstrapService:
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {
-                    "last_sync_at": deps.key_values.get(db, "last_competition_sync_at"),
-                    "last_error": deps.key_values.get(db, "last_competition_sync_error")
+                    "last_sync_at": deps.key_values.get_in_transaction(
+                        db, "last_competition_sync_at"
+                    ),
+                    "last_error": deps.key_values.get_in_transaction(
+                        db, "last_competition_sync_error"
+                    )
                     or None,
-                    "running": deps.key_values.get(db, "competition_sync_running")
+                    "running": deps.key_values.get_in_transaction(
+                        db, "competition_sync_running"
+                    )
                     == "1",
-                    "status": deps.key_values.get(db, "competition_sync_status")
+                    "status": deps.key_values.get_in_transaction(
+                        db, "competition_sync_status"
+                    )
                     or None,
                 },
                 "performance_refresh": {
-                    "last_refresh_at": deps.key_values.get(
+                    "last_refresh_at": deps.key_values.get_in_transaction(
                         db, "last_performance_refresh_at"
                     ),
-                    "last_error": deps.key_values.get(db, "last_performance_error")
+                    "last_error": deps.key_values.get_in_transaction(
+                        db, "last_performance_error"
+                    )
                     or None,
-                    "running": deps.key_values.get(db, "performance_refresh_running")
+                    "running": deps.key_values.get_in_transaction(
+                        db, "performance_refresh_running"
+                    )
                     == "1",
                 },
                 "morning_checkin": deps.morning_checkin_state_service().state(),

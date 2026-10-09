@@ -3,6 +3,7 @@
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.performance import freshness as performance_freshness
 from backend.performance.activity_validation import bounded_activity_metric
 
@@ -201,7 +202,7 @@ def _fresh_source(value: Any, observed_at: Any, current_date: date) -> bool:
 
 
 def _date(value: Any) -> str | None:
-    candidate = str(value or "")[:10]
+    candidate = iso_date_prefix(str(value or ""))
     try:
         return date.fromisoformat(candidate).isoformat()
     except ValueError:

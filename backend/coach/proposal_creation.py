@@ -13,6 +13,7 @@ from backend.activities.duplicates import (
     latest_wahoo_garmin_duplicate,
     validate_duplicate_delete,
 )
+from backend.athlete.local_date import LocalDate
 from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
     _preview_nutrient,
@@ -33,6 +34,17 @@ from backend.sync.state import SyncStateRepository
 _MAX_REMOTE_APPROVAL_DETAILS = 5000
 
 
+def _approval_date(value: Any) -> str:
+    if value in (None, ""):
+        return "Datum unbekannt"
+    try:
+        return LocalDate.parse(value).isoformat()
+    except (TypeError, ValueError) as exc:
+        raise AppError(
+            409, "Die Vorschau enthaelt ein ungueltiges Datum.", reason="invalid_date"
+        ) from exc
+
+
 class CoachProposalCreationService:
     def __init__(
         self,
@@ -43,7 +55,8 @@ class CoachProposalCreationService:
         now: Callable[[], float] = time.time,
         utc_now: Callable[[], str] = _utc_now,
         uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
-        nutrition_service: Callable[[], Any] | None = None,
+        nutrition_diary_service: Callable[[], Any] | None = None,
+        nutrition_meal_library_service: Callable[[], Any] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._sync_state_repository = sync_state_repository
@@ -51,7 +64,8 @@ class CoachProposalCreationService:
         self._now = now
         self._utc_now = utc_now
         self._uuid_factory = uuid_factory
-        self._nutrition_service = nutrition_service
+        self._nutrition_diary_service = nutrition_diary_service
+        self._nutrition_meal_library_service = nutrition_meal_library_service
 
     def create(self, values: Any, session_csrf_hash: str) -> dict[str, Any]:
         action_type, target_system, object_ids, diff, payload = (
@@ -135,7 +149,7 @@ class CoachProposalCreationService:
             intent,
             database_manager=self._database_manager,
             sync_state_repository=self._sync_state_repository,
-            nutrition_service=self._nutrition_service,
+            nutrition_diary_service=self._nutrition_diary_service,
         )
         approval_manifest = payload["arguments"].get("_approval_manifest")
         approval_details = _remote_write_approval_details(
@@ -207,8 +221,8 @@ class CoachProposalCreationService:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         template_id = str(values.get("id") or "").strip()
-        if template_id and self._nutrition_service:
-            nutrition = self._nutrition_service()
+        if template_id and self._nutrition_meal_library_service:
+            nutrition = self._nutrition_meal_library_service()
             if payload.get("tool") == "save_nutrition_product":
                 try:
                     existing = nutrition.get_product(template_id)
@@ -234,25 +248,29 @@ class CoachProposalCreationService:
         payload: dict[str, Any],
     ) -> None:
         if "components" in values:
-            if self._nutrition_service is None:
+            if self._nutrition_meal_library_service is None:
                 raise AppError(503, "Lebensmitteldatenbank ist nicht verfuegbar.")
-            calculation = self._nutrition_service().calculate_components(
+            calculation = self._nutrition_meal_library_service().calculate_components(
                 values["components"]
             )
             preview_values.update(calculation)
             payload["arguments"]["_food_calculation"] = calculation
         elif "food_ingredients" in values:
-            if self._nutrition_service is None:
+            if self._nutrition_meal_library_service is None:
                 raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
-            calculation = self._nutrition_service().food_database.calculate(
-                values["food_ingredients"]
+            calculation = (
+                self._nutrition_meal_library_service().food_database.calculate(
+                    values["food_ingredients"]
+                )
             )
             preview_values.update(calculation)
             payload["arguments"]["_food_calculation"] = calculation
         elif set(values) & {"kcal", "carbs_g", "protein_g", "fat_g"}:
-            if self._nutrition_service is not None:
+            if self._nutrition_meal_library_service is not None:
                 preview_values.update(
-                    self._nutrition_service()._prepare_values(preview_values)
+                    self._nutrition_meal_library_service().prepare_values(
+                        preview_values
+                    )
                 )
 
     @staticmethod
@@ -291,7 +309,7 @@ def _approved_remote_arguments(
     *,
     database_manager: DatabaseManager,
     sync_state_repository: Any,
-    nutrition_service: Callable[[], Any] | None,
+    nutrition_diary_service: Callable[[], Any] | None,
 ) -> dict[str, Any]:
     if tool == "start_intervals_plan_sync":
         return _approved_plan_sync_arguments(arguments, intent, database_manager)
@@ -301,7 +319,7 @@ def _approved_remote_arguments(
     if tool == "delete_duplicate_intervals_activity":
         return _duplicate_approval_arguments(arguments, sync_state_repository)
     if tool == "sync_nutrition":
-        return _nutrition_approval_arguments(arguments, nutrition_service)
+        return _nutrition_approval_arguments(arguments, nutrition_diary_service)
     return dict(arguments)
 
 
@@ -447,7 +465,7 @@ def _competition_detail(db: Any, item: dict[str, Any]) -> dict[str, str]:
         )
         return {
             "name": str(row["name"] or "Wettkampf")[:120],
-            "date": str(row["event_date"] or "Datum unbekannt")[:10],
+            "date": _approval_date(row["event_date"]),
             "sport": str(row["sport"] or "")[:40],
             "id": str(row["id"]),
         }
@@ -492,7 +510,7 @@ def _plan_workout_details(rows: list[Any]) -> list[dict[str, str]]:
             details.append(
                 {
                     "name": str(workout.get("name") or "Trainingseinheit")[:120],
-                    "date": str(workout.get("date") or "Datum unbekannt")[:10],
+                    "date": _approval_date(workout.get("date")),
                     "sport": str(workout.get("sport") or "")[:40],
                     "id": str(row["local_id"]),
                 }
@@ -523,15 +541,15 @@ def _duplicate_approval_arguments(
 
 
 def _nutrition_approval_arguments(
-    arguments: dict[str, Any], nutrition_service: Callable[[], Any] | None
+    arguments: dict[str, Any], nutrition_diary_service: Callable[[], Any] | None
 ) -> dict[str, Any]:
-    if not nutrition_service:
+    if not nutrition_diary_service:
         raise AppError(503, "Ernährungsvorschau ist nicht verfügbar.")
     date_value = str(arguments.get("date") or "").strip()
     limit = arguments.get("pending_limit")
     if bool(date_value) == (limit is not None):
         raise AppError(400, "Wähle ein Datum oder ausstehende Tage.")
-    nutrition = nutrition_service()
+    nutrition = nutrition_diary_service()
     manifest = (
         nutrition.approval_manifest(meal_date=date_value)
         if date_value

@@ -9,7 +9,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from backend.athlete.local_date import LocalDate
+from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.errors import AppError
 
 COMPETITION_TEXT_LIMITS = {
@@ -216,9 +216,9 @@ def competition_sync_key(
 ) -> tuple[str, str, str] | None:
     """Return a conservative identity for matching a local and remote race."""
     name = " ".join(str(value.get("name") or "").split()).casefold()
-    event_date = str(value.get("event_date") or remote_competition_date(value) or "")[
-        :10
-    ]
+    event_date = iso_date_prefix(
+        str(value.get("event_date") or remote_competition_date(value) or "")
+    )
     sport = supported_competition_sport(
         value.get("sport") or value.get("type") or "Ride"
     )

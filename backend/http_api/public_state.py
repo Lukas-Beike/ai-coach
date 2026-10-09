@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import KeyValueRepository
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.public_performance import (
     PublicFeedbackStateService,
@@ -52,7 +51,7 @@ class PublicStateDependencies:
     calendar_projection: PublicStateCalendarProjection
     database_manager: Callable[[], DatabaseManager]
     database_lock: Any
-    key_values: KeyValueRepository
+    key_values: Any
     app_name: str
     app_version: str
     config: Config
@@ -100,7 +99,7 @@ class PublicStateService:
     def _get_value(self, key: str, manager: DatabaseManager) -> str | None:
         deps = self._deps
         with deps.database_lock, manager.unit_of_work() as db:
-            return deps.key_values.get(db, key)
+            return deps.key_values.get_in_transaction(db, key)
 
     def read(self, local_only: bool = False) -> dict[str, Any]:
         deps = self._deps
@@ -159,8 +158,13 @@ class PublicStateService:
                     status=self._get_value("sync_status", manager) or None,
                     last_sync_at=self._get_value("last_sync_at", manager),
                     last_sync_error=self._get_value("last_sync_error", manager) or None,
-                    last_library_sync_at=self._get_value("last_library_sync_at", manager),
-                    last_library_sync_error=self._get_value("last_library_sync_error", manager) or None,
+                    last_library_sync_at=self._get_value(
+                        "last_library_sync_at", manager
+                    ),
+                    last_library_sync_error=self._get_value(
+                        "last_library_sync_error", manager
+                    )
+                    or None,
                     pagination_value=self._get_value("last_sync_pagination", manager),
                     snapshot=snapshot,
                     library_sync_state=deps.workout_library_sync_state.summary(),
@@ -180,7 +184,8 @@ class PublicStateService:
                 "sync": sync,
                 "library_sync": {
                     "last_sync_at": self._get_value("last_library_sync_at", manager),
-                    "last_error": self._get_value("last_library_sync_error", manager) or None,
+                    "last_error": self._get_value("last_library_sync_error", manager)
+                    or None,
                     "state": deps.workout_library_sync_state.summary(),
                 },
                 "sync_settings": {
@@ -193,15 +198,26 @@ class PublicStateService:
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {
-                    "last_sync_at": self._get_value("last_competition_sync_at", manager),
-                    "last_error": self._get_value("last_competition_sync_error", manager) or None,
-                    "running": self._get_value("competition_sync_running", manager) == "1",
-                    "status": self._get_value("competition_sync_status", manager) or None,
+                    "last_sync_at": self._get_value(
+                        "last_competition_sync_at", manager
+                    ),
+                    "last_error": self._get_value(
+                        "last_competition_sync_error", manager
+                    )
+                    or None,
+                    "running": self._get_value("competition_sync_running", manager)
+                    == "1",
+                    "status": self._get_value("competition_sync_status", manager)
+                    or None,
                 },
                 "performance_refresh": {
-                    "last_refresh_at": self._get_value("last_performance_refresh_at", manager),
-                    "last_error": self._get_value("last_performance_error", manager) or None,
-                    "running": self._get_value("performance_refresh_running", manager) == "1",
+                    "last_refresh_at": self._get_value(
+                        "last_performance_refresh_at", manager
+                    ),
+                    "last_error": self._get_value("last_performance_error", manager)
+                    or None,
+                    "running": self._get_value("performance_refresh_running", manager)
+                    == "1",
                 },
                 "morning_checkin": deps.morning_checkin.state(),
                 "coach_quick_actions": deps.coach_quick_actions.state(),

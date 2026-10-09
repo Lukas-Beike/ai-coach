@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.performance import activity_validation
 
 
@@ -42,7 +43,9 @@ def _wellness_eftp_value(
     row: dict[str, Any], cutoff: date, anchor: date
 ) -> float | None:
     try:
-        row_date = date.fromisoformat(str(row.get("id") or row.get("date") or "")[:10])
+        row_date = date.fromisoformat(
+            iso_date_prefix(str(row.get("id") or row.get("date") or ""))
+        )
     except ValueError:
         return None
     if not cutoff <= row_date <= anchor:
@@ -63,9 +66,9 @@ def _activity_eftp_value(activity: Any, cutoff: date, anchor: date) -> float | N
         return None
     try:
         activity_date = date.fromisoformat(
-            str(activity.get("start_date_local") or "")[:10]
+            iso_date_prefix(str(activity.get("start_date_local") or ""))
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not cutoff <= activity_date <= anchor:
         return None
@@ -113,9 +116,9 @@ def eftp_daily_values(
     ):
         value = _activity_eftp_value(activity, start, end)
         if value is not None:
-            observations[str(activity["start_date_local"])[:10]] = value
+            observations[iso_date_prefix(str(activity["start_date_local"]))] = value
     for row in wellness_rows:
         value = _wellness_eftp_value(row, start, end)
         if value is not None:
-            observations[str(row.get("id") or row.get("date"))[:10]] = value
+            observations[iso_date_prefix(str(row.get("id") or row.get("date")))] = value
     return observations

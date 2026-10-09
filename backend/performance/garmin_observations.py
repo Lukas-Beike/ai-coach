@@ -7,6 +7,8 @@ module only reads the supplied snapshot and never reaches into that state.
 from datetime import date, datetime, timezone
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+
 _OBSERVATION_DATE_FIELDS = (
     "calendarDate",
     "summaryDate",
@@ -32,12 +34,12 @@ def _garmin_record_date(value: Any) -> str | None:
                 .date()
                 .isoformat()
             )
-        except (OverflowError, OSError, ValueError):
+        except OverflowError, OSError, ValueError:
             return None
     try:
         text = str(value).strip().replace("Z", "+00:00")
-        return date.fromisoformat(text[:10]).isoformat()
-    except (AttributeError, TypeError, ValueError):
+        return date.fromisoformat(iso_date_prefix(text)).isoformat()
+    except AttributeError, TypeError, ValueError:
         return None
 
 
@@ -93,7 +95,7 @@ def garmin_sleep_observation_date(snapshot: dict[str, Any]) -> str | None:
             if observed_at not in (None, ""):
                 # Preserve the source-owned value exactly; malformed values
                 # must remain authoritative and must not fall back to raw data.
-                return str(observed_at)[:10]
+                return iso_date_prefix(str(observed_at))
     return garmin_source_observed_at(snapshot.get("sleep"))
 
 
