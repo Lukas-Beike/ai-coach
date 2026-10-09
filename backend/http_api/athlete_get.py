@@ -57,8 +57,7 @@ class AthleteGetRoutes:
         elif path == "/api/feedback":
             payload = self._public_feedback_state_service().feedback_state()
         else:
-            provider = self._settings_service.selected_ai_provider()
-            payload = self._coach_context_preview_service().preview(provider)
+            payload = self._coach_context_preview_service().preview()
 
         handler.send_json(200, payload)
         return True

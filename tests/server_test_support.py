@@ -24,10 +24,6 @@ from backend.performance import garmin_metrics as performance_garmin_metrics
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update(
     {
-        "AI_PROVIDER": "openai",
-        "GEMINI_API_KEY": "",
-        "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
-        "GEMINI_MODEL": "gemini-3.8-flash",
         "OPENAI_API_KEY": "test-openai-key",
         "OPENAI_BASE_URL": "https://api.openai.com/v1",
         "OPENAI_MODEL": "gpt-6-luna",

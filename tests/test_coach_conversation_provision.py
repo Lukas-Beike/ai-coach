@@ -37,14 +37,13 @@ class CoachConversationProvisionTests(unittest.TestCase):
         )
         self.addCleanup(self.database_manager.close)
         with self.database_manager.unit_of_work() as db:
-            db.execute("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)")
+            db.execute(
+                "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+            )
         self.key_values = KeyValueRepository(lambda: "synthetic-now")
-        self.settings = Mock()
-        self.settings.selected_ai_provider.return_value = "openai"
         self.openai = Mock()
         self.uuid = uuid.UUID("12345678-1234-5678-1234-567812345678")
         self.service = CoachConversationProvisionService(
-            self.settings,
             self.database_manager,
             self.key_values,
             self.openai,
@@ -60,38 +59,21 @@ class CoachConversationProvisionTests(unittest.TestCase):
         with self.database_manager.unit_of_work() as db:
             self.key_values.set(db, key, value)
 
-    def test_gemini_reuses_existing_id(self):
-        self.save("gemini_conversation_id", "gemini-existing")
-
-        self.assertEqual(self.service.ensure("gemini"), "gemini-existing")
-        self.settings.selected_ai_provider.assert_not_called()
-        self.openai.request.assert_not_called()
-
-    def test_gemini_creates_and_persists_expected_id(self):
-        conversation_id = self.service.ensure("gemini")
-
-        self.assertEqual(conversation_id, "gemini_12345678123456781234567812345678")
-        self.assertEqual(self.stored("gemini_conversation_id"), conversation_id)
-        self.settings.selected_ai_provider.assert_not_called()
-        self.openai.request.assert_not_called()
-
     def test_openai_reuses_existing_id_without_provider_lookup(self):
         self.save("openai_conversation_id", "conv-existing")
 
-        self.assertEqual(self.service.ensure("openai"), "conv-existing")
-        self.settings.selected_ai_provider.assert_not_called()
+        self.assertEqual(self.service.ensure(), "conv-existing")
         self.openai.request.assert_not_called()
 
     def test_openai_creates_id_with_existing_metadata_contract(self):
         self.openai.request.return_value = {"id": "conv-created"}
 
-        self.assertEqual(self.service.ensure("openai"), "conv-created")
+        self.assertEqual(self.service.ensure(), "conv-created")
         self.assertEqual(self.stored("openai_conversation_id"), "conv-created")
         self.openai.request.assert_called_once_with(
             "/conversations",
             {"metadata": {"app": "intervals-coach", "purpose": "personal-coach"}},
         )
-        self.settings.selected_ai_provider.assert_not_called()
 
     def test_openai_request_holds_neither_database_transaction_nor_db_lock(self):
         lock = _TrackingLock()
@@ -115,7 +97,6 @@ class CoachConversationProvisionTests(unittest.TestCase):
 
         self.openai.request.side_effect = create_conversation
         service = CoachConversationProvisionService(
-            self.settings,
             self.database_manager,
             self.key_values,
             self.openai,
@@ -123,26 +104,17 @@ class CoachConversationProvisionTests(unittest.TestCase):
             lambda: self.uuid,
         )
         with patch.object(self.database_manager, "unit_of_work", tracked_unit_of_work):
-            self.assertEqual(service.ensure("openai"), "conv-outside-lock")
+            self.assertEqual(service.ensure(), "conv-outside-lock")
         self.assertEqual(transaction_depth, 0)
 
     def test_openai_invalid_id_is_502_and_not_persisted(self):
         self.openai.request.return_value = {"id": None}
 
         with self.assertRaises(AppError) as raised:
-            self.service.ensure("openai")
+            self.service.ensure()
 
         self.assertEqual(raised.exception.status, 502)
         self.assertIsNone(self.stored("openai_conversation_id"))
-
-    def test_missing_provider_uses_settings_selection(self):
-        self.settings.selected_ai_provider.return_value = "gemini"
-
-        conversation_id = self.service.ensure()
-
-        self.assertTrue(conversation_id.startswith("gemini_"))
-        self.settings.selected_ai_provider.assert_called_once_with()
-        self.assertEqual(self.stored("gemini_conversation_id"), conversation_id)
 
 
 if __name__ == "__main__":

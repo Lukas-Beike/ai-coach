@@ -198,30 +198,7 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertNotIn("secret provider text", repr(self.logger.records))
         self.assertNotIn("payload", repr(self.capture.entries))
 
-    def test_json_http_client_classifies_gemini_and_intervals_http_errors(self):
-        gemini_body = _JSONResponse(b'{"error":{"status":"INTERNAL"}}')
-        gemini_error = HTTPError(
-            "https://generativelanguage.googleapis.com", 500, "failure", {}, gemini_body
-        )
-        gemini_state = _ProviderState()
-        with self.assertRaises(AppError) as gemini_raised:
-            self._client(
-                lambda _request, *, timeout: (_ for _ in ()).throw(gemini_error),
-                state=gemini_state,
-            ).request(
-                "POST",
-                "https://generativelanguage.googleapis.com/v1beta/models/test",
-                service="gemini",
-            )
-        self.assertEqual(
-            (gemini_raised.exception.status, gemini_raised.exception.reason),
-            (500, "provider_unavailable"),
-        )
-        self.assertTrue(gemini_body.closed)
-        self.assertTrue(
-            any(call[0:2] == ("status", "gemini") for call in gemini_state.calls)
-        )
-
+    def test_json_http_client_classifies_intervals_http_errors(self):
         intervals_body = _JSONResponse(
             b'{"error":{"message":"secret validation detail"}}'
         )

@@ -167,33 +167,28 @@ class CoachContextReductionTests(unittest.TestCase):
             )
         ]
         receipts = [{"tool": "read_training_state", "result": {"ok": True}}]
-        for provider in ("openai", "gemini"):
-            with self.subTest(provider=provider):
-                _, payload = fixture.build(
-                    provider=provider,
-                    message="Was ist das Training fuer heute?",
-                    context=context,
-                    tools=tools,
-                    command_receipts=receipts,
-                )
-                selected = fixture.training_context.build.call_args.kwargs["selection"]
-                self.assertEqual(selected.name, "today_training")
-                self.assertEqual(selected.horizon_days, 3)
-                self.assertEqual(
-                    {tool["name"] for tool in payload["tools"]},
-                    {
-                        "read_coach_context",
-                        "get_activity_details",
-                        "apply_training_patch",
-                        "start_intervals_plan_sync",
-                    },
-                )
-                parsed = json.loads(payload["input"])
-                self.assertEqual(
-                    parsed["dialogue"]["messages"], context["messages"][:-1]
-                )
-                self.assertEqual(parsed["dialogue"]["current_user_message_id"], 24)
-                self.assertEqual(parsed["confirmed_steps"], receipts)
+        _, payload = fixture.build(
+            message="Was ist das Training fuer heute?",
+            context=context,
+            tools=tools,
+            command_receipts=receipts,
+        )
+        selected = fixture.training_context.build.call_args.kwargs["selection"]
+        self.assertEqual(selected.name, "today_training")
+        self.assertEqual(selected.horizon_days, 3)
+        self.assertEqual(
+            {tool["name"] for tool in payload["tools"]},
+            {
+                "read_coach_context",
+                "get_activity_details",
+                "apply_training_patch",
+                "start_intervals_plan_sync",
+            },
+        )
+        parsed = json.loads(payload["input"])
+        self.assertEqual(parsed["dialogue"]["messages"], context["messages"][:-1])
+        self.assertEqual(parsed["dialogue"]["current_user_message_id"], 24)
+        self.assertEqual(parsed["confirmed_steps"], receipts)
         self.assertEqual(len(context["messages"]), 24)
 
     def test_routine_context_reduction_preserves_sources_and_illness(self):

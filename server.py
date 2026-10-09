@@ -427,7 +427,6 @@ EXPORT_TIME_LIMIT_SECONDS = 120
 # max_output_tokens. Keep ordinary replies bounded, but leave enough room for
 # an explicitly requested multi-week training plan.
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
-GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
 INTERVALS_SYNC_WAIT_SECONDS = 120
@@ -989,17 +988,11 @@ NUTRITION_ASSEMBLY = NutritionAssembly(
             ),
             read_profile=lambda: ATHLETE_DATA.profile().get(),
             photo_extractor=lambda: NutritionPhotoExtractionService(
-                selected_provider=SETTINGS.selected_ai_provider,
                 selected_model=SETTINGS.selected_model,
                 openai_request=lambda path, payload: (
                     MODEL_TRANSPORT.openai_responses_client().request(path, payload)
                 ),
                 openai_path=OPENAI_RESPONSES_PATH,
-                gemini_generate=lambda model, payload: (
-                    MODEL_TRANSPORT.gemini_json_client().generate(
-                        model, payload, operation="nutrition_packaging_extraction"
-                    )
-                ),
             ),
         ),
     )
@@ -1013,7 +1006,6 @@ MODEL_TRANSPORT = ModelTransportAssembly(
             state_service=provider_state_service,
         ),
         endpoints=ModelEndpointSettings(
-            gemini_base_url=GEMINI_API_BASE_URL,
             default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
             openai_responses_path=OPENAI_RESPONSES_PATH,
             json_media_type=JSON_MEDIA_TYPE,
@@ -1055,14 +1047,10 @@ COACH_CONVERSATION = CoachConversationAssembly(
         profile_service=ATHLETE_DATA.profile,
     ),
     model=ConversationModelDependencies(
-        settings=SETTINGS,
         model_transport=MODEL_TRANSPORT,
         default_thinking_level=SETTINGS.selected_thinking_level,
         default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
         json_media_type=JSON_MEDIA_TYPE,
-        max_gemini_inline_image_bytes=lambda: (
-            coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES
-        ),
     ),
 )
 COACH_LOCAL = CoachLocalAssembly(
@@ -1594,9 +1582,6 @@ COACH_BACKGROUND_JOBS = CoachBackgroundJobsAssembly(
             background_horizon_days=lambda: coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
             max_attachment_storage_bytes=lambda: (
                 coach_attachments.MAX_ATTACHMENT_STORAGE_BYTES
-            ),
-            max_gemini_inline_image_bytes=lambda: (
-                coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES
             ),
         ),
     )

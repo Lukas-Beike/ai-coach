@@ -435,15 +435,14 @@ class ServerHttpArchitectureTests(unittest.TestCase):
             "_handle_coach_post",
             "TRANSCRIBE_POST_ROUTES",
             ("/api/transcribe",),
-            "TranscribePostRoutes(SETTINGS, MODEL_TRANSPORT.audio_transcription_client)",
+            "TranscribePostRoutes(MODEL_TRANSPORT.audio_transcription_client)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "transcribe_post.py").read_text(
             encoding="utf-8"
         )
         self.assertNotIn("server", route_source.casefold())
         self.assertIn("handler.read_audio_body()", route_source)
-        self.assertIn("selected_ai_provider()", route_source)
-        self.assertIn("selected_model()", route_source)
+        self.assertNotIn("selected_ai_provider()", route_source)
         self.assertNotIn(
             "transcribe_audio",
             {

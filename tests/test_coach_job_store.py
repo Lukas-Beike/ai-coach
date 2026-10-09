@@ -43,15 +43,27 @@ class CoachJobStoreTests(unittest.TestCase):
 
     def _store(self):
         return CoachJobStore(
-            lambda: self.manager, self.lock, self.wake, self.gate,
+            lambda: self.manager,
+            self.lock,
+            self.wake,
+            self.gate,
             lambda: "2026-09-23T12:00:00+00:00",
         )
 
-    def _insert(self, turn_id, receipt, *, status="queued", created_at="2026-09-23", intent=None):
+    def _insert(
+        self, turn_id, receipt, *, status="queued", created_at="2026-09-23", intent=None
+    ):
         with self.manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO coach_commands VALUES (?, ?, ?, ?, ?, ?)",
-                (turn_id, status, json.dumps(receipt), json.dumps(intent or {}), created_at, created_at),
+                (
+                    turn_id,
+                    status,
+                    json.dumps(receipt),
+                    json.dumps(intent or {}),
+                    created_at,
+                    created_at,
+                ),
             )
 
     def test_claim_skips_non_background_and_future_retry_then_claims_once(self):
@@ -72,7 +84,11 @@ class CoachJobStoreTests(unittest.TestCase):
 
     def test_claim_preserves_the_twenty_row_candidate_limit(self):
         for index in range(20):
-            self._insert(f"interactive-{index}", {"mode": "interactive"}, created_at=f"{index:02}")
+            self._insert(
+                f"interactive-{index}",
+                {"mode": "interactive"},
+                created_at=f"{index:02}",
+            )
         self._insert("outside-limit", {"mode": "background"}, created_at="99")
 
         self.assertIsNone(self.store.claim())
@@ -110,7 +126,9 @@ class CoachJobStoreTests(unittest.TestCase):
 
     def test_message_requires_saved_user_content(self):
         with self.manager.unit_of_work() as db:
-            db.execute("INSERT INTO messages(role, content) VALUES ('user', 'Synthetic question')")
+            db.execute(
+                "INSERT INTO messages(role, content) VALUES ('user', 'Synthetic question')"
+            )
         self.assertEqual(
             self.store.message({"receipt": {"user_message_id": 1}}),
             "Synthetic question",
@@ -158,11 +176,23 @@ class CoachJobStoreTests(unittest.TestCase):
         self.assertTrue(json.loads(active["receipt"])["cancel_requested"])
         self.assertNotIn("cancel_requested", json.loads(done["receipt"]))
 
-    def test_restart_requeues_openai_and_queued_jobs_but_fails_interrupted_gemini(self):
-        self._insert("attached", {"mode": "interactive"}, status="running", intent={"operation": "save_checkin"})
-        self._insert("openai", {"mode": "background", "ai_provider": "openai", "openai_response_id": "resp-1"}, status="running")
+    def test_restart_requeues_all_background_jobs(self):
+        self._insert(
+            "attached",
+            {"mode": "interactive"},
+            status="running",
+            intent={"operation": "save_checkin"},
+        )
+        self._insert(
+            "openai",
+            {
+                "mode": "background",
+                "ai_provider": "openai",
+                "openai_response_id": "resp-1",
+            },
+            status="running",
+        )
         self._insert("queued", {"mode": "background", "phase": "preparing"})
-        self._insert("gemini", {"mode": "background", "ai_provider": "gemini"}, status="running", intent={"operation": "stage_training_plan"})
         failures = Mock()
 
         self.assertEqual(self.store.resume_interrupted(failures), 2)
@@ -170,20 +200,30 @@ class CoachJobStoreTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             rows = {
                 row["client_turn_id"]: row
-                for row in db.execute("SELECT client_turn_id, status, receipt FROM coach_commands").fetchall()
+                for row in db.execute(
+                    "SELECT client_turn_id, status, receipt FROM coach_commands"
+                ).fetchall()
             }
         self.assertEqual(rows["openai"]["status"], "queued")
         self.assertEqual(json.loads(rows["openai"]["receipt"])["phase"], "resuming")
         self.assertEqual(rows["queued"]["status"], "queued")
         self.assertEqual(json.loads(rows["queued"]["receipt"])["phase"], "queued")
-        self.assertEqual(rows["gemini"]["status"], "running")
         self.assertTrue(self.wake.is_set())
-        self.assertEqual(failures.persist.call_count, 2)
-        self.assertEqual(failures.persist.call_args_list[0].args[:2], ("attached", {"operation": "save_checkin"}))
-        self.assertEqual(failures.persist.call_args_list[1].args[:2], ("gemini", {"operation": "stage_training_plan"}))
-        self.assertTrue(all(call.args[2].reason == "process_interrupted" for call in failures.persist.call_args_list))
+        self.assertEqual(failures.persist.call_count, 1)
+        self.assertEqual(
+            failures.persist.call_args_list[0].args[:2],
+            ("attached", {"operation": "save_checkin"}),
+        )
+        self.assertTrue(
+            all(
+                call.args[2].reason == "process_interrupted"
+                for call in failures.persist.call_args_list
+            )
+        )
 
-    def test_restart_recovery_uses_replaced_manager_and_does_not_wake_without_jobs(self):
+    def test_restart_recovery_uses_replaced_manager_and_does_not_wake_without_jobs(
+        self,
+    ):
         self._insert("done", {"mode": "background"}, status="completed")
         self.manager.close()
         self.manager = self._manager()

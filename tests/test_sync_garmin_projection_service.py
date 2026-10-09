@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -86,9 +86,6 @@ def _config(*, email="", fixture="", tokenstore="synthetic-tokenstore"):
         openai_api_key="",
         openai_base_url="",
         openai_model="",
-        gemini_api_key="",
-        gemini_model="",
-        ai_provider="openai",
         intervals_api_key="",
         intervals_athlete_id="",
         garmin_email=email,
@@ -151,7 +148,7 @@ class GarminProjectionServiceTests(unittest.TestCase):
                 {"last_garmin_sync_at": last_sync_at}
             ),
             redactor=redactor,
-            local_now=lambda: datetime(2026, 9, 20, 8, tzinfo=timezone.utc),
+            local_now=lambda: datetime(2026, 9, 20, 8, tzinfo=UTC),
         )
         return service, battery
 

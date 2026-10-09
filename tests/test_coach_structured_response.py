@@ -19,7 +19,10 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self.service = CoachStructuredResponseService(
             self.transport, self.recovery, self.retry, self.jobs
         )
-        self.payload = {"input": [{"role": "user", "content": "synthetic"}], "model": "synthetic"}
+        self.payload = {
+            "input": [{"role": "user", "content": "synthetic"}],
+            "model": "synthetic",
+        }
         self.options = {
             "request_payload": self.payload,
             "context": {"synthetic": True},
@@ -27,7 +30,6 @@ class CoachStructuredResponseTests(unittest.TestCase):
             "command_receipts": [],
             "attachments": [],
             "client_turn_id": "turn-synthetic",
-            "ai_provider": "openai",
             "background_owned": False,
             "on_text_delta": None,
             "cancel_event": None,
@@ -57,12 +59,21 @@ class CoachStructuredResponseTests(unittest.TestCase):
 
         self.assertIs(self.service.respond(self.payload, **self.options), expected)
 
-        self.assertEqual(self.transport.background_request.call_args.kwargs["response_id"], "resp-prior")
-        self.jobs.merge_receipt.assert_called_once_with("turn-synthetic", {
-            "status": "running", "phase": "waiting_openai", "openai_response_id": "resp-new",
-            "pending_tool_outputs": [], "response_input": self.payload["input"],
-            "previous_response_id": None,
-        })
+        self.assertEqual(
+            self.transport.background_request.call_args.kwargs["response_id"],
+            "resp-prior",
+        )
+        self.jobs.merge_receipt.assert_called_once_with(
+            "turn-synthetic",
+            {
+                "status": "running",
+                "phase": "waiting_openai",
+                "openai_response_id": "resp-new",
+                "pending_tool_outputs": [],
+                "response_input": self.payload["input"],
+                "previous_response_id": None,
+            },
+        )
 
     def test_transient_background_error_resumes_the_checkpointed_response(self) -> None:
         expected = {"id": "resumed-response"}
@@ -74,7 +85,9 @@ class CoachStructuredResponseTests(unittest.TestCase):
             calls += 1
             if calls == 1:
                 kwargs["on_response_id"]("resp-new")
-                raise AppError(503, "Synthetic provider unavailable", reason="provider_unavailable")
+                raise AppError(
+                    503, "Synthetic provider unavailable", reason="provider_unavailable"
+                )
             return expected
 
         self.transport.background_request.side_effect = respond
@@ -84,7 +97,10 @@ class CoachStructuredResponseTests(unittest.TestCase):
 
         self.assertEqual(self.transport.background_request.call_count, 2)
         self.assertEqual(
-            [item.kwargs["response_id"] for item in self.transport.background_request.call_args_list],
+            [
+                item.kwargs["response_id"]
+                for item in self.transport.background_request.call_args_list
+            ],
             [None, "resp-new"],
         )
         self.retry.retry_delay.assert_not_called()
@@ -93,7 +109,8 @@ class CoachStructuredResponseTests(unittest.TestCase):
     def test_rate_limit_retries_without_stream_delta(self) -> None:
         expected = {"id": "after-retry"}
         self.transport.request.side_effect = [
-            AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded"), expected,
+            AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded"),
+            expected,
         ]
         self.retry.retry_delay.return_value = 0.01
 
@@ -101,7 +118,9 @@ class CoachStructuredResponseTests(unittest.TestCase):
 
         self.assertEqual(self.transport.request.call_count, 2)
         self.retry.retry_delay.assert_called_once()
-        self.assertEqual(self.retry.retry_delay.call_args.kwargs["request_delta_emitted"], False)
+        self.assertEqual(
+            self.retry.retry_delay.call_args.kwargs["request_delta_emitted"], False
+        )
         self.retry.wait.assert_called_once_with(0.01, None, 0)
 
     def test_stream_delta_disables_response_retry(self) -> None:
@@ -119,13 +138,21 @@ class CoachStructuredResponseTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
         self.assertEqual(deltas, ["partial"])
-        self.assertEqual(self.retry.retry_delay.call_args.kwargs["request_delta_emitted"], True)
+        self.assertEqual(
+            self.retry.retry_delay.call_args.kwargs["request_delta_emitted"], True
+        )
         self.transport.stream_request.assert_called_once()
 
-    def test_invalid_conversation_recovery_retries_once_with_shared_payload(self) -> None:
+    def test_invalid_conversation_recovery_retries_once_with_shared_payload(
+        self,
+    ) -> None:
         expected = {"id": "recovered"}
         self.transport.request.side_effect = [
-            AppError(409, "Synthetic invalid conversation", reason="conversation_state_invalid"),
+            AppError(
+                409,
+                "Synthetic invalid conversation",
+                reason="conversation_state_invalid",
+            ),
             expected,
         ]
         self.recovery.recover_if_invalid.return_value = True
@@ -134,7 +161,9 @@ class CoachStructuredResponseTests(unittest.TestCase):
 
         self.recovery.recover_if_invalid.assert_called_once()
         self.assertIs(self.recovery.recover_if_invalid.call_args.args[1], self.payload)
-        self.assertEqual(self.recovery.recover_if_invalid.call_args.kwargs["attempt"], 0)
+        self.assertEqual(
+            self.recovery.recover_if_invalid.call_args.kwargs["attempt"], 0
+        )
         self.assertEqual(self.transport.request.call_count, 2)
         self.retry.retry_delay.assert_not_called()
 
@@ -146,13 +175,17 @@ class CoachStructuredResponseTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             self.service.respond(self.payload, **self.options)
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (499, "chat_cancelled"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason), (499, "chat_cancelled")
+        )
         self.transport.request.assert_not_called()
 
     def test_cancellation_during_retry_wait_prevents_second_provider_call(self) -> None:
         cancelled = threading.Event()
         self.options["cancel_event"] = cancelled
-        self.transport.request.side_effect = AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded")
+        self.transport.request.side_effect = AppError(
+            429, "Synthetic rate limit", reason="rate_limit_exceeded"
+        )
         self.retry.retry_delay.return_value = 0.01
         self.retry.wait.side_effect = lambda *_args: cancelled.set()
 

@@ -49,7 +49,7 @@ class CoachJobStore:
                     continue
                 try:
                     retry_after = float(receipt.get("retry_after") or 0)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     retry_after = 0
                 if retry_after > time.time():
                     continue
@@ -78,16 +78,18 @@ class CoachJobStore:
             receipt = command_receipt(row.get("receipt"))
             try:
                 attempts = max(0, int(receipt.get("contention_attempts") or 0)) + 1
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 attempts = 1
             delay = min(60, 2 ** min(attempts, 5))
-            receipt.update({
-                "status": "queued",
-                "phase": "waiting_for_coach_slot",
-                "retry_reason": reason,
-                "contention_attempts": attempts,
-                "retry_after": time.time() + delay,
-            })
+            receipt.update(
+                {
+                    "status": "queued",
+                    "phase": "waiting_for_coach_slot",
+                    "retry_reason": reason,
+                    "contention_attempts": attempts,
+                    "retry_after": time.time() + delay,
+                }
+            )
             db.execute(
                 "UPDATE coach_commands SET status='queued', receipt=?, updated_at=? "
                 "WHERE client_turn_id=? AND status='running'",
@@ -124,7 +126,9 @@ class CoachJobStore:
             ).fetchone()
         return bool(row and command_receipt(row["receipt"]).get("cancel_requested"))
 
-    def merge_receipt(self, client_turn_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    def merge_receipt(
+        self, client_turn_id: str, updates: dict[str, Any]
+    ) -> dict[str, Any]:
         """Merge progress into a queued/running command in one locked UOW."""
         with self._database_lock, self._database_manager().unit_of_work() as db:
             row = db.execute(
@@ -145,7 +149,7 @@ class CoachJobStore:
         return receipt
 
     def resume_interrupted(self, failures: CoachTurnFailureService) -> int:
-        """Recover durable turns without replaying an interrupted Gemini turn."""
+        """Recover durable turns after a process restart."""
         with self._database_lock, self._database_manager().unit_of_work() as db:
             interrupted = db.execute(
                 "SELECT client_turn_id, intent FROM coach_commands "
@@ -164,7 +168,6 @@ class CoachJobStore:
             )
 
         resumed = 0
-        interrupted_gemini: list[tuple[str, dict[str, Any]]] = []
         now = self._utc_now()
         with self._database_lock, self._database_manager().unit_of_work() as db:
             rows = db.execute(
@@ -175,15 +178,10 @@ class CoachJobStore:
                 receipt = command_receipt(row.get("receipt"))
                 if receipt.get("mode") != "background":
                     continue
-                if row.get("status") == "running" and receipt.get("ai_provider") == "gemini":
-                    # GenerateContent has no resumable response ID. Replaying a
-                    # completed model/tool turn after restart could repeat effects.
-                    interrupted_gemini.append(
-                        (row["client_turn_id"], json.loads(row.get("intent") or "{}"))
-                    )
-                    continue
                 receipt["status"] = "queued"
-                receipt["phase"] = "resuming" if receipt.get("openai_response_id") else "queued"
+                receipt["phase"] = (
+                    "resuming" if receipt.get("openai_response_id") else "queued"
+                )
                 db.execute(
                     "UPDATE coach_commands SET status='queued', receipt=?, updated_at=? "
                     "WHERE client_turn_id=?",
@@ -195,16 +193,6 @@ class CoachJobStore:
                 )
                 resumed += 1
 
-        for client_turn_id, intent in interrupted_gemini:
-            failures.persist(
-                client_turn_id,
-                intent,
-                AppError(
-                    503,
-                    "Die Gemini-Hintergrundverarbeitung wurde durch einen Prozessneustart unterbrochen und nicht erneut ausgeführt.",
-                    reason="process_interrupted",
-                ),
-            )
         if resumed:
             self._wake_event.set()
         return resumed

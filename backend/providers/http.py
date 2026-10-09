@@ -46,7 +46,6 @@ _SECRET_PATTERNS = (
     (re.compile(r"(?i)https?://[^\s<>\"'`]+"), "[REDACTED_URL]"),
     (re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"), "[REDACTED]"),
     (re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"), "[REDACTED_OPENAI_KEY]"),
-    (re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"), "[REDACTED_GEMINI_KEY]"),
     (
         re.compile(
             r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+"
@@ -697,15 +696,7 @@ class JsonHttpClient:
             response_body=raw_body,
         )
         if details:
-            if service == "gemini":
-                self.provider_state.record_status(
-                    "gemini",
-                    state="error",
-                    reason=details["reason"],
-                    message=details["message"],
-                    http_status=error.code,
-                )
-            status = error.code if service == "gemini" or error.code == 429 else 502
+            status = error.code if error.code == 429 else 502
             app_error = AppError(
                 status,
                 details["message"],
@@ -749,12 +740,6 @@ class JsonHttpClient:
                 provider_error_code=details.get("provider_error_code"),
             )
             return details
-        if service == "gemini":
-            from backend.providers import gemini as gemini_provider
-
-            return gemini_provider.error_details(
-                error.code, raw_body, updated_at=self.now()
-            )
         return None
 
     def _interval_error_detail(self, raw_body: bytes) -> str:

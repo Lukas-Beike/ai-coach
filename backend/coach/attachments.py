@@ -7,22 +7,19 @@ import json
 import math
 import struct
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 MAX_FILE_BYTES = 5_000_000
 MAX_FILES = 4
 MAX_REQUEST_BYTES = 28_000_000
 MAX_FIT_MESSAGES = 100_000
-# Gemini accepts at most 20 MB per inline request.  Leave room for the route
-# summary, instructions and the surrounding JSON framing.
-MAX_GEMINI_INLINE_IMAGE_BYTES = 16_000_000
 # Keep encrypted database backups usable even when many turns contain images.
 # This leaves headroom below the application's 100 MB backup limit.
-# Keep room for provider conversation copies and SQLite page overhead inside
+# Keep room for application state and SQLite page overhead inside
 # the existing 100 MB encrypted-backup limit.
 MAX_ATTACHMENT_STORAGE_BYTES = 40_000_000
 FIT_SIGNATURE = b".FIT"
-FIT_EPOCH = datetime(1989, 12, 31, tzinfo=timezone.utc)
+FIT_EPOCH = datetime(1989, 12, 31, tzinfo=UTC)
 _UNSUPPORTED_FIT_BASE_TYPE = "Unsupported FIT base type"
 _FIT_CRC_TABLE = (
     0x0000,
@@ -362,7 +359,7 @@ def _fit_timestamp(value):
             .isoformat()
             .replace("+00:00", "Z")
         )
-    except (OverflowError, ValueError):
+    except OverflowError, ValueError:
         return None
 
 
@@ -670,26 +667,24 @@ def _structured_attachment(name, encoded, data):
     if name.lower().endswith(".gpx"):
         try:
             summary = gpx_summary(data)
-        except (ValueError, KeyError, TypeError, ET.ParseError):
+        except ValueError, KeyError, TypeError, ET.ParseError:
             raise ValueError("Invalid GPX") from None
         return {
             "name": name,
             "type": "gpx",
             "mime": "application/gpx+xml",
-            "gemini_mime": "text/xml",
             "data": encoded,
             "summary": summary,
         }
     if name.lower().endswith(".fit"):
         try:
             summary = fit_summary(data)
-        except (ValueError, KeyError, TypeError, struct.error, UnicodeError):
+        except ValueError, KeyError, TypeError, struct.error, UnicodeError:
             raise ValueError("Invalid FIT") from None
         return {
             "name": name,
             "type": "fit",
             "mime": "application/octet-stream",
-            "gemini_mime": "application/octet-stream",
             "data": encoded,
             "summary": summary,
         }
@@ -744,7 +739,7 @@ def model_input(text, attachments):
             {"type": "input_text", "text": json.dumps(evidence, ensure_ascii=False)}
         )
         if item["type"] in {"gpx", "fit"}:
-            data, mime = provider_attachment_data(item)
+            data, mime = openai_attachment_data(item)
             filename = item["name"] + ".json" if item["type"] == "fit" else item["name"]
             parts.append(
                 {
@@ -764,19 +759,11 @@ def model_input(text, attachments):
     return [{"role": "user", "content": parts}]
 
 
-def gemini_inline_image_bytes(attachments):
-    return sum(
-        len(provider_attachment_data(item)[0])
-        for item in attachments
-        if item.get("type") in {"image", "gpx", "fit"}
-    )
-
-
-def provider_attachment_data(item):
+def openai_attachment_data(item):
     """Return a provider-safe representation without changing persisted bytes."""
     data = str(item.get("data") or "")
     if item.get("type") != "fit":
-        return data, str(item.get("gemini_mime") or item.get("mime") or "")
+        return data, str(item.get("mime") or "")
     document = {
         "format": "FIT",
         "filename": str(item.get("name") or "activity.fit"),
@@ -789,78 +776,3 @@ def provider_attachment_data(item):
         json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")
     return encoded, "application/json"
-
-
-def gemini_selected_raw_attachments(
-    message_attachments, *, max_inline_bytes=MAX_GEMINI_INLINE_IMAGE_BYTES
-):
-    """Choose newest raw image/activity attachments that fit Gemini's inline budget."""
-    candidates = []
-    for message_index, attachments in enumerate(message_attachments):
-        for attachment_index, attachment in enumerate(attachments):
-            if (
-                isinstance(attachment, dict)
-                and attachment.get("type") in {"image", "gpx", "fit"}
-                and attachment.get("data")
-            ):
-                raw_data, _ = provider_attachment_data(attachment)
-                candidates.append((message_index, attachment_index, len(raw_data)))
-    selected = set()
-    remaining_bytes = max_inline_bytes
-    for message_index, attachment_index, size in reversed(candidates):
-        if size <= remaining_bytes:
-            selected.add((message_index, attachment_index))
-            remaining_bytes -= size
-    return selected
-
-
-def gemini_history_parts(message, attachments, message_index, selected_raw):
-    """Build Gemini history parts while marking omitted raw attachments."""
-    content = str(message.get("content") or "").strip()[:6000]
-    if not content:
-        return []
-    parts = [{"text": content}]
-    for attachment_index, attachment in enumerate(attachments):
-        if not isinstance(attachment, dict):
-            continue
-        attachment_type = attachment.get("type")
-        if attachment_type in {"gpx", "fit"}:
-            parts.append(
-                {
-                    "text": json.dumps(
-                        {
-                            "untrusted_attachment_name": attachment.get("name"),
-                            f"untrusted_{attachment_type}": attachment.get("summary"),
-                        },
-                        ensure_ascii=False,
-                    )
-                }
-            )
-        if (message_index, attachment_index) in selected_raw and attachment.get("mime"):
-            data, mime = provider_attachment_data(attachment)
-            parts.append({"inlineData": {"mimeType": mime, "data": data}})
-        elif attachment_type == "image":
-            parts.append(
-                {
-                    "text": json.dumps(
-                        {
-                            "untrusted_attachment_name": attachment.get("name"),
-                            "raw_image_omitted": True,
-                        },
-                        ensure_ascii=False,
-                    )
-                }
-            )
-        elif attachment_type in {"gpx", "fit"} and attachment.get("data"):
-            parts.append(
-                {
-                    "text": json.dumps(
-                        {
-                            "untrusted_attachment_name": attachment.get("name"),
-                            "raw_file_omitted": True,
-                        },
-                        ensure_ascii=False,
-                    )
-                }
-            )
-    return parts

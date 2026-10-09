@@ -101,8 +101,6 @@ class DiagnosticReportService:
                 },
                 "configuration": {
                     "openai_configured": bool(deps.config.openai_api_key),
-                    "gemini_configured": bool(deps.config.gemini_api_key),
-                    "ai_provider": deps.settings.selected_ai_provider(),
                     "intervals_configured": bool(deps.config.intervals_api_key),
                     "garmin_library_available": deps.garmin_client_factory.available(),
                     "garmin_configured": garmin_status["configured"],
@@ -116,7 +114,6 @@ class DiagnosticReportService:
                     ],
                 },
                 "openai": deps.provider_state.summary("openai"),
-                "gemini": deps.provider_state.summary("gemini"),
                 "coach_commands": deps.coach_history.history(),
                 "sync": {
                     "last_success": self._get_value(db, "last_sync_at"),

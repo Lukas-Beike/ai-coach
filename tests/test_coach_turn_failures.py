@@ -50,9 +50,15 @@ class CoachTurnFailureTests(unittest.TestCase):
             )
         )
         with self.manager.unit_of_work() as db:
-            db.execute("CREATE TABLE coach_commands (client_turn_id TEXT PRIMARY KEY, receipt TEXT, status TEXT, updated_at TEXT)")
-            db.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT, content TEXT, client_turn_id TEXT, created_at TEXT)")
-            db.execute("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)")
+            db.execute(
+                "CREATE TABLE coach_commands (client_turn_id TEXT PRIMARY KEY, receipt TEXT, status TEXT, updated_at TEXT)"
+            )
+            db.execute(
+                "CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT, content TEXT, client_turn_id TEXT, created_at TEXT)"
+            )
+            db.execute(
+                "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+            )
 
     def _seed(self, receipt: dict, *, status: str = "running") -> None:
         with self.manager.unit_of_work() as db:
@@ -63,23 +69,36 @@ class CoachTurnFailureTests(unittest.TestCase):
 
     def _stored(self) -> tuple[str, dict]:
         with self.manager.reader() as db:
-            row = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-1'").fetchone()
+            row = db.execute(
+                "SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-1'"
+            ).fetchone()
         return row["status"], json.loads(row["receipt"])
 
-    def test_partial_failure_commits_pending_request_and_discards_provider_checkpoint(self) -> None:
+    def test_partial_failure_commits_pending_request_and_discards_provider_checkpoint(
+        self,
+    ) -> None:
         with self.manager.unit_of_work() as db:
-            user = self.chat.add(db, "user", "Plan bitte lokal", client_turn_id="turn-1")
-        self._seed({
-            "user_message_id": user["id"],
-            "command_receipts": [{"tool": "save_checkin", "result": {"ok": True, "status": "saved"}}],
-            "pending_tool_calls": [{"tool": "apply_workout_library_plan"}],
-            "response_input": [{"image": "secret-image"}],
-            "openai_response_id": "provider-response",
-        })
+            user = self.chat.add(
+                db, "user", "Plan bitte lokal", client_turn_id="turn-1"
+            )
+        self._seed(
+            {
+                "user_message_id": user["id"],
+                "command_receipts": [
+                    {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}}
+                ],
+                "pending_tool_calls": [{"tool": "apply_workout_library_plan"}],
+                "response_input": [{"image": "secret-image"}],
+                "openai_response_id": "provider-response",
+            }
+        )
 
         result = self.service.persist(
             "turn-1",
-            {"operation": "save_checkin", "follow_up_operations": ["apply_workout_library_plan"]},
+            {
+                "operation": "save_checkin",
+                "follow_up_operations": ["apply_workout_library_plan"],
+            },
             AppError(429, "sensitive provider text", reason="rate_limit_exceeded"),
         )
 
@@ -93,29 +112,50 @@ class CoachTurnFailureTests(unittest.TestCase):
         self.assertIn("Bereits erfolgreich", stored["message"]["content"])
         with self.manager.reader() as db:
             pending = json.loads(self.kv.get(db, "coach_pending_request"))
-            assistants = db.execute("SELECT COUNT(*) FROM messages WHERE role='assistant'").fetchone()[0]
-        self.assertEqual(pending["completed_steps"], [{"tool": "save_checkin", "status": "saved"}])
+            assistants = db.execute(
+                "SELECT COUNT(*) FROM messages WHERE role='assistant'"
+            ).fetchone()[0]
+        self.assertEqual(
+            pending["completed_steps"], [{"tool": "save_checkin", "status": "saved"}]
+        )
         self.assertEqual(assistants, 1)
         self.assertEqual(len(self.events.since()["events"]), 1)
 
-    def test_cancellation_clears_pending_and_completed_replay_does_not_duplicate(self) -> None:
+    def test_cancellation_clears_pending_and_completed_replay_does_not_duplicate(
+        self,
+    ) -> None:
         self._seed({"command_receipts": []})
         with self.manager.unit_of_work() as db:
             self.kv.set(db, "coach_pending_request", "queued")
-        first = self.service.persist("turn-1", {}, AppError(499, "stopped", reason="chat_cancelled"))
-        second = self.service.persist("turn-1", {}, AppError(499, "stopped", reason="chat_cancelled"))
+        first = self.service.persist(
+            "turn-1", {}, AppError(499, "stopped", reason="chat_cancelled")
+        )
+        second = self.service.persist(
+            "turn-1", {}, AppError(499, "stopped", reason="chat_cancelled")
+        )
         self.assertEqual(first, second)
         self.assertEqual(first["status"], "cancelled")
         with self.manager.reader() as db:
             self.assertEqual(self.kv.get(db, "coach_pending_request"), "null")
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM messages WHERE role='assistant'").fetchone()[0], 1)
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM messages WHERE role='assistant'"
+                ).fetchone()[0],
+                1,
+            )
         self.assertEqual(len(self.events.since()["events"]), 1)
 
-    def test_message_insert_failure_rolls_back_pending_request_and_receipt(self) -> None:
+    def test_message_insert_failure_rolls_back_pending_request_and_receipt(
+        self,
+    ) -> None:
         with self.manager.unit_of_work() as db:
-            user = self.chat.add(db, "user", "Plan bitte lokal", client_turn_id="turn-1")
+            user = self.chat.add(
+                db, "user", "Plan bitte lokal", client_turn_id="turn-1"
+            )
         self._seed({"user_message_id": user["id"], "command_receipts": []})
-        self.service._deps.chat_repository.add = Mock(side_effect=RuntimeError("synthetic write failure"))
+        self.service._deps.chat_repository.add = Mock(
+            side_effect=RuntimeError("synthetic write failure")
+        )
 
         with self.assertRaisesRegex(RuntimeError, "synthetic write failure"):
             self.service.persist("turn-1", {}, AppError(503, "failed"))
@@ -126,11 +166,9 @@ class CoachTurnFailureTests(unittest.TestCase):
             self.assertIsNone(self.kv.get(db, "coach_pending_request"))
         self.assertEqual(self.events.since()["events"], [])
 
-    def test_unconfigured_ai_provider_explanation(self) -> None:
+    def test_openai_configuration_failure_explanation(self) -> None:
         for reason, expected in (
-            ("ai_provider_not_configured", "Kein KI-Dienst konfiguriert"),
             ("openai_not_configured", "OpenAI ist nicht konfiguriert"),
-            ("gemini_not_configured", "Gemini ist nicht konfiguriert"),
         ):
             status, text, _, _ = self.service._base_response(
                 AppError(503, "not configured", reason=reason), []
@@ -173,7 +211,9 @@ class CoachTurnFailureTests(unittest.TestCase):
             "Das konfigurierte KI-Modell oder der angeforderte Dienst wurde nicht gefunden. Bitte die Modellkonfiguration prüfen.",
         )
 
-    def test_openai_billing_failure_is_a_persisted_actionable_chat_message(self) -> None:
+    def test_openai_billing_failure_is_a_persisted_actionable_chat_message(
+        self,
+    ) -> None:
         self._assert_persisted_failure(
             "credit_balance_exhausted",
             "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen.",
@@ -191,7 +231,9 @@ class CoachTurnFailureTests(unittest.TestCase):
         self.assertEqual(stored["message"]["content"], expected)
         self.assertNotIn("sensitive provider text", json.dumps(stored))
         with self.manager.reader() as db:
-            message = db.execute("SELECT content FROM messages WHERE role='assistant'").fetchone()
+            message = db.execute(
+                "SELECT content FROM messages WHERE role='assistant'"
+            ).fetchone()
         self.assertEqual(message["content"], expected)
 
 

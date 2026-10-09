@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from urllib.parse import parse_qs, urlparse
 
 from backend.config import Config
@@ -49,9 +49,6 @@ def test_config() -> Config:
         openai_api_key="",
         openai_base_url="https://api.openai.com/v1",
         openai_model="test",
-        gemini_api_key="",
-        gemini_model="test",
-        ai_provider="openai",
         intervals_api_key="test-key",
         intervals_athlete_id="athlete/1",
         garmin_email="",
@@ -70,7 +67,7 @@ def make_reader(api, snapshot=None, *, earliest=date(2024, 1, 1), chunk_days=2):
         config=test_config(),
         api_client=api,
         sync_state_repository=FakeSyncStateRepository(snapshot),
-        local_now=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+        local_now=lambda: datetime(2026, 1, 1, tzinfo=UTC),
         utc_now=lambda: "2026-01-01T00:00:00+00:00",
         earliest_date=earliest,
         chunk_days=chunk_days,

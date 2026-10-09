@@ -582,16 +582,12 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             (502, "invalid_response"),
         )
 
-    def test_responses_payload_removes_internal_provider_without_mutating_mapping(self):
+    def test_responses_payload_copies_mapping_without_mutating_it(self):
         marker = object()
-        payload = MappingProxyType(
-            {"_ai_provider": "openai", "model": "gpt-test", "marker": marker}
-        )
+        payload = MappingProxyType({"model": "gpt-test", "marker": marker})
         result = responses_payload(payload, thinking_level="medium")
         self.assertEqual(result["model"], "gpt-test")
         self.assertIs(result["marker"], marker)
-        self.assertNotIn("_ai_provider", result)
-        self.assertEqual(payload["_ai_provider"], "openai")
         self.assertIsNot(result, payload)
 
     def test_responses_payload_defaults_reasoning_and_preserves_explicit_reasoning(
@@ -1541,12 +1537,12 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         state = _ClientState()
         http = _ClientHTTP({"status": "completed"})
         client = self._client(http, state)
-        payload = {"input": "hello", "_ai_provider": "openai"}
+        payload = {"input": "hello"}
 
         result = client.request("/responses", payload)
 
         self.assertEqual(result, {"status": "completed"})
-        self.assertEqual(payload, {"input": "hello", "_ai_provider": "openai"})
+        self.assertEqual(payload, {"input": "hello"})
         args, kwargs = http.calls[0]
         self.assertEqual(args[:2], ("POST", "https://api.example.test/v1/responses"))
         self.assertEqual(args[2], {"input": "hello", "reasoning": {"effort": "high"}})
@@ -1789,7 +1785,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         state = _StreamStateService()
         client = self._stream_client(opener, state=state)
-        payload = {"input": "hello", "stream": False, "_ai_provider": "openai"}
+        payload = {"input": "hello", "stream": False}
         deltas = []
         response_ids = []
 
@@ -1800,9 +1796,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(deltas, ["hello"])
         self.assertEqual(response_ids, ["resp_test"])
-        self.assertEqual(
-            payload, {"input": "hello", "stream": False, "_ai_provider": "openai"}
-        )
+        self.assertEqual(payload, {"input": "hello", "stream": False})
         request, kwargs = opened[0]
         self.assertEqual(request.full_url, "https://api.example.test/v1/responses")
         self.assertEqual(

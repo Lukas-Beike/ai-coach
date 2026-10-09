@@ -799,7 +799,7 @@ function updateVoiceButton() {
 
 function chatControlState(input) {
   const configured = state.data?.configured;
-  const aiConfigured = !configured || Boolean(configured.openai || configured.gemini);
+  const aiConfigured = !configured || Boolean(configured.openai);
   const chatReady = Boolean(state.data && Array.isArray(state.data.messages) && aiConfigured);
   const hasDraft = Boolean((state.chatAttachments || []).length || input?.value.trim());
   const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;
@@ -851,7 +851,7 @@ function updateChatControls() {
     // gates the actions that submit the draft.
     input.disabled = false;
     if (!controls.aiConfigured) {
-      input.placeholder = "OpenAI- oder Gemini-API-Schlüssel in Einstellungen konfigurieren…";
+      input.placeholder = "OPENAI_API_KEY in den Server-Einstellungen konfigurieren…";
     } else if (controls.chatReady) {
       input.placeholder = "Frage deinen Coach…";
     } else {
@@ -1424,7 +1424,7 @@ function renderStatus(data) {
   const configured = data.configured;
   const morning = data.morning_checkin || {};
   const missing = [];
-  if (!configured.openai && !configured.gemini) missing.push("OpenAI- oder Gemini-API-Schlüssel");
+  if (!configured.openai) missing.push("OpenAI-API-Schlüssel");
   if (!configured.intervals) missing.push("Intervals.icu-API-Schlüssel");
   const performanceRefresh = data.performance_refresh || {};
   const openaiStatus = data.usage?.status || {};
@@ -3339,26 +3339,6 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   renderAnalysisSegments(state.route);
 }
 
-function renderAiProvider(provider) {
-  if (!provider) return;
-  const select = $("#aiProviderSelect");
-  const currentIds = [...select.options].map((option) => option.value).join(",");
-  const nextIds = (provider.options || []).map((option) => option.id).join(",");
-  if (currentIds !== nextIds) {
-    select.replaceChildren();
-    for (const option of provider.options || []) {
-      const element = document.createElement("option");
-      element.value = option.id;
-      element.textContent = option.label;
-      element.title = option.description || "";
-      select.append(element);
-    }
-  }
-  select.value = provider.selected;
-  const selected = (provider.options || []).find((option) => option.id === provider.selected);
-  $("#aiProviderDescription").textContent = selected?.description || "Der ausgewählte Anbieter erhält den Coach-Kontext.";
-}
-
 function renderModel(model) {
   if (!model) return;
   const select = $("#modelSelect");
@@ -3414,40 +3394,34 @@ function settingsStatus(selector, ok, text) {
   node.className = ok ? "configured" : "not-configured";
 }
 
-function aiProviderName(provider) {
-  return provider === "gemini" ? "Gemini" : "OpenAI";
-}
-
 function aiConnectionLabel(configured, activeError) {
   if (!configured) return "Nicht konfiguriert";
   return activeError ? "Fehler bei letzter Anfrage" : "Konfiguriert";
 }
 
-function aiConnectionConfigurationDetail(provider) {
-  return provider === "gemini" ? "GEMINI_API_KEY nicht konfiguriert" : "API-Schlüssel nicht konfiguriert";
-}
+function aiConnectionConfigurationDetail() { return "OPENAI_API_KEY nicht konfiguriert"; }
 
-function aiConnectionErrorDetail(provider, status) {
-  const message = status.message || aiProviderName(provider) + "-Anfrage fehlgeschlagen.";
+function aiConnectionErrorDetail(status) {
+  const message = status.message || "OpenAI-Anfrage fehlgeschlagen.";
   const updated = status.updated_at ? " · " + formatTime(status.updated_at) : "";
   return message + updated;
 }
 
-function aiConnectionDetail(provider, configured, activeProvider, activeError, status) {
-  if (!configured) return aiConnectionConfigurationDetail(provider);
-  if (activeError) return aiConnectionErrorDetail(provider, status);
-  if (activeProvider === provider && status.state === "ok") return "Letzter erfolgreicher API-Aufruf: " + formatTime(status.updated_at);
-  return "Als alternativer Anbieter konfiguriert";
+function aiConnectionDetail(configured, status) {
+  if (!configured) return aiConnectionConfigurationDetail();
+  if (status.state === "error") return aiConnectionErrorDetail(status);
+  if (status.state === "ok") return "Letzter erfolgreicher API-Aufruf: " + formatTime(status.updated_at);
+  return "OpenAI Responses API";
 }
 
-function renderAiConnection(provider, configured, activeProvider, status) {
-  const activeError = activeProvider === provider && status.state === "error";
+function renderAiConnection(configured, status) {
+  const activeError = status.state === "error";
   const healthy = configured && !activeError;
-  settingsStatus("#" + provider + "ConnectionStatus", healthy, aiConnectionLabel(configured, activeError));
-  const detail = $("#" + provider + "ConnectionDetail");
+  settingsStatus("#openaiConnectionStatus", healthy, aiConnectionLabel(configured, activeError));
+  const detail = $("#openaiConnectionDetail");
   if (detail) {
     detail.classList.toggle("error", Boolean(configured && activeError));
-    detail.textContent = aiConnectionDetail(provider, configured, activeProvider, activeError, status);
+    detail.textContent = aiConnectionDetail(configured, status);
   }
   return healthy;
 }
@@ -3604,9 +3578,9 @@ function renderSettingsSyncControls(data, configured) {
   renderGarminSyncControl(data);
 }
 
-function renderSettingsUsage(data, activeProvider) {
+function renderSettingsUsage(data) {
   const usage = data.usage || {};
-  const providerLabel = activeProvider === "gemini" ? "Gemini" : "OpenAI";
+  const providerLabel = "OpenAI";
   const usageNode = $("#usageSummary");
   if (usageNode) {
     const rateLimits = usage.rate_limits || {};
@@ -3626,28 +3600,26 @@ function garminConnectionLabel(garmin, running) {
   return garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert";
 }
 
-function renderConnectionsSummary(openaiHealthy, geminiHealthy, intervalsHealthy, garminConfigured, weatherConfigured) {
+function renderConnectionsSummary(openaiHealthy, intervalsHealthy, garminConfigured, weatherConfigured) {
   const connections = $("#connectionsSummary");
   if (!connections) return;
-  const values = [["OpenAI", openaiHealthy], ["Gemini", geminiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garminConfigured], ["Open-Meteo", weatherConfigured]];
+  const values = [["OpenAI", openaiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garminConfigured], ["Open-Meteo", weatherConfigured]];
   connections.textContent = values.map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
 }
 
 function renderSettings(data) {
   const configured = data.configured || {};
-  const activeProvider = data.ai_provider?.selected || "openai";
   const status = data.usage?.status || {};
-  const openaiHealthy = renderAiConnection("openai", configured.openai, activeProvider, status);
-  const geminiHealthy = renderAiConnection("gemini", configured.gemini, activeProvider, status);
+  const openaiHealthy = renderAiConnection(configured.openai, status);
   const intervalsHealthy = renderIntervalsConnection(data, configured);
   const garmin = data.garmin || {};
   const garminRunning = Boolean(data.garmin_sync?.running || state.localSync.garmin);
   settingsStatus("#garminConnectionStatus", garmin.configured, garminConnectionLabel(garmin, garminRunning));
   renderWeatherConnection(data.weather || {});
-  renderConnectionsSummary(openaiHealthy, geminiHealthy, intervalsHealthy, garmin.configured, data.weather?.configured);
+  renderConnectionsSummary(openaiHealthy, intervalsHealthy, garmin.configured, data.weather?.configured);
   renderSettingsInputs(data);
   renderSettingsSyncControls(data, configured);
-  renderSettingsUsage(data, activeProvider);
+  renderSettingsUsage(data);
   renderNotificationStatus();
   renderProviderAttention(data);
   renderConnectionsSyncProgress(data);
@@ -3807,7 +3779,6 @@ function render(data) {
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
   renderPerformance(data.performance);
-  renderAiProvider(data.ai_provider);
   renderModel(data.model);
   renderThinkingLevel(data.thinking_level);
   renderDiagnosticCapture(data.diagnostic_capture);
@@ -4242,27 +4213,6 @@ async function saveModel(event) {
   } finally { select.disabled = false; }
 }
 
-async function saveAiProvider(event) {
-  const select = event.currentTarget;
-  select.disabled = true;
-  try {
-    const result = await api("/api/settings/ai-provider", { method: "PUT", body: JSON.stringify({ provider: select.value }) });
-    if (result?.provider && Array.isArray(result.model_options)) {
-      const provider = { ...state.data?.ai_provider, selected: result.provider };
-      const model = { selected: result.model, options: result.model_options };
-      state.data = { ...state.data, ai_provider: provider, model };
-      renderAiProvider(provider);
-      renderModel(model);
-      renderThinkingLevel(state.data.thinking_level);
-    }
-    toast(`Aktiv: ${select.options[select.selectedIndex].text}`);
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    await load();
-  } finally { select.disabled = false; }
-}
-
 async function saveThinkingLevel(event) {
   const select = event.currentTarget;
   select.disabled = true;
@@ -4540,7 +4490,6 @@ $("#coachAdaptivePlanningButton").addEventListener("click", () => askCoach("Prü
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
 $("#modelSelect").addEventListener("change", saveModel);
-$("#aiProviderSelect").addEventListener("change", saveAiProvider);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
@@ -4549,7 +4498,6 @@ $("#logsRefreshButton").addEventListener("click", loadLogs);
 $("#logsDownloadButton").addEventListener("click", downloadServerLogs);
 $("#logsDeleteButton")?.addEventListener("click", deleteServerLogs);
 $("#openaiChatResetButton").addEventListener("click", resetCoachChat);
-$("#chatResetButton").addEventListener("click", resetCoachChat);
 $("#privacyExportButton").addEventListener("click", downloadPrivacyExport);
 $("#privacyDeleteButton").addEventListener("click", deletePrivacyData);
 $("#changeHistoryRefreshButton").addEventListener("click", loadChangeHistory);

@@ -896,7 +896,7 @@ class CoachContextPreviewService:
         self._limits = limits
         self._utc_now = utc_now
 
-    def preview(self, selected_ai_provider: str) -> dict[str, Any]:
+    def preview(self) -> dict[str, Any]:
         """Return the exact user-inspectable preview without mutating state."""
         snapshot = self._sync_state_repository.latest_snapshot()
         last_user_message = next(
@@ -959,9 +959,7 @@ class CoachContextPreviewService:
                 "KI-Anbieter-Konversation: Dialogkontinuität; nicht autoritativ für dauerhafte Athletenfakten",
             ],
             "conversation": {
-                "mode": "Gemini local conversation history"
-                if selected_ai_provider == "gemini"
-                else "Bounded local dialogue with per-command Responses chain",
+                "mode": "Bounded local dialogue with per-command Responses chain",
                 "included_separately": True,
                 "note": "Der bisherige Dialog wird für Kontinuität mitgeführt. Dauerhafte Athletenfakten stammen ausschließlich aus Profil, Wettkämpfen und aktuellem Datensnapshot.",
             },

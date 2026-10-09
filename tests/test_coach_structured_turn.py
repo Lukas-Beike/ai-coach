@@ -27,27 +27,48 @@ class StructuredTurnTests(unittest.TestCase):
         self.response = Mock()
         self.response.respond.return_value = {"output": []}
         self.rounds = Mock()
-        self.rounds.run.return_value = ({"output": []}, 0, "", False, "synthetic-instructions")
+        self.rounds.run.return_value = (
+            {"output": []},
+            0,
+            "",
+            False,
+            "synthetic-instructions",
+        )
         self.outcome = Mock()
         self.outcome.finalize.return_value = ("completed", "synthetic-answer", [])
         self.final = Mock()
         self.final.build.return_value = {"status": "completed"}
-        self.final.persist.return_value = {"status": "completed", "session_key": "private", "text": "synthetic-answer"}
+        self.final.persist.return_value = {
+            "status": "completed",
+            "session_key": "private",
+            "text": "synthetic-answer",
+        }
         self.failure = Mock()
-        self.service = CoachStructuredTurnService(CoachStructuredTurnDependencies(
-            opening=self.opening, attachments=self.attachments, dialogue=self.dialogue,
-            payload=self.payload, response=self.response, rounds=self.rounds,
-            outcome=self.outcome, final_receipt=self.final, failure=self.failure,
-            tools=[{"name": "read_profile"}, {"name": "update_profile"}],
-            read_only_tools=frozenset({"read_profile"}), logger=Mock(),
-            root=Path("synthetic-root"),
-        ))
+        self.service = CoachStructuredTurnService(
+            CoachStructuredTurnDependencies(
+                opening=self.opening,
+                attachments=self.attachments,
+                dialogue=self.dialogue,
+                payload=self.payload,
+                response=self.response,
+                rounds=self.rounds,
+                outcome=self.outcome,
+                final_receipt=self.final,
+                failure=self.failure,
+                tools=[{"name": "read_profile"}, {"name": "update_profile"}],
+                read_only_tools=frozenset({"read_profile"}),
+                logger=Mock(),
+                root=Path("synthetic-root"),
+            )
+        )
 
     def run_turn(self, **kwargs):
         return self.service.run(
-            "synthetic-question", intent={"allow_mutations": False},
-            conversation_id="synthetic-conversation", client_turn_id="synthetic-turn",
-            session_csrf_hash="synthetic-session", ai_provider="openai",
+            "synthetic-question",
+            intent={"allow_mutations": False},
+            conversation_id="synthetic-conversation",
+            client_turn_id="synthetic-turn",
+            session_csrf_hash="synthetic-session",
             **kwargs,
         )
 
@@ -55,31 +76,46 @@ class StructuredTurnTests(unittest.TestCase):
         result = self.run_turn(background_job=True)
 
         self.assertEqual(result, {"status": "completed", "text": "synthetic-answer"})
-        self.assertEqual(self.payload.build.call_args.kwargs["tools"], [{"name": "read_profile"}])
+        self.assertEqual(
+            self.payload.build.call_args.kwargs["tools"], [{"name": "read_profile"}]
+        )
         self.assertTrue(self.response.respond.call_args.kwargs["background_owned"])
-        self.assertEqual(self.rounds.run.call_args.kwargs["state"].session_csrf_hash, "synthetic-session")
+        self.assertEqual(
+            self.rounds.run.call_args.kwargs["state"].session_csrf_hash,
+            "synthetic-session",
+        )
         self.assertEqual(self.final.build.call_args.kwargs["rounds"], 0)
-        self.assertEqual(self.final.persist.call_args.kwargs["ai_provider"], "openai")
+        self.assertNotIn("ai_provider", self.final.persist.call_args.kwargs)
         self.failure.persist.assert_not_called()
 
-    def test_background_checkpoint_restores_exact_request_input_and_previous_id(self) -> None:
-        self.opening.open.return_value.update({
-            "openai_response_id": "response-one", "response_input": [{"synthetic": "input"}],
-            "previous_response_id": "response-before",
-        })
+    def test_background_checkpoint_restores_exact_request_input_and_previous_id(
+        self,
+    ) -> None:
+        self.opening.open.return_value.update(
+            {
+                "openai_response_id": "response-one",
+                "response_input": [{"synthetic": "input"}],
+                "previous_response_id": "response-before",
+            }
+        )
 
         self.run_turn(background_job=True)
 
         submitted = self.response.respond.call_args.args[0]
         self.assertEqual(submitted["input"], [{"synthetic": "input"}])
         self.assertEqual(submitted["previous_response_id"], "response-before")
-        self.assertEqual(self.response.respond.call_args.kwargs["resume_id"], "response-one")
+        self.assertEqual(
+            self.response.respond.call_args.kwargs["resume_id"], "response-one"
+        )
 
     def test_pending_tool_outputs_override_checkpoint_for_restart(self) -> None:
-        self.opening.open.return_value.update({
-            "openai_response_id": "response-one", "response_input": [{"synthetic": "old"}],
-            "pending_tool_outputs": [{"synthetic": "output"}],
-        })
+        self.opening.open.return_value.update(
+            {
+                "openai_response_id": "response-one",
+                "response_input": [{"synthetic": "old"}],
+                "pending_tool_outputs": [{"synthetic": "output"}],
+            }
+        )
 
         self.run_turn(background_job=True)
 
@@ -89,8 +125,13 @@ class StructuredTurnTests(unittest.TestCase):
         self.assertEqual(self.response.respond.call_args.kwargs["resume_id"], "")
 
     def test_failure_persists_safe_receipt_without_session_key(self) -> None:
-        self.response.respond.side_effect = AppError(502, "synthetic outage", reason="provider_unavailable")
-        self.failure.persist.return_value = {"status": "failed", "session_key": "private"}
+        self.response.respond.side_effect = AppError(
+            502, "synthetic outage", reason="provider_unavailable"
+        )
+        self.failure.persist.return_value = {
+            "status": "failed",
+            "session_key": "private",
+        }
 
         result = self.run_turn()
 
@@ -99,23 +140,32 @@ class StructuredTurnTests(unittest.TestCase):
         self.final.persist.assert_not_called()
 
     def test_scope_denial_is_not_projected_as_terminal_failure(self) -> None:
-        self.opening.open.side_effect = AppError(403, "synthetic denial", reason="command_scope_denied")
+        self.opening.open.side_effect = AppError(
+            403, "synthetic denial", reason="command_scope_denied"
+        )
 
         with self.assertRaises(AppError):
             self.run_turn()
 
         self.failure.persist.assert_not_called()
 
-    def test_diagnostics_keep_only_installed_backend_frames_with_split_server_root(self) -> None:
+    def test_diagnostics_keep_only_installed_backend_frames_with_split_server_root(
+        self,
+    ) -> None:
         try:
-            self.service._resume_id(None, {}, ai_provider="openai", background_owned=True)
+            self.service._resume_id(None, {}, background_owned=True)
         except AttributeError as exc:
             metadata = coach_error_metadata(exc, Path("different-server-root"))
         else:
             self.fail("synthetic invalid receipt must raise")
 
         self.assertTrue(metadata["frames"])
-        self.assertTrue(all(frame["file"] == "backend/coach/structured_turn.py" for frame in metadata["frames"]))
+        self.assertTrue(
+            all(
+                frame["file"] == "backend/coach/structured_turn.py"
+                for frame in metadata["frames"]
+            )
+        )
         try:
             raise RuntimeError("synthetic private payload")
         except RuntimeError as exc:

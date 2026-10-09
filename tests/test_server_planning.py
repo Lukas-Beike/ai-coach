@@ -5,7 +5,7 @@ import threading
 import unittest
 import uuid
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from datetime import datetime as _local_datetime
 from unittest.mock import patch
 
@@ -696,7 +696,7 @@ class ServerPlanningTests(ServerTestCase):
         with patch.object(
             server.ATHLETE_CLOCK,
             "now",
-            return_value=datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc),
+            return_value=datetime(2026, 8, 26, 12, 0, tzinfo=UTC),
         ):
             enriched, weekly = activity_calendar_projection.planning_compliance_state(
                 events, activities, today
@@ -1514,7 +1514,7 @@ class ServerPlanningTests(ServerTestCase):
         )
         self.assertEqual(result["status"], "local")
 
-    def test_outstanding_plan_drafts_remain_visible_across_provider_conversations(self):
+    def test_outstanding_plan_drafts_remain_visible_in_openai_conversation(self):
         draft = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {
                 "payload": {
@@ -1531,13 +1531,13 @@ class ServerPlanningTests(ServerTestCase):
                     ],
                 }
             },
-            "gemini-conversation",
-            "gemini-draft",
+            conversation_id="openai-conversation",
+            client_turn_id="draft-turn",
         )
 
         with server.database_manager().unit_of_work() as db:
             server.CHAT_REPOSITORY.add(
-                db, "user", "Synthetic draft request", client_turn_id="gemini-draft"
+                db, "user", "Synthetic draft request", client_turn_id="draft-turn"
             )
         refs = server.COACH_CONVERSATION.dialogue_read_service().artifact_refs()
 

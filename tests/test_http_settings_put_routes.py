@@ -23,22 +23,13 @@ class SettingsPutRoutesTests(unittest.TestCase):
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_called_once_with(200, {"model": "gpt-6-luna"})
 
-    def test_ai_provider_route_passes_provider_field(self) -> None:
-        self.handler.read_json.return_value = {"provider": "gemini"}
-        result = {"provider": "gemini", "model": "gemini-3.8-flash"}
-        self.settings.save_ai_provider.return_value = result
-
-        self.assertTrue(self.routes.handle(self.handler, "/api/settings/ai-provider"))
-
-        self.settings.save_ai_provider.assert_called_once_with("gemini")
-        self.handler.read_json.assert_called_once_with()
-        self.handler.send_json.assert_called_once_with(200, result)
-
     def test_thinking_level_route_passes_thinking_level_field(self) -> None:
         self.handler.read_json.return_value = {"thinking_level": "high"}
         self.settings.save_thinking_level.return_value = {"thinking_level": "high"}
 
-        self.assertTrue(self.routes.handle(self.handler, "/api/settings/thinking-level"))
+        self.assertTrue(
+            self.routes.handle(self.handler, "/api/settings/thinking-level")
+        )
 
         self.settings.save_thinking_level.assert_called_once_with("high")
         self.handler.read_json.assert_called_once_with()
@@ -50,7 +41,9 @@ class SettingsPutRoutesTests(unittest.TestCase):
         result = {"status": "ok", **payload}
         self.settings.save_calendar_display_settings.return_value = result
 
-        self.assertTrue(self.routes.handle(self.handler, "/api/settings/calendar-display"))
+        self.assertTrue(
+            self.routes.handle(self.handler, "/api/settings/calendar-display")
+        )
 
         self.settings.save_calendar_display_settings.assert_called_once_with(payload)
         self.handler.read_json.assert_called_once_with()
@@ -63,7 +56,6 @@ class SettingsPutRoutesTests(unittest.TestCase):
         self.handler.send_json.assert_not_called()
         for save in (
             self.settings.save_model,
-            self.settings.save_ai_provider,
             self.settings.save_thinking_level,
             self.settings.save_calendar_display_settings,
         ):
