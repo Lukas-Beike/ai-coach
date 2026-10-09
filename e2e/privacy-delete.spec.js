@@ -1,7 +1,9 @@
 const { test, expect } = require("@playwright/test");
 
-// Runs only in the desktop project (no @responsive tag). CI uses a fresh
-// disposable container per spec, so the local deletion is safe there.
+// Desktop-only spec. CI uses a fresh disposable container per spec, so the
+// local deletion is safe there. Deleting local data also removes the login
+// sessions, so a retry would start logged out and is disabled.
+test.describe.configure({ retries: 0 });
 const REQUIRED_TEXT = "LOKALE DATEN LÖSCHEN";
 
 test.beforeEach(async ({ page }) => {
@@ -41,6 +43,7 @@ test("local data deletion requires the exact confirmation text", async ({ page }
   await expect(accept).toBeEnabled();
 
   await accept.click();
-  await expect(page.locator("#privacyDeleteResult")).toBeVisible();
   await expect(page.locator("#privacyDeleteResult")).toContainText("Lokale Datenklassen gelöscht");
+  // The deleted sessions end the current login; the app must return to the login dialog.
+  await expect(page.locator("#loginDialog")).toBeVisible();
 });

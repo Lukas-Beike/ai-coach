@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
 from backend.errors import AppError
@@ -19,8 +20,8 @@ except ImportError:
 
 
 class PrivacyDeleteConfirmationTests(unittest.TestCase):
-    def service(self) -> tuple[PrivacyDeleteService, PrivacyDeleteDependencies]:
-        dependencies = PrivacyDeleteDependencies(
+    def service(self) -> tuple[PrivacyDeleteService, SimpleNamespace]:
+        mocks = SimpleNamespace(
             database_manager=MagicMock(),
             database_lock=MagicMock(),
             key_value_repository=Mock(),
@@ -29,7 +30,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
             openai_client=Mock(),
             logger=Mock(),
         )
-        return PrivacyDeleteService(dependencies), dependencies
+        return PrivacyDeleteService(PrivacyDeleteDependencies(**vars(mocks))), mocks
 
     def test_missing_or_wrong_confirmation_fails_before_any_dependency_access(
         self,
@@ -91,7 +92,7 @@ class PrivacyDeleteDialogTextContractTests(unittest.TestCase):
             privacy_source,
             re.MULTILINE,
         )
-        self.assertIsNotNone(match)
+        assert match is not None
         self.assertEqual(match.group(1), "LOKALE DATEN LÖSCHEN")
         self.assertIn(
             '"confirmation_text": PRIVACY_DELETE_CONFIRMATION_TEXT',

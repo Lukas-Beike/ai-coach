@@ -2480,38 +2480,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 42,
-      "column": 16,
-      "code": "attr-defined",
-      "message_sha256": "f622591e2284b138b9ba2b223afcc1cef97c2ec78ad49ac8fba396e89b713a30"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 43,
-      "column": 16,
-      "code": "attr-defined",
-      "message_sha256": "f622591e2284b138b9ba2b223afcc1cef97c2ec78ad49ac8fba396e89b713a30"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 44,
-      "column": 16,
-      "code": "attr-defined",
-      "message_sha256": "2feef7cab6d05912db10ca627424a13f8ad67eac255768de8ce6d8c331173ffd"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 45,
-      "column": 16,
-      "code": "attr-defined",
-      "message_sha256": "125b93d5dd07a8ffe046f2cbcfebbe292937602a2d01b2ed711cbaac5da61c7c"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_coach_structured_tool_round.py",
       "line": 249,
       "column": 20,
@@ -2549,14 +2517,6 @@
       "column": 25,
       "code": "attr-defined",
       "message_sha256": "6894ca72a82864efd4dfd27c3771f0a621eec6084e87ce8d26dc3d7e29294744"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 67,
-      "column": 25,
-      "code": "attr-defined",
-      "message_sha256": "f099f627502ff19992e31dbb46ffbd99a2a93cb12680f88cbc2ed230f4ea12bb"
     },
     {
       "tool": "mypy",
@@ -2688,22 +2648,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 51,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "891ce020204abd0c04f7c21f44ee66e3010d9abe0ad8bc49ab20d4e6d7a40fda"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 52,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "172427f12d5c1839aae8337fbe84d9727f6a576f13b81210f30848b1ce255f08"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_public_plan.py",
       "line": 52,
       "column": 8,
@@ -2797,22 +2741,6 @@
       "column": 8,
       "code": "attr-defined",
       "message_sha256": "ef80729f7310b16af09639f74441883507a504188243d57e84dbfab30c99c9a7"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 66,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "011b0c081f88b5bde99586f77a5fd5615099d2e63e56ea04ee028cf34e0a65f4"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 68,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "90269da446c5c8b234b977f2419b0e385b423410774d7a2f7608b0db2c77812e"
     },
     {
       "tool": "mypy",
