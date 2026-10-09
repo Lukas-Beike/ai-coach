@@ -326,6 +326,11 @@ class Redactor:
         redacted = re.sub(
             r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted
         )
+        # Legacy Gemini keys can still sit in a preserved .env; keep the
+        # provider-independent signature redacted after the adapter is gone.
+        redacted = re.sub(
+            r"\bAIza[A-Za-z0-9_-]{20,}\b", "[REDACTED_GEMINI_KEY]", redacted
+        )
         redacted = re.sub(
             r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+",
             r"\1" + _REDACTED,

@@ -31,6 +31,15 @@ def _redactor() -> Redactor:
     return Redactor(lambda: config)
 
 
+class LegacyGeminiRedactionTests(unittest.TestCase):
+    def test_retired_gemini_key_signature_stays_redacted(self) -> None:
+        legacy_key = "AIza" + "x" * 35
+        redacted = _redactor().redact_text(f"legacy key {legacy_key} in log")
+
+        self.assertNotIn(legacy_key, redacted)
+        self.assertIn("[REDACTED_GEMINI_KEY]", redacted)
+
+
 class RecentLogEntriesServiceTests(unittest.TestCase):
     def test_missing_file_returns_empty_list(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

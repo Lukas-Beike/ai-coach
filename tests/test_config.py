@@ -69,6 +69,13 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.port, 8090)
         self.assertEqual(config.app_password, "process")
 
+    def test_blank_openai_base_url_uses_documented_default(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = load_config(root, root, {"OPENAI_BASE_URL": "  "})
+
+        self.assertEqual(config.openai_base_url, "https://api.openai.com/v1")
+
     def test_security_error_order_and_success(self):
         config = Config(
             8090,

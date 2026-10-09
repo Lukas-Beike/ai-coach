@@ -208,7 +208,7 @@ def load_config(
         port=_env_int(target, "PORT", 8090),
         openai_api_key=value("OPENAI_API_KEY", ""),
         openai_base_url=validated_openai_base_url(
-            value("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL)
+            value("OPENAI_BASE_URL", "").strip() or DEFAULT_OPENAI_BASE_URL
         ),
         openai_model=value("OPENAI_MODEL", "gpt-6-luna"),
         intervals_api_key=value("INTERVALS_API_KEY", ""),
