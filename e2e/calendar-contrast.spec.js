@@ -36,3 +36,32 @@ test("@responsive completed calendar sports meet AA contrast in both themes", as
     expect(results.incomplete).toEqual([]);
   }
 });
+
+test("@responsive coach planning notice meets AA contrast at rest and on hover in both themes", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
+  await page.goto("/#coach");
+  await page.waitForFunction(() => state.initialStateLoaded);
+  await page.evaluate(async () => { await AppRouter.navigate("coach", { historyMode: "replace" }); });
+  const notice = page.locator("#coachAdaptivePlanningNotice");
+  // The notice is shown only when the fixture needs a replan; reveal it with its real caption for the contrast check.
+  await page.evaluate(() => {
+    const element = document.querySelector("#coachAdaptivePlanningNotice");
+    element.hidden = false;
+    const detail = element.querySelector("small");
+    if (detail && !detail.textContent) detail.textContent = "Ein zukünftiger Entwurf braucht eine Anpassung. Bitte den Coach um die Anpassung.";
+  });
+  await expect(notice).toBeVisible();
+  for (const theme of ["dark", "light"]) {
+    await page.evaluate((selected) => { document.documentElement.dataset.theme = selected; }, theme);
+    await page.mouse.move(0, 0);
+    // Axe reports the coach button as "incomplete" because the chat background behind the notice is a gradient;
+    // only violations are asserted here, and the colour pairs are enforced by tests/test_css_design_tokens.py.
+    const rest = await new AxeBuilder({ page }).include("#coachAdaptivePlanningNotice").withRules(["color-contrast"]).analyze();
+    expect(rest.violations).toEqual([]);
+    await notice.locator("button").hover();
+    await page.waitForTimeout(250); // let the button's background transition (.16s) finish before axe reads colours
+    const hovered = await new AxeBuilder({ page }).include("#coachAdaptivePlanningNotice").withRules(["color-contrast"]).analyze();
+    expect(hovered.violations).toEqual([]);
+  }
+});
