@@ -123,15 +123,17 @@ jobs:
                 ]);
                 const native = allComments.filter(item => bots.has(item.user?.login) &&
                   (recent(item) || (fallbackAt && Date.parse(item.created_at) >= fallbackAt)));
+                const nativeReviews = [...reviews, ...inline].filter(item => bots.has(item.user?.login) &&
+                  (recent(item) || (fallbackAt && activityTime(item) >= fallbackAt)));
                 const reviewEvidence = reviews.some(item => bots.has(item.user?.login) &&
                   item.commit_id === head && item.submitted_at) ||
                   inline.some(item => bots.has(item.user?.login) && item.commit_id === head && recent(item));
-                if (reviewEvidence) return 'active';
-                const limit = /(?:usage limits for code reviews|reached (?:your )?Codex usage limits)/i;
-                const blocked = /(?:blocked:|could not safely inspect|secret scanner|unable to (?:read|review|inspect)|review unavailable)/i;
-                if (native.some(item => limit.test(item.body || '') &&
+                const limit = /(?:usage limits? for code reviews?|(?:reached|exhausted|exceeded|hit)\s+(?:your\s+)?(?:Codex\s+)?usage limits?|(?:Codex\s+)?(?:usage|review)\s+(?:limits?|quota)\s+(?:has been\s+)?(?:reached|exhausted|exceeded))/i;
+                if ([...native, ...nativeReviews].some(item => limit.test(item.body || '') &&
                     (!fallbackAt || activityTime(item) >= fallbackAt))) return 'limit';
-                if (native.some(item => blocked.test(item.body || '') &&
+                if (reviewEvidence) return 'active';
+                const blocked = /(?:blocked:|could not safely inspect|secret scanner|unable to (?:read|review|inspect)|review unavailable)/i;
+                if ([...native, ...nativeReviews].some(item => blocked.test(item.body || '') &&
                     (!fallbackAt || activityTime(item) >= fallbackAt))) return 'blocked';
                 if (!fallbackAt && native.length > 0) return 'active';
                 if (native.some(item => /(?:^Codex Review:|<!-- codex-pull-request-review-summary -->)/m.test(item.body || ''))) return 'active';
