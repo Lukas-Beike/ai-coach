@@ -6,7 +6,6 @@ import ast
 import threading
 import unittest
 from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
 from backend.errors import AppError, public_error_contract
@@ -21,7 +20,11 @@ from backend.sync.full_resync import (
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.refresh import ProviderRefreshTracker, retry_at, sync_job_error_class
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+try:
+    from .architecture_registry import BACKEND_ROOT
+except ImportError:
+    from architecture_registry import BACKEND_ROOT
+
 NOT_CONFIGURED_CONSTANTS = frozenset(
     {"INTERVALS_API_KEY_ERROR", "OPENAI_API_KEY_ERROR", "GARMIN_NOT_CONFIGURED_ERROR"}
 )
@@ -177,14 +180,14 @@ class NotConfiguredReasonContractTests(unittest.TestCase):
     def test_every_provider_not_configured_app_error_declares_reason(self):
         sites: list[str] = []
         violations: list[str] = []
-        for source in sorted((REPOSITORY_ROOT / "backend").rglob("*.py")):
+        for source in sorted(BACKEND_ROOT.rglob("*.py")):
             tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
             for node in ast.walk(tree):
                 if not _is_app_error_call(node) or len(node.args) < 2:
                     continue
                 if not _is_not_configured_message(node.args[1]):
                     continue
-                location = f"{source.relative_to(REPOSITORY_ROOT)}:{node.lineno}"
+                location = f"{source.relative_to(BACKEND_ROOT.parent)}:{node.lineno}"
                 sites.append(location)
                 if not _declares_not_configured_reason(node):
                     violations.append(location)
