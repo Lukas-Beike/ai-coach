@@ -1160,15 +1160,14 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   #chatPanel { padding-bottom: var(--composer-offset); }
   #chatPanel .composer { bottom: var(--composer-offset); }
   /* Opaque backdrop from the composer's lower edge down to the bottom navigation. */
+  /* border-image-outset bleeds to the viewport edges as ink overflow, so the composer gains no scrollable width. */
   #chatPanel .composer::after {
     position: absolute;
     top: 100%;
-    left: 50%;
-    width: 100vw;
+    inset-inline: 0;
     height: var(--composer-offset);
-    background: var(--bg);
+    border-image: linear-gradient(var(--bg), var(--bg)) fill 0 / / 0 100vw;
     content: "";
-    transform: translateX(-50%);
     pointer-events: none;
   }
 }
