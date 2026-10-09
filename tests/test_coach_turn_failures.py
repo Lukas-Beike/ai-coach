@@ -169,6 +169,7 @@ class CoachTurnFailureTests(unittest.TestCase):
     def test_openai_configuration_failure_explanation(self) -> None:
         for reason, expected in (
             ("openai_not_configured", "OpenAI ist nicht konfiguriert"),
+            ("not_configured", "OpenAI ist nicht konfiguriert"),
         ):
             status, text, _, _ = self.service._base_response(
                 AppError(503, "not configured", reason=reason), []

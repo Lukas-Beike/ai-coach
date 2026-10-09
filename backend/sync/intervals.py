@@ -712,7 +712,7 @@ class IntervalsSyncService:
         cancel_event: threading.Event | None,
     ) -> dict[str, Any]:
         if not self._config.intervals_api_key:
-            raise AppError(503, INTERVALS_API_KEY_ERROR)
+            raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
         if activity_days is None:
             activity_days = self._workflow.sync_period()
         self._raise_if_cancelled(cancel_event)

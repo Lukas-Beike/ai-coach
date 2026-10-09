@@ -63,7 +63,7 @@ class AudioTranscriptionClient:
             )
 
         if not self.openai_api_key:
-            raise AppError(503, OPENAI_API_KEY_ERROR)
+            raise AppError(503, OPENAI_API_KEY_ERROR, reason="not_configured")
         body, multipart_type = provider_http.multipart_form_data(
             [
                 ("model", self.openai_transcription_model),

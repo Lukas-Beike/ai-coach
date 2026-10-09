@@ -63,7 +63,7 @@ class SelectedWorkoutSyncService:
 
     def _sync_unlocked(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self._config.intervals_api_key:
-            raise AppError(503, INTERVALS_API_KEY_ERROR)
+            raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
         requested = planning_library.library_bulk_request_entries(
             payload.get("entries"), require_hash=True
         )

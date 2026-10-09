@@ -461,7 +461,7 @@ class CompetitionSyncService:
         expected_manifest: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         if not self._config.intervals_api_key:
-            raise AppError(503, INTERVALS_API_KEY_ERROR)
+            raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
         if not self._competition_lock.acquire(blocking=False):
             return {"status": "already_running"}
 

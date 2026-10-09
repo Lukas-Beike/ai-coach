@@ -550,7 +550,11 @@ class GarminFixtureLoader:
     def load(self, days: int) -> dict[str, Any]:
         path = self.path()
         if path is None:
-            raise AppError(503, "GARMIN_FIXTURE_PATH ist nicht konfiguriert.")
+            raise AppError(
+                503,
+                "GARMIN_FIXTURE_PATH ist nicht konfiguriert.",
+                reason="not_configured",
+            )
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError as exc:

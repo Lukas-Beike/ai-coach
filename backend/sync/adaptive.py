@@ -83,7 +83,7 @@ class IllnessPauseSyncService:
 
     def sync(self, pause: dict[str, Any]) -> dict[str, Any]:
         if not self._config.intervals_api_key:
-            raise AppError(503, INTERVALS_API_KEY_ERROR)
+            raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
 
         illness = str(pause.get("illness") or "Krankheit").strip()[
             : CHECKIN_TEXT_LIMITS["illness"]

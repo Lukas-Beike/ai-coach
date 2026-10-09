@@ -229,7 +229,7 @@ class OpenAIResponsesClient:
 
     def _require_api_key(self) -> None:
         if not self.api_key:
-            raise AppError(503, OPENAI_API_KEY_ERROR)
+            raise AppError(503, OPENAI_API_KEY_ERROR, reason="not_configured")
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}"}

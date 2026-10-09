@@ -52,7 +52,11 @@ class IntervalsNutritionSyncService:
         revision = summary.pop("sync_revision")
         athlete = self._athlete_id
         if not athlete:
-            raise AppError(400, "Intervals Athlete-ID ist nicht konfiguriert.")
+            raise AppError(
+                400,
+                "Intervals Athlete-ID ist nicht konfiguriert.",
+                reason="not_configured",
+            )
 
         payload: dict[str, Any] = {
             "id": meal_date,

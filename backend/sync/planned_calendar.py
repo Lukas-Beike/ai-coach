@@ -192,7 +192,7 @@ class PlannedCalendarSyncService:
 
     def _require_calendar_access(self) -> None:
         if not self._config.intervals_api_key:
-            raise AppError(503, INTERVALS_API_KEY_ERROR)
+            raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
 
     def _event_payload(
         self, normalized_id: str, workout: dict[str, Any]

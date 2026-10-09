@@ -482,7 +482,9 @@ class GarminSyncService:
                 "GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist "
                 "nicht konfiguriert."
             )
-            self._configuration_error("not_configured", message, message)
+            self._configuration_error(
+                "not_configured", message, message, reason="not_configured"
+            )
 
         self._raise_if_cancelled(cancel_event)
         if not self._coordination.acquire():
@@ -581,11 +583,16 @@ class GarminSyncService:
         )
 
     def _configuration_error(
-        self, log_reason: str, stored_message: str, public_message: str
+        self,
+        log_reason: str,
+        stored_message: str,
+        public_message: str,
+        *,
+        reason: str | None = None,
     ) -> None:
         self._lifecycle_state.log_configuration_skip(log_reason)
         self._state_service.persist_error(stored_message, "configuration")
-        raise AppError(503, public_message)
+        raise AppError(503, public_message, reason=reason)
 
     def _record_failure(self, operation_id: str, reason: str, error: Exception) -> None:
         if isinstance(error, AppError) and error.reason == "chat_cancelled":
