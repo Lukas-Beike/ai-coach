@@ -68,7 +68,7 @@ function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGenerati
   payload.state_versions = { ...state.data?.state_versions };
   for (const area of appliedAreas) {
     if (area === "chat" && chatGeneration !== state.chatGeneration) continue;
-    const versionKeys = { feedback: ["checkins", "activity_feedback"], performance: ["performance", "garmin"] }[area] || [area];
+    const versionKeys = { feedback: ["checkins", "activity_feedback"], performance: ["performance", "garmin", "activities"] }[area] || [area];
     for (const key of versionKeys) {
       if (bootstrap.state_versions?.[key] !== undefined) payload.state_versions[key] = bootstrap.state_versions[key];
     }
