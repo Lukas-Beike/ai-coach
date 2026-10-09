@@ -18,6 +18,13 @@ Intervals Coach is intentionally standalone and designed for operation on a trus
 - **Zero Cloud Telemetry**: Biometric data, activity recordings, API keys, database keys, and athlete conversations never leave the host server, except when sending sanitized coaching prompts to the user's selected AI provider.
 - **Standard-Library Foundation**: The backend runs on Python's native `http.server` without heavyweight web frameworks. Application logic is modularized under `backend/`, keeping `server.py` strictly as a composition root.
 
+The backend import contract is layered: `athlete` is below `weather`, and
+`calendar` is below `activities`, which is below `performance`, which is below
+`planning`. `http_api` owns HTTP transport and route assembly, `coach` owns
+Coach workflows, `sync` owns synchronization and scheduling, `providers` owns
+external adapters, and `db` owns persistence. The AST layer tests enforce this
+order and the package-cycle fixture is empty.
+
 ---
 
 ## Release and Database Compatibility
@@ -177,14 +184,22 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 |                                              v                                            |
 |  +-------------------------------------------------------------------------------------+  |
 |  | backend/ Domain Layer                                                               |  |
-|  |   - backend.http_api  : Request routing, JSON/multipart parsing, session cookies     |  |
-|  |   - backend.coach     : AI turn queue, context builder, 39 Coach tools, SSE          |  |
-|  |   - backend.sync      : Background scheduler, Intervals.icu, Garmin, Weather, ICS   |  |
-|  |   - backend.activities: Activity matching, duplicate detection, feedback tracking   |  |
-|  |   - backend.planning  : Workout units, templates, atomic changesets, revision locks |  |
-|  |   - backend.weather   : Open-Meteo client, ICON-D2/ECMWF forecast models, windows   |  |
-|  |   - backend.backup    : Export, validation, pre-restore snapshots, maintenance gate |  |
-|  |   - backend.db        : Repositories, transaction locks, SQLCipher connection pool   |  |
+|  |   - backend.http_api  : HTTP routing and request/response transport                 |  |
+|  |   - backend.coach     : Coach conversations, context, tools, jobs and SSE           |  |
+|  |   - backend.sync      : Provider synchronization, scheduling and durable jobs       |  |
+|  |   - backend.providers : External provider adapters and response handling            |  |
+|  |   - backend.athlete   : Profile, check-ins and athlete-local time                  |  |
+|  |   - backend.activities: Activity reads, matching, feedback and workout projections  |  |
+|  |   - backend.performance: Derived/readiness context and chart history                |  |
+|  |   - backend.planning  : Plans, library, workouts, conflicts and season preparation  |  |
+|  |   - backend.weather   : Weather projections and caching                              |  |
+|  |   - backend.calendar  : Public/external calendar data                                |  |
+|  |   - backend.nutrition : Nutrition entries, templates and product workflows          |  |
+|  |   - backend.backup    : Export, validation and restore workflows                    |  |
+|  |   - backend.diagnostics: Safe diagnostics and logging views                         |  |
+|  |   - backend.history   : Change history and undo                                      |  |
+|  |   - backend.runtime   : Lifecycle and maintenance state                              |  |
+|  |   - backend.db        : Repositories, schema and SQLCipher persistence              |  |
 |  +-------------------------------------------+-----------------------------------------+  |
 |                                              |                                            |
 |                                              v                                            |
@@ -205,6 +220,21 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 |  - Plan Uploads  |         |   - Health Totals  |         |  - Life Calendars  |
 +------------------+         +--------------------+         +--------------------+
 ```
+
+The browser client is a plain JavaScript PWA. `app.js` bootstraps the client;
+`auth.js` owns login, session, confirmation, and app-shell loading; `shared.js`
+owns generic helpers and cross-view UI state; `sync-status.js` owns sync,
+connectivity, provider freshness, and progress state; and `sync-actions.js`
+owns refresh actions. `notifications.js` owns notification permission,
+notifications, and service-worker registration. `performance-view.js` owns
+performance, Garmin, and editable metrics; `diagnostics.js` owns change
+history, logs, and diagnostic capture; and `settings.js` owns profile,
+check-ins, model and calendar settings, backups, and privacy actions. The
+remaining modules own their named domains: `api.js`, `navigation.js`,
+`state.js`, `state-loader.js`, `views.js`, `plan-views.js`, `coach.js`,
+`analysis.js`, `activity-details.js`, `nutrition.js`, `forms.js`,
+`components.js`, and `appearance.js`. The service worker owns the offline
+asset cache.
 
 ---
 
@@ -372,12 +402,12 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). Complete the initial 
 ## Loading, Synchronization & Job Architecture
 
 ### Background Scheduling Engine
-- **Startup Sync**: On container launch, the backend initializes the database, spins up background worker threads, and triggers an initial synchronization across all configured providers.
-- **Hourly Provider Cycle**: Checks for updated calendar events, refreshed weather forecasts, and new Intervals.icu completed activities.
+- **Startup**: On launch, `server.py` composes configuration, persistence, providers, HTTP routes and workers; startup initializes the database and enqueues configured refreshes.
+- **Hourly Provider Cycle**: The scheduler loop wakes every 300 seconds. Calendar, Garmin and Intervals refreshes become eligible once their latest attempt or success is at least 3,600 seconds old; weather refreshes are queued on a pass when a location is configured and no weather job is active.
 - **Garmin Recent History**: Manual activity synchronization defaults to 84 days for both providers. Automatic Garmin synchronization first loads 84 days of activities, sleep, HRV, daily statistics and resting heart rate where supported. Subsequent hourly refreshes normally read today and yesterday. Successfully read continuous date windows are retained per collection; failed collections do not advance their coverage. After an outage, refreshes catch up from the oldest collection endpoint with overlap, bounded to 90 days per request. Historical activity backfills do not advance recovery coverage.
 - **Analysis Coverage**: Charts expose the number of available dated values; recovery charts show measured days and prior nights in the 42-day personal baseline. Training focus shows locally known Garmin sessions and their observation dates. Missing measurements and recordings remain unknown, never confirmed zeros or rest days.
-- **Daily Synchronization Loop**: Runs daily at 03:00 UTC (or configured local time) to pull comprehensive activity files, update rolling fitness metrics, and schedule the day's training agenda.
-- **On-Demand Refreshes**: Triggered immediately whenever the athlete clicks **Synchronisieren** in the More tab or when requested by the Coach.
+- **Periodic Synchronization Loop**: Each loop pass enqueues eligible calendar, Garmin and Intervals refresh jobs and runs the morning Body Battery refresh. The loop uses the athlete's local clock for provider freshness markers; there is no fixed 03:00 daily run.
+- **On-Demand Refreshes**: The UI and Coach can enqueue provider, calendar, weather and performance refresh work through the documented API routes.
 
 ### Priority Queue & Durable Job Processing
 Conversational turns are persisted in `coach_commands`; provider synchronization and background work use durable jobs in `sync_jobs`.
@@ -526,6 +556,8 @@ Because native Windows environments often lack compatible pre-compiled wheels fo
 ### Testing & Quality Assurance
 
 The [Coach dialogue evaluation rubric](docs/coach-dialogue-evaluation.md) and [executable tool coverage matrix](docs/coach-tool-coverage.md) describe the current conversation and tool checks.
+
+The current HTTP route inventory is in [docs/api-routes.md](docs/api-routes.md).
 
 #### Native Python Unit Tests
 Run standard unit tests with temporary in-memory fixtures (mocking external providers):

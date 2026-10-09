@@ -692,7 +692,7 @@ class ServerCoachTests(ServerTestCase):
 
     def test_activity_feedback_remains_coach_managed_without_history_tab(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
-        app = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+        app = (server.PUBLIC_DIR / "sync-status.js").read_text(encoding="utf-8")
         backend = Path(server.__file__).read_text(encoding="utf-8")
         self.assertNotIn('id="feedbackForm"', markup)
         self.assertNotIn("Lokales Athleten-Feedback", markup)

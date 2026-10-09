@@ -10,9 +10,17 @@ Jedes Arbeitspaket liefert einen nutzbaren Ablauf mit Backend, HTTP/API, Coach-A
 
 ## Geprüfte Grundlage
 
+### Aktueller Status
+
+Die Pakete enthalten eine Mischung aus umgesetzten Abläufen und offenen
+Erweiterungen. Analyse-UI und Analyse-API, Aktivitäts-Lesewerkzeuge sowie
+Athleten-Record-Werkzeuge sind im aktuellen Baum vorhanden. Die frühere
+pauschale Aussage, Pakete 6, 8, 9 und 10 hätten noch keine Oberfläche oder
+Coach-Anbindung, gilt daher nicht mehr; offene Punkte stehen einzeln unten.
+
 | Bereich | Bereits vorhanden | Konsequenz für die Umsetzung |
 | --- | --- | --- |
-| Analyse | SVG-Diagramme für Belastung/Form, Leistungsentwicklung und Erholung; datierte Backend-Historie, 14-Tage-/12-Wochen-Darstellung und Wochenbericht | `public/analysis.js` und `backend/performance/chart_history.py` erweitern; bestehende Diagramme und Zeitraumwahl für Body weiterverwenden |
+| Analyse | SVG-Diagramme für Belastung/Form, Leistungsentwicklung und Erholung; datierte Backend-Historie, 14-Tage-/12-Wochen-Darstellung und Wochenbericht | Bestehende Analyse-UI, `backend/http_api/analysis.py` und `backend/performance/chart_history.py` prüfen; neue Lücken separat planen |
 | Kalender | Geplante und absolvierte Einheiten, konservative Paarung und Soll-Ist-Vergleich nach Belastung oder Dauer | Aktivitätsdetails aus dem Kalender öffnen; der entfernte Verlauf-Tab bleibt entfernt |
 | Detaildaten | `backend/sync/activity_details.py` lädt bereits Aktivitätsdetails, Streams und Intervalle; `ActivityReadService.detail` liefert lokale Details und Cache-Verfügbarkeit | Vorhandenen gezielten Detail-Sync um Bestleistungen, Intervallstatistik und Kontext ergänzen |
 | Intervals-Sync | `IntervalsSnapshotReader.fetch_snapshot` lädt Aktivitäten, Wellness, Events und Athletenwerte | Gezielte Detailabfragen über den bestehenden Sync ergänzen; Listenabrufe garantieren keine vollständigen Zeitreihen |
@@ -357,7 +365,7 @@ Worker: gpt-6-luna, Reasoning high; Prüfung und Übernahme durch den Orchestrat
 | Paket 5b: Garmin-Tagesverbrauch | Lokal umgesetzt und geprüft |
 | Paket 12: Archiv und Lebensdauerbalken | Gemeldete Fehler lokal behoben; weitere Zuordnungsfunktionen bleiben geplant |
 | Standard-Testdaten | Versionierte synthetische Fixture, idempotenter Seed und Upgrade |
-| Zusätzliche API-Features | Bewerteter Backlog; noch keine Umsetzung |
+| Zusätzliche API-Features | Bewerteter Backlog; nicht jede geplante Funktion ist umgesetzt |
 
 Abnahme: 3.308 Unit-Tests (16 übersprungen), 11 SQLCipher-Migrationsprüfungen, sechs Standard-Fixture-Tests sowie Body-, Ernährungs- und Ausrüstungs-Browserabläufe auf 320 px, 390 px und Desktop. PWA-Offline- und Markdown-Verträge bestanden. Ruff, gezieltes mypy, Syntaxprüfung und Docker-Build bestanden. Die Vorschau läuft lokal auf http://127.0.0.1:8091 in der mobilen Ansicht. Keine PR, Veröffentlichung oder produktive Bereitstellung wurde ausgelöst.
 

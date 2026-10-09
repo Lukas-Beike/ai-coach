@@ -65,10 +65,12 @@ private VPN; it must not be exposed directly to the public internet.
 - `backend/`: owns application logic. New business logic and use-case
   orchestration must live in the appropriate domain module here, never in
   `server.py`. Use `coach/` for Coach workflows, `planning/` for training-plan
-  changes, `sync/` for synchronization and scheduling, `providers/` for external
-  service adapters, `db/` for persistence, `http_api/` for HTTP handling,
+  changes and season preparation, `sync/` for synchronization and scheduling,
+  `providers/` for external service adapters, `db/` for persistence, `http_api/`
+  for HTTP handling and route assembly (including `athlete_assembly.py`),
   `backup/` for backup/export workflows, `athlete/` for profile/check-ins and
-  athlete-local time, `activities/` for activity feedback and reads,
+  athlete-local time, `activities/` for activity feedback, reads, workout
+  profiles and workout text,
   `calendar/` for public/external calendar data, `diagnostics/` for safe
   diagnostics, `history/` for change history and undo, `nutrition/` for
   nutrition workflows, `performance/` for derived/readiness context,
