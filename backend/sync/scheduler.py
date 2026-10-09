@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -305,7 +306,7 @@ class StartupSyncScheduler:
             return None
         try:
             resume_end = (
-                date.fromisoformat(str(cursor)[:10]) - timedelta(days=1)
+                date.fromisoformat(iso_date_prefix(str(cursor))) - timedelta(days=1)
                 if cursor
                 else None
             )

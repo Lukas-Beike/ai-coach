@@ -32,7 +32,8 @@ class CoachPlanningReadSources:
 
 @dataclass(frozen=True)
 class CoachReadToolPolicy:
-    nutrition_service: Callable[[], Any]
+    nutrition_diary: Callable[[], Any]
+    nutrition_meal_library: Callable[[], Any]
     training_change_limit: Callable[[], int]
     context_service: Callable[[], Any] | None = None
 
@@ -67,7 +68,8 @@ class CoachReadToolsAssembly:
         self._change_history_service = planning.change_history_service
         self._competition_service = planning.competition_service
         self._training_plan_service = planning.training_plan_service
-        self._nutrition_service = policy.nutrition_service
+        self._nutrition_diary = policy.nutrition_diary
+        self._nutrition_meal_library = policy.nutrition_meal_library
         self._training_change_limit = policy.training_change_limit
         self._context_service = policy.context_service
 
@@ -91,6 +93,7 @@ class CoachReadToolsAssembly:
             self._competition_service,
             self._training_plan_service,
             self._training_change_limit(),
-            self._nutrition_service,
+            self._nutrition_diary,
+            self._nutrition_meal_library,
             self._context_service,
         )

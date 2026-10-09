@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import local as calendar_local
 from backend.coach.context_selection import CONTEXT_SECTIONS, CoachContextSelection
 from backend.coach.conversation import CoachMessageService
@@ -193,7 +194,9 @@ def future_coach_planned_workouts(
     for event in events:
         if not isinstance(event, dict):
             continue
-        raw_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+        raw_date = iso_date_prefix(
+            str(event.get("start_date_local") or event.get("date") or "")
+        )
         try:
             event_date = date.fromisoformat(raw_date)
         except ValueError:

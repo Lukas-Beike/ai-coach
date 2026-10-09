@@ -1,9 +1,6 @@
-"""Training report coverage, historical zones and immutable archive contracts."""
+"""Training report coverage and historical zone contracts."""
 
-import sqlite3
-import tempfile
 import unittest
-from contextlib import contextmanager
 from datetime import date
 from unittest.mock import Mock
 
@@ -13,7 +10,6 @@ from backend.performance.report_service import (
     TrainingDerivedReadService,
     TrainingProfileSelectionService,
     TrainingRecordsService,
-    TrainingReportArchiveService,
     TrainingReportReadService,
     TrainingSeasonReadService,
 )
@@ -384,56 +380,6 @@ class TrainingReportTests(unittest.TestCase):
         self.assertEqual(1, result["planning"]["completed"])
         self.assertEqual(20, result["planning"]["load"]["value"])
 
-    def test_archive_is_immutable_idempotent_and_revised_data_gets_new_version(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        db = sqlite3.connect(f"{directory.name}/reports.sqlite")
-        db.row_factory = sqlite3.Row
-        self.addCleanup(db.close)
-        db.execute("CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)")
-
-        class Manager:
-            @contextmanager
-            def unit_of_work(self):
-                with db:
-                    yield db
-
-        snapshot = {"synced_at": "first", "recent_activities": []}
-        report = TrainingReportReadService(
-            read_snapshot=lambda: snapshot,
-            read_plan=dict,
-            read_checkins=list,
-            read_feedback=list,
-            today=lambda: date(2026, 10, 2),
-        )
-        archive = TrainingReportArchiveService(
-            database_manager=Manager(),
-            read_report=report.read,
-            utc_now=lambda: "2026-10-02T00:00:00Z",
-        )
-        initial = archive.archive({})
-        self.assertEqual(initial["report_id"], archive.archive({})["report_id"])
-        snapshot["synced_at"] = "second"
-        revised = archive.archive({})
-        self.assertNotEqual(initial["report_id"], revised["report_id"])
-        self.assertEqual(2, len(archive.archives()["reports"]))
-        self.assertIn(
-            "first",
-            [
-                record["report"]["observed_at"]
-                for record in archive.archives()["reports"]
-            ],
-        )
-        for invalid in (
-            [],
-            {"days": 3660},
-            {"start": "2030-01-01"},
-            {"sport": "../x"},
-            {"report": {}},
-        ):
-            with self.subTest(invalid=invalid), self.assertRaises(AppError):
-                archive.archive(invalid)
-
     def test_records_service_reads_equipment_and_rejects_invalid_record_kinds(self):
         service = TrainingRecordsService(
             database_manager=Mock(),
@@ -507,11 +453,35 @@ class TrainingReportTests(unittest.TestCase):
         )
         self.assertIsInstance(season.season("Europe/Berlin"), dict)
 
-    def test_get_authentication_precedes_report_reads(self):
+    def test_removed_analysis_routes_are_unmatched(self):
+        auth = Mock()
+        reports = Mock()
+        route = AnalysisRoutes(lambda: auth, reports)
+        handler = Mock()
+        for path in (
+            "/api/analysis/report",
+            "/api/analysis/reports",
+            "/api/analysis/impact",
+            "/api/analysis/comparisons",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(route.handle(handler, path))
+        self.assertFalse(route.handle_post(handler, "/api/analysis/reports"))
+        auth.require_auth.assert_not_called()
+        reports.assert_not_called()
+        handler.send_json.assert_not_called()
+
+    def test_get_authentication_precedes_analysis_reads(self):
         auth = Mock()
         auth.require_auth.side_effect = AppError(401, "Synthetic denied")
         reports = Mock()
         route = AnalysisRoutes(lambda: auth, reports)
-        with self.assertRaises(AppError):
-            route.handle(Mock(), "/api/analysis/report")
+        for path in (
+            "/api/analysis/endurance",
+            "/api/analysis/power-profiles",
+            "/api/analysis/season",
+            "/api/analysis/training-records",
+        ):
+            with self.subTest(path=path), self.assertRaises(AppError):
+                route.handle(Mock(), path)
         reports.assert_not_called()

@@ -99,7 +99,7 @@ def fixture_coach_response(payload, **kwargs):
         "E2E nutrition: confirm database meal",
         "E2E nutrition: mixed meal",
     }:
-        nutrition = server.NUTRITION_ASSEMBLY.service()
+        nutrition = server.NUTRITION_ASSEMBLY.meal_library_service()
         templates = nutrition.list_templates()
         if current_message == "E2E nutrition: mixed meal":
             product = nutrition.save_product(
@@ -1413,8 +1413,7 @@ def seed_preview_demo():
                 },
             }
         )
-    nutrition = server.NUTRITION_ASSEMBLY.service()
-    nutrition.save_template(
+    server.NUTRITION_ASSEMBLY.meal_library_service().save_template(
         {
             "name": "Demo-Porridge",
             "description": "Haferflocken, Banane und Joghurt",
@@ -1431,7 +1430,7 @@ def seed_preview_demo():
             ("Reis mit Gemüse und Tofu", 720, 95, 32, 22),
             ("Pasta mit Tomatensauce", 650, 90, 25, 18),
         ]:
-            nutrition.log_meal(
+            server.NUTRITION_ASSEMBLY.diary_service().log_meal(
                 {
                     "meal_date": (today - timedelta(days=offset)).isoformat(),
                     "description": description,

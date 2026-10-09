@@ -5,12 +5,16 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+
 
 def measurement_age(observed_at: Any, current_date: date) -> dict[str, Any]:
     """Describe observation age independently of a successful provider read."""
     try:
-        days = (current_date - date.fromisoformat(str(observed_at)[:10])).days
-    except (TypeError, ValueError):
+        days = (
+            current_date - date.fromisoformat(iso_date_prefix(str(observed_at)))
+        ).days
+    except TypeError, ValueError:
         return {"measurement_status": "unknown", "measurement_age_days": None}
     if days == 0:
         measurement_status = "today"

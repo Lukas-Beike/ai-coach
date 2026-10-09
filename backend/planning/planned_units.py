@@ -7,7 +7,7 @@ import uuid
 from datetime import date
 from typing import Any
 
-from backend.athlete.local_date import LocalDate
+from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
     INVALID_PLANNING_DATE_ERROR,
@@ -109,9 +109,9 @@ def normalize_planned_unit(
         {
             **workout,
             "type": planning_workouts.intervals_workout_sport(workout["sport"]),
-            "date": str(workout.get("date") or workout.get("start_date_local") or "")[
-                :10
-            ],
+            "date": iso_date_prefix(
+                str(workout.get("date") or workout.get("start_date_local") or "")
+            ),
         },
         local_id=local_id,
         external_id=external_id,

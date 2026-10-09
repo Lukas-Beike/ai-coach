@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from backend.diagnostics.readiness_probe import ReadinessProbeService
 from backend.http_api.analysis import AnalysisRoutes
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
@@ -58,7 +59,6 @@ from backend.performance.report_service import (
     TrainingDerivedReadService,
     TrainingProfileSelectionService,
     TrainingRecordsService,
-    TrainingReportArchiveService,
     TrainingReportReadService,
     TrainingReportServices,
     TrainingSeasonReadService,
@@ -224,7 +224,8 @@ class HttpSyncServices:
 
 @dataclass(frozen=True)
 class HttpNutritionServices:
-    nutrition: Callable[[], Any]
+    diary: Callable[[], Any]
+    meal_library: Callable[[], Any]
     intervals_sync: Callable[[], Any]
     audio_transcription: Callable[[], Any]
 
@@ -247,6 +248,7 @@ class HttpReadRouteServices:
     athlete: HttpAthleteServices
     history: HttpHistoryServices
     diagnostics: HttpDiagnosticsServices
+    workout_library: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -280,6 +282,7 @@ class HttpApiAssembly:
         athlete = dependencies.reads.athlete
         history = dependencies.reads.history
         diagnostics = dependencies.reads.diagnostics
+        workout_library = dependencies.reads.workout_library
         privacy = dependencies.domains.privacy
         sync = dependencies.domains.sync
         nutrition = dependencies.domains.nutrition
@@ -343,12 +346,14 @@ class HttpApiAssembly:
         sync_period_defaults = sync.period_defaults
         all_sync_days = sync.all_sync_days
         uuid_factory = sync.uuid_factory
-        nutrition_service = nutrition.nutrition
+        diary_service = nutrition.diary
+        meal_library_service = nutrition.meal_library
         audio_transcription_client = nutrition.audio_transcription
         self._database_manager = database_manager
         self._database_lock = database_lock
         self._data_dir = data_dir
         self._readiness_maintenance_gate = readiness_maintenance_gate
+        self._workout_library = workout_library
         self._conversation_history_service = conversation_history_service
         self._proposal_read_service = proposal_read_service
         self._chat_page_max = chat_page_max
@@ -451,12 +456,6 @@ class HttpApiAssembly:
                     read_observations=records.observations,
                     today=local_today,
                 ),
-                archive=TrainingReportArchiveService(
-                    database_manager=database_manager(),
-                    read_report=lambda values: report_read.read(
-                        values, report_timezone()
-                    ),
-                ),
                 timezone=report_timezone,
             )
 
@@ -531,14 +530,18 @@ class HttpApiAssembly:
         self.auth_post_routes = AuthPostRoutes(session_auth_service, maintenance_gate)
         self.nutrition_get_routes = NutritionGetRoutes(
             session_auth_service,
-            nutrition_service,
+            diary_service,
+            meal_library_service,
             athlete_clock.now,
         )
         self.nutrition_post_routes = NutritionPostRoutes(
-            nutrition_service,
+            diary_service,
+            meal_library_service,
             sync_job_queue_service,
         )
-        self.nutrition_put_routes = NutritionPutRoutes(nutrition_service)
+        self.nutrition_put_routes = NutritionPutRoutes(
+            diary_service, meal_library_service
+        )
         self.route_dispatcher = HttpRouteDispatcher(
             (
                 self.public_get_routes,
@@ -603,6 +606,7 @@ class HttpApiAssembly:
             self._database_lock(),
             self._data_dir(),
             self._readiness_maintenance_gate(),
+            ReadinessProbeService(),
         )
 
     def export_stream_transport(self) -> ExportStreamTransport:
@@ -614,7 +618,7 @@ class HttpApiAssembly:
         )
 
     def library_page_service(self) -> LibraryPageService:
-        return LibraryPageService(self._database_manager())
+        return LibraryPageService(self._database_manager(), self._workout_library())
 
     def chat_history_page_service(self) -> ChatHistoryPageService:
         return ChatHistoryPageService(

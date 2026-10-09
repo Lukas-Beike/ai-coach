@@ -12,6 +12,7 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
 from backend.http_api import pagination
 from backend.http_api.library_page import LibraryPageService
+from backend.planning.library_service import WorkoutLibraryService
 
 
 class LibraryPageServiceTests(unittest.TestCase):
@@ -24,7 +25,13 @@ class LibraryPageServiceTests(unittest.TestCase):
         )
         with self.database_manager.unit_of_work() as db:
             initialize_schema(db)
-        self.service = LibraryPageService(self.database_manager)
+        self.workout_library = WorkoutLibraryService(
+            self.database_manager,
+            lambda: "2026-09-23T00:00:00+00:00",
+            lambda: "id",
+            lambda: None,
+        )
+        self.service = LibraryPageService(self.database_manager, self.workout_library)
 
     def tearDown(self) -> None:
         self.database_manager.close()
@@ -80,7 +87,9 @@ class LibraryPageServiceTests(unittest.TestCase):
     def test_limit_is_clamped_to_service_maximum(self) -> None:
         for index in range(4):
             self._insert_workout(str(index), sport="Run", name=f"Run {index}")
-        service = LibraryPageService(self.database_manager, maximum=3)
+        service = LibraryPageService(
+            self.database_manager, self.workout_library, maximum=3
+        )
 
         result = service.page(limit=90)
 

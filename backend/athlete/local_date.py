@@ -16,6 +16,17 @@ class LocalDateError(ValueError):
     """Raised when a value is not a supported calendar date."""
 
 
+def iso_date_prefix(value: Any) -> str:
+    """Normalize ISO date or timestamp values to their calendar date.
+
+    Invalid legacy values retain their previous ten-character projection.
+    """
+    try:
+        return LocalDate.parse(value).isoformat()
+    except TypeError, ValueError:
+        return str(value or "")[:10]
+
+
 @dataclass(frozen=True, slots=True)
 class LocalDate:
     """A validated calendar date, without timezone or persistence policy."""

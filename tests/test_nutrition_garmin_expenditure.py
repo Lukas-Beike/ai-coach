@@ -2,13 +2,13 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
+from nutrition_service_support import build_nutrition_services
+
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import NutritionRepository
 from backend.db.schema import initialize_schema
-from backend.nutrition.service import NutritionService
 
 
 class NutritionGarminExpenditureTests(unittest.TestCase):
@@ -21,12 +21,11 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
         with manager.unit_of_work() as db:
             initialize_schema(db)
         self.fixed_now = "2026-09-24T12:00:00+00:00"
-        self.service = NutritionService(
-            database_manager=manager,
-            db_lock=threading.Lock(),
-            nutrition_repository=NutritionRepository(now=lambda: self.fixed_now),
-            utc_now=lambda: self.fixed_now,
-            local_now=lambda: datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc),
+        self.service, _ = build_nutrition_services(
+            manager,
+            threading.Lock(),
+            lambda: self.fixed_now,
+            lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
 
     def tearDown(self) -> None:

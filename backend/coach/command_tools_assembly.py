@@ -37,7 +37,8 @@ class CoachAthleteToolFactories:
     checkin_service: Callable[[], Any]
     activity_feedback_service: Callable[[], Any]
     competition_service: Callable[[], Any]
-    nutrition_service: Callable[[], Any]
+    nutrition_diary_service: Callable[[], Any]
+    nutrition_meal_library_service: Callable[[], Any]
     equipment_service: Callable[[], Any] | None = None
 
 
@@ -77,7 +78,7 @@ class CoachCommandToolsAssembly:
             self._sync_mutations.provider_refresh_command(),
             duplicate_activity=self._sync_mutations.duplicate_activity(),
             intervals_client_factory=self._sync_provider.intervals_client,
-            nutrition_service=self._athlete_tools.nutrition_service(),
+            nutrition_diary=self._athlete_tools.nutrition_diary_service(),
         )
 
     def athlete_record_tool_service(self) -> CoachAthleteRecordToolService:
@@ -85,7 +86,8 @@ class CoachCommandToolsAssembly:
             self._athlete_tools.checkin_service(),
             self._athlete_tools.activity_feedback_service(),
             self._athlete_tools.competition_service(),
-            self._athlete_tools.nutrition_service(),
+            self._athlete_tools.nutrition_diary_service(),
+            self._athlete_tools.nutrition_meal_library_service(),
             equipment=self._athlete_tools.equipment_service()
             if self._athlete_tools.equipment_service
             else None,

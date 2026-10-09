@@ -1,4 +1,4 @@
-"""Authenticated local analysis reads and explicit report archival."""
+"""Authenticated local analysis reads and scenario projection."""
 
 from __future__ import annotations
 
@@ -13,14 +13,10 @@ class AnalysisRoutes:
 
     def handle(self, handler: Any, path: str) -> bool:
         if path not in {
-            "/api/analysis/report",
-            "/api/analysis/reports",
             "/api/analysis/endurance",
             "/api/analysis/power-profiles",
             "/api/analysis/season",
-            "/api/analysis/impact",
             "/api/analysis/training-records",
-            "/api/analysis/comparisons",
         }:
             return False
         self._auth().require_auth(handler)
@@ -29,22 +25,14 @@ class AnalysisRoutes:
             for key, value in parse_qs(urlparse(handler.path).query).items()
         }
         reports = self._reports()
-        if path.endswith("/comparisons"):
-            payload = reports.records.comparisons()
-        elif path.endswith("/training-records"):
+        if path.endswith("/training-records"):
             payload = reports.records.training_records(values)
-        elif path.endswith("/impact"):
-            payload = reports.derived.impact(reports.timezone())
         elif path.endswith("/season"):
             payload = reports.season.season(reports.timezone())
         elif path.endswith("/power-profiles"):
             payload = reports.profiles.power_profiles(reports.records.observations())
-        elif path.endswith("/endurance"):
-            payload = reports.records.endurance()
-        elif path.endswith("/reports"):
-            payload = reports.archive.archives()
         else:
-            payload = reports.report.read(values, reports.timezone())
+            payload = reports.records.endurance()
         handler.send_json(200, payload)
         return True
 
@@ -55,7 +43,4 @@ class AnalysisRoutes:
                 200, reports.report.scenarios(handler.read_json(), reports.timezone())
             )
             return True
-        if path != "/api/analysis/reports":
-            return False
-        handler.send_json(200, self._reports().archive.archive(handler.read_json()))
-        return True
+        return False

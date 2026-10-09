@@ -30,6 +30,7 @@ from backend.athlete.profile import (
     DEFAULT_PROFILE,
     normalize_profile,
 )
+from backend.athlete.sessions import AthleteSessionService
 from backend.backup.assembly import (
     BackupAssembly,
     BackupStorageDependencies,
@@ -415,7 +416,6 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
 APP_VERSION = "1.12.26"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
@@ -443,6 +443,7 @@ REDACTOR = observability.Redactor(lambda: CONFIG)
 
 
 KEY_VALUE_REPOSITORY = KeyValueRepository(runtime_clock.utc_now)
+ATHLETE_SESSION_SERVICE = AthleteSessionService()
 PROFILE_REPOSITORY = ProfileRepository(KEY_VALUE_REPOSITORY)
 COMPETITION_REPOSITORY = CompetitionRepository()
 TRAINING_PLAN_REPOSITORY = TrainingPlanRepository()
@@ -490,7 +491,11 @@ def database_manager() -> DatabaseManager:
 def session_auth_service() -> SessionAuthService:
     """Compose the HTTP session owner from the active persistence and security configuration."""
     return get_session_auth_service(
-        database_manager(), DB_LOCK, CONFIG, SQLCIPHER_AVAILABLE
+        database_manager(),
+        DB_LOCK,
+        CONFIG,
+        SQLCIPHER_AVAILABLE,
+        ATHLETE_SESSION_SERVICE,
     )
 
 
@@ -771,7 +776,7 @@ def initialise_database() -> None:
 
 
 def key_value_service() -> KeyValueService:
-    return KeyValueService(database_manager(), KEY_VALUE_REPOSITORY, DB_LOCK)
+    return KeyValueService(database_manager, KEY_VALUE_REPOSITORY, DB_LOCK)
 
 
 SYNC_PERIOD_DEFAULTS = {"intervals": 84, "garmin": 84}
@@ -1235,7 +1240,8 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
             training_plan_service=PLANNING_DATA.training_plan,
         ),
         policy=CoachReadToolPolicy(
-            nutrition_service=NUTRITION_ASSEMBLY.service,
+            nutrition_diary=NUTRITION_ASSEMBLY.diary_service,
+            nutrition_meal_library=NUTRITION_ASSEMBLY.meal_library_service,
             training_change_limit=lambda: coach_limits.COACH_TRAINING_CHANGE_LIMIT,
             context_service=COACH_CONTEXT.structured_context_service,
         ),
@@ -1246,7 +1252,8 @@ COACH_PROPOSALS = CoachProposalAssembly(
         persistence=ProposalPersistence(
             database_manager=database_manager,
             sync_state_repository=SYNC_PERSISTENCE.state_repository,
-            nutrition_service=NUTRITION_ASSEMBLY.service,
+            nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
+            nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         ),
         execution=ProposalExecutionOwners(
             duplicate_activity_service=ATHLETE_DATA.duplicate_activity,
@@ -1469,7 +1476,8 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
         checkin_service=lambda: ATHLETE_DATA.checkin(),
         activity_feedback_service=lambda: ATHLETE_DATA.activity_feedback(),
         competition_service=lambda: PLANNING_DATA.competition(),
-        nutrition_service=NUTRITION_ASSEMBLY.service,
+        nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
+        nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         equipment_service=ATHLETE_DATA.equipment,
     ),
     profile_tools=CoachProfileToolDependencies(
@@ -1647,6 +1655,7 @@ PUBLIC_STATE = PublicStateAssembly(
             app_name=APP_NAME,
             app_version=APP_VERSION,
             key_values=lambda: KEY_VALUE_REPOSITORY,
+            key_value_service=key_value_service,
         ),
         owners=PublicStateOwnerAssemblies(
             snapshot_repository=SNAPSHOT_REPOSITORY,
@@ -1834,6 +1843,7 @@ HTTP_API = HttpApiAssembly(
                 change_history=HISTORY.change_history_service,
                 undo=HISTORY.undo_service,
             ),
+            workout_library=PLANNING_DATA.workout_library,
         ),
         domains=HttpDomainRouteServices(
             privacy=HttpPrivacyServices(
@@ -1855,7 +1865,8 @@ HTTP_API = HttpApiAssembly(
                 uuid_factory=lambda: uuid.uuid4().hex,
             ),
             nutrition=HttpNutritionServices(
-                nutrition=NUTRITION_ASSEMBLY.service,
+                diary=NUTRITION_ASSEMBLY.diary_service,
+                meal_library=NUTRITION_ASSEMBLY.meal_library_service,
                 intervals_sync=NUTRITION_ASSEMBLY.intervals_sync_service,
                 audio_transcription=MODEL_TRANSPORT.audio_transcription_client,
             ),

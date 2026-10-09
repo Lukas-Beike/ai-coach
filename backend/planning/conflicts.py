@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+
 _UTC_OFFSET_SUFFIX = "+00:00"
 
 
@@ -84,18 +86,22 @@ def _calendar_interval(
 def calendar_items_conflict(
     candidate: dict[str, Any], existing: dict[str, Any]
 ) -> tuple[bool, str]:
-    candidate_date = str(
-        _first_present(
-            candidate, ("date", "event_date", "start_date_local", "start_local")
+    candidate_date = iso_date_prefix(
+        str(
+            _first_present(
+                candidate, ("date", "event_date", "start_date_local", "start_local")
+            )
+            or ""
         )
-        or ""
-    )[:10]
-    existing_date = str(
-        _first_present(
-            existing, ("date", "event_date", "start_date_local", "start_local")
+    )
+    existing_date = iso_date_prefix(
+        str(
+            _first_present(
+                existing, ("date", "event_date", "start_date_local", "start_local")
+            )
+            or ""
         )
-        or ""
-    )[:10]
+    )
     candidate_interval = _calendar_interval(candidate)
     existing_interval = _calendar_interval(existing)
     if candidate_interval and existing_interval:
@@ -137,12 +143,14 @@ def _calendar_conflict_record(
     return {
         "id": item.get("id") or item.get("local_id"),
         "name": item.get("name") or "Einheit",
-        "date": str(
-            _first_present(
-                item, ("date", "event_date", "start_date_local", "start_local")
+        "date": iso_date_prefix(
+            str(
+                _first_present(
+                    item, ("date", "event_date", "start_date_local", "start_local")
+                )
+                or ""
             )
-            or ""
-        )[:10],
+        ),
         "source": source,
         "match": match,
         "start_local": interval[0].isoformat(timespec="minutes")

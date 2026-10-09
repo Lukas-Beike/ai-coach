@@ -7,6 +7,7 @@ from statistics import median, quantiles
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.performance.morning_battery import timestamp
 from backend.performance.recovery import (
     dated_garmin_recovery_records,
@@ -37,7 +38,7 @@ def personal_recovery(
     add = partial(_add_record, groups, (history_start, current_day))
 
     for row in wellness:
-        day = str(row.get("id") or row.get("date") or "")[:10]
+        day = iso_date_prefix(str(row.get("id") or row.get("date") or ""))
         add((INTERVALS_SOURCE, "sleep", "sleepSecs"), day, row.get("sleepSecs"), 3600)
         add((INTERVALS_SOURCE, "resting_hr", "restingHR"), day, row.get("restingHR"))
         # Unknown HRV measurement methods cannot support a homogeneous baseline.
@@ -50,7 +51,7 @@ def personal_recovery(
     ]
     try:
         target = float(profile.get("sleep_target_hours") or "nan")
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         target = float("nan")
     deficits = _sleep_deficits(groups, target, today)
     regularity = sleep_regularity(
@@ -212,7 +213,7 @@ def sleep_regularity(
     """Summarize actual sleep intervals without turning them into a score."""
     try:
         zone: tzinfo = ZoneInfo(timezone_name)
-    except (ZoneInfoNotFoundError, ValueError):
+    except ZoneInfoNotFoundError, ValueError:
         zone = timezone.utc
     groups: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
     for row in wellness:

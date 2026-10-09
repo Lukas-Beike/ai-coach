@@ -33,10 +33,11 @@ def _project_existing_training_change(
         return candidate
     try:
         parsed_start = datetime.fromisoformat(str(start_date_local).strip())
+        target_date = LocalDate.parse(candidate_date).to_date()
         candidate["start_date_local"] = parsed_start.replace(
-            year=int(candidate_date[:4]),
-            month=int(candidate_date[5:7]),
-            day=int(candidate_date[8:10]),
+            year=target_date.year,
+            month=target_date.month,
+            day=target_date.day,
         ).isoformat()
     except TypeError, ValueError:
         candidate.pop("start_date_local", None)

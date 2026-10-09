@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.coach.proposal_models import (
     COACH_ACTION_TYPES,
     LOCAL_COACH_WRITE_TOOLS,
@@ -181,7 +182,7 @@ def _remote_write_summary(
     elif tool == "delete_duplicate_intervals_activity":
         manifest = approval_manifest if isinstance(approval_manifest, dict) else {}
         entry.update(
-            date=str(manifest.get("date") or "")[:10],
+            date=_summary_date(manifest.get("date")),
             keep=str(manifest.get("canonical_id") or "")[:80],
             delete=str(manifest.get("duplicate_id") or "")[:80],
         )
@@ -190,6 +191,19 @@ def _remote_write_summary(
             "Adaptive Vorschau " + str(arguments.get("adjustment_id") or "")[:36]
         )
     return [entry]
+
+
+def _summary_date(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    try:
+        return LocalDate.parse(value).isoformat()
+    except (TypeError, ValueError) as exc:
+        raise AppError(
+            409,
+            "Die Aktionsvorschau enthaelt ein ungueltiges Datum.",
+            reason="invalid_date",
+        ) from exc
 
 
 def _nutrition_approval_diff(name: str, approval_manifest: Any) -> list[dict[str, str]]:

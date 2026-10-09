@@ -7,11 +7,16 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.config import Config
-from backend.db.repositories import NutritionRepository
+from backend.db.repositories import (
+    NutritionProductRepository,
+    NutritionRepository,
+    NutritionTemplateRepository,
+)
+from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.food_database import FoodDatabaseService
 from backend.nutrition.fueling import FuelingService
+from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.photo import NutritionPhotoExtractionService
-from backend.nutrition.service import NutritionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.providers.intervals import IntervalsApiClient
 
@@ -53,6 +58,8 @@ class NutritionAssembly:
         self._local_now = dependencies.runtime.local_now
         self._intervals_request = dependencies.runtime.intervals_request
         self._food_database = FoodDatabaseService()
+        self._product_repository = NutritionProductRepository()
+        self._template_repository = NutritionTemplateRepository()
         self._read_planned_units = dependencies.runtime.read_planned_units
         self._read_profile = dependencies.runtime.read_profile
         self._runtime_photo_extractor = dependencies.runtime.photo_extractor
@@ -61,7 +68,7 @@ class NutritionAssembly:
         return FuelingService(
             self._database_manager(),
             self._read_planned_units,
-            lambda: self.service().list_templates(),
+            lambda: self.meal_library_service().list_templates(),
             self._read_profile,
             self._utc_now,
         )
@@ -69,20 +76,28 @@ class NutritionAssembly:
     def food_database(self) -> FoodDatabaseService:
         return self._food_database
 
-    def service(self) -> NutritionService:
-        kwargs = {
-            "database_manager": self._database_manager(),
-            "db_lock": self._database_lock,
-            "nutrition_repository": NutritionRepository(self._utc_now),
-            "utc_now": self._utc_now,
-            "local_now": self._local_now,
-            "food_database": self._food_database,
-            "fueling_service": self.fueling,
-        }
-        photo_extractor = self._photo_extractor()
-        if photo_extractor is not None:
-            return NutritionService(**kwargs, photo_extractor=photo_extractor)
-        return NutritionService(**kwargs)
+    def meal_library_service(self) -> NutritionMealLibraryService:
+        return NutritionMealLibraryService(
+            database_manager=self._database_manager(),
+            db_lock=self._database_lock,
+            utc_now=self._utc_now,
+            local_now=self._local_now,
+            food_database=self._food_database,
+            photo_extractor=self._photo_extractor(),
+            product_repository=self._product_repository,
+            template_repository=self._template_repository,
+        )
+
+    def diary_service(self) -> NutritionDiaryService:
+        return NutritionDiaryService(
+            database_manager=self._database_manager(),
+            db_lock=self._database_lock,
+            nutrition_repository=NutritionRepository(self._utc_now),
+            utc_now=self._utc_now,
+            local_now=self._local_now,
+            meal_library=self.meal_library_service(),
+            fueling_service=self.fueling,
+        )
 
     def _photo_extractor(self) -> NutritionPhotoExtractionService | None:
         if self._runtime_photo_extractor is None:
@@ -98,5 +113,5 @@ class NutritionAssembly:
         return IntervalsNutritionSyncService(
             config=config,
             api_client=api_client,
-            nutrition_service=self.service(),
+            diary_service=self.diary_service(),
         )

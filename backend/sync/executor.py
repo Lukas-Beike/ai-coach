@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.sync.competitions import CompetitionSyncService
@@ -61,7 +62,9 @@ class HistoricalSyncJobOwner:
                 )
             )
             end_date = payload.get("end_date")
-            return days, date.fromisoformat(str(end_date)[:10]) if end_date else None
+            return days, date.fromisoformat(
+                iso_date_prefix(str(end_date))
+            ) if end_date else None
         days = max(
             1,
             min(
@@ -78,7 +81,7 @@ class HistoricalSyncJobOwner:
         )
         default_end = self._local_now().date() - timedelta(days=refresh_days)
         end_date = date.fromisoformat(
-            str(payload.get("end_date") or default_end.isoformat())[:10]
+            iso_date_prefix(str(payload.get("end_date") or default_end.isoformat()))
         )
         return days, end_date
 

@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
 from backend.performance.training_report import canonical_rows, number
 
@@ -46,7 +47,7 @@ class EquipmentService:
             ).fetchone()
             try:
                 garmin = json.loads(garmin_row["value"]) if garmin_row else {}
-            except (TypeError, json.JSONDecodeError):
+            except TypeError, json.JSONDecodeError:
                 garmin = {}
             garmin = garmin if isinstance(garmin, dict) else {}
             if garmin.get("source") == "fixture":
@@ -606,7 +607,7 @@ def _update_usage(
         if (assignments.get(str(row.get("id"))) or {}).get("equipment_id")
         == (item.get("parent_id") or item["id"])
         and item["start_date"]
-        <= str(row.get("start_date_local") or "")[:10]
+        <= iso_date_prefix(str(row.get("start_date_local") or ""))
         <= today.isoformat()
     ]
     events = sorted(
@@ -686,7 +687,8 @@ def _maintenance_sessions(
     since = [
         row
         for row in eligible
-        if not latest or str(row.get("start_date_local") or "")[:10] > latest["date"]
+        if not latest
+        or iso_date_prefix(str(row.get("start_date_local") or "")) > latest["date"]
     ]
     return ambiguous, since
 

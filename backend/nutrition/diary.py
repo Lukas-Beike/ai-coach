@@ -1,4 +1,4 @@
-"""Nutrition domain service orchestrating meal tracking, summaries and sync states."""
+"""Daily nutrition entries, totals, and synchronization state."""
 
 from __future__ import annotations
 
@@ -10,29 +10,24 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import (
-    NutritionProductRepository,
-    NutritionRepository,
-    NutritionTemplateRepository,
-)
+from backend.db.repositories import NutritionRepository
 from backend.errors import AppError
-from backend.nutrition.catalog import ProductCatalogService
-from backend.nutrition.components import MealComponentCalculator
-from backend.nutrition.food_database import NUTRIENTS, FoodDatabaseService
+from backend.nutrition.food_database import NUTRIENTS
+from backend.nutrition.meal_library import (
+    SAVED_MEAL_NOT_FOUND,
+    NutritionMealLibraryService,
+    validate_component_payload,
+)
 from backend.nutrition.models import (
     NutritionDaySummary,
     NutritionEntry,
     normalize_nutrition_entry,
     validate_iso_date,
 )
-from backend.nutrition.photo import NutritionPhotoExtractionService
-from backend.nutrition.photo_service import PhotoExtractionService
 from backend.nutrition.sync_status import NutritionSyncStatusService
 
-SAVED_MEAL_NOT_FOUND = "Gespeicherte Mahlzeit nicht gefunden."
 INVALID_ENTRY_ID = "Ungültige Eintrags-ID."
 ENTRY_NOT_FOUND = "Ernährungseintrag nicht gefunden."
-NUTRIENT_INPUT_ALIASES = {"calories", "carbs", "carbohydrates", "protein", "fat"}
 
 
 def _known_daily_total(entries: list[dict[str, Any]], field: str) -> float | None:
@@ -41,21 +36,8 @@ def _known_daily_total(entries: list[dict[str, Any]], field: str) -> float | Non
     return round(sum(float(entry[field]) for entry in entries), 1)
 
 
-def _validate_component_payload(payload: dict[str, Any]) -> None:
-    forbidden = (
-        {"product_id", "food_ingredients", "nutrition_basis"}
-        | set(NUTRIENTS)
-        | NUTRIENT_INPUT_ALIASES
-    )
-    if forbidden & payload.keys():
-        raise AppError(
-            400,
-            "Komponenten dürfen nicht mit Einzelzutaten, Summenwerten oder clientseitiger Herkunft kombiniert werden.",
-        )
-
-
-class NutritionService:
-    """Orchestrates nutrition logging, daily aggregations and sync markers."""
+class NutritionDiaryService:
+    """Manage consumption entries, daily aggregates, and sync markers."""
 
     def __init__(
         self,
@@ -64,78 +46,19 @@ class NutritionService:
         nutrition_repository: NutritionRepository,
         utc_now: Callable[[], str],
         local_now: Callable[[], datetime],
-        food_database: FoodDatabaseService | None = None,
+        meal_library: NutritionMealLibraryService,
         fueling_service: Callable[[], Any] | None = None,
-        photo_extractor: NutritionPhotoExtractionService | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock
         self._nutrition_repository = nutrition_repository
         self._utc_now = utc_now
         self._local_now = local_now
+        self._meal_library = meal_library
         self._sync_status = NutritionSyncStatusService(
             database_manager, db_lock, nutrition_repository, utc_now, local_now
         )
-        self._templates = NutritionTemplateRepository()
-        self._products = NutritionProductRepository()
-        self.food_database = food_database or FoodDatabaseService()
-        self._component_calculator = MealComponentCalculator(
-            self._products, self.food_database
-        )
-        self._product_catalog = ProductCatalogService(
-            database_manager,
-            db_lock,
-            self._products,
-            utc_now,
-            self.food_database,
-            self._component_calculator,
-        )
-        self._photo_service = PhotoExtractionService(photo_extractor)
         self._fueling_service = fueling_service
-
-    def list_products(
-        self,
-        *,
-        query: str | None = None,
-        barcode: str | None = None,
-        include_archived: bool = False,
-    ) -> list[dict[str, Any]]:
-        return self._product_catalog.list_products(
-            query=query, barcode=barcode, include_archived=include_archived
-        )
-
-    def get_product(self, product_id: str) -> dict[str, Any]:
-        return self._product_catalog.get_product(product_id)
-
-    def save_product(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._product_catalog.save_product(payload)
-
-    def update_product(
-        self, product_id: str, payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        return self._product_catalog.update_product(product_id, payload)
-
-    def archive_product(self, product_id: str) -> dict[str, Any]:
-        return self._product_catalog.archive_product(product_id)
-
-    def lookup_product(
-        self, arguments: dict[str, Any], *, online_fallback: bool = True
-    ) -> dict[str, Any]:
-        return self._product_catalog.lookup_product(
-            arguments, online_fallback=online_fallback
-        )
-
-    def extract_packaging_photo(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._photo_service.extract_packaging_photo(payload)
-
-    def calculate_product(
-        self, product_id: str, amount: Any, unit: str
-    ) -> dict[str, Any]:
-        return self._product_catalog.calculate_product(product_id, amount, unit)
-
-    def calculate_components(self, components: Any) -> dict[str, Any]:
-        """Resolve a flat meal recipe into immutable, trusted nutrient snapshots."""
-        return self._product_catalog.calculate_components(components)
 
     def log_product(
         self,
@@ -146,14 +69,14 @@ class NutritionService:
         meal_date: str | None = None,
         meal_time: str | None = None,
     ) -> dict[str, Any]:
-        calculation = self.calculate_product(product_id, amount, unit)
+        calculation = self._meal_library.calculate_product(product_id, amount, unit)
         if calculation.get("kcal") is None:
             raise AppError(
                 400,
                 "Für dieses Produkt fehlt der Kalorienwert.",
                 reason="food_energy_missing",
             )
-        entry = self.log_meal(
+        return self.log_meal(
             {
                 "product_id": product_id,
                 "amount": amount,
@@ -169,184 +92,11 @@ class NutritionService:
                 "source": "manual",
             }
         )
-        return entry
 
     def fueling(self) -> Any:
         if not self._fueling_service:
             raise AppError(503, "Trainingsverpflegung ist nicht verfügbar.")
         return self._fueling_service()
-
-    def _prepare_values(self, payload: dict[str, Any]) -> dict[str, Any]:
-        packaging_label = payload.get("packaging_label") is True
-        payload = {
-            key: value
-            for key, value in payload.items()
-            if key not in {"nutrition_basis", "packaging_label"}
-        }
-        if "food_ingredients" in payload:
-            return {
-                **payload,
-                **self.food_database.calculate(payload["food_ingredients"]),
-            }
-        kind = (
-            "packaging_label"
-            if packaging_label
-            else self._nutrition_basis_kind(payload)
-        )
-        return {**payload, "nutrition_basis": {"kind": kind}}
-
-    @staticmethod
-    def _nutrition_basis_kind(payload: dict[str, Any]) -> str:
-        return (
-            "estimate"
-            if payload.get("source") in {"coach", "photo", "voice"}
-            else "manual"
-        )
-
-    def list_templates(self) -> list[dict[str, Any]]:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
-            return self._templates.list(db)
-
-    def save_template(
-        self, payload: Any, *, expected_calculation: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        """Save a confirmed recipe for one portion without recording consumption."""
-        if not isinstance(payload, dict):
-            raise AppError(400, "Mahlzeit muss ein Objekt sein.")
-        prepared = payload
-        template_id = str(payload.get("id") or "").strip()
-        resolved_database = (
-            self._component_calculator.prepare_resolutions(payload["components"])
-            if "components" in payload
-            else None
-        )
-        with self._db_lock, self._database_manager.unit_of_work() as db:
-            if "components" in payload:
-                _validate_component_payload(payload)
-                prepared = {
-                    **payload,
-                    **self._component_calculator.calculate(
-                        db, payload["components"], resolved_database
-                    ),
-                }
-                prepared.pop("components", None)
-            elif "food_ingredients" in payload:
-                prepared = self._prepare_values(payload)
-            if expected_calculation is not None and any(
-                prepared.get(key) != value
-                for key, value in expected_calculation.items()
-            ):
-                raise AppError(
-                    409,
-                    "Berechnung hat sich seit der Vorschau geändert.",
-                    reason="food_calculation_changed",
-                )
-            existing = self._templates.get(db, template_id) if template_id else None
-            if template_id and not existing:
-                raise AppError(404, SAVED_MEAL_NOT_FOUND)
-            name = str(
-                payload.get("name") or (existing or {}).get("name") or ""
-            ).strip()
-            self._validate_template_name(db, name, template_id, existing)
-            template = self._build_template(
-                payload, prepared, existing, name, template_id
-            )
-            self._templates.save(db, template)
-            return template
-
-    def _prepare_template_values(
-        self, payload: dict[str, Any], expected: dict[str, Any] | None
-    ) -> dict[str, Any]:
-        prepared = (
-            self._prepare_values(payload) if "food_ingredients" in payload else payload
-        )
-        if expected is not None and any(
-            prepared.get(key) != value for key, value in expected.items()
-        ):
-            raise AppError(
-                409,
-                "Datenbankwerte haben sich seit der Vorschau ge\u00e4ndert. Bitte neue Vorschau best\u00e4tigen.",
-                reason="food_calculation_changed",
-            )
-        return prepared
-
-    def _build_template(
-        self,
-        payload: dict[str, Any],
-        prepared: dict[str, Any],
-        existing: dict[str, Any] | None,
-        name: str,
-        template_id: str,
-    ) -> dict[str, Any]:
-        values = {**(existing or {}), **payload}
-        values = (
-            {**values, **prepared}
-            if "food_ingredients" in payload or "components" in payload
-            else self._prepare_values(values)
-        )
-        values.pop("components", None)
-        normalized = normalize_nutrition_entry(
-            values, local_now_factory=self._local_now
-        )
-        nutrients_unchanged = not any(
-            key in payload and payload[key] != (existing or {}).get(key)
-            for key in NUTRIENTS
-        )
-        if (
-            existing
-            and "food_ingredients" not in payload
-            and "components" not in payload
-            and nutrients_unchanged
-            and payload.get("packaging_label") is not True
-        ):
-            normalized["nutrition_basis"] = existing.get(
-                "nutrition_basis", {"kind": "manual"}
-            )
-        fields = (
-            "description",
-            "meal_type",
-            "kcal",
-            "carbs_g",
-            "protein_g",
-            "fat_g",
-            "source",
-            "nutrition_basis",
-        )
-        template = {key: normalized[key] for key in fields}
-        template["meal_type_explicit"] = "meal_type" in payload or bool(
-            existing and existing.get("meal_type_explicit")
-        )
-        template.update(
-            id=template_id or uuid.uuid4().hex, name=name, updated_at=self._utc_now()
-        )
-        return template
-
-    def _validate_template_name(
-        self,
-        db: Any,
-        name: str,
-        template_id: str,
-        existing: dict[str, Any] | None,
-    ) -> None:
-        if not name or len(name) > 120:
-            raise AppError(400, "Mahlzeitname muss 1 bis 120 Zeichen enthalten.")
-        templates = self._templates.list(db)
-        if any(
-            item["name"].casefold() == name.casefold() and item["id"] != template_id
-            for item in templates
-        ):
-            raise AppError(
-                409,
-                "Dieser Mahlzeitname ist bereits vergeben. Lies die Vorlage und ändere sie gezielt.",
-            )
-        if not existing and len(templates) >= 200:
-            raise AppError(400, "Maximal 200 gespeicherte Mahlzeiten sind möglich.")
-
-    def delete_template(self, template_id: str) -> dict[str, Any]:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
-            if not self._templates.delete(db, template_id):
-                raise AppError(404, SAVED_MEAL_NOT_FOUND)
-        return {"deleted_id": template_id}
 
     def log_template(
         self,
@@ -356,7 +106,6 @@ class NutritionService:
         meal_date: str | None = None,
         meal_time: str | None = None,
     ) -> dict[str, Any]:
-        """Copy current per-portion values; later recipe edits never affect the log."""
         try:
             amount = float(portions)
         except (TypeError, ValueError) as exc:
@@ -366,7 +115,7 @@ class NutritionService:
                 400, "Portionsanzahl muss größer als 0 und höchstens 20 sein."
             )
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            template = self._templates.get(db, template_id)
+            template = self._meal_library.get_template_in_transaction(db, template_id)
             if not template:
                 raise AppError(404, SAVED_MEAL_NOT_FOUND)
             payload = {
@@ -382,7 +131,7 @@ class NutritionService:
             payload["source"] = (
                 "coach" if template.get("source") == "coach" else template["source"]
             )
-            for key in ("kcal", "carbs_g", "protein_g", "fat_g"):
+            for key in NUTRIENTS:
                 payload[key] = None if template[key] is None else template[key] * amount
             basis = template.get("nutrition_basis", {})
             if basis.get("kind") == "database":
@@ -436,16 +185,15 @@ class NutritionService:
                 payload[key] = round(sum(values), precision)
 
     def log_meal(self, payload: Any) -> dict[str, Any]:
-        """Normalize, validate and store a meal entry."""
         if not isinstance(payload, dict):
             raise AppError(400, "Ernährungseintrag muss ein Objekt sein.")
         if "components" in payload:
-            _validate_component_payload(payload)
-            resolved_database = self._component_calculator.prepare_resolutions(
+            validate_component_payload(payload)
+            resolved_database = self._meal_library.prepare_component_resolutions(
                 payload["components"]
             )
             with self._db_lock, self._database_manager.unit_of_work() as db:
-                calculation = self._component_calculator.calculate(
+                calculation = self._meal_library.calculate_components_in_transaction(
                     db, payload["components"], resolved_database
                 )
                 values = {
@@ -458,9 +206,9 @@ class NutritionService:
                 )
                 entry["id"] = str(entry.get("id") or uuid.uuid4().hex)
                 return self._nutrition_repository.create(db, entry)
-        values = self._prepare_values(payload)
+        values = self._meal_library.prepare_values(payload)
         if payload.get("product_id"):
-            calculation = self.calculate_product(
+            calculation = self._meal_library.calculate_product(
                 str(payload["product_id"]),
                 payload.get("amount"),
                 str(payload.get("unit") or ""),
@@ -474,13 +222,10 @@ class NutritionService:
         entry = normalize_nutrition_entry(values, local_now_factory=self._local_now)
         if not entry.get("id"):
             entry["id"] = uuid.uuid4().hex
-
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            saved = self._nutrition_repository.create(db, entry)
-        return saved
+            return self._nutrition_repository.create(db, entry)
 
     def get_meal(self, entry_id: str) -> dict[str, Any]:
-        """Get a single meal entry by ID or raise AppError(404)."""
         clean_id = str(entry_id or "").strip()
         if not clean_id:
             raise AppError(400, INVALID_ENTRY_ID)
@@ -491,14 +236,13 @@ class NutritionService:
         return entry
 
     def update_meal(self, entry_id: str, payload: Any) -> dict[str, Any]:
-        """Normalize and update an existing meal entry."""
         clean_id = str(entry_id or "").strip()
         if not clean_id:
             raise AppError(400, INVALID_ENTRY_ID)
         if not isinstance(payload, dict):
             raise AppError(400, "Ernährungseintrag muss ein Objekt sein.")
         resolved_database = (
-            self._component_calculator.prepare_resolutions(payload["components"])
+            self._meal_library.prepare_component_resolutions(payload["components"])
             if "components" in payload
             else None
         )
@@ -508,16 +252,16 @@ class NutritionService:
                 raise AppError(404, ENTRY_NOT_FOUND)
             merged_payload = {**existing, **payload}
             if "components" in payload:
-                _validate_component_payload(payload)
+                validate_component_payload(payload)
                 prepared = {
                     **merged_payload,
-                    **self._component_calculator.calculate(
+                    **self._meal_library.calculate_components_in_transaction(
                         db, payload["components"], resolved_database
                     ),
                 }
                 prepared.pop("components", None)
             else:
-                prepared = self._prepare_values(merged_payload)
+                prepared = self._meal_library.prepare_values(merged_payload)
             entry = normalize_nutrition_entry(
                 prepared, local_now_factory=self._local_now
             )
@@ -536,7 +280,6 @@ class NutritionService:
         return updated
 
     def correct_meal(self, entry_id: str, changes: Any) -> dict[str, Any]:
-        """Apply a partial correction while preserving every omitted meal field."""
         clean_id = str(entry_id or "").strip()
         if not clean_id:
             raise AppError(400, INVALID_ENTRY_ID)
@@ -545,12 +288,12 @@ class NutritionService:
                 400, "Korrektur muss mindestens ein gültiges Ernährungsfeld enthalten."
             )
         resolved_database = (
-            self._component_calculator.prepare_resolutions(changes["components"])
+            self._meal_library.prepare_component_resolutions(changes["components"])
             if "components" in changes
             else None
         )
         calculation = (
-            self.food_database.calculate(changes["food_ingredients"])
+            self._meal_library.food_database.calculate(changes["food_ingredients"])
             if "food_ingredients" in changes
             else None
         )
@@ -616,16 +359,18 @@ class NutritionService:
         }
         merged = {**existing, **canonical}
         if "components" in changes:
-            _validate_component_payload(changes)
+            validate_component_payload(changes)
             merged.update(
-                self._component_calculator.calculate(
+                self._meal_library.calculate_components_in_transaction(
                     db, changes["components"], resolved_database
                 )
             )
             merged.pop("components", None)
         elif set(canonical) & {*NUTRIENTS, "food_ingredients", "packaging_label"}:
             merged.update(
-                calculation if calculation is not None else self._prepare_values(merged)
+                calculation
+                if calculation is not None
+                else self._meal_library.prepare_values(merged)
             )
             if (
                 "food_ingredients" not in canonical
@@ -637,7 +382,6 @@ class NutritionService:
         return entry
 
     def delete_meal(self, entry_id: str) -> dict[str, Any]:
-        """Delete an existing meal entry by ID."""
         clean_id = str(entry_id or "").strip()
         if not clean_id:
             raise AppError(400, INVALID_ENTRY_ID)
@@ -648,11 +392,9 @@ class NutritionService:
         return {"status": "ok", "deleted_id": clean_id}
 
     def get_day_summary(self, meal_date: str) -> dict[str, Any]:
-        """Return local diary totals plus Garmin's measured expenditure for a day."""
         return self._sync_status.get_day_summary(meal_date)
 
     def get_sync_snapshot(self, meal_date: str) -> dict[str, Any]:
-        """Capture totals and a revision for race-safe provider synchronization."""
         return self._sync_status.get_sync_snapshot(meal_date)
 
     def approval_manifest(
@@ -662,46 +404,35 @@ class NutritionService:
         pending_limit: int | None = None,
         dates: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Read exact nutrition revisions and totals without changing sync state."""
         return self._sync_status.approval_manifest(
             meal_date=meal_date, pending_limit=pending_limit, dates=dates
         )
 
     def get_today_summary(self) -> dict[str, Any]:
-        """Return today's local nutrition totals."""
         return self.get_day_summary(self._local_now().date().isoformat())
 
     def get_range_summary(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
-        """Return daily summaries for each date in a range."""
         valid_start = validate_iso_date(start_date)
         valid_end = validate_iso_date(end_date)
         if valid_start > valid_end:
             raise AppError(400, "Startdatum muss vor oder am Enddatum liegen.")
-
         with self._db_lock, self._database_manager.unit_of_work() as db:
             entries = self._nutrition_repository.list_by_range(
                 db, valid_start, valid_end
             )
-
         by_date: dict[str, list[dict[str, Any]]] = {}
         for entry in entries:
-            d = entry["meal_date"]
-            by_date.setdefault(d, []).append(entry)
-
+            by_date.setdefault(entry["meal_date"], []).append(entry)
         summaries: list[dict[str, Any]] = []
-        for date_key in sorted(by_date.keys()):
+        for date_key in sorted(by_date):
             day_entries = by_date[date_key]
-            total_kcal = sum(int(e["kcal"]) for e in day_entries)
-            total_carbs = _known_daily_total(day_entries, "carbs_g")
-            total_protein = _known_daily_total(day_entries, "protein_g")
-            total_fat = _known_daily_total(day_entries, "fat_g")
             summaries.append(
                 NutritionDaySummary(
                     date=date_key,
-                    total_kcal=total_kcal,
-                    total_carbs_g=total_carbs,
-                    total_protein_g=total_protein,
-                    total_fat_g=total_fat,
+                    total_kcal=sum(int(e["kcal"]) for e in day_entries),
+                    total_carbs_g=_known_daily_total(day_entries, "carbs_g"),
+                    total_protein_g=_known_daily_total(day_entries, "protein_g"),
+                    total_fat_g=_known_daily_total(day_entries, "fat_g"),
                     entry_count=len(day_entries),
                     entries=[
                         NutritionEntry.from_dict(e).to_dict() for e in day_entries
@@ -711,15 +442,12 @@ class NutritionService:
         return summaries
 
     def list_unsynced_dates(self, limit: int = 14) -> list[str]:
-        """Return distinct dates with un-synced nutrition entries."""
         return self._sync_status.list_unsynced_dates(limit=limit)
 
     def mark_date_synced(self, meal_date: str, revision: int) -> bool:
-        """Mark a date synced only if its records did not change during remote I/O."""
         return self._sync_status.mark_date_synced(meal_date, revision)
 
     def context(self) -> dict[str, Any]:
-        """Provide concise recent nutrition summary for coach prompts."""
         today = self._local_now().date().isoformat()
         past_week = (self._local_now().date() - timedelta(days=6)).isoformat()
         with self._db_lock, self._database_manager.unit_of_work() as db:
