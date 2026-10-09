@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
@@ -53,6 +54,27 @@ server.COACH_CONVERSATION.provision_service = FixtureConversationProvisionServic
 http_auth.RATE_LIMITER.allow = lambda key, limit, window_seconds: (True, 0)
 
 
+SLOW_STREAM_CHUNKS = (
+    "## Kurze Antwort\n\n",
+    "Heute passt ein ",
+    "lockerer Dauerlauf ",
+    "von 40 Minuten.\n\n",
+    "Achte auf **ausreichend Schlaf**",
+    " und regelmäßige Mahlzeiten.\n\n",
+    "- Trinke genug Wasser\n",
+    "- Steigere die Belastung nicht zu schnell.",
+)
+
+
+def _slow_stream_response(on_text_delta):
+    """Stream a German Markdown answer in ~3 s; the final text is returned as well."""
+    for chunk in SLOW_STREAM_CHUNKS:
+        if on_text_delta is not None:
+            on_text_delta(chunk)
+        time.sleep(0.4)
+    return {"output_text": "".join(SLOW_STREAM_CHUNKS)}
+
+
 def fixture_coach_response(payload, **kwargs):
     """Canned model outputs exercise HTTP/worker/storage, not language inference."""
     value = payload.get("input")
@@ -88,6 +110,8 @@ def fixture_coach_response(payload, **kwargs):
                 },
             },
         )
+    if current_message == "E2E fixture: slow stream":
+        return _slow_stream_response(kwargs.get("on_text_delta"))
     context = decoded["dialogue"]
     current_id = context["current_user_message_id"]
     if current_message in {
@@ -258,7 +282,8 @@ class FixtureResponseTransport:
     def stream_request(
         self, payload, on_text_delta, cancel_event=None, on_response_id=None
     ):
-        # Preserve the fixture's previous behavior: no synthetic text deltas.
+        # Only "E2E fixture: slow stream" emits synthetic text deltas (~3 s);
+        # every other message keeps the previous no-delta behavior.
         return fixture_coach_response(
             payload,
             on_text_delta=on_text_delta,
