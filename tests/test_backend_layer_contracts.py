@@ -350,9 +350,9 @@ class BackendLayerContractTests(unittest.TestCase):
 
     def test_package_import_cycles_match_shrinking_baseline(self) -> None:
         baseline = json.loads(
-            (REPOSITORY_ROOT / "tests/fixtures/package_import_cycles.json").read_text(
-                encoding="utf-8"
-            )
+            (
+                Path(__file__).resolve().parent / "fixtures/package_import_cycles.json"
+            ).read_text(encoding="utf-8")
         )
         for mode, include_functions in (("module", False), ("all", True)):
             with self.subTest(mode=mode):

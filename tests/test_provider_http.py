@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.error import HTTPError
 
+import backend.providers.http as http_module
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.providers.http import (
@@ -230,17 +231,10 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertNotIn("payload", repr(self.capture.entries))
 
     def test_shared_transport_does_not_import_a_concrete_provider(self):
-        transport_path = (
-            Path(__file__).resolve().parents[1]
-            / "backend"
-            / "providers"
-            / "http.py"
-        )
+        transport_path = Path(http_module.__file__).resolve()
         tree = ast.parse(transport_path.read_text(encoding="utf-8"))
         imported_modules = {
-            node.module
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom)
+            node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
         }
         imported_modules.update(
             alias.name
