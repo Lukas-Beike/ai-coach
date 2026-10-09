@@ -14,7 +14,6 @@ from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.planning import library as planning_library
-from backend.providers import gemini as gemini_provider
 from backend.providers import http as provider_http
 from backend.providers import intervals_client as intervals_client_module
 from backend.providers import openai as openai_provider
@@ -134,7 +133,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         for owner, name in (
             (server.PROVIDER_TRANSPORT.json_http_client(), "request"),
             (provider_http, "urlopen"),
-            (gemini_provider, "urlopen"),
             (openai_provider, "urlopen"),
         ):
             guard = patch.object(

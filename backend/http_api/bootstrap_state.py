@@ -249,10 +249,6 @@ class PublicBootstrapService:
                 },
                 "morning_checkin": deps.morning_checkin_state_service().state(),
                 "coach_quick_actions": deps.coach_quick_actions_service().state(),
-                "ai_provider": {
-                    "selected": deps.settings.selected_ai_provider(),
-                    "options": deps.settings.available_ai_providers(),
-                },
                 "model": {
                     "selected": deps.settings.selected_model(),
                     "options": deps.settings.available_model_options(),
@@ -263,16 +259,13 @@ class PublicBootstrapService:
                 },
                 "configured": {
                     "openai": bool(deps.config.openai_api_key),
-                    "gemini": bool(deps.config.gemini_api_key),
                     "intervals": bool(deps.config.intervals_api_key),
                     "weather": bool(
                         deps.profile_service().get().get("weather_location")
                     ),
                     "external_calendar": bool(deps.config.calendar_ical_url),
                 },
-                "usage": deps.provider_state_service().summary(
-                    deps.settings.selected_ai_provider() or "openai"
-                ),
+                "usage": deps.provider_state_service().summary("openai"),
             }
 
 

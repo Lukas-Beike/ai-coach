@@ -10,11 +10,10 @@ from typing import Any
 
 from backend.coach.attachments import (
     MAX_ATTACHMENT_STORAGE_BYTES,
-    MAX_GEMINI_INLINE_IMAGE_BYTES,
-    gemini_inline_image_bytes,
     validate_attachments,
 )
 from backend.coach.authorization import coach_execution_scope, coach_session_key
+from backend.coach.constants import AI_PROVIDER
 from backend.coach.service import command_receipt
 from backend.coach.streams import ChatStreamRegistry
 from backend.db.manager import DatabaseManager
@@ -40,7 +39,6 @@ class CoachJobSubmissionService:
         *,
         background_horizon_days: int,
         max_attachment_storage_bytes: int = MAX_ATTACHMENT_STORAGE_BYTES,
-        max_gemini_inline_image_bytes: int = MAX_GEMINI_INLINE_IMAGE_BYTES,
     ) -> None:
         self._database_manager = database_manager
         self._chat_repository = chat_repository
@@ -52,7 +50,6 @@ class CoachJobSubmissionService:
         self._utc_now = utc_now
         self._background_horizon_days = background_horizon_days
         self._max_attachment_storage_bytes = max_attachment_storage_bytes
-        self._max_gemini_inline_image_bytes = max_gemini_inline_image_bytes
 
     def active(
         self, session_csrf_hash: str, operation_id: str | None = None
@@ -132,7 +129,7 @@ class CoachJobSubmissionService:
             )
         operation_id = operation_id or uuid.uuid4().hex
         session_key = coach_session_key(session_csrf_hash)
-        ai_provider, model, thinking_level = self._provider_settings(attachments)
+        model, thinking_level = self._model_settings()
 
         existing_response, user_message_id = self._persist(
             message,
@@ -143,7 +140,6 @@ class CoachJobSubmissionService:
             attachments,
             scope,
             session_key,
-            ai_provider,
             model,
             thinking_level,
         )
@@ -215,29 +211,10 @@ class CoachJobSubmissionService:
             )
         return message, client_turn_id, request_kind, attachments, scope
 
-    def _provider_settings(
-        self, attachments: list[dict[str, Any]]
-    ) -> tuple[str, str, str]:
-        ai_provider = self._settings_service.selected_ai_provider()
-        model = self._settings_service.selected_model(ai_provider)
+    def _model_settings(self) -> tuple[str, str]:
+        model = self._settings_service.selected_model()
         thinking_level = self._settings_service.selected_thinking_level()
-        if not ai_provider:
-            raise AppError(
-                503,
-                "Kein KI-Dienst konfiguriert. Bitte hinterlege einen OpenAI- oder Gemini-API-Schlüssel in der Serverkonfiguration.",
-                reason="ai_provider_not_configured",
-            )
-        if (
-            ai_provider == "gemini"
-            and gemini_inline_image_bytes(attachments)
-            > self._max_gemini_inline_image_bytes
-        ):
-            raise AppError(
-                413,
-                "Die ausgewählten Dateien sind für eine Gemini-Anfrage zusammen zu groß. Sende weniger Dateien oder wähle OpenAI.",
-                reason="gemini_attachment_request_too_large",
-            )
-        return ai_provider, model, thinking_level
+        return model, thinking_level
 
     def _persist(
         self,
@@ -249,7 +226,6 @@ class CoachJobSubmissionService:
         attachments: list[dict[str, Any]],
         scope: dict[str, Any],
         session_key: str,
-        ai_provider: str,
         model: str,
         thinking_level: str,
     ) -> tuple[dict[str, Any] | None, int | None]:
@@ -302,17 +278,8 @@ class CoachJobSubmissionService:
                 stored_attachment_bytes = db.execute(
                     "SELECT COALESCE(SUM(length(attachments)), 0) AS total FROM messages"
                 ).fetchone()["total"]
-                stored_gemini_history_row = db.execute(
-                    "SELECT COALESCE(length(value), 0) AS total FROM kv WHERE key='gemini_conversation_history'"
-                ).fetchone()
-                stored_gemini_history_bytes = (
-                    stored_gemini_history_row["total"]
-                    if stored_gemini_history_row
-                    else 0
-                )
                 if (
                     int(stored_attachment_bytes or 0)
-                    + int(stored_gemini_history_bytes or 0)
                     + len(attachment_json.encode("utf-8"))
                     > self._max_attachment_storage_bytes
                 ):
@@ -334,7 +301,7 @@ class CoachJobSubmissionService:
                     "user_message_id": user_message["id"],
                     "client_turn_id": client_turn_id,
                     "plan_scope": scope,
-                    "ai_provider": ai_provider,
+                    "ai_provider": AI_PROVIDER,
                     "model": model,
                     "thinking_level": thinking_level,
                     "request_kind": request_kind,

@@ -459,7 +459,6 @@ class CoachReviewTests(unittest.TestCase):
                 conversation_id="review-conversation",
                 client_turn_id="foreign",
                 session_csrf_hash="intruder",
-                ai_provider=server.SETTINGS.selected_ai_provider(),
             )
         self.assertEqual(error.exception.status, 403)
         with server.database_manager().unit_of_work() as db:

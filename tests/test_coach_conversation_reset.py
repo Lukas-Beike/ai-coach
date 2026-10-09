@@ -61,9 +61,6 @@ class CoachConversationResetTests(unittest.TestCase):
         self.key_values = KeyValueRepository(lambda: "2026-09-29T12:00:00+00:00")
         with self.manager.unit_of_work() as db:
             self.key_values.set(db, "openai_conversation_id", "old-openai-id")
-            self.key_values.set(db, "gemini_conversation_id", "old-gemini-id")
-            self.key_values.set(db, "gemini_conversation_history", "old-history")
-            self.key_values.set(db, "gemini_call_names", "old-call-names")
         self.conversation_lock = _TrackedLock()
         self.remote_entered = threading.Event()
         self.remote_release = threading.Event()
@@ -73,9 +70,9 @@ class CoachConversationResetTests(unittest.TestCase):
             self.assertFalse(self.conversation_lock.active)
             with self.manager.unit_of_work() as db:
                 self.assertEqual(self.key_values.get(db, "openai_conversation_id"), "")
-                self.assertEqual(self.key_values.get(db, "gemini_conversation_id"), "")
-                self.assertEqual(self.key_values.get(db, "gemini_conversation_history"), "[]")
-                self.assertEqual(db.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 0)
+                self.assertEqual(
+                    db.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 0
+                )
             self.remote_entered.set()
             self.remote_release.wait(2)
             return True
@@ -93,7 +90,9 @@ class CoachConversationResetTests(unittest.TestCase):
             Mock(),
         )
 
-    def test_local_reset_commits_and_releases_chat_lock_before_remote_delete(self) -> None:
+    def test_local_reset_commits_and_releases_chat_lock_before_remote_delete(
+        self,
+    ) -> None:
         results = []
         reset = threading.Thread(target=lambda: results.append(self.service.reset()))
         reset.start()
@@ -107,8 +106,10 @@ class CoachConversationResetTests(unittest.TestCase):
         self.assertEqual(results[0]["generation"], "new-generation")
         self.assertTrue(results[0]["remote_conversation_deleted"])
         with self.manager.unit_of_work() as db:
-            self.assertEqual(self.key_values.get(db, "gemini_call_names"), "{}")
-            self.assertEqual(self.key_values.get(db, "last_chat_reset_at"), "2026-09-29T12:00:00+00:00")
+            self.assertEqual(
+                self.key_values.get(db, "last_chat_reset_at"),
+                "2026-09-29T12:00:00+00:00",
+            )
 
 
 if __name__ == "__main__":

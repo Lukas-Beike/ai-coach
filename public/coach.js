@@ -502,8 +502,8 @@ async function cancelChat() {
 async function sendMessage(event) {
   event.preventDefault();
   const configured = state.data?.configured;
-  if (configured && !configured.openai && !configured.gemini) {
-    toast("Kein KI-Dienst konfiguriert. Bitte hinterlege einen OpenAI- oder Gemini-API-Schlüssel in den Einstellungen.", true);
+  if (configured && !configured.openai) {
+    toast("Kein OpenAI-API-Schlüssel konfiguriert. Bitte hinterlege OPENAI_API_KEY auf dem Server.", true);
     return;
   }
   const input = $("#messageInput");
@@ -554,12 +554,10 @@ function steerCurrentChat(event) {
 }
 
 async function resetCoachChat() {
-  const buttons = [$("#openaiChatResetButton"), $("#chatResetButton")].filter(Boolean);
-  if (!buttons.length || !await requestConfirmation("Coach-Chat wirklich zurücksetzen und eine neue Unterhaltung beginnen?", { title: "Coach-Chat zurücksetzen?" })) return;
-  buttons.forEach((button) => {
-    button.disabled = true;
-    button.textContent = "Wird zurückgesetzt…";
-  });
+  const button = $("#openaiChatResetButton");
+  if (!button || !await requestConfirmation("Coach-Chat wirklich zurücksetzen und eine neue Unterhaltung beginnen?", { title: "Coach-Chat zurücksetzen?" })) return;
+  button.disabled = true;
+  button.textContent = "Wird zurückgesetzt…";
   try {
     const reset = await api("/api/chat/reset", { method: "POST", body: "{}" });
     state.chatAttachments = [];
@@ -591,9 +589,7 @@ async function resetCoachChat() {
     toast("Neuer Coach-Chat gestartet");
   } catch (error) { toast(error.message, true); }
   finally {
-    buttons.forEach((button) => {
-      button.disabled = false;
-      button.textContent = "Chat zurücksetzen";
-    });
+    button.disabled = false;
+    button.textContent = "Chat zurücksetzen";
   }
 }

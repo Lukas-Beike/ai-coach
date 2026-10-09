@@ -1,5 +1,6 @@
 """Server integration tests for frontend."""
 
+import re
 import unittest
 from datetime import datetime as _local_datetime
 from datetime import timedelta
@@ -14,6 +15,36 @@ from backend.sync.adaptive import ILLNESS_CALENDAR_CATEGORY
 
 
 class ServerFrontendTests(ServerTestCase):
+    def test_reset_button_selectors_exist_in_markup(self):
+        root = Path(__file__).resolve().parents[1]
+        scripts = "\n".join(
+            (root / "public" / name).read_text(encoding="utf-8")
+            for name in ("app.js", "coach.js")
+        )
+        index = (root / "public" / "index.html").read_text(encoding="utf-8")
+        referenced_ids = set(
+            re.findall(
+                r"(?:getElementById\(|querySelector\(\s*|\$\(\s*)['\"]#([A-Za-z0-9_-]*reset[A-Za-z0-9_-]*)",
+                scripts,
+                re.IGNORECASE,
+            )
+        )
+        markup_ids = set(re.findall(r"\bid=['\"]([^'\"]+)['\"]", index))
+
+        self.assertTrue(referenced_ids)
+        self.assertLessEqual(referenced_ids, markup_ids)
+
+    def test_removed_ai_controls_and_reset_binding_match_markup(self):
+        root = Path(__file__).resolve().parents[1]
+        app = (root / "public" / "app.js").read_text(encoding="utf-8")
+        index = (root / "public" / "index.html").read_text(encoding="utf-8")
+
+        for identifier in ("chat" + "ResetButton", "ai" + "ProviderSelect"):
+            self.assertNotIn(f'$("#{identifier}")', app)
+            self.assertNotIn(f'id="{identifier}"', index)
+        self.assertEqual(index.count('id="openaiChatResetButton"'), 1)
+        self.assertIn('$("#openaiChatResetButton").addEventListener', app)
+
     def test_structured_coach_deletes_local_planned_unit_without_ui_preview(self):
         planned = server.PLANNING_DATA.planned_unit().create(
             {
@@ -229,7 +260,6 @@ class ServerFrontendTests(ServerTestCase):
         )
         self.assertIn("globalThis.AppApi.request(path, options, () =>", app)
         self.assertIn("globalThis.AppApi.audio(path, blob, () =>", app)
-        self.assertIn("Array.isArray(result.model_options)", app)
         self.assertIn("renderModel(model)", app)
         self.assertIn("/api.js?v=222", index)
         self.assertIn("/navigation.js?v=230", index)
@@ -239,10 +269,10 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("/views.js?v=218", index)
         self.assertIn("/forms.js?v=217", index)
         self.assertIn("/components.js?v=217", index)
-        self.assertIn("/coach.js?v=6", index)
-        self.assertIn("/app.js?v=272", index)
+        self.assertIn("/coach.js?v=7", index)
+        self.assertIn("/app.js?v=273", index)
         self.assertIn("/styles.css?v=279", index)
-        self.assertIn("intervals-coach-v366", service_worker)
+        self.assertIn("intervals-coach-v367", service_worker)
         self.assertIn("/analysis.js?v=94", index)
         self.assertIn('"/navigation.js?v=230"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
@@ -300,9 +330,9 @@ class ServerFrontendTests(ServerTestCase):
             index.index("/forms.js?v=217"), index.index("/components.js?v=217")
         )
         self.assertLess(
-            index.index("/components.js?v=217"), index.index("/coach.js?v=6")
+            index.index("/components.js?v=217"), index.index("/coach.js?v=7")
         )
-        self.assertLess(index.index("/coach.js?v=6"), index.index("/app.js?v=272"))
+        self.assertLess(index.index("/coach.js?v=7"), index.index("/app.js?v=273"))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn(
@@ -493,7 +523,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split("app.js?v=", 1)[1].split('"', 1)[0]
         self.assertIn(f"app.js?v={asset_version}", markup)
-        self.assertIn("intervals-coach-v366", service_worker)
+        self.assertIn("intervals-coach-v367", service_worker)
         self.assertIn(f"/app.js?v={asset_version}", service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -610,7 +640,7 @@ class ServerFrontendTests(ServerTestCase):
         index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
         self.assertIn('/analysis.js?v=94"', index)
         self.assertNotIn("/analysis.js?v=93", index + worker)
-        self.assertIn('const CACHE = "intervals-coach-v366";', worker)
+        self.assertIn('const CACHE = "intervals-coach-v367";', worker)
         source = response.body.decode("utf-8")
         self.assertIn("equipment-archive", source)
         self.assertIn("function appendEquipmentLifetime", source)
@@ -658,7 +688,7 @@ class ServerFrontendTests(ServerTestCase):
         handler.wfile.write.assert_not_called()
 
         coach = StaticAssetService(server.PUBLIC_DIR).render(
-            "/coach.js", "/coach.js?v=6", None
+            "/coach.js", "/coach.js?v=7", None
         )
         self.assertEqual(coach.status, 200)
         self.assertEqual(
@@ -712,8 +742,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/forms.js?v=217"', source)
         self.assertIn('"/components.js?v=217"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/coach.js?v=6"', source)
-        self.assertIn('"/app.js?v=272"', source)
+        self.assertIn('"/coach.js?v=7"', source)
+        self.assertIn('"/app.js?v=273"', source)
         self.assertIn('"/nutrition.js?v=19"', source)
         self.assertIn('"/icon.svg?v=217"', source)
         self.assertIn('"/styles.css?v=279"', source)

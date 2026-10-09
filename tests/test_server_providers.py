@@ -4,7 +4,7 @@ import json
 import threading
 import unittest
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import ClassVar
@@ -12,13 +12,11 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 
-from server_test_support import ServerTestCase, _transcribe_via_http_route, server
-from support import build_gemini_request_payload
+from server_test_support import ServerTestCase, server
 
 from backend.coach import streams as coach_streams
 from backend.errors import ClientDisconnected
 from backend.providers import calendar as calendar_provider
-from backend.providers import gemini as gemini_provider
 from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
 from backend.providers.transport_assembly import ProviderTransportAssembly
@@ -46,7 +44,7 @@ class ServerProvidersTests(ServerTestCase):
                     sync_period_defaults={},
                     all_sync_days=365,
                     sync_chunk_days=30,
-                    sync_earliest_date=datetime(2020, 1, 1, tzinfo=timezone.utc).date(),
+                    sync_earliest_date=datetime(2020, 1, 1, tzinfo=UTC).date(),
                 ),
                 state=SyncJobStateDependencies(
                     sync_state_repository=deferred,
@@ -142,23 +140,6 @@ class ServerProvidersTests(ServerTestCase):
         self.assertEqual(raised.exception.reason, "invalid_job_request")
         sync.assert_not_called()
 
-    def test_finite_retention_clears_unstamped_gemini_history(self):
-        server.key_value_service().set(
-            "gemini_conversation_history",
-            json.dumps([{"role": "user", "parts": [{"text": "old coach context"}]}]),
-        )
-        server.key_value_service().set(
-            "gemini_call_names", json.dumps({"gemini_old": "save_checkin"})
-        )
-        with patch.object(
-            server, "CONFIG", replace(server.CONFIG, data_retention_days=30)
-        ):
-            server.initialise_database()
-        self.assertEqual(
-            server.key_value_service().get("gemini_conversation_history"), "[]"
-        )
-        self.assertEqual(server.key_value_service().get("gemini_call_names"), "{}")
-
     def test_garmin_capability_breaker_pauses_repeated_same_error(self):
         error = server.AppError(503, "provider unavailable", reason="network_error")
         service = server.GARMIN_ASSEMBLY.sync_state_service()
@@ -182,559 +163,20 @@ class ServerProvidersTests(ServerTestCase):
         }
         self.assertEqual(openai_provider.response_text(response), "Hello")
 
-    def test_gemini_normalizes_tool_calls_and_preserves_function_history(self):
-        captured = []
-        responses = [
-            {
-                "candidates": [
-                    {
-                        "content": {
-                            "role": "model",
-                            "parts": [
-                                {
-                                    "functionCall": {
-                                        "name": "save_checkin",
-                                        "args": {"payload": {"energy": 7}},
-                                    }
-                                }
-                            ],
-                        }
-                    }
-                ],
-                "usageMetadata": {
-                    "promptTokenCount": 11,
-                    "candidatesTokenCount": 3,
-                    "totalTokenCount": 14,
-                },
-            },
-            {
-                "candidates": [
-                    {
-                        "content": {
-                            "role": "model",
-                            "parts": [{"text": "Check-in gespeichert."}],
-                        }
-                    }
-                ],
-                "usageMetadata": {
-                    "promptTokenCount": 14,
-                    "candidatesTokenCount": 4,
-                    "totalTokenCount": 18,
-                },
-            },
-        ]
-
-        def fake_http_json(method, url, payload=None, headers=None, **kwargs):
-            captured.append(
-                {"method": method, "url": url, "payload": payload, "headers": headers}
-            )
-            return responses.pop(0)
-
-        config = replace(
-            server.CONFIG,
-            openai_api_key="",
-            gemini_api_key="test-gemini-key",
-            ai_provider="gemini",
-        )
-        tool = {
-            "type": "function",
-            "name": "save_checkin",
-            "description": "Save check-in",
-            "parameters": {
-                "type": "object",
-                "properties": {"payload": {"type": "object"}},
-            },
-        }
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                server.PROVIDER_TRANSPORT.json_http_client(),
-                "request",
-                side_effect=fake_http_json,
-            ),
-        ):
-            initial = server.COACH_CONVERSATION.gemini_conversation_response_service().request(
-                {
-                    "model": "gemini-3.8-flash",
-                    "conversation": "gemini_test",
-                    "instructions": "Coach rules",
-                    "input": "Speichere meine Tagesform.",
-                    "tools": [tool],
-                    "tool_choice": "auto",
-                    "max_output_tokens": 321,
-                }
-            )
-            call = next(
-                item for item in initial["output"] if item["type"] == "function_call"
-            )
-            followup = server.COACH_CONVERSATION.gemini_conversation_response_service().request(
-                {
-                    "conversation": "gemini_test",
-                    "instructions": "Coach rules",
-                    "input": [
-                        {
-                            "type": "function_call_output",
-                            "call_id": call["call_id"],
-                            "output": '{"ok":true}',
-                        }
-                    ],
-                    "tools": [tool],
-                    "tool_choice": "auto",
-                }
-            )
-
-        self.assertEqual(
-            captured[0]["url"],
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
-        )
-        self.assertEqual(captured[0]["headers"]["x-goog-api-key"], "test-gemini-key")
-        self.assertEqual(
-            captured[0]["payload"]["systemInstruction"]["parts"][0]["text"],
-            "Coach rules",
-        )
-        self.assertEqual(
-            captured[0]["payload"]["tools"][0]["functionDeclarations"][0]["name"],
-            "save_checkin",
-        )
-        self.assertEqual(
-            captured[0]["payload"]["tools"][0]["functionDeclarations"][0][
-                "parametersJsonSchema"
-            ],
-            tool["parameters"],
-        )
-        function_response = next(
-            part["functionResponse"]
-            for content in captured[1]["payload"]["contents"]
-            for part in content.get("parts", [])
-            if "functionResponse" in part
-        )
-        self.assertEqual(function_response["name"], "save_checkin")
-        self.assertEqual(
-            openai_provider.response_text(followup), "Check-in gespeichert."
-        )
-
-    def test_gemini_stream_forwards_chunks_and_aggregates_the_final_response(self):
-        captured = {}
-
-        class StreamResponse:
-            status = 200
-            headers: ClassVar = {}
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_args):
-                return False
-
-            def __iter__(self):
-                yield b'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hallo "}]}}]}\n'
-                yield b"\n"
-                yield b'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Welt"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7}}\n'
-                yield b"\n"
-
-        def fake_urlopen(request, **_kwargs):
-            captured["request"] = request
-            return StreamResponse()
-
-        deltas = []
-        config = replace(
-            server.CONFIG,
-            openai_api_key="",
-            gemini_api_key="test-gemini-key",
-            ai_provider="gemini",
-        )
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(gemini_provider, "urlopen", side_effect=fake_urlopen),
-        ):
-            result = server.COACH_CONVERSATION.response_transport().stream_request(
-                {
-                    "_ai_provider": "gemini",
-                    "model": "gemini-3.8-flash",
-                    "input": "Begrüße mich.",
-                },
-                deltas.append,
-            )
-
-        self.assertEqual(deltas, ["Hallo ", "Welt"])
-        self.assertEqual(openai_provider.response_text(result), "Hallo Welt")
-        self.assertEqual(result["usage"]["total_tokens"], 7)
-        self.assertEqual(
-            captured["request"].full_url,
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse",
-        )
-        self.assertEqual(
-            captured["request"].headers["X-goog-api-key"], "test-gemini-key"
-        )
-
-    def test_gemini_stream_preserves_response_too_large_contract(self):
-        class StreamResponse:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_args):
-                return False
-
-            def __iter__(self):
-                yield b"data: {}\n"
-
-        config = replace(server.CONFIG, gemini_api_key="test-gemini-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(provider_http, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
-            patch.object(gemini_provider, "urlopen", return_value=StreamResponse()),
-            self.assertRaises(server.AppError) as raised,
-        ):
-            server.COACH_CONVERSATION.gemini_conversation_response_service().stream(
-                {"model": "gemini-3.8-flash", "input": "test"}, lambda _: None
-            )
-
-        self.assertEqual(raised.exception.status, 502)
-        self.assertEqual(raised.exception.reason, "response_too_large")
-
-    def test_gemini_persists_tool_response_before_a_failed_followup(self):
-        responses = [
-            {
-                "candidates": [
-                    {
-                        "content": {
-                            "role": "model",
-                            "parts": [
-                                {"functionCall": {"name": "save_checkin", "args": {}}}
-                            ],
-                        }
-                    }
-                ]
-            },
-            server.AppError(
-                429, "Gemini ist ausgelastet.", reason="rate_limit_exceeded"
-            ),
-        ]
-
-        def fake_http_json(*args, **kwargs):
-            response = responses.pop(0)
-            if isinstance(response, Exception):
-                raise response
-            return response
-
-        config = replace(
-            server.CONFIG,
-            openai_api_key="",
-            gemini_api_key="test-gemini-key",
-            ai_provider="gemini",
-        )
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                server.PROVIDER_TRANSPORT.json_http_client(),
-                "request",
-                side_effect=fake_http_json,
-            ),
-        ):
-            initial = server.COACH_CONVERSATION.gemini_conversation_response_service().request(
-                {
-                    "conversation": "gemini-persist-response",
-                    "input": "Speichere meine Tagesform.",
-                    "parallel_tool_calls": False,
-                }
-            )
-            call = next(
-                item for item in initial["output"] if item["type"] == "function_call"
-            )
-            with self.assertRaises(server.AppError):
-                server.COACH_CONVERSATION.gemini_conversation_response_service().request(
-                    {
-                        "conversation": "gemini-persist-response",
-                        "input": [
-                            {
-                                "type": "function_call_output",
-                                "call_id": call["call_id"],
-                                "output": '{"ok":true}',
-                            }
-                        ],
-                        "parallel_tool_calls": False,
-                    }
-                )
-
-        history = json.loads(
-            server.key_value_service().get("gemini_conversation_history") or "[]"
-        )
-        self.assertEqual(
-            history[-2]["parts"][0]["functionCall"]["name"], "save_checkin"
-        )
-        self.assertEqual(
-            history[-1]["parts"][0]["functionResponse"]["name"], "save_checkin"
-        )
-
-    def test_gemini_rejects_parallel_tool_calls_when_coach_disables_them(self):
-        response = {
-            "candidates": [
-                {
-                    "content": {
-                        "role": "model",
-                        "parts": [
-                            {"functionCall": {"name": "save_checkin", "args": {}}},
-                            {"functionCall": {"name": "save_profile", "args": {}}},
-                        ],
-                    }
-                }
-            ]
-        }
-        config = replace(
-            server.CONFIG,
-            openai_api_key="",
-            gemini_api_key="test-gemini-key",
-            ai_provider="gemini",
-        )
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                server.PROVIDER_TRANSPORT.json_http_client(),
-                "request",
-                return_value=response,
-            ),
-            self.assertRaises(server.AppError) as raised,
-        ):
-            server.COACH_CONVERSATION.gemini_conversation_response_service().request(
-                {
-                    "conversation": "gemini-single-tool",
-                    "input": "Aktualisiere meine Daten.",
-                    "parallel_tool_calls": False,
-                }
-            )
-
-        self.assertEqual(raised.exception.reason, "parallel_tool_calls_unsupported")
-        self.assertEqual(
-            json.loads(
-                server.key_value_service().get("gemini_conversation_history") or "[]"
-            ),
-            [],
-        )
-
-    def test_gemini_transcription_keeps_audio_server_side_and_returns_text(self):
-        captured = {}
-
-        def fake_http_json(method, url, payload=None, headers=None, **kwargs):
-            captured.update(
-                {"method": method, "url": url, "payload": payload, "headers": headers}
-            )
-            return {
-                "candidates": [
-                    {
-                        "content": {
-                            "role": "model",
-                            "parts": [{"text": "Wie soll ich morgen trainieren?"}],
-                        }
-                    }
-                ]
-            }
-
-        config = replace(
-            server.CONFIG,
-            openai_api_key="",
-            gemini_api_key="test-gemini-key",
-            ai_provider="gemini",
-        )
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                server.PROVIDER_TRANSPORT.json_http_client(),
-                "request",
-                side_effect=fake_http_json,
-            ),
-        ):
-            result = _transcribe_via_http_route(
-                b"fake-webm-audio", "audio/webm;codecs=opus"
-            )
-
-        self.assertEqual(result, {"transcript": "Wie soll ich morgen trainieren?"})
-        self.assertEqual(captured["headers"]["x-goog-api-key"], "test-gemini-key")
-        audio_part = captured["payload"]["contents"][0]["parts"][0]["inlineData"]
-        self.assertEqual(audio_part["mimeType"], "audio/webm")
-        self.assertNotIn("fake-webm-audio", str(captured["payload"]))
-
-    def test_ai_provider_selection_keeps_models_separate(self):
+    def test_openai_model_selection_uses_configured_model(self):
         config = replace(
             server.CONFIG,
             openai_api_key="test-openai-key",
-            gemini_api_key="test-gemini-key",
-            ai_provider="openai",
+            openai_model="gpt-6-luna",
         )
         with patch.object(server, "CONFIG", config):
-            self.assertEqual(server.SETTINGS.selected_ai_provider(), "openai")
-            server.SETTINGS.save_model("gpt-6-luna")
-            provider_state = server.SETTINGS.save_ai_provider("gemini")
-            self.assertEqual(provider_state["provider"], "gemini")
-            self.assertEqual(provider_state["model"], "gemini-3.8-flash")
-            self.assertEqual(
-                [option["id"] for option in provider_state["model_options"]],
-                ["gemini-3.8-flash", "gemini-2.5-pro"],
-            )
-            self.assertEqual(server.SETTINGS.selected_model(), "gemini-3.8-flash")
-            server.SETTINGS.save_model("gemini-2.5-pro")
-            server.SETTINGS.save_ai_provider("openai")
             self.assertEqual(server.SETTINGS.selected_model(), "gpt-6-luna")
-
-    def test_gemini_key_is_redacted_from_diagnostics_text(self):
-        key = "AIza" + "a" * 35
-        with patch.object(server, "CONFIG", replace(server.CONFIG, gemini_api_key=key)):
-            self.assertNotIn(
-                key, server.REDACTOR.redact_text(f"Gemini request failed: {key}")
-            )
-
-    def test_gemini_turn_uses_its_captured_provider_and_reasoning_level(self):
-        config = replace(
-            server.CONFIG,
-            openai_api_key="test-openai-key",
-            gemini_api_key="test-gemini-key",
-            ai_provider="openai",
-        )
-        payload = {
-            "_ai_provider": "gemini",
-            "model": "gemini-3.8-flash",
-            "input": "Prüfe die Form.",
-            "reasoning": {"effort": "low"},
-        }
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                server.COACH_CONVERSATION, "gemini_conversation_response_service"
-            ) as service_factory,
-            patch.object(openai_provider.OpenAIResponsesClient, "responses") as openai,
-        ):
-            service_factory.return_value.request.return_value = {"output_text": "ok"}
             self.assertEqual(
-                server.COACH_CONVERSATION.response_transport().request(payload)[
-                    "output_text"
-                ],
-                "ok",
+                [option["id"] for option in server.SETTINGS.available_model_options()],
+                ["gpt-6-luna"],
             )
-        service_factory.return_value.request.assert_called_once_with(payload)
-        openai.assert_not_called()
-        request, _, _ = build_gemini_request_payload(
-            server, payload, "gemini-3.8-flash"
-        )
-        self.assertEqual(
-            request["generationConfig"]["thinkingConfig"], {"thinkingLevel": "low"}
-        )
-
-    def test_gemini_background_job_is_not_replayed_after_restart(self):
-        config = replace(
-            server.CONFIG,
-            openai_api_key="",
-            gemini_api_key="test-gemini-key",
-            ai_provider="gemini",
-        )
-        server.key_value_service().set(
-            "gemini_conversation_history",
-            json.dumps(
-                [
-                    {"role": "user", "parts": [{"text": "Erstelle einen Plan."}]},
-                    {
-                        "role": "model",
-                        "parts": [
-                            {
-                                "functionCall": {
-                                    "name": "stage_training_plan",
-                                    "args": {},
-                                }
-                            }
-                        ],
-                    },
-                ]
-            ),
-        )
-        with patch.object(server, "CONFIG", config):
-            server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
-                "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
-                "turn-gemini-background-restart",
-                "csrf-gemini-background-restart",
-            )
-            self.assertIsNotNone(server.COACH_BACKGROUND_JOBS.job_store().claim())
-            self.assertEqual(
-                server.COACH_BACKGROUND_JOBS.job_store().resume_interrupted(
-                    server.COACH_BACKGROUND_JOBS.turn_failure_service()
-                ),
-                0,
-            )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            command = db.execute(
-                "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?",
-                ("turn-gemini-background-restart",),
-            ).fetchone()
-        self.assertEqual(command["status"], "completed")
-        self.assertEqual(json.loads(command["receipt"])["status"], "failed")
-        self.assertEqual(
-            server.COACH_CONVERSATION.gemini_history_service().load(),
-            [
-                {"role": "user", "parts": [{"text": "Erstelle einen Plan."}]},
-                {
-                    "role": "model",
-                    "parts": [
-                        {"functionCall": {"name": "stage_training_plan", "args": {}}}
-                    ],
-                },
-            ],
-        )
-
-    def test_gemini_reset_deletes_an_existing_openai_conversation(self):
-        server.key_value_service().set("openai_conversation_id", "conv-test")
-        with server.database_manager().unit_of_work() as db:
-            db.execute(
-                "INSERT INTO coach_action_proposals "
-                "(id, session_csrf_hash, action_type, target_system, object_ids, diff, payload, "
-                "payload_hash, action_token_hash, status, expires_at, created_at) "
-                "VALUES ('remote-proposal', 'session', 'remote_coach_write', 'intervals', '{}', '[]', '{}', "
-                "'hash', 'token-hash', 'ready', 9999999999, '2026-09-28T00:00:00Z')"
-            )
-        config = replace(
-            server.CONFIG,
-            openai_api_key="test-openai-key",
-            gemini_api_key="test-gemini-key",
-            ai_provider="gemini",
-        )
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                openai_provider.OpenAIResponsesClient,
-                "delete_conversation",
-                return_value=True,
-            ) as delete,
-        ):
-            result = server.COACH_CONVERSATION.reset_service().reset()
-        delete.assert_called_once_with("conv-test")
-        self.assertTrue(result["remote_conversation_deleted"])
-        with server.database_manager().reader() as db:
-            proposal = db.execute(
-                "SELECT status, action_token_hash FROM coach_action_proposals WHERE id='remote-proposal'"
-            ).fetchone()
-        self.assertEqual(proposal["status"], "cancelled")
-        self.assertIsNone(proposal["action_token_hash"])
-
-    def test_gemini_http_errors_keep_the_provider_status(self):
-        upstream_error = HTTPError(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
-            401,
-            "Unauthorized",
-            {},
-            BytesIO(b'{"error":{"status":"UNAUTHENTICATED"}}'),
-        )
-        with (
-            patch.object(
-                server.PROVIDER_TRANSPORT.json_http_client(),
-                "opener",
-                side_effect=upstream_error,
-            ),
-            self.assertRaises(server.AppError) as raised,
-        ):
-            server.PROVIDER_TRANSPORT.json_http_client().request(
-                "POST",
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
-                {},
-                service="gemini",
-            )
-        self.assertEqual(raised.exception.status, 401)
-        self.assertEqual(raised.exception.reason, "authentication_or_permission")
+            server.SETTINGS.save_model("gpt-6-luna")
+            self.assertEqual(server.SETTINGS.selected_model(), "gpt-6-luna")
 
     def test_openai_request_uses_configured_compatible_provider_endpoint(self):
         captured = {}
@@ -1753,9 +1195,7 @@ class ServerProvidersTests(ServerTestCase):
                 "refresh",
                 {"days": 1},
                 requested_by="test",
-                available_at=(
-                    datetime.now(timezone.utc) + timedelta(hours=1)
-                ).isoformat(),
+                available_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat(),
             )
             scheduled = {
                 (item["provider"], item["area"]): item
@@ -1777,7 +1217,7 @@ class ServerProvidersTests(ServerTestCase):
                 refresh_id, "success", "complete"
             )
             with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-                stale_at = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+                stale_at = (datetime.now(UTC) - timedelta(days=3)).isoformat()
                 db.execute(
                     "UPDATE provider_refresh_history SET started_at=?, finished_at=? WHERE id=?",
                     (stale_at, stale_at, refresh_id),

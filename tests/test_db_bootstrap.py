@@ -243,18 +243,6 @@ class DatabaseBootstrapTests(unittest.TestCase):
                 self.assertFalse(any(key.startswith("gemini_") for key in values))
                 self.assertNotIn("selected_model_gemini", values)
 
-    def test_bounded_retention_does_not_recreate_retired_gemini_state(self):
-        db = self.make_connection()
-        self.addCleanup(db.close)
-        self.bootstrap(db)
-        self.key_values.set(db, "gemini_conversation_history", '[{"role":"user"}]')
-        self.key_values.set(db, "gemini_call_names", '{"one":"call"}')
-
-        self.bootstrap(db, retention_days=30)
-
-        self.assertEqual(self.key_values.get(db, "gemini_conversation_history"), "[]")
-        self.assertEqual(self.key_values.get(db, "gemini_call_names"), "{}")
-
     def test_bounded_retention_clamps_to_three_thousand_six_hundred_fifty_days(self):
         db = self.make_connection()
         self.addCleanup(db.close)
@@ -287,7 +275,7 @@ class DatabaseBootstrapTests(unittest.TestCase):
             ["recent"],
         )
 
-    def test_unlimited_retention_keeps_messages_snapshots_and_history(self):
+    def test_unlimited_retention_keeps_messages_and_snapshots(self):
         db = self.make_connection()
         self.addCleanup(db.close)
         self.bootstrap(db)
@@ -299,17 +287,11 @@ class DatabaseBootstrapTests(unittest.TestCase):
         db.execute(
             "INSERT INTO snapshots(payload, created_at) VALUES ('old', ?)", (old,)
         )
-        self.key_values.set(db, "gemini_conversation_history", '[{"role":"user"}]')
-        self.key_values.set(db, "gemini_call_names", '{"one":"call"}')
 
         self.bootstrap(db)
 
         self.assertEqual(db.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 1)
         self.assertEqual(db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0], 1)
-        self.assertEqual(
-            self.key_values.get(db, "gemini_conversation_history"), '[{"role":"user"}]'
-        )
-        self.assertEqual(self.key_values.get(db, "gemini_call_names"), '{"one":"call"}')
 
     def test_import_has_no_database_side_effects(self):
         with tempfile.TemporaryDirectory() as root:

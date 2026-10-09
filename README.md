@@ -1,6 +1,6 @@
 # Intervals Coach
 
-Intervals Coach is a private, mobile-first Progressive Web App (PWA) designed for a single athlete. Built on Python's standard-library HTTP server and an encrypted SQLCipher SQLite database, it bridges athlete training history and daily health metrics from Intervals.icu and Garmin Connect with state-of-the-art conversational AI models from OpenAI and Google Gemini.
+Intervals Coach is a private, mobile-first Progressive Web App (PWA) designed for a single athlete. Built on Python's standard-library HTTP server and an encrypted SQLCipher SQLite database, it bridges athlete training history and daily health metrics from Intervals.icu and Garmin Connect with OpenAI Responses-compatible conversational AI APIs.
 
 The application serves as an autonomous, conversational training companion. It understands athlete fatigue, manages a structured workout library, schedules future training sessions, analyzes past workouts, tracks environmental weather constraints, and interprets read-only calendar events—all while keeping sensitive biometric data, credentials, and workout plans strictly local and under the athlete's direct control.
 
@@ -41,7 +41,7 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 
 ### AI Coach & Conversational Intelligence
 - **Natural Language Coaching**: Conversational coaching without rigid trigger words, supporting natural phrasing, corrections, follow-up questions, and pronoun resolution across turns.
-- **Dual AI Provider Support**: Native integration with the OpenAI Responses API (GPT-6 Luna) and Google Gemini (Gemini 3.8 Flash) with real-time SSE token streaming.
+- **Responses API Support**: Uses OpenAI Responses-compatible APIs with real-time SSE token streaming. Chat Completions and provider fallback are unsupported.
 - **Durable Turn Queueing**: Every chat request is persisted in a durable SQLite background queue before processing, enabling seamless answer recovery across network drops or browser reloads.
 - **Permanent Fact Memorization**: Conversational profile updates that save athlete preferences, equipment notes, and constraints to the durable profile only upon explicit confirmation.
 - **Request-Specific Context Projection**: Compact daily, activity and dialogue windows for routine turns; detailed local context and additional tools are available on demand, with conservative fallback for continuations.
@@ -217,12 +217,9 @@ All configuration is loaded from container environment variables or a local `.en
 | Variable | Default Value | Required? | Description |
 | :--- | :--- | :--- | :--- |
 | `APP_PASSWORD` | *None* | **Yes** | Master password (minimum 12 characters). Secures web UI authentication and acts as the encryption key for the SQLCipher database. |
-| `OPENAI_API_KEY` | *None* | **Conditional** | API key for OpenAI. Required if using OpenAI as the AI provider. |
-| `GEMINI_API_KEY` | *None* | **Conditional** | API key for Google Gemini. Required if using Gemini as the AI provider. |
-| `AI_PROVIDER` | `openai` | No | Active AI provider (`openai` or `gemini`). Determines which model powers Coach Chat. |
+| `OPENAI_API_KEY` | *None* | **Yes** | Server-side API key for the OpenAI Responses API or compatible endpoint. |
 | `OPENAI_MODEL` | `gpt-6-luna` | No | OpenAI model deployment name (GPT-6 Luna). |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | No | Google Gemini model name. Default: `gemini-3.8-flash`. |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | No | Custom base URL for OpenAI-compatible APIs (e.g., Azure OpenAI / Microsoft Foundry endpoints ending in `/openai/v1`). |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | No | Optional Responses-compatible API base URL. HTTPS is required; HTTP is allowed only for loopback addresses. |
 | `INTERVALS_API_KEY` | *None* | **Yes** | Personal API key obtained from Intervals.icu account settings. |
 | `INTERVALS_ATHLETE_ID` | `0` | No | Athlete ID for Intervals.icu (`0` targets the athlete account associated with the API key). |
 | `GARMIN_EMAIL` | *None* | No | Garmin Connect account email. Used only during initial interactive login. |
@@ -421,7 +418,7 @@ The Coach interacts with the athlete's data via structured tools covering plan i
 - **Receipt Verification**: Tool invocations produce structured receipts in the chat UI, distinguishing saved local modifications, pending approval, queued sync jobs, and rejected parameters.
 
 ### Multimodal Capabilities
-- **Voice Transcription**: Push-to-talk voice recording captures audio directly in the PWA. Audio is streamed to `/audio/transcriptions` (OpenAI Whisper or Gemini) in memory and inserted into the message box. Raw audio is never persisted.
+- **Voice Transcription**: Push-to-talk voice recording captures audio directly in the PWA. Audio is streamed to `/audio/transcriptions` in memory and inserted into the message box. Raw audio is never persisted.
 - **File Attachments**: Athletes can attach up to 4 GPX, FIT, or image files (max 5 MB each) per turn. GPX tracks are summarized locally (distance, elevation, GPS bounds); FIT files are parsed for power and cardiac data; images are sent for vision-based AI coaching.
 
 ---
@@ -606,7 +603,7 @@ pip-compile --allow-unsafe --generate-hashes --output-file=requirements-dev.txt 
 ```
 
 ### Continuous Integration & Native Codex Reviews
-- **Conventional Commits**: All commit messages and pull request titles must follow the Conventional Commits specification (e.g., `feat(coach): add Gemini 3.8 Flash support` or `fix(sync): resolve Garmin sleep retry backoff`).
+- **Conventional Commits**: All commit messages and pull request titles must follow the Conventional Commits specification (e.g., `feat(coach): add structured response support` or `fix(sync): resolve Garmin sleep retry backoff`).
 
 - **Native Codex Reviews**: In [Codex Settings](https://chatgpt.com/codex/settings/code-review), enable automatic code review for this repository and select the trigger for new PRs and subsequent pushes. The watchdog waits at most three minutes for a native Codex comment. If none appears, it posts one `@codex review` fallback for that PR commit, then waits up to three minutes for the regular review or explicit exhausted-usage response. The latter grants an availability exception; continued silence fails the check. A later Codex comment or submitted review automatically reruns the check and recovers a late response. Inspect the reviewed commit and resolve all findings before merging. Local `codex review --base origin/develop` is an optional preflight. After adopting the watchdog on each protected branch, require its `Codex review availability` context in the ruleset. Account-level activation must be verified in Codex Settings. Copilot automatic review is disabled in repository rulesets.
 - **Dependency Updates**: Dependabot updates pip, npm, Docker and GitHub Actions on `develop`. Squash auto-merge is enabled for patch, minor and major updates; protected-branch checks and review-thread resolution still apply. The privileged auto-merge workflow never checks out or executes PR code.
@@ -687,8 +684,8 @@ MongoDB/InfluxDB und ist keine produktbezogene Lookup-API. Die Nährwerte werden
 Bezugsmenge und Einheit gespeichert. Gramm und Milliliter werden ohne bekannte
 Dichte nicht ineinander umgerechnet.
 
-Ein Foto der Nährwerttabelle wird begrenzt und nur vorübergehend an den aktuell
-ausgewählten KI-Provider übertragen. OpenAI Responses und Gemini liefern einen
+Ein Foto der Nährwerttabelle wird begrenzt und nur vorübergehend an die
+konfigurierte OpenAI Responses-kompatible API übertragen. Die API liefert einen
 strukturierten, editierbaren Vorschlag; Bilddaten, Providerantworten und
 unbestätigte Werte werden nicht in der Produktbibliothek abgelegt. Name,
 Bezugsmenge und erkannte Nährwerte müssen vor dem Speichern geprüft werden.

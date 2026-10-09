@@ -5,7 +5,6 @@ from collections.abc import Callable
 
 INTERVALS_API_KEY_ERROR = "INTERVALS_API_KEY ist nicht konfiguriert."
 OPENAI_API_KEY_ERROR = "OPENAI_API_KEY ist nicht konfiguriert."
-GEMINI_API_KEY_ERROR = "GEMINI_API_KEY ist nicht konfiguriert."
 NOT_FOUND_ERROR = "Nicht gefunden."
 INTERNAL_SERVER_ERROR = "Interner Serverfehler."
 COMPETITION_NOT_FOUND_ERROR = "Wettkampf nicht gefunden."

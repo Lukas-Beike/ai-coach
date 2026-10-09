@@ -15,7 +15,7 @@ from backend.errors import AppError
 from backend.providers import openai as openai_provider
 from backend.providers import usage as provider_usage
 
-_PROVIDERS = frozenset({"openai", "gemini"})
+_PROVIDERS = frozenset({"openai"})
 _STATUS_KEYS = {provider: f"{provider}_status" for provider in _PROVIDERS}
 _USAGE_KEYS = {provider: f"{provider}_usage" for provider in _PROVIDERS}
 _OPENAI_RATE_LIMITS_KEY = "openai_rate_limits"
@@ -24,7 +24,7 @@ _SAFE_CODE = re.compile(r"(?a)^[a-z0-9][a-z0-9_.:/-]{0,79}$")
 
 def _provider(value: Any) -> str:
     if value not in _PROVIDERS:
-        raise ValueError("provider must be exactly 'openai' or 'gemini'")
+        raise ValueError("provider must be exactly 'openai'")
     return value
 
 
@@ -51,7 +51,7 @@ def _safe_http_status(value: Any) -> int | None:
     if isinstance(value, str) and value.strip().isdigit():
         try:
             return int(value.strip())
-        except (TypeError, ValueError, OverflowError):
+        except TypeError, ValueError, OverflowError:
             pass
     return None
 
@@ -172,8 +172,7 @@ class ProviderStateService:
                 provider,
                 state="ok",
                 reason="ok",
-                message=("OpenAI" if provider == "openai" else "Gemini")
-                + " ist verfügbar.",
+                message="OpenAI ist verfügbar.",
                 http_status=http_status,
                 provider_error_code=None,
             )

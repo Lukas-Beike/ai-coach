@@ -495,15 +495,13 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(state["checkins"][0]["checkin_date"], "2026-08-30")
         self.assertEqual(state["checkins"][0]["motivation"], 8)
 
-    def test_public_states_keep_empty_usage_when_no_ai_provider_is_configured(self):
-        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="")
-
+    def test_public_states_keep_empty_usage_when_openai_is_not_configured(self):
+        config = replace(server.CONFIG, openai_api_key="")
         with patch.object(server, "CONFIG", config):
             bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
             state = server.PUBLIC_STATE.state_service().read(local_only=True)
 
         for result in (bootstrap, state):
-            self.assertEqual(result["ai_provider"]["selected"], "")
             self.assertEqual(result["usage"]["requests"], 0)
             self.assertEqual(result["usage"]["status"], {})
             self.assertEqual(result["usage"]["rate_limits"], {})
@@ -746,7 +744,6 @@ class ServerHttpTests(ServerTestCase):
                 "performance_refresh",
                 "morning_checkin",
                 "coach_quick_actions",
-                "ai_provider",
                 "model",
                 "thinking_level",
                 "configured",
@@ -1092,7 +1089,7 @@ class ServerHttpTests(ServerTestCase):
     def test_provider_authentication_errors_do_not_use_the_session_status(self):
         provider_error = server.AppError(
             401,
-            "Gemini-Schlüssel ungültig.",
+            "OpenAI key invalid.",
             reason="authentication_or_permission",
             upstream_status=401,
         )
@@ -1135,9 +1132,8 @@ class ServerHttpTests(ServerTestCase):
             try:
                 server.PROVIDER_TRANSPORT.json_http_client().request(
                     "POST",
-                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+                    "https://api.openai.com/v1/responses",
                     {},
-                    service="gemini",
                     cancel_event=cancelled,
                 )
             except server.AppError as exc:

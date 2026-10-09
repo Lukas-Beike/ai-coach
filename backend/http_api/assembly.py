@@ -486,7 +486,6 @@ class HttpApiAssembly:
             response_timeout_seconds=timeout,
         )
         self.transcribe_post_routes = TranscribePostRoutes(
-            settings,
             audio_transcription_client,
         )
         self.privacy_delete_post_routes = PrivacyDeletePostRoutes(

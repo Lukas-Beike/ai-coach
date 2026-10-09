@@ -221,10 +221,6 @@ class PublicStateService:
                 },
                 "morning_checkin": deps.morning_checkin.state(),
                 "coach_quick_actions": deps.coach_quick_actions.state(),
-                "ai_provider": {
-                    "selected": deps.settings.selected_ai_provider(),
-                    "options": deps.settings.available_ai_providers(),
-                },
                 "model": {
                     "selected": deps.settings.selected_model(),
                     "options": deps.settings.available_model_options(),
@@ -235,12 +231,9 @@ class PublicStateService:
                 },
                 "configured": {
                     "openai": bool(deps.config.openai_api_key),
-                    "gemini": bool(deps.config.gemini_api_key),
                     "intervals": bool(deps.config.intervals_api_key),
                     "weather": bool(weather.get("configured")),
                     "external_calendar": bool(deps.config.calendar_ical_url),
                 },
-                "usage": deps.provider_state.summary(
-                    deps.settings.selected_ai_provider() or "openai"
-                ),
+                "usage": deps.provider_state.summary("openai"),
             }

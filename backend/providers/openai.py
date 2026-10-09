@@ -433,7 +433,6 @@ def responses_payload(
 ) -> dict[str, Any]:
     """Build an OpenAI Responses API payload without mutating caller state."""
     request_payload = dict(payload)
-    request_payload.pop("_ai_provider", None)
     request_payload.setdefault("reasoning", {"effort": thinking_level})
     if stream:
         request_payload["stream"] = True

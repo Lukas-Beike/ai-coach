@@ -109,13 +109,11 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 key_values=self.key_values,
                 config=SimpleNamespace(
                     openai_api_key="fake-openai-secret",
-                    gemini_api_key="fake-gemini-secret",
                     intervals_api_key="fake-intervals-secret",
                     calendar_ical_url="https://calendar.invalid/fake-token",
                     garmin_tokenstore="/does-not-exist/fake-token-store",
                 ),
                 settings=SimpleNamespace(
-                    selected_ai_provider=lambda: "openai",
                     selected_model=lambda: "gpt-test",
                     selected_thinking_level=lambda: "medium",
                     available_model_options=lambda: [{"id": "gpt-test"}],
@@ -161,7 +159,6 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "runtime",
                 "configuration",
                 "openai",
-                "gemini",
                 "coach_commands",
                 "sync",
                 "performance_refresh",
@@ -210,7 +207,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         serialized = str(report)
         for private in (
             "fake-openai-secret",
-            "fake-gemini-secret",
+            "fake-provider-secret",
             "fake-intervals-secret",
             "fake-token",
             "private athlete",

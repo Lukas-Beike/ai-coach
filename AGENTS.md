@@ -132,12 +132,11 @@ status. Treat all of it as durable athlete data.
   sync path before coaching where supported. Do not add unconditional provider
   refreshes to every chat request.
 - Model options and defaults come from the provider implementation and
-  configuration. Preserve explicit provider/model selection; verify the code
-  before documenting or changing model policy.
-- Gemini is a separately configured AI provider with its own model options
-  and response adapter. Preserve explicit provider selection, provider-specific
-  errors, freshness/provenance, and conversation continuity. Diagnose OpenAI
-  independently; a successful Gemini response does not verify the OpenAI path.
+  configuration. Preserve explicit model selection; verify the code before
+  documenting or changing model policy.
+- Coach uses only the OpenAI Responses API contract. `OPENAI_BASE_URL` may point
+  to an OpenAI Responses-compatible endpoint; Chat Completions and provider
+  fallback paths are unsupported.
 - `APP_VERSION` in `server.py` must match the GitHub release tag. If a release
   needs a version update, the daily release workflow opens a PR; it must not
   push directly to protected `main`. The container publishing workflow must

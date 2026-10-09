@@ -14,7 +14,7 @@ The review followed the repository `AGENTS.md`, the scoped `public/AGENTS.md` an
 
 The source snapshot was `a01eab4f57bf331dc712344587421708ea1a3cad` on `t3code/full-codebase-architecture-review`. At review start, the tracked tree was clean; this report was the sole untracked path. It is the review deliverable, not a source change included in the reviewed snapshot.
 
-The review traced the application from `server.py` composition through `backend/`, the browser client, SQLCipher repositories, workers, provider adapters, OpenAI/Gemini Responses flows, route contracts, tests, Docker, workflows, and README claims. A disposable SQLCipher fixture container was used for the unit and browser checks. The complete local source snapshot is covered below; runtime and real-provider limitations are recorded explicitly.
+The review traced the application from `server.py` composition through `backend/`, the browser client, SQLCipher repositories, workers, provider adapters, OpenAI Responses flows, route contracts, tests, Docker, workflows, and README claims. A disposable SQLCipher fixture container was used for the unit and browser checks. The complete local source snapshot is covered below; runtime and real-provider limitations are recorded explicitly.
 
 ## Findings
 
@@ -119,7 +119,7 @@ Start with `backend/coach/turn_outcome.py` and its receipt producers during F2: 
 `public/coach.js` owns the Coach lifecycle, but `public/app.js` still owns history loading, route restoration, and shared state. Keep one authoritative reconciliation owner with explicit generation/version inputs. U1 below must establish the two actual request stacks before deciding whether a small coalescing change or fixture correction is needed. Do not introduce a state-management dependency or split files solely by length.
 
 - `server.py` remains approximately 1,833 lines, but the reviewed current paths keep new domain workflows in `backend/` and use `server.py` primarily as composition root. Size alone is therefore not reported as a defect.
-- A static dependency pass showed a provider-state/openai/http/gemini cycle-shaped relationship caused partly by type-checking and dynamic imports. No import failure or runtime break was reproduced. Treat this as a refactoring candidate: make provider protocols and transport dependencies unidirectional before adding more adapters.
+- A static dependency pass showed a provider-state/openai/http cycle-shaped relationship caused partly by type-checking and dynamic imports. No import failure or runtime break was reproduced. Treat this as a refactoring candidate: make provider protocols and transport dependencies unidirectional.
 - `Any` and untyped dictionary boundaries are concentrated in provider payloads, Coach proposals/context, and sync jobs. Type those boundaries incrementally alongside the CI task; no standalone correctness defect was proven from the inventory alone.
 - The HTTP and Coach library projections duplicate pagination/filtering rules. Finding 3 is the confirmed failure; consolidate the read model while fixing it.
 - The Playwright fixture uses one worker and mutable shared SQLCipher state. Tests that create “today” records can contaminate later projects. The observed plan-commit failure at `e2e/coach.spec.js:638-652` was classified as fixture isolation, not as a product defect. Reset or namespace fixture state per test/project in a follow-up.
@@ -221,7 +221,7 @@ Desktop `contracts.spec.js:45` was active at interruption. The remaining desktop
 | 3. Secrets, privacy, untrusted content | logging/redaction, Markdown, voice, export/delete, token boundaries | Secret scans and tests | Reviewed; export lock finding | No real credential/provider run |
 | 4. SQLCipher and durable data | DB manager, schema/repositories, UOW/reader ownership | Container unit suite | Reviewed | Load under real SQLCipher concurrency not measured |
 | 5. Backup/restore/recovery | export, restore, maintenance gate, recovery copy | Unit tests and source trace | Reviewed | Full fault-injection restart journey blocked |
-| 6. Provider/network security | Intervals, Garmin, calendar, weather, OpenAI, Gemini HTTP adapters | Mocked provider tests | Reviewed | Live API/version and DNS edge cases unverified |
+| 6. Provider/network security | Intervals, Garmin, calendar, weather, OpenAI HTTP adapter | Mocked provider tests | Reviewed | Live API/version and DNS edge cases unverified |
 | 7. Synchronization/concurrency | queues, workers, scheduler, cursors, reconciliation | Worker reproduction; unit suite | Finding 1 | Cross-process restart/load tests remain follow-up |
 | 8. Coach context/training correctness | context projection, provenance, local authority, budgets | Unit/source checks | Reviewed | Real-model advice quality not certified |
 | 9. Responses lifecycle/Coach tools | schemas, catalog, dispatcher, receipts, stream/background state | Container tests; browser matrix | F2/F3; investigation U1 | Full semantic and every race scenario not observed |
@@ -303,7 +303,6 @@ Required 400, 401, 403, 404, 409, 413, 422, 429, 500, 502, 503, 504, malformed-r
 | Public iCalendar | HTTPS/SSRF/pinned-address fetch, bounded recurrence, timezone/event text as data, last-good state | Source/tests reviewed; DNS rebinding and live feed not run |
 | Weather | Location-derived forecast, cache/backoff, stale/error state, plan visibility | Unit/source reviewed; no live weather |
 | OpenAI Responses | Conversation create/resume/reset, streaming/background, cancellation, tools, usage, redaction, model setting | Mocked tests passed; no real model semantic evaluation; Finding 2 applies to status projection |
-| Gemini | Equivalent stream/tool/history/media path and provider selection | Mocked tests passed; no live model |
 | GitHub release status | Optional status/version/release validation | Source/workflow reviewed; no live GitHub request |
 
 Cross-provider success/failure combinations, startup/daily/manual/named refresh overlap, pagination boundaries, duplicate/out-of-order records, rate limits, malformed schemas, and recovery were covered by mocks/source where available but not certified against live services.
@@ -371,7 +370,7 @@ Post-remediation validation completed with `python -m unittest discover -s tests
 ## Limitations and follow-up
 
 - Whole-project Playwright runs for tablet and desktop still exhibit a cumulative fixture/session stall after 28 passing cases; the affected cases pass when each spec gets a fresh disposable fixture. All 270 tests therefore passed, but tablet and desktop did not complete as single-project runs. Keep investigating fixture lifetime if the project-level matrix is made a required local workflow.
-- Real OpenAI/Gemini semantic behavior, live Intervals/Garmin/calendar/weather/GitHub contracts, and remote writes were intentionally not exercised.
+- Real OpenAI semantic behavior, live Intervals/Garmin/calendar/weather/GitHub contracts, and remote writes were intentionally not exercised.
 - Full SQLCipher load, process restart during an effect, restore overlap, and failure-injection journeys need a disposable integration run.
 - Current dependency advisory/license checks and GitHub workflow dispatch/settings were not run.
 - Live provider semantics, real-model language behavior, and remote writes remain outside this disposable validation scope and still require separate mocked integration coverage before any production deployment.

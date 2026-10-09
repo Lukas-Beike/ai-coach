@@ -128,7 +128,6 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         with patch("backend.coach.response_retry.secrets.randbelow", return_value=250):
             delay = self.retry_policy.retry_delay(
                 error,
-                ai_provider="openai",
                 attempt=0,
                 request_delta_emitted=False,
             )
@@ -142,7 +141,6 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertIsNone(
             self.retry_policy.retry_delay(
                 error,
-                ai_provider="openai",
                 attempt=0,
                 request_delta_emitted=False,
             )

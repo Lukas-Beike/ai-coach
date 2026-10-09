@@ -16,10 +16,10 @@ class SettingsPutRoutes:
     def handle(self, handler: Any, path: str) -> bool:
         if path == "/api/settings/model":
             result = self._settings.save_model(handler.read_json().get("model"))
-        elif path == "/api/settings/ai-provider":
-            result = self._settings.save_ai_provider(handler.read_json().get("provider"))
         elif path == "/api/settings/thinking-level":
-            result = self._settings.save_thinking_level(handler.read_json().get("thinking_level"))
+            result = self._settings.save_thinking_level(
+                handler.read_json().get("thinking_level")
+            )
         elif path == "/api/settings/calendar-display":
             result = self._settings.save_calendar_display_settings(handler.read_json())
         else:

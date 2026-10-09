@@ -57,20 +57,14 @@ class AthleteGetRoutesTests(unittest.TestCase):
                 self.handler.send_json.assert_called_once_with(200, expected_payload)
         self.competitions.list.assert_called_once_with(limit=100)
 
-    def test_context_preview_uses_current_provider_selection(self) -> None:
-        providers = iter(("openai", "gemini"))
-        self.settings.selected_ai_provider.side_effect = lambda: next(providers)
-        self.preview.preview.side_effect = lambda provider: {"provider": provider}
+    def test_context_preview_uses_openai_contract(self) -> None:
+        self.preview.preview.return_value = {"context": "synthetic"}
 
-        for expected_provider in ("openai", "gemini"):
-            self.handler.reset_mock()
-            self.assertTrue(self.routes.handle(self.handler, "/api/context-preview"))
-            self.preview.preview.assert_called_with(expected_provider)
-            self.handler.send_json.assert_called_once_with(
-                200, {"provider": expected_provider}
-            )
+        self.assertTrue(self.routes.handle(self.handler, "/api/context-preview"))
 
-        self.assertEqual(self.factories["preview"].call_count, 2)
+        self.preview.preview.assert_called_once_with()
+        self.handler.send_json.assert_called_once_with(200, {"context": "synthetic"})
+        self.assertEqual(self.factories["preview"].call_count, 1)
 
     def test_keep_alive_requests_resolve_auth_service_again(self) -> None:
         first_auth = Mock()
@@ -90,7 +84,9 @@ class AthleteGetRoutesTests(unittest.TestCase):
             factory.assert_not_called()
         self.handler.send_json.assert_not_called()
 
-    def test_auth_failure_prevents_data_and_settings_resolution_or_response(self) -> None:
+    def test_auth_failure_prevents_data_and_settings_resolution_or_response(
+        self,
+    ) -> None:
         self.auth.require_auth.side_effect = PermissionError("unauthorized")
 
         with self.assertRaisesRegex(PermissionError, "unauthorized"):
@@ -99,7 +95,6 @@ class AthleteGetRoutesTests(unittest.TestCase):
         self.factories["auth"].assert_called_once_with()
         for name in ("performance", "profile", "competitions", "feedback", "preview"):
             self.factories[name].assert_not_called()
-        self.settings.selected_ai_provider.assert_not_called()
         self.handler.send_json.assert_not_called()
 
 

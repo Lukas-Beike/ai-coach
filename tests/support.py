@@ -7,21 +7,9 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.coach import limits as coach_limits
 from backend.coach import streams as coach_streams
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.runtime import clock as runtime_clock
-
-
-def build_gemini_request_payload(server, payload, model):
-    """Exercise the concrete Gemini request owner with active test settings."""
-    return server.COACH_CONVERSATION.gemini_request_payload_service().build(
-        payload,
-        model,
-        default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
-        default_thinking_level=server.SETTINGS.selected_thinking_level(),
-        json_media_type=server.JSON_MEDIA_TYPE,
-    )
 
 
 class IntervalsRequestRecorder:

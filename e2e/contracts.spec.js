@@ -146,7 +146,6 @@ test("light mode keeps performance source badges readable", { tag: "@responsive"
 test("chat reset detaches a delayed status poll without releasing its successor", async ({ page }) => {
   await ready(page);
   await expect(page.locator("#openaiChatResetButton")).toHaveCount(1);
-  await expect(page.locator("#chatResetButton")).toHaveCount(1);
   await page.evaluate(() => {
     const original = fetch.bind(window);
     window.__statusCalls = [];

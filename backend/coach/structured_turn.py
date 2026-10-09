@@ -49,16 +49,25 @@ class CoachStructuredTurnService:
 
     @staticmethod
     def _resume_id(
-        receipt: dict[str, Any], request_payload: dict[str, Any], *, ai_provider: str, background_owned: bool,
+        receipt: dict[str, Any],
+        request_payload: dict[str, Any],
+        *,
+        background_owned: bool,
     ) -> str:
-        resume_id = str(receipt.get("openai_response_id") or "") if background_owned and ai_provider == "openai" else ""
+        resume_id = (
+            str(receipt.get("openai_response_id") or "") if background_owned else ""
+        )
         if resume_id and receipt.get("response_input"):
             request_payload["input"] = receipt["response_input"]
-            if receipt.get("previous_response_id") and not request_payload.get("conversation"):
-                request_payload["previous_response_id"] = receipt["previous_response_id"]
+            if receipt.get("previous_response_id") and not request_payload.get(
+                "conversation"
+            ):
+                request_payload["previous_response_id"] = receipt[
+                    "previous_response_id"
+                ]
         if background_owned and receipt.get("pending_tool_outputs"):
             request_payload["input"] = receipt["pending_tool_outputs"]
-            if ai_provider == "openai" and resume_id and not request_payload.get("conversation"):
+            if resume_id and not request_payload.get("conversation"):
                 request_payload["previous_response_id"] = resume_id
             resume_id = ""
         return resume_id
@@ -72,50 +81,86 @@ class CoachStructuredTurnService:
         client_turn_id: str,
         session_csrf_hash: str,
         background_job: bool,
-        ai_provider: str,
         model: str | None,
         thinking_level: str | None,
         on_text_delta: Callable[[str], None] | None,
         cancel_event: threading.Event | None,
     ) -> dict[str, Any]:
         receipt = self._deps.opening.open(
-            message, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
-            session_csrf_hash=session_csrf_hash, ai_provider=ai_provider, model=model,
+            message,
+            intent=intent,
+            conversation_id=conversation_id,
+            client_turn_id=client_turn_id,
+            session_csrf_hash=session_csrf_hash,
+            model=model,
         )
-        attachments, has_prior_openai_attachments = self._deps.attachments.load_for_receipt(receipt)
-        retain_openai_attachment_context = ai_provider == "openai" and bool(attachments or has_prior_openai_attachments)
+        attachments, has_prior_openai_attachments = (
+            self._deps.attachments.load_for_receipt(receipt)
+        )
+        retain_openai_attachment_context = bool(
+            attachments or has_prior_openai_attachments
+        )
         background_owned = background_job and receipt.get("mode") == "background"
         context = self._deps.dialogue.context(client_turn_id)
         self._deps.attachments.add_evidence(context)
         allow_mutations = intent.get("allow_mutations", True)
         command_receipts = list(receipt.get("command_receipts") or [])
         sync_job_ids = list(receipt.get("sync_job_ids") or [])
-        tools = self._deps.tools if allow_mutations else [
-            tool for tool in self._deps.tools if tool["name"] in self._deps.read_only_tools
-        ]
+        tools = (
+            self._deps.tools
+            if allow_mutations
+            else [
+                tool
+                for tool in self._deps.tools
+                if tool["name"] in self._deps.read_only_tools
+            ]
+        )
         model_instructions, request_payload = self._deps.payload.build(
-            message=message, context=context, command_receipts=command_receipts, tools=tools,
-            allow_mutations=allow_mutations, ai_provider=ai_provider, model=model,
-            thinking_level=thinking_level, conversation_id=conversation_id, attachments=attachments,
+            message=message,
+            context=context,
+            command_receipts=command_receipts,
+            tools=tools,
+            allow_mutations=allow_mutations,
+            model=model,
+            thinking_level=thinking_level,
+            conversation_id=conversation_id,
+            attachments=attachments,
             retain_openai_attachment_context=retain_openai_attachment_context,
             has_prior_openai_attachments=has_prior_openai_attachments,
         )
         recovery_state = {"conversation_recovered": False}
         resume_id = self._resume_id(
-            receipt, request_payload, ai_provider=ai_provider, background_owned=background_owned,
+            receipt,
+            request_payload,
+            background_owned=background_owned,
         )
         response = self._deps.response.respond(
-            request_payload, request_payload=request_payload, context=context, message=message,
-            command_receipts=command_receipts, attachments=attachments, client_turn_id=client_turn_id,
-            ai_provider=ai_provider, background_owned=background_owned, on_text_delta=on_text_delta,
-            cancel_event=cancel_event, recovery_state=recovery_state, resume_id=resume_id,
+            request_payload,
+            request_payload=request_payload,
+            context=context,
+            message=message,
+            command_receipts=command_receipts,
+            attachments=attachments,
+            client_turn_id=client_turn_id,
+            background_owned=background_owned,
+            on_text_delta=on_text_delta,
+            cancel_event=cancel_event,
+            recovery_state=recovery_state,
+            resume_id=resume_id,
         )
         return {
-            "receipt": receipt, "context": context, "command_receipts": command_receipts,
-            "sync_job_ids": sync_job_ids, "allow_mutations": allow_mutations, "tools": tools,
-            "model_instructions": model_instructions, "request_payload": request_payload,
-            "recovery_state": recovery_state, "attachments": attachments,
-            "background_owned": background_owned, "response": response,
+            "receipt": receipt,
+            "context": context,
+            "command_receipts": command_receipts,
+            "sync_job_ids": sync_job_ids,
+            "allow_mutations": allow_mutations,
+            "tools": tools,
+            "model_instructions": model_instructions,
+            "request_payload": request_payload,
+            "recovery_state": recovery_state,
+            "attachments": attachments,
+            "background_owned": background_owned,
+            "response": response,
         }
 
     def _run_turn(
@@ -129,15 +174,20 @@ class CoachStructuredTurnService:
         cancel_event: threading.Event | None,
         session_csrf_hash: str,
         background_job: bool,
-        ai_provider: str,
         model: str | None,
         thinking_level: str | None,
     ) -> dict[str, Any]:
         state = self._open_and_request(
-            message, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
-            session_csrf_hash=session_csrf_hash, background_job=background_job,
-            ai_provider=ai_provider, model=model, thinking_level=thinking_level,
-            on_text_delta=on_text_delta, cancel_event=cancel_event,
+            message,
+            intent=intent,
+            conversation_id=conversation_id,
+            client_turn_id=client_turn_id,
+            session_csrf_hash=session_csrf_hash,
+            background_job=background_job,
+            model=model,
+            thinking_level=thinking_level,
+            on_text_delta=on_text_delta,
+            cancel_event=cancel_event,
         )
         receipt = state["receipt"]
         context = state["context"]
@@ -145,31 +195,56 @@ class CoachStructuredTurnService:
         sync_job_ids = state["sync_job_ids"]
         allow_mutations = state["allow_mutations"]
         round_state = StructuredCoachRoundState(
-            tools=state["tools"], command_receipts=command_receipts, sync_job_ids=sync_job_ids,
-            context=context, allow_mutations=allow_mutations, conversation_id=conversation_id,
-            client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash,
-            cancel_event=cancel_event, ai_provider=ai_provider, request_payload=state["request_payload"],
-            model_instructions=state["model_instructions"], message=message, attachments=state["attachments"],
-            background_owned=state["background_owned"], on_text_delta=on_text_delta,
+            tools=state["tools"],
+            command_receipts=command_receipts,
+            sync_job_ids=sync_job_ids,
+            context=context,
+            allow_mutations=allow_mutations,
+            conversation_id=conversation_id,
+            client_turn_id=client_turn_id,
+            session_csrf_hash=session_csrf_hash,
+            cancel_event=cancel_event,
+            request_payload=state["request_payload"],
+            model_instructions=state["model_instructions"],
+            message=message,
+            attachments=state["attachments"],
+            background_owned=state["background_owned"],
+            on_text_delta=on_text_delta,
             recovery_state=state["recovery_state"],
         )
         response, rounds, question, cancelled, _ = self._deps.rounds.run(
-            state["response"], rounds=int(receipt.get("tool_rounds") or 0),
-            question="", cancelled=False, state=round_state,
+            state["response"],
+            rounds=int(receipt.get("tool_rounds") or 0),
+            question="",
+            cancelled=False,
+            state=round_state,
         )
         status, text, failures = self._deps.outcome.finalize(
-            response, command_receipts, question=question, cancelled=cancelled,
-            allow_mutations=allow_mutations, context=context, message=message,
+            response,
+            command_receipts,
+            question=question,
+            cancelled=cancelled,
+            allow_mutations=allow_mutations,
+            context=context,
+            message=message,
         )
         final_receipt = self._deps.final_receipt.build(
-            receipt, status=status, response=response, client_turn_id=client_turn_id,
-            command_receipts=command_receipts, sync_job_ids=sync_job_ids, intent=intent,
-            rounds=rounds, failures=failures, awaiting_clarification=bool(question),
+            receipt,
+            status=status,
+            response=response,
+            client_turn_id=client_turn_id,
+            command_receipts=command_receipts,
+            sync_job_ids=sync_job_ids,
+            intent=intent,
+            rounds=rounds,
+            failures=failures,
+            awaiting_clarification=bool(question),
         )
         final_receipt["text"] = text
         return self._deps.final_receipt.persist(
-            final_receipt, client_turn_id=client_turn_id,
-            command_receipts=command_receipts, ai_provider=ai_provider,
+            final_receipt,
+            client_turn_id=client_turn_id,
+            command_receipts=command_receipts,
         )
 
     def run(
@@ -183,25 +258,35 @@ class CoachStructuredTurnService:
         cancel_event: threading.Event | None = None,
         session_csrf_hash: str = "",
         background_job: bool = False,
-        ai_provider: str,
         model: str | None = None,
         thinking_level: str | None = None,
     ) -> dict[str, Any]:
         """Persist a complete turn or the safe terminal failure receipt."""
         try:
             receipt = self._run_turn(
-                message, intent=intent, conversation_id=conversation_id,
-                client_turn_id=client_turn_id, on_text_delta=on_text_delta,
-                cancel_event=cancel_event, session_csrf_hash=session_csrf_hash,
-                background_job=background_job, ai_provider=ai_provider,
-                model=model, thinking_level=thinking_level,
+                message,
+                intent=intent,
+                conversation_id=conversation_id,
+                client_turn_id=client_turn_id,
+                on_text_delta=on_text_delta,
+                cancel_event=cancel_event,
+                session_csrf_hash=session_csrf_hash,
+                background_job=background_job,
+                model=model,
+                thinking_level=thinking_level,
             )
         except Exception as exc:
-            if isinstance(exc, AppError) and exc.reason in {"command_scope_denied", "client_turn_in_progress"}:
+            if isinstance(exc, AppError) and exc.reason in {
+                "command_scope_denied",
+                "client_turn_in_progress",
+            }:
                 raise
             self._deps.logger.warning(
                 "Coach command failed",
-                extra={"event": "coach_command_failed", "context": coach_error_metadata(exc, self._deps.root)},
+                extra={
+                    "event": "coach_command_failed",
+                    "context": coach_error_metadata(exc, self._deps.root),
+                },
             )
             receipt = self._deps.failure.persist(client_turn_id, intent, exc)
             if not receipt:

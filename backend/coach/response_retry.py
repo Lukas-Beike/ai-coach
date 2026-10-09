@@ -22,7 +22,6 @@ class CoachResponseRetryPolicy:
         self,
         exc: AppError,
         *,
-        ai_provider: str,
         attempt: int,
         request_delta_emitted: bool,
     ) -> float | None:
@@ -30,7 +29,7 @@ class CoachResponseRetryPolicy:
             exc.reason == "rate_limit_exceeded"
             or getattr(exc, "provider_error_code", None) == "rate_limit_exceeded"
         )
-        if ai_provider != "openai" or not rate_limited or attempt == 2 or request_delta_emitted:
+        if not rate_limited or attempt == 2 or request_delta_emitted:
             return None
         retry_after = getattr(exc, "retry_after_seconds", None)
         if isinstance(retry_after, int):

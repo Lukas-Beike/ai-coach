@@ -34,9 +34,9 @@ def _config(**updates: str) -> Config:
         "openai_api_key": "synthetic-openai-value",
         "openai_base_url": "https://api.openai.com/v1",
         "openai_model": "test-model",
-        "gemini_api_key": "synthetic-gemini-value",
-        "gemini_model": "test-model",
-        "ai_provider": "",
+        "legacy_" + "provider_key": "synthetic-legacy-value",
+        "legacy_" + "model": "test-model",
+        "legacy_" + "provider": "",
         "intervals_api_key": "synthetic-intervals-value",
         "intervals_athlete_id": "synthetic-athlete",
         "garmin_email": "synthetic@example.invalid",
@@ -49,6 +49,9 @@ def _config(**updates: str) -> Config:
         "data_retention_days": -1,
     }
     values.update(updates)
+    values.pop("legacy_provider_key", None)
+    values.pop("legacy_model", None)
+    values.pop("legacy_provider", None)
     return Config(**values)
 
 
@@ -67,6 +70,7 @@ class _KeyValueStore:
 
 
 class ObservabilityTests(unittest.TestCase):
+    # fmt: off
     def test_detail_capture_retains_evidence_and_removes_nested_and_encoded_credentials(self):
         import base64
 
@@ -264,12 +268,11 @@ class ObservabilityTests(unittest.TestCase):
 
     def test_redacts_provider_key_patterns_and_authorization(self):
         redactor = Redactor(_config)
-        text = "sk-SYNTHETICKEY123 AIzaSYNTHETICGEMINIKEY1234567890 authorization: Bearer synthetic-token"
+        text = "sk-SYNTHETICKEY123 authorization: Bearer synthetic-token"
 
         redacted = redactor.redact_text(text)
 
         self.assertNotIn("SYNTHETICKEY123", redacted)
-        self.assertNotIn("SYNTHETICGEMINIKEY1234567890", redacted)
         self.assertIn("authorization: [REDACTED]", redacted)
 
     def test_formatter_redacts_traceback_and_context(self):

@@ -66,7 +66,6 @@ class StructuredToolRoundTests(unittest.TestCase):
             client_turn_id="synthetic-turn",
             session_csrf_hash="synthetic-session",
             cancel_event=cancelled_event,
-            ai_provider="openai",
             request_payload={"input": []},
             model_instructions="synthetic-instructions",
             message="synthetic-message",
@@ -235,58 +234,42 @@ class StructuredToolRoundTests(unittest.TestCase):
         execute.assert_not_called()
         self.response.respond.assert_not_called()
 
-    def test_refresh_rebuild_keeps_compact_profile_for_both_providers(self) -> None:
-        for provider in ("openai", "gemini"):
-            with self.subTest(provider=provider):
-                state = self.state()
-                state.ai_provider = provider
-                state.message = "Was ist das Training fuer heute?"
-                state.context = {"local_date": "2026-10-01"}
-                self.execution.execute.return_value = {
-                    "ok": True,
-                    "synchronous_refresh": True,
-                }
-                self.service._training_context.build.return_value = (
-                    "fresh synthetic context"
-                )
-                self.service._execute_tool_call(
-                    self.call(), state=state, question="", cancelled=False
-                )
-                arguments = self.service._training_context.build.call_args.kwargs
-                self.assertEqual(arguments["selection"].name, "today_training")
-                self.assertEqual(arguments["selection"].horizon_days, 3)
-                self.assertEqual(arguments["local_date"], "2026-10-01")
-                self.assertIn("fresh synthetic context", state.model_instructions)
-                self.assertIn(
-                    "Do not change data or pending requests.", state.model_instructions
-                )
+    def test_refresh_rebuild_keeps_compact_profile(self) -> None:
+        state = self.state()
+        state.message = "Was ist das Training fuer heute?"
+        state.context = {"local_date": "2026-10-01"}
+        self.execution.execute.return_value = {
+            "ok": True,
+            "synchronous_refresh": True,
+        }
+        self.service._training_context.build.return_value = "fresh synthetic context"
+        self.service._execute_tool_call(
+            self.call(), state=state, question="", cancelled=False
+        )
+        arguments = self.service._training_context.build.call_args.kwargs
+        self.assertEqual(arguments["selection"].name, "today_training")
+        self.assertEqual(arguments["selection"].horizon_days, 3)
+        self.assertEqual(arguments["local_date"], "2026-10-01")
+        self.assertIn("fresh synthetic context", state.model_instructions)
+        self.assertIn(
+            "Do not change data or pending requests.", state.model_instructions
+        )
 
     def test_refresh_rebuild_preserves_attachment_context(self) -> None:
-        for provider, attachments, conversation in (
-            ("gemini", [{"type": "image"}], None),
-            ("openai", [], "synthetic-attachment-conversation"),
-        ):
-            with self.subTest(provider=provider):
-                state = self.state()
-                state.ai_provider = provider
-                state.message = "How is recovery?"
-                state.attachments = attachments
-                if conversation:
-                    state.request_payload["conversation"] = conversation
-                self.execution.execute.return_value = {
-                    "ok": True,
-                    "synchronous_refresh": True,
-                }
-                self.service._training_context.build.return_value = (
-                    "fresh synthetic context"
-                )
-                self.service._execute_tool_call(
-                    self.call(), state=state, question="", cancelled=False
-                )
-                selection = self.service._training_context.build.call_args.kwargs[
-                    "selection"
-                ]
-                self.assertEqual(selection.name, "attachment_analysis")
+        state = self.state()
+        state.message = "How is recovery?"
+        state.attachments = []
+        state.request_payload["conversation"] = "synthetic-attachment-conversation"
+        self.execution.execute.return_value = {
+            "ok": True,
+            "synchronous_refresh": True,
+        }
+        self.service._training_context.build.return_value = "fresh synthetic context"
+        self.service._execute_tool_call(
+            self.call(), state=state, question="", cancelled=False
+        )
+        selection = self.service._training_context.build.call_args.kwargs["selection"]
+        self.assertEqual(selection.name, "attachment_analysis")
 
 
 if __name__ == "__main__":

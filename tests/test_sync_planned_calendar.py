@@ -124,9 +124,6 @@ class PlannedCalendarSyncTests(unittest.TestCase):
             openai_api_key="",
             openai_base_url="https://api.openai.com/v1",
             openai_model="test",
-            gemini_api_key="",
-            gemini_model="test",
-            ai_provider="",
             intervals_api_key=api_key,
             intervals_athlete_id="athlete/1",
             garmin_email="",
@@ -320,7 +317,9 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.assertEqual(row["sync_state"], "local")
         self.assertNotEqual(row["baseline_hash"], planned_unit_payload_hash(payload))
         self.service.sync_entry(LOCAL_ID)
-        self.assertEqual(self.client.upserts[-1][0]["name"], "Synthetic concurrent edit")
+        self.assertEqual(
+            self.client.upserts[-1][0]["name"], "Synthetic concurrent edit"
+        )
         self.assertEqual(self.client.upserts[-1][0]["id"], "event-1")
         self.assertEqual(self.unit()["sync_dirty"], 0)
         self.assertEqual(self.unit()["sync_state"], "synced")
@@ -389,7 +388,9 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.assertEqual(row["sync_dirty"], 1)
         self.assertEqual(row["sync_state"], "local")
         self.service.sync_entry(LOCAL_ID)
-        self.assertEqual(self.client.upserts[-1][0]["start_date_local"], "2026-09-22T00:00:00")
+        self.assertEqual(
+            self.client.upserts[-1][0]["start_date_local"], "2026-09-22T00:00:00"
+        )
         self.assertEqual(self.unit()["sync_state"], "synced")
 
     def test_archive_during_upload_keeps_identity_until_remote_cleanup(self):

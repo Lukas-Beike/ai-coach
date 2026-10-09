@@ -398,7 +398,7 @@ another generic framework around the whole chain.
 | Vanilla JavaScript PWA | Small runtime dependency footprint is useful; shared global state is now the maintenance bottleneck | Extract cohesive modules/state ownership; a React rewrite is not justified |
 | Custom restricted Markdown | Escaping and HTTP(S)-only links reduce exposure; limited dialect can be acceptable | Keep if its supported subset is intentional and tested; do not replace it with raw HTML rendering |
 | Custom provider HTTP/SSE adapters | Offers explicit redaction, bounds, cancellation; duplicates protocol maintenance work | Keep working boundaries; evaluate an official SDK only against concrete simplification and security requirements |
-| Dual OpenAI/Gemini support | Real feature with history/media/stream complexity, not dead code | Preserve supported behavior; keep provider normalization out of domain authorization and persistence policy |
+| OpenAI Responses support | Real feature with history/media/stream complexity, not dead code | Keep provider normalization out of domain authorization and persistence policy |
 | JSON payloads plus scalar state columns | Flexible provider snapshots; weaker contracts for mutable domain entities | Keep full raw snapshots; type normalized records and make duplicate-state invariants explicit |
 | Fresh-schema-only installation | Explicit product contract | No migration/legacy compatibility layers; current-schema restore and same-build restart still must work |
 | Docker canonical runtime | Correct response to SQLCipher's unavailable native Windows wheel | Keep secure-startup failure; never substitute plaintext SQLite in the app to get a browser running |
@@ -651,7 +651,7 @@ sequences do not establish that a model chooses those sequences for real wording
 | Five-project Playwright and manual browser checks | Not run: no SQLCipher Docker fixture runtime/browser session |
 | Ruff/mypy application analysis | Not run: tools not installed locally; CI scope inspected and recorded in A7 |
 | Dependency vulnerability/license audit | Not run against a current advisory/license database; pins, lock/build setup inspected |
-| Real OpenAI/Gemini language evaluation | Not run; no external model calls or athlete data used |
+| Real OpenAI language evaluation | Not run; no external model calls or athlete data used |
 
 The initial unit command was accidentally launched twice; only the run with
 captured terminal output is used for the final unit result. This does not constitute
@@ -785,7 +785,6 @@ live providers. Existing source and unit coverage is evidence only for its asser
 | Public iCalendar | Pinned-address HTTPS fetch, SSRF/redirect restrictions, recurrence bounds | DNS/address edge cases, recurrence exceptions, stale feed preservation |
 | Weather | Location/context, cache/backoff, error preservation | Location changes in flight; never call stale forecast current |
 | OpenAI | Responses transport, stream/background, cancellation, conversation recovery | Semantic evaluation and truthful effect/current-data wording |
-| Gemini | Stream normalization, function calls, local history/media, settings | Same tool/receipt behavior after provider switch |
 | GitHub release status | Release/source validation and optional status paths | Rate-limit/cache/recovery without blocking core app |
 
 For each supported provider, also run manual refresh, Coach named refresh, startup,

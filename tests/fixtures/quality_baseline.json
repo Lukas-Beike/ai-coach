@@ -96,14 +96,6 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_coach_dialogue.py",
-      "line": 38,
-      "column": 104,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/performance/personal_recovery.py",
       "line": 217,
       "column": 16,
@@ -128,25 +120,9 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_audit_remediation.py",
-      "line": 273,
-      "column": 24,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/providers/calendar.py",
       "line": 383,
       "column": 24,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "tests/test_audit_remediation.py",
-      "line": 289,
-      "column": 28,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
     },
@@ -267,22 +243,6 @@
       "path": "backend/sync/freshness.py",
       "line": 187,
       "column": 33,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/observability.py",
-      "line": 496,
-      "column": 33,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "tests/test_server_providers.py",
-      "line": 1757,
-      "column": 34,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
     },
@@ -432,14 +392,6 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_server_providers.py",
-      "line": 1780,
-      "column": 42,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "e2e/fixture_runtime.py",
       "line": 1533,
       "column": 43,
@@ -448,32 +400,8 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_sync_freshness.py",
-      "line": 23,
-      "column": 43,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/coach/attachments.py",
-      "line": 25,
-      "column": 43,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "tests/test_sync_refresh.py",
       "line": 84,
-      "column": 43,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/observability.py",
-      "line": 846,
       "column": 43,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -640,14 +568,6 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_sync_garmin.py",
-      "line": 57,
-      "column": 50,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "tests/test_performance_garmin_weight.py",
       "line": 64,
       "column": 50,
@@ -744,22 +664,6 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_server_sync.py",
-      "line": 711,
-      "column": 55,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "tests/test_sync_intervals_reader.py",
-      "line": 73,
-      "column": 55,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/sync/job_outcomes.py",
       "line": 88,
       "column": 56,
@@ -776,24 +680,8 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_sync_garmin.py",
-      "line": 332,
-      "column": 57,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "tests/test_coach_morning_completion.py",
       "line": 62,
-      "column": 57,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "tests/test_server_sync.py",
-      "line": 689,
       "column": 57,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -864,14 +752,6 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_server_database.py",
-      "line": 609,
-      "column": 60,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/sync/garmin_service.py",
       "line": 214,
       "column": 61,
@@ -904,33 +784,9 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_server_planning.py",
-      "line": 699,
-      "column": 62,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "tests/test_server_database.py",
-      "line": 789,
-      "column": 62,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "tests/test_server_weather_calendar.py",
       "line": 882,
       "column": 62,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "tests/test_sync_garmin_projection_service.py",
-      "line": 154,
-      "column": 63,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
     },
@@ -984,25 +840,9 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_coach_context_preview.py",
-      "line": 79,
-      "column": 66,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "tests/test_server_weather_calendar.py",
       "line": 944,
       "column": 66,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "tests/test_server_providers.py",
-      "line": 49,
-      "column": 68,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
     },
@@ -1032,24 +872,8 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_sync_garmin_service.py",
-      "line": 574,
-      "column": 71,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
       "line": 123,
-      "column": 73,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "tests/test_sync_garmin_service.py",
-      "line": 510,
       "column": 73,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -1153,7 +977,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_garmin_service.py",
-      "line": 203,
+      "line": 200,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "4a2c94b5c7fe3637da201af0266b096530f278d961b920dddd4eaf65367a3585"
@@ -1161,7 +985,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_garmin_service.py",
-      "line": 204,
+      "line": 201,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "c7da7bf07f0bf1dfb1a8839132681b09f07fb2b9e13ff096b5a4e21072b6c46d"
@@ -1329,7 +1153,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_conversation_reset.py",
-      "line": 85,
+      "line": 82,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "6a429cf6d88f82d32e60b6416efc8a28c2595c057c1acbd53fd432f308438b04"
@@ -1337,7 +1161,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_conversation_reset.py",
-      "line": 92,
+      "line": 89,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "aa86d9820f47bc76dd2f58b52f317e0fa17f587affef1b2ee9e7f772867330eb"
@@ -1465,7 +1289,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_garmin_service.py",
-      "line": 197,
+      "line": 194,
       "column": 16,
       "code": "arg-type",
       "message_sha256": "51deec515d87f4c4a08dd80c52b09425d53aaf34c13ab33b805610c8cc8151b0"
@@ -1473,7 +1297,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_garmin_service.py",
-      "line": 207,
+      "line": 204,
       "column": 16,
       "code": "arg-type",
       "message_sha256": "a74a9ddbd5aef5d62db4ad9dd5b802522953e56ecd9d0b1a3a2d32614a4d9a2d"
@@ -1521,7 +1345,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_freshness.py",
-      "line": 47,
+      "line": 44,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
@@ -1529,7 +1353,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_freshness.py",
-      "line": 47,
+      "line": 44,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
@@ -1537,7 +1361,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_freshness.py",
-      "line": 47,
+      "line": 44,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
@@ -1545,7 +1369,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 52,
+      "line": 55,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
@@ -1553,7 +1377,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 52,
+      "line": 55,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
@@ -1561,7 +1385,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 52,
+      "line": 55,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
@@ -1657,7 +1481,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 617,
+      "line": 616,
       "column": 27,
       "code": "arg-type",
       "message_sha256": "570d1b972c0b2f2550ad42db3eb3936ceda3bf167873fb1c991c7a6af5d78110"
@@ -1689,7 +1513,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_request_payload.py",
-      "line": 142,
+      "line": 114,
       "column": 29,
       "code": "arg-type",
       "message_sha256": "248119b31631b4bbce11bca5f2fa6b4eb6d5d6b51cfae662bd814f551f4c3896"
@@ -1697,7 +1521,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_garmin_service.py",
-      "line": 163,
+      "line": 160,
       "column": 29,
       "code": "arg-type",
       "message_sha256": "16610b5b216207d4df9d943b0e296f26131cb9a54dc4eb090ffac13fd040c0a0"
@@ -1705,7 +1529,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_garmin_service.py",
-      "line": 163,
+      "line": 160,
       "column": 29,
       "code": "arg-type",
       "message_sha256": "2627ee3026f6c40e9cf4de748f04da9e6b168767ed0657719d341b513d0a077d"
@@ -1713,7 +1537,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 563,
+      "line": 562,
       "column": 29,
       "code": "arg-type",
       "message_sha256": "8201b28533baa9af4e40901aafd403409021ccf3e9391330974505c193ecfc6a"
@@ -1800,6 +1624,14 @@
     },
     {
       "tool": "mypy",
+      "path": "tests/test_coach_turn_failures.py",
+      "line": 114,
+      "column": 33,
+      "code": "arg-type",
+      "message_sha256": "ef0f58bc633fe6a5d59efb94e2db2afed6709ff4c2d6788144a847ef64a487f7"
+    },
+    {
+      "tool": "mypy",
       "path": "backend/planning/library.py",
       "line": 163,
       "column": 33,
@@ -1816,16 +1648,8 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_coach_turn_failures.py",
-      "line": 95,
-      "column": 33,
-      "code": "arg-type",
-      "message_sha256": "ef0f58bc633fe6a5d59efb94e2db2afed6709ff4c2d6788144a847ef64a487f7"
-    },
-    {
-      "tool": "mypy",
       "path": "backend/coach/request_payload.py",
-      "line": 145,
+      "line": 128,
       "column": 34,
       "code": "arg-type",
       "message_sha256": "0eb0c3b2dbe530d9741379c8a2f9bde0b26fe4b24bb7478eeff4afe2dcb3e1b8"
@@ -1841,7 +1665,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_turn.py",
-      "line": 111,
+      "line": 156,
       "column": 36,
       "code": "arg-type",
       "message_sha256": "a8a309b373437e92a52815510020fcf4d9edf5165cfe16201e472f9b88b24b61"
@@ -1913,7 +1737,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 592,
+      "line": 591,
       "column": 4,
       "code": "arg-type",
       "message_sha256": "255201a8a31afedba5121f4dd0ee8d9b8ca035a0b9b064e89336ba22241ee1f1"
@@ -1985,7 +1809,7 @@
     {
       "tool": "mypy",
       "path": "backend/coach/request_payload.py",
-      "line": 138,
+      "line": 121,
       "column": 46,
       "code": "arg-type",
       "message_sha256": "0eb0c3b2dbe530d9741379c8a2f9bde0b26fe4b24bb7478eeff4afe2dcb3e1b8"
@@ -2025,7 +1849,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 118,
+      "line": 137,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
@@ -2033,7 +1857,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 118,
+      "line": 137,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
@@ -2041,7 +1865,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 118,
+      "line": 137,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
@@ -2049,7 +1873,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 118,
+      "line": 137,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
@@ -2057,7 +1881,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 118,
+      "line": 137,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
@@ -2065,7 +1889,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 118,
+      "line": 137,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
@@ -2073,7 +1897,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 118,
+      "line": 137,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
@@ -2081,7 +1905,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 147,
+      "line": 176,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
@@ -2089,7 +1913,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 147,
+      "line": 176,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
@@ -2097,7 +1921,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 147,
+      "line": 176,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
@@ -2105,7 +1929,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 147,
+      "line": 176,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
@@ -2113,7 +1937,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 147,
+      "line": 176,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
@@ -2121,7 +1945,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 147,
+      "line": 176,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
@@ -2129,63 +1953,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 147,
-      "column": 49,
-      "code": "arg-type",
-      "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_structured_response.py",
-      "line": 160,
-      "column": 49,
-      "code": "arg-type",
-      "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_structured_response.py",
-      "line": 160,
-      "column": 49,
-      "code": "arg-type",
-      "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_structured_response.py",
-      "line": 160,
-      "column": 49,
-      "code": "arg-type",
-      "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_structured_response.py",
-      "line": 160,
-      "column": 49,
-      "code": "arg-type",
-      "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_structured_response.py",
-      "line": 160,
-      "column": 49,
-      "code": "arg-type",
-      "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_structured_response.py",
-      "line": 160,
-      "column": 49,
-      "code": "arg-type",
-      "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_structured_response.py",
-      "line": 160,
+      "line": 176,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
@@ -2197,6 +1965,62 @@
       "column": 49,
       "code": "arg-type",
       "message_sha256": "b44452059202c4e3b923fe68adecbdaa88633a7546010cf0bd6a8f31fc133f4f"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 193,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 193,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 193,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 193,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 193,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 193,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 193,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
     },
     {
       "tool": "mypy",
@@ -2257,7 +2081,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 100,
+      "line": 117,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
@@ -2265,7 +2089,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 100,
+      "line": 117,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
@@ -2273,7 +2097,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 100,
+      "line": 117,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
@@ -2281,7 +2105,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 100,
+      "line": 117,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
@@ -2289,7 +2113,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 100,
+      "line": 117,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
@@ -2297,7 +2121,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 100,
+      "line": 117,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
@@ -2305,7 +2129,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 100,
+      "line": 117,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
@@ -2313,7 +2137,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 133,
+      "line": 160,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
@@ -2321,7 +2145,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 133,
+      "line": 160,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
@@ -2329,7 +2153,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 133,
+      "line": 160,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
@@ -2337,7 +2161,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 133,
+      "line": 160,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
@@ -2345,7 +2169,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 133,
+      "line": 160,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
@@ -2353,7 +2177,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 133,
+      "line": 160,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
@@ -2361,7 +2185,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 133,
+      "line": 160,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
@@ -2393,7 +2217,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 41,
+      "line": 43,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
@@ -2401,7 +2225,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 41,
+      "line": 43,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
@@ -2409,7 +2233,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 41,
+      "line": 43,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
@@ -2417,7 +2241,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 41,
+      "line": 43,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
@@ -2425,7 +2249,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 41,
+      "line": 43,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
@@ -2433,7 +2257,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 41,
+      "line": 43,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
@@ -2441,7 +2265,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 41,
+      "line": 43,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
@@ -2449,7 +2273,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 58,
+      "line": 60,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
@@ -2457,7 +2281,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 58,
+      "line": 60,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
@@ -2465,7 +2289,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 58,
+      "line": 60,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
@@ -2473,7 +2297,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 58,
+      "line": 60,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
@@ -2481,7 +2305,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 58,
+      "line": 60,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
@@ -2489,7 +2313,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 58,
+      "line": 60,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
@@ -2497,7 +2321,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 58,
+      "line": 60,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
@@ -2505,7 +2329,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 83,
+      "line": 96,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
@@ -2513,7 +2337,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 83,
+      "line": 96,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
@@ -2521,7 +2345,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 83,
+      "line": 96,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
@@ -2529,7 +2353,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 83,
+      "line": 96,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
@@ -2537,7 +2361,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 83,
+      "line": 96,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
@@ -2545,7 +2369,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 83,
+      "line": 96,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
@@ -2553,7 +2377,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_structured_response.py",
-      "line": 83,
+      "line": 96,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
@@ -2664,14 +2488,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/coach/conversation.py",
-      "line": 167,
-      "column": 30,
-      "code": "assignment",
-      "message_sha256": "e7248b7a4fe4bae9ed33377a133238a0e0258845226a2ae81b5a6280ec701284"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_morning_battery_service.py",
       "line": 367,
       "column": 33,
@@ -2737,7 +2553,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_response_retry.py",
-      "line": 23,
+      "line": 25,
       "column": 12,
       "code": "attr-defined",
       "message_sha256": "4aa577f73fdb15e49318c743f72cbccccd37c2be7e35f7dc457ab689b438c014"
@@ -2761,7 +2577,7 @@
     {
       "tool": "mypy",
       "path": "backend/providers/state.py",
-      "line": 209,
+      "line": 208,
       "column": 16,
       "code": "attr-defined",
       "message_sha256": "4aa577f73fdb15e49318c743f72cbccccd37c2be7e35f7dc457ab689b438c014"
@@ -2769,7 +2585,7 @@
     {
       "tool": "mypy",
       "path": "backend/providers/state.py",
-      "line": 211,
+      "line": 210,
       "column": 16,
       "code": "attr-defined",
       "message_sha256": "3a17d588b9c9c9fbb0d4ac165188b70312d06fdeacbfa85c91ed8e129132fc70"
@@ -2777,7 +2593,7 @@
     {
       "tool": "mypy",
       "path": "backend/providers/state.py",
-      "line": 213,
+      "line": 212,
       "column": 16,
       "code": "attr-defined",
       "message_sha256": "49e175295e507496fe654c7a26e50d9783a4638ec61b41112f936d2c9b61422c"
@@ -2785,26 +2601,10 @@
     {
       "tool": "mypy",
       "path": "backend/providers/state.py",
-      "line": 215,
+      "line": 214,
       "column": 16,
       "code": "attr-defined",
       "message_sha256": "5a55aeaafa33071da3a81b8596a9fccf3d3f2856f40f402cc8691b8257a7c409"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_structured_tool_round.py",
-      "line": 249,
-      "column": 16,
-      "code": "attr-defined",
-      "message_sha256": "7407b09a1ecada8941987b551f9890e5f2d5073325710393f260d125aa4841c6"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_structured_tool_round.py",
-      "line": 280,
-      "column": 16,
-      "code": "attr-defined",
-      "message_sha256": "7407b09a1ecada8941987b551f9890e5f2d5073325710393f260d125aa4841c6"
     },
     {
       "tool": "mypy",
@@ -2840,6 +2640,22 @@
     },
     {
       "tool": "mypy",
+      "path": "tests/test_coach_structured_tool_round.py",
+      "line": 249,
+      "column": 20,
+      "code": "attr-defined",
+      "message_sha256": "67dc3abcce848ea579afb90b68bb9a18046ab2bad3059c092c839866cf34e435"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_tool_round.py",
+      "line": 271,
+      "column": 20,
+      "code": "attr-defined",
+      "message_sha256": "67dc3abcce848ea579afb90b68bb9a18046ab2bad3059c092c839866cf34e435"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_sync_plan_selection.py",
       "line": 124,
       "column": 25,
@@ -2869,22 +2685,6 @@
       "column": 25,
       "code": "attr-defined",
       "message_sha256": "f099f627502ff19992e31dbb46ffbd99a2a93cb12680f88cbc2ed230f4ea12bb"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_structured_tool_round.py",
-      "line": 255,
-      "column": 28,
-      "code": "attr-defined",
-      "message_sha256": "67dc3abcce848ea579afb90b68bb9a18046ab2bad3059c092c839866cf34e435"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_structured_tool_round.py",
-      "line": 286,
-      "column": 28,
-      "code": "attr-defined",
-      "message_sha256": "67dc3abcce848ea579afb90b68bb9a18046ab2bad3059c092c839866cf34e435"
     },
     {
       "tool": "mypy",
@@ -2949,6 +2749,22 @@
       "column": 51,
       "code": "attr-defined",
       "message_sha256": "48817743dc3963ca62b240b8f252a193b62d5fb0d8f8638ae1c45e9071742fbe"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_tool_round.py",
+      "line": 245,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "7407b09a1ecada8941987b551f9890e5f2d5073325710393f260d125aa4841c6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_tool_round.py",
+      "line": 267,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "7407b09a1ecada8941987b551f9890e5f2d5073325710393f260d125aa4841c6"
     },
     {
       "tool": "mypy",
@@ -3241,7 +3057,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 615,
+      "line": 614,
       "column": 16,
       "code": "has-type",
       "message_sha256": "4b7e78aca8d7c14e4949c4d2c1e7b5dbe37f97501201f64a1fc21f632e11770d"
@@ -3249,7 +3065,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 652,
+      "line": 651,
       "column": 16,
       "code": "has-type",
       "message_sha256": "e020f47cf690127bbfb4750cbe0b93f382fe80b2ac32f84d93c47d3cdb2e0192"
@@ -3257,7 +3073,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 923,
+      "line": 922,
       "column": 16,
       "code": "has-type",
       "message_sha256": "c3827639903091a4321d0e0848e6289e336e994114e1a16099bebc3274bf7946"
@@ -3265,7 +3081,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 926,
+      "line": 925,
       "column": 16,
       "code": "has-type",
       "message_sha256": "c53b9e646657d76e58ce4a8d414022143183888c840336c5e976cccc80e9fdda"
@@ -3273,7 +3089,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 995,
+      "line": 993,
       "column": 20,
       "code": "has-type",
       "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
@@ -3281,15 +3097,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 999,
-      "column": 20,
-      "code": "has-type",
-      "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "line": 902,
+      "line": 901,
       "column": 28,
       "code": "has-type",
       "message_sha256": "6aa98648523c886c38d6ec5ff2cba0b9a86a5cb9fe5f9593e07c2251a0075a22"
@@ -3297,7 +3105,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1554,
+      "line": 1542,
       "column": 30,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -3305,7 +3113,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 745,
+      "line": 744,
       "column": 30,
       "code": "has-type",
       "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
@@ -3313,7 +3121,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 582,
+      "line": 581,
       "column": 31,
       "code": "has-type",
       "message_sha256": "7fadfe3e746eaff9f0518c8e8252349ddb632785627d5bcb9e2c837b0403f130"
@@ -3321,7 +3129,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 746,
+      "line": 745,
       "column": 31,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -3329,7 +3137,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 711,
+      "line": 710,
       "column": 34,
       "code": "has-type",
       "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
@@ -3337,7 +3145,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 747,
+      "line": 746,
       "column": 35,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -3345,7 +3153,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1232,
+      "line": 1220,
       "column": 36,
       "code": "has-type",
       "message_sha256": "480057763c1b5347f5e8f0a61c7f20c6cec2d3a6e24f1e8563bd5b76f2138cc4"
@@ -3353,7 +3161,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 643,
+      "line": 642,
       "column": 36,
       "code": "has-type",
       "message_sha256": "743b0a5f8fa53d140838c45e76a8917ca3b252a48e3882d05cde8d6f0b24e492"
@@ -3361,7 +3169,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1558,
+      "line": 1546,
       "column": 37,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -3369,7 +3177,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1586,
+      "line": 1574,
       "column": 38,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -3377,7 +3185,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 587,
+      "line": 586,
       "column": 39,
       "code": "has-type",
       "message_sha256": "a6717e30878d2725304d97c5fb32dacd1e9390ad42c1c53805e5ad4228c63498"
@@ -3385,7 +3193,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1263,
+      "line": 1251,
       "column": 42,
       "code": "has-type",
       "message_sha256": "6b3bf53c953464ae5eca5af23f6ee4aa9b3fe9f5856d07f358d76bd3a8dee02e"
@@ -3393,7 +3201,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 650,
+      "line": 649,
       "column": 43,
       "code": "has-type",
       "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
@@ -3401,7 +3209,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 642,
+      "line": 641,
       "column": 45,
       "code": "has-type",
       "message_sha256": "9076d7668e920f937d99a8809d7222f870ef1d895bef707f657887bd19ded42e"
@@ -3409,7 +3217,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 699,
+      "line": 698,
       "column": 45,
       "code": "has-type",
       "message_sha256": "9076d7668e920f937d99a8809d7222f870ef1d895bef707f657887bd19ded42e"
@@ -3705,16 +3513,16 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_request_payload.py",
-      "line": 132,
-      "column": 52,
+      "line": 105,
+      "column": 57,
       "code": "index",
       "message_sha256": "20cbbc295cdb534102f13264762ddc8c7798c0a87c1d65677b7c010d3a54a96a"
     },
     {
       "tool": "mypy",
       "path": "tests/test_coach_request_payload.py",
-      "line": 132,
-      "column": 72,
+      "line": 105,
+      "column": 77,
       "code": "index",
       "message_sha256": "c650cb6fdb97181bb1fe92f76cfcb26c43e2e75da13e3bd6810e03f7c81db909"
     },
@@ -3729,7 +3537,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_attachment_context.py",
-      "line": 52,
+      "line": 57,
       "column": 26,
       "code": "list-item",
       "message_sha256": "c7eb94fdd7c8c7c856097235467eaaa07040cb3af8d1f7b03549f0810c985f6a"
@@ -3737,7 +3545,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_attachment_context.py",
-      "line": 73,
+      "line": 93,
       "column": 26,
       "code": "list-item",
       "message_sha256": "a5ab97917c52be2c83cdaee803ee4a1d6131477ea65b6abdb05de96bbc953539"
@@ -3745,7 +3553,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_attachment_context.py",
-      "line": 73,
+      "line": 93,
       "column": 31,
       "code": "list-item",
       "message_sha256": "b64b3b3fc34f29fe64f54e8faec8e6c92330709db85939d38fd2998caab2f5bb"
@@ -3753,7 +3561,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_attachment_context.py",
-      "line": 73,
+      "line": 93,
       "column": 36,
       "code": "list-item",
       "message_sha256": "3fbad926607747d193ca8c03ab0ddeaa7830ef0a937b33516fb5d95f4c600484"
@@ -3808,8 +3616,16 @@
     },
     {
       "tool": "mypy",
+      "path": "tests/test_coach_job_worker.py",
+      "line": 133,
+      "column": 8,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_coach_turn_failures.py",
-      "line": 118,
+      "line": 156,
       "column": 8,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3817,15 +3633,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_turn_opening.py",
-      "line": 130,
-      "column": 8,
-      "code": "method-assign",
-      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_job_worker.py",
-      "line": 133,
+      "line": 159,
       "column": 8,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3889,7 +3697,7 @@
     {
       "tool": "mypy",
       "path": "backend/coach/request_payload.py",
-      "line": 129,
+      "line": 112,
       "column": 12,
       "code": "operator",
       "message_sha256": "707d8043b32df45b81e34c30d7ca9376fba066f666a023a63841bec514d52b59"
@@ -3952,6 +3760,14 @@
     },
     {
       "tool": "mypy",
+      "path": "backend/coach/request_payload.py",
+      "line": 103,
+      "column": 8,
+      "code": "operator",
+      "message_sha256": "707d8043b32df45b81e34c30d7ca9376fba066f666a023a63841bec514d52b59"
+    },
+    {
+      "tool": "mypy",
       "path": "backend/weather/projection.py",
       "line": 104,
       "column": 8,
@@ -3981,14 +3797,6 @@
       "column": 8,
       "code": "operator",
       "message_sha256": "d2e0707d21e78ea4f68568bf7ca771fc3ee06a1de9a20ffa975fe0e37cfe3560"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/coach/request_payload.py",
-      "line": 116,
-      "column": 8,
-      "code": "operator",
-      "message_sha256": "707d8043b32df45b81e34c30d7ca9376fba066f666a023a63841bec514d52b59"
     },
     {
       "tool": "mypy",
@@ -4049,7 +3857,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_conversation_reset.py",
-      "line": 92,
+      "line": 89,
       "column": 20,
       "code": "return-value",
       "message_sha256": "f4c04c73f25c4752bb822b7ae29f94fde7b20c87eb7f3581fdd754a2cc1fa0a8"
@@ -4185,7 +3993,7 @@
     {
       "tool": "mypy",
       "path": "backend/coach/job_store.py",
-      "line": 104,
+      "line": 106,
       "column": 21,
       "code": "union-attr",
       "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
@@ -4472,6 +4280,14 @@
     },
     {
       "tool": "mypy",
+      "path": "tests/test_coach_response_transport.py",
+      "line": 35,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "6797e377ccdd96cb1a1ba656b01f06555b2805a23eead0e2b58e0de11bf46a87"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_adaptive_preview_service.py",
       "line": 40,
       "column": 8,
@@ -4533,6 +4349,14 @@
       "column": 8,
       "code": "var-annotated",
       "message_sha256": "4701a40058dd36901a37d6d2a3c9aee26e1ccc9bef0ebfcefcc752621bee7127"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_response_transport.py",
+      "line": 58,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "6797e377ccdd96cb1a1ba656b01f06555b2805a23eead0e2b58e0de11bf46a87"
     },
     {
       "tool": "mypy",

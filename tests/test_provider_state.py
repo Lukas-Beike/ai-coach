@@ -76,21 +76,9 @@ class ProviderStateServiceTests(unittest.TestCase):
             self.logger,
         )
 
-    def test_empty_summaries_are_daily_for_both_providers(self):
+    def test_empty_openai_summary_is_daily(self):
         self.assertEqual(
             self.service.summary("openai"),
-            {
-                "date": "2026-09-19",
-                "requests": 0,
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "total_tokens": 0,
-                "status": {},
-                "rate_limits": {},
-            },
-        )
-        self.assertEqual(
-            self.service.summary("gemini"),
             {
                 "date": "2026-09-19",
                 "requests": 0,
@@ -106,7 +94,7 @@ class ProviderStateServiceTests(unittest.TestCase):
         for method, args in (
             (self.service.summary, ("OpenAI",)),
             (self.service.record_success, ("other",)),
-            (self.service.record_usage, ("gemini ", {}, "chat")),
+            (self.service.record_usage, ("unsupported ", {}, "chat")),
         ):
             with self.assertRaises(ValueError):
                 method(*args)
@@ -127,20 +115,16 @@ class ProviderStateServiceTests(unittest.TestCase):
         self.assertEqual(status["http_status"], 503)
         self.assertEqual(status["provider_error_code"], "rate_limit_exceeded")
 
-        self.service.record_status(
-            "gemini",
-            state="error",
-            reason="http_error",
-            message="Fehler",
-            provider_error_code="rate_limit_exceeded",
-        )
-        self.assertNotIn("provider_error_code", json.loads(self.repository.values["gemini_status"]))
-
     def test_success_uses_german_provider_message(self):
         self.service.record_success("openai")
-        self.service.record_success("gemini")
-        self.assertEqual(json.loads(self.repository.values["openai_status"])["message"], "OpenAI ist verfügbar.")
-        self.assertEqual(json.loads(self.repository.values["gemini_status"])["message"], "Gemini ist verfügbar.")
+        self.assertEqual(
+            json.loads(self.repository.values["openai_status"])["message"],
+            "OpenAI ist verfügbar.",
+        )
+        self.assertEqual(
+            json.loads(self.repository.values["openai_status"])["message"],
+            "OpenAI ist verfügbar.",
+        )
 
     def test_rate_limits_are_allowlisted(self):
         self.service.record_rate_limits(
@@ -175,7 +159,9 @@ class ProviderStateServiceTests(unittest.TestCase):
         self.assertEqual(status["provider_error_code"], "server_error")
         self.assertNotIn("private provider content", json.dumps(status))
 
-    def test_openai_terminal_error_codes_use_production_allowlist_and_actionable_reasons(self):
+    def test_openai_terminal_error_codes_use_production_allowlist_and_actionable_reasons(
+        self,
+    ):
         cases = (
             ("conversation_locked", "conversation_locked"),
             ("conversation_lock_timeout", "conversation_locked"),
@@ -207,15 +193,24 @@ class ProviderStateServiceTests(unittest.TestCase):
                 self.assertEqual(status["provider_error_code"], code)
                 self.assertNotIn("private provider content", json.dumps(status))
 
-    def test_openai_response_validation_drops_untrusted_code_and_keeps_invalid_shape_out_of_state(self):
+    def test_openai_response_validation_drops_untrusted_code_and_keeps_invalid_shape_out_of_state(
+        self,
+    ):
         with self.assertRaises(AppError) as raised:
             self.service.validate_openai_response(
                 "/responses",
-                {"error": {"code": "private_code", "message": "private provider content"}},
+                {
+                    "error": {
+                        "code": "private_code",
+                        "message": "private provider content",
+                    }
+                },
             )
         self.assertEqual(raised.exception.reason, "response_error")
         self.assertFalse(hasattr(raised.exception, "provider_error_code"))
-        self.assertNotIn("provider_error_code", json.loads(self.repository.values["openai_status"]))
+        self.assertNotIn(
+            "provider_error_code", json.loads(self.repository.values["openai_status"])
+        )
 
         self.repository.values.pop("openai_status")
         with self.assertRaises(AppError) as invalid:
@@ -225,17 +220,22 @@ class ProviderStateServiceTests(unittest.TestCase):
 
     def test_openai_response_validation_surfaces_and_persists_billing_failure(self):
         with self.assertRaises(AppError) as raised:
-            self.service.validate_openai_response("/responses", {
-                "status": "failed",
-                "error": {
-                    "code": "credit_balance_exhausted",
-                    "message": "private provider content",
+            self.service.validate_openai_response(
+                "/responses",
+                {
+                    "status": "failed",
+                    "error": {
+                        "code": "credit_balance_exhausted",
+                        "message": "private provider content",
+                    },
                 },
-            })
+            )
         message = "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
         self.assertEqual(raised.exception.reason, "credit_balance_exhausted")
         self.assertEqual(raised.exception.message, message)
-        self.assertEqual(raised.exception.provider_error_code, "credit_balance_exhausted")
+        self.assertEqual(
+            raised.exception.provider_error_code, "credit_balance_exhausted"
+        )
         self.assertEqual(raised.exception.status, 502)
         status = json.loads(self.repository.values["openai_status"])
         self.assertEqual(status["reason"], "credit_balance_exhausted")
@@ -245,12 +245,17 @@ class ProviderStateServiceTests(unittest.TestCase):
 
     def test_openai_response_validation_returns_valid_result_unchanged(self):
         result = {"id": "response-test", "status": "completed"}
-        self.assertIs(self.service.validate_openai_response("/responses", result), result)
+        self.assertIs(
+            self.service.validate_openai_response("/responses", result), result
+        )
 
     def test_usage_accumulates_atomically_and_logs_only_operation_and_counts(self):
         first = self.service.record_usage(
             "openai",
-            {"usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}, "secret": "private"},
+            {
+                "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+                "secret": "private",
+            },
             "chat",
         )
         second = self.service.record_usage(
@@ -258,33 +263,34 @@ class ProviderStateServiceTests(unittest.TestCase):
             {"usage": {"input_tokens": 4, "output_tokens": 1, "total_tokens": 5}},
             "stream",
         )
-        self.assertEqual(first, {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5})
-        self.assertEqual(second, {"input_tokens": 4, "output_tokens": 1, "total_tokens": 5})
+        self.assertEqual(
+            first, {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}
+        )
+        self.assertEqual(
+            second, {"input_tokens": 4, "output_tokens": 1, "total_tokens": 5}
+        )
         self.assertEqual(self.service.summary("openai")["requests"], 2)
         self.assertEqual(self.service.summary("openai")["total_tokens"], 10)
-        self.service.record_usage(
-            "gemini",
-            {
-                "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 2},
-                "secret": "gemini-private-payload",
-            },
-            "generate_content",
-        )
         self.assertEqual(len(self.logger.calls), 2)
         self.assertNotIn("private", json.dumps(self.logger.calls))
         self.assertEqual(self.logger.calls[0][0], "OpenAI usage recorded")
         self.assertEqual(self.logger.calls[0][1]["extra"]["event"], "openai_usage")
-        self.assertEqual(self.logger.calls[-1][1]["extra"]["context"], {
-            "operation": "stream",
-            "input_tokens": 4,
-            "output_tokens": 1,
-            "total_tokens": 5,
-        })
+        self.assertEqual(
+            self.logger.calls[-1][1]["extra"]["context"],
+            {
+                "operation": "stream",
+                "input_tokens": 4,
+                "output_tokens": 1,
+                "total_tokens": 5,
+            },
+        )
 
     def test_every_operation_acquires_lock_before_transaction(self):
         self.service.summary("openai")
         self.assertLess(self.events.index("lock-enter"), self.events.index("uow-enter"))
-        self.assertLess(self.events.index("uow-enter"), self.events.index("get:openai_usage"))
+        self.assertLess(
+            self.events.index("uow-enter"), self.events.index("get:openai_usage")
+        )
         self.assertEqual(self.events[-2:], ["uow-exit", "lock-exit"])
 
 

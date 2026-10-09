@@ -204,8 +204,7 @@ class NutritionProductContractTests(unittest.TestCase):
             "output_text": '{"name":"Synthetic cocoa mix","basis_amount":100,"basis_unit":"g","kcal":376,"protein_g":78}'
         }
         extractor = NutritionPhotoExtractionService(
-            selected_provider=lambda: "openai",
-            selected_model=lambda _provider: "gpt-6-luna",
+            selected_model=lambda: "gpt-6-luna",
             openai_request=lambda _path, _payload: response,
         )
         self.service = self.build_service(photo_extractor=extractor)

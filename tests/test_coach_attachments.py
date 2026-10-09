@@ -4,11 +4,9 @@ import struct
 import unittest
 from unittest.mock import Mock, patch
 
-from support import build_gemini_request_payload
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach import attachments as coach_attachments
-from backend.coach import conversation_assembly
 from backend.coach.attachments import (
     _FIT_SPORTS,
     _fit_crc16,
@@ -17,7 +15,6 @@ from backend.coach.attachments import (
     fit_summary,
     gpx_summary,
     model_input,
-    provider_attachment_data,
     validate_attachments,
 )
 
@@ -117,18 +114,6 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             base64.b64decode(raw_part["file_data"].split(",", 1)[1]).decode("utf-8")
         )
         self.assertEqual(envelope["raw_base64"], attachment["data"])
-
-        payload, _, _ = build_gemini_request_payload(
-            server, {"input": request_input}, "gemini-test"
-        )
-        inline_data = payload["contents"][-1]["parts"][-1]["inlineData"]
-        self.assertEqual(inline_data["mimeType"], "application/json")
-        self.assertEqual(
-            json.loads(base64.b64decode(inline_data["data"]).decode("utf-8"))[
-                "raw_base64"
-            ],
-            attachment["data"],
-        )
 
     def test_fit_records_use_standard_headers_fields_and_compressed_timestamps(self):
         summary = fit_summary(FIT_RECORDS)
@@ -273,12 +258,6 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         server.COACH_CONVERSATION.message_service().add(
             "user", "What does the chart show?"
         )
-        followup, _, _ = build_gemini_request_payload(
-            server,
-            {"conversation": "synthetic-gemini", "input": "Follow-up question"},
-            "gemini-test",
-        )
-        self.assertIn(PNG, json.dumps(followup["contents"]))
 
     def test_invalid_upload_does_not_create_a_command(self):
         with self.assertRaises(server.AppError):
@@ -304,200 +283,24 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(error.exception.reason, "attachment_storage_quota")
         self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
 
-    def test_gemini_rejects_images_that_exceed_its_inline_request_budget(self):
-        with (
-            patch.object(
-                server.SETTINGS, "selected_ai_provider", return_value="gemini"
-            ),
-            patch.object(coach_attachments, "MAX_GEMINI_INLINE_IMAGE_BYTES", 1),
-            self.assertRaises(server.AppError) as error,
-        ):
-            server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
-                "Analyze",
-                "gemini-size-turn",
-                "synthetic-csrf",
-                attachments=[self.upload(FIT, "ride.fit")],
-            )
-        self.assertEqual(error.exception.reason, "gemini_attachment_request_too_large")
-        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
-
-    def test_submission_rejects_when_no_ai_provider_is_configured(self):
-        with (
-            patch.object(server.SETTINGS, "selected_ai_provider", return_value=""),
-            self.assertRaises(server.AppError) as error,
-        ):
-            server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
-                "Analyze", "no-provider-turn", "synthetic-csrf"
-            )
-        self.assertEqual(error.exception.reason, "ai_provider_not_configured")
-        self.assertEqual(error.exception.status, 503)
-        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
-
-    def test_both_provider_formats_include_image_and_gpx(self):
+    def test_openai_model_input_includes_image_gpx_and_fit_evidence(self):
         attachments = validate_attachments(
-            [self.upload(), {"name": "chart.png", "data": PNG}]
+            [
+                self.upload(),
+                {"name": "chart.png", "data": PNG},
+                self.upload(FIT, "ride.fit"),
+            ]
         )
         value = model_input("Analyze the route and chart", attachments)
-        self.assertEqual(
-            value[0]["content"][-1]["image_url"], "data:image/png;base64," + PNG
+        serialized = json.dumps(value)
+        self.assertIn('"type": "input_image"', serialized)
+        self.assertIn("uploaded_gpx", serialized)
+        self.assertIn("ride.fit.json", serialized)
+        fit_file = value[0]["content"][-1]
+        envelope = json.loads(
+            base64.b64decode(fit_file["file_data"].split(",", 1)[1]).decode("utf-8")
         )
-        payload, _, _ = build_gemini_request_payload(
-            server, {"input": value}, "gemini-test"
-        )
-        parts = payload["contents"][-1]["parts"]
-        self.assertEqual(
-            parts[-1]["inlineData"], {"mimeType": "image/png", "data": PNG}
-        )
-        self.assertIn("uploaded_gpx", json.dumps(parts))
-        payload, _, _ = build_gemini_request_payload(
-            server,
-            {
-                "input": value,
-                "_gemini_transient_images": [{"mime": "image/png", "data": PNG}],
-            },
-            "gemini-test",
-        )
-        self.assertEqual(
-            sum("inlineData" in part for part in payload["contents"][-1]["parts"]), 2
-        )
-        self.assertIn(self.upload()["data"], json.dumps(payload["contents"][-1]))
-
-        saved_history = [
-            {"role": "user", "parts": [{"text": "Analyze"}]},
-            {"role": "model", "parts": [{"functionCall": {"name": "coach_tool"}}]},
-        ]
-        with patch.object(
-            conversation_assembly.GeminiConversationHistoryService,
-            "load",
-            return_value=saved_history,
-        ):
-            followup, _, _ = build_gemini_request_payload(
-                server,
-                {
-                    "conversation": "synthetic-gemini",
-                    "input": [
-                        {
-                            "type": "function_call_output",
-                            "call_id": "call-1",
-                            "output": "{}",
-                        }
-                    ],
-                    "_gemini_transient_images": [
-                        {"mime": "image/png", "data": PNG},
-                        {
-                            "mime": "application/octet-stream",
-                            "data": self.upload(FIT, "ride.fit")["data"],
-                        },
-                    ],
-                },
-                "gemini-test",
-            )
-        self.assertIn(
-            {"inlineData": {"mimeType": "image/png", "data": PNG}},
-            followup["contents"][-1]["parts"],
-        )
-        self.assertIn(
-            {
-                "inlineData": {
-                    "mimeType": "application/octet-stream",
-                    "data": self.upload(FIT, "ride.fit")["data"],
-                }
-            },
-            followup["contents"][-1]["parts"],
-        )
-
-    def test_gemini_history_keeps_latest_raw_files_within_budget(self):
-        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
-            "First",
-            "history-first",
-            "synthetic-csrf",
-            attachments=[self.upload(FIT, "first.fit")],
-        )
-        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
-            "Second",
-            "history-second",
-            "synthetic-csrf-2",
-            attachments=[self.upload(FIT, "second.fit")],
-        )
-        encoded_size = len(
-            provider_attachment_data(
-                validate_attachments([self.upload(FIT, "first.fit")])[0]
-            )[0]
-        )
-        with patch.object(
-            coach_attachments, "MAX_GEMINI_INLINE_IMAGE_BYTES", encoded_size + 1
-        ):
-            history = server.COACH_CONVERSATION.gemini_local_history_service().build()
-        raw_parts = [
-            part
-            for entry in history
-            for part in entry["parts"]
-            if "inlineData" in part
-            and part["inlineData"].get("mimeType") == "application/json"
-        ]
-        self.assertEqual(len(raw_parts), 1)
-        self.assertIn("first.fit", json.dumps(history))
-        self.assertIn("second.fit", json.dumps(history))
-
-    def test_gemini_replayed_media_survives_tool_followup(self):
-        history = [
-            {
-                "role": "user",
-                "parts": [
-                    {"text": "Analyze"},
-                    {
-                        "inlineData": {
-                            "mimeType": "application/octet-stream",
-                            "data": self.upload(FIT, "ride.fit")["data"],
-                        }
-                    },
-                ],
-            },
-            {"role": "model", "parts": [{"functionCall": {"name": "coach_tool"}}]},
-        ]
-        with (
-            patch.object(
-                conversation_assembly.GeminiLocalChatHistoryService,
-                "build",
-                return_value=history,
-            ),
-            patch.object(
-                conversation_assembly.GeminiConversationHistoryService,
-                "load",
-                return_value=history,
-            ),
-        ):
-            request_args = {
-                "conversation": "synthetic-gemini",
-                "input": "Follow up with the tool",
-            }
-            build_gemini_request_payload(server, request_args, "gemini-test")
-            followup, _, _ = build_gemini_request_payload(
-                server,
-                {
-                    "conversation": "synthetic-gemini",
-                    "input": [
-                        {
-                            "type": "function_call_output",
-                            "call_id": "call-1",
-                            "output": "{}",
-                        }
-                    ],
-                    "_gemini_transient_images": request_args[
-                        "_gemini_transient_images"
-                    ],
-                },
-                "gemini-test",
-            )
-        self.assertIn(
-            {
-                "inlineData": {
-                    "mimeType": "application/octet-stream",
-                    "data": self.upload(FIT, "ride.fit")["data"],
-                }
-            },
-            followup["contents"][-1]["parts"],
-        )
+        self.assertEqual(envelope["raw_base64"], self.upload(FIT, "ride.fit")["data"])
 
     def test_background_model_receives_saved_attachments(self):
         server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(

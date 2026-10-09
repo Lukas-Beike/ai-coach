@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,7 +20,7 @@ from backend.sync.freshness import (
     provider_freshness_state,
 )
 
-NOW = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
 
 
 def _config(**values: str) -> Config:
@@ -29,9 +29,6 @@ def _config(**values: str) -> Config:
         "openai_api_key": "",
         "openai_base_url": "https://api.openai.com/v1",
         "openai_model": "model",
-        "gemini_api_key": "",
-        "gemini_model": "gemini",
-        "ai_provider": "",
         "intervals_api_key": "",
         "intervals_athlete_id": "0",
         "garmin_email": "",

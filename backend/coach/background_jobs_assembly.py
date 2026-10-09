@@ -54,7 +54,6 @@ class CoachJobAthleteServices:
 class CoachJobLimits:
     background_horizon_days: Callable[[], int]
     max_attachment_storage_bytes: Callable[[], int]
-    max_gemini_inline_image_bytes: Callable[[], int]
 
 
 class CoachBackgroundJobsAssembly:
@@ -95,7 +94,6 @@ class CoachBackgroundJobsAssembly:
         self._athlete_clock = athlete.athlete_clock
         self._background_horizon_days = limits.background_horizon_days
         self._max_attachment_storage_bytes = limits.max_attachment_storage_bytes
-        self._max_gemini_inline_image_bytes = limits.max_gemini_inline_image_bytes
 
     def job_store(self) -> CoachJobStore:
         return CoachJobStore(
@@ -133,7 +131,6 @@ class CoachBackgroundJobsAssembly:
             self._utc_now,
             background_horizon_days=self._background_horizon_days(),
             max_attachment_storage_bytes=self._max_attachment_storage_bytes(),
-            max_gemini_inline_image_bytes=self._max_gemini_inline_image_bytes(),
         )
 
     def cancellation_service(self) -> CoachCancellationService:
