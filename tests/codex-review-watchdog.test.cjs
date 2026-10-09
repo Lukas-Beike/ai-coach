@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/codex-review-watchdog.yml'), 'utf8');
+const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/codex-review-watchdog.yml'), 'utf8')
+  .replace(/\r\n/g, '\n');
 const source = workflow.replace(/\r\n/g, '\n').split('          script: |\n')[1]
   .split('\n').map(line => line.slice(12)).join('\n');
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -42,15 +43,16 @@ async function scenario(options = {}) {
         ...(options.updated ? { updated_at: new Clock(epoch + elapsed).toISOString() } : {}),
         body: options.limitAndBlocked ? 'Review unavailable: reached your Codex usage limits' :
           options.blocked ? '### Blocked: Required Secret Scanner Is Unavailable' :
-          options.limit ? 'You have reached your Codex usage limits' :
-          options.progress ? 'Codex review started' : options.unrelated ? 'Unrelated comment' :
-            "Codex Review: Didn't find any major issues.",
+          options.limitText || (options.limit ? 'You have reached your Codex usage limits' :
+            options.progress ? 'Codex review started' : options.unrelated ? 'Unrelated comment' :
+              "Codex Review: Didn't find any major issues."),
       });
       return [...comments, ...native];
     },
-    reviews: () => options.review ? [{
+    reviews: () => options.review || options.reviewLimit ? [{
       user: { login: bot }, commit_id: options.wrongHead ? 'c'.repeat(40) : head,
       submitted_at: new Clock().toISOString(),
+      body: options.reviewLimit ? 'Codex review quota exhausted' : undefined,
     }] : [],
     inline: () => [],
   };
@@ -148,6 +150,25 @@ test('integration-blocked comments fail and are not treated as usage exhaustion'
 
 test('usage-limit wording wins over a generic blocked match', async () => {
   const result = await scenario({ active: true, limitAndBlocked: true });
+  assert.equal(result.writes.length, 0);
+  assert.equal(result.results[0].conclusion, 'success');
+  assert.match(result.results[0].output.title, /usage limit/);
+});
+
+test('singular code-review limits and quota wording are explicit exemptions', async () => {
+  for (const limitText of [
+    'You have reached your Codex usage limit for code reviews',
+    'Codex review quota exhausted',
+  ]) {
+    const result = await scenario({ active: true, limitText });
+    assert.equal(result.writes.length, 0);
+    assert.equal(result.results[0].conclusion, 'success');
+    assert.match(result.results[0].output.title, /usage limit/);
+  }
+});
+
+test('usage exhaustion in a native review takes precedence over review activity', async () => {
+  const result = await scenario({ reviewLimit: true });
   assert.equal(result.writes.length, 0);
   assert.equal(result.results[0].conclusion, 'success');
   assert.match(result.results[0].output.title, /usage limit/);
