@@ -382,7 +382,7 @@ def request_json(
         raw_body = read_response(response, max_bytes, cancel_event)
         try:
             payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             raise ProviderInvalidResponse(_INVALID_JSON_MESSAGE) from None
         status = (
             getattr(response, "status", None) or getattr(response, "code", None) or 200
@@ -706,10 +706,13 @@ class JsonHttpClient:
                     http_status=error.code,
                 )
             status = error.code if service == "gemini" or error.code == 429 else 502
-            app_error = AppError(status, details["message"], reason=details["reason"])
-            retry_after = details.get("retry_after_seconds")
-            if isinstance(retry_after, int):
-                app_error.retry_after_seconds = retry_after
+            app_error = AppError(
+                status,
+                details["message"],
+                reason=details["reason"],
+                upstream_status=error.code,
+                retry_after_seconds=details.get("retry_after_seconds"),
+            )
             raise app_error from error
         detail = self._interval_error_detail(raw_body) if service == "intervals" else ""
         message = (
@@ -717,7 +720,12 @@ class JsonHttpClient:
             if detail and service == "intervals"
             else f"Anfrage an externen Dienst fehlgeschlagen ({error.code})."
         )
-        raise AppError(502, message, reason="provider_http_error") from error
+        raise AppError(
+            502,
+            message,
+            reason="provider_http_error",
+            upstream_status=error.code,
+        ) from error
 
     def _provider_error_details(
         self, service: str | None, error: HTTPError, raw_body: bytes
@@ -763,7 +771,7 @@ def _decoded_error_payload(raw_body: bytes) -> dict[str, Any]:
         payload = (
             json.loads(raw_body.decode("utf-8", errors="replace")) if raw_body else None
         )
-    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+    except TypeError, UnicodeDecodeError, json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
 

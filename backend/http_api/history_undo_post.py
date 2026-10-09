@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from backend.coach.proposals import CoachProposalCreationService
+from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.history.undo_service import HistoryUndoService
 
 

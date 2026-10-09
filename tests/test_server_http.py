@@ -10,6 +10,7 @@ from datetime import datetime as _local_datetime
 from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import Mock, call, patch
 from urllib.error import HTTPError
@@ -22,7 +23,7 @@ from server_test_support import (
 )
 
 from backend.coach import streams as coach_streams
-from backend.errors import ClientDisconnected
+from backend.errors import ClientDisconnected, public_error_contract
 from backend.http_api import auth as http_auth
 from backend.http_api import readiness as readiness_module
 from backend.http_api import response_transport, responses
@@ -38,6 +39,85 @@ from backend.runtime import maintenance as runtime_maintenance
 
 
 class ServerHttpTests(ServerTestCase):
+    def test_app_error_handler_logs_redacted_event_for_each_method(self):
+        for method in ("GET", "POST", "PUT"):
+            with self.subTest(method=method):
+                logger = Mock()
+                transport = Mock()
+                handler = object.__new__(server.HTTP_API.request_handler_class())
+                handler.path = "/api/synthetic?private=value"
+                handler.request_id = "request-1"
+                handler.dependencies = SimpleNamespace(
+                    logger=logger,
+                    redact_text=lambda value: value,
+                    response_transport=transport,
+                )
+                handler._send_app_error(
+                    server.AppError(503, "synthetic failure"), method
+                )
+                logger.error.assert_called_once()
+                event = logger.error.call_args.kwargs["extra"]
+                self.assertEqual(event["event"], "http_app_error")
+                self.assertEqual(event["context"]["method"], method)
+                self.assertEqual(
+                    event["context"],
+                    {"method": method, "status": 503, "request_id": "request-1"},
+                )
+                self.assertNotIn("synthetic failure", repr(logger.error.call_args))
+                self.assertNotIn("private", repr(event))
+
+    def test_provider_auth_error_does_not_receive_session_challenge(self):
+        transport = Mock()
+        handler = object.__new__(server.HTTP_API.request_handler_class())
+        handler.path = "/api/synthetic"
+        handler.request_id = "request-provider"
+        handler.dependencies = SimpleNamespace(
+            logger=Mock(),
+            redact_text=lambda value: value,
+            response_transport=transport,
+        )
+        handler._send_app_error(
+            server.AppError(
+                401,
+                "Provider authentication failed",
+                reason="authentication_or_permission",
+                upstream_status=401,
+            ),
+            "POST",
+        )
+        self.assertEqual(transport.send_json.call_args.args[1], 502)
+        self.assertIsNone(transport.send_json.call_args.args[3])
+
+    def test_missing_request_id_is_omitted_from_error_response(self):
+        transport = Mock()
+        handler = object.__new__(server.HTTP_API.request_handler_class())
+        handler.path = "/api/synthetic"
+        handler.dependencies = SimpleNamespace(
+            logger=Mock(),
+            redact_text=lambda value: value,
+            response_transport=transport,
+        )
+
+        handler._send_app_error(server.AppError(400, "Invalid"), "GET")
+
+        self.assertNotIn("request_id", transport.send_json.call_args.args[2])
+
+    def test_local_session_401_receives_session_challenge(self):
+        transport = Mock()
+        handler = object.__new__(server.HTTP_API.request_handler_class())
+        handler.path = "/api/synthetic"
+        handler.request_id = "request-session"
+        handler.dependencies = SimpleNamespace(
+            logger=Mock(),
+            redact_text=lambda value: value,
+            response_transport=transport,
+        )
+        handler._send_app_error(server.AppError(401, "Login required"), "POST")
+        self.assertEqual(transport.send_json.call_args.args[1], 401)
+        self.assertEqual(
+            transport.send_json.call_args.args[3], {"WWW-Authenticate": "Session"}
+        )
+
     def test_http_assembly_keeps_dispatchers_shared_and_handler_configuration_lazy(
         self,
     ):
@@ -1011,13 +1091,14 @@ class ServerHttpTests(ServerTestCase):
 
     def test_provider_authentication_errors_do_not_use_the_session_status(self):
         provider_error = server.AppError(
-            401, "Gemini-Schlüssel ungültig.", reason="authentication_or_permission"
+            401,
+            "Gemini-Schlüssel ungültig.",
+            reason="authentication_or_permission",
+            upstream_status=401,
         )
-        self.assertEqual(server.public_app_error_status(provider_error), 502)
+        self.assertEqual(public_error_contract(provider_error), (502, "upstream_auth"))
         self.assertEqual(
-            server.public_app_error_status(
-                server.AppError(401, "Anmeldung erforderlich.")
-            ),
+            public_error_contract(server.AppError(401, "Anmeldung erforderlich."))[0],
             401,
         )
 

@@ -11,6 +11,7 @@ from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.backup.restore import (
     DatabaseRestoreConfig,
     DatabaseRestoreService,
+    RestoreDependencies,
 )
 from backend.backup.restore_validation import (
     DatabaseRestoreValidationConfig,
@@ -120,17 +121,18 @@ class BackupAssembly:
         )
 
     def restore_service(self) -> DatabaseRestoreService:
-        return DatabaseRestoreService(
-            self.restore_validation_service(),
-            self.backup_service(),
-            self._database_manager,
-            self._database_lock(),
-            self._maintenance_gate(),
-            self._sync_jobs(),
-            self._coach_jobs(),
-            self._coach_failures(),
-            self._sync_wake_event(),
-            self._coach_wake_event,
-            DatabaseRestoreConfig(self._data_dir(), self._database_path()),
-            self._redact,
+        dependencies = RestoreDependencies(
+            validation=self.restore_validation_service(),
+            backup=self.backup_service(),
+            database_manager=self._database_manager,
+            database_lock=self._database_lock(),
+            maintenance_gate=self._maintenance_gate(),
+            sync_jobs=self._sync_jobs(),
+            coach_jobs=self._coach_jobs(),
+            coach_failures=self._coach_failures(),
+            sync_wake=self._sync_wake_event(),
+            coach_wake=self._coach_wake_event,
+            config=DatabaseRestoreConfig(self._data_dir(), self._database_path()),
+            redact=self._redact,
         )
+        return DatabaseRestoreService(dependencies)

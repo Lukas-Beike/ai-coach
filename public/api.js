@@ -30,7 +30,7 @@
       throw responseError(response, response.ok ? "Ungültige Serverantwort: JSON erwartet. Bitte den gespeicherten Stand prüfen." : `Anfrage fehlgeschlagen (${response.status})`, "invalid_json");
     }
     if (!response.ok) {
-      throw responseError(response, typeof payload?.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`, payload?.reason || "http_error", payload?.retry_after);
+      throw responseError(response, typeof payload?.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`, payload?.reason || "http_error", payload?.retry_after_seconds);
     }
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw responseError(response, "Ungültige Serverantwort: Objekt erwartet.", "invalid_shape");
     return payload;

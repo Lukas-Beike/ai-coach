@@ -1090,7 +1090,7 @@ class OpenAIStreamTelemetry:
                     if state.headers is not None
                     else None
                 )
-            except (AttributeError, TypeError):
+            except AttributeError, TypeError:
                 request_id = None
             if isinstance(request_id, str) and re.fullmatch(
                 r"req_[A-Za-z0-9_-]{1,128}", request_id
@@ -1371,10 +1371,13 @@ class OpenAIStreamClient:
                 "response_body": raw_error.decode("utf-8", errors="replace"),
             },
         )
-        error = AppError(status, details["message"], reason=details["reason"])
-        retry_after = details.get("retry_after_seconds")
-        if isinstance(retry_after, int):
-            error.retry_after_seconds = retry_after
+        error = AppError(
+            status,
+            details["message"],
+            reason=details["reason"],
+            upstream_status=status,
+            retry_after_seconds=details.get("retry_after_seconds"),
+        )
         raise error from exc
 
     def _timeout(
@@ -1621,7 +1624,7 @@ def retry_after_seconds(headers: Any) -> int | None:
         return None
     try:
         seconds = float(str(headers.get("retry-after")).strip())
-    except (AttributeError, TypeError, ValueError, OverflowError):
+    except AttributeError, TypeError, ValueError, OverflowError:
         return None
     if not math.isfinite(seconds) or seconds < 0:
         return None
@@ -1639,7 +1642,7 @@ def _safe_openai_error_token(value: Any) -> str | None:
 def _provider_error_payload(raw_body: bytes) -> dict[str, Any]:
     try:
         payload = json.loads(raw_body) if raw_body else None
-    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+    except TypeError, UnicodeDecodeError, json.JSONDecodeError:
         payload = None
     error = payload.get("error") if isinstance(payload, dict) else None
     return error if isinstance(error, dict) else {}
@@ -1668,7 +1671,7 @@ def error_diagnostic_details(
             if headers is not None
             else None
         )
-    except (AttributeError, TypeError):
+    except AttributeError, TypeError:
         request_id = None
     if request_id:
         details["request_id"] = request_id
@@ -1861,7 +1864,7 @@ def rate_limit_snapshot(headers: Any, *, updated_at: str) -> dict[str, Any] | No
     for header_name, value_name in OPENAI_RATE_LIMIT_HEADERS.items():
         try:
             value = headers.get(header_name)
-        except (AttributeError, TypeError):
+        except AttributeError, TypeError:
             continue
         if value not in (None, ""):
             values[value_name] = str(value)

@@ -150,6 +150,16 @@ class LibraryPlanServiceTests(unittest.TestCase):
                 400,
                 INVALID_PLANNING_DATE_ERROR,
             ),
+            (
+                [
+                    {
+                        "library_workout_id": str(uuid.uuid4()),
+                        "date": f"{TODAY}T08:00:00",
+                    }
+                ],
+                400,
+                INVALID_PLANNING_DATE_ERROR,
+            ),
         ]
         for entries, status, message in cases:
             with self.subTest(entries=entries):

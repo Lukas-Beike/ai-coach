@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from statistics import median
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.performance import (
     activity_validation,
     eftp,
@@ -21,15 +22,15 @@ GARMIN_SOURCE = "Garmin Connect"
 def _number(value: Any) -> float | None:
     try:
         result = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return result if math.isfinite(result) else None
 
 
 def _day(value: Any) -> date | None:
     try:
-        return date.fromisoformat(str(value)[:10])
-    except (TypeError, ValueError):
+        return LocalDate.parse(value).to_date()
+    except TypeError, ValueError:
         return None
 
 

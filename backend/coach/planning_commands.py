@@ -8,7 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.coach.authorization import coach_session_key
-from backend.coach.proposals import coach_action_hash
+from backend.coach.proposal_models import coach_action_hash
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.service import command_receipt
 from backend.coach.tool_dispatch import CoachToolDispatchService

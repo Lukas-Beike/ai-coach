@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.errors import AppError
 from backend.pagination import (
     api_page_limit,
@@ -14,6 +15,14 @@ from backend.pagination import (
     encode_page_cursor,
 )
 from backend.planning import library as planning_library
+
+
+def _normalized_date(value: Any) -> str | None:
+    try:
+        return LocalDate.parse(value).isoformat()
+    except ValueError:
+        return None
+
 
 STRUCTURED_TRAINING_STATE_PAGE_LIMIT = 366
 
@@ -72,7 +81,7 @@ class StructuredTrainingStateService:
     def _target_ref(row: Any, *, planned: bool) -> dict[str, Any] | None:
         try:
             payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         if not isinstance(payload, dict):
             return None
@@ -80,7 +89,7 @@ class StructuredTrainingStateService:
             "local_id": str(row.get("local_id") or ""),
             "name": str(payload.get("name") or "")[:200],
             "sport": str(payload.get("sport") or payload.get("type") or "")[:80],
-            "date": str(payload.get("date") or "")[:10] or None,
+            "date": _normalized_date(payload.get("date")),
             "archived": bool(payload.get("archived")),
             "local_deleted": bool(payload.get("local_deleted")) if planned else False,
             "sync_status": str(

@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.db.repositories import PlanningStateRepository
 from backend.errors import (
     INVALID_PLANNING_DATE_ERROR,
@@ -31,9 +32,7 @@ def _project_existing_training_change(
     if not start_date_local or change.get("start_date_local"):
         return candidate
     try:
-        parsed_start = datetime.fromisoformat(
-            str(start_date_local).strip().replace("Z", "+00:00")
-        )
+        parsed_start = datetime.fromisoformat(str(start_date_local).strip())
         candidate["start_date_local"] = parsed_start.replace(
             year=int(candidate_date[:4]),
             month=int(candidate_date[5:7]),
@@ -45,10 +44,9 @@ def _project_existing_training_change(
 
 
 def validated_training_date(value: Any) -> str:
-    candidate_date = str(value or "").strip()[:10]
     try:
-        date.fromisoformat(candidate_date)
-    except ValueError as exc:
+        candidate_date = LocalDate.parse(value).isoformat()
+    except (TypeError, ValueError) as exc:
         raise AppError(
             400, INVALID_PLANNING_DATE_ERROR, reason="invalid_change"
         ) from exc
@@ -161,7 +159,7 @@ class StructuredTrainingChangeValidator:
         final_dates: dict[str, str],
         final_active: dict[str, bool],
     ) -> None:
-        candidate_date = str(change.get("date") or "").strip()[:10]
+        candidate_date = str(change.get("date") or "").strip()
         if not candidate_date:
             raise AppError(
                 400,
@@ -195,7 +193,7 @@ class StructuredTrainingChangeValidator:
             current = {}
         if not isinstance(current, dict):
             return
-        current_date = str(current.get("date") or "").strip()[:10]
+        current_date = str(current.get("date") or "").strip()
         if current_date:
             original_dates.setdefault(change_identity, current_date)
         final_active.setdefault(
@@ -214,7 +212,7 @@ class StructuredTrainingChangeValidator:
             or final_dates.get(change_identity)
             or current.get("date")
             or ""
-        ).strip()[:10]
+        ).strip()
         if candidate_date:
             final_dates[change_identity] = validated_training_date(candidate_date)
         changes_by_identity[change_identity] = _project_existing_training_change(
@@ -477,13 +475,15 @@ class StructuredTrainingPlanResolver:
     ) -> bool:
         if action in {"delete", "archive", "restore"}:
             return True
-        return (
-            action == "update"
-            and "date" in change
-            and not str(change.get("date") or "").startswith(
-                str(current.get("date") or "")[:10]
+        if action != "update" or "date" not in change:
+            return False
+        try:
+            return (
+                LocalDate.parse(change.get("date")).isoformat()
+                != LocalDate.parse(current.get("date")).isoformat()
             )
-        )
+        except TypeError, ValueError:
+            return True
 
     def _membership_update(
         self, change: dict[str, Any], db: Any

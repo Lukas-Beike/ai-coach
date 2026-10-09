@@ -7,7 +7,7 @@ import shutil
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,51 +27,46 @@ class DatabaseRestoreConfig:
     database_path: Path
 
 
+@dataclass(frozen=True)
+class RestoreDependencies:
+    validation: DatabaseRestoreValidationService
+    backup: DatabaseBackupService
+    database_manager: Callable[[], DatabaseManager]
+    database_lock: Any
+    maintenance_gate: MaintenanceGate
+    sync_jobs: SyncJobQueueService
+    coach_jobs: CoachJobStore
+    coach_failures: CoachTurnFailureService
+    sync_wake: Any
+    coach_wake: Any
+    config: DatabaseRestoreConfig
+    redact: Callable[[str], str]
+
+
 class DatabaseRestoreService:
     """Own the complete staged restore, file swap, and worker recovery."""
 
-    def __init__(
-        self,
-        validation: DatabaseRestoreValidationService,
-        backup: DatabaseBackupService,
-        database_manager: Callable[[], DatabaseManager],
-        database_lock: Any,
-        maintenance_gate: MaintenanceGate,
-        sync_jobs: SyncJobQueueService,
-        coach_jobs: CoachJobStore,
-        coach_failures: CoachTurnFailureService,
-        sync_wake: Any,
-        coach_wake: Any,
-        config: DatabaseRestoreConfig,
-        redact: Callable[[str], str],
-    ) -> None:
-        self._validation = validation
-        self._backup = backup
-        self._database_manager = database_manager
-        self._database_lock = database_lock
-        self._maintenance_gate = maintenance_gate
-        self._sync_jobs = sync_jobs
-        self._coach_jobs = coach_jobs
-        self._coach_failures = coach_failures
-        self._sync_wake = sync_wake
-        self._coach_wake = coach_wake
-        self._config = config
-        self._redact = redact
+    def __init__(self, dependencies: RestoreDependencies) -> None:
+        self._dependencies = dependencies
 
     def _replace(self, temporary_path: Path) -> str | None:
-        database_path = self._config.database_path
+        config = self._dependencies.config
+        database_path = config.database_path
         previous_backup_name: str | None = None
-        with self._database_lock:
-            self._backup.checkpoint()
-            with self._database_manager().restore_drain():
-                backup_path = self._config.data_dir / (
-                    f"{database_path.name}.pre-restore-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-"
+        with self._dependencies.database_lock:
+            self._dependencies.backup.checkpoint()
+            with self._dependencies.database_manager().restore_drain():
+                backup_path = config.data_dir / (
+                    f"{database_path.name}.pre-restore-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-"
                     f"{uuid.uuid4().hex}"
                 )
                 if database_path.exists():
                     shutil.copy2(database_path, backup_path)
                     previous_backup_name = backup_path.name
-                for sidecar in (Path(f"{database_path}-wal"), Path(f"{database_path}-shm")):
+                for sidecar in (
+                    Path(f"{database_path}-wal"),
+                    Path(f"{database_path}-shm"),
+                ):
                     try:
                         sidecar.unlink()
                     except FileNotFoundError:
@@ -80,17 +75,18 @@ class DatabaseRestoreService:
         return previous_backup_name
 
     def _resume(self) -> None:
-        self._sync_jobs.resume_interrupted()
-        self._coach_jobs.resume_interrupted(self._coach_failures)
-        self._sync_wake.set()
-        self._coach_wake.set()
+        dependencies = self._dependencies
+        dependencies.sync_jobs.resume_interrupted()
+        dependencies.coach_jobs.resume_interrupted(dependencies.coach_failures)
+        dependencies.sync_wake.set()
+        dependencies.coach_wake.set()
 
     def restore(self, payload: bytes) -> dict[str, Any]:
-        with self._maintenance_gate.restore():
+        with self._dependencies.maintenance_gate.restore():
             temporary_path: Path | None = None
             try:
-                temporary_path = self._validation.stage(payload)
-                self._validation.validate(temporary_path)
+                temporary_path = self._dependencies.validation.stage(payload)
+                self._dependencies.validation.validate(temporary_path)
                 previous_backup_name = self._replace(temporary_path)
                 temporary_path = None
                 self._resume()
@@ -105,7 +101,7 @@ class DatabaseRestoreService:
                 raise AppError(
                     400,
                     "Das Datenbank-Backup konnte nicht validiert werden: "
-                    f"{self._redact(str(exc))[:300]}",
+                    f"{self._dependencies.redact(str(exc))[:300]}",
                 ) from exc
             finally:
                 if temporary_path is not None:

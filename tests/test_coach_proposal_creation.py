@@ -11,9 +11,9 @@ from pathlib import Path
 from unittest.mock import Mock
 from uuid import UUID
 
-from backend.coach.proposals import (
+from backend.coach.proposal_creation import CoachProposalCreationService
+from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
-    CoachProposalCreationService,
     coach_action_hash,
 )
 from backend.db import DatabaseManager, row_factory

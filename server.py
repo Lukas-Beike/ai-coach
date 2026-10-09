@@ -7,7 +7,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from functools import partial
 from http.server import (
     BaseHTTPRequestHandler,  # noqa: F401 - compatibility export for tests
@@ -117,7 +117,7 @@ from backend.coach.tool_dispatch_assembly import (
     CoachSyncToolOwners,
     CoachToolDispatchAssembly,
 )
-from backend.coach.tools import build_tool_contracts
+from backend.coach.tool_registry import build_tool_contracts
 from backend.coach.turn_assembly import (
     ChatEntryServices,
     CoachTurnAssembly,
@@ -164,7 +164,6 @@ from backend.diagnostics.assembly import (
 from backend.errors import (
     INTERNAL_SERVER_ERROR,
     AppError,  # noqa: F401 - compatibility export for tests
-    public_app_error_status,
 )
 from backend.history.assembly import (
     HistoryAssembly,
@@ -518,7 +517,7 @@ PROVIDER_SYNC = ProviderSyncAssembly(
             config=lambda: CONFIG,
             maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
             logger=LOGGER,
-            now=lambda: datetime.now(timezone.utc),
+            now=lambda: datetime.now(UTC),
         ),
         retry_policy=ProviderRefreshRetryPolicy(
             uuid_factory=lambda: uuid.uuid4().hex,
@@ -555,7 +554,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
             GARMIN_RESYNC_GATE,
             GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
         ),
-        MorningBatteryClock(lambda: datetime.now(timezone.utc), ATHLETE_CLOCK.now),
+        MorningBatteryClock(lambda: datetime.now(UTC), ATHLETE_CLOCK.now),
         MorningBatteryEvents(runtime_events.STATE_EVENT_BUFFER.publish, LOGGER),
         MorningBatteryRetryPolicy(),
     )
@@ -763,7 +762,7 @@ def initialise_database() -> None:
             db,
             key_values=KEY_VALUE_REPOSITORY,
             now=runtime_clock.utc_now(),
-            current_time=datetime.now(timezone.utc),
+            current_time=datetime.now(UTC),
             default_profile_json=json.dumps(DEFAULT_PROFILE),
             provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
             retention_days=int(getattr(CONFIG, "data_retention_days", -1)),
@@ -830,7 +829,7 @@ GARMIN_ASSEMBLY = GarminAssembly(
         ),
         control=GarminSyncControl(
             utc_now=runtime_clock.utc_now,
-            datetime_now=lambda: datetime.now(timezone.utc),
+            datetime_now=lambda: datetime.now(UTC),
             resync_gate=GARMIN_RESYNC_GATE,
             operation_observer=PROVIDER_SYNC.operation_observer,
             lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
@@ -844,7 +843,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
         persistence=SyncQueuePersistence(
             database_manager=database_manager,
             now=runtime_clock.utc_now,
-            current_time=lambda: datetime.now(timezone.utc),
+            current_time=lambda: datetime.now(UTC),
             uuid_factory=lambda: uuid.uuid4().hex,
         ),
         worker=SyncQueueWorker(
@@ -1166,7 +1165,7 @@ WEATHER_ASSEMBLY = WeatherAssembly(
         ),
         sync=WeatherSyncRuntime(
             maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-            now=lambda: datetime.now(timezone.utc),
+            now=lambda: datetime.now(UTC),
             today=lambda: ATHLETE_CLOCK.now().date(),
             adaptive_preview_service=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
             observer=PROVIDER_SYNC.operation_observer,
@@ -1185,7 +1184,7 @@ COACH_CONTEXT = CoachContextAssembly(
             activity_feedback_service=ATHLETE_DATA.activity_feedback,
             today=lambda: ATHLETE_CLOCK.now().date(),
             local_date=lambda: ATHLETE_CLOCK.now().date(),
-            utc_now=lambda: datetime.now(timezone.utc),
+            utc_now=lambda: datetime.now(UTC),
         ),
         planning=CoachContextPlanningSources(
             checkin_service=ATHLETE_DATA.checkin,
@@ -1225,7 +1224,7 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             profile_service=ATHLETE_DATA.profile,
             today=lambda: ATHLETE_CLOCK.now().date(),
-            report_service=lambda: HTTP_API.training_reports(),
+            report_services=lambda: HTTP_API.training_reports(),
         ),
         planning=CoachPlanningReadSources(
             structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
@@ -1759,7 +1758,6 @@ HTTP_API = HttpApiAssembly(
                         ),
                         errors=HttpHandlerErrors(
                             redact_text=REDACTOR.redact_text,
-                            public_app_error_status=public_app_error_status,
                             internal_server_error=INTERNAL_SERVER_ERROR,
                         ),
                         body_limits=HttpRequestBodyLimits(

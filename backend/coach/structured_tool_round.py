@@ -13,7 +13,7 @@ from backend.coach.context import CoachTrainingContextService
 from backend.coach.context_selection import select_coach_context
 from backend.coach.dialogue import INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS
 from backend.coach.job_store import CoachJobStore
-from backend.coach.proposals import coach_action_hash
+from backend.coach.proposal_models import coach_action_hash
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.tool_call_metadata import structured_tool_call_metadata

@@ -1,6 +1,7 @@
 """Training report coverage, historical zones and immutable archive contracts."""
 
 import sqlite3
+import tempfile
 import unittest
 from contextlib import contextmanager
 from datetime import date
@@ -8,7 +9,14 @@ from unittest.mock import Mock
 
 from backend.errors import AppError
 from backend.http_api.analysis import AnalysisRoutes
-from backend.performance.report_service import TrainingReportService
+from backend.performance.report_service import (
+    TrainingDerivedReadService,
+    TrainingProfileSelectionService,
+    TrainingRecordsService,
+    TrainingReportArchiveService,
+    TrainingReportReadService,
+    TrainingSeasonReadService,
+)
 from backend.performance.training_report import training_report
 
 
@@ -49,7 +57,9 @@ class TrainingReportTests(unittest.TestCase):
                 "power_profile": {"status": "insufficient_data", "duration_curve": []},
             },
         ]
-        result = TrainingReportService._profile_window(records, date(2026, 10, 2), 28)
+        result = TrainingProfileSelectionService._profile_window(
+            records, date(2026, 10, 2), 28
+        )
         self.assertEqual(3, result["cache_coverage"]["records"])
         self.assertEqual(2, result["cache_coverage"]["usable_records"])
         self.assertEqual(1, result["cache_coverage"]["unknown_records"])
@@ -91,7 +101,9 @@ class TrainingReportTests(unittest.TestCase):
                 },
             },
         ]
-        result = TrainingReportService._profile_window(records, date(2026, 10, 2), 28)
+        result = TrainingProfileSelectionService._profile_window(
+            records, date(2026, 10, 2), 28
+        )
         self.assertEqual(
             4.0,
             next(
@@ -373,7 +385,9 @@ class TrainingReportTests(unittest.TestCase):
         self.assertEqual(20, result["planning"]["load"]["value"])
 
     def test_archive_is_immutable_idempotent_and_revised_data_gets_new_version(self):
-        db = sqlite3.connect(":memory:")
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        db = sqlite3.connect(f"{directory.name}/reports.sqlite")
         db.row_factory = sqlite3.Row
         self.addCleanup(db.close)
         db.execute("CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)")
@@ -385,24 +399,29 @@ class TrainingReportTests(unittest.TestCase):
                     yield db
 
         snapshot = {"synced_at": "first", "recent_activities": []}
-        service = TrainingReportService(
+        report = TrainingReportReadService(
             read_snapshot=lambda: snapshot,
             read_plan=dict,
             read_checkins=list,
-            database_manager=Manager(),
+            read_feedback=list,
             today=lambda: date(2026, 10, 2),
         )
-        initial = service.archive({})
-        self.assertEqual(initial["report_id"], service.archive({})["report_id"])
+        archive = TrainingReportArchiveService(
+            database_manager=Manager(),
+            read_report=report.read,
+            utc_now=lambda: "2026-10-02T00:00:00Z",
+        )
+        initial = archive.archive({})
+        self.assertEqual(initial["report_id"], archive.archive({})["report_id"])
         snapshot["synced_at"] = "second"
-        revised = service.archive({})
+        revised = archive.archive({})
         self.assertNotEqual(initial["report_id"], revised["report_id"])
-        self.assertEqual(2, len(service.archives()["reports"]))
+        self.assertEqual(2, len(archive.archives()["reports"]))
         self.assertIn(
             "first",
             [
                 record["report"]["observed_at"]
-                for record in service.archives()["reports"]
+                for record in archive.archives()["reports"]
             ],
         )
         for invalid in (
@@ -413,7 +432,80 @@ class TrainingReportTests(unittest.TestCase):
             {"report": {}},
         ):
             with self.subTest(invalid=invalid), self.assertRaises(AppError):
-                service.archive(invalid)
+                archive.archive(invalid)
+
+    def test_records_service_reads_equipment_and_rejects_invalid_record_kinds(self):
+        service = TrainingRecordsService(
+            database_manager=Mock(),
+            read_snapshot=dict,
+            read_equipment=lambda: {"items": [{"id": "gear"}]},
+            read_record=None,
+        )
+        self.assertEqual(
+            {"equipment": {"items": [{"id": "gear"}]}}, service.training_records()
+        )
+        with self.assertRaises(AppError):
+            service.training_records({"record_type": "other", "record_id": "gear"})
+
+    def test_profile_selection_uses_today_and_keeps_future_activities_out(self):
+        service = TrainingProfileSelectionService(lambda: date(2026, 10, 2))
+        result = service.power_profiles(
+            [
+                {
+                    "activity_id": "today",
+                    "date": "2026-10-02",
+                    "observed_at": "2026-10-02T00:00:00Z",
+                    "sport": "Ride",
+                    "power_profile": {
+                        "status": "ok",
+                        "points": [{"duration_seconds": 60, "watts": 200}],
+                        "duration_curve": [{"duration_seconds": 60, "watts": 200}],
+                    },
+                },
+                {
+                    "activity_id": "future",
+                    "date": "2026-10-03",
+                    "sport": "Ride",
+                    "power_profile": {
+                        "status": "ok",
+                        "points": [{"duration_seconds": 60, "watts": 300}],
+                        "duration_curve": [{"duration_seconds": 60, "watts": 300}],
+                    },
+                },
+            ]
+        )
+        self.assertEqual("today", result["best"][0]["activity_id"])
+
+    def test_report_read_service_validates_period_and_preserves_timezone(self):
+        service = TrainingReportReadService(
+            read_snapshot=lambda: {"recent_activities": []},
+            read_plan=dict,
+            read_checkins=list,
+            read_feedback=list,
+            today=lambda: date(2026, 10, 2),
+        )
+        result = service.read({}, "Europe/Berlin")
+        self.assertEqual("Europe/Berlin", result["timezone"])
+        with self.assertRaises(AppError):
+            service.read({"days": 3660})
+
+    def test_derived_and_season_reads_keep_missing_data_fallbacks(self):
+        derived = TrainingDerivedReadService(
+            read_snapshot=dict,
+            read_checkins=list,
+            read_recovery=dict,
+            read_performance=dict,
+            today=lambda: date(2026, 10, 2),
+        )
+        self.assertEqual({"status": "insufficient_data"}, derived.body_history())
+        self.assertEqual({"status": "insufficient_data"}, derived.sleep_regularity())
+        season = TrainingSeasonReadService(
+            read_snapshot=dict,
+            read_competitions=list,
+            read_observations=list,
+            today=lambda: date(2026, 10, 2),
+        )
+        self.assertIsInstance(season.season("Europe/Berlin"), dict)
 
     def test_get_authentication_precedes_report_reads(self):
         auth = Mock()

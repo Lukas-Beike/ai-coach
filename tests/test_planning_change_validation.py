@@ -113,6 +113,17 @@ class StructuredTrainingChangeValidatorTests(unittest.TestCase):
         )
         self._assert_app_error(
             lambda: self.validator.validate(
+                [{"action": "create", "date": "2031-06-03junk"}],
+                {},
+                self.db,
+                False,
+            ),
+            status=400,
+            message=INVALID_PLANNING_DATE_ERROR,
+            reason="invalid_change",
+        )
+        self._assert_app_error(
+            lambda: self.validator.validate(
                 [{"action": "create", "date": "2031-02-30"}],
                 {},
                 self.db,

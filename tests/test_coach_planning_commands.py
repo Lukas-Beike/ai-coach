@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.authorization import coach_session_key
-from backend.coach.proposals import coach_action_hash
+from backend.coach.proposal_models import coach_action_hash
 from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
 
 

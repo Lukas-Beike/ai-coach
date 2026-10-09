@@ -17,7 +17,7 @@ class CoachActivityReadSources:
     garmin_payload_service: Callable[[], Any]
     profile_service: Callable[[], Any]
     today: Callable[[], date]
-    report_service: Callable[[], Any] | None = None
+    report_services: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ class CoachReadToolsAssembly:
         self._garmin_payload_service = activity.garmin_payload_service
         self._profile_service = activity.profile_service
         self._today = activity.today
-        self._report_service = activity.report_service
+        self._report_services = activity.report_services
         self._structured_training_state_service = (
             planning.structured_training_state_service
         )
@@ -77,7 +77,7 @@ class CoachReadToolsAssembly:
             self._garmin_payload_service(),
             self._profile_service(),
             self._today,
-            self._report_service() if self._report_service else None,
+            self._report_services() if self._report_services else None,
         )
 
     def read_service(self) -> CoachReadToolService:

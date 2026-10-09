@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.planning import adaptive, calendar
 from backend.planning.context import external_calendar_event_dates
 from backend.weather.adaptive import weather_adaptive_reason
@@ -16,7 +17,7 @@ from backend.weather.adaptive import weather_adaptive_reason
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -183,7 +184,10 @@ def _change_state(
 ) -> dict[str, Any] | None:
     if not draft.get("date") or str(draft.get("date") or "") < today:
         return None
-    draft_date = str(draft.get("date") or "")[:10]
+    try:
+        draft_date = LocalDate.parse(draft.get("date")).isoformat()
+    except ValueError:
+        return None
     duration = _as_number(draft.get("duration_minutes"))
     available_minutes = _as_number(feedback.get("available_minutes"))
     motivation = _as_number(feedback.get("motivation"))
@@ -392,7 +396,7 @@ class AdaptiveReplanPreviewService:
             return None
         try:
             payload = json.loads(row["payload"])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
@@ -430,7 +434,7 @@ class AdaptiveReplanPreviewService:
         for row in rows:
             try:
                 payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             pause = payload.get("illness_pause") if isinstance(payload, dict) else None
             if isinstance(pause, dict):

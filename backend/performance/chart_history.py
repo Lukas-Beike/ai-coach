@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.performance import activity_validation, body, eftp, garmin_metric_history
 from backend.performance.garmin_load import acute_load_value
 
@@ -23,7 +24,7 @@ METRIC_KEYS = (
 
 def _day(value: Any) -> date | None:
     try:
-        return date.fromisoformat(str(value)[:10])
+        return LocalDate.parse(value).to_date()
     except ValueError:
         return None
 
@@ -71,7 +72,7 @@ def _training_time_history(
     seen: set[str] = set()
     for row in _rows(raw.get("activities")) + _rows(snapshot.get("recent_activities")):
         key = str(row.get("id") or "")
-        day = _day(str(row.get("start_date_local") or "")[:10])
+        day = _day(row.get("start_date_local"))
         value = row.get("moving_time")
         if (
             day is None

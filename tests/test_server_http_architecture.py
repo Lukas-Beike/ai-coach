@@ -4,18 +4,26 @@ import ast
 import unittest
 
 try:
-    from .test_server_architecture import (
+    from .architecture_analysis import (
+        parse_python as _parse,
+    )
+    from .architecture_analysis import (
+        request_handler_definition as _request_handler_definition,
+    )
+    from .architecture_registry import (
         BACKEND_ROOT,
         SERVER_PATH,
-        _parse,
-        _request_handler_definition,
     )
 except ImportError:
-    from test_server_architecture import (
+    from architecture_analysis import (
+        parse_python as _parse,
+    )
+    from architecture_analysis import (
+        request_handler_definition as _request_handler_definition,
+    )
+    from architecture_registry import (
         BACKEND_ROOT,
         SERVER_PATH,
-        _parse,
-        _request_handler_definition,
     )
 
 

@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.activities.duplicate_service import DuplicateActivityService
-from backend.coach.proposals import (
+from backend.coach.proposal_creation import CoachProposalCreationService
+from backend.coach.proposal_execution import CoachProposalExecutionService
+from backend.coach.proposal_read import (
     CoachProposalConfirmationService,
-    CoachProposalCreationService,
-    CoachProposalExecutionService,
     CoachProposalReadService,
 )
 from backend.db.manager import DatabaseManager

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.coach.conversation import CoachConversationHistoryService
-from backend.coach.proposals import CoachProposalReadService
+from backend.coach.proposal_read import CoachProposalReadService
 from backend.http_api import pagination
 
 

@@ -11,7 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock
 
-from backend.coach.proposals import CoachProposalExecutionService, coach_action_hash
+from backend.coach.proposal_execution import CoachProposalExecutionService
+from backend.coach.proposal_models import coach_action_hash
 from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
 from backend.errors import AppError

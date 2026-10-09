@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from backend.coach.proposals import coach_action_hash
+from backend.coach.proposal_models import coach_action_hash
 from backend.coach.service import (
     coach_repair_key,
     dialogue_effect_key,

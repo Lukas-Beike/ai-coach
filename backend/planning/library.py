@@ -5,9 +5,9 @@ import hashlib
 import math
 import re
 import uuid
-from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.errors import AppError
 from backend.planning import competitions as planning_competitions
 from backend.planning import workouts as planning_workouts
@@ -51,7 +51,7 @@ def _library_workout_local_id(workout: dict[str, Any], local_id: str | None) -> 
     if not requested_local_id and raw_id:
         try:
             requested_local_id = str(uuid.UUID(raw_id))
-        except (ValueError, AttributeError):
+        except ValueError, AttributeError:
             requested_local_id = ""
     if requested_local_id:
         try:
@@ -74,7 +74,7 @@ def _library_workout_external_id(
     if not resolved_external_id:
         try:
             raw_id_is_local = str(uuid.UUID(raw_id)) == local_id
-        except (ValueError, AttributeError):
+        except ValueError, AttributeError:
             raw_id_is_local = raw_id == local_id
         resolved_external_id = (
             raw_id
@@ -120,7 +120,7 @@ def _normalize_library_workout_duration(result: dict[str, Any]) -> None:
         return
     try:
         result["duration_minutes"] = max(5, round(float(result["moving_time"]) / 60))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         pass
 
 
@@ -163,11 +163,11 @@ def library_workout_duration_minutes(workout: dict[str, Any]) -> float | None:
         duration_minutes = float(workout.get("duration_minutes"))
         if duration_minutes >= 0:
             return duration_minutes
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         pass
     try:
         moving_time = float(workout.get("moving_time"))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return moving_time / 60 if moving_time >= 0 else None
 
@@ -208,7 +208,7 @@ def _similar_library_workout_inputs(
 ) -> tuple[str | None, str, str, int] | None:
     try:
         expected_duration = int(workout.get("duration_minutes"))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return (
         workout_library_type(workout.get("sport")),
@@ -317,10 +317,10 @@ def _library_bulk_entry_date(item: dict[str, Any]) -> str | None:
         return None
     plan_date = str(item.get("date") or "").strip()
     try:
-        date.fromisoformat(plan_date)
+        LocalDate.parse(plan_date, allow_datetime=False, allow_basic=True)
     except (TypeError, ValueError) as exc:
         raise AppError(400, "Das Bulk-Datum muss das Format JJJJ-MM-TT haben.") from exc
-    return plan_date[:10]
+    return plan_date
 
 
 def _library_bulk_entry_hash(item: dict[str, Any], *, require_hash: bool) -> str | None:
@@ -400,7 +400,7 @@ def workout_library_update_candidate(
 def _library_workout_as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None

@@ -9,6 +9,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.errors import AppError
 
 COMPETITION_TEXT_LIMITS = {
@@ -128,8 +129,8 @@ def remote_competition_date(event: dict[str, Any]) -> str | None:
     if raw in (None, ""):
         return None
     try:
-        return date.fromisoformat(str(raw)[:10]).isoformat()
-    except ValueError:
+        return LocalDate.parse(raw).isoformat()
+    except TypeError, ValueError:
         return None
 
 
@@ -434,7 +435,7 @@ def competition_start(value: Any, fallback_date: Any = None) -> tuple[str, str]:
     if not raw:
         raw = fallback + "T00:00:00"
     try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(raw)
     except ValueError as exc:
         raise AppError(
             400, "Der Startzeitpunkt des Wettkampfs muss ein gültiges Datum sein."
@@ -513,7 +514,7 @@ def competition_category_and_priority(
 def competition_normalized_id(value: Any) -> str:
     try:
         return str(uuid.UUID(str(value or "").strip()))
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         return str(uuid.uuid4())
 
 

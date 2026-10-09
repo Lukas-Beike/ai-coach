@@ -6,7 +6,7 @@ import json
 import unittest
 from typing import ClassVar
 
-from backend.coach.proposals import coach_action_hash
+from backend.coach.proposal_models import coach_action_hash
 from backend.coach.service import (
     coach_repair_key,
     dialogue_effect_key,

@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
+
 ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 LOCAL_INTERVALS_SCOPE = "local+intervals"
 
@@ -43,7 +45,10 @@ def _canonical_local_event_identity(
     linked: dict[str, Any] | None,
 ) -> tuple[str, str, str, str, str, str]:
     local_id = str(entry.get("id") or entry.get("local_id") or "")
-    event_date = str(entry.get("date") or "")[:10]
+    try:
+        event_date = LocalDate.parse(entry.get("date")).isoformat()
+    except TypeError, ValueError:
+        event_date = ""
     local_status = str(entry.get("sync_status") or "local")
     remote_id = (
         str(linked.get("id") or entry.get("remote_event_id") or "")

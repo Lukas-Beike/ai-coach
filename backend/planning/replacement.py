@@ -3,6 +3,7 @@
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.errors import AppError
 from backend.planning.artifacts import (
     structured_artifact_payload,
@@ -51,7 +52,14 @@ def validate_replacement_workouts(
     from backend.planning.conflicts import calendar_items_conflict
 
     for i, workout in enumerate(workouts):
-        workout_date = str(workout.get("date") or "")[:10]
+        try:
+            workout_date = LocalDate.parse(workout.get("date")).isoformat()
+        except (TypeError, ValueError) as exc:
+            raise AppError(
+                400,
+                "Ein vollständiger Planersatz darf keine ungültigen Einheiten enthalten.",
+                reason="invalid_plan",
+            ) from exc
         if workout_date < today or not period["start"] <= workout_date <= period["end"]:
             raise AppError(
                 400,

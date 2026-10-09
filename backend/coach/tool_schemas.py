@@ -1,15 +1,32 @@
-"""Canonical Coach tool schemas and inventory."""
+"""Canonical structured Coach tool schemas."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
-from backend.coach.capabilities import build_capability_catalog
-from backend.coach.outcomes import COACH_OPERATION_LABELS
+
+def _canonical_coach_tool(
+    name: str,
+    description: str,
+    properties: dict[str, Any] | None = None,
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "name": name,
+        "description": description,
+        "strict": strict or not bool(properties),
+        "parameters": {
+            "type": "object",
+            "properties": properties or {},
+            "required": list(properties or {}) if strict else [],
+            "additionalProperties": False,
+        },
+    }
 
 
-def build_tool_contracts(
+def build_structured_tool_schemas(
     *,
     default_profile: dict[str, Any],
     checkin_text_limits: dict[str, int],
@@ -17,7 +34,6 @@ def build_tool_contracts(
     training_change_limit: int,
     library_bulk_max_entries: int,
     training_plan_statuses: Any,
-    dialogue_tools: Callable[..., list[dict[str, Any]]],
 ):
     COACH_TRAINING_CHANGE_LIMIT = training_change_limit
     LIBRARY_BULK_MAX_ENTRIES = library_bulk_max_entries
@@ -25,32 +41,6 @@ def build_tool_contracts(
     CHECKIN_TEXT_LIMITS = checkin_text_limits
     CHECKIN_SCORE_FIELDS = checkin_score_fields
     TRAINING_PLAN_STATUSES = training_plan_statuses
-
-    def _canonical_coach_tool(
-        name: str,
-        description: str,
-        properties: dict[str, Any] | None = None,
-        *,
-        strict: bool = False,
-    ) -> dict[str, Any]:
-        """Declare a focused schema for one structured Coach operation.
-
-        Read-only tools with no arguments are strict. Mutable tools retain
-        optional fields where the operation supports partial updates, but no
-        longer receive every unrelated Coach parameter.
-        """
-        return {
-            "type": "function",
-            "name": name,
-            "description": description,
-            "strict": strict or not bool(properties),
-            "parameters": {
-                "type": "object",
-                "properties": properties or {},
-                "required": list(properties or {}) if strict else [],
-                "additionalProperties": False,
-            },
-        }
 
     food_ingredients = {
         "type": "array",
@@ -1218,101 +1208,4 @@ def build_tool_contracts(
         )
     )
 
-    COACH_CANONICAL_TOOL_NAMES = tuple(tool["name"] for tool in COACH_STRUCTURED_TOOLS)
-    STRUCTURED_READ_ONLY_TOOLS = {
-        "read_coach_context",
-        "read_profile",
-        "read_training_state",
-        "list_recent_activities",
-        "get_activity_details",
-        "get_training_report",
-        "read_training_records",
-        "list_workout_library",
-        "list_planned_workouts",
-        "list_change_history",
-        "list_competitions",
-        "list_training_plans",
-        "get_sync_job",
-        "read_nutrition",
-        "lookup_food",
-        "calculate_food_nutrition",
-    }
-
-    COACH_DIALOGUE_TOOLS = dialogue_tools(
-        [
-            tool
-            for tool in COACH_STRUCTURED_TOOLS
-            if tool["name"] != "apply_training_changes"
-        ],
-        STRUCTURED_READ_ONLY_TOOLS,
-    )
-    _patch_properties = {
-        "changes": next(
-            tool
-            for tool in COACH_STRUCTURED_TOOLS
-            if tool["name"] == "apply_training_changes"
-        )["parameters"]["properties"]["changes"],
-        "workouts": next(
-            tool
-            for tool in COACH_STRUCTURED_TOOLS
-            if tool["name"] == "stage_training_plan"
-        )["parameters"]["properties"]["payload"]["properties"]["workouts"],
-        "expected_revision": {"type": "integer"},
-        "plan_name": {"type": "string"},
-        "goal": {"type": "string"},
-    }
-    _patch_properties["changes"] = {**_patch_properties["changes"], "minItems": 0}
-    _patch_properties["workouts"] = {**_patch_properties["workouts"], "minItems": 0}
-    COACH_DIALOGUE_TOOLS.extend(
-        dialogue_tools(
-            [
-                _canonical_coach_tool(
-                    "apply_training_patch",
-                    "Apply related moves, edits, deletions and additions in one atomic local change. Read revision and per-unit hashes first. Existing objects keep their IDs. No remote writes.",
-                    _patch_properties,
-                ),
-            ],
-            STRUCTURED_READ_ONLY_TOOLS,
-        )
-    )
-    COACH_DIALOGUE_TOOLS.extend(
-        [
-            _canonical_coach_tool(
-                "clarify_coach_request",
-                "Keep the current request and its constraints for a concrete clarification. Source IDs refer to user messages; summary includes all unresolved requirements.",
-                {
-                    "source_message_ids": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "maxItems": 24,
-                    },
-                    "summary": {"type": "string"},
-                    "question": {"type": "string"},
-                },
-                strict=True,
-            ),
-            _canonical_coach_tool(
-                "cancel_coach_request",
-                "Close the pending request when the athlete cancels it; completed effects remain recorded.",
-            ),
-            _canonical_coach_tool(
-                "inspect_activity_duplicates",
-                "Inspect the latest cycling activity for duplicate Wahoo/Garmin recordings. Prefer Wahoo for analysis. A returned removal preview still requires the athlete's explicit confirmation; this tool never deletes remotely.",
-            ),
-        ]
-    )
-    STRUCTURED_READ_ONLY_TOOLS.add("inspect_activity_duplicates")
-
-    capabilities = build_capability_catalog(
-        COACH_STRUCTURED_TOOLS,
-        COACH_DIALOGUE_TOOLS,
-        STRUCTURED_READ_ONLY_TOOLS,
-        COACH_OPERATION_LABELS,
-    )
-    return (
-        COACH_CANONICAL_TOOL_NAMES,
-        COACH_STRUCTURED_TOOLS,
-        STRUCTURED_READ_ONLY_TOOLS,
-        COACH_DIALOGUE_TOOLS,
-        capabilities,
-    )
+    return COACH_STRUCTURED_TOOLS

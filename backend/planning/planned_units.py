@@ -7,6 +7,7 @@ import uuid
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
     INVALID_PLANNING_DATE_ERROR,
@@ -29,7 +30,7 @@ def adopt_normalized_remote_planned_unit(
     remote_id = str(remote.get("remote_event_id") or "").strip()
     event_date = str(remote.get("date") or "").strip()
     try:
-        if not remote_id or date.fromisoformat(event_date).isoformat() != event_date:
+        if not remote_id or LocalDate.parse(event_date).isoformat() != event_date:
             return None
     except ValueError:
         return None
@@ -178,10 +179,16 @@ def prepare_planned_workout_date(
 ) -> bool:
     candidate["date"] = str(candidate.get("date") or "").strip()
     try:
-        date.fromisoformat(candidate["date"])
+        candidate["date"] = LocalDate.parse(
+            candidate["date"], allow_datetime=False
+        ).isoformat()
     except (TypeError, ValueError) as exc:
         raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
-    date_changed = candidate["date"][:10] != str(current.get("date") or "")[:10]
+    try:
+        current_date = LocalDate.parse(current.get("date")).isoformat()
+    except TypeError, ValueError:
+        current_date = str(current.get("date") or "")
+    date_changed = candidate["date"] != current_date
     if date_changed and candidate.get("start_date_local") in (
         None,
         current.get("start_date_local"),
@@ -193,7 +200,7 @@ def prepare_planned_workout_date(
                 if len(old_start) > 10 and old_start[10] == "T"
                 else _ISO_MIDNIGHT_SUFFIX
             )
-            candidate["start_date_local"] = candidate["date"][:10] + time_suffix
+            candidate["start_date_local"] = candidate["date"] + time_suffix
     return date_changed
 
 
@@ -297,7 +304,12 @@ def _remote_planned_unit_id(event: dict[str, Any]) -> str | None:
 
 
 def _remote_planned_unit_date(event: dict[str, Any], *, today: date) -> str | None:
-    event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+    try:
+        event_date = LocalDate.parse(
+            event.get("start_date_local") or event.get("date")
+        ).isoformat()
+    except TypeError, ValueError:
+        return None
     try:
         if date.fromisoformat(event_date) < today:
             return None

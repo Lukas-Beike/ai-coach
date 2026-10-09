@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import Mock
 
 from backend.config import Config
@@ -11,7 +11,7 @@ from backend.http_api.nutrition import (
     NutritionPostRoutes,
     NutritionPutRoutes,
 )
-from backend.nutrition.service import nutrition_approval_item
+from backend.nutrition.contracts import nutrition_approval_item
 from backend.nutrition.sync import IntervalsNutritionSyncService
 
 
@@ -23,7 +23,7 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.sync_service = Mock()
         self.sync_job_queue = Mock()
         self.sync_job_queue.enqueue.return_value = {"id": "nutrition-job-1"}
-        self.local_now = lambda: datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
+        self.local_now = lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
 
         self.get_routes = NutritionGetRoutes(
             session_auth_service=lambda: self.auth,

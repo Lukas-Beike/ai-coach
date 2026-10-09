@@ -32,36 +32,53 @@ class AppError(Exception):
         message: str,
         *,
         reason: str | None = None,
-        retry_after: int | None = None,
+        upstream_status: int | None = None,
+        retry_after_seconds: int | None = None,
     ):
         super().__init__(message)
         self.status = status
         self.message = message
         self.reason = reason
-        self.retry_after = retry_after
+        self.upstream_status: int | None = upstream_status
+        self.retry_after_seconds: int | None = retry_after_seconds
 
 
-def public_error_payload(
-    error: AppError, redact: Callable[[str], str]
-) -> dict[str, object]:
-    """Build the shared, redacted HTTP error envelope."""
+def public_error_contract(error: AppError) -> tuple[int, str]:
+    """Resolve the public HTTP status and reason for an application error."""
+    if error.upstream_status is not None:
+        upstream_status = error.upstream_status
+        if upstream_status in {401, 403}:
+            return 502, "upstream_auth"
+        if upstream_status == 404:
+            return 502, "upstream_not_found"
+        if upstream_status == 429:
+            return 429, "upstream_rate_limited"
+        if upstream_status == 408 or upstream_status >= 500:
+            return 503, "upstream_unavailable"
+        return 502, "upstream_rejected"
     reason = error.reason or "request_failed"
     if not re.fullmatch(r"[a-z0-9_]{1,80}", reason):
         reason = "request_failed"
+    return error.status, reason
+
+
+def public_error_payload(
+    error: AppError,
+    redact: Callable[[str], str],
+    *,
+    request_id: str | None = None,
+) -> dict[str, object]:
+    """Build the shared, redacted HTTP error envelope."""
+    status, reason = public_error_contract(error)
     payload: dict[str, object] = {
         "error": redact(error.message)[:1000],
         "reason": reason,
     }
-    if type(error.retry_after) is int:
-        payload["retry_after"] = max(0, error.retry_after)
+    if request_id is not None:
+        payload["request_id"] = request_id
+    if type(error.retry_after_seconds) is int and status in {429, 503}:
+        payload["retry_after_seconds"] = max(0, error.retry_after_seconds)
     return payload
-
-
-def public_app_error_status(error: AppError) -> int:
-    """Keep upstream authentication failures separate from local sessions."""
-    if error.status == 401 and error.reason == "authentication_or_permission":
-        return 502
-    return error.status
 
 
 class ClientDisconnected(Exception):
