@@ -30,29 +30,32 @@ class AnalysisRoutes:
         }
         reports = self._reports()
         if path.endswith("/comparisons"):
-            payload = reports.comparisons()
+            payload = reports.records.comparisons()
         elif path.endswith("/training-records"):
-            payload = reports.training_records(values)
+            payload = reports.records.training_records(values)
         elif path.endswith("/impact"):
-            payload = reports.impact()
+            payload = reports.derived.impact(reports.timezone())
         elif path.endswith("/season"):
-            payload = reports.season()
+            payload = reports.season.season(reports.timezone())
         elif path.endswith("/power-profiles"):
-            payload = reports.power_profiles()
+            payload = reports.profiles.power_profiles(reports.records.observations())
         elif path.endswith("/endurance"):
-            payload = reports.endurance()
+            payload = reports.records.endurance()
         elif path.endswith("/reports"):
-            payload = reports.archives()
+            payload = reports.archive.archives()
         else:
-            payload = reports.read(values)
+            payload = reports.report.read(values, reports.timezone())
         handler.send_json(200, payload)
         return True
 
     def handle_post(self, handler: Any, path: str) -> bool:
         if path == "/api/analysis/scenarios":
-            handler.send_json(200, self._reports().scenarios(handler.read_json()))
+            reports = self._reports()
+            handler.send_json(
+                200, reports.report.scenarios(handler.read_json(), reports.timezone())
+            )
             return True
         if path != "/api/analysis/reports":
             return False
-        handler.send_json(200, self._reports().archive(handler.read_json()))
+        handler.send_json(200, self._reports().archive.archive(handler.read_json()))
         return True

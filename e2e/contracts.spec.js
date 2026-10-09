@@ -1,5 +1,9 @@
 const { test, expect } = require("@playwright/test");
+const { readFileSync } = require("node:fs");
+const path = require("node:path");
 const { captureReadFixture, installReadFixture } = require("./read-fixture");
+
+const SERVICE_WORKER_CACHE = readFileSync(path.join(__dirname, "..", "public", "service-worker.js"), "utf8").match(/const CACHE = "([^"]+)";/)[1];
 
 let fixture;
 test.beforeAll(async ({ request }) => { fixture = await captureReadFixture(request); });
@@ -417,7 +421,7 @@ test("provider source retains visible stale and partial measurement context", as
 test("fresh service worker keeps the current shell available offline", async ({ page }) => {
   await ready(page);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  expect(await page.evaluate(() => caches.keys())).toEqual(["intervals-coach-v365"]);
+  expect(await page.evaluate(() => caches.keys())).toEqual([SERVICE_WORKER_CACHE]);
   await page.context().setOffline(true);
   try {
     await page.reload();

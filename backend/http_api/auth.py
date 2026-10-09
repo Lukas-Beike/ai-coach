@@ -185,7 +185,7 @@ class SessionAuthService:
                 429,
                 f"Zu viele Anmeldeversuche. Erneut versuchen in etwa {retry_after} Sekunden.",
                 reason="rate_limited",
-                retry_after=retry_after,
+                retry_after_seconds=retry_after,
             )
         if password is None:
             payload = handler.read_json()
@@ -246,7 +246,7 @@ class SessionAuthService:
                 429,
                 f"Zu viele Anfragen. Erneut versuchen in etwa {retry_after} Sekunden.",
                 reason="rate_limited",
-                retry_after=retry_after,
+                retry_after_seconds=retry_after,
             )
         return session
 

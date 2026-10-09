@@ -4,26 +4,42 @@ import ast
 import unittest
 
 try:
-    from .test_server_architecture import (
+    from .architecture_analysis import (
+        parse_python as _parse,
+    )
+    from .architecture_analysis import (
+        python_files as _python_files,
+    )
+    from .architecture_analysis import (
+        request_handler_definition as _request_handler_definition,
+    )
+    from .architecture_analysis import (
+        top_level_implementations as _top_level_implementations,
+    )
+    from .architecture_registry import (
         BACKEND_ROOT,
         REPOSITORY_ROOT,
         SERVER_COMPOSITION_CONTROL_FLOW,
         SERVER_PATH,
-        _parse,
-        _python_files,
-        _request_handler_definition,
-        _top_level_implementations,
     )
 except ImportError:
-    from test_server_architecture import (
+    from architecture_analysis import (
+        parse_python as _parse,
+    )
+    from architecture_analysis import (
+        python_files as _python_files,
+    )
+    from architecture_analysis import (
+        request_handler_definition as _request_handler_definition,
+    )
+    from architecture_analysis import (
+        top_level_implementations as _top_level_implementations,
+    )
+    from architecture_registry import (
         BACKEND_ROOT,
         REPOSITORY_ROOT,
         SERVER_COMPOSITION_CONTROL_FLOW,
         SERVER_PATH,
-        _parse,
-        _python_files,
-        _request_handler_definition,
-        _top_level_implementations,
     )
 
 

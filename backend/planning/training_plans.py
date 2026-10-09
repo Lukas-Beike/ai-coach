@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Iterable
-from datetime import date
 from typing import Any
 
 from backend import change_history
+from backend.athlete.local_date import LocalDate
 from backend.errors import AppError
 
 COACH_PLAN_CONSTRAINTS_PREFIX = "coach_plan_constraints:"
@@ -38,10 +38,13 @@ def _member_dates(db: Any, plan_id: str) -> list[str]:
     for row in rows:
         try:
             payload = json.loads(row["payload"] or "{}")
-        except (TypeError, ValueError, KeyError):
+        except TypeError, ValueError, KeyError:
             payload = {}
-        if isinstance(payload, dict) and str(payload.get("date") or "")[:10]:
-            dates.append(str(payload["date"])[:10])
+        if isinstance(payload, dict):
+            try:
+                dates.append(LocalDate.parse(payload.get("date")).isoformat())
+            except TypeError, ValueError:
+                continue
     return dates
 
 
@@ -68,9 +71,9 @@ def _candidate(current: dict[str, Any], values: dict[str, Any]) -> dict[str, Any
     if candidate["status"] not in TRAINING_PLAN_STATUSES:
         raise AppError(400, "Ungültiger Trainingsplanstatus.")
     try:
-        start = date.fromisoformat(candidate["start_date"])
-        end = date.fromisoformat(candidate["end_date"])
-    except ValueError as exc:
+        start = LocalDate.parse(candidate["start_date"]).to_date()
+        end = LocalDate.parse(candidate["end_date"]).to_date()
+    except (TypeError, ValueError) as exc:
         raise AppError(
             400, "Start- und Enddatum müssen das Format JJJJ-MM-TT haben."
         ) from exc

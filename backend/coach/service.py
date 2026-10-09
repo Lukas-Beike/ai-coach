@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
-from backend.coach.proposals import coach_action_hash
+from backend.coach.proposal_models import coach_action_hash
 
 
 def dialogue_scope_repair_key(name: str, arguments: dict[str, Any]) -> str:

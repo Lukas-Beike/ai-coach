@@ -2,12 +2,17 @@
 
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
+
 ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 LOCAL_INTERVALS_SCOPE = "local+intervals"
 
 
 def _local_calendar_competition(competition: dict[str, Any]) -> dict[str, Any]:
-    event_date = str(competition.get("event_date") or "")[:10]
+    try:
+        event_date = LocalDate.parse(competition.get("event_date")).isoformat()
+    except TypeError, ValueError:
+        return {**competition, "date": "", "start_date_local": None}
     linked = bool(competition.get("external_id"))
     return {
         **competition,
@@ -27,9 +32,13 @@ def _local_calendar_competition(competition: dict[str, Any]) -> dict[str, Any]:
 def _local_calendar_external_event(event: Any) -> dict[str, Any] | None:
     if not isinstance(event, dict) or int(event.get("training_relevant") or 0) != 1:
         return None
+    try:
+        event_date = LocalDate.parse(event.get("event_date")).isoformat()
+    except ValueError:
+        return None
     return {
         **event,
-        "date": str(event.get("event_date") or "")[:10],
+        "date": event_date,
         "is_external_calendar": True,
         "is_local": True,
         "is_remote": False,

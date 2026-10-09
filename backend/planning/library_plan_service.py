@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Callable
-from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.errors import (
     CORRUPT_LIBRARY_ERROR,
     INVALID_LIBRARY_ID_ERROR,
@@ -60,7 +60,7 @@ class WorkoutLibraryPlanService:
             raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
         plan_date = str(item.get("date") or "").strip()
         try:
-            date.fromisoformat(plan_date)
+            plan_date = LocalDate.parse(plan_date).isoformat()
         except (TypeError, ValueError) as exc:
             raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
 
@@ -96,7 +96,10 @@ class WorkoutLibraryPlanService:
             seen_dates[plan_date] = workout_id
 
             source = request["workout"]
-            source_date = str(source.get("date") or "")[:10]
+            try:
+                source_date = LocalDate.parse(source.get("date")).isoformat()
+            except ValueError:
+                source_date = ""
             already_planned = source_date == plan_date and source.get("source") in {
                 "coach",
                 "library",

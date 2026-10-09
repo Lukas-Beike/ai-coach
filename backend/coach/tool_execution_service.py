@@ -11,7 +11,7 @@ from backend.activities.duplicates import (
     latest_wahoo_garmin_duplicate,
 )
 from backend.coach.clarification import CoachClarificationService
-from backend.coach.proposals import CoachProposalCreationService
+from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.db.manager import DatabaseManager

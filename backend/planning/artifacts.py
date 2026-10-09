@@ -1,8 +1,8 @@
 """Validation for structured Coach plan artifacts."""
 
-from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.errors import AppError
 
 
@@ -39,7 +39,7 @@ def validate_structured_plan_limits(payload: dict[str, Any]) -> None:
                 reason="invalid_plan",
             )
         try:
-            dates.append(date.fromisoformat(str(workout.get("date") or "")[:10]))
+            dates.append(LocalDate.parse(workout.get("date")).to_date())
         except (TypeError, ValueError) as exc:
             raise AppError(
                 400,

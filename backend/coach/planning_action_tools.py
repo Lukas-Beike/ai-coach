@@ -12,7 +12,7 @@ from backend.coach.authorization import (
     require_coach_scope,
     structured_action_payload,
 )
-from backend.coach.proposals import CoachProposalCreationService
+from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
 from backend.history.undo_service import HistoryUndoService
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService

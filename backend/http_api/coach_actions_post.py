@@ -5,10 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from backend.coach.proposals import (
-    CoachProposalConfirmationService,
-    CoachProposalExecutionService,
-)
+from backend.coach.proposal_execution import CoachProposalExecutionService
+from backend.coach.proposal_read import CoachProposalConfirmationService
 
 
 class CoachActionsPostRoutes:

@@ -13,7 +13,7 @@ from backend.coach.plan_artifact_tools import CoachPlanArtifactToolService
 from backend.coach.planning_action_tools import CoachPlanningActionToolService
 from backend.coach.planning_change_tools import CoachPlanningChangeToolService
 from backend.coach.profile_update import CoachProfileUpdateService
-from backend.coach.proposals import CoachProposalCreationService
+from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.read_tools import CoachReadToolService
 from backend.coach.sync_tools import CoachSyncToolService
 from backend.coach.tool_dispatch import CoachToolDispatchService

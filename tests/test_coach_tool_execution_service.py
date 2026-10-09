@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 
 from backend.activities.duplicates import duplicate_delete_action
 from backend.coach.clarification import CoachClarificationService
-from backend.coach.proposals import CoachProposalCreationService
+from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.training_patch import CoachTrainingPatchService

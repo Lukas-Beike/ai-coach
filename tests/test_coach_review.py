@@ -16,7 +16,7 @@ import server_test_support as fixtures
 from support import reset_application_state
 
 from backend.coach.authorization import coach_session_key
-from backend.coach.proposals import (
+from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
     prune_expired_coach_proposals,
 )

@@ -83,7 +83,7 @@ class PlanningArtifactTests(unittest.TestCase):
                     message="Jede Planeinheit benötigt ein gültiges Datum.",
                 )
 
-    def test_uses_first_ten_date_characters_and_does_not_mutate_input(self):
+    def test_accepts_valid_timestamps_and_does_not_mutate_input(self):
         payload = {
             "workouts": [
                 {"date": "2026-01-01T12:30:00Z", "details": {"sport": "Ride"}},
@@ -95,6 +95,13 @@ class PlanningArtifactTests(unittest.TestCase):
         validate_structured_plan_limits(payload)
 
         self.assertEqual(payload, original)
+
+    def test_rejects_invalid_timestamp_calendar_date(self):
+        self.assert_app_error(
+            {"workouts": [{"date": "2026-02-30T12:30:00Z"}]},
+            reason="invalid_plan",
+            message="Jede Planeinheit benötigt ein gültiges Datum.",
+        )
 
     def test_structured_artifact_payload_returns_the_original_dict(self):
         payload = {"workouts": [{"date": "2026-01-01"}]}

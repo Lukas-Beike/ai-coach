@@ -1,10 +1,8 @@
 import copy
 import unittest
 
-from backend.coach.proposals import (
-    COACH_ACTION_TYPES,
-    validated_coach_action_preview_input,
-)
+from backend.coach.proposal_models import COACH_ACTION_TYPES
+from backend.coach.proposal_validation import validated_coach_action_preview_input
 from backend.errors import AppError
 
 

@@ -1,24 +1,9 @@
-"""Static architecture guards for the server-monolith extraction.
+"""Maintain these registries when backend ownership or source paths change."""
 
-The checks in this module intentionally parse source files instead of importing
-the application.  Importing ``server`` initializes configuration and other
-runtime state, which is outside the scope of an architecture check.
-"""
-
-from __future__ import annotations
-
-import ast
-import tempfile
-import unittest
-from collections.abc import Iterable
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-# Container CI mounts tests and server.py under /review while the application
-# package remains at /app/backend. Keep static guards pointed at real source.
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
-if not BACKEND_ROOT.is_dir():
-    BACKEND_ROOT = Path.cwd() / "backend"
 SERVER_PATH = REPOSITORY_ROOT / "server.py"
 HANDLER_PATH = BACKEND_ROOT / "http_api" / "handler.py"
 
@@ -26,6 +11,7 @@ HANDLER_PATH = BACKEND_ROOT / "http_api" / "handler.py"
 # This is deliberately explicit.  These small, dependency-light helpers are
 # backend-owned implementations, not server callbacks or compatibility
 # wrappers, and must not be reintroduced in server.py.
+
 MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.athlete.clock", ("AthleteLocalClock",)),
     (
@@ -108,26 +94,30 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.public_plan", ("PublicPlanStateService",)),
     ("backend.http_api.library_page", ("LibraryPageService", "paged_library")),
     (
-        "backend.coach.proposals",
+        "backend.coach.proposal_models",
         (
-            "CoachProposalReadService",
-            "CoachProposalCreationService",
-            "CoachProposalConfirmationService",
-            "CoachProposalExecutionService",
             "COACH_ACTION_TTL_SECONDS",
             "COACH_ACTION_TYPES",
             "coach_action_hash",
             "coach_action_view",
             "prune_expired_coach_proposals",
-            "_coach_action_hash",
-            "_coach_action_view",
-            "current_coach_proposals",
-            "confirm_coach_action_preview",
-            "validated_coach_action_preview_input",
-            "create_coach_action_preview",
-            "execute_coach_action",
-            "_execute_coach_action",
         ),
+    ),
+    (
+        "backend.coach.proposal_validation",
+        ("validated_coach_action_preview_input",),
+    ),
+    (
+        "backend.coach.proposal_creation",
+        ("CoachProposalCreationService",),
+    ),
+    (
+        "backend.coach.proposal_read",
+        ("CoachProposalReadService", "CoachProposalConfirmationService"),
+    ),
+    (
+        "backend.coach.proposal_execution",
+        ("CoachProposalExecutionService",),
     ),
     ("backend.coach.receipt_reads", ("CoachCommandReceiptService",)),
     ("backend.coach.request_payload", ("CoachRequestPayloadService",)),
@@ -301,7 +291,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "AppError",
             "ClientDisconnected",
             "provider_error",
-            "public_app_error_status",
+            "public_error_contract",
             "INTERVALS_API_KEY_ERROR",
             "OPENAI_API_KEY_ERROR",
             "GEMINI_API_KEY_ERROR",
@@ -2105,6 +2095,7 @@ FORBIDDEN_SERVER_SYMBOLS = (
 # These functions intentionally retain the small amount of root control flow
 # for schema initialization and process lifecycle. Runtime caches bind their
 # services to explicit dependencies in the owning backend modules.
+
 SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
     {
         "database_manager",
@@ -2113,418 +2104,3 @@ SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
         "main",
     }
 )
-
-
-def _python_files(root: Path) -> Iterable[Path]:
-    return sorted(path for path in root.rglob("*.py") if path.is_file())
-
-
-def _parse(path: Path) -> ast.Module:
-    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-
-
-def _request_handler_definition() -> ast.ClassDef:
-    return next(
-        node
-        for node in _parse(HANDLER_PATH).body
-        if isinstance(node, ast.ClassDef) and node.name == "RequestHandler"
-    )
-
-
-def _dotted_name(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        parent = _dotted_name(node.value)
-        return f"{parent}.{node.attr}" if parent else node.attr
-    return None
-
-
-def _literal_string(node: ast.AST | None) -> str | None:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return None
-
-
-def _is_entrypoint_module(value: str | None) -> bool:
-    return value in {"server", "__main__"} or bool(
-        value and value.startswith("server.")
-    )
-
-
-def _import_aliases(tree: ast.AST) -> tuple[set[str], set[str], set[str], set[str]]:
-    """Return reliable aliases for sys.modules and dynamic import APIs."""
-    sys_names = {"sys"}
-    importlib_names = {"importlib"}
-    import_functions = {"__import__"}
-    sys_modules_names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                bound_name = alias.asname or alias.name.split(".", 1)[0]
-                if alias.name == "sys":
-                    sys_names.add(bound_name)
-                elif alias.name == "importlib":
-                    importlib_names.add(bound_name)
-        elif isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                bound_name = alias.asname or alias.name
-                if node.module == "sys" and alias.name == "modules":
-                    sys_modules_names.add(bound_name)
-                elif (
-                    node.module == "importlib"
-                    and alias.name in {"import_module", "__import__"}
-                ) or (node.module == "builtins" and alias.name == "__import__"):
-                    import_functions.add(bound_name)
-    return sys_names, importlib_names, import_functions, sys_modules_names
-
-
-def _is_sys_modules(
-    node: ast.AST, sys_names: set[str], sys_modules_names: set[str]
-) -> bool:
-    dotted = _dotted_name(node)
-    return (
-        dotted in {f"{name}.modules" for name in sys_names}
-        or dotted in sys_modules_names
-    )
-
-
-def _entrypoint_namespace_expression(
-    node: ast.AST,
-    sys_names: set[str],
-    sys_modules_names: set[str],
-) -> bool:
-    if isinstance(node, ast.Subscript) and _is_sys_modules(
-        node.value, sys_names, sys_modules_names
-    ):
-        return _is_entrypoint_module(_literal_string(node.slice))
-    if (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and _is_sys_modules(node.func.value, sys_names, sys_modules_names)
-        and node.func.attr in {"get", "setdefault", "pop", "__getitem__"}
-    ):
-        return _is_entrypoint_module(
-            _literal_string(node.args[0]) if node.args else None
-        )
-    return False
-
-
-def _server_import_violations(path: Path, tree: ast.AST) -> list[str]:
-    violations: list[str] = []
-    sys_names, importlib_names, import_functions, sys_modules_names = _import_aliases(
-        tree
-    )
-    entrypoint_bindings: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and _entrypoint_namespace_expression(
-            node.value, sys_names, sys_modules_names
-        ):
-            entrypoint_bindings.update(
-                target.id for target in node.targets if isinstance(target, ast.Name)
-            )
-        elif (
-            isinstance(node, ast.AnnAssign)
-            and _entrypoint_namespace_expression(
-                node.value, sys_names, sys_modules_names
-            )
-            and isinstance(node.target, ast.Name)
-        ):
-            entrypoint_bindings.add(node.target.id)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if _is_entrypoint_module(alias.name):
-                    violations.append(
-                        f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: import {alias.name}"
-                    )
-        elif isinstance(node, ast.ImportFrom) and _is_entrypoint_module(node.module):
-            violations.append(
-                f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: from {node.module} import ..."
-            )
-        elif isinstance(node, ast.Call):
-            function = _dotted_name(node.func)
-            imported_name = _literal_string(node.args[0]) if node.args else None
-            dynamic_import_names = (
-                import_functions
-                | {f"{name}.import_module" for name in importlib_names}
-                | {f"{name}.__import__" for name in importlib_names}
-            )
-            if function in dynamic_import_names and _is_entrypoint_module(
-                imported_name
-            ):
-                violations.append(
-                    f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: {function}({imported_name!r})"
-                )
-            elif _entrypoint_namespace_expression(node, sys_names, sys_modules_names):
-                violations.append(
-                    f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: entry-point namespace lookup"
-                )
-            elif (
-                function in {"getattr", "hasattr"}
-                and node.args
-                and (
-                    isinstance(node.args[0], ast.Name)
-                    and node.args[0].id in entrypoint_bindings
-                    or _entrypoint_namespace_expression(
-                        node.args[0], sys_names, sys_modules_names
-                    )
-                )
-            ):
-                violations.append(
-                    f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: {function} on entry-point namespace"
-                )
-        elif isinstance(node, ast.Subscript):
-            if _is_sys_modules(node.value, sys_names, sys_modules_names):
-                imported_name = _literal_string(node.slice)
-                if _is_entrypoint_module(imported_name):
-                    violations.append(
-                        f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: sys.modules[{imported_name!r}]"
-                    )
-        elif (
-            isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in entrypoint_bindings
-        ):
-            violations.append(
-                f"{path.relative_to(BACKEND_ROOT.parent)}:{node.lineno}: entry-point attribute access"
-            )
-    return violations
-
-
-def _runtime_import_cycles(backend_root: Path) -> list[tuple[str, ...]]:
-    """Find eager backend import cycles, excluding type-only and local imports."""
-    modules: dict[str, Path] = {}
-    for path in _python_files(backend_root):
-        relative = path.relative_to(backend_root).with_suffix("")
-        parts = relative.parts[:-1] if relative.name == "__init__" else relative.parts
-        modules["backend" + ("." + ".".join(parts) if parts else "")] = path
-
-    graph: dict[str, set[str]] = {name: set() for name in modules}
-
-    def eager_nodes(nodes: list[ast.stmt]) -> Iterable[ast.AST]:
-        for node in nodes:
-            yield node
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                continue
-            if isinstance(node, ast.If):
-                test = ast.unparse(node.test)
-                if test in {"TYPE_CHECKING", "typing.TYPE_CHECKING"}:
-                    continue
-                yield from eager_nodes(node.body)
-                yield from eager_nodes(node.orelse)
-            elif isinstance(node, (ast.Try, ast.TryStar)):
-                yield from eager_nodes(node.body)
-                for handler in node.handlers:
-                    yield from eager_nodes(handler.body)
-                yield from eager_nodes(node.orelse)
-                yield from eager_nodes(node.finalbody)
-
-    for name, path in modules.items():
-        tree = _parse(path)
-        for node in eager_nodes(tree.body):
-            targets: set[str] = set()
-            if isinstance(node, ast.Import):
-                targets.update(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                if node.level:
-                    current = name.split(".")
-                    package = current if path.name == "__init__.py" else current[:-1]
-                    base = package[: len(package) - node.level + 1]
-                    imported = node.module.split(".") if node.module else []
-                    target = ".".join(base + imported)
-                else:
-                    target = node.module or ""
-                if target:
-                    targets.add(target)
-                for alias in node.names:
-                    child = f"{target}.{alias.name}" if target else alias.name
-                    if child in modules:
-                        targets.add(child)
-            graph[name].update(target for target in targets if target in modules)
-
-    cycles: set[tuple[str, ...]] = set()
-    active: list[str] = []
-    active_set: set[str] = set()
-    complete: set[str] = set()
-
-    def visit(name: str) -> None:
-        if name in active_set:
-            cycle = active[active.index(name) :]
-            rotations = [
-                tuple(cycle[index:] + cycle[:index]) for index in range(len(cycle))
-            ]
-            cycles.add(min(rotations))
-            return
-        if name in complete:
-            return
-        active.append(name)
-        active_set.add(name)
-        for target in sorted(graph[name]):
-            visit(target)
-        active.pop()
-        active_set.remove(name)
-        complete.add(name)
-
-    for name in sorted(graph):
-        visit(name)
-    return sorted(cycles)
-
-
-def _top_level_implementations(tree: ast.Module) -> dict[str, int]:
-    implementations: dict[str, int] = {}
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            implementations[node.name] = node.lineno
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    implementations[target.id] = node.lineno
-    return implementations
-
-
-class ServerArchitectureTests(unittest.TestCase):
-    def test_backend_does_not_import_or_reach_server_namespace(self) -> None:
-        self.assertTrue(BACKEND_ROOT.is_dir(), "Backend source must be available")
-        violations: list[str] = []
-        for path in _python_files(BACKEND_ROOT):
-            violations.extend(_server_import_violations(path, _parse(path)))
-        self.assertEqual(
-            [],
-            violations,
-            "Backend modules must not import or dynamically access server.py:\n"
-            + "\n".join(violations),
-        )
-
-    def test_backend_has_no_eager_runtime_import_cycles(self) -> None:
-        self.assertEqual([], _runtime_import_cycles(BACKEND_ROOT))
-
-    def test_import_cycle_guard_ignores_type_only_and_function_local_imports(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            backend_root = Path(temporary) / "backend"
-            backend_root.mkdir()
-            (backend_root / "__init__.py").write_text("", encoding="utf-8")
-            (backend_root / "first.py").write_text(
-                "from typing import TYPE_CHECKING\n"
-                "if TYPE_CHECKING:\n    from . import second\n"
-                "def later():\n    from . import second\n",
-                encoding="utf-8",
-            )
-            (backend_root / "second.py").write_text(
-                "from . import first\n",
-                encoding="utf-8",
-            )
-            self.assertEqual([], _runtime_import_cycles(backend_root))
-
-            (backend_root / "first.py").write_text(
-                "from . import second\n",
-                encoding="utf-8",
-            )
-            self.assertEqual(
-                [("backend.first", "backend.second")],
-                _runtime_import_cycles(backend_root),
-            )
-
-    def test_server_does_not_redefine_extracted_public_symbols(self) -> None:
-        implementations = _top_level_implementations(_parse(SERVER_PATH))
-        violations = [
-            f"{module}.{symbol} is redefined in server.py:{implementations[symbol]}"
-            for module, symbols in MOVED_SYMBOLS
-            for symbol in symbols
-            if symbol in implementations
-        ]
-        violations.extend(
-            f"legacy extracted symbol {symbol} is redefined in server.py:{implementations[symbol]}"
-            for symbol in FORBIDDEN_SERVER_SYMBOLS
-            if symbol in implementations
-        )
-        self.assertEqual(
-            [],
-            violations,
-            "server.py must remain a composition root for extracted symbols:\n"
-            + "\n".join(violations),
-        )
-
-    def test_server_definitions_are_composition_factories_or_lifecycle(self) -> None:
-        tree = _parse(SERVER_PATH)
-        classes = [node.name for node in tree.body if isinstance(node, ast.ClassDef)]
-        self.assertEqual(
-            [], classes, "Application and HTTP classes belong in backend owners."
-        )
-
-        functions = [
-            node
-            for node in tree.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        ]
-        self.assertGreater(len(functions), 0)
-        for function in functions:
-            nested_implementation = [
-                node
-                for node in ast.walk(function)
-                if isinstance(
-                    node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-                )
-                and node is not function
-            ]
-            self.assertEqual(
-                [], nested_implementation, f"{function.name} defines nested behavior"
-            )
-
-            if function.name in SERVER_COMPOSITION_CONTROL_FLOW:
-                continue
-            statements = [
-                node
-                for node in function.body
-                if not (
-                    isinstance(node, ast.Expr)
-                    and isinstance(node.value, ast.Constant)
-                    and isinstance(node.value.value, str)
-                )
-            ]
-            self.assertTrue(
-                statements, f"{function.name} must return its composed service"
-            )
-            self.assertTrue(
-                all(
-                    isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return))
-                    for node in statements
-                ),
-                f"{function.name} must stay a straight-line composition factory",
-            )
-
-    def test_intervals_client_does_not_retain_snapshot_use_cases(self) -> None:
-        intervals_client = next(
-            node
-            for node in _parse(BACKEND_ROOT / "providers" / "intervals_client.py").body
-            if isinstance(node, ast.ClassDef) and node.name == "IntervalsClient"
-        )
-        methods = {
-            node.name
-            for node in intervals_client.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        self.assertTrue(
-            {"fetch_snapshot", "fetch_performance_snapshot"}.isdisjoint(methods)
-        )
-
-    def test_intervals_sync_service_uses_bounded_owner_dependencies(self) -> None:
-        intervals_module = _parse(BACKEND_ROOT / "sync" / "intervals.py")
-        service = next(
-            node
-            for node in intervals_module.body
-            if isinstance(node, ast.ClassDef) and node.name == "IntervalsSyncService"
-        )
-        initializer = next(
-            node
-            for node in service.body
-            if isinstance(node, ast.FunctionDef) and node.name == "__init__"
-        )
-        self.assertLessEqual(len(initializer.args.args) - 1, 7)
-
-
-if __name__ == "__main__":
-    unittest.main()

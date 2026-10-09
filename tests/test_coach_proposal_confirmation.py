@@ -5,7 +5,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from backend.coach.proposals import CoachProposalConfirmationService
+from backend.coach.proposal_read import CoachProposalConfirmationService
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 

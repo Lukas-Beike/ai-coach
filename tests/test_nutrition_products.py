@@ -5,7 +5,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -55,15 +55,19 @@ class NutritionProductContractTests(unittest.TestCase):
             ],
             "source": "open_food_facts",
         }
-        self.service = NutritionService(
+        self.service = self.build_service()
+
+    def build_service(self, photo_extractor=None):
+        return NutritionService(
             database_manager=self.manager,
             db_lock=self.lock,
             nutrition_repository=NutritionRepository(
                 now=lambda: "2026-10-05T12:00:00+00:00"
             ),
             utc_now=lambda: "2026-10-05T12:00:00+00:00",
-            local_now=lambda: datetime(2026, 10, 5, 14, 0, tzinfo=timezone.utc),
+            local_now=lambda: datetime(2026, 10, 5, 14, 0, tzinfo=UTC),
             food_database=self.food_database,
+            photo_extractor=photo_extractor,
         )
 
     @staticmethod
@@ -206,7 +210,7 @@ class NutritionProductContractTests(unittest.TestCase):
             selected_model=lambda _provider: "gpt-6-luna",
             openai_request=lambda _path, _payload: response,
         )
-        self.service._photo_extractor = extractor
+        self.service = self.build_service(photo_extractor=extractor)
         data_url = "data:image/jpeg;base64," + base64.b64encode(
             b"\xff\xd8\xffsynthetic-image"
         ).decode("ascii")

@@ -22,7 +22,7 @@ from backend.coach.context import (
     future_coach_planned_workouts,
 )
 from backend.coach.morning import ManualMorningCheckinService
-from backend.coach.proposals import validated_coach_action_preview_input
+from backend.coach.proposal_validation import validated_coach_action_preview_input
 from backend.http_api import server as http_server_module
 from backend.planning import competitions as planning_competitions
 from backend.providers import openai as openai_provider

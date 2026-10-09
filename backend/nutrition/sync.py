@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from backend.config import Config
 from backend.errors import AppError
-from backend.nutrition.service import (
-    NutritionService,
+from backend.nutrition.contracts import (
     nutrition_approval_item,
     nutrition_approval_item_matches,
 )
 from backend.providers.intervals import IntervalsApiClient
+
+if TYPE_CHECKING:
+    from backend.nutrition.service import NutritionService
 
 logger = logging.getLogger("ai_coach.nutrition.sync")
 

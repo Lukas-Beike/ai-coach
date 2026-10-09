@@ -16,9 +16,15 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 try:
-    from .test_server_architecture import BACKEND_ROOT, _server_import_violations
+    from .architecture_analysis import (
+        server_import_violations as _server_import_violations,
+    )
+    from .architecture_registry import BACKEND_ROOT
 except ImportError:
-    from test_server_architecture import BACKEND_ROOT, _server_import_violations
+    from architecture_analysis import (
+        server_import_violations as _server_import_violations,
+    )
+    from architecture_registry import BACKEND_ROOT
 
 REPOSITORY_ROOT = BACKEND_ROOT.parent
 DOMAIN_ROOTS = frozenset(

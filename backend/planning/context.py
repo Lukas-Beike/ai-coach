@@ -6,6 +6,8 @@ import json
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
+
 UTC_OFFSET_SUFFIX = "+00:00"
 
 CHECKIN_FIELDS = (
@@ -314,7 +316,7 @@ def local_calendar_library_entries(
             continue
         try:
             entry = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if isinstance(entry, dict) and entry.get("source") in {
             "coach",
@@ -326,10 +328,9 @@ def local_calendar_library_entries(
 
 
 def planning_date(value: Any) -> str:
-    raw = str(value or "").replace("Z", UTC_OFFSET_SUFFIX)[:10]
     try:
-        return date.fromisoformat(raw).isoformat()
-    except ValueError:
+        return LocalDate.parse(value).isoformat()
+    except TypeError, ValueError:
         return ""
 
 
@@ -342,7 +343,7 @@ def external_calendar_event_dates(
             str(event.get("start_local") or event["event_date"])
         )
         end = datetime.fromisoformat(str(event.get("end_local") or start.isoformat()))
-    except (ValueError, KeyError):
+    except ValueError, KeyError:
         return []
     first = start.date()
     last = (end - timedelta(microseconds=1)).date() if end > start else first

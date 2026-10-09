@@ -11,6 +11,7 @@ from typing import Any
 
 from backend import change_history
 from backend.athlete.checkins import CHECKIN_TEXT_LIMITS
+from backend.athlete.local_date import LocalDate
 from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
 from backend.planning.planned_unit_service import UPDATE_SQL as PLANNED_UNIT_UPDATE_SQL
@@ -128,8 +129,8 @@ def adaptive_quick_action_blockers(
         if not isinstance(change, dict):
             continue
         try:
-            change_date = date.fromisoformat(str(change.get("date") or "")[:10])
-        except (TypeError, ValueError):
+            change_date = LocalDate.parse(change.get("date")).to_date()
+        except TypeError, ValueError:
             continue
         trigger_values = change.get("blocking_triggers")
         triggers = (
@@ -209,8 +210,8 @@ def illness_calendar_events(
     external_prefix: str,
     midnight_suffix: str,
 ) -> list[dict[str, Any]]:
-    start = date.fromisoformat(str(pause["start_date"])[:10])
-    end = date.fromisoformat(str(pause["end_date"])[:10])
+    start = LocalDate.parse(pause["start_date"]).to_date()
+    end = LocalDate.parse(pause["end_date"]).to_date()
     events: list[dict[str, Any]] = []
     current = start
     while current <= end:
@@ -403,8 +404,8 @@ class AdaptiveReplanApplyService:
         illness = str(pause.get("illness") or "Krankheit").strip()[
             : CHECKIN_TEXT_LIMITS["illness"]
         ]
-        start = date.fromisoformat(str(pause["start_date"])[:10])
-        end = date.fromisoformat(str(pause["end_date"])[:10])
+        start = LocalDate.parse(pause["start_date"]).to_date()
+        end = LocalDate.parse(pause["end_date"]).to_date()
         marker = f"Krankheitspause prognostiziert ab {start.isoformat()}"
         filled = 0
         current = start
@@ -446,7 +447,7 @@ class AdaptiveReplanApplyService:
         draft = dict(draft)
         try:
             current = json.loads(draft["payload"])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             current = None
         expected_fingerprint = str(change.get("source_fingerprint") or "")
         stale_reason = cls._adaptive_change_stale_reason(current, expected_fingerprint)
@@ -456,7 +457,11 @@ class AdaptiveReplanApplyService:
             **current,
             "sync_status": draft.get("sync_state") or current.get("sync_status"),
         }
-        if str(current.get("date") or "")[:10] < today.isoformat():
+        try:
+            current_date = LocalDate.parse(current.get("date")).isoformat()
+        except TypeError, ValueError:
+            return 0, {"library_workout_id": draft_id, "reason": "invalid_date"}
+        if current_date < today.isoformat():
             return 0, {"library_workout_id": draft_id, "reason": "past"}
         replacement = {
             **replacement,
