@@ -1,5 +1,64 @@
 globalThis.AppPlanViews = Object.freeze({ create });
 
+function plannedAppointmentLabel(event) {
+  if (!event || typeof event !== "object") return "";
+  const name = String(event.name || "Trainingstermin").trim() || "Trainingstermin";
+  if (event.all_day) return `${name} · ganztägig`;
+  const time = /(?:T|\s)(\d{2}:\d{2})/.exec(String(event.start_local || ""));
+  return time ? `${name} · ${time[1]}` : name;
+}
+
+function calendarActualActivity(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  if (entry.is_completed_activity) return entry;
+  const actual = entry.compliance?.actual_activity;
+  return actual && typeof actual === "object" ? actual : null;
+}
+
+function calendarMetricNumber(value, suffix = "") {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  const digits = Number.isInteger(number) ? 0 : 1;
+  return `${number.toLocaleString("de-DE", { maximumFractionDigits: digits })}${suffix}`;
+}
+
+function calendarIntensityLabel(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  const percent = number > 0 && number <= 2 ? number * 100 : number;
+  return `${Math.round(percent)} %`;
+}
+
+function calendarStartTime(value) {
+  const match = /(?:T|\s)(\d{2}:\d{2})/.exec(String(value || ""));
+  return match ? match[1] : null;
+}
+
+function appendCalendarFact(root, label, value) {
+  if (value == null || value === "") return;
+  const item = document.createElement("span");
+  const title = document.createElement("strong");
+  title.textContent = label;
+  item.append(title, document.createTextNode(` ${value}`));
+  root.append(item);
+}
+
+function competitionSportLabel(sport) {
+  return ({ Cycling: "Radfahren", Ride: "Radfahren", VirtualRide: "Rad indoor", Running: "Laufen", Run: "Laufen", Swim: "Schwimmen", Strength: "Krafttraining" })[sport] || sport || "–";
+}
+
+function competitionFact(labelText, value) {
+  const item = document.createElement("div");
+  const label = document.createElement("span");
+  label.textContent = labelText;
+  const content = document.createElement("strong");
+  content.textContent = value || "–";
+  item.append(label, content);
+  return item;
+}
+
 function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
@@ -126,14 +185,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return [weatherIconFor(weather), temperatures.join(" / ")].filter(Boolean).join(" ");
   }
 
-  function plannedAppointmentLabel(event) {
-    if (!event || typeof event !== "object") return "";
-    const name = String(event.name || "Trainingstermin").trim() || "Trainingstermin";
-    if (event.all_day) return `${name} · ganztägig`;
-    const time = /(?:T|\s)(\d{2}:\d{2})/.exec(String(event.start_local || ""));
-    return time ? `${name} · ${time[1]}` : name;
-  }
-
   function appendPlannedWeatherInsight(body, weather) {
     const weatherLabel = plannedWeatherLabel(weather);
     if (!weather || !weatherLabel) return;
@@ -196,13 +247,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return `${units} · ${load.join(" · ")}`;
   }
 
-  function calendarActualActivity(entry) {
-    if (!entry || typeof entry !== "object") return null;
-    if (entry.is_completed_activity) return entry;
-    const actual = entry.compliance?.actual_activity;
-    return actual && typeof actual === "object" ? actual : null;
-  }
-
   function calendarEntryStatus(entry, dateKey, todayKey) {
     if (calendarActualActivity(entry)) return "completed";
     if (entry?.compliance?.status === "missed") return "missed";
@@ -216,31 +260,10 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return status === "today" ? "Heute geplant" : "Geplant";
   }
 
-  function calendarMetricNumber(value, suffix = "") {
-    if (value == null || value === "") return null;
-    const number = Number(value);
-    if (!Number.isFinite(number)) return null;
-    const digits = Number.isInteger(number) ? 0 : 1;
-    return `${number.toLocaleString("de-DE", { maximumFractionDigits: digits })}${suffix}`;
-  }
-
   function calendarRpeLabel(value) {
     if (value == null || value === "") return null;
     const number = Number(value);
     return Number.isFinite(number) && number >= 0 && number <= 10 ? calendarMetricNumber(number) : null;
-  }
-
-  function calendarIntensityLabel(value) {
-    if (value == null || value === "") return null;
-    const number = Number(value);
-    if (!Number.isFinite(number) || number < 0) return null;
-    const percent = number > 0 && number <= 2 ? number * 100 : number;
-    return `${Math.round(percent)} %`;
-  }
-
-  function calendarStartTime(value) {
-    const match = /(?:T|\s)(\d{2}:\d{2})/.exec(String(value || ""));
-    return match ? match[1] : null;
   }
 
   function calendarPaceLabel(activity) {
@@ -263,15 +286,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       counts.planned ? `${counts.planned} geplant` : "",
       counts.missed ? `${counts.missed} nicht absolviert` : "",
     ].filter(Boolean).join(" · ");
-  }
-
-  function appendCalendarFact(root, label, value) {
-    if (value == null || value === "") return;
-    const item = document.createElement("span");
-    const title = document.createElement("strong");
-    title.textContent = label;
-    item.append(title, document.createTextNode(` ${value}`));
-    root.append(item);
   }
 
   function focusPlannedToday() {
@@ -766,20 +780,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   }
 
 
-
-  function competitionSportLabel(sport) {
-    return ({ Cycling: "Radfahren", Ride: "Radfahren", VirtualRide: "Rad indoor", Running: "Laufen", Run: "Laufen", Swim: "Schwimmen", Strength: "Krafttraining" })[sport] || sport || "–";
-  }
-
-  function competitionFact(labelText, value) {
-    const item = document.createElement("div");
-    const label = document.createElement("span");
-    label.textContent = labelText;
-    const content = document.createElement("strong");
-    content.textContent = value || "–";
-    item.append(label, content);
-    return item;
-  }
 
   function competitionCard(competition = {}, index = 0) {
     const card = document.createElement("article");
