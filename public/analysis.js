@@ -190,10 +190,16 @@ function analysisPlotScales(series, start, end, { unit = "", zeroCentered = fals
   return { min, max, step, chartWidth, chartRight, x, y };
 }
 
+function analysisAxisLabel(value, unit) {
+  if (unit === "s/km") return formatPace(value).split(" ")[0];
+  if (unit === "s") return formatDuration(Math.round(value));
+  return Number(value.toFixed(3)).toLocaleString("de-DE", { maximumFractionDigits: 1 });
+}
+
 function appendAnalysisAxes(svg, unit, { min, max, step, chartRight, y }) {
   for (let value = min; value <= max + step / 100; value += step) {
     svg.append(analysisSvg("line", { x1: 60, x2: chartRight, y1: y(value), y2: y(value), class: Math.abs(value) < step / 100 ? "analysis-zero-line" : "analysis-grid-line" }));
-    const label = unit === "s/km" ? formatPace(value).split(" ")[0] : unit === "s" ? formatDuration(Math.round(value)) : Number(value.toFixed(3)).toLocaleString("de-DE", { maximumFractionDigits: 1 });
+    const label = analysisAxisLabel(value, unit);
     svg.append(analysisSvg("text", { x: 52, y: y(value) + 4, "text-anchor": "end", class: "analysis-value-tick" }, label));
   }
   svg.append(analysisSvg("text", { x: 60, y: 15, class: "analysis-axis-unit" }, unit === "s/km" ? "min/km · schneller oben" : unit || "Belastungspunkte"));
@@ -201,7 +207,6 @@ function appendAnalysisAxes(svg, unit, { min, max, step, chartRight, y }) {
 
 function appendAnalysisReferenceLines(svg, item, index, unit, scales) {
   const { chartRight, y } = scales;
-  const color = item.color ?? index;
   if (item.range) svg.append(analysisSvg("rect", { x: 60, y: Math.min(y(item.range.lower), y(item.range.upper)), width: chartRight - 60, height: Math.max(1, Math.abs(y(item.range.lower) - y(item.range.upper))), class: "analysis-baseline-band" }));
   if (item.target != null) svg.append(analysisSvg("line", { x1: 60, x2: chartRight, y1: y(item.target), y2: y(item.target), class: "analysis-target-line" }));
   if (item.average) {
