@@ -572,6 +572,8 @@ function renderAnalysisHistory(history) { // NOSONAR
   for (const target of [root, loadRoot]) target.querySelectorAll("details").forEach((details) => { details.open = openDetails.has(`${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`); });
 }
 
+// The backend reports these metrics with source "Garmin Connect" and labels them in `note`.
+const RACE_PREDICTION_SOURCE = "Garmin Connect Laufprognose";
 const racePredictionSeries = [
   ["run_5k_seconds", "5 km"],
   ["run_10k_seconds", "10 km"],
@@ -583,8 +585,8 @@ function renderRacePredictionCharts(metrics, history, root, start, end) {
   const predictions = racePredictionSeries.map(([key, label]) => {
     const metric = metrics?.[key];
     const value = Number(metric?.value);
-    return metric?.source === "Garmin Connect Laufprognose" && Number.isFinite(value) && value > 0 && value <= 86400
-      ? { key, label, value, source: metric.source }
+    return [metric?.source, metric?.note].includes(RACE_PREDICTION_SOURCE) && Number.isFinite(value) && value > 0 && value <= 86400
+      ? { key, label, value, source: RACE_PREDICTION_SOURCE }
       : null;
   }).filter(Boolean);
   const historical = racePredictionSeries.flatMap(([key, label], index) => {

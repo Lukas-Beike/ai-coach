@@ -245,7 +245,7 @@ test("@responsive performance keeps predictions in the dedicated table", async (
   await performanceFixture(page, { available: true, metrics: {
     cycling_ftp_watts: { value: 280, unit: "W" }, running_vo2max_ml_kg_min: { value: 52 },
     weight_kg: { value: 72, unit: "kg", source: "Garmin Connect" },
-    run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect Laufprognose" },
+    run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect", note: "Garmin Connect Laufprognose" },
   } });
   await expect(page.locator("#performancePredictions")).toContainText("Laufprognosen");
   await expect(page.locator("#performancePredictions")).toContainText("20:00");
@@ -255,8 +255,8 @@ test("@responsive performance keeps predictions in the dedicated table", async (
 test("@responsive race estimates chart current times and reports missing history honestly", async ({ page }) => {
   await performanceFixture(page, {
     metrics: {
-      run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect Laufprognose" },
-      run_10k_seconds: { value: 2500, unit: "s", source: "Garmin Connect Laufprognose" },
+      run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect", note: "Garmin Connect Laufprognose" },
+      run_10k_seconds: { value: 2500, unit: "s", source: "Garmin Connect", note: "Garmin Connect Laufprognose" },
     },
     history: { start: "2026-09-01", end: "2026-10-01", load: { points: [] }, metrics: {} },
   });
