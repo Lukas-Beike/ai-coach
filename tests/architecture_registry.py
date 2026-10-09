@@ -3,7 +3,11 @@
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+# Container CI mounts tests and server.py under /review while the application
+# package remains at /app/backend. Keep static guards pointed at real source.
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
+if not BACKEND_ROOT.is_dir():
+    BACKEND_ROOT = Path.cwd() / "backend"
 SERVER_PATH = REPOSITORY_ROOT / "server.py"
 HANDLER_PATH = BACKEND_ROOT / "http_api" / "handler.py"
 
