@@ -269,6 +269,9 @@
           <a href="#more/privacy" data-more-segment="privacy">Daten &amp; Datenschutz</a>
           <a href="#more/operations" data-more-segment="operations">Betrieb &amp; Diagnose</a>
         </nav>
+        <section class="settings-section session-settings" aria-label="Sitzung">
+          <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
+        </section>
         <section class="settings-section" data-more-segment-panel="equipment" hidden>
           <section id="equipmentItems" class="analysis-chart-card" aria-label="Ausrüstung und Wartung"></section>
         </section>
@@ -369,10 +372,6 @@
             <label>Backup wiederherstellen<input id="backupFileInput" type="file" accept=".backup,.db,application/octet-stream"></label>
             <button id="backupRestoreButton" type="button" class="secondary-button danger-button">Backup wiederherstellen</button>
           </div>
-          <div class="settings-inline-action">
-            <span>Die Datenbank bleibt als verschlüsselte Datei bestehen; ihr Inhalt wird geleert.</span>
-            <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
-          </div>
         </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="operations">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Diagnose</span><span class="collapsible-summary-meta">Bereinigten Status herunterladen</span></summary>
@@ -402,7 +401,7 @@
   <dialog id="loginDialog" aria-labelledby="loginTitle">
     <form id="loginForm" method="dialog">
       <h2 id="loginTitle">Anmelden</h2>
-      <p>Gib das im Container gesetzte APP_PASSWORD ein.</p>
+      <p>Gib dein App-Passwort ein.</p>
       <label for="loginPassword">Passwort<input id="loginPassword" type="password" autocomplete="current-password" required></label>
       <p id="loginError" class="error" aria-live="polite"></p>
       <button type="submit" id="loginButton" class="login-button">

@@ -41,6 +41,7 @@ document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEvent
 document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("close", () => restoreDialogFocus(dialog)));
 
 $("#loginForm").addEventListener("submit", login);
+installLoginDialogGuards();
 setupCoachEvents();
 $("#appearanceSelect").addEventListener("change", (event) => {
   const appearance = applyAppearance(event.currentTarget.value);
