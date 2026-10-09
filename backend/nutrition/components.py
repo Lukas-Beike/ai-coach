@@ -95,6 +95,18 @@ class MealComponentCalculator:
         }
 
     @staticmethod
+    def _validated_quantity(amount: Any) -> float:
+        if isinstance(amount, bool) or not isinstance(amount, (int, float, str)):
+            raise AppError(400, "Ung\u00fcltige Komponentenmenge.")
+        try:
+            quantity = float(amount)
+        except TypeError, ValueError:
+            raise AppError(400, "Ung\u00fcltige Komponentenmenge.") from None
+        if not math.isfinite(quantity) or not 0 < quantity <= 10000:
+            raise AppError(400, "Komponentenmenge muss gr\u00f6\u00dfer als 0 sein.")
+        return quantity
+
+    @staticmethod
     def _validate_component_header(item: Any) -> tuple[str, float, str]:
         kinds = {"local_product", "database", "estimate", "packaging_label", "manual"}
         kind = item.get("kind") if isinstance(item, dict) else None
@@ -104,15 +116,7 @@ class MealComponentCalculator:
             key = "product_id" if kind == "local_product" else "food_id"
             if not isinstance(item.get(key), str) or not item[key].strip():
                 raise AppError(400, "Komponentenreferenz muss eine Zeichenkette sein.")
-        amount = item.get("amount")
-        if isinstance(amount, bool) or not isinstance(amount, (int, float, str)):
-            raise AppError(400, "Ung\u00fcltige Komponentenmenge.")
-        try:
-            quantity = float(amount)
-        except TypeError, ValueError:
-            raise AppError(400, "Ung\u00fcltige Komponentenmenge.") from None
-        if not math.isfinite(quantity) or not 0 < quantity <= 10000:
-            raise AppError(400, "Komponentenmenge muss gr\u00f6\u00dfer als 0 sein.")
+        quantity = MealComponentCalculator._validated_quantity(item.get("amount"))
         unit = item.get("unit")
         if not isinstance(unit, str) or unit not in {"g", "ml", "portion"}:
             raise AppError(400, "Einheit muss g, ml oder portion sein.")
