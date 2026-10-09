@@ -74,15 +74,15 @@ class CoachActionsPostRoutesTests(unittest.TestCase):
         self.confirmation_service.confirm.side_effect = error
 
         with self.assertRaises(RuntimeError) as caught:
-            self.routes.handle(
-                self.handler, "/api/coach/actions/confirm", self.session
-            )
+            self.routes.handle(self.handler, "/api/coach/actions/confirm", self.session)
 
         self.assertIs(caught.exception, error)
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_not_called()
 
-    def test_execute_error_propagates_without_response_after_expected_arguments(self) -> None:
+    def test_execute_error_propagates_without_response_after_expected_arguments(
+        self,
+    ) -> None:
         error = RuntimeError("synthetic execution failure")
         self.handler.read_json.return_value = {
             "action_token": "synthetic-action-token",
@@ -91,9 +91,7 @@ class CoachActionsPostRoutesTests(unittest.TestCase):
         self.execution_service.execute.side_effect = error
 
         with self.assertRaises(RuntimeError) as caught:
-            self.routes.handle(
-                self.handler, "/api/coach/actions/execute", self.session
-            )
+            self.routes.handle(self.handler, "/api/coach/actions/execute", self.session)
 
         self.assertIs(caught.exception, error)
         self.handler.read_json.assert_called_once_with()
@@ -108,7 +106,10 @@ class CoachActionsPostRoutesTests(unittest.TestCase):
     def test_factories_are_resolved_for_each_request(self) -> None:
         first_confirmation, second_confirmation = Mock(), Mock()
         first_execution, second_execution = Mock(), Mock()
-        self.confirmation_factory.side_effect = [first_confirmation, second_confirmation]
+        self.confirmation_factory.side_effect = [
+            first_confirmation,
+            second_confirmation,
+        ]
         self.execution_factory.side_effect = [first_execution, second_execution]
         self.handler.read_json.side_effect = [
             {"proposal_id": "first-proposal"},

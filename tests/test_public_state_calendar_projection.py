@@ -37,7 +37,9 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
                 calls.append(("external_state", kwargs))
                 return external_state
 
-            def list_events(self, limit: int, *, training_relevant_only: bool) -> list[dict[str, str]]:
+            def list_events(
+                self, limit: int, *, training_relevant_only: bool
+            ) -> list[dict[str, str]]:
                 calls.append(("external_events", (limit, training_relevant_only)))
                 return [{"name": "Relevant event"}]
 

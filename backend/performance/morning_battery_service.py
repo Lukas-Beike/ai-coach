@@ -86,7 +86,7 @@ class MorningBatteryStore:
         with self._manager.unit_of_work() as db:
             try:
                 errors = json.loads(self._key_values.get(db, _GARMIN_ERROR_KEY) or "[]")
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 errors = []
             retained = (
                 [
@@ -110,7 +110,7 @@ class MorningBatteryStore:
                 return self._read_snapshot(owned)
         try:
             value = json.loads(self._key_values.get(db, _GARMIN_SNAPSHOT_KEY) or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return {}
         return value if isinstance(value, dict) else {}
 

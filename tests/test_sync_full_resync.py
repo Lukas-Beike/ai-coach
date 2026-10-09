@@ -138,9 +138,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
                 self.garmin_gate,
                 -1,
             ),
-            FullResyncStateStore(
-                self.database, key_values or self.key_values
-            ),
+            FullResyncStateStore(self.database, key_values or self.key_values),
             operation_journal,
         )
 

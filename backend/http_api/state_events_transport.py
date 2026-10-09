@@ -41,12 +41,16 @@ class StateEventTransport:
         query = parse_qs(urlparse(request_target).query)
         raw_since = query.get("since", ["0"])[0]
         if not str(raw_since).isdigit():
-            raise AppError(400, "Die Event-ID ist ungültig.", reason="invalid_event_cursor")
+            raise AppError(
+                400, "Die Event-ID ist ungültig.", reason="invalid_event_cursor"
+            )
         since = int(raw_since)
         set_connection_timeout(None)
         try:
             send_headers()
-            since, _ = self.send_batch(self.event_buffer.since(since), since, send_event)
+            since, _ = self.send_batch(
+                self.event_buffer.since(since), since, send_event
+            )
             send_event("ready", {"latest_event_id": since}, since or None)
             while True:
                 self.event_buffer.wait(timeout=15)
@@ -55,6 +59,8 @@ class StateEventTransport:
                 if gap:
                     continue
                 if not pending["events"]:
-                    send_event("heartbeat", {"latest_event_id": pending["latest_event_id"]})
+                    send_event(
+                        "heartbeat", {"latest_event_id": pending["latest_event_id"]}
+                    )
         except ClientDisconnected:
             return

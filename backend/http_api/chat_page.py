@@ -35,9 +35,7 @@ class ChatHistoryPageService:
         term = str(search or "").strip()[:200]
         decoded = pagination.decode_page_cursor(cursor)
         before_message_id = None
-        if isinstance(decoded, int) or (
-            isinstance(decoded, str) and decoded.isdigit()
-        ):
+        if isinstance(decoded, int) or (isinstance(decoded, str) and decoded.isdigit()):
             before_message_id = int(decoded)
 
         generation, rows = self._conversation_history.page(
@@ -59,9 +57,7 @@ class ChatHistoryPageService:
                 }
                 for row in reversed(rows)
             ],
-            "proposed_actions": self._proposal_read_service.current(
-                session_csrf_hash
-            ),
+            "proposed_actions": self._proposal_read_service.current(session_csrf_hash),
             "next_cursor": pagination.encode_page_cursor(int(rows[-1]["id"]))
             if has_more and rows
             else None,

@@ -86,9 +86,7 @@ class PlanPushCommandServiceTests(unittest.TestCase):
     def test_payload_hash_operations_reason_repair_and_requester_contract(self):
         entries = self.entries(2)
 
-        result = self.service.enqueue(
-            entries, [], reason="r" * 205, repair=True
-        )
+        result = self.service.enqueue(entries, [], reason="r" * 205, repair=True)
 
         self.assertEqual(result["sync_job_ids"], ["job-1"])
         self.queue.enqueue.assert_called_once_with(
@@ -120,9 +118,7 @@ class PlanPushCommandServiceTests(unittest.TestCase):
         ]
 
         with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-            self.service.enqueue(
-                self.entries(29), sync_job_ids, reason="plan update"
-            )
+            self.service.enqueue(self.entries(29), sync_job_ids, reason="plan update")
 
         self.assertEqual(self.queue.enqueue.call_count, 2)
         self.assertEqual(sync_job_ids, ["job-first"])

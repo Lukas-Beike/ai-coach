@@ -82,10 +82,14 @@ class IntervalsApiClient:
         }
         return rows
 
-    def post(self, path: str, payload: Any, params: Mapping[str, Any] | None = None) -> Any:
+    def post(
+        self, path: str, payload: Any, params: Mapping[str, Any] | None = None
+    ) -> Any:
         return self._write_transport.post(path, payload, params)
 
-    def put(self, path: str, payload: Any, params: Mapping[str, Any] | None = None) -> Any:
+    def put(
+        self, path: str, payload: Any, params: Mapping[str, Any] | None = None
+    ) -> Any:
         return self._write_transport.put(path, payload, params)
 
     def delete(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
@@ -129,7 +133,9 @@ class IntervalsWriteTransport:
         self._headers = headers
         self._request = request
 
-    def post(self, path: str, payload: Any, params: Mapping[str, Any] | None = None) -> Any:
+    def post(
+        self, path: str, payload: Any, params: Mapping[str, Any] | None = None
+    ) -> Any:
         query = "?" + urlencode(params, doseq=True) if params else ""
         return self._request(
             "POST",
@@ -139,7 +145,9 @@ class IntervalsWriteTransport:
             service="intervals",
         )
 
-    def put(self, path: str, payload: Any, params: Mapping[str, Any] | None = None) -> Any:
+    def put(
+        self, path: str, payload: Any, params: Mapping[str, Any] | None = None
+    ) -> Any:
         query = "?" + urlencode(params, doseq=True) if params else ""
         return self._request(
             "PUT",
@@ -159,10 +167,26 @@ class IntervalsWriteTransport:
         )
 
 
-def _fetch_page(get: JsonGetter, path: str, params: Mapping[str, Any] | None, collection: str,
-                error: ErrorFactory, offset: int, page_size: int, cancel_event: Any) -> list[dict[str, Any]]:
-    page_params = {**(dict(params) if params else {}), "limit": page_size, "offset": offset}
-    page = get(path, page_params) if cancel_event is None else get(path, page_params, cancel_event=cancel_event)
+def _fetch_page(
+    get: JsonGetter,
+    path: str,
+    params: Mapping[str, Any] | None,
+    collection: str,
+    error: ErrorFactory,
+    offset: int,
+    page_size: int,
+    cancel_event: Any,
+) -> list[dict[str, Any]]:
+    page_params = {
+        **(dict(params) if params else {}),
+        "limit": page_size,
+        "offset": offset,
+    }
+    page = (
+        get(path, page_params)
+        if cancel_event is None
+        else get(path, page_params, cancel_event=cancel_event)
+    )
     if not isinstance(page, list):
         raise error(f"Invalid {collection} page")
     page_rows = [item for item in page if isinstance(item, dict)]
@@ -173,12 +197,19 @@ def _fetch_page(get: JsonGetter, path: str, params: Mapping[str, Any] | None, co
 
 def _page_fingerprint(page_rows: list[dict[str, Any]]) -> str:
     return hashlib.sha256(
-        json.dumps(page_rows, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        json.dumps(page_rows, sort_keys=True, ensure_ascii=False, default=str).encode(
+            "utf-8"
+        )
     ).hexdigest()
 
 
-def _remember_page(fingerprints: set[str], fingerprint: str, page_rows: list[dict[str, Any]],
-                   collection: str, error: ErrorFactory) -> None:
+def _remember_page(
+    fingerprints: set[str],
+    fingerprint: str,
+    page_rows: list[dict[str, Any]],
+    collection: str,
+    error: ErrorFactory,
+) -> None:
     if fingerprint in fingerprints and page_rows:
         raise error(f"Repeated {collection} page")
     fingerprints.add(fingerprint)
@@ -200,7 +231,9 @@ def fetch_paged_collection(
     pages = 0
     fingerprints: set[str] = set()
     while True:
-        page_rows = _fetch_page(get, path, params, collection, error, offset, page_size, cancel_event)
+        page_rows = _fetch_page(
+            get, path, params, collection, error, offset, page_size, cancel_event
+        )
         pages += 1
         fingerprint = _page_fingerprint(page_rows)
         _remember_page(fingerprints, fingerprint, page_rows, collection, error)
@@ -211,4 +244,3 @@ def fetch_paged_collection(
         if pages >= max_pages:
             raise error(f"Page limit exceeded for {collection}.")
     return rows, {"pages": pages, "records": len(rows), "complete": True}
-

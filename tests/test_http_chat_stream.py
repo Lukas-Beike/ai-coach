@@ -134,7 +134,9 @@ class CoachChatStreamTransportTests(unittest.TestCase):
 
         self.transport.handle(self.handler, self.session)
 
-        self.assertEqual(self.events.get.call_args_list, [call(timeout=15), call(timeout=15)])
+        self.assertEqual(
+            self.events.get.call_args_list, [call(timeout=15), call(timeout=15)]
+        )
         self.handler.send_sse_event.assert_has_calls(
             [
                 call("started", {"operation_id": "new-operation"}),
@@ -148,12 +150,15 @@ class CoachChatStreamTransportTests(unittest.TestCase):
         self.registry.unregister.assert_called_once()
 
     def test_app_error_is_redacted_and_cleanup_is_preserved(self) -> None:
-        self.submission.enqueue.side_effect = AppError(409, "synthetic private detail", reason="conflict")
+        self.submission.enqueue.side_effect = AppError(
+            409, "synthetic private detail", reason="conflict"
+        )
 
         self.transport.handle(self.handler, self.session)
 
         self.handler.send_sse_event.assert_any_call(
-            "error", {"reason": "conflict", "message": "redacted:synthetic private detail"}
+            "error",
+            {"reason": "conflict", "message": "redacted:synthetic private detail"},
         )
         self.registry.unregister.assert_called_once()
         self.assertTrue(self.handler.close_connection)
@@ -163,12 +168,18 @@ class CoachChatStreamTransportTests(unittest.TestCase):
         self.events.get.side_effect = queue.Empty()
         self.registry.events.return_value = self.events
         self.submission.active.return_value = None
-        self.receipts.read.side_effect = AppError(404, "synthetic private receipt", reason="receipt_missing")
+        self.receipts.read.side_effect = AppError(
+            404, "synthetic private receipt", reason="receipt_missing"
+        )
 
         self.transport.handle(self.handler, self.session)
 
         self.handler.send_sse_event.assert_any_call(
-            "error", {"reason": "receipt_missing", "message": "redacted:synthetic private receipt"}
+            "error",
+            {
+                "reason": "receipt_missing",
+                "message": "redacted:synthetic private receipt",
+            },
         )
         self.registry.unregister.assert_called_once()
 
@@ -178,7 +189,10 @@ class CoachChatStreamTransportTests(unittest.TestCase):
         with self.assertRaises(AppError) as caught:
             self.transport.handle(self.handler, self.session)
 
-        self.assertEqual((caught.exception.status, caught.exception.reason), (400, "invalid_client_turn"))
+        self.assertEqual(
+            (caught.exception.status, caught.exception.reason),
+            (400, "invalid_client_turn"),
+        )
         self.registry.register.assert_not_called()
         self.submission_factory.assert_not_called()
         self.handler.send_sse_headers.assert_not_called()

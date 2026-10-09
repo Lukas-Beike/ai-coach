@@ -25,7 +25,8 @@ class CoachProfileUpdateTests(unittest.TestCase):
             self.profile, self.manager, threading.RLock()
         )
         self.intent = {
-            "operation": "update_profile", "target_system": "local",
+            "operation": "update_profile",
+            "target_system": "local",
             "authorization_scope": ["local_profile"],
         }
 
@@ -48,12 +49,18 @@ class CoachProfileUpdateTests(unittest.TestCase):
 
     def test_valid_batch_saves_only_selected_fields(self):
         result = self.service.apply(
-            {"changes": [{"field": "name", "expected_value": "Athlete", "value": "Updated"}]},
+            {
+                "changes": [
+                    {"field": "name", "expected_value": "Athlete", "value": "Updated"}
+                ]
+            },
             self.intent,
         )
         self.assertEqual(result["updated_fields"], ["name"])
         self.assertEqual(result["profile"], {"name": "Updated", "goals": "Current"})
-        self.profile.save.assert_called_once_with({"name": "Updated", "goals": "Current"})
+        self.profile.save.assert_called_once_with(
+            {"name": "Updated", "goals": "Current"}
+        )
 
 
 if __name__ == "__main__":

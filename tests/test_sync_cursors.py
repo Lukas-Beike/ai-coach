@@ -17,12 +17,20 @@ class SyncCursorTests(unittest.TestCase):
         self.db.close()
 
     def test_read_returns_empty_contract_and_write_round_trips(self):
-        self.assertEqual(read_cursor(self.db, "intervals", "activities")["cursor"], None)
+        self.assertEqual(
+            read_cursor(self.db, "intervals", "activities")["cursor"], None
+        )
         write_cursor(self.db, "intervals", "activities", "newest", "high", "now")
-        self.assertEqual(read_cursor(self.db, "intervals", "activities"), {
-            "provider": "intervals", "stream": "activities", "cursor": "newest",
-            "high_water_mark": "high", "updated_at": "now",
-        })
+        self.assertEqual(
+            read_cursor(self.db, "intervals", "activities"),
+            {
+                "provider": "intervals",
+                "stream": "activities",
+                "cursor": "newest",
+                "high_water_mark": "high",
+                "updated_at": "now",
+            },
+        )
 
 
 if __name__ == "__main__":

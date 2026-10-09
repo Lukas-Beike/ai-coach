@@ -69,10 +69,9 @@ class CoachCommandReceiptService:
                 ).fetchone()
                 if current:
                     value = coach_action_view(dict(current))
-                    if (
-                        float(value["expires_at"]) <= self._now()
-                        and value["status"] in {"preview", "ready"}
-                    ):
+                    if float(value["expires_at"]) <= self._now() and value[
+                        "status"
+                    ] in {"preview", "ready"}:
                         value["status"] = "expired"
                     receipt["proposed_actions"].append(value)
 

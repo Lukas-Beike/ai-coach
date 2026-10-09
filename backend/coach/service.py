@@ -138,7 +138,7 @@ def command_receipt(value: Any) -> dict[str, Any]:
         receipt = (
             json.loads(value or "{}") if not isinstance(value, dict) else dict(value)
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         receipt = {}
     return receipt if isinstance(receipt, dict) else {}
 

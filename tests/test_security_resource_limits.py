@@ -370,7 +370,7 @@ class HttpResourceLimitsTests(unittest.TestCase):
                     time.sleep(0.3)
                     self.send_response(200)
                     self.end_headers()
-                except (TimeoutError, AppError):
+                except TimeoutError, AppError:
                     self.close_connection = True
                 finally:
                     completed.set()

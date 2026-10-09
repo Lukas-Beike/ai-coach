@@ -40,17 +40,27 @@ class PublicGetRoutesTests(unittest.TestCase):
         self.assertEqual(
             self.handler.send_json.call_args_list,
             [
-                unittest.mock.call(200, {"status": "ok", "maintenance": {"active": False}}),
-                unittest.mock.call(200, {"status": "ok", "maintenance": {"active": True}}),
+                unittest.mock.call(
+                    200, {"status": "ok", "maintenance": {"active": False}}
+                ),
+                unittest.mock.call(
+                    200, {"status": "ok", "maintenance": {"active": True}}
+                ),
             ],
         )
         self.readiness_factory.assert_not_called()
         self.auth_factory.assert_not_called()
         self.bootstrap_factory.assert_not_called()
 
-    def test_readiness_uses_ready_boolean_for_http_status_and_preserves_json(self) -> None:
+    def test_readiness_uses_ready_boolean_for_http_status_and_preserves_json(
+        self,
+    ) -> None:
         ready = {"ready": True, "status": "ready", "details": {"database": True}}
-        not_ready = {"ready": False, "status": "not_ready", "details": {"database": False}}
+        not_ready = {
+            "ready": False,
+            "status": "not_ready",
+            "details": {"database": False},
+        }
         self.readiness.state.side_effect = [ready, not_ready]
 
         self.assertTrue(self.routes.handle(self.handler, "/api/readiness"))
@@ -60,9 +70,13 @@ class PublicGetRoutesTests(unittest.TestCase):
             self.handler.send_json.call_args_list,
             [unittest.mock.call(200, ready), unittest.mock.call(503, not_ready)],
         )
-        self.readiness_factory.assert_has_calls([unittest.mock.call(), unittest.mock.call()])
+        self.readiness_factory.assert_has_calls(
+            [unittest.mock.call(), unittest.mock.call()]
+        )
 
-    def test_auth_status_uses_optional_authenticated_session_and_live_gate(self) -> None:
+    def test_auth_status_uses_optional_authenticated_session_and_live_gate(
+        self,
+    ) -> None:
         self.auth.authenticated_session.side_effect = [None, {"csrf_hash": "fake"}]
         self.maintenance_gate.state.side_effect = [
             {"active": False},
@@ -93,7 +107,9 @@ class PublicGetRoutesTests(unittest.TestCase):
     def test_bootstrap_authenticates_before_read_and_returns_json(self) -> None:
         events: list[str] = []
         self.auth.require_auth.side_effect = lambda _handler: events.append("auth")
-        self.bootstrap.read.side_effect = lambda: events.append("read") or {"schema_version": 3}
+        self.bootstrap.read.side_effect = lambda: (
+            events.append("read") or {"schema_version": 3}
+        )
 
         self.assertTrue(self.routes.handle(self.handler, "/api/bootstrap"))
 
@@ -135,7 +151,10 @@ class PublicGetRoutesTests(unittest.TestCase):
         first_auth.authenticated_session.assert_called_once_with(self.handler)
         second_auth.authenticated_session.assert_called_once_with(self.handler)
         self.assertEqual(
-            [call.args[1]["authenticated"] for call in self.handler.send_json.call_args_list],
+            [
+                call.args[1]["authenticated"]
+                for call in self.handler.send_json.call_args_list
+            ],
             [True, False],
         )
 

@@ -13,7 +13,7 @@ from backend.planning.revision import PlanningRevisionService
 def _load_payload(row: Any) -> dict[str, Any]:
     try:
         payload = json.loads(row["payload"] or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         payload = {}
     return payload if isinstance(payload, dict) else {}
 
@@ -91,13 +91,17 @@ class PlannedUnitSyncStateWriter:
         remote_external_id = _apply_remote_event(
             payload, "identity" if changed else state, remote_event
         )
-        baseline_payload = _load_payload({"payload": expected_payload}) if changed else payload
+        baseline_payload = (
+            _load_payload({"payload": expected_payload}) if changed else payload
+        )
         if changed and state == "synced":
             _apply_remote_event(baseline_payload, state, remote_event)
         persisted_state = "local" if changed and state == "synced" else state
         if changed:
             payload["sync_status"] = persisted_state
-        baseline_hash = planned_unit_payload_hash(baseline_payload) if state == "synced" else None
+        baseline_hash = (
+            planned_unit_payload_hash(baseline_payload) if state == "synced" else None
+        )
         return payload, remote_external_id, persisted_state, changed, baseline_hash
 
     def _insert_deleted_row(

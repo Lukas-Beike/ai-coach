@@ -149,7 +149,9 @@ class WeatherServiceTests(unittest.TestCase):
         self.now = datetime(2026, 9, 20, 12, tzinfo=UTC)
         self.key_values = KeyValueRepository(lambda: self.now.isoformat())
         self.profile = ProfileService(
-            self.manager, ProfileRepository(self.key_values), self.key_values,
+            self.manager,
+            ProfileRepository(self.key_values),
+            self.key_values,
             on_location_changed=cache.invalidate_for_location_change,
         )
         self.profile.save({"weather_location": "Berlin"})

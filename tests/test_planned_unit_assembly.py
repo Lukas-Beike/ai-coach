@@ -14,15 +14,20 @@ from backend.sync.planned_unit_assembly import (
 
 class PlannedUnitSyncAssemblyTests(unittest.TestCase):
     def _assembly(self, callbacks):
-        return PlannedUnitSyncAssembly(dependencies=PlannedUnitSyncAssembly.Inputs(
-            owners=PlannedUnitOwners(
-                callbacks["database_manager"], callbacks["planned_unit_service"],
-                callbacks["planning_revision_service"],
-            ),
-            runtime=PlannedUnitRuntime(
-                callbacks["redactor"], callbacks["utc_now"], callbacks["today"],
-            ),
-        ))
+        return PlannedUnitSyncAssembly(
+            dependencies=PlannedUnitSyncAssembly.Inputs(
+                owners=PlannedUnitOwners(
+                    callbacks["database_manager"],
+                    callbacks["planned_unit_service"],
+                    callbacks["planning_revision_service"],
+                ),
+                runtime=PlannedUnitRuntime(
+                    callbacks["redactor"],
+                    callbacks["utc_now"],
+                    callbacks["today"],
+                ),
+            )
+        )
 
     def test_construction_defers_current_resources(self):
         callbacks = {
@@ -63,7 +68,9 @@ class PlannedUnitSyncAssemblyTests(unittest.TestCase):
     def test_remote_reconciler_resolves_manager_and_service_per_call(self):
         callbacks = {
             "database_manager": Mock(side_effect=["first manager", "second manager"]),
-            "planned_unit_service": Mock(side_effect=["first service", "second service"]),
+            "planned_unit_service": Mock(
+                side_effect=["first service", "second service"]
+            ),
             "planning_revision_service": Mock(),
             "redactor": Mock(),
             "utc_now": Mock(),
@@ -71,18 +78,29 @@ class PlannedUnitSyncAssemblyTests(unittest.TestCase):
         }
         assembly = self._assembly(callbacks)
 
-        with patch.object(assembly_module, "RemotePlannedUnitReconciler") as reconciler_type:
+        with patch.object(
+            assembly_module, "RemotePlannedUnitReconciler"
+        ) as reconciler_type:
             first = assembly.remote_reconciler()
             second = assembly.remote_reconciler()
 
         self.assertIsNotNone(first)
         self.assertIsNotNone(second)
         self.assertEqual(reconciler_type.call_count, 2)
-        self.assertEqual(reconciler_type.call_args.args[:3], (
-            "second manager", "second service", callbacks["planning_revision_service"]
-        ))
-        callbacks["database_manager"].assert_has_calls([unittest.mock.call(), unittest.mock.call()])
-        callbacks["planned_unit_service"].assert_has_calls([unittest.mock.call(), unittest.mock.call()])
+        self.assertEqual(
+            reconciler_type.call_args.args[:3],
+            (
+                "second manager",
+                "second service",
+                callbacks["planning_revision_service"],
+            ),
+        )
+        callbacks["database_manager"].assert_has_calls(
+            [unittest.mock.call(), unittest.mock.call()]
+        )
+        callbacks["planned_unit_service"].assert_has_calls(
+            [unittest.mock.call(), unittest.mock.call()]
+        )
 
 
 if __name__ == "__main__":

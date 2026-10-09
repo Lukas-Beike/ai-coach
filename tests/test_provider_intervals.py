@@ -23,7 +23,8 @@ class IntervalsApiClientTests(unittest.TestCase):
             "GET",
             "https://intervals.test/api/v1/athlete/1?include=a&include=b",
             headers={
-                "Authorization": "Basic " + base64.b64encode(b"API_KEY:synthetic-key").decode()
+                "Authorization": "Basic "
+                + base64.b64encode(b"API_KEY:synthetic-key").decode()
             },
             service="intervals",
         )
@@ -47,10 +48,23 @@ class IntervalsApiClientTests(unittest.TestCase):
         self.assertEqual(client.put("/events/1", {"id": 1}, {"force": True}), "put")
         self.assertEqual(client.delete("/events/1", {"force": True}), "delete")
 
-        self.assertEqual(request.call_args_list[0].args[:3], ("POST", "https://intervals.icu/api/v1/events?tag=a&tag=b", {"id": 1}))
-        self.assertEqual(request.call_args_list[1].args[:3], ("PUT", "https://intervals.icu/api/v1/events/1?force=True", {"id": 1}))
-        self.assertEqual(request.call_args_list[2].args[:2], ("DELETE", "https://intervals.icu/api/v1/events/1?force=True"))
-        self.assertTrue(all(call.kwargs["service"] == "intervals" for call in request.call_args_list))
+        self.assertEqual(
+            request.call_args_list[0].args[:3],
+            ("POST", "https://intervals.icu/api/v1/events?tag=a&tag=b", {"id": 1}),
+        )
+        self.assertEqual(
+            request.call_args_list[1].args[:3],
+            ("PUT", "https://intervals.icu/api/v1/events/1?force=True", {"id": 1}),
+        )
+        self.assertEqual(
+            request.call_args_list[2].args[:2],
+            ("DELETE", "https://intervals.icu/api/v1/events/1?force=True"),
+        )
+        self.assertTrue(
+            all(
+                call.kwargs["service"] == "intervals" for call in request.call_args_list
+            )
+        )
 
     def test_pagination_accumulates_and_state_is_independent(self):
         first = Mock(side_effect=[[{"id": 1}, {"id": 2}], [{"id": 3}], [{"id": 4}]])
@@ -58,16 +72,29 @@ class IntervalsApiClientTests(unittest.TestCase):
         first_client = IntervalsApiClient(api_key="key", request=first)
         second_client = IntervalsApiClient(api_key="key", request=second)
 
-        first_client.get_paged_collection("/items", {"sport": "Run"}, "items", page_size=2)
-        first_client.get_paged_collection("/items", {"sport": "Run"}, "items", page_size=2)
+        first_client.get_paged_collection(
+            "/items", {"sport": "Run"}, "items", page_size=2
+        )
+        first_client.get_paged_collection(
+            "/items", {"sport": "Run"}, "items", page_size=2
+        )
         second_client.get_paged_collection("/items", {}, "items")
 
-        self.assertEqual(dict(first_client.pagination["items"]), {"pages": 3, "records": 4, "complete": True})
-        self.assertEqual(dict(second_client.pagination["items"]), {"pages": 1, "records": 1, "complete": True})
+        self.assertEqual(
+            dict(first_client.pagination["items"]),
+            {"pages": 3, "records": 4, "complete": True},
+        )
+        self.assertEqual(
+            dict(second_client.pagination["items"]),
+            {"pages": 1, "records": 1, "complete": True},
+        )
         pagination_copy = first_client.pagination
-        self.assertEqual(json.loads(json.dumps(pagination_copy)), {
-            "items": {"pages": 3, "records": 4, "complete": True},
-        })
+        self.assertEqual(
+            json.loads(json.dumps(pagination_copy)),
+            {
+                "items": {"pages": 3, "records": 4, "complete": True},
+            },
+        )
         pagination_copy["items"]["pages"] = 0
         self.assertEqual(first_client.pagination["items"]["pages"], 3)
 
@@ -79,7 +106,10 @@ class IntervalsApiClientTests(unittest.TestCase):
         ):
             request = Mock(side_effect=[response, response])
             client = IntervalsApiClient(api_key="key", request=request)
-            with self.subTest(message=message), self.assertRaisesRegex(AppError, message) as raised:
+            with (
+                self.subTest(message=message),
+                self.assertRaisesRegex(AppError, message) as raised,
+            ):
                 client.get_paged_collection("/items", {}, "items", page_size=1)
             self.assertEqual(raised.exception.status, 502)
 

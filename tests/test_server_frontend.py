@@ -14,11 +14,19 @@ def frontend_source():
     return "\n".join(
         (server.PUBLIC_DIR / name).read_text(encoding="utf-8")
         for name in (
-            "shared.js", "auth.js", "sync-status.js", "notifications.js",
-            "performance-view.js", "diagnostics.js", "state-loader.js",
-            "sync-actions.js", "settings.js", "app.js",
+            "shared.js",
+            "auth.js",
+            "sync-status.js",
+            "notifications.js",
+            "performance-view.js",
+            "diagnostics.js",
+            "state-loader.js",
+            "sync-actions.js",
+            "settings.js",
+            "app.js",
         )
     )
+
 
 from backend.http_api import state_events_get
 from backend.http_api.static_assets import StaticAssetService
@@ -30,15 +38,35 @@ class ServerFrontendTests(ServerTestCase):
         root = server.PUBLIC_DIR
         app = (root / "app.js").read_text(encoding="utf-8")
         moved = {
-            "shared.js": ("applyAppearance", "renderActiveRoute", "updateMobileViewportLayout"),
+            "shared.js": (
+                "applyAppearance",
+                "renderActiveRoute",
+                "updateMobileViewportLayout",
+            ),
             "auth.js": ("showLogin", "requestConfirmation", "finishAppShellLoading"),
-            "sync-status.js": ("connectStateEvents", "pollSyncStatus", "renderSyncStatus"),
-            "notifications.js": ("notificationPermission", "enableNotifications", "registerServiceWorker"),
-            "performance-view.js": ("renderPerformance", "activitySportLabel", "saveInlineMetric"),
+            "sync-status.js": (
+                "connectStateEvents",
+                "pollSyncStatus",
+                "renderSyncStatus",
+            ),
+            "notifications.js": (
+                "notificationPermission",
+                "enableNotifications",
+                "registerServiceWorker",
+            ),
+            "performance-view.js": (
+                "renderPerformance",
+                "activitySportLabel",
+                "saveInlineMetric",
+            ),
             "diagnostics.js": ("loadChangeHistory", "loadLogs", "deleteDiagnostics"),
             "state-loader.js": ("loadState", "load", "render"),
             "sync-actions.js": ("syncNow", "syncGarmin", "fullResync"),
-            "settings.js": ("saveProfile", "saveCheckin", "saveCalendarDisplaySettings"),
+            "settings.js": (
+                "saveProfile",
+                "saveCheckin",
+                "saveCalendarDisplaySettings",
+            ),
         }
         for module, names in moved.items():
             source = (root / module).read_text(encoding="utf-8")
@@ -51,22 +79,42 @@ class ServerFrontendTests(ServerTestCase):
         app = frontend_source()
         coach = (root / "coach.js").read_text(encoding="utf-8")
         for name in (
-            "setVoiceStatus", "toggleVoiceInput", "chatControlState",
-            "updateChatControls", "announceChatStatus", "renderCoachOverview",
-            "renderCoachReceipts", "addStructuredCoachReceipts", "askCoach",
-            "renderMessages", "handleWindowScroll", "executeCoachActionProposal",
-            "renderContextPreview", "invalidateContextPreview", "loadContextPreview",
-            "latestAssistantMessageKey", "applyChatGenerationChange", "applyChatResult",
-            "refreshChatHistoryState", "renderChatAttachments",
-            "validateChatAttachmentFiles", "fileBase64", "prepareChatAttachment",
+            "setVoiceStatus",
+            "toggleVoiceInput",
+            "chatControlState",
+            "updateChatControls",
+            "announceChatStatus",
+            "renderCoachOverview",
+            "renderCoachReceipts",
+            "addStructuredCoachReceipts",
+            "askCoach",
+            "renderMessages",
+            "handleWindowScroll",
+            "executeCoachActionProposal",
+            "renderContextPreview",
+            "invalidateContextPreview",
+            "loadContextPreview",
+            "latestAssistantMessageKey",
+            "applyChatGenerationChange",
+            "applyChatResult",
+            "refreshChatHistoryState",
+            "renderChatAttachments",
+            "validateChatAttachmentFiles",
+            "fileBase64",
+            "prepareChatAttachment",
             "setupCoachEvents",
         ):
             declaration = f"function {name}("
             self.assertIn(declaration, coach)
             self.assertNotIn(declaration, app)
         for selector in (
-            "chatForm", "steerButton", "cancelChatButton", "voiceButton",
-            "attachmentInput", "messageInput", "openaiChatResetButton",
+            "chatForm",
+            "steerButton",
+            "cancelChatButton",
+            "voiceButton",
+            "attachmentInput",
+            "messageInput",
+            "openaiChatResetButton",
         ):
             binding = f'$("#{selector}").addEventListener('
             self.assertIn(binding, coach)
@@ -93,7 +141,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertLessEqual(referenced_ids, markup_ids)
 
     def test_removed_ai_controls_and_reset_binding_match_markup(self):
-        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(encoding="utf-8")
+        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
+            encoding="utf-8"
+        )
         root = Path(__file__).resolve().parents[1]
         app = frontend_source()
         index = (root / "public" / "index.html").read_text(encoding="utf-8")
@@ -258,7 +308,9 @@ class ServerFrontendTests(ServerTestCase):
         )
 
     def test_mobile_chat_layout_keeps_composer_clear_of_navigation_and_keyboard(self):
-        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(encoding="utf-8")
+        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
+            encoding="utf-8"
+        )
         app = frontend_source()
         styles = (
             Path(__file__).resolve().parents[1] / "public" / "styles.css"
@@ -280,7 +332,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(".quick-message-templates::after", styles)
 
     def test_maintenance_ui_status_and_restore_asset_versions_are_present(self):
-        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(encoding="utf-8")
+        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
+            encoding="utf-8"
+        )
         root = Path(__file__).resolve().parents[1]
         app = frontend_source()
         api_client = (
@@ -366,23 +420,45 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("const state = {", app)
         navigation = (root / "public" / "navigation.js").read_text(encoding="utf-8")
         self.assertIn("globalThis.AppState = (() =>", state)
-        self.assertIn("return Object.freeze({ state, secureToken, setRoute, setPlanSegment });", state)
-        self.assertIn("if (!Object.hasOwn(state, key)) throw new Error(`Unknown state key: ${key}`);", state)
+        self.assertIn(
+            "return Object.freeze({ state, secureToken, setRoute, setPlanSegment });",
+            state,
+        )
+        self.assertIn(
+            "if (!Object.hasOwn(state, key)) throw new Error(`Unknown state key: ${key}`);",
+            state,
+        )
         self.assertNotIn("return false", state)
         self.assertIn("function setRoute(route)", state)
         self.assertIn("function setPlanSegment(segment)", state)
         self.assertIn("globalThis.AppRouter = (() =>", navigation)
-        self.assertIn("globalThis.addEventListener(\"hashchange\", syncFromHash);", navigation)
-        self.assertIn("if (!configured) throw new Error(\"AppRouter is not configured\");", navigation)
-        self.assertIn("requiredHandlers.some((name) => typeof nextHandlers[name] !== \"function\")", navigation)
+        self.assertIn(
+            'globalThis.addEventListener("hashchange", syncFromHash);', navigation
+        )
+        self.assertIn(
+            'if (!configured) throw new Error("AppRouter is not configured");',
+            navigation,
+        )
+        self.assertIn(
+            'requiredHandlers.some((name) => typeof nextHandlers[name] !== "function")',
+            navigation,
+        )
         self.assertIn("globalThis.AppNavigation = Object.freeze", navigation)
-        self.assertIn('planSegments: PLAN_SEGMENTS', navigation)
-        self.assertIn('moreSegments: MORE_SEGMENTS', navigation)
-        self.assertIn('const PLAN_SEGMENTS = Object.freeze(["overview", "library", "season"]);', navigation)
-        self.assertIn('const MORE_SEGMENTS = Object.freeze(["profile", "equipment", "connections", "coach", "privacy", "operations", "appearance"]);', navigation)
+        self.assertIn("planSegments: PLAN_SEGMENTS", navigation)
+        self.assertIn("moreSegments: MORE_SEGMENTS", navigation)
+        self.assertIn(
+            'const PLAN_SEGMENTS = Object.freeze(["overview", "library", "season"]);',
+            navigation,
+        )
+        self.assertIn(
+            'const MORE_SEGMENTS = Object.freeze(["profile", "equipment", "connections", "coach", "privacy", "operations", "appearance"]);',
+            navigation,
+        )
         self.assertLess(
             navigation.index("function configure(nextHandlers)"),
-            navigation.index('globalThis.addEventListener("hashchange", syncFromHash);'),
+            navigation.index(
+                'globalThis.addEventListener("hashchange", syncFromHash);'
+            ),
         )
         self.assertIn("if (!hashchangeRegistered)", navigation)
         self.assertIn("function routeFromHash(", navigation)
@@ -394,10 +470,12 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("AppState.setPlanSegment(selected)", views)
         self.assertNotIn("renderSeasonPreparation()", views)
         self.assertIn("AppState.setPlanSegment(planSegment);", app)
-        self.assertIn("if (planSegment === \"season\" && state.data) void renderSeasonPreparation();", app)
+        self.assertIn(
+            'if (planSegment === "season" && state.data) void renderSeasonPreparation();',
+            app,
+        )
         public_source = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in (root / "public").glob("*.js")
+            path.read_text(encoding="utf-8") for path in (root / "public").glob("*.js")
         )
         self.assertNotRegex(public_source, r"\bstate\.(?:route|planSegment)\s*=(?!=)")
         self.assertNotIn("function applyNavigationRoute(", app)
@@ -447,22 +525,26 @@ class ServerFrontendTests(ServerTestCase):
             "upstream_not_found",
         ):
             self.assertIn(f'{reason}: "', api_client)
-        self.assertIn("function safeErrorMessage(response, payload, fallback)", api_client)
-        self.assertIn('if (response.status === 404)', api_client)
+        self.assertIn(
+            "function safeErrorMessage(response, payload, fallback)", api_client
+        )
+        self.assertIn("if (response.status === 404)", api_client)
         self.assertIn("globalThis.AppApi.download(path", app)
         self.assertIn('AppApi.stream("/api/chat/stream"', coach)
         self.assertNotIn('fetch("/api/', app + coach)
         self.assertNotIn("completed.error_class", app)
         self.assertNotIn('id="messages" class="messages" aria-live=', index)
-        self.assertIn('<output id="chatOperationStatus" class="sr-only" aria-live="polite"', index)
+        self.assertIn(
+            '<output id="chatOperationStatus" class="sr-only" aria-live="polite"', index
+        )
         self.assertIn("if (!status || status.textContent === message) return;", coach)
         self.assertIn('announceChatStatus("Antwort fertig.")', coach)
 
     def test_main_navigation_uses_stable_hash_links_and_focuses_active_panel(self):
         app = frontend_source()
-        router = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(
-            encoding="utf-8"
-        )
+        router = (
+            Path(__file__).resolve().parents[1] / "public" / "navigation.js"
+        ).read_text(encoding="utf-8")
         navigation = (
             Path(__file__).resolve().parents[1] / "public" / "navigation.js"
         ).read_text(encoding="utf-8")
@@ -494,7 +576,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("function renderToday(data)", app)
 
     def test_task8_coach_first_views_have_shared_states_and_analysis_segments(self):
-        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(encoding="utf-8")
+        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
+            encoding="utf-8"
+        )
         app = frontend_source()
         components = (
             Path(__file__).resolve().parents[1] / "public" / "components.js"
@@ -572,11 +656,15 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="plannedCalendar"', index)
         self.assertNotIn('id="trainingPlans"', index)
         self.assertNotIn('id="libraryLoadButton"', index)
-        plan_views = (Path(__file__).resolve().parents[1] / "public" / "plan-views.js").read_text(encoding="utf-8")
+        plan_views = (
+            Path(__file__).resolve().parents[1] / "public" / "plan-views.js"
+        ).read_text(encoding="utf-8")
         self.assertIn("function renderPlanned(", plan_views)
         self.assertIn("function plannedWeekSummary(", plan_views)
         self.assertIn('document.createElement("details")', plan_views)
-        self.assertIn("weekKey === currentWeekKey || weekKey === nextWeekKey", plan_views)
+        self.assertIn(
+            "weekKey === currentWeekKey || weekKey === nextWeekKey", plan_views
+        )
         self.assertIn("state.data?.planning_compliance", plan_views)
         self.assertIn("function plannedWeatherLabel(", plan_views)
         self.assertIn("function calendarActualActivity(", plan_views)
@@ -585,7 +673,9 @@ class ServerFrontendTests(ServerTestCase):
             "renderPlanned(data.training_calendar || data.planned || [])", app
         )
         self.assertIn("function focusPlannedToday()", plan_views)
-        self.assertIn('today.scrollIntoView({ block: "start", behavior: "auto" })', plan_views)
+        self.assertIn(
+            'today.scrollIntoView({ block: "start", behavior: "auto" })', plan_views
+        )
         self.assertIn('"RPE offen"', plan_views)
         self.assertIn('"Trainingsload"', plan_views)
         self.assertIn("Plan/Ist:", plan_views)

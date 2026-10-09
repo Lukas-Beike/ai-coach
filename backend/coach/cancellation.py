@@ -22,7 +22,9 @@ class CoachCancellationService:
         self._jobs = jobs
         self._streams = streams
 
-    def cancel(self, session_csrf_hash: str, operation_id: Any = None) -> dict[str, Any]:
+    def cancel(
+        self, session_csrf_hash: str, operation_id: Any = None
+    ) -> dict[str, Any]:
         result, response = self._streams.cancel_attached(
             session_csrf_hash, operation_id
         )
@@ -52,5 +54,5 @@ class CoachCancellationService:
             return
         try:
             response.close()
-        except (OSError, ValueError):
+        except OSError, ValueError:
             pass

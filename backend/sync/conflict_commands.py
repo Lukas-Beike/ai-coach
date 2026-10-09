@@ -37,9 +37,7 @@ class SyncConflictCommandService:
             planned = db.execute(
                 "SELECT 1 FROM planned_units WHERE local_id=?", (normalized_id,)
             ).fetchone()
-        service = (
-            self._planned_unit_service if planned else self._competition_service
-        )
+        service = self._planned_unit_service if planned else self._competition_service
         return {
             "ok": True,
             **service.resolve_conflict(normalized_id, selected_strategy),
@@ -52,9 +50,7 @@ class SyncConflictCommandService:
     def retry_job(self, job_id: str) -> dict[str, Any]:
         """Explicitly retry a previously authorized sync job."""
         normalized_id = str(job_id or "").strip()
-        job = self._job_queue_service.resolve(
-            normalized_id, {"action": "retry"}
-        )
+        job = self._job_queue_service.resolve(normalized_id, {"action": "retry"})
         return {"ok": True, "status": "queued", "job": job}
 
     @classmethod

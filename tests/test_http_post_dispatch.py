@@ -57,9 +57,7 @@ class HttpPostDispatcherTests(unittest.TestCase):
         coach_actions.handle.return_value = False
         chat.handle.return_value = True
 
-        self.dispatcher.handle_authenticated(
-            self.handler, "/api/chat", self.session
-        )
+        self.dispatcher.handle_authenticated(self.handler, "/api/chat", self.session)
 
         coach_actions.handle.assert_called_once_with(
             self.handler, "/api/chat", self.session

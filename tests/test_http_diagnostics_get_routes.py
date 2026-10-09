@@ -64,7 +64,9 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
             200,
             b'{"event":"safe"}\n',
             "application/x-ndjson; charset=utf-8",
-            {"Content-Disposition": 'attachment; filename="intervals-coach-server-logs.jsonl"'},
+            {
+                "Content-Disposition": 'attachment; filename="intervals-coach-server-logs.jsonl"'
+            },
         )
 
     def test_auth_failure_precedes_every_service_and_capture_action(self) -> None:

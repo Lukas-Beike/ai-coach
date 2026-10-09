@@ -108,9 +108,7 @@ class FullResyncStateStore:
             gate.is_resetting()
             or self.key_value_repository.get(db, keys["running"]) == "1"
         )
-        status = (
-            self.key_value_repository.get(db, keys["status"]) if running else None
-        )
+        status = self.key_value_repository.get(db, keys["status"]) if running else None
         last_resync_at = self.key_value_repository.get(db, keys["last_at"])
         last_error = self.key_value_repository.get(db, keys["error"]) or None
         return {
@@ -270,16 +268,12 @@ class FullProviderResyncService:
             resolved_operation_id = (
                 operation_id or self._operation_journal.new_operation_id()
             )
-            operation_token = self._operation_journal.set_context(
-                resolved_operation_id
-            )
+            operation_token = self._operation_journal.set_context(resolved_operation_id)
             operation_started = self._operation_journal.monotonic()
             self._operation_journal.log_started(
                 resolved_operation_id, provider, operation_started
             )
-            self._state_store.start(
-                provider, self._provider_execution.label(provider)
-            )
+            self._state_store.start(provider, self._provider_execution.label(provider))
             result = self._provider_execution.run(
                 provider, resolved_operation_id, self._operation_journal.observer
             )

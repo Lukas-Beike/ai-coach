@@ -42,8 +42,13 @@ class PublicStatePreludeTests(unittest.TestCase):
         self.weather.state.side_effect = self._weather_state
         self.followup = Mock()
         self.local = PublicStateLocalPrelude(
-            self.state, self.feedback, self.planned, self.weather,
-            self.manager, self.lock, lambda: date(2026, 9, 23),
+            self.state,
+            self.feedback,
+            self.planned,
+            self.weather,
+            self.manager,
+            self.lock,
+            lambda: date(2026, 9, 23),
             CalendarWindowRange(35, 35),
         )
 
@@ -72,7 +77,9 @@ class PublicStatePreludeTests(unittest.TestCase):
     def test_provider_refresh_and_adaptive_followup_happen_after_local_lock(self):
         self.state.latest_snapshot.return_value = {
             "recent_activities": [],
-            "provider_sync": {"calendar_window": {"start": "2020-01-01", "end": "2020-02-01"}},
+            "provider_sync": {
+                "calendar_window": {"start": "2020-01-01", "end": "2020-02-01"}
+            },
         }
         result = self.local.read(local_only=False)
         self.assertEqual(result.calendar_window["start"], "2020-01-01")

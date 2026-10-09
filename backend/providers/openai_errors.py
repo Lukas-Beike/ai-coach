@@ -50,7 +50,6 @@ _SAFE_LOG_REASONS = {
 }
 
 
-
 def retry_after_seconds(headers: Any) -> int | None:
     """Parse a bounded numeric Retry-After hint without retaining raw headers."""
     if headers is None:

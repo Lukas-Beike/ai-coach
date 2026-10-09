@@ -24,7 +24,9 @@ class CoachConversationGateTests(unittest.TestCase):
 
     def test_full_queue_returns_429_and_queue_full_reason(self) -> None:
         gate = CoachConversationGate()
-        acquired = [gate._queue.acquire(blocking=False) for _ in range(CHAT_QUEUE_LIMIT)]
+        acquired = [
+            gate._queue.acquire(blocking=False) for _ in range(CHAT_QUEUE_LIMIT)
+        ]
         self.assertTrue(all(acquired))
         try:
             with self.assertRaises(AppError) as raised:

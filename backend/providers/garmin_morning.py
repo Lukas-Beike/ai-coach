@@ -46,7 +46,7 @@ def fetch_morning_body_battery(
         return sleep_payload, []
     try:
         local_zone = ZoneInfo(profile_timezone)
-    except (ZoneInfoNotFoundError, ValueError):
+    except ZoneInfoNotFoundError, ValueError:
         local_zone = fallback_zone or timezone.utc
     range_start = sleep_start.astimezone(local_zone).date()
     records = external_call(

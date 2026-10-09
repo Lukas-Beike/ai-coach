@@ -43,7 +43,9 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
         self.authority.mark_planning_authoritative.side_effect = self._mark
         self.queue = Mock()
         self.queue.enqueue.side_effect = self._enqueue
-        self.service = StructuredPlanSyncService(self.manager, self.authority, self.queue, 366)
+        self.service = StructuredPlanSyncService(
+            self.manager, self.authority, self.queue, 366
+        )
 
     def tearDown(self) -> None:
         self.manager.close()
@@ -97,7 +99,9 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
         self.assertEqual(prepared.mode, "all")
         self.assertEqual(prepared.required_scope_groups, (("local_plan",),))
         self.service.execute(prepared, [], reason="all")
-        self.assertEqual([event[0] for event in self.events], ["mark", "pending", "enqueue"])
+        self.assertEqual(
+            [event[0] for event in self.events], ["mark", "pending", "enqueue"]
+        )
         self.assertEqual(self.events[-1][1], [])
 
     def test_changed_selection_scopes_each_id_and_queues_pre_mark_hash(self) -> None:
@@ -106,9 +110,15 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
         self.add_entry(UNIT_A, {"name": "A"})
         prepared = self.service.prepare(
             None,
-            {"_sync_changed_entries_only": True, "_changed_sync_entry_ids": [f" {UNIT_B} ", UNIT_A]},
+            {
+                "_sync_changed_entries_only": True,
+                "_changed_sync_entry_ids": [f" {UNIT_B} ", UNIT_A],
+            },
         )
-        self.assertEqual([entry["library_workout_id"] for entry in prepared.entries], [UNIT_A, UNIT_B])
+        self.assertEqual(
+            [entry["library_workout_id"] for entry in prepared.entries],
+            [UNIT_A, UNIT_B],
+        )
         self.assertEqual(
             prepared.required_scope_groups,
             (
@@ -130,24 +140,47 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
     def test_selected_scope_and_all_pending_validation(self) -> None:
         item = self.add_entry(UNIT_A, {"name": "A"})
         prepared = self.service.prepare(
-            [{"library_workout_id": UNIT_A, "expected_payload_hash": item["expected_payload_hash"]}],
+            [
+                {
+                    "library_workout_id": UNIT_A,
+                    "expected_payload_hash": item["expected_payload_hash"],
+                }
+            ],
             {"_created_sync_entry_ids": [UNIT_A]},
         )
-        self.assertEqual(prepared.required_scope_groups, ((f"planned_unit:{UNIT_A}", f"library_workout:{UNIT_A}"),))
+        self.assertEqual(
+            prepared.required_scope_groups,
+            ((f"planned_unit:{UNIT_A}", f"library_workout:{UNIT_A}"),),
+        )
         all_pending = self.service.prepare(
-            [{"library_workout_id": UNIT_A, "expected_payload_hash": item["expected_payload_hash"]}],
+            [
+                {
+                    "library_workout_id": UNIT_A,
+                    "expected_payload_hash": item["expected_payload_hash"],
+                }
+            ],
             {"_sync_all_pending": True},
         )
         self.assertEqual(all_pending.required_scope_groups, (("local_plan",),))
         with self.assertRaises(AppError) as error:
             self.service.prepare(
-                [{"library_workout_id": UNIT_A, "expected_payload_hash": item["expected_payload_hash"]}],
+                [
+                    {
+                        "library_workout_id": UNIT_A,
+                        "expected_payload_hash": item["expected_payload_hash"],
+                    }
+                ],
                 {"_created_sync_entry_ids": ["00000000-0000-0000-0000-000000000009"]},
             )
         self.assertEqual(error.exception.reason, "intent_scope_denied")
         with self.assertRaises(AppError) as all_pending_error:
             self.service.prepare(
-                [{"library_workout_id": UNIT_A, "expected_payload_hash": item["expected_payload_hash"]}],
+                [
+                    {
+                        "library_workout_id": UNIT_A,
+                        "expected_payload_hash": item["expected_payload_hash"],
+                    }
+                ],
                 {
                     "_sync_all_pending": True,
                     "_created_sync_entry_ids": ["00000000-0000-0000-0000-000000000009"],
@@ -172,7 +205,13 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
     def test_stale_hash_rejected_before_authority_mutation(self) -> None:
         item = self.add_entry(UNIT_A, {"name": "A"})
         prepared = self.service.prepare(
-            [{"library_workout_id": UNIT_A, "expected_payload_hash": item["expected_payload_hash"]}], {}
+            [
+                {
+                    "library_workout_id": UNIT_A,
+                    "expected_payload_hash": item["expected_payload_hash"],
+                }
+            ],
+            {},
         )
         with self.manager.unit_of_work() as db:
             db.execute(
@@ -184,11 +223,14 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
         self.assertEqual(error.exception.reason, "planning_revision_conflict")
         self.authority.mark_planning_authoritative.assert_not_called()
 
-    def test_all_pending_selection_validates_and_queues_workout_library_rows(self) -> None:
+    def test_all_pending_selection_validates_and_queues_workout_library_rows(
+        self,
+    ) -> None:
         raw = json.dumps({"name": "Template"}, sort_keys=True)
         with self.manager.unit_of_work() as db:
             db.execute(
-                "INSERT INTO workout_library(local_id, payload) VALUES (?, ?)", (UNIT_A, raw)
+                "INSERT INTO workout_library(local_id, payload) VALUES (?, ?)",
+                (UNIT_A, raw),
             )
         entry = {
             "library_workout_id": UNIT_A,
@@ -208,7 +250,13 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
         item = self.add_entry(UNIT_A, {"name": "A"})
         original_hash = item["expected_payload_hash"]
         prepared = self.service.prepare(
-            [{"library_workout_id": UNIT_A, "expected_payload_hash": item["expected_payload_hash"]}], {}
+            [
+                {
+                    "library_workout_id": UNIT_A,
+                    "expected_payload_hash": item["expected_payload_hash"],
+                }
+            ],
+            {},
         )
         self.service.execute(prepared, [], reason="selected")
         queued_hash = self.events[-1][1][0]["expected_payload_hash"]
@@ -219,7 +267,13 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
     def test_selected_authority_failure_rolls_back_database_mutation(self) -> None:
         item = self.add_entry(UNIT_A, {"name": "A"})
         prepared = self.service.prepare(
-            [{"library_workout_id": UNIT_A, "expected_payload_hash": item["expected_payload_hash"]}], {}
+            [
+                {
+                    "library_workout_id": UNIT_A,
+                    "expected_payload_hash": item["expected_payload_hash"],
+                }
+            ],
+            {},
         )
         with self.manager.reader() as db:
             original_payload = db.execute(

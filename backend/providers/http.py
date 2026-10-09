@@ -930,10 +930,7 @@ class JsonHttpClientCache:
         )
         classifier_key = active_error_details.cache_key()
         with self._lock:
-            if (
-                self._client is None
-                or self._classifier_key is not classifier_key
-            ):
+            if self._client is None or self._classifier_key is not classifier_key:
                 self._client = JsonHttpClient(
                     app_version,
                     max_response_bytes,

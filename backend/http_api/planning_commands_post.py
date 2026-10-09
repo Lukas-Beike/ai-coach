@@ -15,10 +15,14 @@ class PlanningCommandsPostRoutes:
     def __init__(
         self,
         coach_planning_command_service: Callable[[], CoachPlanningCommandService],
-        coach_conversation_provision_service: Callable[[], CoachConversationProvisionService],
+        coach_conversation_provision_service: Callable[
+            [], CoachConversationProvisionService
+        ],
     ) -> None:
         self._coach_planning_command_service = coach_planning_command_service
-        self._coach_conversation_provision_service = coach_conversation_provision_service
+        self._coach_conversation_provision_service = (
+            coach_conversation_provision_service
+        )
 
     def handle(self, handler: Any, path: str, session: dict[str, Any]) -> bool:
         if path != "/api/planning/commands":

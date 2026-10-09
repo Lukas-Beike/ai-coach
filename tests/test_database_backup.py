@@ -51,7 +51,9 @@ class DatabaseBackupServiceTests(unittest.TestCase):
             disk_usage=lambda _path: SimpleNamespace(free=2_000_000),
         )
 
-    def service(self, config: DatabaseBackupConfig | None = None) -> DatabaseBackupService:
+    def service(
+        self, config: DatabaseBackupConfig | None = None
+    ) -> DatabaseBackupService:
         return DatabaseBackupService(
             self.manager, self.lock, config or self.config, self.logger
         )
@@ -63,7 +65,9 @@ class DatabaseBackupServiceTests(unittest.TestCase):
                 snapshot.execute("SELECT value FROM records").fetchone()[0],
                 "saved in wal",
             )
-            self.assertEqual(snapshot.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(
+                snapshot.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+            )
         finally:
             snapshot.close()
 
@@ -195,7 +199,10 @@ class DatabaseBackupServiceTests(unittest.TestCase):
     def test_size_and_free_space_limits_reject_backup(self) -> None:
         cases = (
             (replace(self.config, maximum_bytes=1), 413),
-            (replace(self.config, disk_usage=lambda _path: SimpleNamespace(free=0)), 507),
+            (
+                replace(self.config, disk_usage=lambda _path: SimpleNamespace(free=0)),
+                507,
+            ),
         )
         for config, status in cases:
             with (

@@ -173,7 +173,9 @@ class SyncJobWorkerTests(unittest.TestCase):
         with self.assertRaisesRegex(AppError, "runner failed"):
             worker.run_loop()
 
-    def test_transient_claim_error_keeps_worker_alive_without_replaying_job(self) -> None:
+    def test_transient_claim_error_keeps_worker_alive_without_replaying_job(
+        self,
+    ) -> None:
         class RecoveringStore:
             claims = 0
 
@@ -194,10 +196,14 @@ class SyncJobWorkerTests(unittest.TestCase):
 
         self.assertEqual(store.claims, 2)
         self.assertEqual([job["id"] for job in runner.jobs], ["job-1"])
-        self.assertEqual(log_error.call_args.kwargs["extra"]["error_class"], "OperationalError")
+        self.assertEqual(
+            log_error.call_args.kwargs["extra"]["error_class"], "OperationalError"
+        )
         self.assertNotIn("private detail", repr(log_error.call_args))
 
-    def test_runner_error_does_not_retry_claimed_effect_in_same_worker_loop(self) -> None:
+    def test_runner_error_does_not_retry_claimed_effect_in_same_worker_loop(
+        self,
+    ) -> None:
         class TwoJobs:
             jobs = iter(({"id": "uncertain"}, {"id": "next"}))
 
@@ -221,7 +227,9 @@ class SyncJobWorkerTests(unittest.TestCase):
             worker.run_loop()
 
         self.assertEqual(runner.calls, ["uncertain", "next"])
-        self.assertEqual(log_error.call_args.kwargs["extra"]["error_class"], "RuntimeError")
+        self.assertEqual(
+            log_error.call_args.kwargs["extra"]["error_class"], "RuntimeError"
+        )
 
     def test_stop_wakes_worker_and_start_restarts_after_exit(self) -> None:
         claim_seen = threading.Event()

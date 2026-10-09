@@ -36,14 +36,19 @@ class AthletePutRoutesTests(unittest.TestCase):
 
     def test_athlete_context_route_maps_profile_and_competitions(self) -> None:
         payload = {"profile": {"name": "Example"}, "competitions": [{"id": "race-1"}]}
-        result = {"profile": payload["profile"], "competitions": payload["competitions"]}
+        result = {
+            "profile": payload["profile"],
+            "competitions": payload["competitions"],
+        }
         self.handler.read_json.return_value = payload
         self.context.save.return_value = result
 
         self.assertTrue(self.routes.handle(self.handler, "/api/athlete-context"))
 
         self.context_factory.assert_called_once_with()
-        self.context.save.assert_called_once_with(payload["profile"], payload["competitions"])
+        self.context.save.assert_called_once_with(
+            payload["profile"], payload["competitions"]
+        )
         self.profile_factory.assert_not_called()
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_called_once_with(200, result)

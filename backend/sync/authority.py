@@ -32,7 +32,9 @@ def competition_push_manifest(db: Any) -> list[dict[str, str]]:
         for row in db.execute(query).fetchall():
             values = dict(row)
             digest = hashlib.sha256(
-                json.dumps(values, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                json.dumps(
+                    values, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+                ).encode("utf-8")
             ).hexdigest()
             manifest.append({"type": table, key: str(values[key]), "sha256": digest})
     return manifest
@@ -103,7 +105,9 @@ class PlanningAuthorityService:
         """Choose only the competition state shown in the approved preview."""
         with self._database_manager.unit_of_work() as db:
             if competition_push_manifest(db) != expected_manifest:
-                raise AppError(409, "Der Wettkampfbestand hat sich seit der Freigabe geändert.")
+                raise AppError(
+                    409, "Der Wettkampfbestand hat sich seit der Freigabe geändert."
+                )
             rows = db.execute(
                 "SELECT id, sync_state, sync_conflict FROM competitions "
                 "WHERE sync_dirty=1 OR sync_state='conflict'"
@@ -129,7 +133,7 @@ class PlanningAuthorityService:
     def _mark_planning_row(row: dict[str, Any], now: str, db: Any) -> bool:
         try:
             payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             payload = {}
         if not isinstance(payload, dict) or payload.get("local_deleted"):
             return False
@@ -146,6 +150,6 @@ class PlanningAuthorityService:
             return True
         try:
             conflict = json.loads(row.get("sync_conflict") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
         return isinstance(conflict, dict) and conflict.get("type") == "remote_missing"

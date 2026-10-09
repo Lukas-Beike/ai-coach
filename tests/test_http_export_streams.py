@@ -49,12 +49,16 @@ class ExportStreamTransportTests(unittest.TestCase):
             logging.getLogger(__name__),
         )
 
-    def test_database_backup_releases_database_lock_before_send_and_passes_deadline(self) -> None:
+    def test_database_backup_releases_database_lock_before_send_and_passes_deadline(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             lock = TrackedLock()
             backup = self.backup(root, lock)
-            privacy_export_factory = Mock(side_effect=RuntimeError("unused privacy export construction failed"))
+            privacy_export_factory = Mock(
+                side_effect=RuntimeError("unused privacy export construction failed")
+            )
             transport = ExportStreamTransport(
                 lambda: backup,
                 privacy_export_factory,
@@ -66,7 +70,10 @@ class ExportStreamTransportTests(unittest.TestCase):
             def send_file_stream(*args: object, **kwargs: object) -> None:
                 self.assertFalse(lock.held)
                 self.assertEqual(args[0].name.startswith(".database-backup-"), True)
-                self.assertEqual(args[1:], ("application/octet-stream", "intervals-coach-database.backup"))
+                self.assertEqual(
+                    args[1:],
+                    ("application/octet-stream", "intervals-coach-database.backup"),
+                )
                 self.assertEqual(kwargs, {"deadline": 18})
                 self.assertTrue(Path(args[0]).exists())
 
@@ -84,7 +91,11 @@ class ExportStreamTransportTests(unittest.TestCase):
             backup = self.backup(root, lock)
             transport = ExportStreamTransport(
                 lambda: backup,
-                Mock(side_effect=RuntimeError("unused privacy export construction failed")),
+                Mock(
+                    side_effect=RuntimeError(
+                        "unused privacy export construction failed"
+                    )
+                ),
                 monotonic=lambda: 50,
                 time_limit_seconds=20,
             )
@@ -97,11 +108,15 @@ class ExportStreamTransportTests(unittest.TestCase):
             self.assertFalse(lock.held)
             self.assertFalse(list(root.glob(".database-backup-*.tmp")))
 
-    def test_privacy_export_uses_injected_deadline_and_cleans_up_on_send_failure(self) -> None:
+    def test_privacy_export_uses_injected_deadline_and_cleans_up_on_send_failure(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             archive_path = Path(temporary) / "export.zip"
             archive_path.write_bytes(b"archive")
-            database_backup_factory = Mock(side_effect=RuntimeError("unused backup construction failed"))
+            database_backup_factory = Mock(
+                side_effect=RuntimeError("unused backup construction failed")
+            )
             privacy_export = Mock()
             privacy_export.create_file.return_value = archive_path
             transport = ExportStreamTransport(
@@ -113,7 +128,10 @@ class ExportStreamTransportTests(unittest.TestCase):
             handler = Mock()
 
             def send_file_stream(*args: object, **kwargs: object) -> None:
-                self.assertEqual(args, (archive_path, "application/zip", "intervals-coach-export.zip"))
+                self.assertEqual(
+                    args,
+                    (archive_path, "application/zip", "intervals-coach-export.zip"),
+                )
                 self.assertEqual(kwargs, {"deadline": 19.5, "cleanup": True})
                 try:
                     raise BrokenPipeError("client disconnected")

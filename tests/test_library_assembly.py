@@ -23,16 +23,23 @@ class WorkoutLibrarySyncAssemblyTests(unittest.TestCase):
         }
 
     def _assembly(self, callbacks):
-        return WorkoutLibrarySyncAssembly(dependencies=WorkoutLibrarySyncAssembly.Inputs(
-            provider=WorkoutLibraryProvider(
-                callbacks["config"], callbacks["database_manager"],
-                callbacks["intervals_client"], callbacks["workout_library_service"],
-            ),
-            state=WorkoutLibraryState(
-                Mock(), Mock(), Mock(), callbacks["utc_now"],
-            ),
-            uuid_factory=callbacks["uuid_factory"],
-        ))
+        return WorkoutLibrarySyncAssembly(
+            dependencies=WorkoutLibrarySyncAssembly.Inputs(
+                provider=WorkoutLibraryProvider(
+                    callbacks["config"],
+                    callbacks["database_manager"],
+                    callbacks["intervals_client"],
+                    callbacks["workout_library_service"],
+                ),
+                state=WorkoutLibraryState(
+                    Mock(),
+                    Mock(),
+                    Mock(),
+                    callbacks["utc_now"],
+                ),
+                uuid_factory=callbacks["uuid_factory"],
+            )
+        )
 
     def test_construction_does_not_resolve_runtime_dependencies(self):
         callbacks = self._callbacks()
@@ -46,9 +53,12 @@ class WorkoutLibrarySyncAssemblyTests(unittest.TestCase):
         callbacks = self._callbacks()
         assembly = self._assembly(callbacks)
 
-        with patch.object(assembly_module, "WorkoutLibrarySyncStateService") as state_type, patch.object(
-            assembly_module, "WorkoutLibrarySyncService"
-        ) as sync_type:
+        with (
+            patch.object(
+                assembly_module, "WorkoutLibrarySyncStateService"
+            ) as state_type,
+            patch.object(assembly_module, "WorkoutLibrarySyncService") as sync_type,
+        ):
             service = assembly.sync_service()
             next_service = assembly.sync_service()
 
@@ -62,7 +72,9 @@ class WorkoutLibrarySyncAssemblyTests(unittest.TestCase):
         callbacks = self._callbacks()
         assembly = self._assembly(callbacks)
 
-        with patch.object(assembly_module, "WorkoutLibraryRefreshService") as refresh_type:
+        with patch.object(
+            assembly_module, "WorkoutLibraryRefreshService"
+        ) as refresh_type:
             refresh = assembly.refresh_service()
 
         self.assertIsNotNone(refresh)

@@ -14,7 +14,10 @@ class CoachLibraryPlanToolServiceTests(unittest.TestCase):
 
     def test_authorized_entry_is_delegated_and_wrapped_as_local_result(self) -> None:
         entry = {"library_workout_id": "workout-1", "date": "2026-09-24"}
-        self.library_plan_service.apply.return_value = {"status": "local", "planned": [entry]}
+        self.library_plan_service.apply.return_value = {
+            "status": "local",
+            "planned": [entry],
+        }
 
         result = self.service.execute(
             {"entries": [entry]},
@@ -46,7 +49,10 @@ class CoachLibraryPlanToolServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(raised.exception.message, "Bibliothekseinheiten müssen als Liste gesendet werden.")
+        self.assertEqual(
+            raised.exception.message,
+            "Bibliothekseinheiten müssen als Liste gesendet werden.",
+        )
         self.assertEqual(raised.exception.reason, "invalid_library_plan")
         self.library_plan_service.apply.assert_not_called()
 
@@ -58,7 +64,9 @@ class CoachLibraryPlanToolServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(raised.exception.message, "Jede Bibliothekseinheit muss ein Objekt sein.")
+        self.assertEqual(
+            raised.exception.message, "Jede Bibliothekseinheit muss ein Objekt sein."
+        )
         self.assertEqual(raised.exception.reason, "invalid_library_plan")
         self.library_plan_service.apply.assert_not_called()
 

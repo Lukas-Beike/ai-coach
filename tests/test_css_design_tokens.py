@@ -87,21 +87,41 @@ class CssDesignTokenTests(unittest.TestCase):
         declarations = _declarations(CSS_PATH.read_text(encoding="utf-8"))
         tokens = {}
         for theme in (":root", ':root[data-theme="light"]'):
-            tokens.update({name: value for selector, name, value in declarations if selector == theme})
+            tokens.update(
+                {
+                    name: value
+                    for selector, name, value in declarations
+                    if selector == theme
+                }
+            )
 
             def luminance(value):
                 while value.startswith("var("):
                     value = tokens[value[4:-1]]
                 self.assertRegex(value, r"^#[0-9a-fA-F]{6}$")
-                channels = [int(value[index:index + 2], 16) / 255 for index in (1, 3, 5)]
-                linear = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4 for channel in channels]
-                return sum(channel * weight for channel, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+                channels = [
+                    int(value[index : index + 2], 16) / 255 for index in (1, 3, 5)
+                ]
+                linear = [
+                    channel / 12.92
+                    if channel <= 0.04045
+                    else ((channel + 0.055) / 1.055) ** 2.4
+                    for channel in channels
+                ]
+                return sum(
+                    channel * weight
+                    for channel, weight in zip(linear, (0.2126, 0.7152, 0.0722))
+                )
 
             for sport in ("default", "bike", "run", "swim", "strength"):
                 with self.subTest(theme=theme, sport=sport):
                     background = luminance(tokens[f"--planned-session-{sport}"])
                     foreground = luminance(tokens[f"--planned-session-{sport}-on"])
-                    self.assertGreaterEqual((max(background, foreground) + 0.05) / (min(background, foreground) + 0.05), 4.5)
+                    self.assertGreaterEqual(
+                        (max(background, foreground) + 0.05)
+                        / (min(background, foreground) + 0.05),
+                        4.5,
+                    )
 
     def test_stylesheet_uses_semantic_tokens_and_documented_status_roles(self):
         css = CSS_PATH.read_text(encoding="utf-8")
@@ -109,17 +129,22 @@ class CssDesignTokenTests(unittest.TestCase):
         root_tokens = {
             name
             for selector, name, _ in _declarations(css)
-            if selector in {":root", ':root[data-theme="light"]'} and name.startswith("--")
+            if selector in {":root", ':root[data-theme="light"]'}
+            and name.startswith("--")
         }
         self.assertTrue({"--danger", "--stop", "--disabled-ink"}.issubset(root_tokens))
 
     def test_color_literals_are_confined_to_theme_token_blocks(self):
         violations = []
-        for selector, name, value in _declarations(CSS_PATH.read_text(encoding="utf-8")):
+        for selector, name, value in _declarations(
+            CSS_PATH.read_text(encoding="utf-8")
+        ):
             literals = _color_literals(value)
             if not literals:
                 continue
-            if selector in {":root", ':root[data-theme="light"]'} and name.startswith("--"):
+            if selector in {":root", ':root[data-theme="light"]'} and name.startswith(
+                "--"
+            ):
                 continue
             if (selector, name, value) in RULE_LITERAL_ALLOWLIST:
                 continue

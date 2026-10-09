@@ -23,7 +23,9 @@ class StructuredToolFailureTests(unittest.TestCase):
             Path(self.temporary.name), self.logger, frozenset({"read_profile"})
         )
 
-    def project(self, exc: BaseException, *, name: str = "read_profile") -> dict[str, Any]:
+    def project(
+        self, exc: BaseException, *, name: str = "read_profile"
+    ) -> dict[str, Any]:
         return self.service.project(
             exc,
             name=name,
@@ -75,7 +77,9 @@ class StructuredToolFailureTests(unittest.TestCase):
         self.assertEqual(result["reason"], "tool_arguments_invalid")
         self.assertIn("ungültig", result["error"])
         self.assertNotIn("secret exception text", str(result))
-        self.assertNotIn("secret exception text", str(self.receipts[0]["diagnostic_error"]))
+        self.assertNotIn(
+            "secret exception text", str(self.receipts[0]["diagnostic_error"])
+        )
 
     def test_empty_app_error_reason_uses_400_fallback(self) -> None:
         result = self.project(AppError(400, "Bad request", reason=""))
@@ -87,13 +91,17 @@ class StructuredToolFailureTests(unittest.TestCase):
 
         self.assertEqual(result["reason"], "tool_failed")
 
-    def test_invalid_validation_reason_is_omitted_and_unknown_name_is_redacted(self) -> None:
+    def test_invalid_validation_reason_is_omitted_and_unknown_name_is_redacted(
+        self,
+    ) -> None:
         error = AppError(400, "Invalid request", reason="invalid")
         error.validation_reason = "request_" + "x" * 73
         result = self.project(error, name="untrusted-tool-name")
 
         self.assertNotIn("validation_reason", result)
-        self.assertEqual(self.logger.warning.call_args.kwargs["extra"]["context"]["tool"], "unknown")
+        self.assertEqual(
+            self.logger.warning.call_args.kwargs["extra"]["context"]["tool"], "unknown"
+        )
         self.assertEqual(self.receipts[0]["tool"], "untrusted-tool-name")
 
     def test_receipt_is_appended_before_logger_event(self) -> None:

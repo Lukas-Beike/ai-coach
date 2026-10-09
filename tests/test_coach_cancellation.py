@@ -39,7 +39,9 @@ class CoachCancellationServiceTests(unittest.TestCase):
         finally:
             self.streams.unregister("session", operation_id)
 
-    def test_background_cancel_persists_before_signalling_and_does_not_recreate_event(self):
+    def test_background_cancel_persists_before_signalling_and_does_not_recreate_event(
+        self,
+    ):
         operation_id = "durable-operation"
         self.submissions.active.return_value = {
             "client_turn_id": "turn-1",
@@ -67,7 +69,9 @@ class CoachCancellationServiceTests(unittest.TestCase):
         self.streams.clear_state()
         self.jobs.reset_mock()
         self.jobs.merge_receipt.side_effect = None
-        self.assertEqual(self.service.cancel("session", operation_id)["status"], "cancelling")
+        self.assertEqual(
+            self.service.cancel("session", operation_id)["status"], "cancelling"
+        )
         self.jobs.merge_receipt.assert_called_once()
         self.assertIsNone(self.streams.get_background_event(operation_id))
 

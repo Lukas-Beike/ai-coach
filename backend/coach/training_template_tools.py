@@ -23,9 +23,13 @@ class TrainingTemplateToolService:
         self._database_lock = database_lock
         self._workout_library_service = workout_library_service
 
-    def execute(self, arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
+    def execute(
+        self, arguments: dict[str, Any], intent: dict[str, Any]
+    ) -> dict[str, Any]:
         if "manage_training_templates" not in authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+            raise AppError(
+                403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
+            )
 
         templates = arguments.get("templates")
         if (
@@ -44,7 +48,9 @@ class TrainingTemplateToolService:
             action = str(template.get("action") or "create").strip().casefold()
             if action in {"update", "archive", "restore", "delete"}:
                 local_id = str(template.get("local_id") or "").strip()
-                require_coach_scope(intent, f"library_workout:{local_id}", "local_template")
+                require_coach_scope(
+                    intent, f"library_workout:{local_id}", "local_template"
+                )
             elif action == "create":
                 local_id = ""
                 require_coach_scope(intent, "local_template")
@@ -64,7 +70,9 @@ class TrainingTemplateToolService:
             library = self._workout_library_service()
             with manager.unit_of_work():
                 results = []
-                for template, (action, local_id) in zip(templates, actions, strict=True):
+                for template, (action, local_id) in zip(
+                    templates, actions, strict=True
+                ):
                     if action == "create":
                         results.append(library.create_template(template))
                     else:

@@ -25,7 +25,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -96,7 +96,7 @@ def _intervals_sleep_recovery(
         sleep_hours = (
             round(float(sleep_seconds) / 3600, 1) if sleep_seconds is not None else None
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         sleep_hours = None
     sleep_average = wellness.wellness_average(
         wellness_rows, ("sleepSecs", "sleep_seconds"), 7, today, 3600

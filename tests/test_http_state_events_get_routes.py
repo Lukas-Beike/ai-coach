@@ -17,7 +17,9 @@ class StateEventsGetRoutesTests(unittest.TestCase):
         self.transport = Mock()
         self.routes = StateEventsGetRoutes(self.auth_factory, self.transport)
 
-    def test_recognized_path_authenticates_then_forwards_exact_transport_callbacks(self) -> None:
+    def test_recognized_path_authenticates_then_forwards_exact_transport_callbacks(
+        self,
+    ) -> None:
         self.assertTrue(self.routes.handle(self.handler, "/api/state/events"))
         self.auth_factory.assert_called_once_with()
         self.auth.require_auth.assert_called_once_with(self.handler)

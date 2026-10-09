@@ -79,7 +79,11 @@ class CoachJobStatusTests(unittest.TestCase):
             receipt["phase"] = phase
         if plan_scope is not None:
             receipt["plan_scope"] = plan_scope
-        return {"client_turn_id": "synthetic-turn", "status": status, "receipt": json.dumps(receipt)}
+        return {
+            "client_turn_id": "synthetic-turn",
+            "status": status,
+            "receipt": json.dumps(receipt),
+        }
 
     def test_attached_status_takes_priority_over_background_lookup(self) -> None:
         service, manager = self.make_service(
@@ -96,11 +100,18 @@ class CoachJobStatusTests(unittest.TestCase):
     def test_idle_status_has_exact_response_shape(self) -> None:
         service, _manager = self.make_service()
 
-        self.assertEqual(service.stream_status("idle-session"), {"status": "idle", "operation_id": None})
+        self.assertEqual(
+            service.stream_status("idle-session"),
+            {"status": "idle", "operation_id": None},
+        )
 
     def test_background_status_projects_receipt_fields(self) -> None:
         service, _manager = self.make_service(
-            rows=[self.background_row("owner", plan_scope={"background": True, "horizon_days": 30})]
+            rows=[
+                self.background_row(
+                    "owner", plan_scope={"background": True, "horizon_days": 30}
+                )
+            ]
         )
 
         self.assertEqual(

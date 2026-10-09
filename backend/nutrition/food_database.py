@@ -96,7 +96,7 @@ class FoodDatabaseService:
             raise AppError(400, "Zutat muss food_id, amount und unit enthalten.")
         try:
             amount = float(item["amount"])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raise AppError(400, "Ungültige Zutatenmenge.") from None
         if (
             isinstance(item["amount"], bool)

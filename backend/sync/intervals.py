@@ -566,7 +566,9 @@ class IntervalsSyncRuntime:
     @contextmanager
     def operation(self, reason: str, operation_id: str | None) -> Iterator[Any]:
         with (
-            self._observer.observe("intervals", "activities", reason, operation_id) as scope,
+            self._observer.observe(
+                "intervals", "activities", reason, operation_id
+            ) as scope,
             self._provider_resync_gate.operation(),
         ):
             yield scope
@@ -607,9 +609,7 @@ class IntervalsSyncRuntime:
                         wait_for_performance,
                         cancel_event,
                     )
-                last_error = journal.redacted_error(
-                    status.get("last_sync_error") or ""
-                )
+                last_error = journal.redacted_error(status.get("last_sync_error") or "")
                 detail = f" {last_error[:300]}" if last_error else ""
                 raise AppError(
                     503,
@@ -642,7 +642,7 @@ class IntervalsSyncRuntime:
     ) -> dict[str, Any]:
         try:
             completed_activity_days = int(status.get("last_sync_activity_days") or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             completed_activity_days = 0
         if wait_for_performance:
             followup.wait(cancel_event=cancel_event)

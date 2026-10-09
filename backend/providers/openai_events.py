@@ -240,7 +240,6 @@ def request_stream_response(
                 delattr(cancel_event, "_provider_response")
 
 
-
 def _decode_sse_event(data_lines: list[str]) -> dict[str, Any] | None:
     raw_event = "\n".join(data_lines)
     if raw_event.strip() == "[DONE]":

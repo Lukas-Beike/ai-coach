@@ -29,20 +29,27 @@ class CoachLocalAssemblyTests(unittest.TestCase):
             "morning_body_battery": Mock(name="morning_body_battery"),
             "logger": Mock(name="logger"),
         }
-        assembly = CoachLocalAssembly(dependencies=CoachLocalAssembly.Inputs(
-            state=CoachLocalState(
-                dependencies["database_manager"], dependencies["database_lock"],
-                dependencies["key_values"],
-            ),
-            planning=CoachLocalPlanning(
-                dependencies["sync_job_queue"], dependencies["local_date"],
-                dependencies["adaptive_preview"], dependencies["planned_workout_label"],
-            ),
-            garmin=CoachLocalGarmin(
-                dependencies["garmin_sync"], dependencies["garmin_payload"],
-                dependencies["morning_body_battery"], dependencies["logger"],
-            ),
-        ))
+        assembly = CoachLocalAssembly(
+            dependencies=CoachLocalAssembly.Inputs(
+                state=CoachLocalState(
+                    dependencies["database_manager"],
+                    dependencies["database_lock"],
+                    dependencies["key_values"],
+                ),
+                planning=CoachLocalPlanning(
+                    dependencies["sync_job_queue"],
+                    dependencies["local_date"],
+                    dependencies["adaptive_preview"],
+                    dependencies["planned_workout_label"],
+                ),
+                garmin=CoachLocalGarmin(
+                    dependencies["garmin_sync"],
+                    dependencies["garmin_payload"],
+                    dependencies["morning_body_battery"],
+                    dependencies["logger"],
+                ),
+            )
+        )
         return assembly, dependencies, manager
 
     def test_dialogue_and_checkin_factories_keep_shared_state(self):
@@ -62,7 +69,9 @@ class CoachLocalAssemblyTests(unittest.TestCase):
         self.assertIs(clarification.call_args.args[1], deps["key_values"])
         self.assertIs(clarification.call_args.args[2], deps["database_lock"])
         self.assertIs(morning.call_args.args[0], deps["garmin_sync"].return_value)
-        self.assertIs(morning.call_args.args[2], deps["morning_body_battery"].return_value)
+        self.assertIs(
+            morning.call_args.args[2], deps["morning_body_battery"].return_value
+        )
 
     def test_quick_action_factory_uses_existing_preview_owner(self):
         assembly, deps, manager = self.make_assembly()
@@ -70,7 +79,9 @@ class CoachLocalAssemblyTests(unittest.TestCase):
             assembly.quick_actions_service()
 
         self.assertIs(quick_actions.call_args.args[0], manager)
-        self.assertIs(quick_actions.call_args.args[2], deps["adaptive_preview"].return_value)
+        self.assertIs(
+            quick_actions.call_args.args[2], deps["adaptive_preview"].return_value
+        )
         self.assertEqual(quick_actions.call_args.args[3](), "2026-09-26")
 
 

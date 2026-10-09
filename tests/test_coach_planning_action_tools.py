@@ -19,7 +19,10 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
         self.history.preview.return_value = {
             "status": "preview",
             "change": {"id": "change-1"},
-            "proposal": {"action_type": "undo_change", "payload": {"change_id": "change-1"}},
+            "proposal": {
+                "action_type": "undo_change",
+                "payload": {"change_id": "change-1"},
+            },
         }
         self.proposals = Mock()
         self.proposals.create.return_value = {"proposed_action": {"id": "proposal-1"}}
@@ -38,37 +41,56 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
             self.factories["proposals"],
         )
 
-    def test_preview_returns_local_preview_only_after_operation_and_scope_checks(self) -> None:
+    def test_preview_returns_local_preview_only_after_operation_and_scope_checks(
+        self,
+    ) -> None:
         result = self.service.execute(
             "preview_adaptive_replan",
             {},
-            {"operation": "preview_adaptive_replan", "authorization_scope": ["adaptive_replan"]},
+            {
+                "operation": "preview_adaptive_replan",
+                "authorization_scope": ["adaptive_replan"],
+            },
             "turn-1",
             "csrf-hash-1",
         )
 
-        self.assertEqual(result, {"ok": True, "id": "adjustment-1", "status": "preview"})
+        self.assertEqual(
+            result, {"ok": True, "id": "adjustment-1", "status": "preview"}
+        )
         self.preview.preview.assert_called_once_with()
         self.adaptive_apply.apply.assert_not_called()
 
     def test_preview_rejects_missing_operation_before_factory(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "preview_adaptive_replan", {}, {"operation": "other", "authorization_scope": ["adaptive_replan"]},
-                "turn-1", "csrf-hash-1",
+                "preview_adaptive_replan",
+                {},
+                {"operation": "other", "authorization_scope": ["adaptive_replan"]},
+                "turn-1",
+                "csrf-hash-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.factories["preview"].assert_not_called()
 
     def test_preview_rejects_missing_scope_before_factory(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "preview_adaptive_replan", {}, {"operation": "preview_adaptive_replan", "authorization_scope": []},
-                "turn-1", "csrf-hash-1",
+                "preview_adaptive_replan",
+                {},
+                {"operation": "preview_adaptive_replan", "authorization_scope": []},
+                "turn-1",
+                "csrf-hash-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.factories["preview"].assert_not_called()
 
     def test_apply_delegates_arguments_intent_and_later_client_turn(self) -> None:
@@ -123,7 +145,10 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
         self.service.execute(
             "update_training_plan",
             arguments,
-            {"operation": "update_training_plan", "authorization_scope": ["local_plan"]},
+            {
+                "operation": "update_training_plan",
+                "authorization_scope": ["local_plan"],
+            },
             "turn-1",
             "csrf-hash-1",
         )
@@ -133,41 +158,66 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
     def test_update_rejects_missing_operation_before_factory(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "update_training_plan", {"payload": {"plan_id": "plan-1"}},
+                "update_training_plan",
+                {"payload": {"plan_id": "plan-1"}},
                 {"operation": "other", "authorization_scope": ["training_plan:plan-1"]},
-                "turn-1", "csrf-hash-1",
+                "turn-1",
+                "csrf-hash-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.factories["plans"].assert_not_called()
 
     def test_update_rejects_scope_for_a_different_plan_before_factory(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "update_training_plan", {"payload": {"plan_id": "plan-1"}},
-                {"operation": "update_training_plan", "authorization_scope": ["training_plan:plan-2"]},
-                "turn-1", "csrf-hash-1",
+                "update_training_plan",
+                {"payload": {"plan_id": "plan-1"}},
+                {
+                    "operation": "update_training_plan",
+                    "authorization_scope": ["training_plan:plan-2"],
+                },
+                "turn-1",
+                "csrf-hash-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.factories["plans"].assert_not_called()
 
     def test_update_rejects_missing_payload_with_existing_client_error(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "update_training_plan", {},
-                {"operation": "update_training_plan", "authorization_scope": ["local_plan"]},
-                "turn-1", "csrf-hash-1",
+                "update_training_plan",
+                {},
+                {
+                    "operation": "update_training_plan",
+                    "authorization_scope": ["local_plan"],
+                },
+                "turn-1",
+                "csrf-hash-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (400, "invalid_action"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason), (400, "invalid_action")
+        )
         self.factories["plans"].assert_not_called()
 
-    def test_undo_creates_session_bound_proposal_and_excludes_raw_proposal(self) -> None:
+    def test_undo_creates_session_bound_proposal_and_excludes_raw_proposal(
+        self,
+    ) -> None:
         result = self.service.execute(
             "undo_training_change",
             {"change_id": "change-1"},
-            {"operation": "undo_training_change", "authorization_scope": ["change:change-1"]},
+            {
+                "operation": "undo_training_change",
+                "authorization_scope": ["change:change-1"],
+            },
             "turn-1",
             "csrf-hash-1",
         )
@@ -194,7 +244,10 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
             "change": {"id": "change-1"},
             "proposal": {
                 "action_type": "undo_change",
-                "payload": {"change_id": "change-1", "expected_current_hash": "current-hash"},
+                "payload": {
+                    "change_id": "change-1",
+                    "expected_current_hash": "current-hash",
+                },
             },
         }
         self.history.apply.return_value = {
@@ -205,7 +258,10 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
         result = self.service.execute(
             "undo_training_change",
             {"change_id": "change-1", "apply": True},
-            {"operation": "undo_training_change", "authorization_scope": ["change:change-1"]},
+            {
+                "operation": "undo_training_change",
+                "authorization_scope": ["change:change-1"],
+            },
             "turn-1",
             "csrf-hash-1",
         )
@@ -220,38 +276,57 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
             },
         )
         self.history.preview.assert_called_once_with("change-1")
-        self.history.apply.assert_called_once_with({
-            "change_id": "change-1",
-            "expected_current_hash": "current-hash",
-        })
+        self.history.apply.assert_called_once_with(
+            {
+                "change_id": "change-1",
+                "expected_current_hash": "current-hash",
+            }
+        )
         self.proposals.create.assert_not_called()
 
-    def test_undo_rejects_missing_operation_before_history_or_proposal_factories(self) -> None:
+    def test_undo_rejects_missing_operation_before_history_or_proposal_factories(
+        self,
+    ) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "undo_training_change", {"change_id": "change-1"},
+                "undo_training_change",
+                {"change_id": "change-1"},
                 {"operation": "other", "authorization_scope": ["change:change-1"]},
-                "turn-1", "csrf-hash-1",
+                "turn-1",
+                "csrf-hash-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.factories["history"].assert_not_called()
         self.factories["proposals"].assert_not_called()
 
     def test_undo_rejects_wrong_change_scope_before_factories(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.service.execute(
-                "undo_training_change", {"change_id": "change-1"},
-                {"operation": "undo_training_change", "authorization_scope": ["change:change-2"]},
-                "turn-1", "csrf-hash-1",
+                "undo_training_change",
+                {"change_id": "change-1"},
+                {
+                    "operation": "undo_training_change",
+                    "authorization_scope": ["change:change-2"],
+                },
+                "turn-1",
+                "csrf-hash-1",
             )
 
-        self.assertEqual((raised.exception.status, raised.exception.reason), (403, "intent_scope_denied"))
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (403, "intent_scope_denied"),
+        )
         self.factories["history"].assert_not_called()
         self.factories["proposals"].assert_not_called()
 
     def test_unknown_name_returns_none_without_constructing_any_owner(self) -> None:
-        result = self.service.execute("not_a_misc_tool", {}, {}, "turn-1", "csrf-hash-1")
+        result = self.service.execute(
+            "not_a_misc_tool", {}, {}, "turn-1", "csrf-hash-1"
+        )
 
         self.assertIsNone(result)
         for factory in self.factories.values():

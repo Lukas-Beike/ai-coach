@@ -23,7 +23,7 @@ class PlanPushCommandService:
     ) -> dict[str, Any]:
         jobs: list[dict[str, Any]] = []
         for offset in range(0, len(entries), 28):
-            chunk = entries[offset:offset + 28]
+            chunk = entries[offset : offset + 28]
             payload: dict[str, Any] = {
                 "entries": chunk,
                 "reason": reason[:200] or "coach",

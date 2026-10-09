@@ -27,7 +27,9 @@ class PlanningCommandsPostRoutesTests(unittest.TestCase):
         self.session = {"csrf_hash": "session-csrf-hash"}
 
     def test_success_dispatches_payload_conversation_and_csrf_hash(self) -> None:
-        handled = self.routes.handle(self.handler, "/api/planning/commands", self.session)
+        handled = self.routes.handle(
+            self.handler, "/api/planning/commands", self.session
+        )
         self.assertTrue(handled)
         self.handler.read_json.assert_called_once_with()
         self.provision_service.ensure.assert_called_once_with()

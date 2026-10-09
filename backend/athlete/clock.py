@@ -31,5 +31,5 @@ class AthleteLocalClock:
         timezone = timezone_name(self._profile.get().get("timezone"))
         try:
             return self._now(ZoneInfo(timezone))
-        except (OSError, RuntimeError, TypeError, ZoneInfoNotFoundError):
+        except OSError, RuntimeError, TypeError, ZoneInfoNotFoundError:
             return self._now().astimezone()

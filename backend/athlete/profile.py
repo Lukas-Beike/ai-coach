@@ -39,7 +39,7 @@ def timezone_name(value: Any, *, strict: bool = False) -> str:
     candidate = str(value or DEFAULT_TIMEZONE).strip()[:120] or DEFAULT_TIMEZONE
     try:
         ZoneInfo(candidate)
-    except (ZoneInfoNotFoundError, ValueError):
+    except ZoneInfoNotFoundError, ValueError:
         if strict:
             raise AppError(400, "Die Zeitzone muss eine gültige IANA-Zeitzone sein.")
         return DEFAULT_TIMEZONE
@@ -87,7 +87,7 @@ class ProfileService:
         payload = self._profile_repository.get(db)
         try:
             return normalize_profile(json.loads(payload or "{}"))
-        except (TypeError, json.JSONDecodeError):
+        except TypeError, json.JSONDecodeError:
             return dict(DEFAULT_PROFILE)
 
     def get(self) -> dict[str, str]:
