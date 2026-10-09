@@ -16,6 +16,10 @@ test.describe("login dialog", () => {
     await page.keyboard.press("Escape");
     await expect(loginDialog).toBeVisible();
     await expect(passwordInput).toBeFocused();
+    // A repeated Escape may bypass the cancel event in Chromium; the close fallback must reopen the dialog.
+    await page.keyboard.press("Escape");
+    await expect(loginDialog).toBeVisible();
+    await expect(passwordInput).toBeFocused();
 
     await passwordInput.fill(password);
     await page.getByRole("button", { name: "Anmelden", exact: true }).click();

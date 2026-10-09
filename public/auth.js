@@ -74,8 +74,9 @@ function installLoginDialogGuards() {
   dialog.addEventListener("close", () => {
     if (!loginDialogRequired) return;
     // Defer so the global close handler restores focus first; the password field must keep focus.
+    // Only reopen while the app shell is still locked, so a programmatic session handover is not undone.
     setTimeout(() => {
-      if (loginDialogRequired && !dialog.open) showAccessibleDialog(dialog, $("#loginPassword"));
+      if (loginDialogRequired && !dialog.open && $("#appShell").hidden) showAccessibleDialog(dialog, $("#loginPassword"));
     }, 0);
   });
 }
