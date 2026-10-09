@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 from backend.activities.detail_projection import detailed_activity
-from backend.performance.workout_profile import recorded_profile
+from backend.activities.workout_profile import recorded_profile
 
 
 def summary_fingerprint(activity: dict[str, Any]) -> str:

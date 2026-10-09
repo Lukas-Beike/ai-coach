@@ -7,8 +7,9 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.athlete.measurements import number
 from backend.errors import AppError
-from backend.performance.training_report import activity_day, canonical_rows, number
+from backend.performance.training_report import activity_day, canonical_rows
 from backend.planning.competitions import supported_competition_sport
 from backend.planning.season import season_plan_summary
 

@@ -12,8 +12,9 @@ from typing import Any
 
 from backend import observability
 from backend.errors import AppError
-from backend.providers import openai as openai_provider
 from backend.providers import usage as provider_usage
+from backend.providers.openai_errors import rate_limit_snapshot
+from backend.providers.openai_responses import OpenAIResponseFailure, validate_response
 
 _PROVIDERS = frozenset({"openai"})
 _STATUS_KEYS = {provider: f"{provider}_status" for provider in _PROVIDERS}
@@ -179,7 +180,7 @@ class ProviderStateService:
 
     def record_rate_limits(self, headers: Any) -> None:
         with self._lock, self._manager.unit_of_work() as db:
-            snapshot = openai_provider.rate_limit_snapshot(
+            snapshot = rate_limit_snapshot(
                 headers, updated_at=_timestamp(self._now())
             )
             if snapshot:
@@ -188,12 +189,12 @@ class ProviderStateService:
     def validate_openai_response(self, path: str, result: Any) -> dict[str, Any]:
         """Validate one decoded response and persist only safe failure state."""
         try:
-            return openai_provider.validate_response(
+            return validate_response(
                 path,
                 result,
                 allowed_error_codes=tuple(observability.OPENAI_RESPONSE_ERROR_CODES),
             )
-        except openai_provider.OpenAIResponseFailure as failure:
+        except OpenAIResponseFailure as failure:
             if failure.reason != "invalid_response":
                 self.record_status(
                     "openai",

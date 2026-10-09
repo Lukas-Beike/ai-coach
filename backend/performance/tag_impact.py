@@ -5,7 +5,8 @@ from statistics import median, quantiles
 from typing import Any
 
 from backend.athlete.checkins import CHECKIN_TAGS
-from backend.performance.training_report import activity_day, canonical_rows, number
+from backend.athlete.measurements import number
+from backend.performance.training_report import activity_day, canonical_rows
 
 
 def tag_impact(

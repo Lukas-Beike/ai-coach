@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlencode
 
 from backend.errors import AppError
-from backend.weather import forecast as weather_forecast
-from backend.weather import projection as weather_projection
+from backend.providers import weather_data as weather_forecast
 
 WEATHER_ICON_D2_DAYS = 2
 NRW_LATITUDE_BOUNDS = (50.3, 52.6)
 NRW_LONGITUDE_BOUNDS = (5.5, 9.6)
 LOGGER = logging.getLogger("intervals_coach")
+
+
+def _weather_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except TypeError, ValueError:
+        return None
+    return number if math.isfinite(number) else None
 
 
 class WeatherClient:
@@ -25,16 +33,19 @@ class WeatherClient:
         request: Callable[..., Any],
         now: Callable[[], str],
         logger: Any = None,
+        *,
+        forecast_days: int,
     ) -> None:
         self._request = request
         self._now = now
         self._logger = logger if logger is not None else LOGGER
+        self._forecast_days = forecast_days
 
     def fetch(self, query: str) -> dict[str, Any]:
         """Return the forecast for ``query`` without changing input data."""
         location = self._geocoded_location(query)
         forecast_params = weather_forecast.weather_forecast_params(
-            location, weather_projection.WEATHER_FORECAST_DAYS, "ecmwf_ifs"
+            location, self._forecast_days, "ecmwf_ifs"
         )
         forecast_url = "https://api.open-meteo.com/v1/forecast?" + urlencode(
             forecast_params
@@ -81,8 +92,8 @@ class WeatherClient:
         )
         if location_result is None:
             raise AppError(400, "Der Wetterort wurde nicht gefunden.")
-        latitude = weather_projection.weather_number(location_result.get("latitude"))
-        longitude = weather_projection.weather_number(location_result.get("longitude"))
+        latitude = _weather_number(location_result.get("latitude"))
+        longitude = _weather_number(location_result.get("longitude"))
         if latitude is None or longitude is None:
             raise AppError(400, "Der Wetterort wurde nicht gefunden.")
         return {

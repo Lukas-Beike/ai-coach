@@ -7,7 +7,8 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.errors import COACH_ABORTED_ERROR, AppError
-from backend.providers.openai import OpenAIResponsesClient, OpenAIStreamClient
+from backend.providers.openai_requests import OpenAIResponsesClient
+from backend.providers.openai_stream import OpenAIStreamClient
 
 
 def raise_if_chat_cancelled(cancel_event: threading.Event | None) -> None:

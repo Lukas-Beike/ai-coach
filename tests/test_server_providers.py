@@ -95,8 +95,6 @@ class ServerProvidersTests(ServerTestCase):
                     opener=deferred,
                 ),
                 operation=ProviderOperationContext(
-                    provider_state=deferred,
-                    now=lambda: "synthetic-time",
                     operation_context=lambda: None,
                 ),
                 intervals=IntervalsTransportSettings(

@@ -292,7 +292,7 @@ class ServerHttpArchitectureTests(unittest.TestCase):
                 "session_auth_service",
                 "SYNC_JOB_QUEUE.service",
                 "PUBLIC_STATE.sync_public_state_service",
-                "ATHLETE_DATA.activity_read",
+                "ACTIVITY_READS.activity_read",
                 "lambda: ATHLETE_CLOCK.now().date()",
                 "ALL_SYNC_DAYS",
             ],

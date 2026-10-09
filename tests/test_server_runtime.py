@@ -87,6 +87,7 @@ class ServerRuntimeTests(ServerTestCase):
         forms = (Path(__file__).resolve().parents[1] / "public" / "forms.js").read_text(
             encoding="utf-8"
         )
+        views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(encoding="utf-8")
         navigation = (
             Path(__file__).resolve().parents[1] / "public" / "navigation.js"
         ).read_text(encoding="utf-8")
@@ -96,9 +97,9 @@ class ServerRuntimeTests(ServerTestCase):
         for segment in ("profile", "connections", "coach", "privacy", "operations"):
             self.assertIn(f'"more/{segment}"', navigation)
             self.assertIn(f'href="#more/{segment}"', index)
-        self.assertIn("function moreSegmentFromRoute(route = state.route)", navigation)
+        self.assertIn("function moreSegmentFromRoute(route = AppState.state.route)", navigation)
         self.assertIn(
-            "function renderMoreSegments(segment = moreSegmentFromRoute())", app
+            "function renderMoreSegments(segment)", views
         )
         self.assertIn('formData.getAll("sports")', app)
         self.assertNotIn("function collectCompetitions()", forms)

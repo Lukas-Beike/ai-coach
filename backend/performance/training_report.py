@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -14,14 +13,9 @@ from backend.activities.duplicates import (
 )
 from backend.activities.identity import intervals_activity_device_source
 from backend.athlete.local_date import iso_date_prefix
+from backend.athlete.measurements import number
 
 METHOD = "local-training-report-v1"
-
-
-def number(value: Any) -> float | None:
-    if type(value) not in {float, int} or not math.isfinite(value) or value < 0:
-        return None
-    return float(value)
 
 
 def canonical_rows(snapshot: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:

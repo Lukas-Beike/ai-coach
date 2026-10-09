@@ -10,6 +10,7 @@ do not prove the absence of runtime cycles or arbitrary computed imports.
 from __future__ import annotations
 
 import ast
+import json
 import unittest
 from collections import Counter
 from pathlib import Path
@@ -66,9 +67,6 @@ PERMITTED_IMPORTS_BY_LAYER = {
             "backend.runtime.clock",
             "backend.runtime.ports",
             "backend.runtime.socket_deadline",
-            "backend.calendar.markers",
-            "backend.weather.forecast",
-            "backend.weather.projection",
         }
     ),
     "http_api": DOMAIN_ROOTS | SHARED_ROOTS | {"backend.http_api", "backend.runtime"},
@@ -89,12 +87,10 @@ IMPORT_DEBT_BASELINE = frozenset(
         ("backend/http_api/library_page.py", "backend.db"),
         ("backend/http_api/public_plan.py", "backend.db.manager"),
         ("backend/http_api/public_state.py", "backend.db.manager"),
-        ("backend/http_api/public_state.py", "backend.providers.state"),
         ("backend/http_api/readiness.py", "backend.db.manager"),
         ("backend/http_api/readiness.py", "backend.db.schema"),
         ("backend/http_api/state_prelude.py", "backend.db.manager"),
         ("backend/http_api/state_versions.py", "backend.db"),
-        ("backend/http_api/transcribe_post.py", "backend.providers.audio"),
     }
 )
 
@@ -205,6 +201,52 @@ def _import_violations(root: Path) -> set[tuple[str, str]]:
     return violations
 
 
+def _package_import_edges(
+    root: Path, *, include_function_imports: bool = True
+) -> set[tuple[str, str]]:
+    modules = _module_names(root)
+    edges = set()
+    for path in sorted((root / "backend").rglob("*.py")):
+        source = _module_name(path, root)
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if not include_function_imports:
+
+            class ModuleImports(ast.NodeTransformer):
+                def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                    return None
+
+                def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+                    return None
+
+            tree = ModuleImports().visit(tree)
+        source_package = ".".join(source.split(".")[:2])
+        for target in _imports(
+            source, tree, modules, is_package=path.name == "__init__.py"
+        ):
+            target_package = ".".join(target.split(".")[:2])
+            if target.startswith("backend.") and source_package != target_package:
+                edges.add((source_package, target_package))
+    return edges
+
+
+def _package_import_cycles(edges: set[tuple[str, str]]) -> set[tuple[str, ...]]:
+    graph: dict[str, set[str]] = {}
+    for source, target in edges:
+        graph.setdefault(source, set()).add(target)
+    cycles: set[tuple[str, ...]] = set()
+
+    def visit(start: str, current: str, path: tuple[str, ...]) -> None:
+        for target in graph.get(current, set()):
+            if target == start:
+                cycles.add(path)
+            elif target > start and target not in path:
+                visit(start, target, (*path, target))
+
+    for source in sorted(graph):
+        visit(source, source, (source,))
+    return cycles
+
+
 def _execute_calls(tree: ast.AST, relative: str) -> Counter[tuple[str, str, str]]:
     """Collect every execute call regardless of receiver name or SQL spelling."""
     sites: Counter[tuple[str, str, str]] = Counter()
@@ -296,6 +338,57 @@ def _http_sql_literals(root: Path) -> list[tuple[str, str]]:
 
 
 class BackendLayerContractTests(unittest.TestCase):
+    def test_athlete_has_no_domain_package_dependencies(self) -> None:
+        self.assertEqual(
+            set(),
+            {
+                target
+                for source, target in _package_import_edges(REPOSITORY_ROOT)
+                if source == "backend.athlete" and target in DOMAIN_ROOTS
+            },
+        )
+
+    def test_package_import_cycles_match_shrinking_baseline(self) -> None:
+        baseline = json.loads(
+            (
+                Path(__file__).resolve().parent / "fixtures/package_import_cycles.json"
+            ).read_text(encoding="utf-8")
+        )
+        for mode, include_functions in (("module", False), ("all", True)):
+            with self.subTest(mode=mode):
+                cycles = _package_import_cycles(
+                    _package_import_edges(
+                        REPOSITORY_ROOT, include_function_imports=include_functions
+                    )
+                )
+                self.assertEqual(
+                    {tuple(cycle) for cycle in baseline[mode]},
+                    cycles,
+                    "Package imports must be cycle-free; shrink the explicit remaining cycle baseline when debt is resolved.",
+                )
+
+    def test_cycle_detection_includes_lazy_relative_and_type_only_imports(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sources = {
+                "backend/activities/read.py": "def load():\n    from ..performance import metrics\n",
+                "backend/performance/metrics.py": "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from backend.activities import read\n",
+            }
+            for relative, text in sources.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            self.assertEqual(
+                set(),
+                _package_import_cycles(
+                    _package_import_edges(root, include_function_imports=False)
+                ),
+            )
+            self.assertEqual(
+                {("backend.activities", "backend.performance")},
+                _package_import_cycles(_package_import_edges(root)),
+            )
+
     def test_backend_import_directions_match_pending_baseline(self) -> None:
         violations = _import_violations(REPOSITORY_ROOT)
         self.assertEqual(

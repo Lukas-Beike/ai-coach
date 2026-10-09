@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from backend.providers.audio import AudioTranscriptionClient
+from backend.runtime.ports import AudioTranscriber
 
 
 class TranscribePostRoutes:
     """Route audio uploads to the selected transcription provider."""
 
-    def __init__(self, audio_client: Callable[[], AudioTranscriptionClient]) -> None:
+    def __init__(self, audio_client: Callable[[], AudioTranscriber]) -> None:
         self._audio_client = audio_client
 
     def handle(self, handler: Any, path: str) -> bool:

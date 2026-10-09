@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.errors import AppError
-from backend.providers import openai as openai_provider
+from backend.providers.openai_responses import response_text
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -239,4 +239,4 @@ class NutritionPhotoExtractionService:
 
 
 def _openai_text(response: Any) -> str:
-    return openai_provider.response_text(response) if isinstance(response, dict) else ""
+    return response_text(response) if isinstance(response, dict) else ""

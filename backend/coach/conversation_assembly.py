@@ -19,7 +19,7 @@ from backend.coach.response_transport import CoachResponseTransport
 from backend.coach.streams import ChatStreamRegistry
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
-from backend.providers.openai import OpenAIResponsesClient
+from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.events import StateEventBuffer
 
 

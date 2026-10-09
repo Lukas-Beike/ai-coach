@@ -21,12 +21,11 @@ class ProviderHttpSettings:
     redact_text: Callable[[str], str]
     safe_response_headers: Callable[[Mapping[str, Any]], Mapping[str, str]]
     opener: Callable[[], Any]
+    provider_error_details: provider_http.ProviderErrorDetails | None = None
 
 
 @dataclass(frozen=True)
 class ProviderOperationContext:
-    provider_state: Callable[[], Any]
-    now: Callable[[], str]
     operation_context: Callable[[], Mapping[str, Any] | None]
 
 
@@ -58,12 +57,11 @@ class ProviderTransportAssembly:
         self._max_response_bytes = http.max_response_bytes
         self._logger = http.logger
         self._diagnostic_capture = http.diagnostic_capture
-        self._provider_state = operation.provider_state
         self._redact_text = http.redact_text
         self._safe_response_headers = http.safe_response_headers
-        self._now = operation.now
         self._operation_context = operation.operation_context
         self._opener = http.opener
+        self._provider_error_details = http.provider_error_details
         self._config = intervals.config
         self._athlete_now = intervals.athlete_now
         self._intervals_operation = intervals.operation
@@ -75,11 +73,10 @@ class ProviderTransportAssembly:
             self._max_response_bytes,
             self._logger,
             self._diagnostic_capture,
-            self._provider_state(),
             self._redact_text,
             self._safe_response_headers,
-            self._now,
             self._operation_context,
+            provider_error_details=self._provider_error_details,
             opener=self._opener(),
         )
 

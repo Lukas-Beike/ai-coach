@@ -2,8 +2,8 @@
 
 import unittest
 
-from backend.activities.target_snapshot import freeze_targets
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
+from backend.planning.target_snapshot import freeze_targets
 
 
 def ride(times=None):

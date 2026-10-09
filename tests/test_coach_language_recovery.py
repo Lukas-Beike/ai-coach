@@ -7,10 +7,10 @@ from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
 
+from backend.activities.workout_text import canonical_workout_zones, structured_steps
 from backend.coach.outcomes import coach_failure_lines
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.planning import workouts as planning_workouts
-from backend.planning.workout_text import canonical_workout_zones, structured_steps
 from backend.sync import queue as sync_queue
 
 

@@ -14,6 +14,7 @@ from backend.performance.report_service import (
     TrainingSeasonReadService,
 )
 from backend.performance.training_report import training_report
+from backend.planning.season_preparation import load_scenarios, season_preparation
 
 
 class TrainingReportTests(unittest.TestCase):
@@ -429,6 +430,7 @@ class TrainingReportTests(unittest.TestCase):
             read_checkins=list,
             read_feedback=list,
             today=lambda: date(2026, 10, 2),
+            load_scenarios=load_scenarios,
         )
         result = service.read({}, "Europe/Berlin")
         self.assertEqual("Europe/Berlin", result["timezone"])
@@ -450,6 +452,7 @@ class TrainingReportTests(unittest.TestCase):
             read_competitions=list,
             read_observations=list,
             today=lambda: date(2026, 10, 2),
+            season_preparation=season_preparation,
         )
         self.assertIsInstance(season.season("Europe/Berlin"), dict)
 

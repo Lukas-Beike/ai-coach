@@ -1397,6 +1397,16 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     ("backend.providers.state", ("ProviderStateService",)),
     (
+        "backend.calendar.ical_mapping",
+        (
+            "ical_training_impact",
+            "ical_training_relevant",
+            "ical_no_intensity",
+            "ical_short_only",
+            "calendar_event_constraints",
+        ),
+    ),
+    (
         "backend.providers.calendar",
         (
             "MAX_EXTERNAL_CALENDAR_BYTES",
@@ -1409,10 +1419,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "parse_ics_date",
             "unfold_ical",
             "ical_duration",
-            "ical_training_impact",
-            "ical_training_relevant",
-            "ical_no_intensity",
-            "ical_short_only",
             "parse_ical_calendar",
             "external_calendar_url",
             "fetch_calendar_feed",

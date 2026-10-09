@@ -8,8 +8,8 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.athlete.measurements import number
 from backend.errors import AppError
-from backend.performance.training_report import canonical_rows, number
 
 EQUIPMENT_PREFIX = "equipment:"
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
@@ -22,6 +22,7 @@ class EquipmentService:
         read_snapshot: Callable[[], dict[str, Any]],
         today: Callable[[], date],
         utc_now: Callable[[], str],
+        canonical_rows: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], int]],
     ):
         self._manager, self._read_snapshot, self._today, self._utc_now = (
             manager,
@@ -29,6 +30,7 @@ class EquipmentService:
             today,
             utc_now,
         )
+        self._canonical_rows = canonical_rows
 
     def _records(self, db: Any, prefix: str, limit: int) -> list[dict[str, Any]]:
         return [
@@ -40,7 +42,7 @@ class EquipmentService:
         ]
 
     def read(self, item_id: str | None = None) -> dict[str, Any]:
-        rows, duplicates = canonical_rows(self._read_snapshot() or {})
+        rows, duplicates = self._canonical_rows(self._read_snapshot() or {})
         with self._manager.unit_of_work() as db:
             garmin_row = db.execute(
                 "SELECT value FROM kv WHERE key='garmin_snapshot'"
@@ -210,7 +212,7 @@ class EquipmentService:
             "equipment_id",
         }:
             raise AppError(400, "Aktivität und Ausrüstung sind erforderlich.")
-        rows, _ = canonical_rows(self._read_snapshot() or {})
+        rows, _ = self._canonical_rows(self._read_snapshot() or {})
         row = next(
             (row for row in rows if str(row.get("id")) == str(payload["activity_id"])),
             None,

@@ -273,6 +273,9 @@ with patch.object(Path, 'read_text', deny):
             window_end=date(2026, 9, 10),
         )
         self.assertEqual(len(events), 1)
+        from backend.calendar.ical_mapping import calendar_event_constraints
+
+        events = [calendar_event_constraints(event) for event in events]
         self.assertTrue(events[0]["short_only"])
         self.assertEqual(
             planning_context.external_calendar_event_dates(

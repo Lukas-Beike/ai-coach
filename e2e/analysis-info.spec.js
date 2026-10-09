@@ -176,9 +176,9 @@ test("@responsive performance uses weekly last values and medians, keeps equal w
   const pace = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schwellenpace", exact: true }) });
   await pace.getByText("Werte ansehen", { exact: true }).click();
   await expect(pace.locator("tbody td:nth-child(2)")).toHaveText([/4:50 min\/km/, /4:50 min\/km/]);
-  await page.evaluate(async () => { await applyNavigationRoute("analysis/load", { historyMode: "replace" }); });
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/load", { historyMode: "replace" }); });
   await page.locator("#analysisLoadCharts").getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
-  await page.evaluate(async () => { await applyNavigationRoute("analysis/performance", { historyMode: "replace" }); });
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/performance", { historyMode: "replace" }); });
   await expect(ftp.locator("tbody tr")).toHaveCount(2);
 });
 
@@ -321,7 +321,7 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
   await expect(performance.getByRole("heading", { name: "Running Tolerance" })).toHaveCount(0);
   await expect(performance).not.toContainText("Garmin-Provider-Metriken");
   await expect(performance).not.toContainText("Rohfeld");
-  await page.evaluate(async () => { await applyNavigationRoute("analysis/recovery", { historyMode: "replace" }); });
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/recovery", { historyMode: "replace" }); });
   const recovery = page.locator("#personalRecovery");
   await expect(recovery).not.toContainText("Schlafdefizit");
   await expect(recovery).not.toContainText("Schlafregelm");

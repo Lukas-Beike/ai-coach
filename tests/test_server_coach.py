@@ -289,7 +289,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(result["activity_validation"]["activity"]["sport"], "Laufen")
 
         with self.assertRaises(server.AppError) as missing:
-            server.ATHLETE_DATA.activity_read().detail(
+            server.ACTIVITY_READS.activity_read().detail(
                 "activity-3",
                 garmin_snapshot=server.GARMIN_ASSEMBLY.payload_service().snapshot(),
                 profile=server.ATHLETE_DATA.profile().get(),

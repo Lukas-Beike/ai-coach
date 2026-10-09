@@ -63,6 +63,7 @@ from backend.performance.report_service import (
     TrainingReportServices,
     TrainingSeasonReadService,
 )
+from backend.planning.season_preparation import load_scenarios, season_preparation
 
 
 @dataclass(frozen=True)
@@ -438,6 +439,7 @@ class HttpApiAssembly:
                 read_checkins=report_checkins,
                 read_feedback=report_feedback,
                 today=local_today,
+                load_scenarios=load_scenarios,
             )
             return TrainingReportServices(
                 records=records,
@@ -455,6 +457,7 @@ class HttpApiAssembly:
                     read_competitions=lambda: competition_service().list(100),
                     read_observations=records.observations,
                     today=local_today,
+                    season_preparation=season_preparation,
                 ),
                 timezone=report_timezone,
             )

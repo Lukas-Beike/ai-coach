@@ -551,7 +551,7 @@ class ServerHttpTests(ServerTestCase):
                 ],
             }
         )
-        service = server.ATHLETE_DATA.activity_read()
+        service = server.ACTIVITY_READS.activity_read()
         first = service.page(limit=2, days=1, today=today)
         second = service.page(first["next_cursor"], 2, 1, today=today)
         third = service.page(second["next_cursor"], 2, 1, today=today)

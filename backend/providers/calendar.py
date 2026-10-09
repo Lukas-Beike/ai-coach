@@ -12,14 +12,13 @@ import ssl
 import time
 import uuid
 from collections.abc import Iterator
-from datetime import date, datetime, timedelta, timezone, tzinfo
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from http.client import HTTPResponse
 from itertools import chain
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from backend.calendar.markers import has_marker
 from backend.errors import UNSUPPORTED_BYDAY_ERROR, AppError
 from backend.runtime.socket_deadline import SocketDeadline
 
@@ -33,14 +32,6 @@ EXTERNAL_CALENDAR_WINDOW_DAYS = 56
 ICAL_MAX_RECURRENCE_COUNT = 1000
 ICAL_MAX_RECURRENCE_PERIODS = 10000
 ICAL_MAX_RAW_EVENTS = 10000
-ICAL_NO_TRAINING_MARKER = "[NO_TRAINING]"
-ICAL_NO_INTENSITY_MARKER = "[NO_INTENSITY]"
-ICAL_SHORT_ONLY_MARKER = "[SHORT_ONLY]"
-ICAL_TRAINING_MARKERS = (
-    ICAL_NO_TRAINING_MARKER,
-    ICAL_NO_INTENSITY_MARKER,
-    ICAL_SHORT_ONLY_MARKER,
-)
 ICAL_DAY_NUMBERS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
 
 
@@ -379,9 +370,7 @@ def _ical_temporal_value(
                 local_zone,
             ), True
         if value.endswith("Z"):
-            parsed = datetime.strptime(value[:-1], "%Y%m%dT%H%M%S").replace(
-                tzinfo=timezone.utc
-            )
+            parsed = datetime.strptime(value[:-1], "%Y%m%dT%H%M%S").replace(tzinfo=UTC)
         else:
             parsed = datetime.strptime(  # noqa: DTZ007
                 value, "%Y%m%dT%H%M" if len(value) == 13 else "%Y%m%dT%H%M%S"
@@ -393,46 +382,11 @@ def _ical_temporal_value(
                     if name
                     else parsed.replace(tzinfo=local_zone)
                 )
-            except (ZoneInfoNotFoundError, ValueError):
+            except ZoneInfoNotFoundError, ValueError:
                 parsed = parsed.replace(tzinfo=local_zone)
         return parsed.astimezone(local_zone), False
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
-
-
-def _ical_description_contains(description: Any, marker: str) -> bool:
-    return has_marker(description, marker)
-
-
-def _ical_marker_text(description: Any, name: Any = "") -> str:
-    return f"{name or ''} {description or ''}"
-
-
-def ical_training_impact(description: Any, name: Any = "") -> bool:
-    text = _ical_marker_text(description, name)
-    return any(
-        _ical_description_contains(text, marker) for marker in ICAL_TRAINING_MARKERS
-    )
-
-
-def ical_training_relevant(description: Any, name: Any = "") -> bool:
-    description_text = str(description or "").strip()
-    marker_text = _ical_marker_text(description, name)
-    return bool(description_text) and not _ical_description_contains(
-        marker_text, ICAL_NO_TRAINING_MARKER
-    )
-
-
-def ical_no_intensity(description: Any, name: Any = "") -> bool:
-    return _ical_description_contains(
-        _ical_marker_text(description, name), ICAL_NO_INTENSITY_MARKER
-    )
-
-
-def ical_short_only(description: Any, name: Any = "") -> bool:
-    return _ical_description_contains(
-        _ical_marker_text(description, name), ICAL_SHORT_ONLY_MARKER
-    )
 
 
 def _ical_rule_values(raw: str) -> dict[str, str]:
@@ -897,20 +851,7 @@ def _ical_instances(
             "end_local": end.isoformat(),
             "duration_minutes": max(1, round(duration.total_seconds() / 60)),
             "all_day": bool(event.get("all_day")),
-            "training_impact": ical_training_impact(
-                event.get("description"), event.get("name")
-            ),
-            "training_relevant": ical_training_relevant(
-                event.get("description"), event.get("name")
-            ),
-            "no_training": _ical_description_contains(
-                _ical_marker_text(event.get("description"), event.get("name")),
-                ICAL_NO_TRAINING_MARKER,
-            ),
-            "no_intensity": ical_no_intensity(
-                event.get("description"), event.get("name")
-            ),
-            "short_only": ical_short_only(event.get("description"), event.get("name")),
+            "description": event.get("description"),
         }
 
 

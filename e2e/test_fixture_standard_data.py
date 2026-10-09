@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+from backend.calendar.ical_mapping import calendar_event_constraints
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.performance.body import body_history
 from backend.performance.daily_health import garmin_daily_expenditure
@@ -89,6 +90,8 @@ class StandardFixtureDataTests(unittest.TestCase):
             window_start=self.today,
             window_end=self.today + timedelta(days=56),
         )
+        events = [calendar_event_constraints(event) for event in events]
+        self.assertTrue(all("description" not in event for event in events))
         by_uid = {}
         for event in events:
             by_uid.setdefault(event["uid"], []).append(event)

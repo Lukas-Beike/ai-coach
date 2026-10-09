@@ -7,9 +7,9 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
-from backend.activities.read_service import ActivityReadService
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.errors import AppError
+from backend.performance.activity_read_service import ActivityAnalysisReadService
 
 
 class CoachActivityReadToolServiceTests(unittest.TestCase):
@@ -140,7 +140,11 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         }
         feedback = Mock()
         feedback.list.return_value = []
-        activity_read = ActivityReadService(manager, snapshot_repository, feedback)
+        activity_read = ActivityAnalysisReadService(
+            manager,
+            snapshot_repository,
+            feedback,
+        )
         garmin_snapshot = {"recent_wellness": []}
         profile_value = {"weight_kg": "70"}
         garmin = Mock(snapshot=Mock(return_value=garmin_snapshot))

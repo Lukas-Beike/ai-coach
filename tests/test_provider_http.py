@@ -1,12 +1,16 @@
+import ast
 import threading
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.error import HTTPError
 
+import backend.providers.http as http_module
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.providers.http import (
     JsonHttpClient,
+    JsonHttpClientCache,
     JsonResponse,
     ProviderInvalidResponse,
     ProviderRequestCancelled,
@@ -22,6 +26,7 @@ from backend.providers.http import (
     request_body,
     request_json,
 )
+from backend.providers.openai_error_classifier import OpenAIErrorClassifier
 
 
 class _CallLogger:
@@ -91,20 +96,22 @@ class ProviderHTTPTests(unittest.TestCase):
     def _client(
         self, opener, *, state=None, max_bytes=100, redact=None, operation_context=None
     ):
+        active_state = state or _ProviderState()
         return JsonHttpClient(
             "1.2.3",
             max_bytes,
             self.logger,
             self.capture,
-            state or _ProviderState(),
             redact or (lambda value: str(value).replace("secret", "[REDACTED]")),
             lambda headers: {
                 str(key).casefold(): str(value)
                 for key, value in (headers or {}).items()
                 if str(key).casefold() in {"content-type", "retry-after"}
             },
-            lambda: "2026-09-19T00:00:00+00:00",
             operation_context or (lambda: {"operation_id": "op-1", "trigger": "test"}),
+            provider_error_details=OpenAIErrorClassifier(
+                lambda: active_state, lambda: "2026-09-19T00:00:00+00:00"
+            ),
             opener=opener,
             monotonic=lambda: 1.0,
         )
@@ -144,6 +151,31 @@ class ProviderHTTPTests(unittest.TestCase):
             [record[2]["extra"]["event"] for record in self.logger.records],
             ["external_request_started", "external_request_completed"],
         )
+
+    def test_json_http_client_cache_uses_null_classifier_by_default(self):
+        cache = JsonHttpClientCache()
+        first = cache.get(
+            "1.2.3",
+            100,
+            self.logger,
+            self.capture,
+            str,
+            lambda headers: headers,
+            lambda: {"operation_id": "op-1", "trigger": "test"},
+            opener=lambda _request, *, timeout: _JSONResponse(b"{}"),
+        )
+        second = cache.get(
+            "1.2.3",
+            100,
+            self.logger,
+            self.capture,
+            str,
+            lambda headers: headers,
+            lambda: {"operation_id": "op-1", "trigger": "test"},
+            opener=lambda _request, *, timeout: _JSONResponse(b"{}"),
+        )
+
+        self.assertIs(first, second)
 
     def test_json_http_client_reads_current_operation_context_for_each_request(self):
         context = {"operation_id": "op-1", "trigger": "first"}
@@ -197,6 +229,20 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertIn(("rate_limits", error.headers), state.calls)
         self.assertNotIn("secret provider text", repr(self.logger.records))
         self.assertNotIn("payload", repr(self.capture.entries))
+
+    def test_shared_transport_does_not_import_a_concrete_provider(self):
+        transport_path = Path(http_module.__file__).resolve()
+        tree = ast.parse(transport_path.read_text(encoding="utf-8"))
+        imported_modules = {
+            node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+        }
+        imported_modules.update(
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        )
+        self.assertFalse(any("providers.openai" in name for name in imported_modules))
 
     def test_json_http_client_classifies_intervals_http_errors(self):
         intervals_body = _JSONResponse(

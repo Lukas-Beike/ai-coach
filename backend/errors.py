@@ -42,23 +42,48 @@ class AppError(Exception):
         self.retry_after_seconds: int | None = retry_after_seconds
 
 
+def upstream_public_status(upstream_status: int) -> tuple[int, str]:
+    """Map an upstream status to the stable public status and reason."""
+    if upstream_status in {401, 403}:
+        return 502, "upstream_auth"
+    if upstream_status == 404:
+        return 502, "upstream_not_found"
+    if upstream_status == 429:
+        return 429, "upstream_rate_limited"
+    if upstream_status == 408 or upstream_status >= 500:
+        return 503, "upstream_unavailable"
+    return 502, "upstream_rejected"
+
+
 def public_error_contract(error: AppError) -> tuple[int, str]:
     """Resolve the public HTTP status and reason for an application error."""
     if error.upstream_status is not None:
-        upstream_status = error.upstream_status
-        if upstream_status in {401, 403}:
-            return 502, "upstream_auth"
-        if upstream_status == 404:
-            return 502, "upstream_not_found"
-        if upstream_status == 429:
-            return 429, "upstream_rate_limited"
-        if upstream_status == 408 or upstream_status >= 500:
-            return 503, "upstream_unavailable"
-        return 502, "upstream_rejected"
+        return upstream_public_status(error.upstream_status)
     reason = error.reason or "request_failed"
     if not re.fullmatch(r"[a-z0-9_]{1,80}", reason):
         reason = "request_failed"
     return error.status, reason
+
+
+class ProviderErrorClassifier:
+    """Map normalized upstream failure metadata to the application contract."""
+
+    @staticmethod
+    def classify_upstream(
+        message: str,
+        *,
+        upstream_status: int,
+        reason: str,
+        retry_after_seconds: int | None = None,
+    ) -> AppError:
+        status, _ = upstream_public_status(upstream_status)
+        return AppError(
+            status,
+            message,
+            reason=reason,
+            upstream_status=upstream_status,
+            retry_after_seconds=retry_after_seconds,
+        )
 
 
 def public_error_payload(

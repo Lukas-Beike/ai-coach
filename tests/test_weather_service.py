@@ -2,7 +2,7 @@ import json
 import sqlite3
 import unittest
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from unittest.mock import Mock
 
 from backend.athlete.profile import ProfileService
@@ -116,7 +116,6 @@ class Logger:
 
 
 class WeatherServiceTests(unittest.TestCase):
-
     def test_weather_assembly_keeps_provider_and_database_dependencies_lazy(self):
         callbacks = [Mock() for _ in range(8)]
         (
@@ -130,24 +129,28 @@ class WeatherServiceTests(unittest.TestCase):
             preview,
         ) = callbacks
         observer = Mock()
-        assembly = WeatherAssembly(dependencies=WeatherAssembly.Inputs(
-            state=WeatherStateOwners(manager, Mock(), profile),
-            provider=WeatherProviderRuntime(client, tracker, Mock(), operation_id),
-            sync=WeatherSyncRuntime(
-                MaintenanceGate(), now, today, preview, observer, Mock()
-            ),
-        ))
+        assembly = WeatherAssembly(
+            dependencies=WeatherAssembly.Inputs(
+                state=WeatherStateOwners(manager, Mock(), profile),
+                provider=WeatherProviderRuntime(client, tracker, Mock(), operation_id),
+                sync=WeatherSyncRuntime(
+                    MaintenanceGate(), now, today, preview, observer, Mock(), Mock()
+                ),
+            )
+        )
 
         self.assertIsNotNone(assembly)
         for callback in (*callbacks, observer):
             callback.assert_not_called()
+
     def setUp(self):
         self.manager = DatabaseManager()
         self.addCleanup(self.manager.connection.close)
-        self.now = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
+        self.now = datetime(2026, 9, 20, 12, tzinfo=UTC)
         self.key_values = KeyValueRepository(lambda: self.now.isoformat())
         self.profile = ProfileService(
-            self.manager, ProfileRepository(self.key_values), self.key_values
+            self.manager, ProfileRepository(self.key_values), self.key_values,
+            on_location_changed=cache.invalidate_for_location_change,
         )
         self.profile.save({"weather_location": "Berlin"})
         self.tracker = Tracker(self.manager.connection)
