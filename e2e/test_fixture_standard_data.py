@@ -449,6 +449,125 @@ class StandardFixtureDataTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 499)
         self.assertEqual(raised.exception.reason, "chat_cancelled")
 
+    def test_auto_seeded_restarts_and_explicit_seeds_keep_data_stable(self):
+        server = fixture_runtime.server
+        original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)
+
+        def counts():
+            with server.database_manager().unit_of_work() as db:
+                snapshot = json.loads(server.SNAPSHOT_REPOSITORY.latest_payload(db))
+                equipment_keys = db.execute(
+                    "SELECT COUNT(*) AS count FROM kv WHERE key LIKE 'equipment%'"
+                ).fetchone()["count"]
+            competitions = server.PLANNING_DATA.competition().list(100)
+            return {
+                "activities": len(snapshot["recent_activities"]),
+                "competitions": len(competitions),
+                "cycling_targets": sum(
+                    item["name"] == "Fixture cycling target" for item in competitions
+                ),
+                "units": len(server.PLANNING_DATA.planned_unit().list(500)),
+                "equipment_keys": equipment_keys,
+            }
+
+        with TemporaryDirectory(prefix="fixture-restart-test-") as directory:
+            root = Path(directory)
+            try:
+                DATABASE_MANAGER_CACHE.reset()
+                server.CONFIG = replace(server.CONFIG, app_password="")
+                server.DATA_DIR = root
+                server.DB_PATH = root / "fixture.db"
+                server.LOG_PATH = root / "fixture.log"
+                with patch.dict("os.environ", {"FIXTURE_AUTO_SEED": "1"}):
+                    fixture_runtime.initialise_fixture()
+                    first = counts()
+                    fixture_runtime.initialise_fixture()
+                    restarted = counts()
+                demo_ids = self._snapshot_activity_ids(server)
+
+                fixture_runtime.seed_training_features()
+                fixture_runtime.seed_training_features()
+                features = counts()
+                feature_ids = self._snapshot_activity_ids(server)
+            finally:
+                DATABASE_MANAGER_CACHE.reset()
+                server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH = (
+                    original
+                )
+
+        self.assertEqual(restarted, first)
+        self.assertEqual(first["cycling_targets"], 1)
+        self.assertEqual(features["cycling_targets"], 1)
+        self.assertEqual(features["competitions"], first["competitions"])
+        self.assertEqual(features["units"], first["units"])
+        self.assertEqual(feature_ids, demo_ids)
+
+    def test_explicit_activity_seed_merges_into_existing_snapshot(self):
+        server = fixture_runtime.server
+        existing = {
+            "id": "existing-1",
+            "name": "Existing ride",
+            "start_date_local": "2026-10-01T08:00:00",
+        }
+        snapshot = {
+            "synced_at": "synthetic",
+            "athlete": {},
+            "recent_wellness": [{"id": "2026-10-01"}],
+            "recent_activities": [existing, {"id": "feature-ride-1", "name": "Old"}],
+            "raw_provider_data": {"activities": [existing]},
+        }
+        saved = []
+        unit_of_work = Mock()
+        unit_of_work.return_value.__enter__ = Mock(return_value=object())
+        unit_of_work.return_value.__exit__ = Mock(return_value=False)
+        with (
+            patch.object(
+                server,
+                "database_manager",
+                return_value=Mock(unit_of_work=unit_of_work),
+            ),
+            patch.object(
+                server.runtime_clock, "utc_now", return_value="synthetic-merge"
+            ),
+            patch.object(
+                server.SNAPSHOT_REPOSITORY,
+                "latest_payload",
+                return_value=json.dumps(snapshot),
+            ),
+            patch.object(
+                server.SNAPSHOT_REPOSITORY,
+                "save",
+                side_effect=lambda _db, value, _at: saved.append(value),
+            ),
+        ):
+            fixture_runtime._merge_snapshot_activities(
+                [
+                    {
+                        "id": "feature-ride-1",
+                        "name": "New",
+                        "start_date_local": "2026-10-06T08:00:00",
+                    }
+                ]
+            )
+
+        merged = saved[0]
+        self.assertEqual(
+            [item["id"] for item in merged["recent_activities"]],
+            ["feature-ride-1", "existing-1"],
+        )
+        self.assertEqual(merged["recent_activities"][0]["name"], "New")
+        self.assertEqual(
+            merged["raw_provider_data"]["activities"], merged["recent_activities"]
+        )
+        self.assertEqual(merged["recent_wellness"], [{"id": "2026-10-01"}])
+        self.assertEqual(merged["synced_at"], "synthetic-merge")
+
+    @staticmethod
+    def _snapshot_activity_ids(server):
+        with server.database_manager().unit_of_work() as db:
+            snapshot = json.loads(server.SNAPSHOT_REPOSITORY.latest_payload(db))
+        return sorted(str(item["id"]) for item in snapshot["recent_activities"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
 FIXTURE_DEMO_SEED_VERSION = "5"
+FIXTURE_TRAINING_FEATURES_SEED_VERSION = "1"
 
 # This file is mounted only in disposable test containers, never normal startup.
 os.environ.update(
@@ -401,10 +402,9 @@ def stage_fixture_artifact():
 
 def initialise_fixture():
     initialise()
-    # Opt-in standard data: the demo container seeds itself on every start.
-    # Both seeds are idempotent and versioned, so restarts are safe.
+    # Opt-in standard data for the demo container. The demo seed is versioned
+    # and seeds the training features once, so restarts leave the data as-is.
     if os.environ.get("FIXTURE_AUTO_SEED") == "1":
-        seed_training_features()
         seed_preview_demo()
 
 
@@ -436,6 +436,68 @@ def demo_performance_history(today):
             }
         )
     return history
+
+
+def _merge_snapshot_activities(activities, wellness=None):
+    """Upsert fixture activities into the latest snapshot without dropping others."""
+    with server.database_manager().unit_of_work() as db:
+        payload = server.SNAPSHOT_REPOSITORY.latest_payload(db)
+        snapshot = json.loads(payload) if payload else {"athlete": {}}
+        by_id = {
+            str(item.get("id")): item
+            for item in snapshot.get("recent_activities") or []
+            if isinstance(item, dict)
+        }
+        by_id.update({str(item["id"]): item for item in activities})
+        merged = sorted(
+            by_id.values(),
+            key=lambda item: str(item.get("start_date_local") or ""),
+            reverse=True,
+        )
+        raw = (
+            snapshot.get("raw_provider_data")
+            if isinstance(snapshot.get("raw_provider_data"), dict)
+            else {}
+        )
+        snapshot["recent_activities"] = merged
+        snapshot["raw_provider_data"] = {**raw, "activities": merged}
+        if wellness is not None:
+            snapshot["recent_wellness"] = wellness
+            snapshot["raw_provider_data"]["wellness"] = wellness
+        snapshot.setdefault("recent_wellness", [])
+        snapshot["synced_at"] = server.runtime_clock.utc_now()
+        server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
+    return snapshot
+
+
+def _fixture_cycling_target(event_date):
+    """Keep exactly one dated cycling target instead of adding one per seed."""
+    target = {
+        "name": "Fixture cycling target",
+        "event_date": event_date.isoformat(),
+        "sport": "Ride",
+        "priority": "A",
+    }
+    existing = next(
+        (
+            item
+            for item in server.PLANNING_DATA.competition().list(100)
+            if item.get("name") == target["name"]
+        ),
+        None,
+    )
+    if existing is None:
+        server.PLANNING_DATA.competition().save(target)
+    elif existing.get("event_date") != target["event_date"]:
+        server.PLANNING_DATA.competition().save({**target, "id": existing["id"]})
+
+
+def ensure_training_features():
+    """Seed the training features once per seed version."""
+    with server.database_manager().unit_of_work() as db:
+        version = server.KEY_VALUE_REPOSITORY.get(db, "training_features_seed_version")
+    if version != FIXTURE_TRAINING_FEATURES_SEED_VERSION:
+        seed_training_features()
 
 
 def seed_training_features():
@@ -508,18 +570,13 @@ def seed_training_features():
                     "icu_training_load": 30,
                 }
             )
-    snapshot = {
-        "synced_at": server.runtime_clock.utc_now(),
-        "athlete": {},
-        "recent_wellness": wellness,
-        "recent_activities": rows,
-        "raw_provider_data": {"activities": rows, "wellness": wellness},
-    }
+    snapshot = _merge_snapshot_activities(rows, wellness)
     with server.database_manager().unit_of_work() as db:
+        # Explicit feature seeding resets local equipment so the panels start
+        # from the one synthetic bike below.
         db.execute(
             "DELETE FROM kv WHERE key LIKE 'equipment:%' OR key LIKE 'equipment_assignment:%' OR key LIKE 'equipment_maintenance:%' OR key = 'garmin_equipment_initialized'"
         )
-        server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
         garmin_full = _fixture_demo_garmin(
             now.date(), demo_performance_history(now.date())
         )
@@ -620,14 +677,7 @@ def seed_training_features():
     server.ATHLETE_DATA.equipment().assign(
         {"activity_id": "feature-ride-1", "equipment_id": equipment["id"]}
     )
-    server.PLANNING_DATA.competition().save(
-        {
-            "name": "Fixture cycling target",
-            "event_date": (now.date() + timedelta(days=30)).isoformat(),
-            "sport": "Ride",
-            "priority": "A",
-        }
-    )
+    _fixture_cycling_target(now.date() + timedelta(days=30))
     units = server.PLANNING_DATA.planned_unit().list(500)
     planned = next(
         (unit for unit in units if unit.get("name") == "Fixture fueling ride"), None
@@ -646,6 +696,10 @@ def seed_training_features():
                 }
             ]
         )[0]
+    with server.database_manager().unit_of_work() as db:
+        server.KEY_VALUE_REPOSITORY.set(
+            db, "training_features_seed_version", FIXTURE_TRAINING_FEATURES_SEED_VERSION
+        )
     return {"planned_unit_id": planned["id"], "equipment_id": equipment["id"]}
 
 
@@ -1448,7 +1502,7 @@ def seed_preview_demo():
             return {"ready": True}
     if legacy_seeded or version:
         return _upgrade_preview_demo(server.ATHLETE_CLOCK.now().date())
-    seed_training_features()
+    ensure_training_features()
     today = server.ATHLETE_CLOCK.now().date()
     server.ATHLETE_DATA.profile().save(
         {
@@ -1600,15 +1654,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 "distance": 25000,
                 "icu_training_load": 50,
             }
-            snapshot = {
-                "synced_at": datetime.now(timezone.utc).isoformat(),
-                "athlete": {},
-                "recent_wellness": [],
-                "recent_activities": [activity],
-                "raw_provider_data": {"activities": [activity]},
-            }
-            with server.database_manager().unit_of_work() as db:
-                server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
+            _merge_snapshot_activities([activity])
             detailed = {
                 **activity,
                 "icu_ftp": 250,

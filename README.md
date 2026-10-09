@@ -613,8 +613,11 @@ Use a fresh fixture browser profile and check the mobile-small and mobile
 projects when reviewing this preview.
 
 `scripts/demo-container.ps1` builds the image and starts a disposable demo
-container that seeds this data itself on every start (`FIXTURE_AUTO_SEED=1`;
-idempotent). Run it with
+container that seeds this data itself on every start (`FIXTURE_AUTO_SEED=1`).
+Restarts keep the seeded data unchanged, including with `-Persist`; the
+explicit `GET /api/fixture/features` and `GET /api/fixture/activity` test seeds
+add their synthetic activities to the existing snapshot instead of replacing
+it. Run it with
 `powershell -ExecutionPolicy Bypass -File scripts/demo-container.ps1`; add
 `-Persist` to keep the data in a named volume and `-Port`/`-Name` to adjust the
 container. The login password is the fixture password
