@@ -201,10 +201,14 @@ async function deletePrivacyData() {
       `${(preview.remote_untouched || []).join("\n")}\n\n` +
       `${preview.openai_conversation || "Eine vorhandene OpenAI-Konversation wird separat behandelt."}\n\n` +
       "Erstelle bei Bedarf vorher ein verschlüsseltes Backup oder einen Export. Dieser Schritt kann nicht rückgängig gemacht werden.";
+    // The backend preview is the single source of the required text; fail closed without it.
+    if (!preview.confirmation_text) throw new Error("Die Löschbestätigung ist derzeit nicht verfügbar.");
     const confirmation = await requestConfirmation(scope, {
       title: "Lokale Daten endgültig löschen?",
       inputLabel: "Bestätigungstext",
       expectedText: preview.confirmation_text,
+      confirmLabel: "Endgültig löschen",
+      secondaryAction: { label: "Erst Backup erstellen", onClick: downloadDatabaseBackup },
     });
     if (!confirmation) return;
     const result = await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: confirmation }) });

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
 from backend.errors import AppError
@@ -66,6 +68,43 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
         dependencies.maintenance_gate.restore.assert_called_once_with()
         self.assertEqual(dependencies.database_manager.unit_of_work.call_count, 2)
         dependencies.planning_revision_service.mark_reset_pending.assert_called_once_with()
+
+
+class PrivacyDeleteDialogTextContractTests(unittest.TestCase):
+    """The dialog must show the exact text the backend requires."""
+
+    REPO_ROOT = Path(__file__).resolve().parents[1]
+
+    def test_settings_dialog_shows_the_backend_confirmation_constant(self) -> None:
+        privacy_source = (self.REPO_ROOT / "backend" / "privacy.py").read_text(
+            encoding="utf-8"
+        )
+        settings_source = (self.REPO_ROOT / "public" / "settings.js").read_text(
+            encoding="utf-8"
+        )
+
+        match = re.search(
+            r'^PRIVACY_DELETE_CONFIRMATION_TEXT = "([^"]+)"$',
+            privacy_source,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(1), "LOKALE DATEN LÖSCHEN")
+        self.assertIn(
+            '"confirmation_text": PRIVACY_DELETE_CONFIRMATION_TEXT',
+            privacy_source,
+        )
+        # settings.js takes the required text from the preview, so the dialog
+        # cannot drift from the backend constant.
+        self.assertIn("expectedText: preview.confirmation_text", settings_source)
+        self.assertIn(
+            'api("/api/privacy/delete/preview")',
+            settings_source,
+        )
+        self.assertIn(
+            'secondaryAction: { label: "Erst Backup erstellen", onClick: downloadDatabaseBackup }',
+            settings_source,
+        )
 
 
 if __name__ == "__main__":

@@ -62,23 +62,55 @@ function showLogin() {
 
 let confirmationResolver = null;
 
-function requestConfirmation(message, { title = "Aktion bestätigen", inputLabel = "", expectedText = "" } = {}) {
+// Keeps the confirm button disabled until the typed text matches exactly.
+function syncConfirmationAcceptState() {
+  const dialog = $("#confirmationDialog");
+  const input = $("#confirmationDialogInput");
+  const acceptButton = $("#confirmationDialogAccept");
+  if (!dialog || !input || !acceptButton) return;
+  const expectedText = dialog.dataset.expectedText || "";
+  acceptButton.disabled = Boolean(expectedText) && input.value !== expectedText;
+}
+
+function requestConfirmation(message, {
+  title = "Aktion bestätigen",
+  inputLabel = "",
+  expectedText = "",
+  confirmLabel = "Bestätigen",
+  secondaryAction = null,
+} = {}) {
   const dialog = $("#confirmationDialog");
   const form = $("#confirmationDialogForm");
   const messageNode = $("#confirmationDialogMessage");
   const titleNode = $("#confirmationDialogTitle");
   const inputLabelNode = $("#confirmationDialogInputLabel");
   const input = $("#confirmationDialogInput");
-  if (!dialog || !form || !messageNode || !titleNode || !inputLabelNode || !input) return Promise.resolve(false);
+  const expectedNode = $("#confirmationDialogExpected");
+  const acceptButton = $("#confirmationDialogAccept");
+  const secondaryButton = $("#confirmationDialogSecondary");
+  if (!dialog || !form || !messageNode || !titleNode || !inputLabelNode || !input || !expectedNode || !acceptButton || !secondaryButton) {
+    return Promise.resolve(false);
+  }
   if (confirmationResolver) confirmationResolver(false);
   dialog.dataset.expectedText = expectedText;
   titleNode.textContent = title;
   messageNode.textContent = message;
+  expectedNode.hidden = !expectedText;
+  expectedNode.textContent = expectedText ? `Tippe „${expectedText}“ zur Bestätigung.` : "";
+  if (expectedText) input.setAttribute("aria-describedby", expectedNode.id);
+  else input.removeAttribute("aria-describedby");
   inputLabelNode.hidden = !expectedText;
   inputLabelNode.firstChild.textContent = inputLabel || "Bestätigungstext";
   input.value = "";
   input.required = Boolean(expectedText);
   input.setCustomValidity("");
+  input.oninput = syncConfirmationAcceptState;
+  acceptButton.textContent = confirmLabel;
+  // The secondary action never settles the confirmation; the dialog stays open.
+  secondaryButton.hidden = !secondaryAction;
+  secondaryButton.textContent = secondaryAction?.label || "";
+  secondaryButton.onclick = secondaryAction ? () => { void secondaryAction.onClick(); } : null;
+  syncConfirmationAcceptState();
   return new Promise((resolve) => {
     confirmationResolver = resolve;
     showAccessibleDialog(dialog, expectedText ? input : $("#confirmationDialogCancel"));

@@ -433,10 +433,12 @@
       <span class="eyebrow">BESTÄTIGUNG</span>
       <h2 id="confirmationDialogTitle">Aktion bestätigen</h2>
       <p id="confirmationDialogMessage"></p>
+      <p id="confirmationDialogExpected" class="fine-print" hidden></p>
       <label id="confirmationDialogInputLabel" for="confirmationDialogInput" hidden>Bestätigungstext
         <input id="confirmationDialogInput" type="text" autocomplete="off">
       </label>
       <div class="dialog-actions">
+        <button type="button" id="confirmationDialogSecondary" class="secondary-button" hidden></button>
         <button type="button" id="confirmationDialogCancel" class="secondary-button">Abbrechen</button>
         <button type="submit" id="confirmationDialogAccept" class="adaptive-planning-button">Bestätigen</button>
       </div>
@@ -462,7 +464,7 @@
   <script src="/diagnostics.js?v=1" defer></script>
   <script src="/state-loader.js?v=1" defer></script>
   <script src="/sync-actions.js?v=1" defer></script>
-  <script src="/settings.js?v=1" defer></script>
+  <script src="/settings.js?v=2" defer></script>
   <script src="/app.js?v=276" defer></script>
 </body>
 </html>
