@@ -1,6 +1,6 @@
 import unittest
 
-from backend.performance.workout_profile import planned_profile, recorded_profile
+from backend.activities.workout_profile import planned_profile, recorded_profile
 
 
 class WorkoutProfileTests(unittest.TestCase):

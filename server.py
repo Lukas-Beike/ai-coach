@@ -16,11 +16,6 @@ from pathlib import Path
 
 from backend import config as app_config
 from backend import observability
-from backend.athlete.assembly import (
-    AthleteDataAssembly,
-    AthleteRepositories,
-    AthleteRuntime,
-)
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -173,6 +168,7 @@ from backend.history.assembly import (
     HistoryPlanningServices,
 )
 from backend.http_api import server as http_server
+from backend.http_api.activity_assembly import ActivityReadAssembly
 from backend.http_api.assembly import (
     HttpApiAssembly,
     HttpAthleteServices,
@@ -199,6 +195,11 @@ from backend.http_api.assembly import (
     HttpRequestBodyLimits,
     HttpResponseServices,
     HttpSyncServices,
+)
+from backend.http_api.athlete_assembly import (
+    AthleteDataAssembly,
+    AthleteRepositories,
+    AthleteRuntime,
 )
 from backend.http_api.auth import (
     SessionAuthService,
@@ -276,6 +277,7 @@ from backend.providers.model_assembly import (
     ModelTransportAssembly,
     ModelTransportClock,
 )
+from backend.providers.openai_error_classifier import OpenAIErrorClassifier
 from backend.providers.transport_assembly import (
     IntervalsTransportSettings,
     ProviderHttpSettings,
@@ -387,6 +389,7 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutSyncAssembly,
 )
 from backend.sync.snapshot_reader import SnapshotRepositoryReader
+from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
 from backend.weather.assembly import (
@@ -589,6 +592,12 @@ ATHLETE_DATA = AthleteDataAssembly(
 )
 ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
     database_manager_runtime.DATABASE_MANAGER_CACHE
+)
+ACTIVITY_READS = ActivityReadAssembly(
+    database_manager,
+    SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+    ATHLETE_DATA.activity_feedback,
+    lambda: ATHLETE_DATA.equipment().read(),
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
@@ -955,17 +964,11 @@ PROVIDER_TRANSPORT = ProviderTransportAssembly(
                 observability.safe_response_headers, redact=REDACTOR.redact_text
             ),
             opener=lambda: provider_http.urlopen,
+            provider_error_details=OpenAIErrorClassifier(
+                provider_state_service, runtime_clock.utc_now
+            ),
         ),
         operation=ProviderOperationContext(
-            provider_state=lambda: provider_state.get_provider_state_service(
-                database_manager(),
-                KEY_VALUE_REPOSITORY,
-                DB_LOCK,
-                runtime_clock.utc_now,
-                lambda: ATHLETE_CLOCK.now().date(),
-                LOGGER,
-            ),
-            now=runtime_clock.utc_now,
             operation_context=sync_observation.operation_context,
         ),
         intervals=IntervalsTransportSettings(
@@ -1147,16 +1150,18 @@ WEATHER_ASSEMBLY = WeatherAssembly(
             profile_service=ATHLETE_DATA.profile,
         ),
         provider=WeatherProviderRuntime(
-            client_factory=lambda: weather_provider.WeatherClient(
+            client_factory=lambda forecast_days: weather_provider.WeatherClient(
                 PROVIDER_TRANSPORT.json_http_client().request,
                 runtime_clock.utc_now,
                 LOGGER,
+                forecast_days=forecast_days,
             ),
             refresh_tracker=PROVIDER_SYNC.refresh_tracker,
             operation_context=sync_observation.OPERATION_CONTEXT,
             operation_id_factory=lambda: uuid.uuid4().hex,
         ),
         sync=WeatherSyncRuntime(
+            service_factory=WeatherSyncService,
             maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
             now=lambda: datetime.now(UTC),
             today=lambda: ATHLETE_CLOCK.now().date(),
@@ -1213,7 +1218,7 @@ COACH_CONTEXT = CoachContextAssembly(
 COACH_READ_TOOLS = CoachReadToolsAssembly(
     dependencies=CoachReadToolsAssembly.Inputs(
         activity=CoachActivityReadSources(
-            activity_read_service=ATHLETE_DATA.activity_read,
+            activity_read_service=ACTIVITY_READS.activity_read,
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             profile_service=ATHLETE_DATA.profile,
             today=lambda: ATHLETE_CLOCK.now().date(),
@@ -1811,7 +1816,7 @@ HTTP_API = HttpApiAssembly(
             athlete=HttpAthleteServices(
                 profile=ATHLETE_DATA.profile,
                 competition=PLANNING_DATA.competition,
-                activity_read=ATHLETE_DATA.activity_read,
+                activity_read=ACTIVITY_READS.activity_read,
                 equipment=ATHLETE_DATA.equipment,
                 activity_feedback=ATHLETE_DATA.activity_feedback,
                 checkin=ATHLETE_DATA.checkin,

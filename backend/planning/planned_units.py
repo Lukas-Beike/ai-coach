@@ -7,6 +7,7 @@ import uuid
 from datetime import date
 from typing import Any
 
+from backend.activities.workout_text import canonical_workout_zones
 from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
@@ -16,7 +17,6 @@ from backend.errors import (
 )
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
-from backend.planning.workout_text import canonical_workout_zones
 
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 

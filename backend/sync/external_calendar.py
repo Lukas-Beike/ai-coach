@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
-from datetime import timedelta, timezone
+from datetime import UTC, timedelta
 from typing import Any
 
+from backend.calendar.ical_mapping import calendar_event_constraints
 from backend.config import Config
 from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -122,12 +123,13 @@ class ExternalCalendarSyncService:
         today = current_local.date()
         events = calendar_provider.parse_ical_calendar(
             payload,
-            local_zone=current_local.tzinfo or timezone.utc,
+            local_zone=current_local.tzinfo or UTC,
             today=today,
             window_start=today,
             window_end=today
             + timedelta(days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS),
         )
+        events = [calendar_event_constraints(event) for event in events]
         synced_at = self._utc_now()
         with self._database_manager.unit_of_work() as db:
             db.execute("DELETE FROM external_calendar_events")

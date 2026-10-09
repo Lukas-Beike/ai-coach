@@ -20,6 +20,7 @@ from backend.http_api.state_prelude import (
     PublicStateWeatherPrelude,
 )
 from backend.planning import season as planning_season
+from backend.runtime.ports import ProviderStateReader
 from backend.sync import intervals_state
 
 if TYPE_CHECKING:
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
     from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
     from backend.planning.library_service import WorkoutLibraryService
     from backend.planning.training_plans import TrainingPlanService
-    from backend.providers.state import ProviderStateService
     from backend.settings import SettingsService
     from backend.sync.freshness import ProviderFreshnessService
     from backend.sync.full_resync import FullProviderResyncService
@@ -74,7 +74,7 @@ class PublicStateDependencies:
     planning_preview: AdaptiveReplanPreviewService
     morning_checkin: MorningCheckinStateService
     coach_quick_actions: CoachQuickActionsService
-    provider_state: ProviderStateService
+    provider_state: ProviderStateReader
     sync_period_defaults: dict[str, int]
     all_sync_days: int
     calendar_history_days: int

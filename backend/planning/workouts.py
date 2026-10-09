@@ -6,13 +6,13 @@ from datetime import date, datetime, timedelta
 from itertools import pairwise
 from typing import Any
 
-from backend.errors import AppError
-from backend.planning.workout_text import (
+from backend.activities.workout_text import (
     WorkoutTextError,
     canonical_workout_zones,
     structured_duration,
     verify_workout_readback,
 )
+from backend.errors import AppError
 
 COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
 

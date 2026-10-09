@@ -1,4 +1,4 @@
-"""Composition for athlete records and completed-activity services."""
+"""Application composition for athlete records and completed-activity services."""
 
 from __future__ import annotations
 
@@ -6,34 +6,26 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
-from backend.activities.read_service import ActivityReadService
 from backend.athlete.checkins import CheckinService
 from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
-from backend.db import DatabaseManager
-from backend.db.repositories import (
-    ActivityFeedbackRepository,
-    CheckinRepository,
-    CompetitionRepository,
-    ProfileRepository,
-    SnapshotRepository,
-)
+from backend.performance.training_report import canonical_rows
 from backend.runtime.ports import ProviderSnapshotReader
+from backend.weather.cache import invalidate_for_location_change
 
 
 @dataclass(frozen=True)
 class AthleteRepositories:
-    activity_feedback: ActivityFeedbackRepository
-    checkin: CheckinRepository
-    profile: ProfileRepository
+    activity_feedback: Any
+    checkin: Any
+    profile: Any
     key_values: Any
-    snapshot: SnapshotRepository
+    snapshot: Any
     snapshot_reader: ProviderSnapshotReader
-    competition: CompetitionRepository
+    competition: Any
 
 
 @dataclass(frozen=True)
@@ -52,7 +44,7 @@ class AthleteDataAssembly:
 
     @dataclass(frozen=True)
     class Inputs:
-        database_manager: Callable[[], DatabaseManager]
+        database_manager: Callable[[], Any]
         repositories: AthleteRepositories
         runtime: AthleteRuntime
 
@@ -89,6 +81,7 @@ class AthleteDataAssembly:
             self.training_snapshot,
             self._local_date,
             self._utc_now,
+            canonical_rows,
         )
 
     def activity_feedback(self) -> ActivityFeedbackService:
@@ -96,15 +89,6 @@ class AthleteDataAssembly:
             self._database_manager(),
             self._activity_feedback_repository,
             self._snapshot_reader,
-        )
-
-    def activity_read(self) -> ActivityReadService:
-        return ActivityReadService(
-            self._database_manager(),
-            self._snapshot_reader,
-            self.activity_feedback(),
-            ActivityDetailStore(self._database_manager()),
-            read_equipment=lambda: self.equipment().read(),
         )
 
     def duplicate_activity(self) -> DuplicateActivityService:
@@ -124,12 +108,13 @@ class AthleteDataAssembly:
     def profile(self) -> ProfileService:
         return self.profile_for(self._database_manager())
 
-    def profile_for(self, manager: DatabaseManager) -> ProfileService:
+    def profile_for(self, manager: Any) -> ProfileService:
         """Bind the athlete clock to the existing shared manager cache owner."""
         return ProfileService(
             manager,
             self._profile_repository,
             self._key_value_repository,
+            on_location_changed=invalidate_for_location_change,
         )
 
     def context(self) -> AthleteContextService:

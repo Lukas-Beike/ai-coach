@@ -15,13 +15,18 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from backend import observability
-from backend.errors import COACH_ABORTED_ERROR, AppError, provider_error
+from backend.errors import (
+    COACH_ABORTED_ERROR,
+    AppError,
+    ProviderErrorClassifier,
+    provider_error,
+)
 
 
 class _RejectProviderRedirects(HTTPRedirectHandler):
@@ -79,6 +84,42 @@ class JsonResponse:
 
 _INVALID_JSON_MESSAGE = "provider response is not valid UTF-8 JSON"
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
+
+
+class ProviderErrorDetails(Protocol):
+    def __call__(
+        self, service: str | None, status: int, raw_body: bytes, headers: Any
+    ) -> dict[str, Any] | None: ...
+
+    def cache_key(self) -> Any: ...
+
+    def on_network_error(self, service: str | None) -> None: ...
+
+    def on_client_error(self, service: str | None) -> None: ...
+
+    def on_success(self, service: str | None, response: Any) -> None: ...
+
+
+class _NullProviderErrorDetails(ProviderErrorDetails):
+    def __call__(
+        self, _service: str | None, _status: int, _raw_body: bytes, _headers: Any
+    ) -> dict[str, Any] | None:
+        return None
+
+    def cache_key(self) -> _NullProviderErrorDetails:
+        return self
+
+    def on_network_error(self, _service: str | None) -> None:
+        return None
+
+    def on_client_error(self, _service: str | None) -> None:
+        return None
+
+    def on_success(self, _service: str | None, _response: Any) -> None:
+        return None
+
+
+_NULL_PROVIDER_ERROR_DETAILS = _NullProviderErrorDetails()
 
 
 def _close_response(response: Any) -> None:
@@ -400,12 +441,11 @@ class JsonHttpClient:
         max_response_bytes: int,
         logger: Any,
         diagnostic_capture: Any,
-        provider_state: Any,
         redact_text: Any,
         safe_response_headers: Any,
-        now: Any,
         operation_context: Callable[[], Mapping[str, Any] | None],
         *,
+        provider_error_details: ProviderErrorDetails | None = None,
         opener: Any = urlopen,
         monotonic: Any = time.perf_counter,
     ) -> None:
@@ -413,11 +453,14 @@ class JsonHttpClient:
         self.max_response_bytes = max_response_bytes
         self.logger = logger
         self.diagnostic_capture = diagnostic_capture
-        self.provider_state = provider_state
         self.redact_text = redact_text
         self.safe_response_headers = safe_response_headers
-        self.now = now
         self.operation_context = operation_context
+        self.provider_error_details = (
+            provider_error_details
+            if provider_error_details is not None
+            else _NULL_PROVIDER_ERROR_DETAILS
+        )
         self.opener = opener
         self.monotonic = monotonic
 
@@ -518,13 +561,7 @@ class JsonHttpClient:
     ) -> None:
         if cancel_event is not None and cancel_event.is_set():
             raise self._cancelled_error(context, parsed_url, started) from error
-        if service == "openai":
-            self.provider_state.record_status(
-                "openai",
-                state="error",
-                reason="network_error",
-                message="OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung pruefen und spaeter erneut versuchen.",
-            )
+        self.provider_error_details.on_network_error(service)
         self.logger.exception(
             "Upstream service is unavailable",
             extra={
@@ -543,13 +580,7 @@ class JsonHttpClient:
         parsed_url: Any,
         started: float,
     ) -> None:
-        if service == "openai":
-            self.provider_state.record_status(
-                "openai",
-                state="error",
-                reason="client_error",
-                message="Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte spaeter erneut versuchen.",
-            )
+        self.provider_error_details.on_client_error(service)
         self.logger.exception(
             "External HTTP request failed while processing response",
             extra={
@@ -626,9 +657,7 @@ class JsonHttpClient:
         started: float,
     ) -> Any:
         result = response.payload if response.response_bytes else None
-        if service == "openai":
-            self.provider_state.record_rate_limits(response.headers)
-            self.provider_state.record_success("openai", response.status)
+        self.provider_error_details.on_success(service, response)
         duration_ms = round((self.monotonic() - started) * 1000, 1)
         self.logger.info(
             "External HTTP request completed",
@@ -672,7 +701,9 @@ class JsonHttpClient:
         raw_body = read_error_body(error, self.max_response_bytes)
         if cancel_event is not None and cancel_event.is_set():
             raise self._cancelled_error(request_context, parsed_url, started) from error
-        details = self._provider_error_details(service, error, raw_body)
+        details = self.provider_error_details(
+            service, error.code, raw_body, getattr(error, "headers", None)
+        )
         self.logger.exception(
             "Upstream HTTP request failed",
             extra={
@@ -696,51 +727,24 @@ class JsonHttpClient:
             response_body=raw_body,
         )
         if details:
-            status = error.code if error.code == 429 else 502
-            app_error = AppError(
-                status,
+            app_error = ProviderErrorClassifier.classify_upstream(
                 details["message"],
                 reason=details["reason"],
                 upstream_status=error.code,
                 retry_after_seconds=details.get("retry_after_seconds"),
             )
             raise app_error from error
-        detail = self._interval_error_detail(raw_body) if service == "intervals" else ""
+        detail = self._interval_error_detail(raw_body)
         message = (
             f"Intervals.icu weist die Anfrage zurück ({error.code}): {detail}"
             if detail and service == "intervals"
             else f"Anfrage an externen Dienst fehlgeschlagen ({error.code})."
         )
-        raise AppError(
-            502,
+        raise ProviderErrorClassifier.classify_upstream(
             message,
             reason="provider_http_error",
             upstream_status=error.code,
         ) from error
-
-    def _provider_error_details(
-        self, service: str | None, error: HTTPError, raw_body: bytes
-    ) -> dict[str, Any] | None:
-        if service == "openai":
-            from backend.providers import openai as openai_provider
-
-            self.provider_state.record_rate_limits(getattr(error, "headers", None))
-            details = openai_provider.error_details(
-                error.code,
-                raw_body,
-                getattr(error, "headers", None),
-                updated_at=self.now(),
-            )
-            self.provider_state.record_status(
-                "openai",
-                state=details.get("state"),
-                reason=details.get("reason"),
-                message=details.get("message"),
-                http_status=details.get("http_status"),
-                provider_error_code=details.get("provider_error_code"),
-            )
-            return details
-        return None
 
     def _interval_error_detail(self, raw_body: bytes) -> str:
         return error_detail(
@@ -904,7 +908,7 @@ class JsonHttpClientCache:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._client: JsonHttpClient | None = None
-        self._provider_state: Any = None
+        self._classifier_key: Any = None
 
     def get(
         self,
@@ -912,29 +916,36 @@ class JsonHttpClientCache:
         max_response_bytes: int,
         logger: Any,
         diagnostic_capture: Any,
-        provider_state: Any,
         redact_text: Any,
         safe_response_headers: Any,
-        now: Any,
         operation_context: Callable[[], Mapping[str, Any] | None],
         *,
+        provider_error_details: ProviderErrorDetails | None = None,
         opener: Any = urlopen,
     ) -> JsonHttpClient:
+        active_error_details: ProviderErrorDetails = (
+            provider_error_details
+            if provider_error_details is not None
+            else _NULL_PROVIDER_ERROR_DETAILS
+        )
+        classifier_key = active_error_details.cache_key()
         with self._lock:
-            if self._client is None or self._provider_state is not provider_state:
+            if (
+                self._client is None
+                or self._classifier_key is not classifier_key
+            ):
                 self._client = JsonHttpClient(
                     app_version,
                     max_response_bytes,
                     logger,
                     diagnostic_capture,
-                    provider_state,
                     redact_text,
                     safe_response_headers,
-                    now,
                     operation_context,
+                    provider_error_details=active_error_details,
                     opener=opener,
                 )
-                self._provider_state = provider_state
+                self._classifier_key = classifier_key
             return self._client
 
 

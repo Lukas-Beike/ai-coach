@@ -224,7 +224,9 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertIsNot(second_refresh_tracker, first_refresh_tracker)
         self.assertIsNot(second_weather_service, first_weather_service)
         self.assertIsNot(second_morning_service, first_morning_service)
-        self.assertIs(second_http_client.provider_state, second)
+        self.assertIs(
+            second_http_client.provider_error_details.cache_key(), second
+        )
         second.record_status(
             "openai",
             state="ok",

@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=279">
+  <link rel="stylesheet" href="/styles.css?v=281">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -39,7 +39,7 @@
     </header>
 
     <main>
-      <section id="statusCard" class="status-card" aria-live="polite">
+      <section id="statusCard" class="status-card" role="status" aria-live="polite">
         <div><span class="pulse"></span><strong id="statusTitle">Verbindung wird hergestellt…</strong></div>
         <span id="statusDetail">Trainingsbereich wird geprüft</span>
       </section>
@@ -54,8 +54,8 @@
           <div><strong>Deine Planung braucht eine Anpassung</strong><small>Bitte den Coach, die nächsten Einheiten zu prüfen.</small></div>
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Coach fragen</button>
         </div>
-        <div id="chatOperationStatus" class="sr-only" aria-live="polite" hidden></div>
-        <div id="messages" class="messages" aria-live="polite" aria-atomic="false"></div>
+        <div id="chatOperationStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+        <div id="messages" class="messages"></div>
         <section id="coachActionReview" class="coach-action-review" aria-labelledby="coachActionReviewTitle" hidden>
           <div class="coach-action-review-heading">
             <div><span class="eyebrow">VORSCHLAG PRÜFEN</span><h2 id="coachActionReviewTitle">Lokale Planung</h2></div>
@@ -283,7 +283,7 @@
         </section>
         <details class="settings-section collapsible-section" data-more-segment-panel="connections">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
-          <section id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></section>
+          <section id="connectionsSyncProgress" class="connections-sync-progress" role="status" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></section>
           <div class="connection-cards">
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
@@ -396,7 +396,7 @@
     </nav>
   </div>
 
-  <div id="toast" class="toast" aria-live="polite"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="authLoading" class="auth-loading" aria-live="polite">Trainingsbereich wird gepr&uuml;ft&hellip;</div>
   <dialog id="loginDialog" aria-labelledby="loginTitle">
     <form id="loginForm" method="dialog">
@@ -441,16 +441,16 @@
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=222" defer></script>
-  <script src="/navigation.js?v=230" defer></script>
-  <script src="/state.js?v=218" defer></script>
-  <script src="/views.js?v=218" defer></script>
+  <script src="/api.js?v=223" defer></script>
+  <script src="/navigation.js?v=231" defer></script>
+  <script src="/state.js?v=219" defer></script>
+  <script src="/views.js?v=220" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=7" defer></script>
-  <script src="/nutrition.js?v=19" defer></script>
+  <script src="/coach.js?v=9" defer></script>
+  <script src="/nutrition.js?v=21" defer></script>
   <script src="/analysis.js?v=94" defer></script>
   <script src="/activity-details.js?v=9" defer></script>
-  <script src="/app.js?v=273" defer></script>
+  <script src="/app.js?v=275" defer></script>
 </body>
 </html>

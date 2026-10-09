@@ -3,17 +3,22 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, Mock
 
-from backend.athlete.assembly import (
+from backend.athlete.equipment import EquipmentService
+from backend.athlete.measurements import number
+from backend.errors import AppError
+from backend.http_api.athlete_assembly import (
     AthleteDataAssembly,
     AthleteRepositories,
     AthleteRuntime,
 )
+from backend.performance.training_report import canonical_rows
 from backend.planning.assembly import (
     PlanningDataAssembly,
     PlanningMutations,
     PlanningRepositories,
     PlanningRuntime,
 )
+from backend.weather.cache import invalidate_for_location_change
 
 
 class AthleteDataAssemblyTests(unittest.TestCase):
@@ -57,10 +62,12 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         self.assertIs(checkin._manager, manager)
         self.assertIs(checkin._today, today)
         self.assertIs(profile._manager, manager)
+        self.assertIs(profile._on_location_changed, invalidate_for_location_change)
+        self.assertIs(assembly.equipment()._canonical_rows, canonical_rows)
         self.assertIs(duplicate._database_manager, manager)
         self.assertIs(duplicate._event_buffer, event_buffer)
         self.assertIs(feedback._snapshot_reader, snapshot_reader)
-        self.assertIs(assembly.activity_read()._snapshot_reader, snapshot_reader)
+        self.assertFalse(hasattr(assembly, "activity_read"))
         self.assertIs(duplicate._snapshot_reader, snapshot_reader)
 
     def test_training_snapshot_uses_injected_reader_without_changing_provenance(self):
@@ -97,6 +104,24 @@ class AthleteDataAssemblyTests(unittest.TestCase):
 
         self.assertIs(assembly.training_snapshot(), snapshot)
         reader.latest_snapshot.assert_called_once_with(db)
+
+
+class EquipmentDependencyTests(unittest.TestCase):
+    def test_assignment_uses_injected_canonical_activity_rows(self) -> None:
+        snapshot = {"recent_activities": [{"id": "synthetic"}]}
+        rows = Mock(return_value=([], 0))
+        service = EquipmentService(Mock(), lambda: snapshot, Mock(), Mock(), rows)
+        with self.assertRaises(AppError) as raised:
+            service.assign({"activity_id": "synthetic", "equipment_id": None})
+        self.assertEqual(raised.exception.status, 404)
+        rows.assert_called_once_with(snapshot)
+
+    def test_usage_numbers_reject_invalid_values_and_preserve_zero(self) -> None:
+        for value in (True, False, "12", None, -1, float("inf"), float("nan")):
+            with self.subTest(value=value):
+                self.assertIsNone(number(value))
+        self.assertEqual(number(0), 0.0)
+        self.assertEqual(number(12.5), 12.5)
 
 
 class PlanningDataAssemblyTests(unittest.TestCase):

@@ -55,6 +55,7 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
             self.database_manager,
             ProfileRepository(self.key_values),
             self.key_values,
+            on_location_changed=lambda *args, **kwargs: None,
         )
 
     def tearDown(self) -> None:

@@ -4,9 +4,9 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/app.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "../public/coach.js"), "utf8");
 const start = source.indexOf("const HIDDEN_CHAT_RECEIPT_TOOLS");
-const end = source.indexOf("\nasync function retryProvider", start);
+const end = source.indexOf("\nasync function askCoach", start);
 
 function render(commands) {
   assert.ok(start >= 0 && end > start);
@@ -130,7 +130,7 @@ test("approved nutrition product write refreshes and opens the product catalog",
     addCoachReceipt() {},
     toast() {},
     load: async (...args) => { loads.push(args); },
-    applyNavigationRoute: async (...args) => { routes.push(args); },
+    AppRouter: { navigate: async (...args) => { routes.push(args); } },
   });
   vm.runInContext(source.slice(start, end), context);
   await context.executeCoachActionProposal(

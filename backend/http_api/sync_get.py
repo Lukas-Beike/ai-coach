@@ -8,8 +8,8 @@ from datetime import date
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from backend.activities.read_service import ActivityReadService
 from backend.http_api.auth import SessionAuthService
+from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.status import SyncPublicStateService
 
@@ -25,7 +25,7 @@ class SyncGetRoutes:
         session_auth_service: Callable[[], SessionAuthService],
         sync_job_queue_service: Callable[[], SyncJobQueueService],
         sync_public_state_service: Callable[[], SyncPublicStateService],
-        activity_read_service: Callable[[], ActivityReadService],
+        activity_read_service: Callable[[], ActivityAnalysisReadService],
         local_today: Callable[[], date],
         all_sync_days: int,
     ) -> None:

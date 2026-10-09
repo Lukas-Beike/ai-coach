@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from backend.errors import OPENAI_API_KEY_ERROR, AppError
 from backend.providers import http as provider_http
-from backend.providers import openai as openai_provider
+from backend.providers.openai_requests import endpoint
 
 VOICE_AUDIO_TYPES = {
     "audio/webm": ".webm",
@@ -80,7 +80,7 @@ class AudioTranscriptionClient:
         )
         result = self.http_client.request(
             "POST",
-            openai_provider.endpoint(
+            endpoint(
                 self.openai_base_url,
                 "/audio/transcriptions",
                 default_base_url=self.default_openai_base_url,

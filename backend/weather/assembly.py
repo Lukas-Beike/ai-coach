@@ -5,11 +5,20 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Protocol
 
 from backend.runtime.maintenance import MaintenanceGate
-from backend.sync.weather import WeatherSyncService
 from backend.weather import service as weather
+from backend.weather.projection import WEATHER_FORECAST_DAYS
+
+
+class WeatherSyncWorkflow(Protocol):
+    def sync(
+        self,
+        reason: str = "background",
+        force: bool = False,
+        operation_id: str | None = None,
+    ) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -21,7 +30,7 @@ class WeatherStateOwners:
 
 @dataclass(frozen=True)
 class WeatherProviderRuntime:
-    client_factory: Callable[[], Any]
+    client_factory: Callable[[int], Any]
     refresh_tracker: Callable[[], Any]
     operation_context: Any
     operation_id_factory: Callable[[], str]
@@ -35,6 +44,9 @@ class WeatherSyncRuntime:
     adaptive_preview_service: Callable[[], Any]
     observer: Callable[[], Any]
     logger: Any
+    service_factory: Callable[
+        [Any, weather.WeatherService, Any, Any, Any], WeatherSyncWorkflow
+    ]
 
 
 class WeatherAssembly:
@@ -57,7 +69,7 @@ class WeatherAssembly:
         self._database_manager = state.database_manager
         self._key_values = state.key_values
         self._profile_service = state.profile_service
-        self._client_factory = provider.client_factory
+        self._client_factory = lambda: provider.client_factory(WEATHER_FORECAST_DAYS)
         self._refresh_tracker = provider.refresh_tracker
         self._operation_context = provider.operation_context
         self._operation_id_factory = provider.operation_id_factory
@@ -67,6 +79,7 @@ class WeatherAssembly:
         self._adaptive_preview_service = sync.adaptive_preview_service
         self._observer = sync.observer
         self._logger = sync.logger
+        self._sync_service_factory = sync.service_factory
 
     def service(self) -> weather.WeatherService:
         """Return the weather service bound to the current database manager."""
@@ -88,9 +101,9 @@ class WeatherAssembly:
             self._today,
         )
 
-    def sync_service(self) -> WeatherSyncService:
+    def sync_service(self) -> WeatherSyncWorkflow:
         """Create the weather sync workflow over current domain services."""
-        return WeatherSyncService(
+        return self._sync_service_factory(
             self._profile_service(),
             self.service(),
             self._adaptive_preview_service(),

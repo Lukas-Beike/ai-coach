@@ -3,8 +3,8 @@ import unittest
 from contextlib import contextmanager
 from datetime import date
 
-from backend.activities.read_service import ActivityReadService
 from backend.errors import AppError
+from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.sync.snapshot_reader import SnapshotRepositoryReader
 
 
@@ -69,7 +69,11 @@ class ActivityReadServiceTests(unittest.TestCase):
                 ]
             },
         }
-        return ActivityReadService(_Manager(), _Snapshots(snapshot), _Feedback())
+        return ActivityAnalysisReadService(
+            _Manager(),
+            _Snapshots(snapshot),
+            _Feedback(),
+        )
 
     def test_page_filters_orders_attaches_feedback_and_uses_cursor(self):
         service = self.service()
@@ -116,7 +120,7 @@ class ActivityReadServiceTests(unittest.TestCase):
             "provider_sync": {"source": "intervals", "cursor": "synthetic"},
             "recent_activities": [],
         }
-        service = ActivityReadService(
+        service = ActivityAnalysisReadService(
             _Manager(),
             SnapshotRepositoryReader(_Snapshots(snapshot)),
             _Feedback(),

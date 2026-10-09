@@ -152,10 +152,7 @@ class ExternalCalendarSyncTests(unittest.TestCase):
             "end_local": "2026-09-21T11:30:00+02:00",
             "duration_minutes": 90,
             "all_day": False,
-            "training_relevant": True,
-            "no_training": True,
-            "no_intensity": True,
-            "short_only": False,
+            "description": "[NO_TRAINING] [NO_INTENSITY]",
             **overrides,
         }
 

@@ -570,7 +570,7 @@ async function createNutritionProductDraft() {
   state.chatDraftDirty = true;
   document.querySelector("#nutritionProductUseDialog")?.close();
   nutritionProductForUse = null;
-  void applyNavigationRoute("coach", { historyMode: "push" });
+  void AppRouter.navigate("coach", { historyMode: "push" });
   jumpToChatComposer();
 }
 
@@ -685,9 +685,9 @@ document.querySelector("#nutritionBarcodeDialog")?.addEventListener("close", sto
 document.querySelector("#nutritionBarcodeForm")?.addEventListener("submit", (event) => { event.preventDefault(); void lookupNutritionProduct(document.querySelector("#nutritionBarcodeManual").value); });
 document.querySelector("#nutritionProductUseCancel")?.addEventListener("click", () => document.querySelector("#nutritionProductUseDialog")?.close());
 document.querySelector("#nutritionProductUseForm")?.addEventListener("submit", (event) => { event.preventDefault(); void createNutritionProductDraft(); });
-document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("click", () => {
-  stopNutritionBarcode(); document.querySelector("#nutritionBarcodeDialog")?.close();
-}));
-globalThis.addEventListener("hashchange", () => { if (!String(globalThis.location.hash).startsWith("#nutrition/products")) { stopNutritionBarcode(); document.querySelector("#nutritionBarcodeDialog")?.close(); } });
+function handleNutritionRoute(route) {
+  if (route !== "nutrition/products") { stopNutritionBarcode(); document.querySelector("#nutritionBarcodeDialog")?.close(); }
+}
+globalThis.AppNutrition = Object.freeze({ handleRoute: handleNutritionRoute });
 globalThis.addEventListener("pagehide", stopNutritionBarcode);
 document.addEventListener("visibilitychange", () => { if (document.hidden) stopNutritionBarcode(); });

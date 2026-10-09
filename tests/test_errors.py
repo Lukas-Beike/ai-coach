@@ -92,6 +92,31 @@ class PublicStatusTests(unittest.TestCase):
                 )
                 self.assertEqual(errors.public_error_contract(error), contract)
 
+    def test_provider_error_classifier_uses_the_public_upstream_contract(self):
+        expected = {
+            400: (502, "upstream_rejected"),
+            401: (502, "upstream_auth"),
+            404: (502, "upstream_not_found"),
+            408: (503, "upstream_unavailable"),
+            429: (429, "upstream_rate_limited"),
+            503: (503, "upstream_unavailable"),
+        }
+        for upstream_status, contract in expected.items():
+            with self.subTest(upstream_status=upstream_status):
+                error = errors.ProviderErrorClassifier.classify_upstream(
+                    "safe upstream failure",
+                    upstream_status=upstream_status,
+                    reason="provider_failure",
+                    retry_after_seconds=7,
+                )
+                self.assertEqual(
+                    errors.public_error_contract(error),
+                    (contract[0], contract[1]),
+                )
+                self.assertEqual(error.status, contract[0])
+                self.assertEqual(error.upstream_status, upstream_status)
+                self.assertEqual(error.retry_after_seconds, 7)
+
 
 class ProviderErrorTests(unittest.TestCase):
     def test_network_category_uses_service_labels_and_reasons(self):

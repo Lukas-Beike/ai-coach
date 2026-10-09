@@ -6,10 +6,10 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from backend.activities.read_service import ActivityReadService
 from backend.athlete.profile import ProfileService
 from backend.coach.context import bounded_coach_context_value, coach_context_json_size
 from backend.errors import AppError
+from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.sync.garmin import GarminPayloadService
 
 
@@ -18,7 +18,7 @@ class CoachActivityReadToolService:
 
     def __init__(
         self,
-        activity_read: ActivityReadService,
+        activity_read: ActivityAnalysisReadService,
         garmin_payload: GarminPayloadService,
         profile: ProfileService,
         today: Callable[[], date],

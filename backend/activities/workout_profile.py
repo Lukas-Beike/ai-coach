@@ -4,7 +4,7 @@ import math
 import re
 from typing import Any
 
-from backend.planning.workout_text import WorkoutTextError, structured_steps
+from backend.activities.workout_text import WorkoutTextError, structured_steps
 
 
 def _number(value: Any) -> float | None:

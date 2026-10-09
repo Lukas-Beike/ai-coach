@@ -5,7 +5,7 @@ test("@responsive activity details preserve calendar without Coach shortcuts", a
   expect(seed.ok()).toBeTruthy();
   await page.goto("/#plan/overview");
   await expect(page.locator("#appShell")).toBeVisible();
-  await page.evaluate(async () => { await applyNavigationRoute("plan/overview", { historyMode: "replace" }); });
+  await page.evaluate(async () => { await AppRouter.navigate("plan/overview", { historyMode: "replace" }); });
   const entry = page.locator(".planned-entry").filter({ hasText: "Synthetic ride <img src=x>" }).first();
   await entry.locator("summary").click();
   const open = entry.getByRole("button", { name: "Aktivität analysieren" });

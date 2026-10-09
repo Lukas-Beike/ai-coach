@@ -19,6 +19,26 @@ async function openAuthenticatedApp(page) {
   await expect(page.locator("#appShell")).toBeVisible();
 }
 
+test("chat status announcements update once and keep history outside the live region @responsive", async ({ page }) => {
+  await openAuthenticatedApp(page);
+  const mutations = await page.evaluate(async () => {
+    const status = document.querySelector("#chatOperationStatus");
+    const records = [];
+    const observer = new MutationObserver((entries) => records.push(...entries));
+    observer.observe(status, { childList: true, characterData: true, subtree: true });
+    announceChatStatus("Coach arbeitet an deiner Antwort…");
+    announceChatStatus("Coach arbeitet an deiner Antwort…");
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    observer.disconnect();
+    return records.length;
+  });
+
+  await expect(page.locator("#messages")).not.toHaveAttribute("aria-live", /.+/);
+  await expect(page.locator("#chatOperationStatus")).toHaveAttribute("role", "status");
+  await expect(page.locator("#chatOperationStatus")).toHaveText("Coach arbeitet an deiner Antwort…");
+  expect(mutations).toBe(1);
+});
+
 function installBrowserGuards(page) {
   const browserErrors = [];
   page.on("console", (message) => {

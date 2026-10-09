@@ -29,7 +29,7 @@ from backend.planning.competition_service import CompetitionService
 from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.training_plans import TrainingPlanService
-from backend.providers.openai import OpenAIResponsesClient
+from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.maintenance import MaintenanceGate
 from backend.weather import cache as weather_cache
 
