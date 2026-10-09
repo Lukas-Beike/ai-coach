@@ -417,7 +417,7 @@ test("provider source retains visible stale and partial measurement context", as
 test("fresh service worker keeps the current shell available offline", async ({ page }) => {
   await ready(page);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  expect(await page.evaluate(() => caches.keys())).toEqual(["intervals-coach-v364"]);
+  expect(await page.evaluate(() => caches.keys())).toEqual(["intervals-coach-v365"]);
   await page.context().setOffline(true);
   try {
     await page.reload();
@@ -488,6 +488,10 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
       { id: "agenda-run", date, start_date_local: `${date}T18:30:00`, name: "Lockerer Dauerlauf mit Steigerungen", type: "Run", duration_minutes: 45, description: "Locker laufen. <img src=x onerror=alert(1)>" },
       { id: "agenda-strength", date, name: "Mobilität und Rumpfstabilität", type: "WeightTraining", duration_minutes: 20 },
       { id: "agenda-completed", date: addDateKey(date, 1), start_date_local: `${addDateKey(date, 1)}T07:15:00`, name: "Grundlagenausfahrt", type: "Ride", is_completed_activity: true, moving_time: 3600, distance: 28000, icu_training_load: 42, icu_rpe: 3 },
+      { id: "agenda-completed-run", date: addDateKey(date, 1), name: "Absolvierte Laufeinheit", type: "Run", is_completed_activity: true, moving_time: 2700, distance: 7000 },
+      { id: "agenda-completed-swim", date: addDateKey(date, 1), name: "Absolvierte Schwimmeinheit", type: "Swim", is_completed_activity: true, moving_time: 1800, distance: 1500 },
+      { id: "agenda-completed-strength", date: addDateKey(date, 1), name: "Absolvierte Krafteinheit", type: "WeightTraining", is_completed_activity: true, moving_time: 1800 },
+      { id: "agenda-completed-other", date: addDateKey(date, 1), name: "Absolvierte sonstige Einheit", type: "Hike", is_completed_activity: true, moving_time: 1800 },
       { id: "agenda-matched", date: addDateKey(date, -2), name: "Aktivierung", type: "Ride", duration_minutes: 45, icu_training_load: 25,
         compliance: { status: "completed", percentage: 136, basis: "training_load", actual_activity: { name: "Aktivierung absolviert", type: "Ride", moving_time: 3600, distance: 24000, icu_training_load: 34, average_heartrate: 125, average_watts: 201 } } },
       { id: "agenda-missed", date: addDateKey(date, -3), name: "Ausgefallene Einheit", type: "Ride", duration_minutes: 45, compliance: { status: "missed", percentage: 0 } },
@@ -544,6 +548,23 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(completed.locator(".planned-session-header")).toContainText("Radfahren · 07:15");
   await expect(completed.locator(".planned-entry-status")).toBeVisible();
   await expect(completed.locator(".planned-actual-facts")).toBeHidden();
+  const completedHeaders = page.locator(".planned-entry.is-completed .planned-session-header");
+  await expect(completedHeaders).toHaveCount(6);
+  for (const theme of ["dark", "light"]) {
+    await page.evaluate((selectedTheme) => { document.documentElement.dataset.theme = selectedTheme; }, theme);
+    const contrasts = await completedHeaders.evaluateAll((headers) => headers.map((header) => {
+      const parse = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number).map((channel) => {
+        const normalized = channel / 255;
+        return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+      });
+      const luminance = (rgb) => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+      const style = getComputedStyle(header);
+      const foreground = luminance(parse(style.color));
+      const background = luminance(parse(style.backgroundColor));
+      return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+    }));
+    expect(contrasts.every((ratio) => ratio >= 4.5), `${theme} completed session contrast`).toBe(true);
+  }
   await completed.locator("summary").click();
   await expect(completed.locator(".planned-actual-facts")).toContainText("Trainingsload 42");
   await completed.locator("summary").click();

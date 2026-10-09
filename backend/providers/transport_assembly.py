@@ -9,6 +9,7 @@ from typing import Any
 from backend.config import Config
 from backend.providers import http as provider_http
 from backend.providers import intervals_client as intervals_client_module
+from backend.runtime.ports import ProviderOperation
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class ProviderOperationContext:
 class IntervalsTransportSettings:
     config: Callable[[], Config]
     athlete_now: Callable[[], Any]
+    operation: ProviderOperation
 
 
 class ProviderTransportAssembly:
@@ -64,6 +66,7 @@ class ProviderTransportAssembly:
         self._opener = http.opener
         self._config = intervals.config
         self._athlete_now = intervals.athlete_now
+        self._intervals_operation = intervals.operation
 
     def json_http_client(self) -> provider_http.JsonHttpClient:
         """Return the cache-owned JSON transport for the current provider state."""
@@ -89,4 +92,5 @@ class ProviderTransportAssembly:
             active_config,
             request=self.json_http_client().request,
             now=self._athlete_now,
+            operation=self._intervals_operation,
         )

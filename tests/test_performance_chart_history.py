@@ -264,6 +264,50 @@ class AnalysisHistoryTests(unittest.TestCase):
             len(analysis_history(None, {}, date(2026, 10, 2))["load"]["points"]), 90
         )
 
+    def test_race_prediction_history_is_dated_and_keeps_missing_days_missing(self):
+        keys = (
+            "run_5k_seconds",
+            "run_10k_seconds",
+            "run_half_marathon_seconds",
+            "run_marathon_seconds",
+        )
+        garmin = {
+            "performance_history": [
+                {"date": "2026-09-30", "metrics": dict.fromkeys(keys, 1500)},
+                {"date": "2026-10-02", "metrics": dict.fromkeys(keys, 1400)},
+            ]
+        }
+
+        metrics = analysis_history(None, garmin, date(2026, 10, 2))["metrics"]
+        for key in keys:
+            series = metrics[key][0]
+            self.assertEqual(series["source"], "Garmin Connect")
+            self.assertEqual(
+                series["points"][-3], {"date": "2026-09-30", "value": 1500}
+            )
+            self.assertEqual(
+                series["points"][-2], {"date": "2026-10-01", "value": None}
+            )
+            self.assertEqual(
+                series["points"][-1], {"date": "2026-10-02", "value": 1400}
+            )
+
+    def test_race_prediction_history_does_not_backfill_current_estimates(self):
+        result = analysis_history(
+            None,
+            {
+                "run_5k_seconds": {"value": 1200},
+                "performance_history": [
+                    {"date": "2026-10-02", "metrics": {"run_5k_seconds": 1200}}
+                ],
+            },
+            date(2026, 10, 2),
+        )
+
+        points = result["metrics"]["run_5k_seconds"][0]["points"]
+        self.assertEqual(points[-1], {"date": "2026-10-02", "value": 1200})
+        self.assertEqual(sum(point["value"] is not None for point in points), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
 from backend.config import Config
 from backend.errors import AppError
-from backend.planning import context as planning_context
-from backend.planning import workouts as planning_workouts
 from backend.providers.intervals import IntervalsApiClient
-from backend.sync.gates import intervals_operation
+from backend.runtime.clock import local_now
+from backend.runtime.ports import ProviderOperation
 
 APP_NAME = "Intervals Coach"
+
 
 class IntervalsClient:
     def __init__(
@@ -24,9 +25,11 @@ class IntervalsClient:
         *,
         request: Callable[..., Any],
         now: Callable[[], datetime] | None = None,
+        operation: ProviderOperation | None = None,
     ):
         self.config = config
         self._now = now
+        self._operation = operation or (lambda: nullcontext())
         self._api = IntervalsApiClient(
             api_key=self.config.intervals_api_key,
             request=lambda *args, **kwargs: request(*args, **kwargs),
@@ -36,11 +39,14 @@ class IntervalsClient:
     def _get_now(self) -> datetime:
         if self._now is not None:
             return self._now()
-        return datetime.now().astimezone()
+        return local_now()
 
     @property
     def pagination(self) -> dict[str, dict[str, Any]]:
-        return {collection: dict(metadata) for collection, metadata in self._api.pagination.items()}
+        return {
+            collection: dict(metadata)
+            for collection, metadata in self._api.pagination.items()
+        }
 
     def get(
         self,
@@ -69,31 +75,54 @@ class IntervalsClient:
             cancel_event=cancel_event,
         )
 
-    @intervals_operation
-    def post(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
-        return self._api.post(path, payload, params)
+    def post(
+        self, path: str, payload: Any, params: dict[str, Any] | None = None
+    ) -> Any:
+        with self._operation():
+            return self._api.post(path, payload, params)
 
-    @intervals_operation
     def put(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
-        return self._api.put(path, payload, params)
+        with self._operation():
+            return self._api.put(path, payload, params)
 
-    @intervals_operation
     def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        return self._api.delete(path, params)
+        with self._operation():
+            return self._api.delete(path, params)
 
-    def get_workout_library(self, *, cancel_event: threading.Event | None = None) -> list[dict[str, Any]]:
+    def get_workout_library(
+        self, *, cancel_event: threading.Event | None = None
+    ) -> list[dict[str, Any]]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         result = self.get_paged_collection(
-            f"/athlete/{athlete}/workouts", {}, "workout_library", cancel_event=cancel_event
+            f"/athlete/{athlete}/workouts",
+            {},
+            "workout_library",
+            cancel_event=cancel_event,
         )
         if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Trainingsbibliothek zurückgegeben.")
+            raise AppError(
+                502, "Intervals.icu hat keine Trainingsbibliothek zurückgegeben."
+            )
         fields = (
-            "id", "name", "description", "type", "moving_time", "distance",
-            "target", "workout_doc", "icu_training_load", "icu_intensity", "indoor",
-            "tags", "folder_id",
+            "id",
+            "name",
+            "description",
+            "type",
+            "moving_time",
+            "distance",
+            "target",
+            "workout_doc",
+            "icu_training_load",
+            "icu_intensity",
+            "indoor",
+            "tags",
+            "folder_id",
         )
-        return [planning_context.selected(item, fields) for item in result if isinstance(item, dict)]
+        return [
+            {key: item[key] for key in fields if key in item and item[key] is not None}
+            for item in result
+            if isinstance(item, dict)
+        ]
 
     @staticmethod
     def _folder_id(value: Any) -> int | None:
@@ -101,7 +130,7 @@ class IntervalsClient:
             return None
         try:
             folder_id = int(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return folder_id if folder_id > 0 else None
 
@@ -114,7 +143,9 @@ class IntervalsClient:
         if isinstance(folders, dict):
             folders = folders.get("folders") or folders.get("data") or []
         if not isinstance(folders, list):
-            raise AppError(502, "Intervals.icu hat keine gültige Ordnerliste zurückgegeben.")
+            raise AppError(
+                502, "Intervals.icu hat keine gültige Ordnerliste zurückgegeben."
+            )
         matching: list[dict[str, Any]] = []
         pending = [item for item in folders if isinstance(item, dict)]
         while pending:
@@ -130,68 +161,71 @@ class IntervalsClient:
                 self._workout_folder_id = folder_id
                 return folder_id
         created = self.post(f"/athlete/{athlete}/folders", {"name": APP_NAME})
-        folder_id = self._folder_id(created.get("id") if isinstance(created, dict) else None)
+        folder_id = self._folder_id(
+            created.get("id") if isinstance(created, dict) else None
+        )
         if folder_id is None:
-            raise AppError(502, "Intervals.icu hat keinen gültigen Ordner zurückgegeben.")
+            raise AppError(
+                502, "Intervals.icu hat keinen gültigen Ordner zurückgegeben."
+            )
         self._workout_folder_id = folder_id
         return folder_id
 
-    def create_library_workouts(self, workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        for workout in workouts:
-            planning_workouts.validate_workout_description(workout)
+    @staticmethod
+    def _library_payload(workout: Mapping[str, Any], folder_id: int) -> dict[str, Any]:
+        return {
+            "name": str(workout["name"]),
+            "description": str(workout["description"]),
+            "type": str(workout["type"]),
+            "folder_id": folder_id,
+            "target": str(workout["target"]),
+        }
+
+    def create_library_workouts(
+        self, workouts: list[Mapping[str, Any]]
+    ) -> list[dict[str, Any]]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         folder_id = self.get_or_create_workout_folder()
         created: list[dict[str, Any]] = []
         for workout in workouts:
-            payload = {
-                "name": str(workout.get("name") or "Coach-Einheit")[:200],
-                "description": str(workout.get("description") or "")[:12000],
-                "type": planning_workouts.intervals_workout_sport(workout.get("type") or workout.get("sport")),
-                "folder_id": folder_id,
-                "target": workout.get("target") or "AUTO",
-            }
+            payload = self._library_payload(workout, folder_id)
             result = self.post(f"/athlete/{athlete}/workouts", payload)
             if not isinstance(result, dict):
-                raise AppError(502, "Intervals.icu hat keine Trainingsbibliotheks-Einheit zurückgegeben.")
+                raise AppError(
+                    502,
+                    "Intervals.icu hat keine Trainingsbibliotheks-Einheit zurückgegeben.",
+                )
             created.append(result)
         return created
 
-    def update_library_workout(self, workout_id: str, workout: dict[str, Any]) -> dict[str, Any]:
-        planning_workouts.validate_workout_description(workout)
+    def update_library_workout(
+        self, workout_id: str, workout: Mapping[str, Any]
+    ) -> dict[str, Any]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         remote_id = quote(str(workout_id), safe="")
-        payload = {
-            "name": str(workout.get("name") or "Coach-Einheit")[:200],
-            "description": str(workout.get("description") or "")[:12000],
-            "type": planning_workouts.intervals_workout_sport(workout.get("type") or workout.get("sport")),
-            "target": workout.get("target") or "AUTO",
-        }
         folder_id = self._folder_id(workout.get("folder_id"))
-        payload["folder_id"] = folder_id if folder_id is not None else self.get_or_create_workout_folder()
+        payload = self._library_payload(
+            workout,
+            folder_id if folder_id is not None else self.get_or_create_workout_folder(),
+        )
         result = self.put(f"/athlete/{athlete}/workouts/{remote_id}", payload)
         if not isinstance(result, dict):
             raise AppError(502, "Intervals.icu returned no updated library workout.")
         return result
 
-    def plan_library_workout(self, workout_id: str, workout: dict[str, Any], plan_date: str) -> dict[str, Any]:
+    def plan_library_workout(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
-        payload = planning_workouts.workout_event_payload(
-            f"library-{workout_id}-{plan_date}",
-            {
-                "date": plan_date,
-                "sport": workout.get("type") or workout.get("sport") or "Ride",
-                "name": workout.get("name") or "Bibliotheks-Einheit",
-                "description": workout.get("description") or "",
-                "duration_minutes": workout.get("duration_minutes") or max(5, round(float(workout.get("moving_time") or 3600) / 60)),
-                "target": workout.get("target") or "AUTO",
-            },
-            today=self._get_now().date(),
+        result = self.post(
+            f"/athlete/{athlete}/events/bulk", [dict(payload)], {"upsert": "true"}
         )
-        result = self.post(f"/athlete/{athlete}/events/bulk", [payload], {"upsert": "true"})
         if not isinstance(result, list) or not result:
-            raise AppError(502, "Intervals.icu hat keine geplante Einheit zurückgegeben.")
-        planning_workouts.validate_intervals_workout_result(workout, result[0])
+            raise AppError(
+                502, "Intervals.icu hat keine geplante Einheit zurückgegeben."
+            )
         return result[0]
+
+    def local_today(self):
+        return self._get_now().date()
 
     def fetch_competition_events(self) -> list[dict[str, Any]]:
         """Fetch a broad calendar range for target-event synchronization."""
@@ -209,23 +243,33 @@ class IntervalsClient:
             raise AppError(502, "Intervals.icu hat keine Kalenderevents zurückgegeben.")
         return [event for event in result if isinstance(event, dict)]
 
-    def upsert_competition_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def upsert_competition_events(
+        self, events: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         if not events:
             return []
         athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
+        result = self.post(
+            f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"}
+        )
         if not isinstance(result, list):
             raise AppError(502, "Intervals.icu hat keine Zielwettkämpfe zurückgegeben.")
         return [event for event in result if isinstance(event, dict)]
 
-    def upsert_calendar_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def upsert_calendar_events(
+        self, events: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """Upsert explicitly approved non-workout calendar events."""
         if not events:
             return []
         athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
+        result = self.post(
+            f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"}
+        )
         if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Kalendereinträge zurückgegeben.")
+            raise AppError(
+                502, "Intervals.icu hat keine Kalendereinträge zurückgegeben."
+            )
         return [event for event in result if isinstance(event, dict)]
 
     def bulk_delete_events(self, identifiers: list[dict[str, str]]) -> Any:

@@ -115,11 +115,9 @@ class RecordedIntervalsClient:
         self.recorder.record("PUT", f"/athlete/0/workouts/{workout_id}", workout)
         return {**workout, "id": workout_id}
 
-    def plan_library_workout(self, workout_id, workout, plan_date):
-        self.recorder.record(
-            "POST", "/athlete/0/events", {"workout_id": workout_id, "date": plan_date}
-        )
-        return {"id": "remote-planned-event"}
+    def plan_library_workout(self, payload):
+        self.recorder.record("POST", "/athlete/0/events", payload)
+        return {**payload, "id": "remote-planned-event"}
 
     def upsert_calendar_events(self, events):
         if events:

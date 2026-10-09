@@ -60,7 +60,7 @@ class NutritionProductRepository:
         product = dict(row)
         try:
             product["provenance"] = json.loads(product["provenance"])
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             product["provenance"] = {"kind": product.get("source", "manual")}
         return product
 
@@ -167,6 +167,106 @@ class KeyValueRepository:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
             (key, value, self._now()),
         )
+
+
+class SessionRepository:
+    """Persist authentication sessions without owning their transaction."""
+
+    def cleanup_expired(self, db: Any, now: float, limit: int) -> int:
+        return db.execute(
+            "DELETE FROM sessions WHERE token_hash IN ("
+            "SELECT token_hash FROM sessions WHERE expires_at <= ? LIMIT ?"
+            ")",
+            (now, limit),
+        ).rowcount
+
+    def get(self, db: Any, token_hash: str) -> Any:
+        return db.execute(
+            "SELECT csrf_hash, expires_at, last_seen FROM sessions WHERE token_hash = ?",
+            (token_hash,),
+        ).fetchone()
+
+    def delete(self, db: Any, token_hash: str) -> None:
+        db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+
+    def touch(self, db: Any, token_hash: str, last_seen: str) -> None:
+        db.execute(
+            "UPDATE sessions SET last_seen = ? WHERE token_hash = ?",
+            (last_seen, token_hash),
+        )
+
+    def create(
+        self,
+        db: Any,
+        token_hash: str,
+        csrf_hash: str,
+        expires_at: float,
+        created_at: str,
+        last_seen: str,
+    ) -> None:
+        db.execute(
+            "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (token_hash, csrf_hash, expires_at, created_at, last_seen),
+        )
+
+    def list_csrf(self, db: Any) -> list[Any]:
+        return db.execute("SELECT csrf_hash, expires_at FROM sessions").fetchall()
+
+
+class LibraryPageRepository:
+    """Read deterministic pages of active, undated library templates."""
+
+    def page(self, db: Any, cursor: list[str] | None, limit: int) -> list[Any]:
+        after_clause = ""
+        params: list[Any] = []
+        if cursor is not None:
+            after_clause = "WHERE (sport_key, name_key, id) > (?, ?, ?)"
+            params.extend(cursor)
+        return db.execute(
+            "WITH templates AS ("
+            "SELECT id, payload, lower(COALESCE(json_extract(payload, '$.type'), '')) AS sport_key, "
+            "lower(COALESCE(json_extract(payload, '$.name'), '')) AS name_key "
+            "FROM workout_library WHERE json_valid(payload) AND json_type(payload)='object' "
+            "AND json_extract(payload, '$.date') IS NULL AND COALESCE(json_extract(payload, '$.archived'), 0)=0) "
+            f"SELECT id, payload, sport_key, name_key FROM templates {after_clause} "
+            "ORDER BY sport_key, name_key, id LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+
+
+class ReadinessRepository:
+    """Provide the minimal persistence probe used by readiness checks."""
+
+    def database_available(self, db: Any) -> bool:
+        return bool(db.execute("SELECT 1").fetchone())
+
+
+class StateVersionRepository:
+    """Read compact counters used to version public state projections."""
+
+    def counters(self, db: Any) -> dict[str, Any]:
+        return {
+            "message": db.execute(
+                "SELECT COUNT(*) AS count, COALESCE(MAX(id), 0) AS latest FROM messages"
+            ).fetchone(),
+            "library": db.execute(
+                "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest "
+                "FROM workout_library WHERE json_extract(payload, '$.date') IS NULL"
+            ).fetchone(),
+            "planned": db.execute(
+                "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest "
+                "FROM planned_units"
+            ).fetchone(),
+            "checkins": db.execute(
+                "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest "
+                "FROM athlete_checkins"
+            ).fetchone(),
+            "feedback": db.execute(
+                "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest "
+                "FROM activity_feedback"
+            ).fetchone(),
+        }
 
 
 class ProfileRepository:

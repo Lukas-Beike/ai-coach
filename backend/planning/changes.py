@@ -15,6 +15,7 @@ from backend.errors import (
     AppError,
 )
 from backend.planning import library as planning_library
+from backend.planning.conflicts import calendar_items_conflict
 from backend.planning.workouts import normalize_workout
 
 _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
@@ -38,7 +39,7 @@ def _project_existing_training_change(
             month=int(candidate_date[5:7]),
             day=int(candidate_date[8:10]),
         ).isoformat()
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         candidate.pop("start_date_local", None)
     return candidate
 
@@ -190,7 +191,7 @@ class StructuredTrainingChangeValidator:
             return
         try:
             current = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             current = {}
         if not isinstance(current, dict):
             return
@@ -226,8 +227,6 @@ class StructuredTrainingChangeValidator:
         final_dates: dict[str, str],
         final_active: dict[str, bool],
     ) -> None:
-        from backend.planning import calendar as planning_calendar
-
         active_ids = [ident for ident in final_dates if final_active.get(ident, True)]
         for i, id_a in enumerate(active_ids):
             date_a = final_dates[id_a]
@@ -236,9 +235,7 @@ class StructuredTrainingChangeValidator:
                 if final_dates[id_b] != date_a:
                     continue
                 change_b = changes_by_identity.get(id_b, {"date": date_a})
-                matches, match = planning_calendar._calendar_items_conflict(
-                    change_a, change_b
-                )
+                matches, match = calendar_items_conflict(change_a, change_b)
                 if matches and match == "time_window":
                     raise AppError(
                         409,
@@ -500,7 +497,7 @@ class StructuredTrainingPlanResolver:
             return None, None
         try:
             current = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             current = {}
         if not isinstance(current, dict):
             return None, None

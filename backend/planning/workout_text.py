@@ -6,7 +6,7 @@ Coach edit. Distance-step duration is left to the athlete's provider settings.
 
 import math
 import re
-from typing import Any
+from typing import Any, NoReturn, TypeGuard
 
 
 class WorkoutTextError(ValueError):
@@ -20,18 +20,48 @@ _DISTANCE_UNITS = frozenset({"km", "mtr", "mi", "yd"})
 _TIME_UNITS = frozenset("hms'\"")
 _TARGET_PATTERNS = (
     re.compile(r"Z\d++(?:-Z\d++)?+(?:\s++(?:HR|Pace))?+(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++(?:\.\d++)?+-\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++(?:\.\d++)?+%-\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
+    re.compile(
+        r"\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE
+    ),
+    re.compile(
+        r"\d++(?:\.\d++)?+-\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\d++(?:\.\d++)?+%-\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)",
+        re.IGNORECASE,
+    ),
     re.compile(r"\d++(?:-\d++)?+(?:w|bpm)(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+\s++Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++:[0-5]\d(?:/km)?+-\d++:[0-5]\d(?:/km)?+\s++Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++:[0-5]\d(?:/mi)?+-\d++:[0-5]\d(?:/mi)?+\s++Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++:[0-5]\d(?:/100m)?+-\d++:[0-5]\d(?:/100m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++:[0-5]\d(?:/100y)?+-\d++:[0-5]\d(?:/100y)?+\s++Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++:[0-5]\d(?:/500m)?+-\d++:[0-5]\d(?:/500m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++:[0-5]\d(?:/400m)?+-\d++:[0-5]\d(?:/400m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++:[0-5]\d(?:/250m)?+-\d++:[0-5]\d(?:/250m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(
+        r"\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+\s++Pace(?=$|\s)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\d++:[0-5]\d(?:/km)?+-\d++:[0-5]\d(?:/km)?+\s++Pace(?=$|\s)", re.IGNORECASE
+    ),
+    re.compile(
+        r"\d++:[0-5]\d(?:/mi)?+-\d++:[0-5]\d(?:/mi)?+\s++Pace(?=$|\s)", re.IGNORECASE
+    ),
+    re.compile(
+        r"\d++:[0-5]\d(?:/100m)?+-\d++:[0-5]\d(?:/100m)?+\s++Pace(?=$|\s)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\d++:[0-5]\d(?:/100y)?+-\d++:[0-5]\d(?:/100y)?+\s++Pace(?=$|\s)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\d++:[0-5]\d(?:/500m)?+-\d++:[0-5]\d(?:/500m)?+\s++Pace(?=$|\s)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\d++:[0-5]\d(?:/400m)?+-\d++:[0-5]\d(?:/400m)?+\s++Pace(?=$|\s)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\d++:[0-5]\d(?:/250m)?+-\d++:[0-5]\d(?:/250m)?+\s++Pace(?=$|\s)",
+        re.IGNORECASE,
+    ),
 )
 
 
@@ -85,7 +115,12 @@ def _read_time_part(value: str, position: int) -> tuple[int, str, str] | None:
 def _normalize_zone(match):
     end = match.group("end")
     suffix = match.group("kind") or ""
-    return "Z" + match.group("start") + ("-Z" + end if end else "") + (" " + suffix if suffix else "")
+    return (
+        "Z"
+        + match.group("start")
+        + ("-Z" + end if end else "")
+        + (" " + suffix if suffix else "")
+    )
 
 
 def _canonical_zone_line(line: str, pattern: re.Pattern[str]) -> str:
@@ -109,7 +144,7 @@ def _canonical_zone_line(line: str, pattern: re.Pattern[str]) -> str:
     if not match:
         return line
     prefix = match["ramp"] or ""
-    return line[:cursor] + prefix + _normalize_zone(match) + target[match.end():]
+    return line[:cursor] + prefix + _normalize_zone(match) + target[match.end() :]
 
 
 def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
@@ -119,17 +154,29 @@ def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
     pattern = re.compile(
         r"^(?P<ramp>ramp\s++)?+(?:Zone\s*+|Z\s*+)(?P<start>[1-9])"
         r"(?:\s*[-\u2013\u2014]\s*(?:Zone\s*|Z\s*)?(?P<end>[1-9]))?"
-        r"(?:\s++(?P<kind>HR|Pace))?(?=$|\s)", re.IGNORECASE,
+        r"(?:\s++(?P<kind>HR|Pace))?(?=$|\s)",
+        re.IGNORECASE,
     )
-    return "\n".join(_canonical_zone_line(line, pattern) for line in description.split("\n"))
+    return "\n".join(
+        _canonical_zone_line(line, pattern) for line in description.split("\n")
+    )
 
 
 def _workout_quantity(line: str, number: int) -> tuple[str, str]:
     step_text = line[1:].lstrip(" \t")
-    separator = next((index for index, character in enumerate(step_text) if character in " \t"), -1)
-    quantity = (step_text[:separator], step_text[separator:].lstrip(" \t")) if separator > 0 else None
+    separator = next(
+        (index for index, character in enumerate(step_text) if character in " \t"), -1
+    )
+    quantity = (
+        (step_text[:separator], step_text[separator:].lstrip(" \t"))
+        if separator > 0
+        else None
+    )
     if not quantity or not (_is_time(quantity[0]) or _distance_match(quantity[0])):
-        raise WorkoutTextError("invalid_workout_step", f"Workout-Zeile {number}: Dauer oder Distanz in Workout-Syntax angeben.")
+        raise WorkoutTextError(
+            "invalid_workout_step",
+            f"Workout-Zeile {number}: Dauer oder Distanz in Workout-Syntax angeben.",
+        )
     return quantity
 
 
@@ -139,10 +186,16 @@ def _workout_target(rest: str, number: int, target: str) -> tuple[str, str, bool
         rest = rest[4:].lstrip(" \t")
     intensity = _target_match(rest)
     if not intensity:
-        raise WorkoutTextError("missing_workout_target", f"Workout-Zeile {number}: Auswertbares Intensitaetsziel fehlt.")
-    cue = re.sub(r"[(),;]", " ", rest[intensity.end():])
+        raise WorkoutTextError(
+            "missing_workout_target",
+            f"Workout-Zeile {number}: Auswertbares Intensitaetsziel fehlt.",
+        )
+    cue = re.sub(r"[(),;]", " ", rest[intensity.end() :])
     if _target_match(cue, search=True):
-        raise WorkoutTextError("ambiguous_workout_target", f"Workout-Zeile {number}: Mehrere Intensitaetsziele im selben Schritt.")
+        raise WorkoutTextError(
+            "ambiguous_workout_target",
+            f"Workout-Zeile {number}: Mehrere Intensitaetsziele im selben Schritt.",
+        )
     parsed = intensity[0].upper()
     if "PACE" in parsed:
         kind = "PACE"
@@ -151,7 +204,10 @@ def _workout_target(rest: str, number: int, target: str) -> tuple[str, str, bool
     else:
         kind = "POWER"
     if target in {"POWER", "HR", "PACE"} and target != kind:
-        raise WorkoutTextError("workout_target_mismatch", f"Workout-Zeile {number}: Schrittziel {kind} passt nicht zum Einheitenziel {target}.")
+        raise WorkoutTextError(
+            "workout_target_mismatch",
+            f"Workout-Zeile {number}: Schrittziel {kind} passt nicht zum Einheitenziel {target}.",
+        )
     return parsed, kind, ramp
 
 
@@ -159,72 +215,122 @@ def _workout_amount(value: str) -> dict:
     distance_match = _distance_match(value)
     if distance_match:
         amount_match = re.match(r"\d+(?:\.\d+)?", value)
+        if amount_match is None:
+            raise WorkoutTextError(
+                "invalid_workout_step", "Eine Trainingsdistanz muss numerisch sein."
+            )
         amount = float(amount_match[0])
         if not math.isfinite(amount) or amount <= 0:
-            raise WorkoutTextError("invalid_workout_step", "Eine Trainingsdistanz muss positiv sein.")
-        unit = value[len(amount_match[0]):]
-        return {"distance": amount * {"km": 1000, "mtr": 1, "mi": 1609.344, "yd": 0.9144}[unit]}
+            raise WorkoutTextError(
+                "invalid_workout_step", "Eine Trainingsdistanz muss positiv sein."
+            )
+        unit = value[len(amount_match[0]) :]
+        return {
+            "distance": amount
+            * {"km": 1000, "mtr": 1, "mi": 1609.344, "yd": 0.9144}[unit]
+        }
     parts = _time_parts(value)
-    seconds = sum(float(amount) * {"h": 3600, "m": 60, "s": 1, "'": 60, '"': 1}[unit] for amount, unit in parts or ())
+    seconds = sum(
+        float(amount) * {"h": 3600, "m": 60, "s": 1, "'": 60, '"': 1}[unit]
+        for amount, unit in parts or ()
+    )
     if not math.isfinite(seconds) or seconds <= 0:
-        raise WorkoutTextError("invalid_workout_step", "Eine Trainingsdauer muss positiv sein.")
+        raise WorkoutTextError(
+            "invalid_workout_step", "Eine Trainingsdauer muss positiv sein."
+        )
     return {"duration": seconds}
 
 
 def _parse_workout_step(line: str, number: int, target: str) -> dict:
     value, rest = _workout_quantity(line, number)
     parsed_target, kind, ramp = _workout_target(rest, number, target)
-    return {"kind": kind.lower(), "target": parsed_target, "ramp": ramp, **_workout_amount(value)}
+    return {
+        "kind": kind.lower(),
+        "target": parsed_target,
+        "ramp": ramp,
+        **_workout_amount(value),
+    }
 
 
-def _repeat_header(line: str, repeat_pending: bool, previous_step: bool) -> tuple[int, bool, bool]:
+def _repeat_header(
+    line: str, repeat_pending: bool, previous_step: bool
+) -> tuple[int, bool, bool]:
     header = re.search(r"\b(\d+)x$", line)
     if not header:
         if repeat_pending or previous_step:
-            raise WorkoutTextError("invalid_workout_repeat", "Hinweise und neue Abschnitte durch eine Leerzeile von Trainingsschritten trennen.")
+            raise WorkoutTextError(
+                "invalid_workout_repeat",
+                "Hinweise und neue Abschnitte durch eine Leerzeile von Trainingsschritten trennen.",
+            )
         return 1, False, False
     repeat = int(header[1])
     if repeat_pending or previous_step or not 1 <= repeat <= 100:
-        raise WorkoutTextError("invalid_workout_repeat", "Wiederholungsbloecke mit Leerzeilen trennen.")
+        raise WorkoutTextError(
+            "invalid_workout_repeat", "Wiederholungsbloecke mit Leerzeilen trennen."
+        )
     return repeat, True, False
 
 
 def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
     """Return expanded steps for comparison with the provider's parsed reply."""
-    result, block = [], []
+    result: list[dict] = []
+    block: list[dict] = []
     repeat, repeat_pending, previous_step = 1, False, False
     for number, raw_line in enumerate(description.splitlines(), 1):
         line = raw_line.strip()
         if not line:
             if repeat_pending:
-                raise WorkoutTextError("invalid_workout_repeat", "Nach einer Wiederholung muessen direkt Trainingsschritte folgen.")
+                raise WorkoutTextError(
+                    "invalid_workout_repeat",
+                    "Nach einer Wiederholung muessen direkt Trainingsschritte folgen.",
+                )
             result.extend(block * repeat)
             block, repeat, previous_step = [], 1, False
         elif line.startswith("-"):
             block.append(_parse_workout_step(line, number, target))
             repeat_pending, previous_step = False, True
         else:
-            repeat, repeat_pending, previous_step = _repeat_header(line, repeat_pending, previous_step)
+            repeat, repeat_pending, previous_step = _repeat_header(
+                line, repeat_pending, previous_step
+            )
     if repeat_pending:
-        raise WorkoutTextError("invalid_workout_repeat", "Wiederholungsblock ohne Trainingsschritte.")
+        raise WorkoutTextError(
+            "invalid_workout_repeat", "Wiederholungsblock ohne Trainingsschritte."
+        )
     if not block and not result:
-        raise WorkoutTextError("missing_workout_steps", "Ausdauer-Einheit ohne auswertbare Trainingsschritte.")
+        raise WorkoutTextError(
+            "missing_workout_steps",
+            "Ausdauer-Einheit ohne auswertbare Trainingsschritte.",
+        )
     result.extend(block * repeat)
     if len(result) > 5000:
-        raise WorkoutTextError("invalid_workout_repeat", "Zu viele Trainingsschritte; Einheit in kleinere Bloecke aufteilen.")
+        raise WorkoutTextError(
+            "invalid_workout_repeat",
+            "Zu viele Trainingsschritte; Einheit in kleinere Bloecke aufteilen.",
+        )
     return result
 
 
 def structured_duration(description: str, target: str = "AUTO") -> tuple[float, bool]:
     steps = structured_steps(description, target)
-    return sum(step.get("duration", 0) for step in steps), any("distance" in step for step in steps)
+    return sum(step.get("duration", 0) for step in steps), any(
+        "distance" in step for step in steps
+    )
 
-def _readback_failure() -> None:
-    raise WorkoutTextError("intervals_workout_verification_failed", "Intervals.icu hat die Einheit nicht korrekt bestaetigt.")
+
+def _readback_failure() -> NoReturn:
+    raise WorkoutTextError(
+        "intervals_workout_verification_failed",
+        "Intervals.icu hat die Einheit nicht korrekt bestaetigt.",
+    )
 
 
-def _numeric(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+def _numeric(value: Any) -> TypeGuard[float | int]:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
 
 
 def _flatten_steps(steps: Any, depth: int = 0) -> list[dict]:
@@ -248,10 +354,18 @@ def _flatten_steps(steps: Any, depth: int = 0) -> list[dict]:
 
 def _expected_intensity(wanted: dict, intensity: dict) -> tuple[list[float], str]:
     text = wanted["target"]
+    values: list[float]
     if ":" in text:
-        values = [int(m) * 60 + int(s) for m, s in re.findall(r"(\d{1,3}):([0-5]\d)", text)]
+        values = [
+            float(int(m) * 60 + int(s))
+            for m, s in re.findall(r"(\d{1,3}):([0-5]\d)", text)
+        ]
         denominators = re.findall(r"/(KM|MI|100M|100Y|500M|400M|250M)", text)
-        units = "secs/" + denominators[0].lower() if denominators else str(intensity.get("units") or "")
+        units = (
+            "secs/" + denominators[0].lower()
+            if denominators
+            else str(intensity.get("units") or "")
+        )
         if not units.startswith("secs/") or len(set(denominators)) > 1:
             _readback_failure()
         return values, units
@@ -259,7 +373,11 @@ def _expected_intensity(wanted: dict, intensity: dict) -> tuple[list[float], str
     if text.startswith("Z"):
         units = wanted["kind"] + "_zone"
     elif "%" in text:
-        units = "%lthr" if "LTHR" in text else {"power": "%ftp", "hr": "%hr", "pace": "%pace"}[wanted["kind"]]
+        units = (
+            "%lthr"
+            if "LTHR" in text
+            else {"power": "%ftp", "hr": "%hr", "pace": "%pace"}[wanted["kind"]]
+        )
     else:
         units = "bpm" if "BPM" in text else "w"
     return values, units
@@ -280,7 +398,10 @@ def _verify_step(wanted: dict, got: Any) -> None:
     if intensity.get("units") != units:
         _readback_failure()
     keys = ("value",) if len(values) == 1 else ("start", "end")
-    if len(values) != len(keys) or any(not _numeric(intensity.get(key)) or abs(intensity[key] - value) > 0.01 for key, value in zip(keys, values)):
+    if len(values) != len(keys) or any(
+        not _numeric(intensity.get(key)) or abs(intensity[key] - value) > 0.01
+        for key, value in zip(keys, values)
+    ):
         _readback_failure()
 
 
@@ -288,13 +409,19 @@ def _verify_totals(doc: dict, remote: dict, actual: list[dict]) -> None:
     durations = [step.get("duration") for step in actual]
     if any(not _numeric(value) or value <= 0 for value in durations):
         _readback_failure()
-    total = sum(durations)
+    total = sum(value for value in durations if _numeric(value))
     tolerance = max(1, len(actual))
     if not _numeric(doc.get("duration")) or abs(doc["duration"] - total) > tolerance:
         _readback_failure()
-    if not _numeric(remote.get("moving_time")) or abs(remote["moving_time"] - total) > tolerance:
+    if (
+        not _numeric(remote.get("moving_time"))
+        or abs(remote["moving_time"] - total) > tolerance
+    ):
         _readback_failure()
-    if not _numeric(remote.get("icu_training_load")) or remote["icu_training_load"] <= 0:
+    if (
+        not _numeric(remote.get("icu_training_load"))
+        or remote["icu_training_load"] <= 0
+    ):
         _readback_failure()
 
 

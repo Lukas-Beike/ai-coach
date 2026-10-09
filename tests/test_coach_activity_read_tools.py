@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import unittest
 from datetime import date
 from unittest.mock import MagicMock, Mock
@@ -100,13 +99,11 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         manager = MagicMock()
         manager.unit_of_work.return_value.__enter__.return_value = object()
         snapshot_repository = Mock()
-        snapshot_repository.latest_payload.return_value = json.dumps(
-            {
-                "synced_at": "synthetic-sync",
-                "recent_activities": [{"id": "synthetic-1", "type": "Run"}],
-                "raw_provider_data": {"activities": [raw_activity]},
-            }
-        )
+        snapshot_repository.latest_snapshot.return_value = {
+            "synced_at": "synthetic-sync",
+            "recent_activities": [{"id": "synthetic-1", "type": "Run"}],
+            "raw_provider_data": {"activities": [raw_activity]},
+        }
         feedback = Mock()
         feedback.list.return_value = []
         activity_read = ActivityReadService(manager, snapshot_repository, feedback)

@@ -1,12 +1,15 @@
 """Exercise source selection and shard discovery without remote CI side effects."""
 
 import importlib.util
+import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 import run_tests
@@ -46,6 +49,64 @@ class WorkflowSourceTests(unittest.TestCase):
             container.count("uses: actions/checkout@"),
             container.count("persist-credentials: false"),
         )
+
+    def test_quality_checks_all_sources_and_merges_every_shard(self):
+        root = Path(__file__).resolve().parents[1]
+        config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(config["tool"]["ruff"]["target-version"], "py314")
+        self.assertIn("DTZ", config["tool"]["ruff"]["lint"]["extend-select"])
+        self.assertEqual(config["tool"]["mypy"]["python_version"], "3.14")
+        self.assertEqual(config["tool"]["mypy"]["files"], ["."])
+        self.assertNotIn("exclude", config["tool"]["mypy"])
+        coverage = config["tool"]["coverage"]["run"]
+        self.assertEqual(coverage["source"], ["server", "backend"])
+        self.assertTrue(coverage["branch"])
+        self.assertTrue(coverage["relative_files"])
+        self.assertTrue(coverage["parallel"])
+        evidence = json.loads(
+            (root / "tests/fixtures/quality_baseline.json").read_text(encoding="utf-8")
+        )
+        diagnostics = evidence["diagnostics"]
+        self.assertEqual({item["tool"] for item in diagnostics}, {"ruff", "mypy"})
+        evidence = evidence["coverage_evidence"]
+        totals = evidence["totals"]
+        measured = (
+            Decimal(totals["covered_lines"] + totals["covered_branches"])
+            * 100
+            / Decimal(totals["num_statements"] + totals["num_branches"])
+        )
+        threshold = config["tool"]["coverage"]["report"]["fail_under"]
+        self.assertGreater(threshold, 0)
+        self.assertEqual(
+            Decimal(str(threshold)),
+            measured.quantize(Decimal("0.01"), rounding=ROUND_DOWN),
+        )
+        self.assertEqual(config["tool"]["coverage"]["report"]["precision"], 2)
+        self.assertEqual(evidence["shards"], 4)
+
+        shards = workflow.split("  test_shards:\n", 1)[1].split("  syntax:\n", 1)[0]
+        self.assertIn("coverage run tests/run_tests.py --shard", shards)
+        self.assertIn("python-coverage-${{ matrix.shard }}", shards)
+        self.assertIn("include-hidden-files: true", shards)
+        self.assertIn("if-no-files-found: error", shards)
+        quality = workflow.split("  quality:\n", 1)[1].split("  image_sbom:\n", 1)[0]
+        self.assertIn("pattern: python-coverage-*", quality)
+        self.assertIn("merge-multiple: true", quality)
+        self.assertIn("coverage combine coverage-data", quality)
+        self.assertIn("coverage report", quality)
+        self.assertIn("-ne 4", quality)
+        self.assertIn("exit 1", quality)
+        self.assertNotIn("coverage run", quality)
+        self.assertNotIn("--fail-under", quality)
+        self.assertNotIn("ruff format", quality)
+        self.assertIn("python tools/quality_baseline.py", quality)
+        self.assertNotIn("Run lint baseline", quality)
+        self.assertIn("/review/pyproject.toml:ro", workflow)
+        self.assertIn("/app/tools:ro", workflow)
 
     def test_dependabot_pip_compile_updates_the_hash_locked_docker_inputs(self):
         root = Path(__file__).resolve().parents[1]

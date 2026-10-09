@@ -1125,13 +1125,16 @@ class ServerPlanningTests(ServerTestCase):
             ) as folder,
             patch.object(client, "put", return_value={"id": "remote-1"}) as put,
         ):
-            client.update_library_workout(
-                "remote-1",
+            payload = planning_workouts.library_workout_payload(
                 {
                     "name": "Easy",
                     "description": "- 30m Z2",
                     "type": "Ride",
-                },
+                }
+            )
+            client.update_library_workout(
+                "remote-1",
+                payload,
             )
         folder.assert_called_once_with()
         self.assertEqual(
@@ -1159,15 +1162,14 @@ class ServerPlanningTests(ServerTestCase):
                 client, "post", side_effect=[{"id": 12345}, {"id": "remote-1"}]
             ) as post,
         ):
-            client.create_library_workouts(
-                [
-                    {
-                        "name": "Regeneration",
-                        "description": "- 30m Z1 HR Locker bewegen",
-                        "sport": "Recovery Session",
-                    }
-                ]
+            payload = planning_workouts.library_workout_payload(
+                {
+                    "name": "Regeneration",
+                    "description": "- 30m Z1 HR Locker bewegen",
+                    "sport": "Recovery Session",
+                }
             )
+            client.create_library_workouts([payload])
         self.assertEqual(post.call_args_list[1].args[1]["type"], "Other")
 
     def test_workout_sport_aliases_are_normalized_before_storage(self):
@@ -1272,13 +1274,22 @@ class ServerPlanningTests(ServerTestCase):
             for operation in (
                 lambda: client.create_library_workouts(
                     [
-                        {"type": "Run", "description": "- 6km Z1 HR"},
-                        workout,
+                        planning_workouts.library_workout_payload(
+                            {"type": "Run", "description": "- 6km Z1 HR"}
+                        ),
+                        planning_workouts.library_workout_payload(workout),
                     ]
                 ),
-                lambda: client.update_library_workout("synthetic", workout),
+                lambda: client.update_library_workout(
+                    "synthetic", planning_workouts.library_workout_payload(workout)
+                ),
                 lambda: client.plan_library_workout(
-                    "synthetic", workout, workout["date"]
+                    planning_workouts.library_workout_event_payload(
+                        "synthetic",
+                        workout,
+                        workout["date"],
+                        today=server.ATHLETE_CLOCK.now().date(),
+                    )
                 ),
                 lambda: planning_workouts.workout_event_payload(
                     "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()

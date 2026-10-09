@@ -7,7 +7,7 @@ import math
 from typing import Any
 
 from backend.errors import AppError
-from backend.sync.snapshots import latest_snapshot
+from backend.runtime.ports import ProviderSnapshotReader
 
 ACTIVITY_FEEDBACK_TEXT_LIMITS = {
     "activity_name": 200,
@@ -65,11 +65,14 @@ class ActivityFeedbackService:
     """Coordinate local activity-feedback use cases and their transactions."""
 
     def __init__(
-        self, database_manager: Any, feedback_repository: Any, snapshot_repository: Any
+        self,
+        database_manager: Any,
+        feedback_repository: Any,
+        snapshot_reader: ProviderSnapshotReader,
     ):
         self._database_manager = database_manager
         self._feedback_repository = feedback_repository
-        self._snapshot_repository = snapshot_repository
+        self._snapshot_reader = snapshot_reader
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 500))
@@ -117,7 +120,7 @@ class ActivityFeedbackService:
         ):
             raise AppError(400, "Die Rückmeldung darf nicht leer sein.")
         with self._database_manager.unit_of_work() as db:
-            snapshot = latest_snapshot(db, self._snapshot_repository) or {}
+            snapshot = self._snapshot_reader.latest_snapshot(db) or {}
             activities = (
                 snapshot.get("recent_activities", [])
                 if isinstance(snapshot, dict)

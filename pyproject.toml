@@ -1,0 +1,22 @@
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+[tool.ruff.lint]
+extend-select = ["DTZ"]
+
+[tool.mypy]
+python_version = "3.14"
+files = ["."]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[tool.coverage.run]
+branch = true
+parallel = true
+relative_files = true
+source = ["server", "backend"]
+
+[tool.coverage.report]
+precision = 2
+fail_under = 93.54

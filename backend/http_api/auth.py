@@ -7,13 +7,14 @@ import hmac
 import secrets
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.cookies import CookieError, SimpleCookie
 from typing import Any
 
 from backend import config as app_config
 from backend.config import Config
 from backend.db.manager import DatabaseManager
+from backend.db.repositories import SessionRepository
 from backend.errors import AppError
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.responses import session_cookies
@@ -92,6 +93,7 @@ class SessionAuthService:
         self._config = config
         self._sqlcipher_available = sqlcipher_available
         self._rate_limiter = rate_limiter
+        self._sessions = SessionRepository()
         self._session_lock = threading.RLock()
         self._last_cleanup_monotonic = 0.0
 
@@ -112,7 +114,7 @@ class SessionAuthService:
         cookie = SimpleCookie()
         try:
             cookie.load(handler.headers.get("Cookie", ""))
-        except (CookieError, TypeError, ValueError):
+        except CookieError, TypeError, ValueError:
             return ""
         return cookie[name].value if name in cookie else ""
 
@@ -123,11 +125,11 @@ class SessionAuthService:
     @staticmethod
     def session_timestamp(value: Any) -> float | None:
         try:
-            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(str(value))
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
+                parsed = parsed.replace(tzinfo=UTC)
             return parsed.timestamp()
-        except (TypeError, ValueError, OverflowError):
+        except TypeError, ValueError, OverflowError:
             return None
 
     def cleanup_expired_sessions(
@@ -140,14 +142,9 @@ class SessionAuthService:
             < SESSION_CLEANUP_INTERVAL_SECONDS
         ):
             return 0
-        cursor = db.execute(
-            "DELETE FROM sessions WHERE token_hash IN ("
-            "SELECT token_hash FROM sessions WHERE expires_at <= ? LIMIT ?"
-            ")",
-            (now, SESSION_CLEANUP_BATCH_SIZE),
-        )
+        deleted = self._sessions.cleanup_expired(db, now, SESSION_CLEANUP_BATCH_SIZE)
         self._last_cleanup_monotonic = current_monotonic
-        return cursor.rowcount
+        return deleted
 
     def authenticated_session(self, handler: Any) -> dict[str, Any] | None:
         token = self.cookie_value(handler, SESSION_COOKIE)
@@ -161,21 +158,15 @@ class SessionAuthService:
             self._database_manager.unit_of_work() as db,
         ):
             self.cleanup_expired_sessions(db, now)
-            row = db.execute(
-                "SELECT csrf_hash, expires_at, last_seen FROM sessions WHERE token_hash = ?",
-                (token_hash,),
-            ).fetchone()
+            row = self._sessions.get(db, token_hash)
             if not row:
                 return None
             if float(row["expires_at"]) <= now:
-                db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+                self._sessions.delete(db, token_hash)
                 return None
             last_seen = self.session_timestamp(row["last_seen"])
             if last_seen is None or now - last_seen >= SESSION_TOUCH_INTERVAL_SECONDS:
-                db.execute(
-                    "UPDATE sessions SET last_seen = ? WHERE token_hash = ?",
-                    (datetime.now(timezone.utc).isoformat(), token_hash),
-                )
+                self._sessions.touch(db, token_hash, datetime.now(UTC).isoformat())
             return {
                 "csrf_hash": row["csrf_hash"],
                 "expires_at": float(row["expires_at"]),
@@ -213,15 +204,13 @@ class SessionAuthService:
             self._database_lock,
             self._database_manager.unit_of_work() as db,
         ):
-            db.execute(
-                "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-                (
-                    self.session_token_hash(token),
-                    self.session_token_hash(csrf),
-                    now + SESSION_TTL_SECONDS,
-                    datetime.now(timezone.utc).isoformat(),
-                    datetime.now(timezone.utc).isoformat(),
-                ),
+            self._sessions.create(
+                db,
+                self.session_token_hash(token),
+                self.session_token_hash(csrf),
+                now + SESSION_TTL_SECONDS,
+                datetime.now(UTC).isoformat(),
+                datetime.now(UTC).isoformat(),
             )
         return {
             "status": "ok",
@@ -239,10 +228,7 @@ class SessionAuthService:
             self._database_lock,
             self._database_manager.unit_of_work() as db,
         ):
-            db.execute(
-                "DELETE FROM sessions WHERE token_hash = ?",
-                (self.session_token_hash(token),),
-            )
+            self._sessions.delete(db, self.session_token_hash(token))
 
     def require_auth(self, handler: Any) -> dict[str, Any]:
         if app_config.security_configuration_error(
@@ -294,7 +280,7 @@ class SessionAuthService:
             self._database_lock,
             self._database_manager.unit_of_work() as db,
         ):
-            rows = db.execute("SELECT csrf_hash, expires_at FROM sessions").fetchall()
+            rows = self._sessions.list_csrf(db)
         for row in rows:
             csrf_hash = str(row.get("csrf_hash") or "")
             if not csrf_hash or float(row.get("expires_at") or 0) <= now:

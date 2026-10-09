@@ -14,7 +14,7 @@ from backend.activities.matching import record_date
 from backend.errors import AppError
 from backend.performance import activity_validation
 from backend.performance import context as performance_context
-from backend.sync.snapshots import latest_snapshot
+from backend.runtime.ports import ProviderSnapshotReader
 
 ALL_DAYS = -1
 PAGE_DEFAULT = 100
@@ -51,14 +51,14 @@ def _decode_cursor(value: Any) -> Any | None:
     try:
         padding = "=" * (-len(str(value)) % 4)
         return json.loads(base64.urlsafe_b64decode(f"{value}{padding}"))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
 def _page_limit(raw: Any) -> int:
     try:
         return max(1, min(int(raw), PAGE_MAX))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return PAGE_DEFAULT
 
 
@@ -68,21 +68,21 @@ class ActivityReadService:
     def __init__(
         self,
         database_manager: Any,
-        snapshot_repository: Any,
+        snapshot_reader: ProviderSnapshotReader,
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
         *,
         read_equipment: Callable[[], dict[str, Any]] = dict,
     ):
         self._database_manager = database_manager
-        self._snapshot_repository = snapshot_repository
+        self._snapshot_reader = snapshot_reader
         self._feedback_service = feedback_service
         self._detail_store = detail_store
         self._read_equipment = read_equipment
 
     def _snapshot(self) -> dict[str, Any]:
         with self._database_manager.unit_of_work() as db:
-            snapshot = latest_snapshot(db, self._snapshot_repository)
+            snapshot = self._snapshot_reader.latest_snapshot(db)
         return snapshot if isinstance(snapshot, dict) else {}
 
     @staticmethod
@@ -106,7 +106,7 @@ class ActivityReadService:
         activities = self._activities(snapshot)
         try:
             days_value = int(days)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             days_value = ALL_DAYS
         if days_value != ALL_DAYS:
             cutoff = today - timedelta(days=max(1, days_value) - 1)

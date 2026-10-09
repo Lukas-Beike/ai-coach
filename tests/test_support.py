@@ -18,7 +18,16 @@ class SupportFixtureTests(unittest.TestCase):
     def test_recorded_intervals_client_records_safe_mutation_metadata(self):
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
-        client.create_library_workouts([{"name": "Synthetic"}])
+        client.create_library_workouts(
+            [
+                {
+                    "name": "Synthetic",
+                    "description": "",
+                    "type": "Ride",
+                    "target": "AUTO",
+                }
+            ]
+        )
         self.assertEqual(recorder.mutations[0]["method"], "POST")
         self.assertEqual(recorder.mutations[0]["path"], "/athlete/0/workouts")
         self.assertEqual(recorder.mutations[0]["payload_count"], 1)

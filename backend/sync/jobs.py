@@ -10,10 +10,13 @@ from __future__ import annotations
 import builtins
 import hashlib
 import json
+import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from typing import Any
+
+from backend.runtime.clock import utc_now as system_utc_now
 
 PROVIDERS = frozenset({"intervals", "garmin", "calendar", "weather"})
 JOB_TYPES = frozenset(
@@ -28,6 +31,13 @@ JOB_TYPES = frozenset(
     }
 )
 JOB_STATUSES = frozenset({"queued", "running", "completed", "partial", "failed"})
+ALLOWED_JOB_TRANSITIONS: dict[str, frozenset[str]] = {
+    "queued": frozenset({"running"}),
+    "running": frozenset({"queued", "completed", "partial", "failed"}),
+    "completed": frozenset(),
+    "partial": frozenset({"queued"}),
+    "failed": frozenset({"queued"}),
+}
 ITEM_STATUSES = frozenset(
     {"queued", "running", "completed", "partial", "failed", "skipped"}
 )
@@ -71,6 +81,10 @@ class SyncJobInvalidStateError(RuntimeError):
     """Raised when a job cannot make the requested state transition."""
 
 
+class SyncJobTransitionError(SyncJobInvalidStateError):
+    """Raised when a guarded job transition is invalid or lost a race."""
+
+
 class SyncJobInvalidOperationError(ValueError):
     """Raised when a sync-job operation violates its persistence contract."""
 
@@ -83,7 +97,7 @@ def decode_job_payload(value: Any) -> dict[str, Any]:
     """Decode a persisted payload without allowing malformed data to escape."""
     try:
         payload = json.loads(value or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -162,7 +176,7 @@ def has_active_job(db: Any, provider: str, job_type: str) -> bool:
 
 def utc_timestamp(now: datetime | None = None) -> str:
     """Return a stable UTC timestamp for durable job records."""
-    value = now or datetime.now(timezone.utc)
+    value = now or datetime.fromisoformat(system_utc_now())
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc).isoformat()
@@ -479,7 +493,7 @@ def retry_delay(attempt: int, *, base_seconds: int, max_seconds: int) -> int:
     """Return bounded exponential backoff after a failed attempt."""
     try:
         number = max(1, int(attempt))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         number = 1
     return min(max_seconds, base_seconds * (2 ** min(number - 1, 16)))
 
@@ -631,10 +645,17 @@ class SyncJobStore:
                 "SELECT id FROM sync_jobs WHERE status='running'"
             ).fetchall()
             for job in jobs:
-                db.execute(
-                    "UPDATE sync_jobs SET status='queued', available_at=?, started_at=NULL, "
-                    "error_class='process_interrupted', updated_at=? WHERE id=?",
-                    (now, now, job["id"]),
+                self._transition(
+                    db,
+                    job["id"],
+                    "running",
+                    "queued",
+                    {
+                        "available_at": now,
+                        "started_at": None,
+                        "error_class": "process_interrupted",
+                        "updated_at": now,
+                    },
                 )
                 db.execute(
                     "UPDATE sync_job_items SET status='queued', error_class='process_interrupted', "
@@ -654,14 +675,21 @@ class SyncJobStore:
             if not candidate:
                 return None
             job_id = candidate["id"]
-            claimed = db.execute(
-                "UPDATE sync_jobs SET status='running', attempts=attempts+1, started_at=?, "
-                "finished_at=NULL, error_class=NULL, updated_at=? "
-                "WHERE id=? AND status='queued' AND (available_at IS NULL OR available_at<=?)",
-                (now, now, job_id, now),
+            self._transition(
+                db,
+                job_id,
+                "queued",
+                "running",
+                {
+                    "started_at": now,
+                    "finished_at": None,
+                    "error_class": None,
+                    "updated_at": now,
+                },
+                increment_attempts=True,
+                extra_where="AND (available_at IS NULL OR available_at<=?)",
+                extra_parameters=(now,),
             )
-            if claimed.rowcount != 1:
-                return None
             db.execute(
                 "UPDATE sync_job_items SET status='running', attempts=attempts+1, error_class=NULL, "
                 "error_detail=NULL, updated_at=? WHERE job_id=? AND status='queued'",
@@ -701,10 +729,18 @@ class SyncJobStore:
             status = aggregate_job_status(items)
             completed, total = bounded_progress(items)
             finished = now if status in TERMINAL_JOB_STATUSES else None
-            db.execute(
-                "UPDATE sync_jobs SET status=?, progress_total=?, progress_completed=?, finished_at=?, "
-                "error_class=?, updated_at=? WHERE id=?",
-                (status, total, completed, finished, error_class, now, job_id),
+            self._transition(
+                db,
+                job_id,
+                str(job["status"]),
+                status,
+                {
+                    "progress_total": total,
+                    "progress_completed": completed,
+                    "finished_at": finished,
+                    "error_class": error_class,
+                    "updated_at": now,
+                },
             )
             updated, updated_items = read_job(db, job_id)
             return self._event_snapshot(updated, updated_items)
@@ -755,10 +791,18 @@ class SyncJobStore:
             completed, total = bounded_progress(items)
             finished = now if status in TERMINAL_JOB_STATUSES else None
             error_class = None if status == "completed" else "plan_push_error"
-            db.execute(
-                "UPDATE sync_jobs SET status=?, progress_total=?, progress_completed=?, finished_at=?, "
-                "error_class=?, updated_at=? WHERE id=?",
-                (status, total, completed, finished, error_class, now, job_id),
+            self._transition(
+                db,
+                job_id,
+                str(job["status"]),
+                status,
+                {
+                    "progress_total": total,
+                    "progress_completed": completed,
+                    "finished_at": finished,
+                    "error_class": error_class,
+                    "updated_at": now,
+                },
             )
             updated, updated_items = read_job(db, job_id)
             return self._event_snapshot(updated, updated_items)
@@ -820,13 +864,18 @@ class SyncJobStore:
             return False
         clipped_detail = str(detail or "")[:500] or None
         with self._database_manager.unit_of_work() as db:
-            updated = db.execute(
-                "UPDATE sync_jobs SET status='queued', available_at=?, finished_at=NULL, "
-                "error_class=?, updated_at=? WHERE id=?",
-                (scheduled_at, error_class, now, job_id),
+            self._transition(
+                db,
+                job_id,
+                "running",
+                "queued",
+                {
+                    "available_at": scheduled_at,
+                    "finished_at": None,
+                    "error_class": error_class,
+                    "updated_at": now,
+                },
             )
-            if updated.rowcount != 1:
-                return False
             db.execute(
                 "UPDATE sync_job_items SET status='queued', error_class=?, error_detail=?, updated_at=? "
                 "WHERE job_id=?",
@@ -846,10 +895,20 @@ class SyncJobStore:
                 raise SyncJobInvalidStateError(
                     "Only failed or partial sync jobs can be resolved."
                 )
-            db.execute(
-                "UPDATE sync_jobs SET status='queued', attempts=0, available_at=?, started_at=NULL, "
-                "finished_at=NULL, error_class=NULL, progress_completed=0, updated_at=? WHERE id=?",
-                (now, now, job_id),
+            self._transition(
+                db,
+                job_id,
+                str(job["status"]),
+                "queued",
+                {
+                    "attempts": 0,
+                    "available_at": now,
+                    "started_at": None,
+                    "finished_at": None,
+                    "error_class": None,
+                    "progress_completed": 0,
+                    "updated_at": now,
+                },
             )
             db.execute(
                 "UPDATE sync_job_items SET status='queued', attempts=0, error_class=NULL, "
@@ -858,6 +917,64 @@ class SyncJobStore:
             )
             resolved, items = read_job(db, job_id)
             return job_dto(resolved, items)
+
+    @staticmethod
+    def _transition(
+        db: Any,
+        job_id: str,
+        expected_status: str,
+        target_status: str,
+        updates: Mapping[str, Any],
+        *,
+        increment_attempts: bool = False,
+        extra_where: str = "",
+        extra_parameters: tuple[Any, ...] = (),
+    ) -> Any:
+        """Validate and atomically apply one guarded job status transition."""
+        allowed = ALLOWED_JOB_TRANSITIONS.get(expected_status, frozenset())
+        if target_status not in allowed:
+            SyncJobStore._log_transition_rejection(expected_status, target_status)
+            raise SyncJobTransitionError("Invalid sync job status transition.")
+        allowed_updates = {
+            "attempts",
+            "available_at",
+            "started_at",
+            "finished_at",
+            "progress_total",
+            "progress_completed",
+            "error_class",
+            "updated_at",
+        }
+        if set(updates) - allowed_updates:
+            raise SyncJobInvalidOperationError("Invalid sync job transition fields.")
+        assignments = []
+        parameters: list[Any] = [target_status]
+        for column, value in updates.items():
+            assignments.append(f"{column}=?")
+            parameters.append(value)
+        if increment_attempts:
+            assignments.append("attempts=attempts+1")
+        sql = (
+            f"UPDATE sync_jobs SET status=?, {', '.join(assignments)} "
+            f"WHERE id=? AND status=? {extra_where}"
+        )
+        parameters.extend((job_id, expected_status, *extra_parameters))
+        updated = db.execute(sql, tuple(parameters))
+        if updated.rowcount != 1:
+            SyncJobStore._log_transition_rejection(expected_status, target_status)
+            raise SyncJobTransitionError("Sync job status transition lost a race.")
+        return updated
+
+    @staticmethod
+    def _log_transition_rejection(expected_status: str, target_status: str) -> None:
+        logging.getLogger(__name__).warning(
+            "Sync job status transition rejected",
+            extra={
+                "event": "sync_job_transition_rejected",
+                "expected_status": expected_status,
+                "target_status": target_status,
+            },
+        )
 
     @staticmethod
     def _scheduled_at(value: str | None, now: str) -> str:

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.db.manager import DatabaseManager
+from backend.db.repositories import ReadinessRepository
 from backend.db.schema import database_schema_is_current
 from backend.runtime.maintenance import MaintenanceGate
 
@@ -26,6 +27,7 @@ class ReadinessService:
         self._db_lock = db_lock
         self._data_dir = data_dir
         self._maintenance_gate = maintenance_gate
+        self._readiness_repository = ReadinessRepository()
 
     def state(self) -> dict[str, Any]:
         checks = {
@@ -36,7 +38,7 @@ class ReadinessService:
         }
         try:
             with self._db_lock, self._manager_factory().unit_of_work() as db:
-                checks["database"] = bool(db.execute("SELECT 1").fetchone())
+                checks["database"] = self._readiness_repository.database_available(db)
                 checks["schema"] = database_schema_is_current(db)
         except Exception:  # noqa: BLE001, S110 - an infrastructure probe must fail closed.
             pass
@@ -45,8 +47,11 @@ class ReadinessService:
         try:
             self._data_dir.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
-                mode="wb", prefix=".readiness-", suffix=".probe",
-                dir=self._data_dir, delete=False,
+                mode="wb",
+                prefix=".readiness-",
+                suffix=".probe",
+                dir=self._data_dir,
+                delete=False,
             ) as handle:
                 probe = Path(handle.name)
                 handle.write(b"ok")

@@ -9,7 +9,7 @@ from backend.activities.duplicates import (
     remove_activity_from_snapshot,
     validate_duplicate_delete,
 )
-from backend.sync.snapshots import latest_snapshot
+from backend.runtime.ports import ProviderSnapshotReader
 
 
 class DuplicateActivityService:
@@ -19,17 +19,19 @@ class DuplicateActivityService:
         self,
         database_manager: Any,
         snapshot_repository: Any,
+        snapshot_reader: ProviderSnapshotReader,
         clock: Any,
         event_buffer: Any,
     ) -> None:
         self._database_manager = database_manager
         self._snapshot_repository = snapshot_repository
+        self._snapshot_reader = snapshot_reader
         self._clock = clock
         self._event_buffer = event_buffer
 
     def _latest_snapshot(self) -> dict[str, Any] | None:
         with self._database_manager.unit_of_work() as db:
-            return latest_snapshot(db, self._snapshot_repository)
+            return self._snapshot_reader.latest_snapshot(db)
 
     def delete(self, payload: Any, intervals_client: Any) -> dict[str, Any]:
         """Delete the confirmed Garmin copy and retain the Wahoo activity."""
@@ -40,7 +42,7 @@ class DuplicateActivityService:
 
         synced_at = self._clock()
         with self._database_manager.unit_of_work() as db:
-            snapshot = latest_snapshot(db, self._snapshot_repository)
+            snapshot = self._snapshot_reader.latest_snapshot(db)
             updated = remove_activity_from_snapshot(
                 snapshot,
                 duplicate_id,

@@ -5,7 +5,7 @@ from typing import Any
 from backend.activities.identity import activity_kind
 from backend.activities.matching import match_planned_workouts, record_date
 from backend.calendar.canonical import canonical_planned_workouts
-from backend.providers.workout_text import WorkoutTextError, structured_steps
+from backend.planning.workout_text import WorkoutTextError, structured_steps
 
 
 def freeze_targets(
