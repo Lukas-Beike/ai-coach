@@ -709,7 +709,11 @@ Charts preserve provider provenance and observation dates. Garmin performance me
 Unter **Geplant → Übersicht** öffnet „Aktivität analysieren“ eine absolvierte
 Einheit mit ihren lokal gespeicherten Messreihen und Intervallen. „Detaildaten
 laden“ startet ausdrücklich einen Hintergrundjob mit ausschließlich lesenden
-Intervals.icu-Abfragen. Der vorherige Detailstand bleibt bei Fehlern erhalten;
+Intervals.icu-Abfragen; die Aktion ist nur für Intervals.icu-Aktivitäten
+verfügbar und bleibt ohne eingerichtete Intervals.icu-Anbindung deaktiviert.
+Solange Zugangsdaten fehlen, zeigt ein Einrichtungshinweis auf allen Tabs
+einen Link zu Mehr › Anbindungen; er lässt sich für die Browsersitzung
+ausblenden. Der vorherige Detailstand bleibt bei Fehlern erhalten;
 normale Synchronisierungen ersetzen ihn nicht. Fehlende Sensorwerte bleiben
 als Datenlücken sichtbar. Diagramme und Coach-Kontext zeigen höchstens 2.000
 Punkte je Messreihe; gespeichert werden die vollständigen Reihen bis zur

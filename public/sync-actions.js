@@ -103,6 +103,11 @@ async function waitForSyncJob(jobId) {
   if (!jobId) return { status: "unknown" };
   for (let attempt = 0; attempt < 180; attempt += 1) {
     const job = await api(`/api/sync/jobs/${encodeURIComponent(jobId)}`);
+    // A non-retryable error (for example a missing provider configuration) will
+    // not change while polling, so stop now and show the job's own message.
+    if ([job.error_class, job.error_code].some(providerErrorIsNonRetryable)) {
+      throw new Error(job.error_detail || "Die Anbindung ist nicht vollständig konfiguriert. Bitte die Verbindungseinstellungen unter Mehr prüfen.");
+    }
     if (["completed", "partial", "failed"].includes(job.status)) return job;
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }

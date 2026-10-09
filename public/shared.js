@@ -259,27 +259,52 @@ function discardUnsavedChanges() {
 }
 
 
+const SETUP_BANNER_DISMISSED_KEY = "intervalsCoachSetupBannerDismissed";
+
+
+function setupBannerDismissed() {
+  // Session-only: dismissal must not persist beyond the browser session.
+  try { return sessionStorage.getItem(SETUP_BANNER_DISMISSED_KEY) === "1"; } catch { return false; }
+}
+
+
+function dismissSetupBanner() {
+  try { sessionStorage.setItem(SETUP_BANNER_DISMISSED_KEY, "1"); } catch { }
+  const banner = $("#setupBanner");
+  if (banner) banner.hidden = true;
+}
+
+
+function renderSetupBanner(missing) {
+  const banner = $("#setupBanner");
+  if (!banner) return;
+  banner.hidden = !missing.length || setupBannerDismissed();
+  const detail = $("#setupBannerDetail");
+  if (detail) detail.textContent = `Fehlt: ${missing.join(" + ")}. Ergänze die fehlende Serverkonfiguration.`;
+}
+
+
 function renderStatus(data) {
   const configured = data.configured;
   const morning = data.morning_checkin || {};
   const missing = [];
   if (!configured.openai) missing.push("OpenAI-API-Schlüssel");
   if (!configured.intervals) missing.push("Intervals.icu-API-Schlüssel");
+  // The setup state is shown by the page-wide setup banner on every tab, so the
+  // status card only reports runtime problems.
+  renderSetupBanner(missing);
   const performanceRefresh = data.performance_refresh || {};
   const openaiStatus = data.usage?.status || {};
   const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error || performanceRefresh.last_error
     || (openaiStatus.state === "error" ? openaiStatus.message : null);
   const statusCard = $("#statusCard");
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
-  const hasProblem = Boolean(missing.length || error);
+  const hasProblem = Boolean(error);
   statusCard.hidden = !hasProblem || activePanel === "settingsPanel";
   statusCard.classList.toggle("warning", hasProblem);
   let statusTitle = "Coach ist bereit";
   let statusDetail = "Bereit für deine nächste Frage";
-  if (missing.length) {
-    statusTitle = `Einrichtung nötig: ${missing.join(" + ")}`;
-    statusDetail = "Ergänze die fehlende Serverkonfiguration";
-  } else if (error) {
+  if (error) {
     statusTitle = "Coach benötigt Aufmerksamkeit";
     statusDetail = error;
   } else if (morning.status === "ready") {

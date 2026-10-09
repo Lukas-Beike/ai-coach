@@ -281,9 +281,17 @@ function coachProviderLabel(provider) {
 }
 
 
+const NON_RETRYABLE_PROVIDER_ERRORS = Object.freeze(["auth_required", "invalid_configuration"]);
+
+
+function providerErrorIsNonRetryable(errorCode) {
+  return NON_RETRYABLE_PROVIDER_ERRORS.includes(errorCode);
+}
+
+
 function providerRequiresManualAttention(entry) {
   if (!entry?.configured) return false;
-  if (["auth_required", "invalid_configuration"].includes(entry.error_code)) return true;
+  if (providerErrorIsNonRetryable(entry.error_code)) return true;
   const hasFutureRetry = entry.next_retry_at && Date.parse(entry.next_retry_at) > Date.now();
   return ["error", "stale", "partial"].includes(entry.state) && !hasFutureRetry;
 }
