@@ -75,6 +75,35 @@ def _slow_stream_response(on_text_delta):
     return {"output_text": "".join(SLOW_STREAM_CHUNKS)}
 
 
+PROVIDER_FAILURE_CODES = {
+    "E2E fixture: OpenAI credit balance exhausted": "credit_balance_exhausted",
+    "E2E fixture: OpenAI model not found": "model_not_found",
+    "E2E fixture: OpenAI access denied": "permission_denied",
+}
+
+
+def _scripted_provider_response(current_message, on_text_delta):
+    """Return provider failures and streaming scenarios triggered by fixed messages."""
+    if current_message == "E2E fixture: OpenAI timeout":
+        raise server.AppError(
+            504, "Synthetic private provider detail", reason="provider_timeout"
+        )
+    if current_message in PROVIDER_FAILURE_CODES:
+        return server.provider_state_service().validate_openai_response(
+            "/responses",
+            {
+                "status": "failed",
+                "error": {
+                    "code": PROVIDER_FAILURE_CODES[current_message],
+                    "message": "Synthetic private provider detail",
+                },
+            },
+        )
+    if current_message == "E2E fixture: slow stream":
+        return _slow_stream_response(on_text_delta)
+    return None
+
+
 def fixture_coach_response(payload, **kwargs):
     """Canned model outputs exercise HTTP/worker/storage, not language inference."""
     value = payload.get("input")
@@ -90,28 +119,9 @@ def fixture_coach_response(payload, **kwargs):
         return {"output_text": question or "Deine Rückmeldung ist gespeichert."}
     decoded = json.loads(value)
     current_message = decoded.get("current_message")
-    if current_message == "E2E fixture: OpenAI timeout":
-        raise server.AppError(
-            504, "Synthetic private provider detail", reason="provider_timeout"
-        )
-    provider_failure_codes = {
-        "E2E fixture: OpenAI credit balance exhausted": "credit_balance_exhausted",
-        "E2E fixture: OpenAI model not found": "model_not_found",
-        "E2E fixture: OpenAI access denied": "permission_denied",
-    }
-    if current_message in provider_failure_codes:
-        return server.provider_state_service().validate_openai_response(
-            "/responses",
-            {
-                "status": "failed",
-                "error": {
-                    "code": provider_failure_codes[current_message],
-                    "message": "Synthetic private provider detail",
-                },
-            },
-        )
-    if current_message == "E2E fixture: slow stream":
-        return _slow_stream_response(kwargs.get("on_text_delta"))
+    scripted = _scripted_provider_response(current_message, kwargs.get("on_text_delta"))
+    if scripted is not None:
+        return scripted
     context = decoded["dialogue"]
     current_id = context["current_user_message_id"]
     if current_message in {
