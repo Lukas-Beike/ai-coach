@@ -60,7 +60,7 @@ class WorkoutLibraryPlanService:
             raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
         plan_date = str(item.get("date") or "").strip()
         try:
-            plan_date = LocalDate.parse(plan_date).isoformat()
+            plan_date = LocalDate.parse(plan_date, allow_datetime=False).isoformat()
         except (TypeError, ValueError) as exc:
             raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
 
