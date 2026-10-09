@@ -297,6 +297,23 @@ function populateCheckin(checkin, timeZone) {
   state.checkinDirty = false;
 }
 
+async function openCheckinEditor(date = todayIso()) {
+  const dialog = $("#checkinDialog");
+  const form = $("#checkinForm");
+  if (!dialog || !form) return;
+  const todayKey = todayIso();
+  if (date > todayKey) return;
+  form.elements.checkin_date.max = todayKey;
+  // Keeping an unsaved draft reopens the dialog with that draft instead of losing access to it.
+  if (await confirmDiscardDraft(state.checkinDirty)) {
+    const timeZone = state.data?.profile?.timezone;
+    const rows = state.data?.checkins || [];
+    populateCheckin(rows.find((row) => row.checkin_date === date) || { checkin_date: date }, timeZone);
+    renderCheckins(rows, timeZone);
+  }
+  showAccessibleDialog(dialog, form.elements.soreness);
+}
+
 function selectedCheckin(rows, timeZone) {
   return rows.find((row) => row.checkin_date === state.checkinSelectedDate)
     || (!state.checkinSelectedDate ? rows.find((row) => row.checkin_date === timezoneDateKey(timeZone)) : null);
@@ -325,7 +342,8 @@ function checkinHistoryButton(row, rows, timeZone) {
   const summary = document.createElement("span");
   summary.textContent = checkinSummary(row);
   button.append(title, summary);
-  button.addEventListener("click", () => {
+  button.addEventListener("click", async () => {
+    if (!(await confirmDiscardDraft(state.checkinDirty))) return;
     populateCheckin(row, timeZone);
     renderCheckins(rows, timeZone);
   });

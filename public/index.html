@@ -112,38 +112,6 @@
           <div class="plan-segment-heading"><div><span class="eyebrow">TRAININGSBIBLIOTHEK</span><h3 id="planLibraryTitle">Bibliothek</h3><span id="librarySummary" class="tab-sync-detail"></span></div></div>
           <div id="library" class="library" aria-live="polite"></div>
         </section>
-        <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle" aria-describedby="checkinDescription">
-          <div class="checkin-dialog-content">
-            <div class="settings-section-heading">
-              <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in <span id="checkinDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><p id="checkinDescription">Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach am ausgewählten Tag fest.</p></div>
-              <button type="button" id="checkinCloseButton" class="secondary-button">Schließen</button>
-            </div>
-            <form id="checkinForm" class="checkin-form">
-              <div class="form-grid">
-                <label>Datum<input name="checkin_date" type="date" required></label>
-                <label>Verfügbare Minuten<input name="available_minutes" type="number" min="0" max="1440" step="1" placeholder="Optional"></label>
-                <label>Muskelkater<input name="soreness" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-                <label>Stress<input name="stress" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-                <label>Motivation<input name="motivation" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-                <label>Session-RPE<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-              </div>
-              <label>Tagesform<textarea name="day_form" rows="2" placeholder="Zum Beispiel schwere Beine, Müdigkeit oder ungewöhnlich fit"></textarea></label>
-              <label class="checkin-critical-field">Krankheit (wichtig)<textarea name="illness" rows="2" placeholder="Zum Beispiel Erkältung, Fieber oder andere Symptome"></textarea></label>
-              <label>Schmerz<textarea name="pain" rows="2" placeholder="Ort, Intensität und Bewegungen, die Beschwerden auslösen"></textarea></label>
-              <label>Hinweise zur Verfügbarkeit<textarea name="availability_notes" rows="2" placeholder="Zum Beispiel Reise, wenig Schlaf oder nur Indoor möglich"></textarea></label>
-              <label>Notizen<textarea name="notes" rows="3" placeholder="Alles, was der Coach heute wissen sollte"></textarea></label>
-              <label>Tagesstatus<select name="day_status"><option value="unknown">Unbekannt</option><option value="rest">Bestätigter Ruhetag</option><option value="pause">Bestätigte Trainingspause</option></select></label>
-              <fieldset><legend>Bestätigte Tages-Tags</legend><p class="fine-print">Ohne Antwort bleibt die Einordnung unbekannt. Für Vergleiche auch „Nein“ ausdrücklich angeben.</p>
-                <label>Reise<select name="tag_travel"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
-                <label>Spätes Essen<select name="tag_late_meal"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
-                <label>Hoher Stress<select name="tag_high_stress"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
-              </fieldset>
-              <p id="checkinError" class="error" role="alert" aria-live="assertive"></p>
-              <button type="submit">Tages-Check-in speichern</button>
-            </form>
-            <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
-          </div>
-        </dialog>
       </section>
 
       <section id="dataPanel" class="panel" aria-label="Analyse">
@@ -206,6 +174,7 @@
       <section id="profilePanel" class="panel" aria-label="Profil">
         <div class="section-heading">
           <div><span class="eyebrow">MEHR · PROFIL</span><h2>Profil <span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2></div>
+          <button type="button" id="profileCheckinButton" class="secondary-button">Tages-Check-in</button>
         </div>
         <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
           <a href="#more/appearance" data-more-segment="appearance">Darstellung</a>
@@ -449,6 +418,38 @@
     </form>
   </dialog>
   <script src="/format.js?v=1" defer></script>
+  <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle" aria-describedby="checkinDescription">
+    <div class="checkin-dialog-content">
+      <div class="settings-section-heading">
+        <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in <span id="checkinDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><p id="checkinDescription">Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach am ausgewählten Tag fest.</p></div>
+        <button type="button" id="checkinCloseButton" class="secondary-button">Schließen</button>
+      </div>
+      <form id="checkinForm" class="checkin-form">
+        <div class="form-grid">
+          <label>Datum<input name="checkin_date" type="date" required></label>
+          <label>Verfügbare Minuten<input name="available_minutes" type="number" min="0" max="1440" step="1" placeholder="Optional"></label>
+          <label>Muskelkater<input name="soreness" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+          <label>Stress<input name="stress" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+          <label>Motivation<input name="motivation" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+          <label>Session-RPE<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+        </div>
+        <label>Tagesform<textarea name="day_form" rows="2" placeholder="Zum Beispiel schwere Beine, Müdigkeit oder ungewöhnlich fit"></textarea></label>
+        <label class="checkin-critical-field">Krankheit (wichtig)<textarea name="illness" rows="2" placeholder="Zum Beispiel Erkältung, Fieber oder andere Symptome"></textarea></label>
+        <label>Schmerz<textarea name="pain" rows="2" placeholder="Ort, Intensität und Bewegungen, die Beschwerden auslösen"></textarea></label>
+        <label>Hinweise zur Verfügbarkeit<textarea name="availability_notes" rows="2" placeholder="Zum Beispiel Reise, wenig Schlaf oder nur Indoor möglich"></textarea></label>
+        <label>Notizen<textarea name="notes" rows="3" placeholder="Alles, was der Coach heute wissen sollte"></textarea></label>
+        <label>Tagesstatus<select name="day_status"><option value="unknown">Unbekannt</option><option value="rest">Bestätigter Ruhetag</option><option value="pause">Bestätigte Trainingspause</option></select></label>
+        <fieldset><legend>Bestätigte Tages-Tags</legend><p class="fine-print">Ohne Antwort bleibt die Einordnung unbekannt. Für Vergleiche auch „Nein“ ausdrücklich angeben.</p>
+          <label>Reise<select name="tag_travel"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
+          <label>Spätes Essen<select name="tag_late_meal"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
+          <label>Hoher Stress<select name="tag_high_stress"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
+        </fieldset>
+        <p id="checkinError" class="error" role="alert" aria-live="assertive"></p>
+        <button type="submit">Tages-Check-in speichern</button>
+      </form>
+      <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
+    </div>
+  </dialog>
   <script src="/api.js?v=223" defer></script>
   <script src="/navigation.js?v=231" defer></script>
   <script src="/state.js?v=220" defer></script>

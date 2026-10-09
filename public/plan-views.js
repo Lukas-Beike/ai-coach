@@ -177,7 +177,7 @@ function appendPlannedCalendarComparison(details, entry, actual) {
   details.append(comparison);
 }
 
-function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
+function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue, openCheckinEditor, checkinSummary }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
     const next = planning.season?.next_event;
@@ -599,6 +599,22 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     day.append(heading);
   }
 
+  function plannedDayCheckin(dateKey) {
+    const row = (state.data?.checkins || []).find((item) => item?.checkin_date === dateKey) || null;
+    const wrap = document.createElement("div");
+    wrap.className = "planned-day-checkin";
+    const status = document.createElement("p");
+    status.className = `planned-day-checkin-status${row ? " is-saved" : ""}`;
+    status.textContent = row ? `Check-in gespeichert · ${checkinSummary(row)}` : "Noch kein Check-in für heute";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button";
+    button.textContent = row ? "Check-in bearbeiten" : "Check-in";
+    button.addEventListener("click", () => openCheckinEditor(dateKey));
+    wrap.append(status, button);
+    return wrap;
+  }
+
   function renderPlannedDay(view, dateKey) {
     const { eventsByDate, planningContextByDate, todayKey } = view;
     const dayEntries = eventsByDate.get(dateKey) || [];
@@ -610,6 +626,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     appendPlannedDayHeading(day, weather, dateKey, todayKey);
     const content = document.createElement("div");
     content.className = "planned-day-content";
+    if (dateKey === todayKey) content.append(plannedDayCheckin(dateKey));
     const notes = plannedDayNotes(dayContext);
     if (notes.childElementCount) content.append(notes);
     if (!dayEntries.length) {
@@ -688,7 +705,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
     const currentWeekKey = planWeekStart(todayKey);
     const display = state.data?.calendar_display || {};
-    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance]);
+    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.checkins]);
     if (snapshot === plannedRenderSnapshot && root.childElementCount) {
       if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
       return;

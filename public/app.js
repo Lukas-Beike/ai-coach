@@ -26,7 +26,7 @@ document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("
   const linkedRoute = String(link.getAttribute("href") || "").replace(/^#/, "").trim();
   void AppRouter.navigate(linkedRoute || link.dataset.route, { historyMode: "push" });
 }));
-const { renderAdaptivePlanning, renderExternalCalendar, renderTrainingPlans, renderPlanned, renderLibrary, renderCompetitions, focusPlannedToday, bindPlanNavigation, bindExternalCalendar } = AppPlanViews.create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue });
+const { renderAdaptivePlanning, renderExternalCalendar, renderTrainingPlans, renderPlanned, renderLibrary, renderCompetitions, focusPlannedToday, bindPlanNavigation, bindExternalCalendar } = AppPlanViews.create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue, openCheckinEditor, checkinSummary });
 bindPlanNavigation();
 document.querySelectorAll("[data-analysis-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -63,6 +63,7 @@ $("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#checkinForm").addEventListener("submit", saveCheckin);
 $("#checkinCloseButton").addEventListener("click", () => $("#checkinDialog")?.close());
+$("#profileCheckinButton").addEventListener("click", () => openCheckinEditor());
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
 $("#modelSelect").addEventListener("change", saveModel);
