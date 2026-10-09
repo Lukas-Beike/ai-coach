@@ -7,7 +7,7 @@ import json
 import re
 import uuid
 from collections.abc import Callable
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
@@ -17,6 +17,7 @@ from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.season_preparation import load_scenarios, season_preparation
 from backend.performance.tag_impact import tag_impact
 from backend.performance.training_report import canonical_rows, training_report
+from backend.runtime.clock import utc_now as system_utc_now
 
 
 class TrainingReportService:
@@ -29,7 +30,7 @@ class TrainingReportService:
         database_manager: Any,
         today: Callable[[], date],
         timezone: Callable[[], str] = lambda: "UTC",
-        utc_now: Callable[[], str] = lambda: datetime.now(UTC).isoformat(),
+        utc_now: Callable[[], str] = system_utc_now,
         read_competitions: Callable[[], list[dict[str, Any]]] = list,
         read_recovery: Callable[[], dict[str, Any]] = dict,
         read_performance: Callable[[], dict[str, Any]] = dict,

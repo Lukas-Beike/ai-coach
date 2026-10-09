@@ -15,7 +15,7 @@ from backend.errors import (
 )
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
-from backend.providers.workout_text import canonical_workout_zones
+from backend.planning.workout_text import canonical_workout_zones
 
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 
@@ -223,7 +223,7 @@ def planned_conflict_payload(row: dict[str, Any]) -> dict[str, Any]:
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -314,7 +314,7 @@ def _remote_planned_unit_duration(event: dict[str, Any]) -> int:
             if moving_time not in (None, "")
             else 30
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 30
 
 
@@ -360,7 +360,7 @@ def remote_planned_unit_existing_state(
 ) -> tuple[dict[str, Any], str]:
     try:
         current = json.loads(current_row.get("payload") or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         current = {}
     if not isinstance(current, dict):
         current = {}

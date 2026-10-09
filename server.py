@@ -386,6 +386,7 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutProviders,
     SelectedWorkoutSyncAssembly,
 )
+from backend.sync.snapshot_reader import SnapshotRepositoryReader
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
 from backend.weather.assembly import (
@@ -569,6 +570,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             profile=PROFILE_REPOSITORY,
             key_values=KEY_VALUE_REPOSITORY,
             snapshot=SNAPSHOT_REPOSITORY,
+            snapshot_reader=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
             competition=COMPETITION_REPOSITORY,
         ),
         runtime=AthleteRuntime(
@@ -966,6 +968,7 @@ PROVIDER_TRANSPORT = ProviderTransportAssembly(
         intervals=IntervalsTransportSettings(
             config=lambda: CONFIG,
             athlete_now=ATHLETE_CLOCK.now,
+            operation=INTERVALS_RESYNC_GATE.operation,
         ),
     ),
 )
@@ -1122,6 +1125,7 @@ WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
             event_buffer=runtime_events.STATE_EVENT_BUFFER,
             redactor=REDACTOR,
             utc_now=runtime_clock.utc_now,
+            local_today=lambda: ATHLETE_CLOCK.now().date(),
         ),
         uuid_factory=uuid.uuid4,
     )

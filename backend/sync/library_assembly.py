@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from backend.config import Config
@@ -36,6 +37,7 @@ class WorkoutLibraryState:
     event_buffer: StateEventBuffer
     redactor: Redactor
     utc_now: Callable[[], str]
+    local_today: Callable[[], date] | None = None
 
 
 class WorkoutLibrarySyncAssembly:
@@ -63,6 +65,7 @@ class WorkoutLibrarySyncAssembly:
         self._event_buffer = state.event_buffer
         self._redactor = state.redactor
         self._utc_now = state.utc_now
+        self._local_today = state.local_today
         self._uuid_factory = dependencies.uuid_factory
 
     def sync_state_service(self) -> WorkoutLibrarySyncStateService:
@@ -103,4 +106,5 @@ class WorkoutLibrarySyncAssembly:
             self._calendar_conflict_service()
             if self._calendar_conflict_service
             else None,
+            local_today=self._local_today,
         )

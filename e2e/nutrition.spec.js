@@ -2,11 +2,8 @@ const { test, expect } = require("@playwright/test");
 
 test("@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption", async ({ page }) => {
   const showNutrition = async (route) => {
-    await page.evaluate(async (nextRoute) => {
-      await applyNavigationRoute(nextRoute, { historyMode: "push" });
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      await loadNutrition();
-    }, route);
+    await page.evaluate((nextRoute) => applyNavigationRoute(nextRoute, { historyMode: "push" }), route);
+    await expect(page.locator("#nutritionStatus")).not.toContainText("wird geladen");
   };
   await page.goto("/#nutrition/diary");
   await expect(page.locator("#appShell")).toBeVisible();

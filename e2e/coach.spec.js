@@ -240,6 +240,40 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     expect(undersizedTargets, "visible touch targets below 44 CSS pixels").toEqual([]);
 
     await page.getByRole("link", { name: "Coach", exact: true }).click();
+    await page.evaluate(() => {
+      state.quickTemplatesVisible = true;
+      renderQuickMessageTemplates();
+    });
+    await expect(page.locator("#quickMessageTemplates")).toBeVisible();
+    if (testInfo.project.name.startsWith("mobile")) {
+      const mobileDock = await page.evaluate(() => {
+        const composer = document.querySelector("#chatForm").getBoundingClientRect();
+        const navigation = document.querySelector(".bottom-nav").getBoundingClientRect();
+        const chips = document.querySelector("#quickMessageTemplates");
+        return {
+          composerAboveNavigation: composer.bottom <= navigation.top - 8,
+          chipsOverflow: chips.scrollWidth > chips.clientWidth,
+          overflowCue: getComputedStyle(chips, "::after").content,
+        };
+      });
+      expect(mobileDock.composerAboveNavigation, "composer stays above fixed navigation").toBe(true);
+      expect(mobileDock.chipsOverflow, "quick-start chips are horizontally scrollable").toBe(true);
+      expect(mobileDock.overflowCue).toBe('"›"');
+      await page.evaluate(() => document.documentElement.classList.add("chat-keyboard-open"));
+      const keyboardDock = await page.evaluate(() => {
+        const composer = document.querySelector("#chatForm").getBoundingClientRect();
+        const viewportBottom = (visualViewport?.offsetTop || 0) + (visualViewport?.height || innerHeight);
+        return {
+          composerVisible: composer.bottom <= viewportBottom + 1,
+          composerBottomOffset: getComputedStyle(document.querySelector("#chatForm")).bottom,
+          navigationHidden: getComputedStyle(document.querySelector(".bottom-nav")).visibility === "hidden",
+        };
+      });
+      expect(keyboardDock.composerVisible, "composer stays in the visible keyboard viewport").toBe(true);
+      expect(keyboardDock.composerBottomOffset).toBe("12px");
+      expect(keyboardDock.navigationHidden).toBe(true);
+      await page.evaluate(() => document.documentElement.classList.remove("chat-keyboard-open"));
+    }
     const safetyHint = page.getByText("Trainingsempfehlungen dienen zur Orientierung", { exact: false });
     await expect(safetyHint).toHaveCount(0);
     const chatIsEmpty = await page.locator("#messages").evaluate((node) => node.classList.contains("has-empty-state"));
@@ -324,7 +358,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await expectNoBrowserErrorsOrOverflow(page, browserErrors);
   });
 
-  test("coach reload opens at the latest message and tab navigation restores the scroll position", async ({ page }) => {
+  test("coach reload opens at the latest message and tab navigation restores the scroll position", async ({ page }, testInfo) => {
     const messages = Array.from({ length: 18 }, (_, index) => ({
       id: 90_000 + index,
       role: index % 2 ? "assistant" : "user",
@@ -354,6 +388,19 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
       return window.scrollY;
     });
     expect(savedScrollY).toBeGreaterThan(0);
+    if (testInfo.project.name.startsWith("mobile")) {
+      const middleGeometry = await page.evaluate(() => {
+        const composer = document.querySelector("#chatForm").getBoundingClientRect();
+        const navigation = document.querySelector(".bottom-nav").getBoundingClientRect();
+        return {
+          scrollY: window.scrollY,
+          maxScrollY: document.documentElement.scrollHeight - window.innerHeight,
+          composerAboveNavigation: composer.bottom <= navigation.top - 8,
+        };
+      });
+      expect(middleGeometry.scrollY).toBeLessThan(middleGeometry.maxScrollY);
+      expect(middleGeometry.composerAboveNavigation, "composer stays clear while chat is scrolled mid-history").toBe(true);
+    }
     await page.getByRole("link", { name: "Kalender", exact: true }).click();
     await expect(page).toHaveURL(/#plan\/overview$/);
     await page.getByRole("link", { name: "Coach", exact: true }).click();
@@ -572,7 +619,6 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     if (touchProject) await expect(page.locator("html")).not.toHaveClass(/chat-keyboard-open/);
     await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", "Coach arbeitet an deiner Antwort…");
     await expect(page.locator("#messages")).toHaveAttribute("aria-busy", "true");
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     if (!await input.isVisible()) {
       await page.locator("#chatJumpToComposer").click();
       await expect(input).toBeFocused();
@@ -647,7 +693,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
       ...Array.from({ length: 12 }, (_, index) => `## Abschnitt ${index + 1}\n\n${"Ausführliche, gut lesbare Trainingsbegründung. ".repeat(5)}`),
     ].join("\n");
     await page.getByRole("link", { name: "Kalender", exact: true }).click();
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
     const inactiveScrollY = await page.evaluate(() => window.scrollY);
     await page.evaluate((content) => {
       const message = { id: 2, role: "assistant", content, created_at: "2026-09-04T10:00:00Z" };
@@ -665,7 +711,6 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     expect(await page.evaluate(() => window.scrollY), "background chat updates must not scroll another tab").toBe(inactiveScrollY);
 
     await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
-    await page.waitForTimeout(100);
     await expect.poll(() => page.evaluate((before) => window.__chatTest.historyResolvers.length, historyResolversBeforeTurn))
       .toBeLessThanOrEqual(historyResolversBeforeTurn + 1);
     await page.evaluate(() => window.__chatTest.releaseHistory());

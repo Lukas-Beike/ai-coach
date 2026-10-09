@@ -9,11 +9,13 @@ from unittest.mock import patch
 
 from backend.db.manager import DatabaseManager
 from backend.sync.jobs import (
+    ALLOWED_JOB_TRANSITIONS,
     JobValidationError,
     SyncJobInvalidOperationError,
     SyncJobInvalidStateError,
     SyncJobNotFoundError,
     SyncJobStore,
+    SyncJobTransitionError,
     aggregate_job_status,
     bounded_progress,
     has_active_job,
@@ -509,6 +511,46 @@ class SyncJobStoreTests(unittest.TestCase):
             available_at,
         )
 
+    def test_job_status_transition_table_allows_only_declared_edges(self):
+        for source, targets in ALLOWED_JOB_TRANSITIONS.items():
+            for target in targets:
+                with self.subTest(source=source, target=target):
+                    job, _ = self.enqueue()
+                    with self.manager.unit_of_work() as db:
+                        db.execute(
+                            "UPDATE sync_jobs SET status=? WHERE id=?",
+                            (source, job["id"]),
+                        )
+                        self.store._transition(
+                            db,
+                            job["id"],
+                            source,
+                            target,
+                            {"updated_at": self.now},
+                        )
+                    self.assertEqual(self.store.state(job["id"])["status"], target)
+
+    def test_job_status_transition_rejects_undeclared_and_raced_edges(self):
+        job, _ = self.enqueue()
+        with self.assertLogs("backend.sync.jobs", level="WARNING") as captured:
+            with (
+                self.manager.unit_of_work() as db,
+                self.assertRaises(SyncJobTransitionError),
+            ):
+                self.store._transition(
+                    db, job["id"], "queued", "completed", {"updated_at": self.now}
+                )
+            with (
+                self.manager.unit_of_work() as db,
+                self.assertRaisesRegex(SyncJobTransitionError, "lost a race"),
+            ):
+                self.store._transition(
+                    db, job["id"], "running", "queued", {"updated_at": self.now}
+                )
+        self.assertEqual(len(captured.records), 2)
+        self.assertNotIn(job["id"], " ".join(captured.output))
+        self.assertEqual(self.store.state(job["id"])["status"], "queued")
+
     def test_read_list_active_and_pending_performance_job(self):
         performance, created = self.enqueue(
             "intervals", "performance_refresh", {"reason": "manual"}
@@ -694,6 +736,7 @@ class SyncJobStoreTests(unittest.TestCase):
 
     def test_update_returns_event_snapshot_and_bounds_details(self):
         job, _ = self.enqueue()
+        self.store.claim()
         snapshot = self.store.update(job["id"], "failed", "provider_error", "x" * 700)
         self.assertEqual(
             snapshot,
@@ -724,6 +767,7 @@ class SyncJobStoreTests(unittest.TestCase):
                 {"item_key": "workout-c", "operation": "push"},
             ],
         )
+        self.store.claim()
         snapshot = self.store.update_from_result(
             job["id"],
             {
@@ -757,6 +801,7 @@ class SyncJobStoreTests(unittest.TestCase):
 
     def test_result_without_item_results_uses_fallback_status(self):
         job, _ = self.enqueue()
+        self.store.claim()
         snapshot = self.store.update_from_result(
             job["id"], {"status": "partial"}, "partial", str
         )
@@ -829,6 +874,7 @@ class SyncJobStoreTests(unittest.TestCase):
         queued, _ = self.enqueue()
         with self.assertRaises(SyncJobInvalidStateError):
             self.store.resolve(queued["id"])
+        self.store.claim()
         self.store.update(queued["id"], "completed")
         with self.assertRaises(SyncJobInvalidStateError):
             self.store.resolve(queued["id"])

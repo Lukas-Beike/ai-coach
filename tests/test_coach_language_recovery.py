@@ -10,7 +10,7 @@ from test_coach_dialogue import DialogueHarness, server
 from backend.coach.outcomes import coach_failure_lines
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.planning import workouts as planning_workouts
-from backend.providers.workout_text import canonical_workout_zones, structured_steps
+from backend.planning.workout_text import canonical_workout_zones, structured_steps
 from backend.sync import queue as sync_queue
 
 

@@ -1,0 +1,4858 @@
+{
+  "schema": 1,
+  "base": "3600ae4cf31d27e5a145d0f8acf6a7938373bad9",
+  "versions": {
+    "ruff": "0.16.10",
+    "mypy": "2.4.0"
+  },
+  "diagnostics": [
+    {
+      "tool": "ruff",
+      "path": "backend/planning/changes.py",
+      "line": 35,
+      "column": 13,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/nutrition/models.py",
+      "line": 175,
+      "column": 32,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/nutrition/models.py",
+      "line": 185,
+      "column": 36,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/garmin.py",
+      "line": 417,
+      "column": 40,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/jobs.py",
+      "line": 985,
+      "column": 40,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/morning_battery.py",
+      "line": 37,
+      "column": 41,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/planning/competitions.py",
+      "line": 437,
+      "column": 41,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/weather/cache.py",
+      "line": 53,
+      "column": 43,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_personal_recovery.py",
+      "line": 108,
+      "column": 45,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/garmin_weight.py",
+      "line": 98,
+      "column": 45,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/training_report.py",
+      "line": 46,
+      "column": 46,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_personal_recovery.py",
+      "line": 105,
+      "column": 47,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/planning/workouts.py",
+      "line": 416,
+      "column": 47,
+      "code": "FURB162",
+      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_coach_dialogue.py",
+      "line": 38,
+      "column": 104,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/personal_recovery.py",
+      "line": 216,
+      "column": 16,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/morning_battery.py",
+      "line": 42,
+      "column": 18,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/freshness.py",
+      "line": 185,
+      "column": 24,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_audit_remediation.py",
+      "line": 273,
+      "column": 24,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/providers/calendar.py",
+      "line": 383,
+      "column": 24,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/coach/proposals.py",
+      "line": 57,
+      "column": 25,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_audit_remediation.py",
+      "line": 289,
+      "column": 28,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_provider_calendar.py",
+      "line": 415,
+      "column": 28,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_provider_calendar.py",
+      "line": 421,
+      "column": 28,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_provider_calendar.py",
+      "line": 440,
+      "column": 28,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/jobs.py",
+      "line": 182,
+      "column": 29,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/weather/cache.py",
+      "line": 49,
+      "column": 29,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_change_history.py",
+      "line": 70,
+      "column": 29,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/jobs.py",
+      "line": 986,
+      "column": 29,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_diagnostic_followups.py",
+      "line": 108,
+      "column": 30,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/morning_battery.py",
+      "line": 191,
+      "column": 30,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_provider_garmin_morning.py",
+      "line": 42,
+      "column": 30,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/freshness.py",
+      "line": 47,
+      "column": 30,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/morning_battery_service.py",
+      "line": 201,
+      "column": 31,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_provider_calendar.py",
+      "line": 429,
+      "column": 32,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_security_resource_limits.py",
+      "line": 108,
+      "column": 33,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/freshness.py",
+      "line": 187,
+      "column": 33,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/observability.py",
+      "line": 496,
+      "column": 33,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_providers.py",
+      "line": 1757,
+      "column": 34,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/morning_battery.py",
+      "line": 189,
+      "column": 34,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_history_service.py",
+      "line": 188,
+      "column": 36,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/change_history.py",
+      "line": 237,
+      "column": 36,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/activities/identity.py",
+      "line": 29,
+      "column": 36,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_provider_calendar.py",
+      "line": 410,
+      "column": 37,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/weather/cache.py",
+      "line": 48,
+      "column": 37,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/job_outcomes.py",
+      "line": 90,
+      "column": 37,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "server.py",
+      "line": 1169,
+      "column": 38,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/jobs.py",
+      "line": 181,
+      "column": 38,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "server.py",
+      "line": 521,
+      "column": 38,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/garmin_weight.py",
+      "line": 100,
+      "column": 39,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/morning_battery_service.py",
+      "line": 200,
+      "column": 39,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/providers/garmin_morning.py",
+      "line": 50,
+      "column": 39,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "server.py",
+      "line": 766,
+      "column": 39,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/garmin_weight.py",
+      "line": 92,
+      "column": 39,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "e2e/fixture_runtime.py",
+      "line": 1071,
+      "column": 40,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "e2e/fixture_runtime.py",
+      "line": 1082,
+      "column": 40,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/change_history.py",
+      "line": 186,
+      "column": 40,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_security_resource_limits.py",
+      "line": 151,
+      "column": 41,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_morning_battery_service.py",
+      "line": 24,
+      "column": 41,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_security_resource_limits.py",
+      "line": 69,
+      "column": 41,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "server.py",
+      "line": 1188,
+      "column": 42,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_providers.py",
+      "line": 1780,
+      "column": 42,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "e2e/fixture_runtime.py",
+      "line": 1534,
+      "column": 43,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_freshness.py",
+      "line": 23,
+      "column": 43,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/coach/attachments.py",
+      "line": 25,
+      "column": 43,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_refresh.py",
+      "line": 84,
+      "column": 43,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/observability.py",
+      "line": 846,
+      "column": 43,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_refresh.py",
+      "line": 193,
+      "column": 44,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_refresh.py",
+      "line": 227,
+      "column": 44,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_refresh.py",
+      "line": 268,
+      "column": 44,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_provider_calendar.py",
+      "line": 577,
+      "column": 44,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_daily.py",
+      "line": 101,
+      "column": 45,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_history_service.py",
+      "line": 105,
+      "column": 45,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_refresh.py",
+      "line": 126,
+      "column": 45,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_history_service.py",
+      "line": 158,
+      "column": 45,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_refresh.py",
+      "line": 181,
+      "column": 45,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_refresh.py",
+      "line": 276,
+      "column": 45,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_refresh.py",
+      "line": 303,
+      "column": 45,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_security_resource_limits.py",
+      "line": 46,
+      "column": 45,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_security_resource_limits.py",
+      "line": 75,
+      "column": 45,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_security_resource_limits.py",
+      "line": 92,
+      "column": 45,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_personal_recovery.py",
+      "line": 118,
+      "column": 47,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "server.py",
+      "line": 833,
+      "column": 47,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "server.py",
+      "line": 847,
+      "column": 47,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/external_calendar.py",
+      "line": 125,
+      "column": 48,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_personal_recovery.py",
+      "line": 167,
+      "column": 48,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_personal_recovery.py",
+      "line": 115,
+      "column": 49,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "e2e/fixture_runtime.py",
+      "line": 1562,
+      "column": 49,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_personal_recovery.py",
+      "line": 164,
+      "column": 49,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "server.py",
+      "line": 558,
+      "column": 50,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_garmin.py",
+      "line": 57,
+      "column": 50,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_performance_garmin_weight.py",
+      "line": 64,
+      "column": 50,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_security_resource_limits.py",
+      "line": 86,
+      "column": 51,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/morning_battery.py",
+      "line": 31,
+      "column": 52,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_security_resource_limits.py",
+      "line": 34,
+      "column": 52,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_provider_calendar.py",
+      "line": 406,
+      "column": 52,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_daily.py",
+      "line": 87,
+      "column": 52,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_personal_recovery.py",
+      "line": 126,
+      "column": 53,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_intervals.py",
+      "line": 126,
+      "column": 53,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_weather_service.py",
+      "line": 147,
+      "column": 53,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_weather_cache.py",
+      "line": 17,
+      "column": 53,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_intervals.py",
+      "line": 274,
+      "column": 53,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_garmin_observations.py",
+      "line": 45,
+      "column": 53,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_sync.py",
+      "line": 711,
+      "column": 55,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_intervals_reader.py",
+      "line": 73,
+      "column": 55,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/job_outcomes.py",
+      "line": 88,
+      "column": 56,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_coach_morning_completion.py",
+      "line": 169,
+      "column": 57,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_garmin.py",
+      "line": 332,
+      "column": 57,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_nutrition.py",
+      "line": 39,
+      "column": 57,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_coach_morning_completion.py",
+      "line": 62,
+      "column": 57,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_sync.py",
+      "line": 689,
+      "column": 57,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_nutrition.py",
+      "line": 69,
+      "column": 57,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_coach_morning_completion.py",
+      "line": 92,
+      "column": 57,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_provider_garmin_morning.py",
+      "line": 93,
+      "column": 57,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_athlete.py",
+      "line": 54,
+      "column": 58,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_weather_calendar.py",
+      "line": 632,
+      "column": 58,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_provider_garmin_morning.py",
+      "line": 64,
+      "column": 59,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_garmin_observations.py",
+      "line": 30,
+      "column": 60,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_security_resource_limits.py",
+      "line": 39,
+      "column": 60,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/morning_battery.py",
+      "line": 41,
+      "column": 60,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_database.py",
+      "line": 609,
+      "column": 60,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/garmin_service.py",
+      "line": 214,
+      "column": 61,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/garmin_observations.py",
+      "line": 31,
+      "column": 61,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/garmin_weight.py",
+      "line": 72,
+      "column": 61,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_db_bootstrap.py",
+      "line": 25,
+      "column": 62,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_planning.py",
+      "line": 699,
+      "column": 62,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_database.py",
+      "line": 789,
+      "column": 62,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_weather_calendar.py",
+      "line": 882,
+      "column": 62,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_garmin_projection_service.py",
+      "line": 154,
+      "column": 63,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_privacy_data_export.py",
+      "line": 129,
+      "column": 64,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_executor.py",
+      "line": 164,
+      "column": 64,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_security_resource_limits.py",
+      "line": 130,
+      "column": 65,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_job_outcomes.py",
+      "line": 47,
+      "column": 65,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_runtime.py",
+      "line": 211,
+      "column": 66,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_morning_battery_service.py",
+      "line": 427,
+      "column": 66,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_coach_context_preview.py",
+      "line": 79,
+      "column": 66,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_weather_calendar.py",
+      "line": 944,
+      "column": 66,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_nutrition_product_http_contract.py",
+      "line": 25,
+      "column": 67,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_nutrition.py",
+      "line": 279,
+      "column": 67,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_nutrition_garmin_expenditure.py",
+      "line": 29,
+      "column": 67,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_nutrition_composition.py",
+      "line": 39,
+      "column": 67,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_nutrition_products.py",
+      "line": 65,
+      "column": 67,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_providers.py",
+      "line": 49,
+      "column": 68,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_nutrition_review_regressions.py",
+      "line": 81,
+      "column": 68,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_server_runtime.py",
+      "line": 210,
+      "column": 69,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_provider_calendar.py",
+      "line": 31,
+      "column": 69,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_morning_battery.py",
+      "line": 13,
+      "column": 7,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_nutrition_api_and_sync.py",
+      "line": 26,
+      "column": 70,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/backup/restore.py",
+      "line": 68,
+      "column": 70,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_garmin_service.py",
+      "line": 574,
+      "column": 71,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_personal_recovery.py",
+      "line": 123,
+      "column": 73,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_sync_garmin_service.py",
+      "line": 510,
+      "column": 73,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_nutrition.py",
+      "line": 63,
+      "column": 76,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/observation.py",
+      "line": 86,
+      "column": 10,
+      "code": "arg-type",
+      "message_sha256": "61577da624c3801c0bdeff61bfbc5820f63e2d5796d6b50970f67b8c1b5a0b73"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_selected.py",
+      "line": 110,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "04ac4f7dcf901a9a86add9229c1d9cee38e39b3f1f1115cf2c2f4fb8aaa60417"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 114,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "4d770f2d6fe6987ad088dd73671c3ce92c82dd6e84da1efc1b1077c83d44950b"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_intervals.py",
+      "line": 122,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "20df52070c7cbb6aefb93f061f5f462ebc387f51c717054e0cb145a8332b726e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_intervals.py",
+      "line": 123,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "e1e530588934f739b54ee6c375a149232c715a7c74279c98e8d0a081b8090daa"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_intervals.py",
+      "line": 124,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "1700ef4aeab756114a9196c6105dd44a9d20a852e87555ba00bd366a1df6f8ef"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_status.py",
+      "line": 130,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "e448ed489639feb4c56dd713bd205b70f34ab80003ecf79ee72675a2ed5358ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_message_service.py",
+      "line": 138,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "6a6d74a3b7b18fe02592519e3346c8c82f8796be800cfd590723c85c46630604"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 142,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "f551f3fc8ae5349801ad371353051a980b669461d8963e613ebe9017553b1b75"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_planned_units.py",
+      "line": 155,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "3752d60f1464ca74bc92b22a587a37ffd7e01ac40903015e3ef8512f4d57129e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 156,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "9e8ce1442287821b4f0d2ca2083d3068ea77a09ac3df0d50decfb04c10781f49"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/sync_tools.py",
+      "line": 158,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "0778ca98903ed91e44ad3e87190c7b73b748aa2e62691a925a5ef32bc54954cf"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 171,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "197cf02cc28324d81cd944715a85befacf58c62f567adceeb29340a7f2b878aa"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_garmin_service.py",
+      "line": 203,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "4a2c94b5c7fe3637da201af0266b096530f278d961b920dddd4eaf65367a3585"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_garmin_service.py",
+      "line": 204,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "c7da7bf07f0bf1dfb1a8839132681b09f07fb2b9e13ff096b5a4e21072b6c46d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 21,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "8f5bf4056f30443bc9995e75a29cc402c2b71a3831cb103241ebfdb255f7b47a"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 238,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "4d770f2d6fe6987ad088dd73671c3ce92c82dd6e84da1efc1b1077c83d44950b"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_change_service.py",
+      "line": 240,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "58a15d37ae982f9b742de9fbfd4657f4fca9118393b1828dd32e13160a265333"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_change_service.py",
+      "line": 241,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "ea15b0ec2228b14f2cbd11007436dfa806ba15aa9bab2a7e910ae7bda57b346d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/handler.py",
+      "line": 282,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "f685cb5d563f596260359c7ec60fc7f872d16dfe84fb079fef2741fa26ae038d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/handler.py",
+      "line": 291,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "6195198e495bd02c70500de218de463b7423c94c7b7371b88aae6a19d1792592"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/handler.py",
+      "line": 303,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "e96d723fc3eefce71127726ff03053febc050202cfdf394836d946e9e10b7309"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_authority.py",
+      "line": 40,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "49f1a564222f8bb28fcad7a83e0c6474ebe6d561a9f0fdb4f884433334a2a6b1"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 49,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "ee45538c43ac3c9b1af562d31b77e169478391b967b13f32a963ee942b2fb38e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_job_status.py",
+      "line": 53,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "2a9549402e685c7913fdbf9f167d941fc05b3e6ace1021752ce7a485e59ed447"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_state_calendar_projection.py",
+      "line": 55,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "5c719a46ad432ff2f7afe88314482d998da69c8574238521331cf1685bae3043"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_state_calendar_projection.py",
+      "line": 56,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "8c7c0fe5ffadfce2251158cb8c8e0b47db8adab9b0cb227033a3bbaac0c8f65c"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_state_calendar_projection.py",
+      "line": 57,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "543e8ca43935d83c5d5f0cbcc6c151f0c62dcb762d86da4b81b11a3f88c52d29"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_state_calendar_projection.py",
+      "line": 58,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "240a573fdcc52ae76164e0da7fc0d9440c16e03cfc998f305fcaa9894ae389f7"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_job_status.py",
+      "line": 58,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "84d21304c9cdbc535678b32cefd1ab96320705c1126d837c4341d75570cb8110"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_state_calendar_projection.py",
+      "line": 59,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "f0e012ab268bd0fb513e0a057eed395cd5ed57a20bb1825e08b9f4e884eca6fd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_training_template_tools.py",
+      "line": 76,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "5073523f2728611d7025dfbacc9cf8d5d1a828844f036760a61ed2d8cc267a0a"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/state_prelude.py",
+      "line": 81,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "c5b10da3c1a67ec6fec8ae1b72aedf49046619ec7640adc1f88c80d760648235"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_conversation_reset.py",
+      "line": 85,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "6a429cf6d88f82d32e60b6416efc8a28c2595c057c1acbd53fd432f308438b04"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_conversation_reset.py",
+      "line": 92,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "aa86d9820f47bc76dd2f58b52f317e0fa17f587affef1b2ee9e7f772867330eb"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 262,
+      "column": 14,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_tool_dispatch.py",
+      "line": 46,
+      "column": 14,
+      "code": "arg-type",
+      "message_sha256": "71eb2c662aa87cd1b680cf54d6f45c8268fb84b266398ffdf03c7e25a9452b5a"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_proposal_creation.py",
+      "line": 51,
+      "column": 14,
+      "code": "arg-type",
+      "message_sha256": "5c694b94f94f64a449a7688ad3095d23cc6e96359cd912ff5f31eada43ad0c6d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_proposal_creation.py",
+      "line": 51,
+      "column": 14,
+      "code": "arg-type",
+      "message_sha256": "8d91fddf4c913f90b6748793f46129418b55406915baa41b989816b5fb70fa94"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_proposal_creation.py",
+      "line": 51,
+      "column": 14,
+      "code": "arg-type",
+      "message_sha256": "e695dcbde391551d0554e7acca0f050bedaa1249875dc53f63aefa35747ced8d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_proposal_creation.py",
+      "line": 51,
+      "column": 14,
+      "code": "arg-type",
+      "message_sha256": "f2c589a91333dc6f1f20cd241cd4090296284b88b4eca94e9c0f585539f9933a"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 117,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "01a4b33e9317a99c5507566b8e6bfae3dc12d7213e6274566ec7a68a005c15c8"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 117,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "5c99e03c0b7482fef0eb1fd152f5eeacad63c96c9362eabe614b1e39e0f6b0c0"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 117,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "c1a535fc787bf4ddd136d75c148e48f96a4ba980cbd2cd66b7844c24bb4d5af4"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/intervals.py",
+      "line": 411,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "efd5f37e7ad07fed11724e3438f0182598afb9f7bcc594e584676fe4d1403787"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/intervals.py",
+      "line": 412,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "4f0bfc6d67f3ccaa36a4de663090e70cda99760d52356c49f5d5af3c8909e86e"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 57,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "84c087c3edc1fdc2670002e0a2d344c006de6737fa58730960658598df1aa4c3"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 57,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "afed839adb87afaffef924126bec2f2edff23d1990be88ea86df4f8d09249830"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/planning/competition_service.py",
+      "line": 146,
+      "column": 16,
+      "code": "arg-type",
+      "message_sha256": "f7c065a7f0134867e32dbc0461fd2a976bd9ed1c6c6307f406017d31130ed1da"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_garmin_service.py",
+      "line": 197,
+      "column": 16,
+      "code": "arg-type",
+      "message_sha256": "51deec515d87f4c4a08dd80c52b09425d53aaf34c13ab33b805610c8cc8151b0"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_garmin_service.py",
+      "line": 207,
+      "column": 16,
+      "code": "arg-type",
+      "message_sha256": "a74a9ddbd5aef5d62db4ad9dd5b802522953e56ecd9d0b1a3a2d32614a4d9a2d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_server_architecture.py",
+      "line": 2229,
+      "column": 16,
+      "code": "arg-type",
+      "message_sha256": "82b3b9bf636f586945c7ba8d4b7be9a1d4c5507f72393c8fbe3e5fba45085141"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/sync_commands.py",
+      "line": 70,
+      "column": 16,
+      "code": "arg-type",
+      "message_sha256": "b56eabb6d44884efdb0061ff020af3a73cfab3aeabdd645b01b9e03a91c6cf87"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/bootstrap_calendar.py",
+      "line": 85,
+      "column": 16,
+      "code": "arg-type",
+      "message_sha256": "1f0507db8f39955b7380d5ccd6ca09cdc2a0398a644e3e54cd387a5169d01c1a"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 263,
+      "column": 17,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 264,
+      "column": 17,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 265,
+      "column": 17,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_freshness.py",
+      "line": 47,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_freshness.py",
+      "line": 47,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_freshness.py",
+      "line": 47,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_observability.py",
+      "line": 52,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_observability.py",
+      "line": 52,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_observability.py",
+      "line": 52,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/background_job.py",
+      "line": 75,
+      "column": 21,
+      "code": "arg-type",
+      "message_sha256": "76cc57698baab7242c7237d9014bae81efb43913b2e291f7e17991f38c77eedc"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 270,
+      "column": 22,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 272,
+      "column": 22,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_authority.py",
+      "line": 248,
+      "column": 23,
+      "code": "arg-type",
+      "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_proposal_creation.py",
+      "line": 47,
+      "column": 23,
+      "code": "arg-type",
+      "message_sha256": "47f4f2417dfb37eea2676d37df989d48b129047fb180c24cc564bb16a041c84a"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/planning/daily_context_service.py",
+      "line": 100,
+      "column": 25,
+      "code": "arg-type",
+      "message_sha256": "1cca5932710be19613824e2d3c53f41de079c408bc0856c9317ac05eaf388d2c"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/current_metrics.py",
+      "line": 177,
+      "column": 25,
+      "code": "arg-type",
+      "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 163,
+      "column": 26,
+      "code": "arg-type",
+      "message_sha256": "fbe896c33be6c0e05462b06ff5c8741a78935c1328c785b40db2153fedb679ae"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/current_metrics.py",
+      "line": 176,
+      "column": 26,
+      "code": "arg-type",
+      "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/handler.py",
+      "line": 293,
+      "column": 26,
+      "code": "arg-type",
+      "message_sha256": "202e95d88c01d1a85fa2f434c5a0096706c95cfdc41dcab4a22472c904bb44b0"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 162,
+      "column": 27,
+      "code": "arg-type",
+      "message_sha256": "cf194421059c0d638fefbdb2ceb95f8f4552d3d5bf1f6a38d0cf19ee994efcab"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 613,
+      "column": 27,
+      "code": "arg-type",
+      "message_sha256": "570d1b972c0b2f2550ad42db3eb3936ceda3bf167873fb1c991c7a6af5d78110"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/planning/library.py",
+      "line": 169,
+      "column": 28,
+      "code": "arg-type",
+      "message_sha256": "b99b36ea488d466a65f1ebd5b90d5a128b23cbc7f5f56e2da5766f6080c1dbb5"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 195,
+      "column": 28,
+      "code": "arg-type",
+      "message_sha256": "e499eec59cbf8e6f80b3c2b7c309167b74628f653f83de1269183e6534dc886a"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_proposal_creation.py",
+      "line": 245,
+      "column": 28,
+      "code": "arg-type",
+      "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
+    },
+    {
+      "tool": "mypy",
+      "path": "tools/extract_bls.py",
+      "line": 26,
+      "column": 28,
+      "code": "arg-type",
+      "message_sha256": "5f98b44ccead6c444920709d58717d3d30817c9730bd4172d31a000187375f7f"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_proposal_creation.py",
+      "line": 271,
+      "column": 28,
+      "code": "arg-type",
+      "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_request_payload.py",
+      "line": 142,
+      "column": 29,
+      "code": "arg-type",
+      "message_sha256": "248119b31631b4bbce11bca5f2fa6b4eb6d5d6b51cfae662bd814f551f4c3896"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_garmin_service.py",
+      "line": 163,
+      "column": 29,
+      "code": "arg-type",
+      "message_sha256": "16610b5b216207d4df9d943b0e296f26131cb9a54dc4eb090ffac13fd040c0a0"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_garmin_service.py",
+      "line": 163,
+      "column": 29,
+      "code": "arg-type",
+      "message_sha256": "2627ee3026f6c40e9cf4de748f04da9e6b168767ed0657719d341b513d0a077d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_proposal_creation.py",
+      "line": 303,
+      "column": 29,
+      "code": "arg-type",
+      "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_proposal_creation.py",
+      "line": 365,
+      "column": 29,
+      "code": "arg-type",
+      "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_proposal_creation.py",
+      "line": 392,
+      "column": 29,
+      "code": "arg-type",
+      "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 559,
+      "column": 29,
+      "code": "arg-type",
+      "message_sha256": "8201b28533baa9af4e40901aafd403409021ccf3e9391330974505c193ecfc6a"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 271,
+      "column": 30,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 273,
+      "column": 30,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_change_plan_resolution.py",
+      "line": 105,
+      "column": 31,
+      "code": "arg-type",
+      "message_sha256": "d79f7d779eba7759a372bfad25fe55d883fef43e790dd50321f1bb14905f1c4c"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 188,
+      "column": 31,
+      "code": "arg-type",
+      "message_sha256": "2de30bbeaead3d07b23c17e32786cbe1a446a47c3178480065f8d07538e87f97"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 218,
+      "column": 31,
+      "code": "arg-type",
+      "message_sha256": "3ffd2b2232889b2baeb798997121d3a82ac8ded6c42aa8d6b8406365c2984f9e"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/planning/competitions.py",
+      "line": 265,
+      "column": 31,
+      "code": "arg-type",
+      "message_sha256": "d59123485b6c5a4fa5b5c286400256fd3f11b7d960c13a09b097918eac088be5"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_layering_contracts.py",
+      "line": 78,
+      "column": 31,
+      "code": "arg-type",
+      "message_sha256": "10961fea979509f4856fc0d143fd27ad84b772fbfe5853cfca5e0dc21d691ffc"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 90,
+      "column": 31,
+      "code": "arg-type",
+      "message_sha256": "197cf02cc28324d81cd944715a85befacf58c62f567adceeb29340a7f2b878aa"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/planning/library.py",
+      "line": 210,
+      "column": 32,
+      "code": "arg-type",
+      "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 95,
+      "column": 32,
+      "code": "arg-type",
+      "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/planning/library.py",
+      "line": 163,
+      "column": 33,
+      "code": "arg-type",
+      "message_sha256": "b99b36ea488d466a65f1ebd5b90d5a128b23cbc7f5f56e2da5766f6080c1dbb5"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 61,
+      "column": 33,
+      "code": "arg-type",
+      "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_turn_failures.py",
+      "line": 95,
+      "column": 33,
+      "code": "arg-type",
+      "message_sha256": "ef0f58bc633fe6a5d59efb94e2db2afed6709ff4c2d6788144a847ef64a487f7"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/request_payload.py",
+      "line": 145,
+      "column": 34,
+      "code": "arg-type",
+      "message_sha256": "0eb0c3b2dbe530d9741379c8a2f9bde0b26fe4b24bb7478eeff4afe2dcb3e1b8"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 162,
+      "column": 34,
+      "code": "arg-type",
+      "message_sha256": "071f83776b887983ebb1fecf210141e3d8f04645a08f1c2abafce86746f780a5"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_turn.py",
+      "line": 111,
+      "column": 36,
+      "code": "arg-type",
+      "message_sha256": "a8a309b373437e92a52815510020fcf4d9edf5165cfe16201e472f9b88b24b61"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_authority.py",
+      "line": 229,
+      "column": 36,
+      "code": "arg-type",
+      "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competitions.py",
+      "line": 32,
+      "column": 36,
+      "code": "arg-type",
+      "message_sha256": "6bdfc527ea2aa8643aa6c1dd61c05ab2d2aa7585b9e9bd8a949be56564aebc74"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 174,
+      "column": 37,
+      "code": "arg-type",
+      "message_sha256": "d8c91f0ee887e46a6b85414422bc0b096bf0fd2fbbcb778385c2938281b6c7b0"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_planning_action_tools.py",
+      "line": 189,
+      "column": 37,
+      "code": "arg-type",
+      "message_sha256": "e07c3f3a1a82f81edbd6276e64568a3ce217078721bfbcbb1f22886d9865a857"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/assembly.py",
+      "line": 447,
+      "column": 37,
+      "code": "arg-type",
+      "message_sha256": "6e2a1d5f101c98ee36bc390fe96e5331bf2154a28467c6d499d7a3153e35cda9"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 70,
+      "column": 37,
+      "code": "arg-type",
+      "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_http_export_streams.py",
+      "line": 71,
+      "column": 37,
+      "code": "arg-type",
+      "message_sha256": "dde96a5e160ea767a6ff0a8d3f59a7f668c5b6c9ffc3d6c3a62f6a2faec1ae7a"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/forecast.py",
+      "line": 52,
+      "column": 38,
+      "code": "arg-type",
+      "message_sha256": "7afd5be69a8ffeb2c432991683fcaa41c1a94b1b743cecd975135ac66ed2379a"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 588,
+      "column": 4,
+      "code": "arg-type",
+      "message_sha256": "255201a8a31afedba5121f4dd0ee8d9b8ca035a0b9b064e89336ba22241ee1f1"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 184,
+      "column": 40,
+      "code": "arg-type",
+      "message_sha256": "a57ef2c9172860161abbecf36737eef488d5f0520f4573482b8bfd247fac670a"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 191,
+      "column": 41,
+      "code": "arg-type",
+      "message_sha256": "457c40ecf7d19bbe1d602a357c1208738bebc65456b705296ef3d4e104a497bd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 71,
+      "column": 41,
+      "code": "arg-type",
+      "message_sha256": "966ea7112a6233541bfd7ce485fee0d8b20fe75982bc8b21ac20f36adf0d644c"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 180,
+      "column": 42,
+      "code": "arg-type",
+      "message_sha256": "93f580915935ffcecc3ffe353b11913a61138e55b14029dde8c21676c38ed70b"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 186,
+      "column": 42,
+      "code": "arg-type",
+      "message_sha256": "6841e9b280db9b30dd86cf9dfda64bcab848a8e2b8997cc2865d35eb44995f2e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 175,
+      "column": 43,
+      "code": "arg-type",
+      "message_sha256": "0956c666a923da5a115b49fe3dbb06c9a765b1aea5b3f51ace020a40960d8ab6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 179,
+      "column": 44,
+      "code": "arg-type",
+      "message_sha256": "63a99715c69686be3a04f12a13858229099d50541cfe7fd85f8e513155ad7e37"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 178,
+      "column": 45,
+      "code": "arg-type",
+      "message_sha256": "67958b7c1fac70ca3a74973695e370b3a28aacc2292e2b73bc5fb9486b8c6bd1"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/request_payload.py",
+      "line": 138,
+      "column": 46,
+      "code": "arg-type",
+      "message_sha256": "0eb0c3b2dbe530d9741379c8a2f9bde0b26fe4b24bb7478eeff4afe2dcb3e1b8"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 142,
+      "column": 47,
+      "code": "arg-type",
+      "message_sha256": "e68729bc1078e1590fa51ecfd203f3eb168f20ebdce932bbe66e5b353d858642"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 176,
+      "column": 48,
+      "code": "arg-type",
+      "message_sha256": "1c1223a819a3f355d8614d19c65050a86f894f1560a2804db67a22aaee5bb9d9"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/forecast.py",
+      "line": 30,
+      "column": 48,
+      "code": "arg-type",
+      "message_sha256": "d8c91f0ee887e46a6b85414422bc0b096bf0fd2fbbcb778385c2938281b6c7b0"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_planned_calendar.py",
+      "line": 110,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "3e5ab9bbce4618175b6dfd6dca49546741a6333d2306a6891f3c1755531b9f97"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 118,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 118,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 118,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 118,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 118,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 118,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 118,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 147,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 147,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 147,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 147,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 147,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 147,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 147,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 160,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 160,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 160,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 160,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 160,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 160,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 160,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 185,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "b44452059202c4e3b923fe68adecbdaa88633a7546010cf0bd6a8f31fc133f4f"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_ci_contracts.py",
+      "line": 21,
+      "column": 49,
+      "code": "arg-type",
+      "message_sha256": "57b2b1a9c3329d5eb922a01522e2b8044e1fdf18d5f96062318baf5fdfa57bc9"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 177,
+      "column": 50,
+      "code": "arg-type",
+      "message_sha256": "34d81fff6a2322d236e7a27db20b4675bd8c9204dd1c95b978cd2bbcd2f997a2"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/activity_validation.py",
+      "line": 177,
+      "column": 51,
+      "code": "arg-type",
+      "message_sha256": "9f15d58ebcfeea6d361abc404047086f7c68383c4d8b4778eecf645cb9c98ca4"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 190,
+      "column": 51,
+      "code": "arg-type",
+      "message_sha256": "feec021553a83a8fa5829eca1bb333991a8dbca72071588f28592501a9c4daf4"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_authority.py",
+      "line": 266,
+      "column": 51,
+      "code": "arg-type",
+      "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_tool_round_journal.py",
+      "line": 37,
+      "column": 53,
+      "code": "arg-type",
+      "message_sha256": "d5cb5499bdad3d5dc5be6fe20caed8367899b89ae79dfaf3b32017d076dee632"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/garmin_metrics.py",
+      "line": 418,
+      "column": 55,
+      "code": "arg-type",
+      "message_sha256": "191d29b851ef2b4cccfd534394145c0e02452f8fb324266008ab916264c05c91"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 100,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 100,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 100,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 100,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 100,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 100,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 100,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 133,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 133,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 133,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 133,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 133,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 133,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 133,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/executor.py",
+      "line": 213,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "530a51c91fbfa215c0ccd47e2a7f8f0c30332690eab03333160b2ba27982b6cf"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/executor.py",
+      "line": 213,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "54675efae78d2298f72fc6821d8a0ee9fcd38848c5c0d8e889716a8795435a11"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/executor.py",
+      "line": 213,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "6944204e882f524b4a6db9a03ee284dd02193846f03f0d550e312366fc422eca"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 41,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 41,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 41,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 41,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 41,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 41,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 41,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 58,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 58,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 58,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 58,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 58,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 58,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 58,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 83,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "220e6ae9e519c0d31d9d7043113ee7eeb2568a690c18893278b52d274151a58e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 83,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "4ef34a2cf458f3e9814f966b79ad5d6d4318df4d9d75ad43491def277dbd4912"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 83,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 83,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "ab658caa3c66b1cdd9ad2cd2330464f76ba90837542aacb435d0d8bd7ed37294"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 83,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "af70ab219fd5ec662076f1b0ba9eca5fa4370dd5aa477e320c86bea4372e003e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 83,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "b4694165451e848d8bfb2f6ac2412d2a84e5a94024dcd4fe2e3c95b9bc18ccae"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_response.py",
+      "line": 83,
+      "column": 59,
+      "code": "arg-type",
+      "message_sha256": "e2f30532c1d91aaf81f5dc74ceb67ea5b30f5b7843e15d056f10860accafd4cd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competition_sync_plan.py",
+      "line": 158,
+      "column": 62,
+      "code": "arg-type",
+      "message_sha256": "27a3bd9479f940a49bec8ff4328e542d11cd49f6cb59c7a4f91c2c71d2406efb"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competitions.py",
+      "line": 211,
+      "column": 63,
+      "code": "arg-type",
+      "message_sha256": "58d592c134edf11bf3a0db0fa23ae26a324dc3e91f3a320194d8b515bba84651"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_planned_calendar.py",
+      "line": 110,
+      "column": 65,
+      "code": "arg-type",
+      "message_sha256": "67a23cbd9410f306da2960b552efb8b98e596674f8f448bcdfb691411841ca0d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/forecast.py",
+      "line": 23,
+      "column": 65,
+      "code": "arg-type",
+      "message_sha256": "d8c91f0ee887e46a6b85414422bc0b096bf0fd2fbbcb778385c2938281b6c7b0"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/forecast.py",
+      "line": 28,
+      "column": 72,
+      "code": "arg-type",
+      "message_sha256": "44a59922aa4e1234597ba360cee5a010f933104b25dc0d9d7057afa0891de90f"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/background_job.py",
+      "line": 68,
+      "column": 77,
+      "code": "arg-type",
+      "message_sha256": "84e2af6fbcb3d2e67bf1b5cdc091ce429b10927169aa5e828c1d703cf79f07a3"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/sync_tools.py",
+      "line": 154,
+      "column": 19,
+      "code": "assignment",
+      "message_sha256": "cb2357b99c309c537809d43ffaf4b1309fff836eca0d891ffc25beaff5976314"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/planning_change_tools.py",
+      "line": 130,
+      "column": 20,
+      "code": "assignment",
+      "message_sha256": "d892791e184e6543638278ea97f16b5c97a42550887b5a82d3fd579a797a5836"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/history/service.py",
+      "line": 39,
+      "column": 20,
+      "code": "assignment",
+      "message_sha256": "3b94f7337d07e04231f4dad89d039610cec2fa34c02905c8d2135361a3c57a3f"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/plan_selection.py",
+      "line": 160,
+      "column": 21,
+      "code": "assignment",
+      "message_sha256": "67c794e71629a9e60729f87ac0fb889765c56a963b2b7798b76b521f89541e3a"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/providers/garmin_morning.py",
+      "line": 50,
+      "column": 21,
+      "code": "assignment",
+      "message_sha256": "e0f69e903b8877f10c21a7a94a7bf76945d2f0f98360c766930bb648f4cbeecb"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/planned_units.py",
+      "line": 235,
+      "column": 25,
+      "code": "assignment",
+      "message_sha256": "dba98398c39cd0ff1435335902a01d5f29b460bda4a9b76372949d59895222c1"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/planned_units.py",
+      "line": 231,
+      "column": 27,
+      "code": "assignment",
+      "message_sha256": "dba98398c39cd0ff1435335902a01d5f29b460bda4a9b76372949d59895222c1"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/conversation.py",
+      "line": 167,
+      "column": 30,
+      "code": "assignment",
+      "message_sha256": "e7248b7a4fe4bae9ed33377a133238a0e0258845226a2ae81b5a6280ec701284"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_morning_battery_service.py",
+      "line": 367,
+      "column": 33,
+      "code": "assignment",
+      "message_sha256": "3e69521ecbdc340106af4a8922c3d8716e59778cac2c6660a5bfc16fa81617d6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_job_status.py",
+      "line": 81,
+      "column": 36,
+      "code": "assignment",
+      "message_sha256": "b36029a87bf7c5ed066afb1a27c05bc8a7ef73963c1594a69da960616fa421ef"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 311,
+      "column": 40,
+      "code": "assignment",
+      "message_sha256": "d8ff17413131b81238284fff67de6570a36dd36adb5f5d0d993e2f13f4e23825"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/intervals.py",
+      "line": 314,
+      "column": 45,
+      "code": "assignment",
+      "message_sha256": "4c66ab7e8c9a5c9452445a66a23808794c742638c457c6feeb1bfa6294051252"
+    },
+    {
+      "tool": "mypy",
+      "path": "e2e/fixture_runtime.py",
+      "line": 49,
+      "column": 46,
+      "code": "assignment",
+      "message_sha256": "63b223df9d3230073bbf9e36a3d550827f18d71602d0883452c44841a538f293"
+    },
+    {
+      "tool": "mypy",
+      "path": "e2e/fixture_runtime.py",
+      "line": 270,
+      "column": 47,
+      "code": "assignment",
+      "message_sha256": "743bb04ffff3138838807d44ce17c43f5e5037ce50d3da58f08cd0e465dc8698"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_change_preparation.py",
+      "line": 188,
+      "column": 8,
+      "code": "assignment",
+      "message_sha256": "d8fa2ef73b7e0da8da970f812f087475db9b32cea2112e115841733a7a2934a9"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/dialogue_action.py",
+      "line": 107,
+      "column": 12,
+      "code": "attr-defined",
+      "message_sha256": "232127bf16e88c0f176ed8e1807960579ac815dba69fc4f319f1bda2d31b8622"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/providers/openai.py",
+      "line": 1377,
+      "column": 12,
+      "code": "attr-defined",
+      "message_sha256": "6b6e66ddc50c994bdd124fcc504be320e100e8311437f48df31b40e14600a69c"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_response_retry.py",
+      "line": 23,
+      "column": 12,
+      "code": "attr-defined",
+      "message_sha256": "4aa577f73fdb15e49318c743f72cbccccd37c2be7e35f7dc457ab689b438c014"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_http_athlete_put_routes.py",
+      "line": 32,
+      "column": 12,
+      "code": "attr-defined",
+      "message_sha256": "beb0ea93ded5e96c319bda5fc5070a374b634b47fed33ee9bc1bd16b493a7473"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_http_athlete_put_routes.py",
+      "line": 28,
+      "column": 15,
+      "code": "attr-defined",
+      "message_sha256": "beb0ea93ded5e96c319bda5fc5070a374b634b47fed33ee9bc1bd16b493a7473"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/providers/state.py",
+      "line": 209,
+      "column": 16,
+      "code": "attr-defined",
+      "message_sha256": "4aa577f73fdb15e49318c743f72cbccccd37c2be7e35f7dc457ab689b438c014"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/providers/state.py",
+      "line": 211,
+      "column": 16,
+      "code": "attr-defined",
+      "message_sha256": "3a17d588b9c9c9fbb0d4ac165188b70312d06fdeacbfa85c91ed8e129132fc70"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/providers/state.py",
+      "line": 213,
+      "column": 16,
+      "code": "attr-defined",
+      "message_sha256": "49e175295e507496fe654c7a26e50d9783a4638ec61b41112f936d2c9b61422c"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/providers/state.py",
+      "line": 215,
+      "column": 16,
+      "code": "attr-defined",
+      "message_sha256": "5a55aeaafa33071da3a81b8596a9fccf3d3f2856f40f402cc8691b8257a7c409"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_tool_round.py",
+      "line": 249,
+      "column": 16,
+      "code": "attr-defined",
+      "message_sha256": "7407b09a1ecada8941987b551f9890e5f2d5073325710393f260d125aa4841c6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_tool_round.py",
+      "line": 280,
+      "column": 16,
+      "code": "attr-defined",
+      "message_sha256": "7407b09a1ecada8941987b551f9890e5f2d5073325710393f260d125aa4841c6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_privacy_delete_confirmation.py",
+      "line": 40,
+      "column": 16,
+      "code": "attr-defined",
+      "message_sha256": "f622591e2284b138b9ba2b223afcc1cef97c2ec78ad49ac8fba396e89b713a30"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_privacy_delete_confirmation.py",
+      "line": 41,
+      "column": 16,
+      "code": "attr-defined",
+      "message_sha256": "f622591e2284b138b9ba2b223afcc1cef97c2ec78ad49ac8fba396e89b713a30"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_privacy_delete_confirmation.py",
+      "line": 42,
+      "column": 16,
+      "code": "attr-defined",
+      "message_sha256": "2feef7cab6d05912db10ca627424a13f8ad67eac255768de8ce6d8c331173ffd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_privacy_delete_confirmation.py",
+      "line": 43,
+      "column": 16,
+      "code": "attr-defined",
+      "message_sha256": "125b93d5dd07a8ffe046f2cbcfebbe292937602a2d01b2ed711cbaac5da61c7c"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/providers/http.py",
+      "line": 712,
+      "column": 16,
+      "code": "attr-defined",
+      "message_sha256": "6b6e66ddc50c994bdd124fcc504be320e100e8311437f48df31b40e14600a69c"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_plan_selection.py",
+      "line": 124,
+      "column": 25,
+      "code": "attr-defined",
+      "message_sha256": "a5e8d3c1d53d545b5f4d6e56c1bde193187e095cc38c052a1252f2dd62f94f16"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_server_composition_architecture.py",
+      "line": 207,
+      "column": 25,
+      "code": "attr-defined",
+      "message_sha256": "f575ce189bb7634653d8ef63616401e74480f579699f4b9326d617f8fd2dd1ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_server_composition_architecture.py",
+      "line": 235,
+      "column": 25,
+      "code": "attr-defined",
+      "message_sha256": "6894ca72a82864efd4dfd27c3771f0a621eec6084e87ce8d26dc3d7e29294744"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_privacy_delete_confirmation.py",
+      "line": 59,
+      "column": 25,
+      "code": "attr-defined",
+      "message_sha256": "f099f627502ff19992e31dbb46ffbd99a2a93cb12680f88cbc2ed230f4ea12bb"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_tool_round.py",
+      "line": 255,
+      "column": 28,
+      "code": "attr-defined",
+      "message_sha256": "67dc3abcce848ea579afb90b68bb9a18046ab2bad3059c092c839866cf34e435"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_structured_tool_round.py",
+      "line": 286,
+      "column": 28,
+      "code": "attr-defined",
+      "message_sha256": "67dc3abcce848ea579afb90b68bb9a18046ab2bad3059c092c839866cf34e435"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_server_http_architecture.py",
+      "line": 116,
+      "column": 29,
+      "code": "attr-defined",
+      "message_sha256": "48817743dc3963ca62b240b8f252a193b62d5fb0d8f8638ae1c45e9071742fbe"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_server_composition_architecture.py",
+      "line": 206,
+      "column": 30,
+      "code": "attr-defined",
+      "message_sha256": "f575ce189bb7634653d8ef63616401e74480f579699f4b9326d617f8fd2dd1ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_http_export_streams.py",
+      "line": 68,
+      "column": 33,
+      "code": "attr-defined",
+      "message_sha256": "1fe9f25f989872de867f1689757a06865fbdaaed69c2961622ba322baf860fd4"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_server_http_architecture.py",
+      "line": 128,
+      "column": 37,
+      "code": "attr-defined",
+      "message_sha256": "f575ce189bb7634653d8ef63616401e74480f579699f4b9326d617f8fd2dd1ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_server_http_architecture.py",
+      "line": 160,
+      "column": 37,
+      "code": "attr-defined",
+      "message_sha256": "f575ce189bb7634653d8ef63616401e74480f579699f4b9326d617f8fd2dd1ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_server_composition_architecture.py",
+      "line": 230,
+      "column": 37,
+      "code": "attr-defined",
+      "message_sha256": "f575ce189bb7634653d8ef63616401e74480f579699f4b9326d617f8fd2dd1ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_server_http_architecture.py",
+      "line": 404,
+      "column": 37,
+      "code": "attr-defined",
+      "message_sha256": "f575ce189bb7634653d8ef63616401e74480f579699f4b9326d617f8fd2dd1ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_server_composition_architecture.py",
+      "line": 232,
+      "column": 51,
+      "code": "attr-defined",
+      "message_sha256": "48817743dc3963ca62b240b8f252a193b62d5fb0d8f8638ae1c45e9071742fbe"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_tool_failures.py",
+      "line": 43,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "232127bf16e88c0f176ed8e1807960579ac815dba69fc4f319f1bda2d31b8622"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 43,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "8c301cd9fb41b2948ce5a8284c1853f12da6959a5cf20892834c523f220ab7c6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 44,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 45,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "0fd9c21c4052270bbe58e699e73585dfb58857469a000a8058fb25bdd6b662c0"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 46,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "ef80729f7310b16af09639f74441883507a504188243d57e84dbfab30c99c9a7"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_privacy_delete_confirmation.py",
+      "line": 49,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "891ce020204abd0c04f7c21f44ee66e3010d9abe0ad8bc49ab20d4e6d7a40fda"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_privacy_delete_confirmation.py",
+      "line": 50,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "172427f12d5c1839aae8337fbe84d9727f6a576f13b81210f30848b1ce255f08"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 50,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "4dc75def4aded67d415972778968fe069d1789ab4de37c124501f903cd77e134"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 52,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "94ba754ee4786d8de5b70d8bcd1dbdb1e7c0d8b7a5cf5e64a2eeb2f375afaf54"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 53,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 54,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "26c8cb1cfecc0ba25827eff39867f9bc467d4c4b003dd507ec057c8c085df2ae"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_response_retry.py",
+      "line": 54,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "6b6e66ddc50c994bdd124fcc504be320e100e8311437f48df31b40e14600a69c"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 55,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "ef80729f7310b16af09639f74441883507a504188243d57e84dbfab30c99c9a7"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_change_service.py",
+      "line": 558,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "682546f5082752e1c00e4680e57dea0e350e0f823edfa0852ecf1b4ec657f83e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_response_retry.py",
+      "line": 56,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "6b6e66ddc50c994bdd124fcc504be320e100e8311437f48df31b40e14600a69c"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 56,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "9ccb93f4219c62d95410fcd6a42c76b54b4d53864d0a82556f382db278dc037d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 57,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "036e432d6a8ea2fb646257cc47cefeb01c5cbc7de2f1df3512b9fac7ba6ea0cc"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_privacy_delete_confirmation.py",
+      "line": 58,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "011b0c081f88b5bde99586f77a5fd5615099d2e63e56ea04ee028cf34e0a65f4"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 58,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 59,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_privacy_delete_confirmation.py",
+      "line": 60,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "90269da446c5c8b234b977f2419b0e385b423410774d7a2f7608b0db2c77812e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 60,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "e758c46a70630561e00465cd8d478d0977f580bdf1092bb216300a0c2d3ad96f"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 61,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "3f41b1984e52acf134388ec95039962ba46f74dc93c006022c6a10cde6d5ca73"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_plan.py",
+      "line": 62,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "ef80729f7310b16af09639f74441883507a504188243d57e84dbfab30c99c9a7"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_tool_failures.py",
+      "line": 92,
+      "column": 8,
+      "code": "attr-defined",
+      "message_sha256": "232127bf16e88c0f176ed8e1807960579ac815dba69fc4f319f1bda2d31b8622"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competitions.py",
+      "line": 288,
+      "column": 12,
+      "code": "call-arg",
+      "message_sha256": "2d37048d4d0b8833c7a1ff61433c7afd0b6d0e952fed1a769fb452360056c425"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competitions.py",
+      "line": 290,
+      "column": 12,
+      "code": "call-arg",
+      "message_sha256": "bfb7c6cc7199c64275ff7bdb3a93e6d034ff3099ef468fe78e1dcd752c1ae1fc"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/planned_calendar.py",
+      "line": 442,
+      "column": 19,
+      "code": "call-arg",
+      "message_sha256": "442fd4cf1edef23c8e8b64550dca5e2deb6cccef376a8f46018b9e74f75cc592"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_http_post_dispatch.py",
+      "line": 21,
+      "column": 26,
+      "code": "call-arg",
+      "message_sha256": "b104e8649068e3856026b1d61f6f36e7d08682408876da27049ccb3185ac267e"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/providers/intervals.py",
+      "line": 165,
+      "column": 63,
+      "code": "call-arg",
+      "message_sha256": "b04fe45d8c503eded7638aebf9b5360cc269c6484775982cba0bacd7f4cdce87"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 142,
+      "column": 15,
+      "code": "call-overload",
+      "message_sha256": "06ec5cf9ef731a0fc5cc91954388e28d7e87714742414a1c42a7de3671eb02ed"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_dialogue_plan_scope.py",
+      "line": 21,
+      "column": 21,
+      "code": "call-overload",
+      "message_sha256": "eb82377dd77074ec135a9350e5dda0b9a5c9f46816d84e117789355db380f38c"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/authorization.py",
+      "line": 77,
+      "column": 52,
+      "code": "call-overload",
+      "message_sha256": "188f40adffde1fb052a30a07373c3bfce193281767de41790f64f915446606a0"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_tool_execution_service.py",
+      "line": 292,
+      "column": 12,
+      "code": "func-returns-value",
+      "message_sha256": "ad262e44a2bdfe94f3baa4963de111499f6b58ae6cfe0d88ccc3e8df4e3aeca6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_manual_morning.py",
+      "line": 56,
+      "column": 12,
+      "code": "func-returns-value",
+      "message_sha256": "1c5569bae0aa424d21e86781106aa6fa96bee9cb6c0a2d349395dd82c0ca0f75"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_http_sync_commands_post.py",
+      "line": 42,
+      "column": 48,
+      "code": "func-returns-value",
+      "message_sha256": "1c5569bae0aa424d21e86781106aa6fa96bee9cb6c0a2d349395dd82c0ca0f75"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_http_public_get_routes.py",
+      "line": 96,
+      "column": 50,
+      "code": "func-returns-value",
+      "message_sha256": "1c5569bae0aa424d21e86781106aa6fa96bee9cb6c0a2d349395dd82c0ca0f75"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 60,
+      "column": 65,
+      "code": "func-returns-value",
+      "message_sha256": "1fccd5da5a36ade69adcaf14df929138a53dd31b48696b8589b6aef87803c267"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 611,
+      "column": 16,
+      "code": "has-type",
+      "message_sha256": "4b7e78aca8d7c14e4949c4d2c1e7b5dbe37f97501201f64a1fc21f632e11770d"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 648,
+      "column": 16,
+      "code": "has-type",
+      "message_sha256": "e020f47cf690127bbfb4750cbe0b93f382fe80b2ac32f84d93c47d3cdb2e0192"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 919,
+      "column": 16,
+      "code": "has-type",
+      "message_sha256": "c3827639903091a4321d0e0848e6289e336e994114e1a16099bebc3274bf7946"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 922,
+      "column": 16,
+      "code": "has-type",
+      "message_sha256": "c53b9e646657d76e58ce4a8d414022143183888c840336c5e976cccc80e9fdda"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 991,
+      "column": 20,
+      "code": "has-type",
+      "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 995,
+      "column": 20,
+      "code": "has-type",
+      "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 898,
+      "column": 28,
+      "code": "has-type",
+      "message_sha256": "6aa98648523c886c38d6ec5ff2cba0b9a86a5cb9fe5f9593e07c2251a0075a22"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 1547,
+      "column": 30,
+      "code": "has-type",
+      "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 741,
+      "column": 30,
+      "code": "has-type",
+      "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 578,
+      "column": 31,
+      "code": "has-type",
+      "message_sha256": "7fadfe3e746eaff9f0518c8e8252349ddb632785627d5bcb9e2c837b0403f130"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 742,
+      "column": 31,
+      "code": "has-type",
+      "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 707,
+      "column": 34,
+      "code": "has-type",
+      "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 1228,
+      "column": 35,
+      "code": "has-type",
+      "message_sha256": "480057763c1b5347f5e8f0a61c7f20c6cec2d3a6e24f1e8563bd5b76f2138cc4"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 743,
+      "column": 35,
+      "code": "has-type",
+      "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 639,
+      "column": 36,
+      "code": "has-type",
+      "message_sha256": "743b0a5f8fa53d140838c45e76a8917ca3b252a48e3882d05cde8d6f0b24e492"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 1551,
+      "column": 37,
+      "code": "has-type",
+      "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 1579,
+      "column": 38,
+      "code": "has-type",
+      "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 583,
+      "column": 39,
+      "code": "has-type",
+      "message_sha256": "a6717e30878d2725304d97c5fb32dacd1e9390ad42c1c53805e5ad4228c63498"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 1257,
+      "column": 42,
+      "code": "has-type",
+      "message_sha256": "6b3bf53c953464ae5eca5af23f6ee4aa9b3fe9f5856d07f358d76bd3a8dee02e"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 646,
+      "column": 43,
+      "code": "has-type",
+      "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 638,
+      "column": 45,
+      "code": "has-type",
+      "message_sha256": "9076d7668e920f937d99a8809d7222f870ef1d895bef707f657887bd19ded42e"
+    },
+    {
+      "tool": "mypy",
+      "path": "server.py",
+      "line": 695,
+      "column": 45,
+      "code": "has-type",
+      "message_sha256": "9076d7668e920f937d99a8809d7222f870ef1d895bef707f657887bd19ded42e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 197,
+      "column": 12,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 203,
+      "column": 12,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 255,
+      "column": 12,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 268,
+      "column": 12,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 289,
+      "column": 12,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 315,
+      "column": 12,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 318,
+      "column": 12,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 334,
+      "column": 12,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 337,
+      "column": 12,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_http_athlete_put_routes.py",
+      "line": 90,
+      "column": 12,
+      "code": "index",
+      "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_http_athlete_put_routes.py",
+      "line": 93,
+      "column": 12,
+      "code": "index",
+      "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_state_calendar_projection.py",
+      "line": 112,
+      "column": 22,
+      "code": "index",
+      "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_plan_selection.py",
+      "line": 214,
+      "column": 22,
+      "code": "index",
+      "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competition_sync_plan.py",
+      "line": 100,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competition_sync_plan.py",
+      "line": 101,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competition_sync_plan.py",
+      "line": 102,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competition_sync_plan.py",
+      "line": 107,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competition_sync_plan.py",
+      "line": 108,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competition_sync_plan.py",
+      "line": 109,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_library_service.py",
+      "line": 124,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_library_service.py",
+      "line": 126,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_library_service.py",
+      "line": 165,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_library_service.py",
+      "line": 166,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_library_service.py",
+      "line": 167,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 170,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 171,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_tool_preparation.py",
+      "line": 196,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "c137d8e31a4faf360fc543a5a1e758f33b869db1645f246e1d09e86fb7a7d940"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_nutrition_review_regressions.py",
+      "line": 37,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_nutrition_review_regressions.py",
+      "line": 60,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competition_sync_plan.py",
+      "line": 94,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competition_sync_plan.py",
+      "line": 95,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competition_sync_plan.py",
+      "line": 96,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_library_service.py",
+      "line": 125,
+      "column": 26,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_training_plan_artifact_service.py",
+      "line": 161,
+      "column": 27,
+      "code": "index",
+      "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_tool_preparation.py",
+      "line": 197,
+      "column": 29,
+      "code": "index",
+      "message_sha256": "c137d8e31a4faf360fc543a5a1e758f33b869db1645f246e1d09e86fb7a7d940"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/authorization.py",
+      "line": 47,
+      "column": 30,
+      "code": "index",
+      "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_library_service.py",
+      "line": 196,
+      "column": 33,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 163,
+      "column": 41,
+      "code": "index",
+      "message_sha256": "a44adfab2551a879041c39b143eb52c7593f7b55e1f911dee04b38739360615e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_request_payload.py",
+      "line": 132,
+      "column": 52,
+      "code": "index",
+      "message_sha256": "20cbbc295cdb534102f13264762ddc8c7798c0a87c1d65677b7c010d3a54a96a"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_request_payload.py",
+      "line": 132,
+      "column": 72,
+      "code": "index",
+      "message_sha256": "c650cb6fdb97181bb1fe92f76cfcb26c43e2e75da13e3bd6810e03f7c81db909"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/planned_calendar.py",
+      "line": 349,
+      "column": 8,
+      "code": "index",
+      "message_sha256": "69467071d581b1ef67e8d2e3bf0c5a40d7239c3db643b55b9fafae5ce76a8114"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_attachment_context.py",
+      "line": 52,
+      "column": 26,
+      "code": "list-item",
+      "message_sha256": "c7eb94fdd7c8c7c856097235467eaaa07040cb3af8d1f7b03549f0810c985f6a"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_attachment_context.py",
+      "line": 73,
+      "column": 26,
+      "code": "list-item",
+      "message_sha256": "a5ab97917c52be2c83cdaee803ee4a1d6131477ea65b6abdb05de96bbc953539"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_attachment_context.py",
+      "line": 73,
+      "column": 31,
+      "code": "list-item",
+      "message_sha256": "b64b3b3fc34f29fe64f54e8faec8e6c92330709db85939d38fd2998caab2f5bb"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_attachment_context.py",
+      "line": 73,
+      "column": 36,
+      "code": "list-item",
+      "message_sha256": "3fbad926607747d193ca8c03ab0ddeaa7830ef0a937b33516fb5d95f4c600484"
+    },
+    {
+      "tool": "mypy",
+      "path": "e2e/fixture_runtime.py",
+      "line": 1586,
+      "column": 0,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "e2e/fixture_runtime.py",
+      "line": 270,
+      "column": 0,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "e2e/fixture_runtime.py",
+      "line": 41,
+      "column": 0,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "e2e/fixture_runtime.py",
+      "line": 49,
+      "column": 0,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "e2e/fixture_runtime.py",
+      "line": 53,
+      "column": 0,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_job_worker.py",
+      "line": 112,
+      "column": 8,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_turn_failures.py",
+      "line": 118,
+      "column": 8,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_turn_opening.py",
+      "line": 130,
+      "column": 8,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_job_worker.py",
+      "line": 133,
+      "column": 8,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_authority.py",
+      "line": 167,
+      "column": 8,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_state_versions.py",
+      "line": 215,
+      "column": 8,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_job_worker.py",
+      "line": 52,
+      "column": 8,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_job_worker.py",
+      "line": 98,
+      "column": 8,
+      "code": "method-assign",
+      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_nutrition_review_regressions.py",
+      "line": 27,
+      "column": 18,
+      "code": "misc",
+      "message_sha256": "e1a6113cd91ca2e6426ccc1e592def61ea2865f5b864d7f48659bdb5da1ee239"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_nutrition_review_regressions.py",
+      "line": 27,
+      "column": 18,
+      "code": "misc",
+      "message_sha256": "f0d2285876fb8a11fc7a08f2c208e12469dc512361d7b9ecbc59a0d8dae10a91"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_nutrition_review_regressions.py",
+      "line": 50,
+      "column": 18,
+      "code": "misc",
+      "message_sha256": "e1a6113cd91ca2e6426ccc1e592def61ea2865f5b864d7f48659bdb5da1ee239"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_nutrition_review_regressions.py",
+      "line": 50,
+      "column": 18,
+      "code": "misc",
+      "message_sha256": "f0d2285876fb8a11fc7a08f2c208e12469dc512361d7b9ecbc59a0d8dae10a91"
+    },
+    {
+      "tool": "mypy",
+      "path": "e2e/fixture_runtime.py",
+      "line": 1496,
+      "column": 21,
+      "code": "misc",
+      "message_sha256": "0ba1e959a9929a580b50012a0a160f4a70e2714e7183d6bc45b46b3eb2904c2c"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/morning_battery.py",
+      "line": 146,
+      "column": 11,
+      "code": "operator",
+      "message_sha256": "1e36937ce73debcb1d1077d51cc4dfe0782c5d2a0ca2e94d4b23a6927f8b694d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/morning_battery.py",
+      "line": 146,
+      "column": 11,
+      "code": "operator",
+      "message_sha256": "4891f806dea0305c6aa348a0673aea322cd1f07b498e5a316f960d337841444e"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/request_payload.py",
+      "line": 129,
+      "column": 12,
+      "code": "operator",
+      "message_sha256": "707d8043b32df45b81e34c30d7ca9376fba066f666a023a63841bec514d52b59"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 269,
+      "column": 13,
+      "code": "operator",
+      "message_sha256": "23273601c5c51787d946c1da6b8228da0c07d81888006e0784614430d67afe3a"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 269,
+      "column": 13,
+      "code": "operator",
+      "message_sha256": "c1d0e13f8fec43a85c14183cf4bb2ae4fd6e3829c26f9cb1b0a76ecd474ee9cb"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/morning_battery.py",
+      "line": 153,
+      "column": 15,
+      "code": "operator",
+      "message_sha256": "1e36937ce73debcb1d1077d51cc4dfe0782c5d2a0ca2e94d4b23a6927f8b694d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/morning_battery.py",
+      "line": 153,
+      "column": 15,
+      "code": "operator",
+      "message_sha256": "4891f806dea0305c6aa348a0673aea322cd1f07b498e5a316f960d337841444e"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 97,
+      "column": 16,
+      "code": "operator",
+      "message_sha256": "95a8fd16907704628ca950fc022ee1ab1927969b446e7dd83d694d851996d900"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/planning/library.py",
+      "line": 417,
+      "column": 48,
+      "code": "operator",
+      "message_sha256": "134b0ed0f4e67b8fe989af28654f6632e4aeeb5d4fcc408f45c84be9069c1f5a"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 97,
+      "column": 57,
+      "code": "operator",
+      "message_sha256": "d27ca06b60a31ad4bc4fd748ea5673e774abbb907800caa12627adf63e6bc1a4"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 104,
+      "column": 8,
+      "code": "operator",
+      "message_sha256": "2012612fca41d94c7889daf96180ad29bf9b74c9e30f4e358a4e87130f68ba96"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 104,
+      "column": 8,
+      "code": "operator",
+      "message_sha256": "27794af3e7e5f5e92f73012181abdb5efb72fbe35207acad943c129bdefb85ef"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 104,
+      "column": 8,
+      "code": "operator",
+      "message_sha256": "8edf938fc0d4757ccb37de1576bb0245841c32c37033768514073b0587e1cfb0"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 104,
+      "column": 8,
+      "code": "operator",
+      "message_sha256": "d2e0707d21e78ea4f68568bf7ca771fc3ee06a1de9a20ffa975fe0e37cfe3560"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/request_payload.py",
+      "line": 116,
+      "column": 8,
+      "code": "operator",
+      "message_sha256": "707d8043b32df45b81e34c30d7ca9376fba066f666a023a63841bec514d52b59"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/current_metrics.py",
+      "line": 180,
+      "column": 11,
+      "code": "return-value",
+      "message_sha256": "08428d57439c2ba1f6948ebae90f4dd207d232b2f5f44547026c8d7a08479b57"
+    },
+    {
+      "tool": "mypy",
+      "path": "tools/extract_bls.py",
+      "line": 28,
+      "column": 11,
+      "code": "return-value",
+      "message_sha256": "0394215e142f9965a2058edade273fe77f53ddfff461f70895aaa6f8fe221999"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/garmin_metrics.py",
+      "line": 419,
+      "column": 11,
+      "code": "return-value",
+      "message_sha256": "560a335294ece6798b3bfe82027b1ac0955498f98e3bfd018ceda8ee97c08e3c"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/planned_calendar.py",
+      "line": 137,
+      "column": 12,
+      "code": "return-value",
+      "message_sha256": "361271fe306e85e3cb67c6ae457d6158f8a2b2501683148fe34bb2cae91765ce"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/planned_calendar.py",
+      "line": 537,
+      "column": 12,
+      "code": "return-value",
+      "message_sha256": "361271fe306e85e3cb67c6ae457d6158f8a2b2501683148fe34bb2cae91765ce"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_job_status.py",
+      "line": 53,
+      "column": 20,
+      "code": "return-value",
+      "message_sha256": "cb0e57b7e90918e46aae4aeb9e8c7f1b5d670835f0147ce092724938cf4b2eb2"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_training_template_tools.py",
+      "line": 76,
+      "column": 20,
+      "code": "return-value",
+      "message_sha256": "d1ce6aba4a78ac24ec4292ff115dbf948e7d3afecfc3329d4da4786a97836773"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_conversation_reset.py",
+      "line": 92,
+      "column": 20,
+      "code": "return-value",
+      "message_sha256": "f4c04c73f25c4752bb822b7ae29f94fde7b20c87eb7f3581fdd754a2cc1fa0a8"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/performance.py",
+      "line": 208,
+      "column": 23,
+      "code": "return-value",
+      "message_sha256": "a0e5eaad7dba0a912f8407d1698bf050624d54d66a17c5a26fe0074def6714fb"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_state_calendar_projection.py",
+      "line": 33,
+      "column": 23,
+      "code": "return-value",
+      "message_sha256": "2553b6187dc2afbd2ac643e581202533bab396c6e515c5be418513823cdbc81f"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/recommendations.py",
+      "line": 106,
+      "column": 24,
+      "code": "type-var",
+      "message_sha256": "c313aee34476942a320a81c257cfed3906219e9611644afa24079877d93d5dd7"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_ci_contracts.py",
+      "line": 22,
+      "column": 0,
+      "code": "union-attr",
+      "message_sha256": "68b93120390acb0bdf745eda42d1ea7b92e9283e041b0489dcfb5e5bc222ea85"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_ci_contracts.py",
+      "line": 22,
+      "column": 0,
+      "code": "union-attr",
+      "message_sha256": "715f4099e0ef8ef7a6c02840bdc40b53b69271dd1f5a26bf7ccf8946cbcb045c"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 160,
+      "column": 12,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 172,
+      "column": 12,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/snapshots.py",
+      "line": 63,
+      "column": 13,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/snapshots.py",
+      "line": 67,
+      "column": 13,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/snapshots.py",
+      "line": 64,
+      "column": 15,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/selected.py",
+      "line": 231,
+      "column": 16,
+      "code": "union-attr",
+      "message_sha256": "1b9a8564ffe7d40a0499a1125643d1b92afcb5b89007886080f0976dfbfff5b1"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/trends.py",
+      "line": 42,
+      "column": 16,
+      "code": "union-attr",
+      "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_background_job.py",
+      "line": 87,
+      "column": 16,
+      "code": "union-attr",
+      "message_sha256": "d1b08c77b27ebdb790d8eabdb06f2d2594c9455dd9b8c313769aa818b5b93e32"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/intervals.py",
+      "line": 185,
+      "column": 19,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/intervals.py",
+      "line": 189,
+      "column": 19,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/snapshots.py",
+      "line": 61,
+      "column": 19,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/job_store.py",
+      "line": 104,
+      "column": 21,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/selected.py",
+      "line": 130,
+      "column": 24,
+      "code": "union-attr",
+      "message_sha256": "63c6fc8efb65cc2bc7963b4dc6618bc71a65428cdb918382f279f994e829043e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 148,
+      "column": 25,
+      "code": "union-attr",
+      "message_sha256": "4f6d400caafa3504162c88ffa1c2060b074f7c3f82d8d562817a0079284996c9"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 245,
+      "column": 25,
+      "code": "union-attr",
+      "message_sha256": "4f6d400caafa3504162c88ffa1c2060b074f7c3f82d8d562817a0079284996c9"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_activity_identity.py",
+      "line": 36,
+      "column": 26,
+      "code": "union-attr",
+      "message_sha256": "8435f119d100d91aabdaf273fac7ed99826ca4c2c44a0d4c528a067d931093f5"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/planning_commands.py",
+      "line": 83,
+      "column": 26,
+      "code": "union-attr",
+      "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/background_job.py",
+      "line": 66,
+      "column": 27,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_worker.py",
+      "line": 253,
+      "column": 28,
+      "code": "union-attr",
+      "message_sha256": "4f6d400caafa3504162c88ffa1c2060b074f7c3f82d8d562817a0079284996c9"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_background_job.py",
+      "line": 101,
+      "column": 29,
+      "code": "union-attr",
+      "message_sha256": "d1b08c77b27ebdb790d8eabdb06f2d2594c9455dd9b8c313769aa818b5b93e32"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/snapshots.py",
+      "line": 69,
+      "column": 29,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_background_job.py",
+      "line": 72,
+      "column": 29,
+      "code": "union-attr",
+      "message_sha256": "d1b08c77b27ebdb790d8eabdb06f2d2594c9455dd9b8c313769aa818b5b93e32"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/current_metrics.py",
+      "line": 56,
+      "column": 33,
+      "code": "union-attr",
+      "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/current_metrics.py",
+      "line": 79,
+      "column": 33,
+      "code": "union-attr",
+      "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/trends.py",
+      "line": 81,
+      "column": 33,
+      "code": "union-attr",
+      "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/garmin_metrics.py",
+      "line": 415,
+      "column": 34,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 197,
+      "column": 36,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 366,
+      "column": 39,
+      "code": "union-attr",
+      "message_sha256": "a1ca1e63c0bac33dcc656c50b9b25dd3c80961d1ede0a22e13285c83107b6a0b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/weather/projection.py",
+      "line": 194,
+      "column": 41,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/coach/background_job.py",
+      "line": 68,
+      "column": 77,
+      "code": "union-attr",
+      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/planned_calendar.py",
+      "line": 352,
+      "column": 8,
+      "code": "union-attr",
+      "message_sha256": "3b6755d7a5dc905d0b2a9e780572db535a8a3d4867910dcfbfa4028dfb62502e"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/queue.py",
+      "line": 69,
+      "column": 25,
+      "code": "valid-type",
+      "message_sha256": "e544e9bb666fd02cbac8c6d513743b7609ad210eee16d21cef00ba879ce33aba"
+    },
+    {
+      "tool": "mypy",
+      "path": "e2e/fixture_runtime.py",
+      "line": 272,
+      "column": 0,
+      "code": "var-annotated",
+      "message_sha256": "0bb96ea92df5309b23828a6df8207d75bdaaa062ec5c639bae3e1a91216449c2"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/grouping.py",
+      "line": 62,
+      "column": 12,
+      "code": "var-annotated",
+      "message_sha256": "1e6b9c1f25c0429575bf0637b8b820edaadc516871bbb9a7ca8e2feff091d295"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_competitions.py",
+      "line": 37,
+      "column": 16,
+      "code": "var-annotated",
+      "message_sha256": "75715854f4847bc1944b040c7bd84fd225a3efcc6273f1e40bf445cc371ee603"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_http_athlete_get_routes.py",
+      "line": 42,
+      "column": 16,
+      "code": "var-annotated",
+      "message_sha256": "75715854f4847bc1944b040c7bd84fd225a3efcc6273f1e40bf445cc371ee603"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_public_state_calendar_projection.py",
+      "line": 22,
+      "column": 18,
+      "code": "var-annotated",
+      "message_sha256": "0be057125dc15cfb9a7c89e80a99f013f80793a3ee42f391dc33ba827dea508e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_planning_change_tools.py",
+      "line": 23,
+      "column": 20,
+      "code": "var-annotated",
+      "message_sha256": "db076574f0882518e69f44477259a1bbd74d2da5f4ac4ba6cffeb9d809868202"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_http_chat_stream.py",
+      "line": 17,
+      "column": 22,
+      "code": "var-annotated",
+      "message_sha256": "c46857bdbb017c805ca99b28d375b3e30df738636108021d08fd48cb65d1f007"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_garmin_service.py",
+      "line": 109,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "c9109e7a789ff07480f61264ff9ebcc7b4ab58d2883dfaa9cf7c4e1a844d5b0e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_local_plan_creation_service.py",
+      "line": 130,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "09d62dbb37a2ab2f66f4c1236b52ce0a74f8a6a7c780d8b0709f7b5a47201960"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_planning_change_preparation.py",
+      "line": 214,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "db076574f0882518e69f44477259a1bbd74d2da5f4ac4ba6cffeb9d809868202"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_startup_sync_scheduler.py",
+      "line": 24,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "2dd9705f13f7d9487e91221bce1e2fd16a9a605a755f2a885db165ccad54061d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_startup_sync_scheduler.py",
+      "line": 25,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "42109d39f9105122f674bf623093ba8a972cdd64206573315b66690fad540a98"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_adaptive_preview_service.py",
+      "line": 30,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "63c1c9b3af004815040d77e41f7e3e6ca426f0117dd99c4473808ec6c8dbe2ac"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_daily.py",
+      "line": 31,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "37be5558bef32f626c26a60cea819ddce9084acb87003a4b88b839ee5872808d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_daily_sync_scheduler.py",
+      "line": 32,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "42109d39f9105122f674bf623093ba8a972cdd64206573315b66690fad540a98"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_adaptive_preview_service.py",
+      "line": 40,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "63c1c9b3af004815040d77e41f7e3e6ca426f0117dd99c4473808ec6c8dbe2ac"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_library_service.py",
+      "line": 414,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "2ad9430b040bcc016cda336fdfcda7082c29dda37eced43a10067fdfea54d86f"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_daily_sync_scheduler.py",
+      "line": 44,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "d7fd9d1a6d86cfe4af7195330fdcc2e53c7967b89baa4b7c4567ee2b32d1b49d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_planned_calendar.py",
+      "line": 46,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "971f8b933791aa8c6acee5ea47c503a064113c78285a9dc7b15cc2d553517b01"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_planned_calendar.py",
+      "line": 47,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "eafc8eaa37e4ffbc2729d7e9973ad53bb9a69cb30f31533e6871457ca2123781"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_planned_calendar.py",
+      "line": 48,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "9710df7244a3c90f48188a2e33cfd8c302d5a75abe3a278c6d119c8747714ba1"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_adaptive_preview_service.py",
+      "line": 50,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "c9109e7a789ff07480f61264ff9ebcc7b4ab58d2883dfaa9cf7c4e1a844d5b0e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_startup_sync_scheduler.py",
+      "line": 58,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "4701a40058dd36901a37d6d2a3c9aee26e1ccc9bef0ebfcefcc752621bee7127"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_startup_sync_scheduler.py",
+      "line": 59,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "280cd74eecbe0c841b76548cbb3e3ed6395273edd728c7e6a3a9cfd838e0cd54"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_executor.py",
+      "line": 68,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "c9109e7a789ff07480f61264ff9ebcc7b4ab58d2883dfaa9cf7c4e1a844d5b0e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_garmin_service.py",
+      "line": 97,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "ae6f6126af8ba4362dc503292818bbc94ff3a6386204b2e745afb0c8287721df"
+    }
+  ],
+  "coverage_evidence": {
+    "platform": "Linux",
+    "python": "3.14.7",
+    "coverage": "7.16.2",
+    "image": "python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d",
+    "shards": 4,
+    "tests": 3332,
+    "skips": 4,
+    "totals": {
+      "num_statements": 29916,
+      "covered_lines": 28496,
+      "num_branches": 8122,
+      "covered_branches": 7088
+    },
+    "percent_covered": 93.54855670645145
+  }
+}

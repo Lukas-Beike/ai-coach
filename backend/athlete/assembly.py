@@ -22,7 +22,7 @@ from backend.db.repositories import (
     ProfileRepository,
     SnapshotRepository,
 )
-from backend.sync.snapshots import latest_snapshot
+from backend.runtime.ports import ProviderSnapshotReader
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,7 @@ class AthleteRepositories:
     profile: ProfileRepository
     key_values: Any
     snapshot: SnapshotRepository
+    snapshot_reader: ProviderSnapshotReader
     competition: CompetitionRepository
 
 
@@ -68,6 +69,7 @@ class AthleteDataAssembly:
         self._profile_repository = repositories.profile
         self._key_value_repository = repositories.key_values
         self._snapshot_repository = repositories.snapshot
+        self._snapshot_reader = repositories.snapshot_reader
         self._utc_now = runtime.utc_now
         self._local_date = runtime.local_date
         self._event_buffer = runtime.event_buffer
@@ -79,7 +81,7 @@ class AthleteDataAssembly:
 
     def training_snapshot(self) -> dict[str, Any]:
         with self._database_manager().unit_of_work() as db:
-            return latest_snapshot(db, self._snapshot_repository) or {}
+            return self._snapshot_reader.latest_snapshot(db) or {}
 
     def equipment(self) -> EquipmentService:
         return EquipmentService(
@@ -93,13 +95,13 @@ class AthleteDataAssembly:
         return ActivityFeedbackService(
             self._database_manager(),
             self._activity_feedback_repository,
-            self._snapshot_repository,
+            self._snapshot_reader,
         )
 
     def activity_read(self) -> ActivityReadService:
         return ActivityReadService(
             self._database_manager(),
-            self._snapshot_repository,
+            self._snapshot_reader,
             self.activity_feedback(),
             ActivityDetailStore(self._database_manager()),
             read_equipment=lambda: self.equipment().read(),
@@ -109,6 +111,7 @@ class AthleteDataAssembly:
         return DuplicateActivityService(
             self._database_manager(),
             self._snapshot_repository,
+            self._snapshot_reader,
             self._utc_now,
             self._event_buffer,
         )

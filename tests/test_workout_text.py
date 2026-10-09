@@ -53,15 +53,12 @@ class WorkoutTextTests(ServerTestCase):
             patch.object(client, "put") as put,
         ):
             for operation in (
-                lambda: client.create_library_workouts(
-                    [self.workout("- 61m 60%"), workout]
-                ),
-                lambda: client.update_library_workout("synthetic", workout),
-                lambda: client.plan_library_workout(
-                    "synthetic", workout, workout["date"]
-                ),
-                lambda: planning_workouts.workout_event_payload(
-                    "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
+                lambda: planning_workouts.library_workout_payload(workout),
+                lambda: planning_workouts.library_workout_event_payload(
+                    "synthetic",
+                    workout,
+                    workout["date"],
+                    today=server.ATHLETE_CLOCK.now().date(),
                 ),
             ):
                 with self.assertRaises(server.AppError):
@@ -331,9 +328,10 @@ class WorkoutTextTests(ServerTestCase):
             patch.object(client, "post", return_value={"id": "synthetic"}) as post,
             patch.object(client, "put", return_value={"id": "synthetic"}) as put,
         ):
-            client.create_library_workouts([workout])
+            library_payload = planning_workouts.library_workout_payload(workout)
+            client.create_library_workouts([library_payload])
             self.assertEqual(post.call_args.args[1]["target"], "HR")
-            client.update_library_workout("synthetic", workout)
+            client.update_library_workout("synthetic", library_payload)
             self.assertEqual(put.call_args.args[1]["target"], "HR")
             post.return_value = [
                 {
@@ -341,7 +339,13 @@ class WorkoutTextTests(ServerTestCase):
                     **parsed_workout_fixture(kind="hr", units="hr_zone", value=2),
                 }
             ]
-            client.plan_library_workout("synthetic", workout, workout["date"])
+            event_payload = planning_workouts.library_workout_event_payload(
+                "synthetic",
+                workout,
+                workout["date"],
+                today=server.ATHLETE_CLOCK.now().date(),
+            )
+            client.plan_library_workout(event_payload)
             self.assertEqual(post.call_args.args[1][0]["moving_time"], 1800)
 
     def test_provider_readback_must_confirm_every_step_target_and_calculated_load(self):

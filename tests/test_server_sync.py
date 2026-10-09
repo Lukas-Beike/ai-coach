@@ -40,6 +40,7 @@ from backend.planning import adaptive as planning_adaptive
 from backend.planning import competitions as planning_competitions
 from backend.planning import context as planning_context
 from backend.planning import library as planning_library
+from backend.planning import workouts as planning_workouts
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import executor as sync_executor
@@ -1057,9 +1058,10 @@ class ServerSyncTests(ServerTestCase):
             ),
             patch.object(client, "post", return_value={"id": "remote-1"}) as post,
         ):
-            client.create_library_workouts(
-                [{"name": "Easy", "description": "- 30m Z2", "sport": "Ride"}]
+            payload = planning_workouts.library_workout_payload(
+                {"name": "Easy", "description": "- 30m Z2", "sport": "Ride"}
             )
+            client.create_library_workouts([payload])
         post.assert_called_once_with(
             "/athlete/athlete-1/workouts",
             {

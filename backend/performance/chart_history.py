@@ -14,6 +14,10 @@ METRIC_KEYS = (
     "run_threshold_pace_seconds_per_km",
     "cycling_vo2max_ml_kg_min",
     "running_vo2max_ml_kg_min",
+    "run_5k_seconds",
+    "run_10k_seconds",
+    "run_half_marathon_seconds",
+    "run_marathon_seconds",
 )
 
 

@@ -442,6 +442,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
 
     def test_completed_async_job_refreshes_model_context(self):
         job = server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 1})
+        server.SYNC_JOB_QUEUE.store().claim()
         server.SYNC_JOB_QUEUE.outcome_service().update(job["id"], "completed")
         steps = iter(
             [

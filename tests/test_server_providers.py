@@ -102,7 +102,9 @@ class ServerProvidersTests(ServerTestCase):
                     operation_context=lambda: None,
                 ),
                 intervals=IntervalsTransportSettings(
-                    config=deferred, athlete_now=deferred
+                    config=deferred,
+                    athlete_now=deferred,
+                    operation=deferred,
                 ),
             )
         )

@@ -7,7 +7,7 @@ from itertools import pairwise
 from typing import Any
 
 from backend.errors import AppError
-from backend.providers.workout_text import (
+from backend.planning.workout_text import (
     WorkoutTextError,
     canonical_workout_zones,
     structured_duration,
@@ -288,7 +288,7 @@ def _validate_workout_duration_match(
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -348,6 +348,40 @@ def workout_event_payload(
         else "AUTO",
         "external_id": f"{COACH_EVENT_EXTERNAL_PREFIX}{workout_id}",
     }
+
+
+def library_workout_payload(workout: dict[str, Any]) -> dict[str, Any]:
+    validate_workout_description(workout)
+    payload = {
+        "name": str(workout.get("name") or "Coach-Einheit")[:200],
+        "description": str(workout.get("description") or "")[:12000],
+        "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
+        "target": workout.get("target") or "AUTO",
+    }
+    if workout.get("folder_id") is not None:
+        payload["folder_id"] = workout["folder_id"]
+    return payload
+
+
+def library_workout_event_payload(
+    workout_id: str,
+    workout: dict[str, Any],
+    plan_date: str,
+    *,
+    today: date,
+) -> dict[str, Any]:
+    planned = {
+        "date": plan_date,
+        "sport": workout.get("type") or workout.get("sport") or "Ride",
+        "name": workout.get("name") or "Bibliotheks-Einheit",
+        "description": workout.get("description") or "",
+        "duration_minutes": workout.get("duration_minutes")
+        or max(5, round(float(workout.get("moving_time") or 3600) / 60)),
+        "target": workout.get("target") or "AUTO",
+    }
+    return workout_event_payload(
+        f"library-{workout_id}-{plan_date}", planned, today=today
+    )
 
 
 def validate_intervals_workout_result(

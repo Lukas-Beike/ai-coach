@@ -169,6 +169,29 @@ class ServerFrontendTests(ServerTestCase):
             styles,
         )
 
+    def test_mobile_chat_layout_keeps_composer_clear_of_navigation_and_keyboard(self):
+        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        styles = (
+            Path(__file__).resolve().parents[1] / "public" / "styles.css"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "#chatPanel .composer { bottom: calc(74px + max(12px, env(safe-area-inset-bottom))); }",
+            styles,
+        )
+        self.assertIn(
+            "html.chat-keyboard-open #chatPanel .composer { bottom: max(12px, env(safe-area-inset-bottom)); }",
+            styles,
+        )
+        self.assertIn("root.scrollTop = root.scrollHeight;", app)
+        self.assertIn(
+            "const viewportBottom = (viewport?.offsetTop || 0) + (viewport?.height || globalThis.innerHeight);",
+            app,
+        )
+        self.assertNotIn("chat-composer-hidden", app + styles)
+        self.assertIn(".quick-message-templates::after", styles)
+
     def test_maintenance_ui_status_and_restore_asset_versions_are_present(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(
             encoding="utf-8"
@@ -217,10 +240,10 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("/forms.js?v=217", index)
         self.assertIn("/components.js?v=217", index)
         self.assertIn("/coach.js?v=6", index)
-        self.assertIn("/app.js?v=271", index)
-        self.assertIn("/styles.css?v=278", index)
-        self.assertIn("intervals-coach-v364", service_worker)
-        self.assertIn("/analysis.js?v=93", index)
+        self.assertIn("/app.js?v=272", index)
+        self.assertIn("/styles.css?v=279", index)
+        self.assertIn("intervals-coach-v365", service_worker)
+        self.assertIn("/analysis.js?v=94", index)
         self.assertIn('"/navigation.js?v=230"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
         self.assertIn('"/state.js?v=218"', service_worker)
@@ -279,7 +302,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertLess(
             index.index("/components.js?v=217"), index.index("/coach.js?v=6")
         )
-        self.assertLess(index.index("/coach.js?v=6"), index.index("/app.js?v=271"))
+        self.assertLess(index.index("/coach.js?v=6"), index.index("/app.js?v=272"))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn(
@@ -470,7 +493,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split("app.js?v=", 1)[1].split('"', 1)[0]
         self.assertIn(f"app.js?v={asset_version}", markup)
-        self.assertIn("intervals-coach-v364", service_worker)
+        self.assertIn("intervals-coach-v365", service_worker)
         self.assertIn(f"/app.js?v={asset_version}", service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -555,7 +578,7 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_nutrition_asset_is_served_as_immutable_javascript(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/nutrition.js", "/nutrition.js?v=6", None
+            "/nutrition.js", "/nutrition.js?v=19", None
         )
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
@@ -573,7 +596,7 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_analysis_asset_is_served_and_precached_as_javascript(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/analysis.js", "/analysis.js?v=93", None
+            "/analysis.js", "/analysis.js?v=94", None
         )
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
@@ -583,7 +606,11 @@ class ServerFrontendTests(ServerTestCase):
         )
         self.assertIn(b"function renderAnalysisHistory", response.body)
         worker = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/analysis.js?v=93"', worker)
+        self.assertIn('"/analysis.js?v=94"', worker)
+        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        self.assertIn('/analysis.js?v=94"', index)
+        self.assertNotIn("/analysis.js?v=93", index + worker)
+        self.assertIn('const CACHE = "intervals-coach-v365";', worker)
         source = response.body.decode("utf-8")
         self.assertIn("equipment-archive", source)
         self.assertIn("function appendEquipmentLifetime", source)
@@ -631,7 +658,7 @@ class ServerFrontendTests(ServerTestCase):
         handler.wfile.write.assert_not_called()
 
         coach = StaticAssetService(server.PUBLIC_DIR).render(
-            "/coach.js", "/coach.js?v=1", None
+            "/coach.js", "/coach.js?v=6", None
         )
         self.assertEqual(coach.status, 200)
         self.assertEqual(
@@ -686,10 +713,10 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/components.js?v=217"', source)
         self.assertIn('"/forms.js"', source)
         self.assertIn('"/coach.js?v=6"', source)
-        self.assertIn('"/app.js?v=271"', source)
+        self.assertIn('"/app.js?v=272"', source)
         self.assertIn('"/nutrition.js?v=19"', source)
         self.assertIn('"/icon.svg?v=217"', source)
-        self.assertIn('"/styles.css?v=278"', source)
+        self.assertIn('"/styles.css?v=279"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)

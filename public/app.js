@@ -1498,13 +1498,16 @@ function activitySportLabel(activity) {
 let chatStreamRenderFrame = null;
 let chatStreamStartScrollPending = false;
 function chatIsNearBottom() {
+  const messages = $("#messages");
+  if (messages && messages.scrollHeight > messages.clientHeight + 1) {
+    return messages.scrollHeight - messages.scrollTop - messages.clientHeight <= 48;
+  }
   return document.documentElement.scrollHeight - (globalThis.scrollY + globalThis.innerHeight) <= 48;
 }
 
 function updateChatComposerVisibility() {
   const panel = $("#chatPanel");
   if (!panel) return;
-  panel.classList.remove("chat-composer-hidden");
   const jump = $("#chatJumpToComposer");
   if (jump) jump.hidden = chatIsNearBottom() || !$("#messages")?.childElementCount || !panel.classList.contains("active");
 }
@@ -1512,8 +1515,6 @@ function updateChatComposerVisibility() {
 function jumpToChatComposer() {
   const input = $("#messageInput");
   if (!input) return;
-  const panel = $("#chatPanel");
-  panel?.classList.remove("chat-composer-hidden");
   const jump = $("#chatJumpToComposer");
   if (jump) jump.hidden = true;
   input.focus({ preventScroll: true });
@@ -2004,16 +2005,20 @@ function scrollChatToLatest() {
   if (!panel?.classList.contains("active") || !root) return;
   requestAnimationFrame(() => {
     if (state.chatInitialScrollPending && (!state.initialStateLoaded || document.readyState !== "complete")) return;
-    const target = root.lastElementChild;
+    root.scrollTop = root.scrollHeight;
+    const messages = root.querySelectorAll(".message[data-message-id]");
+    const target = messages[messages.length - 1] || root.lastElementChild;
     if (!target) return;
     state.chatInitialScrollPending = false;
     const composer = $("#chatForm");
     const targetBottom = target.getBoundingClientRect().bottom;
     const composerTop = composer?.getBoundingClientRect().top;
+    const viewport = globalThis.visualViewport;
+    const viewportBottom = (viewport?.offsetTop || 0) + (viewport?.height || globalThis.innerHeight);
     const targetGap = 12;
     const desiredBottom = Math.min(
-      globalThis.innerHeight,
-      Number.isFinite(composerTop) ? composerTop : globalThis.innerHeight,
+      viewportBottom,
+      Number.isFinite(composerTop) ? composerTop : viewportBottom,
     ) - targetGap;
     globalThis.scrollTo({ top: Math.max(0, globalThis.scrollY + targetBottom - desiredBottom), behavior: "auto" });
     requestAnimationFrame(updateChatComposerVisibility);
@@ -4588,6 +4593,7 @@ document.addEventListener("pointerdown", handlePwaInteraction, { passive: true }
 document.addEventListener("focusin", scheduleMobileViewportLayout);
 document.addEventListener("focusout", scheduleMobileViewportLayout);
 globalThis.addEventListener("scroll", handleWindowScroll, { passive: true });
+$("#messages").addEventListener("scroll", updateChatComposerVisibility, { passive: true });
 globalThis.addEventListener("resize", scheduleMobileViewportLayout, { passive: true });
 globalThis.addEventListener("orientationchange", scheduleMobileViewportLayout, { passive: true });
 globalThis.addEventListener("pageshow", () => {

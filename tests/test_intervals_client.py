@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
 from server_test_support import server
@@ -45,6 +46,16 @@ class IntervalsClientTests(unittest.TestCase):
         self.assertIs(client.config, config)
         self.assertEqual(client.get("/test"), [])
         self.assertIsInstance(client.pagination, dict)
+
+    def test_injected_clock_controls_provider_local_date(self) -> None:
+        config = type(
+            "ConfigStub",
+            (),
+            {"intervals_api_key": "test-key", "intervals_athlete_id": "test-athlete"},
+        )()
+        now = datetime(2026, 9, 20, 22, 30, tzinfo=UTC)
+        client = IntervalsClient(config, request=Mock(), now=lambda: now)
+        self.assertEqual(client.local_today().isoformat(), "2026-09-20")
 
 
 if __name__ == "__main__":

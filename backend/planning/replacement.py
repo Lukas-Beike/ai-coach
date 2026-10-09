@@ -48,7 +48,7 @@ def validate_replacement_workouts(
     workouts: list[dict[str, Any]], today: str, period: dict[str, str]
 ) -> None:
     """Reject past, out-of-period, or overlapping-time workouts in a replacement."""
-    from backend.planning import calendar as planning_calendar
+    from backend.planning.conflicts import calendar_items_conflict
 
     for i, workout in enumerate(workouts):
         workout_date = str(workout.get("date") or "")[:10]
@@ -59,7 +59,7 @@ def validate_replacement_workouts(
                 reason="invalid_plan",
             )
         for other in workouts[i + 1 :]:
-            matches, match = planning_calendar._calendar_items_conflict(workout, other)
+            matches, match = calendar_items_conflict(workout, other)
             if matches and match == "time_window":
                 raise AppError(
                     409,

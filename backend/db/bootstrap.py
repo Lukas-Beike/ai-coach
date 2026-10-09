@@ -55,5 +55,12 @@ def initialize_application_database(
         cutoff = (current_time - timedelta(days=bounded_retention_days)).isoformat()
         db.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
         db.execute("DELETE FROM snapshots WHERE created_at < ?", (cutoff,))
-        key_values.set(db, "gemini_conversation_history", "[]")
-        key_values.set(db, "gemini_call_names", "{}")
+        db.execute(
+            "UPDATE kv SET value='[]', updated_at=? "
+            "WHERE key='gemini_conversation_history'",
+            (now,),
+        )
+        db.execute(
+            "UPDATE kv SET value='{}', updated_at=? WHERE key='gemini_call_names'",
+            (now,),
+        )

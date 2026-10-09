@@ -8,9 +8,9 @@ from typing import Any
 
 from backend import change_history
 from backend.errors import AppError
-from backend.planning import calendar as planning_calendar
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
+from backend.planning.conflicts import calendar_items_conflict
 
 
 class LocalTrainingPlanCreationService:
@@ -44,9 +44,7 @@ class LocalTrainingPlanCreationService:
         """Reject workouts with conflicting calendar blockers or overlapping times."""
         for i, workout in enumerate(workouts):
             for other in workouts[i + 1 :]:
-                matches, match = planning_calendar._calendar_items_conflict(
-                    workout, other
-                )
+                matches, match = calendar_items_conflict(workout, other)
                 if matches and match == "time_window":
                     raise AppError(
                         409,
