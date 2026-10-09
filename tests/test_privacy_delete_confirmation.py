@@ -12,6 +12,11 @@ from backend.privacy import (
     PrivacyDeleteService,
 )
 
+try:
+    from .architecture_registry import BACKEND_ROOT
+except ImportError:
+    from architecture_registry import BACKEND_ROOT
+
 
 class PrivacyDeleteConfirmationTests(unittest.TestCase):
     def service(self) -> tuple[PrivacyDeleteService, PrivacyDeleteDependencies]:
@@ -76,9 +81,7 @@ class PrivacyDeleteDialogTextContractTests(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parents[1]
 
     def test_settings_dialog_shows_the_backend_confirmation_constant(self) -> None:
-        privacy_source = (self.REPO_ROOT / "backend" / "privacy.py").read_text(
-            encoding="utf-8"
-        )
+        privacy_source = (BACKEND_ROOT / "privacy.py").read_text(encoding="utf-8")
         settings_source = (self.REPO_ROOT / "public" / "settings.js").read_text(
             encoding="utf-8"
         )
