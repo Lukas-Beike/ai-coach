@@ -986,9 +986,18 @@ async function renderSeasonPreparation() {
   try {
     const season = await api("/api/analysis/season");
     if (generation !== seasonGeneration) return;
-    if (!season.events?.length) root.append(reportNode("p", "Noch keine Wettkämpfe im Athletenprofil bestätigt."));
-    for (const event of season.events || []) {
-      root.append(seasonEventCard(event, generation));
+    const events = season.events || [];
+    if (!events.length) { root.append(reportNode("p", "Noch keine Wettkämpfe im Athletenprofil bestätigt.")); return; }
+    const upcoming = events.filter((event) => event.phase !== "completed");
+    const past = events.filter((event) => event.phase === "completed");
+    if (!upcoming.length) root.append(reportNode("p", "Kein anstehender Wettkampf bestätigt."));
+    // The backend sorts events by date, so the first upcoming card is the nearest competition.
+    upcoming.forEach((event, index) => root.append(seasonEventCard(event, generation, { open: index === 0 })));
+    if (past.length) {
+      const archive = reportNode("details", null, "season-archive");
+      archive.append(reportNode("summary", `Vergangene Wettkämpfe (${past.length})`));
+      for (const event of past.reverse()) archive.append(seasonEventCard(event, generation));
+      root.append(archive);
     }
   } catch (error) { if (generation === seasonGeneration) root.append(reportNode("p", error.message)); }
 }
@@ -1191,11 +1200,15 @@ function appendEquipmentLifetime(card, lifetime, usageKm, targetKm) {
   card.append(progress, reportNode("p", `${analysisValue(usage, "km")} von ${analysisValue(target, "km")} \u00b7 ${percent}%${overage ? " \u00b7 Ziel \u00fcberschritten" : ""}`));
 }
 
-function seasonEventCard(event, generation) {
-  const section = reportNode("section", null, "analysis-chart-card");
-  section.append(reportNode("h4", `${event.name} · ${dateLabel(event.event_date)} · Priorität ${event.priority}`));
+function seasonEventCard(event, generation, { open = false } = {}) {
+  const section = reportNode("details", null, "season-event analysis-chart-card");
+  section.open = open;
+  const when = AppFormat.relativeDay(event.event_date, todayIso()) ?? `${event.days_until} Tage`;
+  const summary = reportNode("summary");
+  summary.append(reportNode("h4", `${event.name} · ${dateLabel(event.event_date)} · Priorität ${event.priority}`), reportNode("span", when, "season-event-when"));
+  section.append(summary);
   const phase = {base:"Basis",build:"Aufbau",peak:"Spezifische Vorbereitung",taper:"Taper",completed:"Vergangen"}[event.phase];
-  section.append(reportNode("p", `${event.days_until} Tage · kalendarische Phase: ${phase} · ${event.preparation.sessions_84_days} passende Einheiten in 84 Tagen`));
+  section.append(reportNode("p", `${when} · kalendarische Phase: ${phase} · ${event.preparation.sessions_84_days} passende Einheiten in 84 Tagen`));
   const weekly = reportNode("details"); weekly.append(reportNode("summary", `Daten für ${event.preparation.weeks_with_recorded_training} von 12 Wochen mit erfasstem sportartspezifischem Training vorhanden.`));
   for (const week of event.preparation.weeks || []) weekly.append(reportNode("p", seasonWeekSummary(week)));
   weekly.append(reportNode("p", "Wochen ohne Aufzeichnung beweisen keine Trainingspause; Umfang enthält nur lokal bekannte Einheiten.", "muted")); section.append(weekly);
@@ -1282,15 +1295,18 @@ function appendSeasonWeeklyHistory(weeks, source, root) {
 
 function appendSeasonScenario(event, section, generation) {
   const form = reportNode("form", null, "report-controls");
-  const scaleLabel = reportNode("label", "Alternative: Belastungsfaktor"); const scale = reportNode("input"); scale.type="number"; scale.min="0.5"; scale.max="1.5"; scale.step="0.05"; scale.value="0.8"; scale.required=true; scaleLabel.append(scale);
+  const scaleLabel = reportNode("label", "Alternative: Belastungsfaktor"); const scale = reportNode("input"); scale.type="text"; scale.inputMode="decimal"; scale.value="0,8"; scale.required=true; scaleLabel.append(scale);
   const taperLabel = reportNode("label", "Zusätzliche Entlastung (Tage)"); const taper = reportNode("input"); taper.type="number"; taper.min="0"; taper.max="21"; taper.value="7"; taper.required=true; taperLabel.append(taper);
   const calculate = reportNode("button", "Szenarien vergleichen", "secondary-button"); calculate.type="submit";
   const output = reportNode("div"); output.setAttribute("aria-live", "polite");
   form.append(scaleLabel, taperLabel, calculate); section.append(form, output);
   form.addEventListener("submit", async (e) => {
-    e.preventDefault(); calculate.disabled=true;
+    e.preventDefault();
+    const loadScale = parseSeasonLoadFactor(scale.value);
+    if (loadScale == null) { output.replaceChildren(reportNode("p", "Bitte einen Faktor zwischen 0,5 und 1,5 eingeben.")); return; }
+    calculate.disabled=true;
     try {
-      const values = {end:event.event_date,load_scale:Number(scale.value),taper_days:Number(taper.value)};
+      const values = {end:event.event_date,load_scale:loadScale,taper_days:Number(taper.value)};
       const result = await api("/api/analysis/scenarios", {method:"POST",body:JSON.stringify(values)});
       if (generation !== seasonGeneration) return;
       output.replaceChildren(reportNode("p", "Lokales Standardmodell: CTL 42 Tage, ATL 7 Tage. Nicht geplante Tage werden mit 0 Belastung modelliert; die Alternative halbiert die Belastung zusätzlich in den gewählten letzten Tagen. CTL und Form sagen keine Wettkampfzeit voraus.", "muted"));
@@ -1299,6 +1315,14 @@ function appendSeasonScenario(event, section, generation) {
     } catch (error) { if (generation === seasonGeneration) output.textContent=error.message; }
     finally { calculate.disabled=false; }
   });
+}
+
+// Accepts a German or decimal load factor and returns it only inside the 0.5-1.5 scenario range.
+function parseSeasonLoadFactor(text) {
+  const normalized = String(text ?? "").trim();
+  if (!/^\d+(?:[.,]\d+)?$/.test(normalized)) return null;
+  const value = Number(normalized.replace(",", "."));
+  return Number.isFinite(value) && value >= 0.5 && value <= 1.5 ? value : null;
 }
 
 function seasonWeekSummary(week) {
