@@ -346,7 +346,9 @@ class ServerFrontendTests(ServerTestCase):
         styles = (
             Path(__file__).resolve().parents[1] / "public" / "styles.css"
         ).read_text(encoding="utf-8")
-        self.assertIn(".composer-actions { display: flex; align-items: flex-end;", styles)
+        self.assertIn(
+            ".composer-actions { display: flex; align-items: flex-end;", styles
+        )
         self.assertNotIn(".composer.is-busy", styles)
 
     def test_mobile_chat_layout_keeps_composer_clear_of_navigation_and_keyboard(self):

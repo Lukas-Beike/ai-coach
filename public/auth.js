@@ -61,24 +61,64 @@ function showLogin() {
 }
 
 let confirmationResolver = null;
+let confirmationGeneration = 0;
+let confirmationSecondaryPending = false;
 
-function requestConfirmation(message, { title = "Aktion bestätigen", inputLabel = "", expectedText = "" } = {}) {
+// Keeps the confirm button disabled until the typed text matches exactly and no secondary action (such as a backup) is running.
+function syncConfirmationAcceptState() {
+  const dialog = $("#confirmationDialog");
+  const input = $("#confirmationDialogInput");
+  const acceptButton = $("#confirmationDialogAccept");
+  if (!dialog || !input || !acceptButton) return;
+  const expectedText = dialog.dataset.expectedText || "";
+  acceptButton.disabled = confirmationSecondaryPending || (Boolean(expectedText) && input.value !== expectedText);
+}
+
+function requestConfirmation(message, {
+  title = "Aktion bestätigen",
+  inputLabel = "",
+  expectedText = "",
+  confirmLabel = "Bestätigen",
+  secondaryAction = null,
+} = {}) {
   const dialog = $("#confirmationDialog");
   const form = $("#confirmationDialogForm");
   const messageNode = $("#confirmationDialogMessage");
   const titleNode = $("#confirmationDialogTitle");
   const inputLabelNode = $("#confirmationDialogInputLabel");
   const input = $("#confirmationDialogInput");
-  if (!dialog || !form || !messageNode || !titleNode || !inputLabelNode || !input) return Promise.resolve(false);
+  const expectedNode = $("#confirmationDialogExpected");
+  const acceptButton = $("#confirmationDialogAccept");
+  const secondaryButton = $("#confirmationDialogSecondary");
+  const errorNode = $("#confirmationDialogError");
+  if (!dialog || !form || !messageNode || !titleNode || !inputLabelNode || !input || !expectedNode || !acceptButton || !secondaryButton) {
+    return Promise.resolve(false);
+  }
+  confirmationGeneration += 1;
+  confirmationSecondaryPending = false;
   if (confirmationResolver) confirmationResolver(false);
   dialog.dataset.expectedText = expectedText;
   titleNode.textContent = title;
   messageNode.textContent = message;
+  expectedNode.hidden = !expectedText;
+  expectedNode.textContent = expectedText ? `Tippe „${expectedText}“ zur Bestätigung.` : "";
+  if (expectedText) input.setAttribute("aria-describedby", expectedNode.id);
+  else input.removeAttribute("aria-describedby");
   inputLabelNode.hidden = !expectedText;
   inputLabelNode.firstChild.textContent = inputLabel || "Bestätigungstext";
   input.value = "";
   input.required = Boolean(expectedText);
   input.setCustomValidity("");
+  input.oninput = syncConfirmationAcceptState;
+  acceptButton.textContent = confirmLabel;
+  // The secondary action never settles the confirmation; the dialog stays open.
+  secondaryButton.hidden = !secondaryAction;
+  secondaryButton.textContent = secondaryAction?.label || "";
+  secondaryButton.onclick = secondaryAction ? () => { void runConfirmationSecondaryAction(secondaryAction.onClick); } : null;
+  secondaryButton.disabled = false;
+  secondaryButton.removeAttribute("aria-busy");
+  if (errorNode) { errorNode.hidden = true; errorNode.textContent = ""; }
+  syncConfirmationAcceptState();
   return new Promise((resolve) => {
     confirmationResolver = resolve;
     showAccessibleDialog(dialog, expectedText ? input : $("#confirmationDialogCancel"));
@@ -89,6 +129,35 @@ function settleConfirmation(value) {
   const resolve = confirmationResolver;
   confirmationResolver = null;
   if (resolve) resolve(value);
+}
+
+// Runs the secondary action (e.g. a backup) and keeps the confirm button locked until it has succeeded.
+// A failure stays visible in the dialog and the action remains available for a retry.
+async function runConfirmationSecondaryAction(onClick) {
+  const generation = confirmationGeneration;
+  const secondaryButton = $("#confirmationDialogSecondary");
+  const errorNode = $("#confirmationDialogError");
+  confirmationSecondaryPending = true;
+  secondaryButton.disabled = true;
+  secondaryButton.setAttribute("aria-busy", "true");
+  if (errorNode) { errorNode.hidden = true; errorNode.textContent = ""; }
+  syncConfirmationAcceptState();
+  try {
+    await onClick();
+  } catch (error) {
+    if (generation === confirmationGeneration && errorNode) {
+      errorNode.textContent = error.message;
+      errorNode.hidden = false;
+    }
+  } finally {
+    // A dialog that was cancelled or replaced while the action ran must not be touched.
+    if (generation === confirmationGeneration) {
+      confirmationSecondaryPending = false;
+      secondaryButton.disabled = false;
+      secondaryButton.removeAttribute("aria-busy");
+      syncConfirmationAcceptState();
+    }
+  }
 }
 
 function showAppShellLoading() {
