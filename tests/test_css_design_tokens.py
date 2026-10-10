@@ -122,6 +122,14 @@ class CssDesignTokenTests(unittest.TestCase):
                         / (min(background, foreground) + 0.05),
                         4.5,
                     )
+            with self.subTest(theme=theme, pair="error-toast"):
+                background = luminance(tokens["--danger-toast"])
+                foreground = luminance(tokens["--white"])
+                self.assertGreaterEqual(
+                    (max(background, foreground) + 0.05)
+                    / (min(background, foreground) + 0.05),
+                    4.5,
+                )
 
     def test_stylesheet_uses_semantic_tokens_and_documented_status_roles(self):
         css = CSS_PATH.read_text(encoding="utf-8")

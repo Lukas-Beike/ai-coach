@@ -194,14 +194,33 @@ async function apiAudio(path, blob) {
 }
 
 
+function hideToast() {
+  const node = $("#toast");
+  clearTimeout(toast.timer);
+  node.className = "toast";
+  const close = node.querySelector(".toast-close");
+  if (close) close.inert = true;
+}
+
 function toast(message, error = false) {
   const node = $("#toast");
-  node.textContent = message;
+  const text = document.createElement("span");
+  text.textContent = message;
+  node.replaceChildren(text);
+  if (error) {
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "toast-close";
+    close.setAttribute("aria-label", "Meldung schließen");
+    close.textContent = "×";
+    close.addEventListener("click", hideToast);
+    node.append(close);
+  }
   node.setAttribute("role", error ? "alert" : "status");
   node.setAttribute("aria-live", error ? "assertive" : "polite");
   node.className = `toast show${error ? " error" : ""}`;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => { node.className = "toast"; }, 3000);
+  toast.timer = setTimeout(hideToast, error ? 8000 : 3000);
 }
 
 
