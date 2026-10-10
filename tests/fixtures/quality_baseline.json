@@ -201,7 +201,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 108,
+      "line": 109,
       "column": 33,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -329,7 +329,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 151,
+      "line": 152,
       "column": 41,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -345,7 +345,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 69,
+      "line": 70,
       "column": 41,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -441,7 +441,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 46,
+      "line": 47,
       "column": 45,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -449,7 +449,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 75,
+      "line": 76,
       "column": 45,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -457,7 +457,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 92,
+      "line": 93,
       "column": 45,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -513,7 +513,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 86,
+      "line": 87,
       "column": 51,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -529,7 +529,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 34,
+      "line": 35,
       "column": 52,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -657,7 +657,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 39,
+      "line": 40,
       "column": 60,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -729,7 +729,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 130,
+      "line": 131,
       "column": 65,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
