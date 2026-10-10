@@ -30,7 +30,7 @@ class CoachCommandReceiptService:
         if receipt.get("session_key") != coach_session_key(session_csrf_hash):
             raise AppError(
                 403,
-                "Dieser Coach-Auftrag gehoert zu einer anderen Sitzung.",
+                "Dieser Coach-Auftrag gehört zu einer anderen Sitzung.",
                 reason="command_scope_denied",
             )
 
@@ -39,7 +39,7 @@ class CoachCommandReceiptService:
         if not turn_id or len(turn_id) > 120:
             raise AppError(
                 400,
-                "Ungueltige Coach-Auftragskennung.",
+                "Ungültige Coach-Auftragskennung.",
                 reason="invalid_client_turn",
             )
 

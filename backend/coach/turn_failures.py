@@ -255,7 +255,7 @@ class CoachTurnFailureService:
             ]
             if completed:
                 text += (
-                    "\nBereits erfolgreich ausgefuehrt: "
+                    "\nBereits erfolgreich ausgeführt: "
                     + "; ".join(coach_effect_label(step) for step in completed)
                     + ". Diese Schritte bleiben gespeichert."
                 )

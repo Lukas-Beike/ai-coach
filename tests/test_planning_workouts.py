@@ -65,9 +65,9 @@ class PlanningWorkoutTests(unittest.TestCase):
             status=400,
             reason="ambiguous_workout_step",
             message=(
-                "Workout-Text in Zeile 1 ist mehrdeutig: Trainingsschritte mit '- ' muessen direkt mit Dauer oder Distanz beginnen "
+                "Workout-Text in Zeile 1 ist mehrdeutig: Trainingsschritte mit '- ' müssen direkt mit Dauer oder Distanz beginnen "
                 "(z.B. '- 6km Z1 HR'). Hinweise, Bedingungen und optionale Gesamtstrecken als eigenen Absatz ohne '- ' schreiben; "
-                "sonst zaehlt Intervals.icu sie als weitere Schritte."
+                "sonst zählt Intervals.icu sie als weitere Schritte."
             ),
         )
         self.assert_app_error(
@@ -84,7 +84,7 @@ class PlanningWorkoutTests(unittest.TestCase):
         self.assert_app_error(
             lambda: validate_workout_description(workout("- 30m locker")),
             reason="missing_workout_target",
-            message="Workout-Zeile 1: Auswertbares Intensitaetsziel fehlt.",
+            message="Workout-Zeile 1: Auswertbares Intensitätsziel fehlt.",
         )
 
     def test_composite_time_and_thirty_second_tolerance(self):
@@ -260,7 +260,7 @@ class PlanningWorkoutTests(unittest.TestCase):
             lambda: validate_intervals_workout_result(local, {"type": "Run"}),
             status=502,
             reason="intervals_workout_sport_mismatch",
-            message="Intervals.icu hat die Sportart nicht korrekt bestaetigt.",
+            message="Intervals.icu hat die Sportart nicht korrekt bestätigt.",
         )
         invalid = valid_readback()
         invalid["workout_doc"]["steps"][0]["duration"] = 1200
@@ -268,7 +268,7 @@ class PlanningWorkoutTests(unittest.TestCase):
             lambda: validate_intervals_workout_result(local, invalid),
             status=502,
             reason="intervals_workout_verification_failed",
-            message="Intervals.icu hat die Einheit nicht korrekt bestaetigt.",
+            message="Intervals.icu hat die Einheit nicht korrekt bestätigt.",
         )
         strength = workout("Technik und Beweglichkeit", sport="WeightTraining")
         validate_intervals_workout_result(strength, {"type": "WeightTraining"})

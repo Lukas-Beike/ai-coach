@@ -159,7 +159,7 @@ class StructuredTrainingStateServiceTests(unittest.TestCase):
 
         self.assertEqual(400, error.exception.status)
         self.assertEqual("invalid_page_cursor", error.exception.reason)
-        self.assertEqual("Ungueltiger Planungscursor.", error.exception.message)
+        self.assertEqual("Ungültiger Planungscursor.", error.exception.message)
 
     def test_revision_drift_rejects_next_page(self):
         first = self.service.read(limit=1)
@@ -174,7 +174,7 @@ class StructuredTrainingStateServiceTests(unittest.TestCase):
         self.assertEqual(409, error.exception.status)
         self.assertEqual("planning_revision_conflict", error.exception.reason)
         self.assertEqual(
-            "Die Planung hat sich waehrend des Lesens geaendert. Alle Seiten erneut lesen.",
+            "Die Planung hat sich während des Lesens geändert. Alle Seiten erneut lesen.",
             error.exception.message,
         )
 

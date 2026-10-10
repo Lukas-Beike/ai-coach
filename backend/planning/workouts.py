@@ -248,9 +248,9 @@ def _validate_endurance_workout_steps(description: str) -> None:
         if amounts and amounts[0].start() != 0:
             _raise_ambiguous_workout_step(
                 line_number,
-                "Trainingsschritte mit '- ' muessen direkt mit Dauer oder Distanz beginnen "
+                "Trainingsschritte mit '- ' müssen direkt mit Dauer oder Distanz beginnen "
                 "(z.B. '- 6km Z1 HR'). Hinweise, Bedingungen und optionale Gesamtstrecken "
-                "als eigenen Absatz ohne '- ' schreiben; sonst zaehlt Intervals.icu sie als weitere Schritte.",
+                "als eigenen Absatz ohne '- ' schreiben; sonst zählt Intervals.icu sie als weitere Schritte.",
             )
         if len(amounts) > 1 and not _is_composite_duration(amounts):
             _raise_ambiguous_workout_step(
@@ -394,7 +394,7 @@ def validate_intervals_workout_result(
     if not isinstance(remote, dict) or remote.get("type") != expected_sport:
         raise AppError(
             502,
-            "Intervals.icu hat die Sportart nicht korrekt bestaetigt.",
+            "Intervals.icu hat die Sportart nicht korrekt bestätigt.",
             reason="intervals_workout_sport_mismatch",
         )
     if expected_sport not in INTERVALS_ENDURANCE_WORKOUT_TYPES:

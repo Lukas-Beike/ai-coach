@@ -244,7 +244,7 @@ class CoachJobSubmissionService:
                     ):
                         raise AppError(
                             403,
-                            "Dieser Coach-Auftrag gehoert zu einer anderen Sitzung.",
+                            "Dieser Coach-Auftrag gehört zu einer anderen Sitzung.",
                             reason="command_scope_denied",
                         )
                     if receipt.get("mode") != "background":

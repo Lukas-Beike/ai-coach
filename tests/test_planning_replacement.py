@@ -68,7 +68,7 @@ class PlanningReplacementTests(unittest.TestCase):
                     arguments,
                     status=400,
                     reason="invalid_plan",
-                    message="Ein Planartefakt benoetigt payload.",
+                    message="Ein Planartefakt benötigt payload.",
                 )
 
     def test_enforces_plan_limits_before_revision_parsing(self):

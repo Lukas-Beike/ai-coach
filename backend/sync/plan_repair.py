@@ -14,14 +14,12 @@ from backend.planning import workouts as planning_workouts
 from backend.sync.authority import PlanningAuthorityService
 
 _REPAIR_REQUEST_ERROR = (
-    "Reparatur-Sync braucht einen vollstaendigen zukuenftigen Zeitraum."
+    "Reparatur-Sync braucht einen vollständigen zukünftigen Zeitraum."
 )
-_REVISION_CONFLICT = (
-    "Lies die aktuelle Planung vor der vollstaendigen Reparatur erneut."
-)
-_SELECTION_CONFLICT = "Die Reparaturauswahl umfasst nicht den vollstaendigen Zeitraum. Nutze die aktuelle expected_revision ohne entries fuer das komplette serverseitige Manifest."
+_REVISION_CONFLICT = "Lies die aktuelle Planung vor der vollständigen Reparatur erneut."
+_SELECTION_CONFLICT = "Die Reparaturauswahl umfasst nicht den vollständigen Zeitraum. Nutze die aktuelle expected_revision ohne entries für das komplette serverseitige Manifest."
 _STALE_SELECTION = (
-    "Die ausgewaehlte Planung wurde geaendert. Lies den aktuellen Stand erneut."
+    "Die ausgewählte Planung wurde geändert. Lies den aktuellen Stand erneut."
 )
 
 

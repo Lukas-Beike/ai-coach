@@ -15,19 +15,19 @@ COACH_OPERATION_LABELS = {
     "manage_training_templates": "Trainingsvorlagen bearbeitet",
     "apply_training_changes": "Geplante Einheiten bearbeitet",
     "save_checkin": "Tages-Check-in gespeichert",
-    "save_activity_feedback": "Aktivitaetsfeedback gespeichert",
+    "save_activity_feedback": "Aktivitätsfeedback gespeichert",
     "save_fueling_plan": "Trainingsverpflegung lokal gespeichert",
     "save_equipment": "Ausrüstung lokal gespeichert",
     "assign_activity_equipment": "Ausrüstung zugeordnet",
     "log_equipment_maintenance": "Wartung lokal erfasst",
-    "delete_activity_feedback": "Aktivitaetsfeedback entfernt",
+    "delete_activity_feedback": "Aktivitätsfeedback entfernt",
     "save_competition": "Wettkampf gespeichert",
     "delete_competition": "Wettkampf entfernt",
     "start_provider_refresh": "Datenabruf beauftragt",
     "refresh_current_performance": "Leistungsdatenabruf beauftragt",
     "start_intervals_plan_sync": "Plansynchronisierung beauftragt",
     "sync_competitions": "Wettkampfsynchronisierung beauftragt",
-    "undo_training_change": "Rueckgaengig-Vorschau vorbereitet",
+    "undo_training_change": "Rückgängig-Vorschau vorbereitet",
     "apply_adaptive_replan": "Freigegebene Plananpassung angewendet",
     "preview_adaptive_replan": "Plananpassung vorgeschlagen",
     "update_training_plan": "Planinformationen bearbeitet",
@@ -53,19 +53,19 @@ COACH_ACTION_LABELS = {
     "manage_training_templates": "Trainingsvorlagen bearbeiten",
     "apply_training_changes": "Geplante Einheiten bearbeiten",
     "save_checkin": "Tages-Check-in speichern",
-    "save_activity_feedback": "Aktivitaetsfeedback speichern",
+    "save_activity_feedback": "Aktivitätsfeedback speichern",
     "save_fueling_plan": "Trainingsverpflegung speichern",
     "save_equipment": "Ausrüstung speichern",
     "assign_activity_equipment": "Ausrüstung zuordnen",
     "log_equipment_maintenance": "Wartung erfassen",
-    "delete_activity_feedback": "Aktivitaetsfeedback entfernen",
+    "delete_activity_feedback": "Aktivitätsfeedback entfernen",
     "save_competition": "Wettkampf speichern",
     "delete_competition": "Wettkampf entfernen",
     "start_provider_refresh": "Datenabruf starten",
     "refresh_current_performance": "Leistungsdaten abrufen",
     "start_intervals_plan_sync": "Plan synchronisieren",
-    "sync_competitions": "Wettkaempfe synchronisieren",
-    "undo_training_change": "Rueckgaengig-Vorschau erstellen",
+    "sync_competitions": "Wettkämpfe synchronisieren",
+    "undo_training_change": "Rückgängig-Vorschau erstellen",
     "apply_adaptive_replan": "Freigegebene Plananpassung anwenden",
     "preview_adaptive_replan": "Plananpassung vorschlagen",
     "update_training_plan": "Planinformationen bearbeiten",
@@ -93,7 +93,7 @@ def coach_failure_lines(
         )
         detail = " ".join(
             str(
-                result.get("error") or "Die Aktion konnte nicht ausgefuehrt werden."
+                result.get("error") or "Die Aktion konnte nicht ausgeführt werden."
             ).split()
         )
         if result.get("reason") in {

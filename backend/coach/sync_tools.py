@@ -293,7 +293,7 @@ class CoachSyncToolService:
             )
         require_coach_scope(intent, "intervals_sync")
         if not self._duplicate_activity or not self._intervals_client_factory:
-            raise AppError(500, "Duplikat-Bereinigung ist nicht verfuegbar.")
+            raise AppError(500, "Duplikat-Bereinigung ist nicht verfügbar.")
         manifest = arguments.get("_approval_manifest")
         if not isinstance(manifest, dict):
             raise AppError(409, "Die freigegebene Duplikatvorschau fehlt.")
@@ -301,7 +301,7 @@ class CoachSyncToolService:
             requested = arguments.get(field)
             if requested and str(requested) != str(manifest.get(field) or ""):
                 raise AppError(
-                    409, "Die freigegebene Duplikatvorschau stimmt nicht ueberein."
+                    409, "Die freigegebene Duplikatvorschau stimmt nicht überein."
                 )
         result = self._duplicate_activity.delete(
             {
