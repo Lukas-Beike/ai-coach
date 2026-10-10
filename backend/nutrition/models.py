@@ -144,18 +144,7 @@ def normalize_nutrition_entry(
     if not raw_date:
         raise AppError(400, MEAL_DATE_REQUIRED)
     meal_date = validate_iso_date(raw_date)
-    logged_time_known = _logged_time_known_flag(raw.get("logged_time_known"))
-    if logged_time_known:
-        logged_at = _normalize_logged_at(
-            meal_date, raw.get("logged_at") or raw.get("meal_time") or default_time
-        )
-    else:
-        # Without a known time the entry keeps a neutral noon anchor for ordering only.
-        if not str(raw.get("meal_type") or "").strip():
-            raise AppError(
-                400, "Bei unbekannter Uhrzeit ist der Mahlzeittyp erforderlich."
-            )
-        logged_at = f"{meal_date}T12:00:00"
+    logged_at, logged_time_known = _normalize_logged_time(raw, meal_date, default_time)
     meal_type = _normalize_meal_type(raw.get("meal_type"), logged_at)
     raw_desc = str(raw.get("description") or "").strip()
     if not raw_desc:
@@ -187,6 +176,24 @@ def _logged_time_known_flag(value: Any) -> bool:
     raise AppError(400, "logged_time_known muss true oder false sein.")
 
 
+def _normalize_logged_time(
+    raw: dict[str, Any], meal_date: str, default_time: str | None
+) -> tuple[str, bool]:
+    logged_time_known = _logged_time_known_flag(raw.get("logged_time_known"))
+    if logged_time_known:
+        logged_at = _normalize_logged_at(
+            meal_date, raw.get("logged_at") or raw.get("meal_time") or default_time
+        )
+    else:
+        # Without a known time the entry keeps a neutral noon anchor for ordering only.
+        if not str(raw.get("meal_type") or "").strip():
+            raise AppError(
+                400, "Bei unbekannter Uhrzeit ist der Mahlzeittyp erforderlich."
+            )
+        logged_at = f"{meal_date}T12:00:00"
+    return logged_at, logged_time_known
+
+
 def _normalize_logged_at(meal_date: str, value: Any) -> str:
     if not value:
         return f"{meal_date}T12:00:00"
@@ -194,7 +201,7 @@ def _normalize_logged_at(meal_date: str, value: Any) -> str:
         timestamp = str(value)
         if "T" not in timestamp:
             timestamp = f"{meal_date}T{timestamp}"
-        datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        datetime.fromisoformat(timestamp)
         return timestamp
     except ValueError, TypeError:
         return f"{meal_date}T12:00:00"
@@ -203,9 +210,7 @@ def _normalize_logged_at(meal_date: str, value: Any) -> str:
 def _normalize_meal_type(value: Any, logged_at: str) -> str:
     meal_type = str(value or "").strip().lower()
     if not meal_type:
-        meal_type = meal_type_from_hour(
-            datetime.fromisoformat(logged_at.replace("Z", "+00:00")).hour
-        )
+        meal_type = meal_type_from_hour(datetime.fromisoformat(logged_at).hour)
     if meal_type not in VALID_MEAL_TYPES:
         raise AppError(
             400,

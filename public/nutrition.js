@@ -142,7 +142,8 @@ function nutritionCard(item, template) {
   const mealLabels = { breakfast: "Frühstück", lunch: "Mittagessen", dinner: "Abendessen", snack: "Snack" };
   const mealLabel = mealLabels[item.meal_type] || "Mahlzeit";
   const mealTime = item.logged_time_known === false ? "" : String(item.logged_at).split("T")[1]?.slice(0, 5) || "";
-  title.textContent = template ? item.name : (mealTime ? `${mealTime} · ${mealLabel}` : mealLabel);
+  const mealTitle = mealTime ? `${mealTime} · ${mealLabel}` : mealLabel;
+  title.textContent = template ? item.name : mealTitle;
   const description = document.createElement("p");
   description.textContent = item.description;
   const values = document.createElement("p");
@@ -286,7 +287,8 @@ async function loadNutrition() {
       const complete = day[`total_${key}`];
       // A partial sum of known values is shown only with an explicit incompleteness label.
       const total = complete ?? day.known_macro_totals?.[key];
-      value.textContent = `${total != null ? nutritionNumber(total) : "–"} ${unit}`;
+      const totalText = total != null ? nutritionNumber(total) : "–";
+      value.textContent = `${totalText} ${unit}`;
       const caption = document.createElement("span");
       caption.textContent = label + (complete == null && total != null ? " · unvollständig" : "");
       tile.append(value, caption);
@@ -516,6 +518,31 @@ function nutritionProductPayload(form) {
   return payload;
 }
 
+function nutritionProductSourceText(product) {
+  const sourceLabel = product.source === "packaging_label" ? "Verpackungsangabe" : (product.source || "Lokales Produkt");
+  const barcodeLabel = product.barcode ? ` · EAN ${product.barcode}` : "";
+  return sourceLabel + barcodeLabel;
+}
+
+function appendNutritionProductActions(card, product, local) {
+  if (!local || product.local === false) {
+    const button = document.createElement("button"); button.type = "button"; button.className = "secondary-button"; button.textContent = "Lokal speichern";
+    button.addEventListener("click", () => saveNutritionProduct(product)); card.append(button);
+  } else if (product.id) {
+    const actions = document.createElement("div"); actions.className = "nutrition-actions";
+    const use = document.createElement("button"); use.type = "button"; use.className = "push-button"; use.textContent = "In Mahlzeit erfassen";
+    use.addEventListener("click", () => useNutritionProduct(product));
+    const edit = document.createElement("button"); edit.type = "button"; edit.className = "secondary-button"; edit.textContent = "Bearbeiten"; edit.addEventListener("click", () => saveNutritionProduct(product));
+    const archive = document.createElement("button"); archive.type = "button"; archive.className = "secondary-button"; archive.textContent = "Archivieren";
+    archive.addEventListener("click", async () => {
+      if (!await requestConfirmation(`Produkt „${product.name}“ archivieren?`)) return;
+      try { await api("/api/nutrition/products/archive", { method: "POST", body: JSON.stringify({ id: product.id, confirmed: true }) }); await loadNutritionProducts(document.querySelector("#nutritionProductQuery").value.trim()); }
+      catch (error) { document.querySelector("#nutritionProductStatus").textContent = `Produkt konnte nicht archiviert werden: ${error.message}`; }
+    });
+    actions.append(use, edit, archive); card.append(actions);
+  }
+}
+
 function renderNutritionProducts(products, { local = true } = {}) {
   const target = document.querySelector("#nutritionProducts");
   if (!target) return;
@@ -528,27 +555,10 @@ function renderNutritionProducts(products, { local = true } = {}) {
     const title = document.createElement("h3"); title.textContent = [product.brand, product.name].filter(Boolean).join(" · ") || "Unbenanntes Produkt";
     const kcalLabel = product.kcal == null ? "kcal unbekannt" : `${product.kcal} kcal`;
     const detail = document.createElement("p"); detail.textContent = `${kcalLabel} · KH ${product.carbs_g ?? "–"} g · Protein ${product.protein_g ?? "–"} g · Fett ${product.fat_g ?? "–"} g`;
-    const sourceLabel = product.source === "packaging_label" ? "Verpackungsangabe" : (product.source || "Lokales Produkt");
-    const barcodeLabel = product.barcode ? ` · EAN ${product.barcode}` : "";
-    const source = document.createElement("small"); source.textContent = sourceLabel + barcodeLabel;
+    const source = document.createElement("small"); source.textContent = nutritionProductSourceText(product);
     const basis = document.createElement("small"); basis.textContent = product.basis_amount ? `Basis: ${product.basis_amount} ${product.basis_unit || "g"}` : "Bezugsmenge unbekannt";
     card.append(title, detail, source, basis);
-    if (!local || product.local === false) {
-      const button = document.createElement("button"); button.type = "button"; button.className = "secondary-button"; button.textContent = "Lokal speichern";
-      button.addEventListener("click", () => saveNutritionProduct(product)); card.append(button);
-    } else if (product.id) {
-      const actions = document.createElement("div"); actions.className = "nutrition-actions";
-      const use = document.createElement("button"); use.type = "button"; use.className = "push-button"; use.textContent = "In Mahlzeit erfassen";
-      use.addEventListener("click", () => useNutritionProduct(product));
-      const edit = document.createElement("button"); edit.type = "button"; edit.className = "secondary-button"; edit.textContent = "Bearbeiten"; edit.addEventListener("click", () => saveNutritionProduct(product));
-      const archive = document.createElement("button"); archive.type = "button"; archive.className = "secondary-button"; archive.textContent = "Archivieren";
-      archive.addEventListener("click", async () => {
-        if (!await requestConfirmation(`Produkt „${product.name}“ archivieren?`)) return;
-        try { await api("/api/nutrition/products/archive", { method: "POST", body: JSON.stringify({ id: product.id, confirmed: true }) }); await loadNutritionProducts(document.querySelector("#nutritionProductQuery").value.trim()); }
-        catch (error) { document.querySelector("#nutritionProductStatus").textContent = `Produkt konnte nicht archiviert werden: ${error.message}`; }
-      });
-      actions.append(use, edit, archive); card.append(actions);
-    }
+    appendNutritionProductActions(card, product, local);
     target.append(card);
   }
 }
