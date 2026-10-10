@@ -1,6 +1,7 @@
 """Focused contracts for the disposable standard demo fixture data shapes."""
 
 import json
+import threading
 import unittest
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
@@ -10,7 +11,9 @@ from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from backend.calendar.ical_mapping import calendar_event_constraints
+from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.db.manager import DATABASE_MANAGER_CACHE
+from backend.errors import AppError
 from backend.performance.body import body_history
 from backend.performance.daily_health import garmin_daily_expenditure
 from backend.providers.calendar import parse_ical_calendar
@@ -397,6 +400,54 @@ class StandardFixtureDataTests(unittest.TestCase):
         self.assertEqual(shoes["lifetime_target_source"], "garmin")
         self.assertEqual(shoes["lifetime"]["target_km"], 300)
         self.assertGreater(shoes["lifetime"]["percent"], 100)
+
+    def test_slow_stream_cancel_stops_emission_and_matches_real_transport_error(self):
+        cancel_event = threading.Event()
+        emitted = []
+
+        def on_text_delta(chunk):
+            emitted.append(chunk)
+            if len(emitted) == 1:
+                cancel_event.set()
+
+        payload = {"input": json.dumps({"current_message": "E2E fixture: slow stream"})}
+        with self.assertRaises(AppError) as fixture_error:
+            fixture_runtime.FixtureResponseTransport().stream_request(
+                payload, on_text_delta, cancel_event=cancel_event
+            )
+        with self.assertRaises(AppError) as transport_error:
+            raise_if_chat_cancelled(cancel_event)
+
+        self.assertEqual(emitted, [fixture_runtime.SLOW_STREAM_CHUNKS[0]])
+        self.assertEqual(fixture_error.exception.status, 499)
+        self.assertEqual(fixture_error.exception.reason, "chat_cancelled")
+        self.assertEqual(
+            (
+                fixture_error.exception.status,
+                fixture_error.exception.message,
+                fixture_error.exception.reason,
+            ),
+            (
+                transport_error.exception.status,
+                transport_error.exception.message,
+                transport_error.exception.reason,
+            ),
+        )
+
+    def test_slow_stream_pre_cancelled_request_emits_nothing(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+        emitted = []
+        payload = {"input": json.dumps({"current_message": "E2E fixture: slow stream"})}
+
+        with self.assertRaises(AppError) as raised:
+            fixture_runtime.FixtureResponseTransport().stream_request(
+                payload, emitted.append, cancel_event=cancel_event
+            )
+
+        self.assertEqual(emitted, [])
+        self.assertEqual(raised.exception.status, 499)
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
 
 
 if __name__ == "__main__":

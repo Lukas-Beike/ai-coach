@@ -26,6 +26,7 @@ os.environ.update(
 )
 sys.path.insert(0, "/app")
 import server
+from backend.errors import COACH_ABORTED_ERROR
 from backend.http_api import auth as http_auth
 
 FIXTURE_SOURCE = "synthetic fixture"
@@ -66,12 +67,28 @@ SLOW_STREAM_CHUNKS = (
 )
 
 
-def _slow_stream_response(on_text_delta):
-    """Stream a German Markdown answer in ~3 s; the final text is returned as well."""
+def _raise_if_fixture_cancelled(cancel_event):
+    """Raise the same chat-cancelled error as CoachResponseTransport."""
+    if cancel_event is not None and cancel_event.is_set():
+        raise server.AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+
+
+def _slow_stream_response(on_text_delta, cancel_event=None):
+    """Stream a German Markdown answer in ~3 s; the final text is returned as well.
+
+    A set cancel_event stops emission before the next chunk and after each wait,
+    so a cancelled request never reaches the success return, as with the real
+    streaming transport.
+    """
     for chunk in SLOW_STREAM_CHUNKS:
+        _raise_if_fixture_cancelled(cancel_event)
         if on_text_delta is not None:
             on_text_delta(chunk)
-        time.sleep(0.4)
+        if cancel_event is None:
+            time.sleep(0.4)
+        else:
+            cancel_event.wait(0.4)
+        _raise_if_fixture_cancelled(cancel_event)
     return {"output_text": "".join(SLOW_STREAM_CHUNKS)}
 
 
@@ -82,7 +99,7 @@ PROVIDER_FAILURE_CODES = {
 }
 
 
-def _scripted_provider_response(current_message, on_text_delta):
+def _scripted_provider_response(current_message, on_text_delta, cancel_event=None):
     """Return provider failures and streaming scenarios triggered by fixed messages."""
     if current_message == "E2E fixture: OpenAI timeout":
         raise server.AppError(
@@ -100,7 +117,7 @@ def _scripted_provider_response(current_message, on_text_delta):
             },
         )
     if current_message == "E2E fixture: slow stream":
-        return _slow_stream_response(on_text_delta)
+        return _slow_stream_response(on_text_delta, cancel_event)
     return None
 
 
@@ -119,7 +136,9 @@ def fixture_coach_response(payload, **kwargs):
         return {"output_text": question or "Deine Rückmeldung ist gespeichert."}
     decoded = json.loads(value)
     current_message = decoded.get("current_message")
-    scripted = _scripted_provider_response(current_message, kwargs.get("on_text_delta"))
+    scripted = _scripted_provider_response(
+        current_message, kwargs.get("on_text_delta"), kwargs.get("cancel_event")
+    )
     if scripted is not None:
         return scripted
     context = decoded["dialogue"]
