@@ -528,7 +528,7 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   const matched = page.locator(".planned-entry", { hasText: "Aktivierung absolviert" });
   await expect(matched.locator(".planned-execution")).toHaveText("✓ 136 %");
   await expect(matched.locator(".planned-execution")).toHaveAttribute("aria-label", "136 Prozent des Plans · Belastung");
-  await expect(matched.locator(".planned-session-target")).toContainText("Plan: Aktivierung · 45 Min. · Belastung 25");
+  await expect(matched.locator(".planned-session-target")).toContainText("Plan: Aktivierung · 45 min · Belastung 25");
   await expect(matched.locator(".planned-session-metrics")).toContainText("125 bpm · 201 W · Belastung 34");
   await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveText("✕ 0 %");
   await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("aria-label", "0 Prozent des Plans");
@@ -538,7 +538,7 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(previous.locator(".planned-weather-detail")).toHaveAttribute("title", /Gespeicherte Wettervorhersage/);
   await expect(previous.locator(".planned-weather-metrics")).toHaveText("75 % Regen (max. 14:00 Uhr) · 21,1 km/h Wind");
   const workout = day.locator(".planned-entry").filter({ hasText: "Lockerer Dauerlauf mit Steigerungen" });
-  await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 18:30 · 45 Min.");
+  await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 18:30 · 45 min");
   await expect(workout.locator(".planned-session-header")).toContainText("Laufen · 18:30");
   await expect(workout.locator(".planned-session-header")).toBeVisible();
   await expect(workout.locator(".planned-description")).toBeHidden();

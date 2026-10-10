@@ -382,8 +382,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("/coach.js?v=9", index)
         self.assertIn("/app.js?v=276", index)
         self.assertIn("/styles.css?v=281", index)
-        self.assertIn("intervals-coach-v370", service_worker)
-        self.assertIn("/analysis.js?v=94", index)
+        self.assertIn("intervals-coach-v371", service_worker)
+        self.assertIn("/analysis.js?v=95", index)
         self.assertIn('"/navigation.js?v=231"', service_worker)
         self.assertIn('"/appearance.js?v=218"', service_worker)
         self.assertIn('"/state.js?v=219"', service_worker)
@@ -727,7 +727,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split("app.js?v=", 1)[1].split('"', 1)[0]
         self.assertIn(f"app.js?v={asset_version}", markup)
-        self.assertIn("intervals-coach-v370", service_worker)
+        self.assertIn("intervals-coach-v371", service_worker)
         self.assertIn(f"/app.js?v={asset_version}", service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -812,7 +812,7 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_nutrition_asset_is_served_as_immutable_javascript(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/nutrition.js", "/nutrition.js?v=21", None
+            "/nutrition.js", "/nutrition.js?v=22", None
         )
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
@@ -830,7 +830,7 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_analysis_asset_is_served_and_precached_as_javascript(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/analysis.js", "/analysis.js?v=94", None
+            "/analysis.js", "/analysis.js?v=95", None
         )
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
@@ -840,11 +840,11 @@ class ServerFrontendTests(ServerTestCase):
         )
         self.assertIn(b"function renderAnalysisHistory", response.body)
         worker = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/analysis.js?v=94"', worker)
+        self.assertIn('"/analysis.js?v=95"', worker)
         index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
-        self.assertIn('/analysis.js?v=94"', index)
+        self.assertIn('/analysis.js?v=95"', index)
         self.assertNotIn("/analysis.js?v=93", index + worker)
-        self.assertIn('const CACHE = "intervals-coach-v370";', worker)
+        self.assertIn('const CACHE = "intervals-coach-v371";', worker)
         source = response.body.decode("utf-8")
         self.assertIn("equipment-archive", source)
         self.assertIn("function appendEquipmentLifetime", source)
@@ -943,14 +943,14 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/appearance.js?v=218"', source)
         self.assertIn('"/state.js?v=219"', source)
         self.assertIn('"/views.js?v=220"', source)
-        self.assertIn('"/plan-views.js?v=1"', source)
+        self.assertIn('"/plan-views.js?v=2"', source)
         self.assertIn('"/plan-views.js"', source)
         self.assertIn('"/forms.js?v=217"', source)
         self.assertIn('"/components.js?v=217"', source)
         self.assertIn('"/forms.js"', source)
         self.assertIn('"/coach.js?v=9"', source)
         self.assertIn('"/app.js?v=276"', source)
-        self.assertIn('"/nutrition.js?v=21"', source)
+        self.assertIn('"/nutrition.js?v=22"', source)
         self.assertIn('"/icon.svg?v=217"', source)
         self.assertIn('"/styles.css?v=281"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
@@ -998,6 +998,42 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('garmin: "Garmin"', app)
         self.assertIn('calendar: "Gemeinsamer Kalender"', app)
         self.assertIn('weather: "Open-Meteo"', app)
+
+    def test_shared_format_module_is_loaded_and_served_before_consumers(self):
+        root = Path(__file__).resolve().parents[1]
+        index = (root / "public" / "index.html").read_text(encoding="utf-8")
+        worker = (root / "public" / "service-worker.js").read_text(encoding="utf-8")
+        version = re.search(
+            r'<script src="/format\.js\?v=(\d+)" defer></script>', index
+        )
+        self.assertIsNotNone(version)
+        asset = f"/format.js?v={version.group(1)}"
+        self.assertLess(index.index(asset), index.index("/api.js?v="))
+        self.assertIn(f'"{asset}"', worker)
+        self.assertIn('"/format.js"', worker)
+        response = StaticAssetService(server.PUBLIC_DIR).render(
+            "/format.js", asset, None
+        )
+        self.assertEqual(response.status, 200)
+        self.assertIn("javascript", dict(response.headers)["Content-Type"])
+        self.assertEqual(
+            dict(response.headers)["Cache-Control"],
+            "public, max-age=31536000, immutable",
+        )
+
+    def test_user_visible_number_and_date_formatting_uses_app_format(self):
+        public = Path(__file__).resolve().parents[1] / "public"
+        forbidden = re.compile(
+            r"toLocale(?:Date|Time)?String\(\)"
+            r"|Intl\.(?:DateTimeFormat|NumberFormat)\(undefined"
+        )
+        offenders = [
+            path.name
+            for path in sorted(public.glob("*.js"))
+            if path.name != "format.js"
+            and forbidden.search(path.read_text(encoding="utf-8"))
+        ]
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":
