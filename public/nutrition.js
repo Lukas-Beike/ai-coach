@@ -223,7 +223,7 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
   const formatKcal = (rawValue) => {
     const value = rawValue == null || rawValue === "" ? null : Number(rawValue);
     return value != null && Number.isFinite(value)
-      ? `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 }).format(value)} kcal`
+      ? `${AppFormat.number(value, { digits: 0 })} kcal`
       : "Nicht verfügbar";
   };
   const totalTile = document.createElement("div");

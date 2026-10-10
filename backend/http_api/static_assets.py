@@ -12,6 +12,7 @@ from backend.errors import AppError
 
 ASSET_INDEX_HTML = "index.html"
 ASSET_API_JS = "api.js"
+ASSET_FORMAT_JS = "format.js"
 ASSET_APP_JS = "app.js"
 ASSET_SHARED_JS = "shared.js"
 ASSET_AUTH_JS = "auth.js"
@@ -41,6 +42,7 @@ ASSET_ICON = "icon.svg"
 STATIC_TARGETS = (
     ASSET_INDEX_HTML,
     ASSET_API_JS,
+    ASSET_FORMAT_JS,
     ASSET_APP_JS,
     ASSET_SHARED_JS,
     ASSET_AUTH_JS,
@@ -71,6 +73,7 @@ STATIC_TARGETS = (
 VERSIONED_STATIC_ASSETS = frozenset(
     {
         ASSET_API_JS,
+        ASSET_FORMAT_JS,
         ASSET_NAVIGATION_JS,
         ASSET_APPEARANCE_JS,
         ASSET_STATE_JS,

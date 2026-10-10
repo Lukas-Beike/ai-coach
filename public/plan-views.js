@@ -15,12 +15,26 @@ function calendarActualActivity(entry) {
   return actual && typeof actual === "object" ? actual : null;
 }
 
+const DISTANCE_SPORT_TYPES = new Set(["ride", "virtualride", "gravelride", "mountainbikeride", "ebikeride", "run", "virtualrun", "trailrun", "walk", "hike", "swim", "nordicski", "rowing", "canoeing", "kayaking"]);
+
 function calendarMetricNumber(value, suffix = "") {
   if (value == null || value === "") return null;
   const number = Number(value);
   if (!Number.isFinite(number)) return null;
-  const digits = Number.isInteger(number) ? 0 : 1;
-  return `${number.toLocaleString("de-DE", { maximumFractionDigits: digits })}${suffix}`;
+  return `${AppFormat.number(number, { digits: Number.isInteger(number) ? 0 : 1 })}${suffix}`;
+}
+
+// Only sports that normally have a distance count as missing; strength or yoga sessions are ignored.
+function calendarWeekDistanceLabel(activities) {
+  const distanceActivities = activities.filter((entry) => DISTANCE_SPORT_TYPES.has(String(entry.type || "").toLowerCase()));
+  if (!distanceActivities.length) return "–";
+  const measured = distanceActivities.filter((entry) => Number(entry.distance) > 0);
+  const missing = distanceActivities.length - measured.length;
+  const total = measured.length
+    ? AppFormat.distance(measured.reduce((sum, entry) => sum + Number(entry.distance), 0))
+    : "–";
+  if (!missing) return total;
+  return `${total} · ohne ${missing} ${missing === 1 ? "Aktivität" : "Aktivitäten"}`;
 }
 
 function calendarIntensityLabel(value) {
@@ -358,9 +372,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   }
 
   function plannedEntryDurationLabel(actual, entry) {
-    if (actual) return formatDuration(actual.moving_time ?? actual.elapsed_time);
-    if (entry.duration_minutes) return `${entry.duration_minutes} Min.`;
-    return formatDuration(entry.moving_time);
+    if (actual) return AppFormat.duration(actual.moving_time ?? actual.elapsed_time);
+    if (entry.duration_minutes) return AppFormat.duration(Number(entry.duration_minutes) * 60);
+    return AppFormat.duration(entry.moving_time);
   }
 
   function appendActualCalendarDetails(details, actual) {
@@ -372,7 +386,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     primaryMetrics.textContent = [load != null ? `Load ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
     const facts = document.createElement("div");
     facts.className = "planned-actual-facts";
-    appendCalendarFact(facts, "Dauer", formatDuration(actual.moving_time ?? actual.elapsed_time));
+    appendCalendarFact(facts, "Dauer", AppFormat.duration(actual.moving_time ?? actual.elapsed_time));
     appendCalendarFact(facts, "Distanz", distanceLabel(actual.distance));
     appendCalendarFact(facts, "Trainingsload", calendarMetricNumber(actual.icu_training_load));
     appendCalendarFact(facts, "RPE", rpe != null ? `${rpe}/10` : "nicht angegeben");
@@ -392,12 +406,12 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const planLine = document.createElement("p");
     planLine.textContent = `Plan: ${[
       entry.name,
-      formatDuration(plannedDuration),
+      AppFormat.duration(plannedDuration),
       entry.icu_training_load != null ? `Load ${calendarMetricNumber(entry.icu_training_load)}` : null,
     ].filter(Boolean).join(" · ")}`;
     const actualLine = document.createElement("p");
     actualLine.textContent = `Ist: ${[
-      formatDuration(actual.moving_time ?? actual.elapsed_time),
+      AppFormat.duration(actual.moving_time ?? actual.elapsed_time),
       actual.icu_training_load != null ? `Load ${calendarMetricNumber(actual.icu_training_load)}` : null,
     ].filter(Boolean).join(" · ")}`;
     comparison.append(planLine, actualLine);
@@ -636,9 +650,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const plannedSeconds = sum(planned, (entry) => entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time);
     const actualSeconds = sum(actual, (entry) => entry.moving_time ?? entry.elapsed_time);
     for (const [label, value] of [
-      ["Geplant", formatDuration(plannedSeconds)],
-      ["Absolviert", formatDuration(actualSeconds)],
-      ["Distanz", actual.length && actual.every((entry) => entry.distance != null) ? distanceLabel(sum(actual, (entry) => entry.distance)) || "0 km" : "–"],
+      ["Geplant", plannedSeconds > 0 ? AppFormat.duration(plannedSeconds) : "–"],
+      ["Absolviert", AppFormat.duration(actualSeconds)],
+      ["Distanz", calendarWeekDistanceLabel(actual)],
       ["Belastung geplant", planned.length && planned.every((entry) => entry.icu_training_load != null) ? calendarMetricNumber(sum(planned, (entry) => entry.icu_training_load)) : "–"],
       ["Belastung absolviert", actual.length && actual.every((entry) => entry.icu_training_load != null) ? calendarMetricNumber(sum(actual, (entry) => entry.icu_training_load)) : "–"],
     ]) {

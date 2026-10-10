@@ -19,7 +19,7 @@ function analysisValue(value, unit) {
     return `${Number(value) < 0 ? "−" : ""}${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")} h`;
   }
   const suffix = unit ? ` ${unit}` : "";
-  return `${Number(value).toLocaleString("de-DE", { maximumFractionDigits: 1 })}${suffix}`;
+  return `${AppFormat.number(value)}${suffix}`;
 }
 
 function analysisLegendText(item, latest, unit) {
@@ -193,7 +193,7 @@ function analysisPlotScales(series, start, end, { unit = "", zeroCentered = fals
 function analysisAxisLabel(value, unit) {
   if (unit === "s/km") return formatPace(value).split(" ")[0];
   if (unit === "s") return formatDuration(Math.round(value));
-  return Number(value.toFixed(3)).toLocaleString("de-DE", { maximumFractionDigits: 1 });
+  return AppFormat.number(Number(value.toFixed(3)));
 }
 
 function appendAnalysisAxes(svg, unit, { min, max, step, chartRight, y }) {
@@ -1108,7 +1108,8 @@ function seasonStatusLabel(status) {
 }
 
 function seasonDistance(value) {
-  return value == null ? "unbekannt" : `${(Number(value) / 1000).toLocaleString("de-DE", { maximumFractionDigits: 1 })} km`;
+  const km = value == null ? null : AppFormat.number(Number(value) / 1000);
+  return km == null ? "unbekannt" : `${km} km`;
 }
 
 function seasonDuration(value) {
@@ -1190,8 +1191,8 @@ function appendSeasonScenario(event, section, generation) {
 }
 
 function seasonWeekSummary(week) {
-  const duration = week.duration_seconds == null ? "Dauer unbekannt" : formatDuration(week.duration_seconds);
-  const distance = week.distance_meters == null ? "Distanz unbekannt" : `${(week.distance_meters / 1000).toFixed(1)} km`;
+  const duration = week.duration_seconds == null ? "Dauer unbekannt" : AppFormat.duration(week.duration_seconds);
+  const distance = week.distance_meters == null ? "Distanz unbekannt" : (AppFormat.distance(week.distance_meters) ?? "0 km");
   return `${dateLabel(week.start)} \u2013 ${dateLabel(week.end)}: ${week.sessions} erfasste Einheiten \u00b7 ${duration} (${week.duration_known_sessions}/${week.sessions} gemessen) \u00b7 ${distance} (${week.distance_known_sessions}/${week.sessions} gemessen)`;
 }
 

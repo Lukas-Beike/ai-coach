@@ -99,7 +99,7 @@
       activity.type,
       activity.start_date_local?.replace("T", " "),
       activity.moving_time != null ? `${Math.round(activity.moving_time / 60)} min` : null,
-      activity.distance != null ? `${(activity.distance / 1000).toFixed(1)} km` : null,
+      AppFormat.distance(activity.distance),
       activity.icu_training_load != null ? `Belastung ${activity.icu_training_load}` : null,
     ].filter(Boolean);
     content.append(node("p", values.join(" · ")));

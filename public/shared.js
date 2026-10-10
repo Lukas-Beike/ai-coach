@@ -211,13 +211,7 @@ function todayIso() { return timezoneDateKey(state.data?.profile?.timezone, new 
 
 function formatTime(value) {
   if (!value) return "Noch nicht aktualisiert";
-  const dt = new Date(value);
-  if (Number.isNaN(dt.valueOf())) return value;
-  try {
-    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: state.data?.profile?.timezone || undefined }).format(dt);
-  } catch (_) {
-    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(dt);
-  }
+  return AppFormat.dateTime(value, { timeZone: state.data?.profile?.timezone }) ?? value;
 }
 
 
@@ -280,41 +274,22 @@ function renderStatus(data) {
 
 function dateLabel(value) {
   if (!value) return "—";
-  const raw = String(value);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    const [year, month, day] = raw.split("-").map(Number);
-    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(year, month - 1, day));
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.valueOf())) return raw.slice(0, 10);
-  try {
-    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeZone: state.data?.profile?.timezone || undefined }).format(parsed);
-  } catch (_) {
-    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
-  }
+  return AppFormat.date(value, { timeZone: state.data?.profile?.timezone }) ?? String(value).slice(0, 10);
 }
 
 
 function distanceLabel(value) {
-  const distance = Number(value);
-  if (!Number.isFinite(distance) || distance <= 0) return null;
-  return `${(distance / 1000).toFixed(1)} km`;
+  return AppFormat.distance(value);
 }
 
 
 function formatDuration(seconds) {
-  if (seconds == null || Number.isNaN(Number(seconds))) return null;
-  const total = Math.round(Number(seconds));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const remainder = total % 60;
-  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}` : `${minutes}:${String(remainder).padStart(2, "0")}`;
+  return AppFormat.clock(seconds);
 }
 
 
 function formatWhole(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.round(number).toLocaleString("de-DE") : String(value);
+  return AppFormat.number(Math.round(Number(value)), { digits: 0 }) ?? String(value);
 }
 
 
