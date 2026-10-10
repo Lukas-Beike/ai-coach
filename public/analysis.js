@@ -579,6 +579,30 @@ function clearAnalysisReportCache() {
 
 let cyclingPowerProfileGeneration = 0;
 
+function cyclingPowerProfileTable(result) {
+  const table = reportNode("table", null, "race-predictions-table");
+  const head = reportNode("thead"); const header = reportNode("tr");
+  for (const label of ["Dauer", "Draußen", "Indoor"]) {
+    const cell = reportNode("th", label); cell.scope = "col"; header.append(cell);
+  }
+  head.append(header); table.append(head);
+  const body = reportNode("tbody");
+  for (const [duration, label] of [[5, "5 Sekunden"], [60, "1 Minute"], [300, "5 Minuten"], [1200, "20 Minuten"], [3600, "1 Stunde"]]) {
+    const row = reportNode("tr"); row.dataset.powerDuration = String(duration);
+    const heading = reportNode("th", label); heading.scope = "row"; row.append(heading);
+    for (const sport of ["Ride", "VirtualRide"]) {
+      const point = result.windows?.["90"]?.power?.find((item) => item.sport === sport && item.duration_seconds === duration);
+      const valid = point?.watts != null && Number.isFinite(Number(point.watts)) && point.status === "ok";
+      const cell = reportNode("td", valid ? analysisValue(point.watts, "W") : "\u2014");
+      if (valid) cell.title = [dateLabel(point.date), point.source].filter(Boolean).join(" · ");
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(body);
+  return table;
+}
+
 async function renderCyclingPowerProfile() {
   if (state.route !== "analysis/performance" || !state.data?.performance) return;
   const root = document.getElementById("cyclingPowerProfile");
@@ -590,26 +614,7 @@ async function renderCyclingPowerProfile() {
     if (generation !== cyclingPowerProfileGeneration || session !== state.sessionGeneration) return;
     root.replaceChildren(reportNode("h4", "Leistungsprofil"));
     root.append(reportNode("p", "Beste gemessene Durchschnittsleistung · letzte 90 Tage · lokal gespeicherte Aufzeichnungen", "analysis-reference-note"));
-    const table = reportNode("table", null, "race-predictions-table");
-    const head = reportNode("thead"); const header = reportNode("tr");
-    for (const label of ["Dauer", "Draußen", "Indoor"]) {
-      const cell = reportNode("th", label); cell.scope = "col"; header.append(cell);
-    }
-    head.append(header); table.append(head);
-    const body = reportNode("tbody");
-    for (const [duration, label] of [[5, "5 Sekunden"], [60, "1 Minute"], [300, "5 Minuten"], [1200, "20 Minuten"], [3600, "1 Stunde"]]) {
-      const row = reportNode("tr"); row.dataset.powerDuration = String(duration);
-      const heading = reportNode("th", label); heading.scope = "row"; row.append(heading);
-      for (const sport of ["Ride", "VirtualRide"]) {
-        const point = result.windows?.["90"]?.power?.find((item) => item.sport === sport && item.duration_seconds === duration);
-        const valid = point?.watts != null && Number.isFinite(Number(point.watts)) && point.status === "ok";
-        const cell = reportNode("td", valid ? analysisValue(point.watts, "W") : "\u2014");
-        if (valid) cell.title = [dateLabel(point.date), point.source].filter(Boolean).join(" · ");
-        row.append(cell);
-      }
-      body.append(row);
-    }
-    table.append(body); root.append(table);
+    root.append(cyclingPowerProfileTable(result));
   } catch {
     if (generation === cyclingPowerProfileGeneration && session === state.sessionGeneration) {
       root.replaceChildren(reportNode("h4", "Leistungsprofil"), reportNode("p", "Leistungsprofil konnte nicht geladen werden.", "empty"));
@@ -704,11 +709,17 @@ function renderAnalysisHistory(history) { // NOSONAR
     root.append(group);
   }
   const extra = document.createDocumentFragment();
-  const { running_tolerance: _runningTolerance, endurance_score: enduranceScore, ...otherMetrics } = history.provider_metrics || {};
+  const otherMetrics = { ...history.provider_metrics };
+  const enduranceScore = otherMetrics.endurance_score;
+  delete otherMetrics.running_tolerance;
+  delete otherMetrics.endurance_score;
   renderProviderMetrics({ endurance_score: enduranceScore }, extra, performanceStart, end);
-  for (const chart of [...extra.children]) enduranceRoot.append(makeAnalysisSectionCollapsible(chart, "endurance-score"));
+  while (extra.firstElementChild) enduranceRoot.append(makeAnalysisSectionCollapsible(extra.firstElementChild, "endurance-score"));
   renderProviderMetrics(otherMetrics, extra, performanceStart, end);
-  for (const chart of [...extra.children]) root.append(makeAnalysisSectionCollapsible(chart, chart.querySelector("h3").textContent));
+  while (extra.firstElementChild) {
+    const chart = extra.firstElementChild;
+    root.append(makeAnalysisSectionCollapsible(chart, chart.querySelector("h3").textContent));
+  }
   for (const target of [root, loadRoot, enduranceRoot]) target.querySelectorAll("details:not([data-analysis-section])").forEach((details) => { details.open = openDetails.has(`${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`); });
 }
 
@@ -836,7 +847,8 @@ function renderBodyAnalysis(body) {
     const readings = Object.values(body?.windows || {}).flatMap((window) => (window.metrics?.[metric] || [])
       .filter((item) => item.source === "Garmin Connect")
       .flatMap((item) => (item.points || []).filter((point) => point.date >= window.start && point.date <= window.end && analysisValidPoint(point))));
-    const latest = readings.sort((a, b) => (a.observed_at || a.date).localeCompare(b.observed_at || b.date)).at(-1);
+    readings.sort((a, b) => (a.observed_at || a.date).localeCompare(b.observed_at || b.date));
+    const latest = readings.at(-1);
     const row = reportNode("tr"); row.dataset.metric = metric;
     const heading = reportNode("th", title); heading.scope = "row";
     if (latest) heading.append(reportNode("small", dateLabel(latest.observed_at || latest.date)));

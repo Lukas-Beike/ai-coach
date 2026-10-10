@@ -1547,7 +1547,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .analysis-chart-card svg .analysis-series-bar { fill: var(--accent-bright); stroke: none; opacity: .25; }
 .analysis-chart-card svg .analysis-series-bar[data-color="1"] { fill: var(--chart-series-1); stroke: none; }
 
-.current-performance-groups { display: grid; gap: 24px; margin-top: 16px; }
+.current-performance-groups { display: grid; gap: 24px; margin-top: 0; }
 .current-performance-table { width: 100%; border-collapse: collapse; }
 .current-performance-table caption { text-align: left; color: var(--accent-bright); font-size: .9rem; font-weight: 600; padding-bottom: 8px; }
 .current-performance-table th, .current-performance-table td { padding: 12px 0; border-bottom: 1px solid var(--line); }
@@ -1565,7 +1565,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .analysis-section-toggle:not([open]) > summary::after { transform: rotate(0deg); }
 .analysis-section-toggle > summary h3 { flex: 1; }
 .analysis-section-content { display: grid; gap: 12px; margin-top: 12px; }
-.current-performance-groups { margin-top: 0; }
 
 .analysis-group-heading { display: flex; align-items: center; gap: 12px; }
 .analysis-group-heading > .analysis-group-title { min-width: 0; }
