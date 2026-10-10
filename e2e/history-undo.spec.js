@@ -1,6 +1,7 @@
 const { test, expect } = require("@playwright/test");
 
 const CHANGE_ID = "0f0e1d2c-3b4a-4958-8a7b-6c5d4e3f2a1b";
+const PROPOSAL_ID = "5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d";
 const CHANGE = {
   id: CHANGE_ID,
   entity_type: "workout_library",
@@ -23,18 +24,26 @@ function previewResponse() {
     status: "preview",
     change: CHANGE,
     undo_target_hash: "target-hash",
-    proposed_action: {
-      action_type: "undo_change",
-      target_system: "local",
-      object_ids: { change_id: CHANGE_ID },
-      diff: CHANGE.diff,
-      payload: { change_id: CHANGE_ID, expected_current_hash: "after-hash" },
-    },
+    // Mirrors coach_action_view(): the private payload never reaches the browser.
+    proposed_action: proposedAction("preview"),
+  };
+}
+
+function proposedAction(status) {
+  return {
+    id: PROPOSAL_ID,
+    action_type: "undo_change",
+    target_system: "local",
+    object_ids: { change_id: CHANGE_ID },
+    diff: CHANGE.diff,
+    payload_hash: "payload-hash",
+    expires_at: 4102444800,
+    status,
   };
 }
 
 async function openChangeHistory(page, { previewStatus = 200 } = {}) {
-  const calls = { preview: 0, undo: 0, undoBodies: [] };
+  const calls = { preview: 0, confirm: [], execute: [], cancel: [], directUndo: 0 };
   await page.route((url) => url.pathname === "/api/change-history", (route) => route.fulfill({
     json: { changes: [CHANGE] },
   }));
@@ -46,11 +55,22 @@ async function openChangeHistory(page, { previewStatus = 200 } = {}) {
     return route.fulfill({ json: previewResponse() });
   });
   await page.route((url) => url.pathname === "/api/change-history/undo", (route) => {
-    calls.undo += 1;
-    calls.undoBodies.push(route.request().postDataJSON());
+    calls.directUndo += 1;
+    return route.fulfill({ status: 400, json: { error: "Direktes Undo ist nicht vorgesehen." } });
+  });
+  await page.route((url) => url.pathname === "/api/coach/actions/confirm", (route) => {
+    calls.confirm.push(route.request().postDataJSON());
+    return route.fulfill({ json: { status: "ready", action_token: "action-token", proposed_action: proposedAction("ready") } });
+  });
+  await page.route((url) => url.pathname === "/api/coach/actions/execute", (route) => {
+    calls.execute.push(route.request().postDataJSON());
     return route.fulfill({
       json: { status: "undone", change_id: CHANGE_ID, entity_type: "workout_library", entity_id: "wl-fixture-1", remote_untouched: true },
     });
+  });
+  await page.route((url) => url.pathname === "/api/coach/actions/cancel", (route) => {
+    calls.cancel.push(route.request().postDataJSON());
+    return route.fulfill({ json: { status: "cancelled", proposal_id: PROPOSAL_ID } });
   });
 
   await page.goto("/#more/privacy");
@@ -78,7 +98,8 @@ test("undo loads the preview first and shows exactly one dialog @responsive", as
   await expect(page.locator("#confirmationDialogMessage")).toContainText("Workout-Bibliothek, geändert am");
   await expect(page.locator("#confirmationDialogMessage")).toContainText("auf den Stand vor der Änderung zurückgesetzt: Name, Bewegungszeit");
   expect(calls.preview).toBe(1);
-  expect(calls.undo).toBe(0);
+  expect(calls.confirm).toHaveLength(0);
+  expect(calls.execute).toHaveLength(0);
 });
 
 test("cancelling the undo preview changes nothing @responsive", async ({ page }) => {
@@ -89,8 +110,10 @@ test("cancelling the undo preview changes nothing @responsive", async ({ page })
   await page.locator("#confirmationDialogCancel").click();
 
   await expect(page.locator("#confirmationDialog")).toBeHidden();
+  await expect.poll(() => calls.cancel).toEqual([{ proposal_id: PROPOSAL_ID }]);
   expect(calls.preview).toBe(1);
-  expect(calls.undo).toBe(0);
+  expect(calls.confirm).toHaveLength(0);
+  expect(calls.execute).toHaveLength(0);
 });
 
 test("confirming the undo preview applies exactly that change @responsive", async ({ page }) => {
@@ -103,8 +126,10 @@ test("confirming the undo preview applies exactly that change @responsive", asyn
   await expect(page.locator("#confirmationDialog")).toBeHidden();
   await expect(page.locator("#toast")).toContainText("Lokale Änderung zurückgenommen");
   expect(calls.preview).toBe(1);
-  expect(calls.undo).toBe(1);
-  expect(calls.undoBodies[0]).toEqual({ change_id: CHANGE_ID, expected_current_hash: "after-hash" });
+  expect(calls.confirm).toEqual([{ proposal_id: PROPOSAL_ID }]);
+  expect(calls.execute).toEqual([{ action_token: "action-token", payload_hash: "payload-hash" }]);
+  expect(calls.cancel).toHaveLength(0);
+  expect(calls.directUndo).toBe(0);
 });
 
 test("a failed undo preview shows an error and never opens the confirmation @responsive", async ({ page }) => {
@@ -115,5 +140,6 @@ test("a failed undo preview shows an error and never opens the confirmation @res
   await expect(page.locator("#toast")).toContainText("Es wurde nichts zurückgenommen.");
   await expect(page.locator("#confirmationDialog")).toBeHidden();
   expect(calls.preview).toBe(1);
-  expect(calls.undo).toBe(0);
+  expect(calls.confirm).toHaveLength(0);
+  expect(calls.execute).toHaveLength(0);
 });

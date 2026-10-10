@@ -159,8 +159,18 @@ async function undoChange(changeId, button) {
       toast(`${error.message || "Die Undo-Vorschau konnte nicht geladen werden."} Es wurde nichts zurückgenommen.`, true);
       return;
     }
-    if (!await requestConfirmation(undoPreviewMessage(preview), { title: "Lokale Änderung zurücknehmen?" })) return;
-    await api("/api/change-history/undo", { method: "POST", body: JSON.stringify(preview.proposed_action.payload) });
+    // The preview is a one-shot approval proposal; its payload stays server-side, so undo runs through confirm and execute.
+    const proposalId = preview.proposed_action?.id;
+    if (!await requestConfirmation(undoPreviewMessage(preview), { title: "Lokale Änderung zurücknehmen?" })) {
+      if (proposalId) api("/api/coach/actions/cancel", { method: "POST", body: JSON.stringify({ proposal_id: proposalId }) }).catch(() => {});
+      return;
+    }
+    const confirmed = await api("/api/coach/actions/confirm", { method: "POST", body: JSON.stringify({ proposal_id: proposalId }) });
+    const result = await api("/api/coach/actions/execute", {
+      method: "POST",
+      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
+    });
+    if (result.status !== "undone") throw new Error("Die Undo-Bestätigung fehlt; bitte den aktuellen Stand prüfen.");
     toast("Lokale Änderung zurückgenommen");
     await load();
     await loadChangeHistory();
