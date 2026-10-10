@@ -766,7 +766,14 @@ function updateChatControls() {
   updateChatCancelButton($("#cancelChatButton"), controls);
   const progress = $("#chatOperationStatus");
   if (progress) {
-    if (state.busy && !controls.reconciling) announceChatStatus(coachWorkingLabel());
+    if (state.busy && !controls.reconciling) {
+      announceChatStatus(coachWorkingLabel());
+      state.chatStatusWorking = true;
+    } else if (!state.busy && state.chatStatusWorking) {
+      // Keep the completion announcement; clear only a stale working status.
+      state.chatStatusWorking = false;
+      if (progress.textContent !== "Antwort fertig.") progress.textContent = "";
+    }
   }
   updateChatQueueStatus();
 }
@@ -774,7 +781,6 @@ function updateChatControls() {
 function announceChatStatus(message) {
   const status = $("#chatOperationStatus");
   if (!status || status.textContent === message) return;
-  status.hidden = false;
   status.textContent = message;
 }
 function stopVoiceCapture(recorder = state.voiceRecorder) {

@@ -641,6 +641,14 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("if (!status || status.textContent === message) return;", coach)
         self.assertIn('announceChatStatus("Antwort fertig.")', coach)
 
+    def test_chat_operation_status_live_region_stays_mounted(self):
+        root = Path(__file__).resolve().parents[1]
+        index = (root / "public" / "index.html").read_text(encoding="utf-8")
+        markup = next(
+            line for line in index.splitlines() if 'id="chatOperationStatus"' in line
+        )
+        self.assertNotRegex(markup, r"\bhidden\b")
+
     def test_main_navigation_uses_stable_hash_links_and_focuses_active_panel(self):
         app = frontend_source()
         router = (
