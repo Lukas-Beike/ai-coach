@@ -20,6 +20,11 @@ test("@responsive error toasts are readable, dismissible and stay above the coac
   await expect.poll(() => page.evaluate(() => !state.loadPromise)).toBe(true);
   await expect(page.locator("#chatPanel")).toHaveClass(/active/);
   await expect(page.locator("#chatForm")).toBeVisible();
+  // CI starts with an empty chat; give the transcript history-like height so the composer is pinned as in real use.
+  await page.evaluate(() => {
+    document.querySelector("#messages").style.minHeight = "200vh";
+    window.scrollTo(0, document.scrollingElement.scrollHeight);
+  });
 
   await page.evaluate(() => toast("Testfehler", true));
   const toastNode = page.locator("#toast");
