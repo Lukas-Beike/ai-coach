@@ -4,6 +4,8 @@ from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
 
+_LOCAL_MIDNIGHT = "T00:00:00"
+
 
 def _event_query_parts(db: Any, training_relevant_only: bool) -> tuple[str, str]:
     # [NO_TRAINING] deliberately sets training_relevant=0, but remains a
@@ -44,7 +46,7 @@ def list_events(
     rows = db.execute(
         f"SELECT {select_columns} FROM external_calendar_events "
         f"WHERE end_local > ?{relevance_filter} ORDER BY start_local LIMIT ?",
-        (today.isoformat() + "T00:00:00", max(1, min(int(limit), 1000))),
+        (today.isoformat() + _LOCAL_MIDNIGHT, max(1, min(int(limit), 1000))),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -63,7 +65,10 @@ def list_events_in_window(
     rows = db.execute(
         f"SELECT {select_columns} FROM external_calendar_events "
         f"WHERE end_local > ? AND start_local < ?{relevance_filter} ORDER BY start_local",
-        (window_start.isoformat() + "T00:00:00", window_end.isoformat() + "T00:00:00"),
+        (
+            window_start.isoformat() + _LOCAL_MIDNIGHT,
+            window_end.isoformat() + _LOCAL_MIDNIGHT,
+        ),
     ).fetchall()
     return [dict(row) for row in rows]
 

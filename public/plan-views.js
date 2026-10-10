@@ -7,7 +7,7 @@ const CALENDAR_MARKERS = [
 ];
 // Mirrors backend/calendar/markers.py::has_marker: "[" or "(" opens, "]" or ")" closes,
 // the words may be separated by spaces, underscores or hyphens (or none), and case is ignored.
-const calendarMarkerSource = (name) => `[\\[(]\\s*${name.split("_").join("[\\s_-]*")}\\s*[\\])]`;
+const calendarMarkerSource = (name) => String.raw`[\[(]\s*${name.replaceAll("_", String.raw`[\s_-]*`)}\s*[\])]`;
 const CALENDAR_MARKER_PATTERN = new RegExp(
   CALENDAR_MARKERS.map(({ name }) => calendarMarkerSource(name)).join("|"),
   "gi",
