@@ -1045,6 +1045,42 @@ function handleChatScrollKey(event) {
   chatUserScrolledAway();
 }
 
+// Offsets the app last set or accepted. A scroll that moves above them by more than a few pixels is the reader,
+// including a scrollbar drag, which sends no wheel event. Programmatic scrolls re-anchor through scrollWindowForChat.
+const CHAT_UPWARD_SCROLL_PX = 4;
+const chatScrollAnchors = { window: null, messages: null };
+function chatScrollMovedUp(kind, position) {
+  const anchor = chatScrollAnchors[kind];
+  if (anchor == null || position > anchor) {
+    chatScrollAnchors[kind] = position;
+    return false;
+  }
+  if (position >= anchor - CHAT_UPWARD_SCROLL_PX) return false;
+  chatScrollAnchors[kind] = position;
+  return true;
+}
+
+function scrollWindowForChat(top) {
+  globalThis.scrollTo({ top, behavior: "auto" });
+  chatScrollAnchors.window = globalThis.scrollY;
+}
+
+function chatAcceptsReaderScroll() {
+  return !state.chatInitialScrollPending && !state.chatScrollRestoring && Boolean($("#chatPanel")?.classList.contains("active"));
+}
+
+// A small upward drag near the newest content keeps following; anything further away leaves it.
+function chatReaderScrolledUp() {
+  if (chatIsNearBottom()) return;
+  chatUserScrolledAway();
+}
+
+function handleChatMessagesScroll(event) {
+  const movedUp = chatScrollMovedUp("messages", event.target.scrollTop);
+  if (movedUp && chatAcceptsReaderScroll()) chatReaderScrolledUp();
+  updateChatComposerVisibility();
+}
+
 function jumpToLatestMessages() {
   const input = $("#messageInput");
   if (!input) return;
@@ -1530,7 +1566,7 @@ function scrollChatToResponseStart() {
       return;
     }
     const topGap = 16;
-    globalThis.scrollTo({ top: Math.max(0, globalThis.scrollY + target.getBoundingClientRect().top - topGap), behavior: "auto" });
+    scrollWindowForChat(Math.max(0, globalThis.scrollY + target.getBoundingClientRect().top - topGap));
     state.chatResponseMessageId = null;
     requestAnimationFrame(updateChatComposerVisibility);
   });
@@ -1546,7 +1582,7 @@ function keepChatStreamInView(streaming) {
   const overlap = latest.getBoundingClientRect().bottom - (composerTop - 12);
   const headroom = streaming.getBoundingClientRect().top - 16;
   const delta = Math.min(overlap, headroom);
-  if (delta > 0) globalThis.scrollBy({ top: delta, behavior: "auto" });
+  if (delta > 0) scrollWindowForChat(globalThis.scrollY + delta);
 }
 
 // The newest visible child: a working indicator, stream, queued or optimistic message can sit below the last persisted reply.
@@ -1561,6 +1597,7 @@ function scrollChatToLatest() {
   requestAnimationFrame(() => {
     if (state.chatInitialScrollPending && (!state.initialStateLoaded || document.readyState !== "complete")) return;
     root.scrollTop = root.scrollHeight;
+    chatScrollAnchors.messages = root.scrollTop;
     const target = chatLatestVisibleNode(root);
     if (!target) return;
     state.chatInitialScrollPending = false;
@@ -1574,7 +1611,7 @@ function scrollChatToLatest() {
       viewportBottom,
       Number.isFinite(composerTop) ? composerTop : viewportBottom,
     ) - targetGap;
-    globalThis.scrollTo({ top: Math.max(0, globalThis.scrollY + targetBottom - desiredBottom), behavior: "auto" });
+    scrollWindowForChat(Math.max(0, globalThis.scrollY + targetBottom - desiredBottom));
     requestAnimationFrame(updateChatComposerVisibility);
   });
 }
@@ -1589,9 +1626,9 @@ function restoreChatScrollPosition() {
       state.chatScrollRestoring = false;
       return;
     }
-    globalThis.scrollTo({ top: scrollY, behavior: "auto" });
+    scrollWindowForChat(scrollY);
     requestAnimationFrame(() => {
-      if (panel.classList.contains("active")) globalThis.scrollTo({ top: scrollY, behavior: "auto" });
+      if (panel.classList.contains("active")) scrollWindowForChat(scrollY);
       state.chatScrollRestoring = false;
       updateChatComposerVisibility();
     });
@@ -1600,8 +1637,11 @@ function restoreChatScrollPosition() {
 }
 
 function handleWindowScroll() {
-  if (!state.chatInitialScrollPending && !state.chatScrollRestoring && $("#chatPanel")?.classList.contains("active")) {
+  // The offset is tracked even while the chat is hidden, so a later comparison starts from the real position.
+  const movedUp = chatScrollMovedUp("window", globalThis.scrollY);
+  if (chatAcceptsReaderScroll()) {
     state.chatScrollY = globalThis.scrollY;
+    if (movedUp) chatReaderScrolledUp();
   }
   updateChatComposerVisibility();
 }
@@ -1926,5 +1966,5 @@ function setupCoachEvents() {
   globalThis.addEventListener("touchstart", handleChatTouchStart, { passive: true });
   globalThis.addEventListener("touchmove", handleChatTouchMove, { passive: true });
   globalThis.addEventListener("keydown", handleChatScrollKey);
-  $("#messages").addEventListener("scroll", updateChatComposerVisibility, { passive: true });
+  $("#messages").addEventListener("scroll", handleChatMessagesScroll, { passive: true });
 }

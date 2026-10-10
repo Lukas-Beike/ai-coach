@@ -92,3 +92,23 @@ test("the jump button returns to the latest reply and moves focus only on deskto
   if (touchProject) expect(await page.evaluate(() => document.activeElement?.id)).not.toBe("messageInput");
   else await expect(page.locator("#messageInput")).toBeFocused();
 });
+
+test("a scrollbar drag upward during a stream stops following without a wheel gesture @responsive", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "scrollbar dragging is a desktop gesture");
+  await openCoach(page);
+  await sendSlowStream(page);
+  await expect(page.locator(".message.assistant.streaming")).toBeVisible();
+  // Only a scroll event reaches the page: no wheel or key event, as with a scrollbar drag.
+  const { before, after } = await page.evaluate(() => {
+    const before = window.scrollY;
+    window.scrollTo({ top: Math.max(0, before - 800), behavior: "auto" });
+    return { before, after: window.scrollY };
+  });
+  expect(after).toBeLessThan(before);
+  await expect.poll(() => page.evaluate(() => state.chatFollowLatest)).toBe(false);
+  await waitForStreamToFinish(page);
+  expect(Math.abs(await page.evaluate(() => window.scrollY) - after)).toBeLessThanOrEqual(2);
+  const jump = page.locator("#chatJumpToComposer");
+  await expect(jump).toBeVisible();
+  await expect(jump.locator(".chat-jump-label")).toHaveText("Neue Antwort");
+});
