@@ -36,16 +36,30 @@ class PersonalRecoveryTests(unittest.TestCase):
             if nights >= 14:
                 self.assertEqual(50, pulse["median"])
                 self.assertEqual("above", pulse["position"])
-            self.assertFalse(any(row["metric"] == "hrv" for row in result["baselines"]))
+            hrv = next(row for row in result["baselines"] if row["metric"] == "hrv")
+            self.assertEqual(("RMSSD", status), (hrv["measurement"], hrv["status"]))
 
-    def test_future_stale_and_incompatible_methods_are_not_classified(self):
+    def test_future_stale_and_separate_hrv_methods_are_not_classified(self):
         rows = self.rows(30)
         for row in rows:
-            row["hrv_method"] = "RMSSD" if row["id"] < "2026-09-20" else "SDNN"
-        rows.append({"id": "2026-10-03", "restingHR": 200, "sleepSecs": 100})
+            row["hrvSDNN"] = 30
+        rows.append(
+            {
+                "id": "2026-10-03",
+                "restingHR": 200,
+                "sleepSecs": 100,
+                "hrv": 200,
+                "hrvSDNN": 200,
+            }
+        )
         result = personal_recovery(rows, {}, {}, self.today)
         self.assertEqual(
-            2, len([row for row in result["baselines"] if row["metric"] == "hrv"])
+            {"RMSSD", "SDNN"},
+            {
+                row["measurement"]
+                for row in result["baselines"]
+                if row["metric"] == "hrv"
+            },
         )
         self.assertFalse(
             any(
@@ -57,6 +71,20 @@ class PersonalRecoveryTests(unittest.TestCase):
         stale = personal_recovery(self.rows(30)[3:], {}, {}, self.today)
         self.assertTrue(
             all(row["status"] == "insufficient_data" for row in stale["baselines"])
+        )
+
+    def test_legacy_hrv_method_field_is_ignored(self):
+        rows = self.rows(14)
+        for row in rows:
+            row["hrv_method"] = "SDNN"
+        result = personal_recovery(rows, {}, {}, self.today)
+        self.assertEqual(
+            ["RMSSD"],
+            [
+                row["measurement"]
+                for row in result["baselines"]
+                if row["metric"] == "hrv"
+            ],
         )
 
     def test_deficit_uses_known_nights_and_never_offsets_with_long_sleep(self):

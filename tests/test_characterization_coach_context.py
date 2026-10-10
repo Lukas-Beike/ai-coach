@@ -10,18 +10,22 @@ from __future__ import annotations
 
 import json
 import unittest
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import Mock
 
 from backend.coach.context import (
+    COACH_CONTEXT_SECTION_LIMITS,
     CoachIntervalsContextService,
     CoachPerformanceContextReader,
     CoachPlanningContextReader,
     CoachStructuredContextService,
+    bounded_coach_context_sections,
+    coach_context_json_size,
 )
 from backend.coach.context_selection import CoachContextSelection
 from backend.performance.context import current_performance_context
+from backend.planning.context import compact_snapshot
 from backend.sync.garmin_projection_service import GarminProjectionService
 
 TODAY = date(2026, 5, 4)
@@ -653,6 +657,111 @@ class GarminCoachContextFallbackProvenanceTests(unittest.TestCase):
         self.assertEqual(ftp["freshness"], "current")
         self.assertEqual(ftp["measurement_status"], "today")
         self.assertIn("Kein Intervals.icu-Snapshot", result["scope"])
+
+
+def _eighty_four_day_wellness() -> list[dict[str, Any]]:
+    """Synthetic Intervals.icu wellness rows covering a full 84-day window."""
+    return [
+        {
+            "id": (TODAY - timedelta(days=83 - index)).isoformat(),
+            "hrv": 40 + index % 7,
+            "hrvSDNN": 55 + index % 5,
+            "restingHR": 50 + index % 4,
+            "sleepSecs": 7 * 3600 + (index % 5) * 600,
+        }
+        for index in range(84)
+    ]
+
+
+def _eighty_four_day_garmin_payload() -> dict[str, Any]:
+    """Synthetic Garmin payload with 84 days of sleep, resting HR and HRV."""
+
+    def epoch_ms(day: date, hour: int, minute: int, offset_days: int = 0) -> int:
+        moment = datetime(day.year, day.month, day.day, hour, minute, tzinfo=UTC)
+        return int((moment + timedelta(days=offset_days)).timestamp() * 1000)
+
+    sleep: list[dict[str, Any]] = []
+    resting: list[dict[str, Any]] = []
+    hrv: list[dict[str, Any]] = []
+    for index in range(84):
+        day = TODAY - timedelta(days=83 - index)
+        sleep.append(
+            {
+                "calendarDate": day.isoformat(),
+                "sleepTimeSeconds": 7 * 3600 + (index % 6) * 500,
+                "sleepStartTimestampGMT": epoch_ms(day, 21, 30 + index % 20, -1),
+                "sleepEndTimestampGMT": epoch_ms(day, 5, 30 + index % 15),
+                "sleepScores": {"overall": {"value": 70 + index % 20}},
+            }
+        )
+        resting.append(
+            {"calendarDate": day.isoformat(), "restingHeartRate": 48 + index % 5}
+        )
+        hrv.append(
+            {
+                "calendarDate": day.isoformat(),
+                "lastNightAvg": 45 + index % 9,
+                "lastNight5MinHigh": 70 + index % 9,
+            }
+        )
+    return {"sleep": sleep, "resting_hr": resting, "hrv": hrv}
+
+
+class CoachPerformanceBudgetTests(unittest.TestCase):
+    def test_eighty_four_day_worst_case_fits_current_performance_budget(self) -> None:
+        snapshot = compact_snapshot(
+            {"icu_ftp": 280, "max_hr": 190},
+            [],
+            _eighty_four_day_wellness(),
+            [],
+            history_days=-1,
+            all_sync_days=-1,
+            synced_at="2026-05-04T08:00:00+00:00",
+        )
+        reader, _ = _performance_reader(_eighty_four_day_garmin_payload())
+
+        performance = reader.current_performance(snapshot)
+        limit = COACH_CONTEXT_SECTION_LIMITS["current_performance"]
+        bounded, truncations = bounded_coach_context_sections(
+            {"current_performance": performance},
+            section_limits={"current_performance": limit},
+        )
+        kept = bounded["current_performance"]
+
+        self.assertLessEqual(coach_context_json_size(performance), limit)
+        self.assertEqual(truncations, [])
+        self.assertEqual(set(kept), set(performance))
+        self.assertIn("metrics", kept)
+        self.assertIn("training_focus", kept)
+        self.assertEqual(len(kept["personal_recovery"]["baselines"]), 7)
+
+    def test_coach_projection_drops_history_arrays_but_ui_source_keeps_them(
+        self,
+    ) -> None:
+        snapshot = compact_snapshot(
+            {"icu_ftp": 280, "max_hr": 190},
+            [],
+            _eighty_four_day_wellness(),
+            [],
+            history_days=-1,
+            all_sync_days=-1,
+            synced_at="2026-05-04T08:00:00+00:00",
+        )
+        garmin = _eighty_four_day_garmin_payload()
+        reader, _ = _performance_reader(garmin)
+
+        coach = reader.current_performance(snapshot)
+        ui = current_performance_context(snapshot, garmin, {"timezone": "UTC"}, TODAY)
+
+        for row in coach["personal_recovery"]["baselines"]:
+            self.assertNotIn("history", row)
+        regularity = coach["personal_recovery"]["regularity"]
+        self.assertNotIn("points_84", regularity)
+        self.assertNotIn("sources", regularity)
+        for series in regularity["series"]:
+            self.assertNotIn("points_84", series)
+        self.assertTrue(ui["personal_recovery"]["baselines"][0]["history"])
+        self.assertTrue(ui["personal_recovery"]["regularity"]["points_84"])
 
 
 if __name__ == "__main__":

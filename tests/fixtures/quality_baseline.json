@@ -49,7 +49,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 108,
+      "line": 136,
       "column": 45,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -65,7 +65,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 105,
+      "line": 133,
       "column": 47,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -89,7 +89,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/personal_recovery.py",
-      "line": 217,
+      "line": 218,
       "column": 16,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -449,7 +449,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 118,
+      "line": 146,
       "column": 47,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -457,7 +457,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 167,
+      "line": 195,
       "column": 48,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -465,15 +465,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 115,
-      "column": 49,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "tests/test_personal_recovery.py",
-      "line": 164,
+      "line": 143,
       "column": 49,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -482,6 +474,14 @@
       "tool": "ruff",
       "path": "e2e/fixture_runtime.py",
       "line": 1865,
+      "column": 49,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "tests/test_personal_recovery.py",
+      "line": 192,
       "column": 49,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -528,7 +528,7 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_personal_recovery.py",
+      "path": "tests/test_sync_intervals.py",
       "line": 126,
       "column": 53,
       "code": "UP017",
@@ -536,8 +536,8 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_sync_intervals.py",
-      "line": 126,
+      "path": "tests/test_personal_recovery.py",
+      "line": 154,
       "column": 53,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -769,7 +769,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 123,
+      "line": 151,
       "column": 73,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
