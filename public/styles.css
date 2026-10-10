@@ -1535,3 +1535,42 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 
 
 .analysis-report-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 0.9rem; overflow-wrap: anywhere; }
+
+.race-predictions-table { width: 100%; margin-top: 12px; border-collapse: collapse; }
+.race-predictions-table th, .race-predictions-table td { padding: 12px 4px; border-bottom: 1px solid var(--line); }
+.race-predictions-table thead th { color: var(--muted); font-size: .8rem; font-weight: 500; text-align: left; }
+.race-predictions-table tbody th { color: var(--ink); font-weight: 500; text-align: left; }
+.race-predictions-table th:last-child, .race-predictions-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.race-predictions-table tbody tr:last-child > * { border-bottom: 0; }
+#cyclingPowerProfile .race-predictions-table td { text-align: right; font-variant-numeric: tabular-nums; }
+#cyclingPowerProfile .race-predictions-table thead th:not(:first-child) { text-align: right; }
+.analysis-chart-card svg .analysis-series-bar { fill: var(--accent-bright); stroke: none; opacity: .25; }
+.analysis-chart-card svg .analysis-series-bar[data-color="1"] { fill: var(--chart-series-1); stroke: none; }
+
+.current-performance-groups { display: grid; gap: 24px; margin-top: 0; }
+.current-performance-table { width: 100%; border-collapse: collapse; }
+.current-performance-table caption { text-align: left; color: var(--accent-bright); font-size: .9rem; font-weight: 600; padding-bottom: 8px; }
+.current-performance-table th, .current-performance-table td { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.current-performance-table th { text-align: left; font-size: .85rem; font-weight: 500; }
+.current-performance-table th small { display: block; margin-top: 4px; color: var(--muted); font-size: .7rem; font-weight: 400; overflow-wrap: anywhere; }
+.current-performance-table td { text-align: right; padding-left: 12px; font-size: .95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.current-performance-table tbody tr:last-child > * { border-bottom: 0; }
+@media (min-width: 768px) { .current-performance-groups { grid-template-columns: 1fr 1fr; gap: 32px; } }
+
+#currentPerformance, #performancePredictions { margin-bottom: 24px; }
+
+.analysis-section-toggle > summary { display: flex; gap: 12px; justify-content: space-between; list-style: none; }
+.analysis-section-toggle > summary::-webkit-details-marker { display: none; }
+.analysis-section-toggle > summary::after { content: "\203a"; font-size: 1.5rem; transform: rotate(90deg); }
+.analysis-section-toggle:not([open]) > summary::after { transform: rotate(0deg); }
+.analysis-section-toggle > summary h3 { flex: 1; }
+.analysis-section-content { display: grid; gap: 12px; margin-top: 12px; }
+
+.analysis-group-heading { display: flex; align-items: center; gap: 12px; }
+.analysis-group-heading > .analysis-group-title { min-width: 0; }
+.analysis-group-heading > .analysis-legend-info { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px; min-height: 44px; margin: 0; padding: 0; }
+#performancePredictions.analysis-subchart { margin-bottom: 0; }
+
+.analysis-chart-stack:has(.analysis-section-help) { position: relative; }
+.analysis-chart-stack:has(.analysis-section-help) > .analysis-section-toggle > summary h3 { padding-right: 56px; }
+.analysis-chart-stack > .analysis-section-help { position: absolute; top: 16px; right: 52px; display: inline-flex; align-items: center; justify-content: center; width: 44px; min-height: 44px; margin: 0; padding: 0; }

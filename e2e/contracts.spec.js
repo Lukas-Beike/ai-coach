@@ -665,10 +665,12 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await page.getByRole("link", { name: "Analyse", exact: true }).click();
   const charts = page.locator("#analysisHistoryCharts");
   await expect(charts.locator("svg")).toHaveCount(4);
-  const running = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: /^Leistungsentwicklung · Laufen/ }) });
-  const cycling = charts.locator(".analysis-chart-card").filter({ has: page.getByRole("heading", { name: /^Leistungsentwicklung · Rad/ }) });
-  await expect(running.getByRole("button", { name: "Leistungsentwicklung · Laufen: Informationen", exact: true })).toBeVisible();
-  await expect(cycling.getByRole("button", { name: "Leistungsentwicklung · Rad: Informationen", exact: true })).toBeVisible();
+  const running = charts.locator('[data-analysis-section="development-Lauf"]').locator("..");
+  const cycling = charts.locator('[data-analysis-section="development-Rad"]').locator("..");
+  await expect(running.getByRole("heading", { name: "Laufen", exact: true })).toBeVisible();
+  await expect(cycling.getByRole("heading", { name: "Rad", exact: true })).toBeVisible();
+  await expect(running.getByRole("button", { name: "Laufen: Informationen", exact: true })).toBeVisible();
+  await expect(cycling.getByRole("button", { name: "Rad: Informationen", exact: true })).toBeVisible();
   await expect(running).toContainText("Schwellenpace: 5:05 min/km");
   await expect(running).toContainText("VO₂max: 59,4 ml/kg/min");
   await expect(cycling).toContainText("FTP: 255,5 W");
@@ -683,7 +685,7 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(cycling.locator(".analysis-info-tooltip:popover-open")).toContainText(/Daten für \d+ von \d+ Wochen vorhanden\./);
   await page.keyboard.press("Escape");
   expect((await cycling.locator('path[data-series="0"]').first().getAttribute("d")).match(/M/g)).toHaveLength(1);
-  const details = cycling.locator("details").filter({ has: page.getByText("Werte ansehen", { exact: true }) }).first();
+  const details = cycling.locator("details:not([data-analysis-section])").filter({ has: page.getByText("Werte ansehen", { exact: true }) }).first();
   await details.locator(":scope > summary").click();
   await expect(details).toHaveAttribute("open", "");
   await expect(details.getByRole("table")).toBeVisible();
@@ -695,5 +697,6 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
     start: "2026-07-05", end: "2026-10-02", load: { points: [] }, metrics: {},
   }));
   await expect(charts.locator("svg")).toHaveCount(0);
-  await expect(charts.locator(".empty")).toHaveCount(4);
+  await expect(charts.locator(".empty").filter({ hasText: "Noch keine datierten Werte im Zeitraum vorhanden." })).toHaveCount(4);
+  await expect(charts.locator("#performancePredictions")).toContainText("Noch keine Prognosen");
 });

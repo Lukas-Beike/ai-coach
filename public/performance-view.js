@@ -250,34 +250,73 @@ function performanceSection(root, title, items, detail = "") {
   root.append(section);
 }
 
+function renderCurrentPerformance(metrics) {
+  const root = document.getElementById("currentPerformance");
+  root.replaceChildren(reportNode("h3", "Aktuelle Leistungswerte"));
+  const groups = [
+    ["Laufen", [
+      ["run_threshold_pace_seconds_per_km", "Schwellenpace"],
+      ["run_threshold_watts", "Schwellenleistung"],
+      ["run_threshold_hr_bpm", "Schwellen-Herzfrequenz"],
+      ["running_max_hr_bpm", "Maximale Herzfrequenz"],
+      ["running_vo2max_ml_kg_min", "VO\u2082max \u00b7 Sch\u00e4tzung"],
+    ]],
+    ["Radfahren", [
+      ["cycling_ftp_watts", "FTP"],
+      ["cycling_eftp_watts", "eFTP \u00b7 Sch\u00e4tzung"],
+      ["bike_threshold_hr_bpm", "Schwellen-Herzfrequenz"],
+      ["cycling_max_hr_bpm", "Maximale Herzfrequenz"],
+      ["cycling_vo2max_ml_kg_min", "VO\u2082max \u00b7 Sch\u00e4tzung"],
+    ]],
+  ];
+  const grid = reportNode("div", null, "current-performance-groups");
+  for (const [sport, items] of groups) {
+    const table = reportNode("table", null, "current-performance-table");
+    table.append(reportNode("caption", sport));
+    const body = reportNode("tbody");
+    for (const [key, label] of items) {
+      const metric = metrics?.[key];
+      const row = reportNode("tr"); row.dataset.metric = key;
+      const heading = reportNode("th", label); heading.scope = "row";
+      row.append(heading, reportNode("td", metric?.value == null ? "\u2014" : analysisValue(metric.value, metric.unit || "")));
+      body.append(row);
+    }
+    table.append(body); grid.append(table);
+  }
+  root.append(grid);
+  makeAnalysisSectionCollapsible(root, "current-performance");
+}
+
 function renderPerformance(performance, { refreshCharts = true } = {}) {
   if (refreshCharts) {
     void renderTrainingRecords();
     renderPersonalRecovery(performance?.personal_recovery);
     renderAnalysisHistory(performance?.history);
+    void renderCyclingPowerProfile();
     renderTrainingFocus(performance?.training_focus);
-    void loadAnalysisReports();
   }
   const root = $("#performancePredictions");
   root.replaceChildren();
   const values = performance?.metrics || {};
+  renderCurrentPerformance(values);
   const predictions = racePredictionRows(values);
   root.hidden = false;
-  root.append(reportNode("h3", "Laufprognosen"));
+  root.append(reportNode("h4", "Laufprognosen"));
   if (!predictions.length) {
     root.append(reportNode("p", racePredictionEmptyReason(values), "empty"));
   } else {
-    const table = reportNode("table");
+    const table = reportNode("table", null, "race-predictions-table");
     const head = reportNode("thead");
     const header = reportNode("tr");
-    for (const label of ["Distanz", "Gesch\u00e4tzte Zeit", "Quelle"]) {
+    for (const label of ["Distanz", "Gesch\u00e4tzte Zeit"]) {
       const cell = reportNode("th", label); cell.scope = "col"; header.append(cell);
     }
     head.append(header); table.append(head);
     const body = reportNode("tbody");
     for (const { label, metric } of predictions) {
       const row = reportNode("tr");
-      row.append(reportNode("td", label), reportNode("td", formatDuration(metric.value)), reportNode("td", metric.source || "Unbekannt"));
+      const distance = reportNode("th", label); distance.scope = "row";
+      row.append(distance, reportNode("td", formatDuration(metric.value)));
       body.append(row);
     }
     table.append(body); root.append(table);
@@ -286,8 +325,8 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
 }
 
 function racePredictionRows(metrics) {
-  const distances = [["run_5k_seconds", "5 km (geschätzt)"], ["run_10k_seconds", "10 km (geschätzt)"],
-    ["run_half_marathon_seconds", "Halbmarathon (geschätzt)"], ["run_marathon_seconds", "Marathon (geschätzt)"]];
+  const distances = [["run_5k_seconds", "5 km"], ["run_10k_seconds", "10 km"],
+    ["run_half_marathon_seconds", "Halbmarathon"], ["run_marathon_seconds", "Marathon"]];
   const values = metrics || {};
   return distances.filter(([key]) => values[key]?.value != null).map(([key, label]) => ({ label, metric: values[key] }));
 }
