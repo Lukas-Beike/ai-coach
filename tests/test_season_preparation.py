@@ -3,7 +3,11 @@ from copy import deepcopy
 from datetime import date
 
 from backend.errors import AppError
-from backend.planning.season_preparation import load_scenarios, season_preparation
+from backend.planning.season_preparation import (
+    PLANNED_LOAD_ESTIMATE_SOURCE,
+    load_scenarios,
+    season_preparation,
+)
 
 
 class SeasonPreparationTests(unittest.TestCase):
@@ -194,6 +198,233 @@ class SeasonPreparationTests(unittest.TestCase):
                 "preparation"
             ]["target_context"]["distance_meters"]
             self.assertEqual(expected, actual)
+
+    def test_past_competition_window_is_anchored_at_event_date(self):
+        event = {
+            "id": "past",
+            "event_date": "2026-09-01",
+            "sport": "Run",
+            "priority": "A",
+            "name": "Past race",
+        }
+        snapshot = {
+            "recent_activities": [
+                {
+                    "id": "before",
+                    "type": "Run",
+                    "start_date_local": "2026-06-14T09:00:00",
+                    "moving_time": 1800,
+                },
+                {
+                    "id": "first-week",
+                    "type": "Run",
+                    "start_date_local": "2026-06-15T09:00:00",
+                    "moving_time": 1800,
+                },
+                {
+                    "id": "sunday",
+                    "type": "Run",
+                    "start_date_local": "2026-08-30T09:00:00",
+                    "moving_time": 1800,
+                },
+                {
+                    "id": "after",
+                    "type": "Run",
+                    "start_date_local": "2026-09-02T09:00:00",
+                    "moving_time": 1800,
+                },
+            ]
+        }
+        preparation = season_preparation(snapshot, [event], self.today)["events"][0][
+            "preparation"
+        ]
+        self.assertEqual("2026-06-15", preparation["window_start"])
+        self.assertEqual("2026-09-01", preparation["window_end"])
+        self.assertEqual(2, preparation["sessions_84_days"])
+        weeks = preparation["weeks"]
+        self.assertEqual(12, len(weeks))
+        for week in weeks:
+            start, end = (
+                date.fromisoformat(week["start"]),
+                date.fromisoformat(week["end"]),
+            )
+            self.assertEqual(0, start.weekday())
+            self.assertEqual(6, end.weekday())
+        self.assertEqual("2026-06-15", weeks[0]["start"])
+        self.assertEqual("2026-08-31", weeks[-1]["start"])
+        self.assertEqual(12, preparation["weekly_observed_volume"]["weeks_total"])
+
+    def test_future_competition_evidence_covers_the_weeks_up_to_today(self):
+        event = {
+            "id": "future",
+            "event_date": "2026-12-20",
+            "sport": "Run",
+            "priority": "A",
+            "name": "Future race",
+        }
+        snapshot = {
+            "recent_activities": [
+                {
+                    "id": "run",
+                    "type": "Run",
+                    "start_date_local": "2026-10-01T09:00:00",
+                    "moving_time": 1800,
+                },
+            ]
+        }
+        preparation = season_preparation(snapshot, [event], self.today)["events"][0][
+            "preparation"
+        ]
+        self.assertEqual("2026-07-13", preparation["window_start"])
+        self.assertEqual("2026-10-02", preparation["window_end"])
+        self.assertEqual(1, preparation["sessions_84_days"])
+        self.assertEqual(12, len(preparation["weeks"]))
+        self.assertEqual("2026-09-28", preparation["weeks"][-1]["start"])
+        self.assertEqual(1, preparation["weeks_with_recorded_training"])
+
+    def test_far_future_competition_keeps_current_evidence(self):
+        event = {
+            "id": "far",
+            "event_date": "2027-04-10",
+            "sport": "Run",
+            "priority": "B",
+            "name": "Far race",
+        }
+        snapshot = {
+            "recent_activities": [
+                {
+                    "id": "run",
+                    "type": "Run",
+                    "start_date_local": "2026-10-01T09:00:00",
+                    "moving_time": 1800,
+                },
+            ]
+        }
+        preparation = season_preparation(snapshot, [event], self.today)["events"][0][
+            "preparation"
+        ]
+        self.assertEqual("2026-07-13", preparation["window_start"])
+        self.assertEqual("2026-10-02", preparation["window_end"])
+        self.assertEqual(1, preparation["sessions_84_days"])
+        self.assertEqual("observations", preparation["status"])
+
+    def test_planned_load_is_estimated_from_duration_and_intensity(self):
+        plan = {
+            "training_calendar": [
+                {
+                    "id": "tempo",
+                    "name": "Tempo",
+                    "start_date_local": "2026-10-03T08:00:00",
+                    "moving_time": 3600,
+                    "icu_intensity": 0.85,
+                }
+            ]
+        }
+        snapshot = {"recent_wellness": [{"id": "2026-10-01", "ctl": 50, "atl": 60}]}
+        result = load_scenarios(snapshot, plan, self.today, {"end": "2026-10-04"})
+        self.assertEqual("ok", result["status"])
+        self.assertTrue(result["planned_load_estimated"])
+        self.assertEqual(
+            [
+                {
+                    "date": "2026-10-03",
+                    "name": "Tempo",
+                    "load": 72.25,
+                    "source": PLANNED_LOAD_ESTIMATE_SOURCE,
+                }
+            ],
+            result["estimated_planned_units"],
+        )
+        self.assertEqual(72.25, result["curves"][0]["points"][1]["load"])
+
+    def test_planned_intensity_in_percent_is_read_as_intensity_factor(self):
+        plan = {
+            "training_calendar": [
+                {
+                    "start_date_local": "2026-10-03T08:00:00",
+                    "moving_time": 3600,
+                    "icu_intensity": 85,
+                }
+            ]
+        }
+        snapshot = {"recent_wellness": [{"id": "2026-10-01", "ctl": 50, "atl": 60}]}
+        result = load_scenarios(snapshot, plan, self.today, {"end": "2026-10-04"})
+        self.assertEqual(72.25, result["estimated_planned_units"][0]["load"])
+
+    def test_recorded_planned_load_wins_over_estimate(self):
+        plan = {
+            "training_calendar": [
+                {
+                    "start_date_local": "2026-10-03T08:00:00",
+                    "moving_time": 3600,
+                    "icu_intensity": 0.85,
+                    "icu_training_load": 50,
+                }
+            ]
+        }
+        snapshot = {"recent_wellness": [{"id": "2026-10-01", "ctl": 50, "atl": 60}]}
+        result = load_scenarios(snapshot, plan, self.today, {"end": "2026-10-04"})
+        self.assertFalse(result["planned_load_estimated"])
+        self.assertEqual([], result["estimated_planned_units"])
+        self.assertEqual(50, result["curves"][0]["points"][1]["load"])
+
+    def test_units_without_any_load_are_listed_by_name_and_date(self):
+        plan = {
+            "training_calendar": [
+                {"date": "2026-10-03", "name": "Intervals"},
+                {
+                    "date": "2026-10-04",
+                    "name": "Bad intensity",
+                    "moving_time": 3600,
+                    "icu_intensity": 250,
+                },
+                {
+                    "date": "2026-10-04",
+                    "name": "Estimable",
+                    "moving_time": 1800,
+                    "icu_intensity": 0.7,
+                },
+            ]
+        }
+        snapshot = {"recent_wellness": [{"id": "2026-10-01", "ctl": 50, "atl": 60}]}
+        result = load_scenarios(snapshot, plan, self.today, {"end": "2026-10-04"})
+        self.assertEqual("insufficient_data", result["status"])
+        self.assertEqual(
+            [
+                {"date": "2026-10-03", "name": "Intervals"},
+                {"date": "2026-10-04", "name": "Bad intensity"},
+            ],
+            result["units_without_load"],
+        )
+        self.assertEqual(
+            ["Estimable"], [unit["name"] for unit in result["estimated_planned_units"]]
+        )
+
+    def test_load_scale_accepts_german_decimal_comma(self):
+        snapshot = {"recent_wellness": [{"id": "2026-10-01", "ctl": 50, "atl": 60}]}
+        plan = {
+            "training_calendar": [
+                {
+                    "id": "local",
+                    "start_date_local": "2026-10-03",
+                    "icu_training_load": 100,
+                }
+            ]
+        }
+        result = load_scenarios(
+            snapshot, plan, self.today, {"end": "2026-10-04", "load_scale": "0,85"}
+        )
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(0.85, result["alternative"]["load_scale"])
+        self.assertEqual(85, result["curves"][1]["points"][1]["load"])
+        for invalid in ("0,4", "1,6", "nan", "abc"):
+            with self.assertRaises(AppError):
+                load_scenarios(
+                    snapshot,
+                    plan,
+                    self.today,
+                    {"end": "2026-10-04", "load_scale": invalid},
+                )
 
 
 if __name__ == "__main__":
