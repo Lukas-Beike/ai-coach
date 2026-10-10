@@ -102,14 +102,17 @@ test("undo loads the preview first and shows exactly one dialog @responsive", as
   expect(calls.execute).toHaveLength(0);
 });
 
-test("cancelling the undo preview changes nothing @responsive", async ({ page }) => {
+async function answerUndoPreview(page, answerSelector) {
   const calls = await openChangeHistory(page);
   await page.locator("#changeHistoryList .change-history-item").getByRole("button", { name: "Änderung zurücknehmen" }).click();
   await expect(page.locator("#confirmationDialog")).toBeVisible();
-
-  await page.locator("#confirmationDialogCancel").click();
-
+  await page.locator(answerSelector).click();
   await expect(page.locator("#confirmationDialog")).toBeHidden();
+  return calls;
+}
+
+test("cancelling the undo preview changes nothing @responsive", async ({ page }) => {
+  const calls = await answerUndoPreview(page, "#confirmationDialogCancel");
   await expect.poll(() => calls.cancel).toEqual([{ proposal_id: PROPOSAL_ID }]);
   expect(calls.preview).toBe(1);
   expect(calls.confirm).toHaveLength(0);
@@ -117,13 +120,7 @@ test("cancelling the undo preview changes nothing @responsive", async ({ page })
 });
 
 test("confirming the undo preview applies exactly that change @responsive", async ({ page }) => {
-  const calls = await openChangeHistory(page);
-  await page.locator("#changeHistoryList .change-history-item").getByRole("button", { name: "Änderung zurücknehmen" }).click();
-  await expect(page.locator("#confirmationDialog")).toBeVisible();
-
-  await page.locator("#confirmationDialogAccept").click();
-
-  await expect(page.locator("#confirmationDialog")).toBeHidden();
+  const calls = await answerUndoPreview(page, "#confirmationDialogAccept");
   await expect(page.locator("#toast")).toContainText("Lokale Änderung zurückgenommen");
   expect(calls.preview).toBe(1);
   expect(calls.confirm).toEqual([{ proposal_id: PROPOSAL_ID }]);
