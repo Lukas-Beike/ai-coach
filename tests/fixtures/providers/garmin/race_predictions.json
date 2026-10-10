@@ -1,0 +1,6 @@
+{
+  "5k": {"raceTime": 1320},
+  "10k": {"raceTime": 2790},
+  "halfMarathon": {"raceTime": 6150},
+  "marathon": {"raceTime": 13050}
+}
