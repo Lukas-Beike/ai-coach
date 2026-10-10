@@ -53,7 +53,7 @@ test("race prediction rows exclude body weight and empty states give a reason", 
     run_marathon_seconds: { value: null },
     weight_kg: { value: 72.4, source: "Garmin Connect" },
   });
-  assert.deepEqual(Array.from(rows, (row) => row.label), ["5 km (geschätzt)"]);
+  assert.deepEqual(Array.from(rows, (row) => row.label), ["5 km"]);
   assert.equal(racePredictionRows(undefined).length, 0);
 
   assert.equal(
