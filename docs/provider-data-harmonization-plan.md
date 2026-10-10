@@ -1,8 +1,11 @@
 # Plan: Providerunabhängiges Datenformat für Trainings- und Gesundheitsdaten
 
-Stand: 9. Oktober 2026. Grundlage ist Commit `3f8bcaaa` auf `develop`
-(`APP_VERSION` 1.12.27, `CURRENT_SCHEMA_VERSION = 4`; letztes Release-Tag 1.12.26
-mit Schema v3). Status: Plan, noch keine Umsetzung.
+Stand: 10. Oktober 2026. Grundlage ist Commit `44c90499` auf `develop`
+(`APP_VERSION` 1.12.27, veröffentlicht mit Schema v4 und eingefroren als
+`tests/fixtures/schema_v4.sql.txt`; `develop` steht bereits auf
+`CURRENT_SCHEMA_VERSION = 5` mit `nutrition_logs.logged_time_known`). Die
+kanonische Persistenz dieses Plans wird damit **Schema v6**. Status: Welle 1
+(Phase 0 und unabhängige Teile von Phase 1) in Umsetzung, siehe Abschnitt 5.1.
 
 Ziel: Daten von Intervals.icu, Garmin Connect und künftigen Providern wie Wahoo
 werden an genau einer Grenze in ein eigenes, versioniertes, kanonisches Format
@@ -56,14 +59,19 @@ Installation und keine Remote-Schreibvorgänge.
 
 ### 1.3 Nebenbefund: Intervals-HRV-Baseline bleibt leer
 
-`performance/personal_recovery.py:45` verwendet Intervals-HRV nur bei
-`hrv_method` `RMSSD` oder `SDNN`. `performance/context.py:61` und `:124`
-übergeben jedoch die kompakte `recent_wellness`-Liste, die
-`planning/context.py:284` über `WELLNESS_FIELDS` filtert – und dort fehlt
-`hrv_method`. Nur Tests und das e2e-Fixture liefern das Feld. Empfehlung: ein
-kleiner `fix(performance)`-PR vorab mit Regressionstest über den echten
-Produzenten-/Verbraucherpfad. Das kanonische Format behebt diese Fehlerklasse
-später strukturell.
+`performance/personal_recovery.py:44-46` verwendet Intervals-HRV nur bei
+`hrv_method` `RMSSD` oder `SDNN`. Die Intervals-Wellness-API liefert dieses Feld
+jedoch nicht; nur Tests und das e2e-Fixture setzen es. Intervals kodiert die
+Methode stattdessen im Feldnamen: `hrv` (rMSSD) und `hrvSDNN` (SDNN; Semantik
+laut Intervals-Forum bzw. Drittdokumentation, nicht aus einem offiziellen
+Schema). Zusätzlich verwirft `planning/context.py:176` (`WELLNESS_FIELDS`, über
+`selected(...)` in `compact_snapshot` angewandt) `hrvSDNN`, und
+`performance/context.py:61` und `:124` übergeben genau diese kompakte
+`recent_wellness`-Liste. Korrektur (Welle 1, Einheit 1): Methode aus dem
+Feldnamen ableiten (`hrv` → `RMSSD`, `hrvSDNN` → `SDNN`, getrennte Serien),
+`hrvSDNN` in `WELLNESS_FIELDS` aufnehmen, Regressionstest über
+`compact_snapshot` → `current_performance_context`. Das kanonische Format behebt
+diese Fehlerklasse später strukturell.
 
 ## 2. Leitprinzipien
 
@@ -196,7 +204,7 @@ Deutsche Anzeigenamen stehen in genau einer Tabelle und erreichen das Frontend
   `{value, unit, source, freshness, fetched_at, observed_at, status}` für HTTP und
   Coach.
 
-### 3.4 Persistenz (Schema v5, additiv)
+### 3.4 Persistenz (Schema v6, additiv)
 
 Skizze; die endgültige DDL entsteht im Persistenz-PR.
 
@@ -208,7 +216,7 @@ Skizze; die endgültige DDL entsteht im Persistenz-PR.
 | `observations` | Tages- und Punktwerte im Langformat | eindeutig je `(provider, metric, sport, method, observed_at bzw. local_date)` |
 
 Bestehende Tabellen und kv-Einträge (`snapshots`, `garmin_snapshot`,
-`activity_detail:*`, `equipment_assignment:*`, Ausrüstung) bleiben in v5
+`activity_detail:*`, `equipment_assignment:*`, Ausrüstung) bleiben in v6
 unverändert und werden weiter geschrieben (Dual-Write). Referenzen werden nicht
 umgeschlüsselt, sondern über einen Resolver aufgelöst: lokale `activity_id` →
 Primäraufzeichnung bzw. alte Provider-ID → `(provider, provider_activity_id)` →
@@ -336,11 +344,25 @@ Jede Phase besteht aus mehreren kleinen PRs mit Conventional-Commit-Titeln.
    (`activities/read_service.py`) und Analyse-Fingerprints
    (`performance/report_service.py`). Sie sind die Paritätsreferenz aller
    Folgephasen.
-4. **Migrationsgerüst:** eingefrorene Schemasignaturen je Version statt
-   Rückrechnung aus dem aktuellen Schema und eine registrierte Schrittkette
-   `v1 → v2 → v3 → v4 → …`; verhaltensgleich, bestehende Migrationstests bleiben
-   grün. Nach dem Release von 1.12.27 das Fixture `schema_1_12_27.sql.txt` (v4)
-   einfrieren.
+4. **Migrationsgerüst:** eingefrorene SHA-256-Digests der normalisierten
+   Schemasignatur je veröffentlichter *Form* statt Rückrechnung aus dem aktuellen
+   Schema. Formen: S1 (Release 1.12.19), S2 (v2), S3 (v3 und v4 sind
+   tabellengleich), aktuell (v5, live aus dem Code berechnet). Exakte Erkennung
+   per Lookup `user_version → zulässige Formen` (0 → S1/S2/S3/aktuell, 1 → S1,
+   2 → S2, 3 und 4 → S3, 5 → aktuell); alles andere wird vor jedem Schreibzugriff
+   abgewiesen. Schritte je Form: S1 → S2 (Nutrition-Produkte-DDL), S2 → S3
+   (`no_training` mit Backfill und Refresh-Marker), S3 → aktuell
+   (`logged_time_known`); `_remove_gemini_state` bleibt unbedingter Nachschritt.
+   Ein Savepoint, frühe No-op-Rückkehr und Endvalidierung gegen die
+   Live-Signatur bleiben; verhaltensgleich, bestehende Migrationstests
+   unverändert grün. Die Digests werden nie zur Laufzeit aus `tests/fixtures`
+   geladen. Das v4-Fixture `schema_v4.sql.txt` existiert bereits; das
+   v5-Fixture wird nach dem nächsten Release eingefroren.
+5. **Garmin-Lock-Identität:** Heute gibt es kein Race auf `garmin_snapshot` –
+   Garmin-Sync und Morgen-Body-Battery teilen `GARMIN_SYNC_LOCK`
+   (`server.py:558-563`, `sync/garmin_service.py:32-37`,
+   `http_api/garmin_assembly.py:174-178`). Die Kopplung ist aber nur verdrahtet;
+   ein Identitätstest sichert sie bis zum einzigen Schreibpfad in Phase 3.
 
 Abnahme: volle Suite, Qualitäts-Ratchet ohne neue Befunde. Größe: mittel.
 
@@ -379,17 +401,19 @@ Guard-Baseline. Größe: mittel.
 Abnahme: Paritätstests – die Charakterisierungsergebnisse sind aus kanonischen
 Daten identisch zu heute. Größe: mittel.
 
-### Phase 3 – Kanonische Persistenz und Aktivitätsidentität (Schema v5)
+### Phase 3 – Kanonische Persistenz und Aktivitätsidentität (Schema v6)
 
 Kommt vor der Verbraucherumstellung, weil Feedback, Ausrüstung, Analysen,
 Paginierung und Coach-Werkzeuge stabile IDs brauchen, sobald sie kanonische
 Aktivitäten verwenden.
 
-1. Migration v5 (additiv) mit allen Nachweisen aus Abschnitt 6.
+1. Migration v6 (additiv, Schritt „aktuell (v5) → v6“ im Gerüst aus 0.4) mit
+   allen Nachweisen aus Abschnitt 6.
 2. Ingest-Schreibpfad nach Abschnitt 3.4: Intervals- und Garmin-Jobs schreiben
    Rohdatensätze, kanonische Datensätze und den Legacy-Snapshot in derselben
    Transaktion (Dual-Write), Cursor zuletzt. `garmin_snapshot` erhält genau einen
-   Schreibpfad; heute schreiben Sync und Morgen-Body-Battery getrennt.
+   Schreibpfad; heute schreiben Sync und Morgen-Body-Battery getrennt, aber
+   unter demselben `GARMIN_SYNC_LOCK`.
 3. Neuprojektions- und Backfill-Job: idempotent, an die Mapper-Version gebunden,
    in Batches wiederaufnehmbar, Zähler in der Diagnose ohne Athleteninhalte.
 4. Referenz-Resolver für lokale und alte Provider-IDs. Er wird verwendet von
@@ -473,12 +497,12 @@ Siehe Abschnitt 7.
 
 | Schritt | Benötigt | Beispiel-PR-Titel |
 | --- | --- | --- |
-| 0.1 HRV-Fix | – | `fix(performance): keep Intervals HRV method for personal baselines` |
-| 0.2–0.3 Fixtures, Charakterisierung | – | `test(performance): characterize provider source precedence` |
-| 0.4 Migrationsgerüst | – | `refactor(db): register frozen schema signatures per version` |
+| 0.1 HRV-Fix | – | `fix(performance): derive Intervals HRV method from wellness fields` |
+| 0.2–0.3, 0.5 Fixtures, Charakterisierung, Lock-Test | – | `test(performance): characterize recovery source precedence` |
+| 0.4 Migrationsgerüst | – | `refactor(db): recognize released schemas by frozen signatures` |
 | 1 Vertrag, Mapper, Guard | 0.2–0.3 | `feat(canonical): add provider-independent records and mappers` |
 | 2 Leseschicht | 1 | `refactor(sync): read provider snapshots through canonical ports` |
-| 3 Persistenz v5, Identität | 0.4, 2 | `feat(db): persist canonical provider records in schema v5` |
+| 3 Persistenz v6, Identität | 0.4, 2 | `feat(db): persist canonical provider records in schema v6` |
 | 4 Register | 1 | `refactor(sync): drive provider orchestration from a registry` |
 | 5 Verbraucher | 3 | `refactor(performance): consume canonical observations` |
 | 6 Outbound | 4 | `refactor(planning): export workouts through a provider port` |
@@ -488,14 +512,34 @@ Siehe Abschnitt 7.
 Kritischer Pfad bis „neuer Provider ohne Domänenänderung“: 0 → 1 → 2 → 3 → 5,
 mit 4 parallel.
 
-## 6. Pflichtnachweise für Schema-PRs (v5 und folgende)
+### 5.1 Umsetzungswellen
+
+Parallel umsetzbar sind nur unabhängig mergebare PRs gegen `develop`. Die
+Umsetzung läuft deshalb in Wellen; jede Welle startet erst, wenn die vorige
+gemergt ist.
+
+| Welle | Inhalt | PRs |
+| --- | --- | --- |
+| 1 | Phase 0 vollständig; aus Phase 1 das Leaf-Paket `backend/canonical/` (Vokabular, `Provenance`, `ActivityRecord`, `Observation`, `MetricValue`, Validierung, Layer-Registrierung) und der Kopplungs-Guard mit zählerbasierter Baseline | 12: HRV-Fix; Wire-Fixtures mit Lock-Identitätstest; sieben Charakterisierungs-PRs (aktuelle Metriken, Recovery, Körper-/Chart-Historie, Last/Fokus, Aktivitätsidentität, Coach-Kontext, Aktivitätslesen); Migrationsgerüst; kanonisches Paket; Guard |
+| 2 | Phase 1.2/1.3 und Beginn Phase 4: Intervals- und Garmin-Mapper gegen die Wire-Fixtures, zentraler Sport-Klassifizierer, Provider-Deskriptoren im Register | je Mapper ein PR, Klassifizierer, Deskriptoren |
+| 3 | Phase 2: kanonische Leseschicht über Bestandsdaten, verhaltensgleich gegen die Charakterisierungstests | je Datenbereich ein PR |
+| 4 | Phase 3: Schema v6, Ingest-Dual-Write, Backfill-Job, Aktivitätsidentität | sequenziell |
+| 5+ | Phasen 5–8 | je Domäne ein PR |
+
+Konfliktregeln für Welle 1: Nur HRV-Fix, Migrationsgerüst und kanonisches Paket
+ändern bestehende Python-Dateien. HRV-Fix und Migrationsgerüst fügen keine
+`icu_*`-Bezeichner, Garmin-Wire-Schlüssel oder `"intervals"`/`"garmin"`-Literale
+hinzu oder entfernen sie, damit die Guard-Baseline nach allen Merges gültig
+bleibt. Der Guard erlaubt `backend/providers/` und `backend/canonical/` vorab.
+
+## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
 - Eingefrorenes Fixture des zuletzt veröffentlichten Schemas mit Daten; direkte
-  Upgrades von v1, v2, v3 und v4 einschließlich übersprungener Releases, mit
+  Upgrades von v1, v2, v3, v4 und v5 einschließlich übersprungener Releases, mit
   befüllten Tabellen (`seed_all_tables` in `tests/test_db_migrations.py`).
 - Rollback bei Fehlern in jedem Schritt, Same-Build-Restart und Abweisung
   unbekannter oder neuerer Versionen ohne Datenänderung (der bestehende Test mit
-  `(None, 5, 99)` wird auf die neue Version angepasst).
+  `(None, 5, 6, 99)` wird auf die neue Version angepasst).
 - SQLCipher-Wiederöffnung in Docker/CI, da kein Windows-Wheel existiert.
 - Restore älterer Backups einschließlich Migration sowie Rollback der
   Restore-Validierung.
@@ -556,7 +600,7 @@ Fixtures und Tests. In `performance/`, `activities/`, `planning/`, `coach/`,
 | Risiko | Gegenmaßnahme |
 | --- | --- |
 | Stille Abweichungen abgeleiteter Werte | Zuerst charakterisieren, Paritätstests in jedem PR, Umstellung je Domäne |
-| Datenverlust oder fehlerhaftes Upgrade | v5 rein additiv, Backfill als idempotenter Job außerhalb der Migration, Rückbau erst nach verifiziertem Backfill, Nachweise aus Abschnitt 6 |
+| Datenverlust oder fehlerhaftes Upgrade | v6 rein additiv, Backfill als idempotenter Job außerhalb der Migration, Rückbau erst nach verifiziertem Backfill, Nachweise aus Abschnitt 6 |
 | Speicherwachstum durch Rohdaten | Ersetzt 12 Vollkopien und unbegrenztes `raw_provider_data`; Aufbewahrungsregel je Datenart (Entscheidung 1) |
 | Verwaiste Referenzen durch neue IDs | API-`id` und Speicherschlüssel bleiben Provider-IDs, Resolver für alte und neue IDs, unveränderte Analyse-Fingerprints, Zähler für nicht auflösbare Referenzen |
 | Lücken durch nicht atomaren Dual-Write | Kanonische Daten und Snapshot in einer Transaktion, Cursor zuletzt, Fehlerinjektionstest |
@@ -566,7 +610,7 @@ Fixtures und Tests. In `performance/`, `activities/`, `planning/`, `coach/`,
 | Zeitzonen und naive Ortszeiten | `start_utc` plus Athleten-Zeitzone; Mapper-Tests mit Sommerzeitwechsel |
 | Coach-Qualität nach Kontextumbau | Eigener PR, Evaluationsfälle, Budget-Tests |
 | Überentwicklung | Nur Felder mit konkretem Verbraucher; kein generisches Entity-Framework (A1) |
-| Zwei Schreiber auf `garmin_snapshot` | Ingest als einziger Schreibpfad (Phase 3); die Lock-Nutzung des Morgen-Pfads ist bis dahin nicht verifiziert und wird in Phase 0 geprüft |
+| Zwei Schreiber auf `garmin_snapshot` | Geprüft: beide Pfade teilen `GARMIN_SYNC_LOCK`; ein Identitätstest (Phase 0.5) sichert das bis zum einzigen Schreibpfad über Ingest (Phase 3) |
 | Wahoo-Zugang und Nutzungsbedingungen | Vor Phase 8 klären; ohne Freigabe endet das Vorhaben nach Phase 7 trotzdem mit providerneutraler Architektur |
 
 ## 9. Offene Entscheidungen
@@ -579,8 +623,10 @@ Fixtures und Tests. In `performance/`, `activities/`, `planning/`, `coach/`,
    Athleteneinstellung erst bei konkretem Bedarf.
 4. **Coach-Kontext nach Fachbereichen statt nach Providern.** Empfehlung: ja, als
    eigener PR mit Evaluation.
-5. **Basisversion für v5.** v5 setzt auf das veröffentlichte v4 (1.12.27) auf;
-   das Fixture wird nach dem Release eingefroren.
+5. **Basisversion für v6.** v6 setzt auf v5 (`logged_time_known`) auf, das
+   `develop` bereits enthält. Vor dem v6-PR sollte v5 veröffentlicht und als
+   Fixture eingefroren sein; sonst bündelt der v6-PR beide Schritte und weist
+   direkte Upgrades von v4 nach.
 
 ## 10. Definition of Done
 
@@ -592,7 +638,7 @@ Fixtures und Tests. In `performance/`, `activities/`, `planning/`, `coach/`,
   Codeänderung in Domäne, HTTP oder PWA.
 - Alle Präzedenzregeln stehen in einer Tabelle und sind durch Tests belegt;
   jeder Wert trägt Quelle, Messzeit und Abrufzeit.
-- Bestehende Installationen mit v1–v4 aktualisieren datenbewahrend;
+- Bestehende Installationen mit v1–v5 aktualisieren datenbewahrend;
   Backup/Restore, Same-Build-Restart, Export und Löschung sind abgedeckt.
 - Vorhandenes Feedback, Detailanalysen, Ausrüstungszuordnungen, alte
   Paginierungscursor und Aktivitäts-IDs im Coach-Verlauf bleiben auflösbar.
