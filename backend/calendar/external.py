@@ -1,17 +1,11 @@
 """Read-only queries and state projection for an external iCalendar feed."""
 
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 
-def list_events(
-    db: Any,
-    *,
-    today: date,
-    limit: Any = 300,
-    training_relevant_only: bool = False,
-) -> list[dict[str, Any]]:
+def _event_query_parts(db: Any, training_relevant_only: bool) -> tuple[str, str]:
     # [NO_TRAINING] deliberately sets training_relevant=0, but remains a
     # blocking event for callers that otherwise request only relevant events.
     columns = {
@@ -32,12 +26,44 @@ def list_events(
         if training_relevant_only
         else ""
     )
+    select_columns = (
+        "id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, "
+        f"training_relevant, {no_training_projection}no_intensity, short_only, updated_at"
+    )
+    return select_columns, relevance_filter
+
+
+def list_events(
+    db: Any,
+    *,
+    today: date,
+    limit: Any = 300,
+    training_relevant_only: bool = False,
+) -> list[dict[str, Any]]:
+    select_columns, relevance_filter = _event_query_parts(db, training_relevant_only)
     rows = db.execute(
-        "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, "
-        f"training_relevant, {no_training_projection}no_intensity, short_only, updated_at "
-        f"FROM external_calendar_events WHERE end_local > ?{relevance_filter} "
-        "ORDER BY start_local LIMIT ?",
+        f"SELECT {select_columns} FROM external_calendar_events "
+        f"WHERE end_local > ?{relevance_filter} ORDER BY start_local LIMIT ?",
         (today.isoformat() + "T00:00:00", max(1, min(int(limit), 1000))),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_events_in_window(
+    db: Any,
+    *,
+    today: date,
+    window_days: int,
+    training_relevant_only: bool = False,
+) -> list[dict[str, Any]]:
+    """Return every event overlapping the bounded local window, without a row cap."""
+    select_columns, relevance_filter = _event_query_parts(db, training_relevant_only)
+    window_start = today - timedelta(days=window_days)
+    window_end = today + timedelta(days=window_days + 1)
+    rows = db.execute(
+        f"SELECT {select_columns} FROM external_calendar_events "
+        f"WHERE end_local > ? AND start_local < ?{relevance_filter} ORDER BY start_local",
+        (window_start.isoformat() + "T00:00:00", window_end.isoformat() + "T00:00:00"),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -84,6 +110,17 @@ class ExternalCalendarReader:
                 db,
                 today=self._today(),
                 limit=limit,
+                training_relevant_only=training_relevant_only,
+            )
+
+    def list_events_in_window(
+        self, window_days: int, training_relevant_only: bool = False
+    ) -> list[dict[str, Any]]:
+        with self._database_manager.unit_of_work() as db:
+            return list_events_in_window(
+                db,
+                today=self._today(),
+                window_days=window_days,
                 training_relevant_only=training_relevant_only,
             )
 

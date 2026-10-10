@@ -1,9 +1,15 @@
 import sqlite3
 import unittest
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 
-from backend.calendar.external import ExternalCalendarReader, list_events, state
+from backend.calendar.external import (
+    ExternalCalendarReader,
+    list_events,
+    list_events_in_window,
+    state,
+)
+from backend.planning.context import build_daily_planning_context
 
 
 class Manager:
@@ -172,6 +178,41 @@ class ExternalCalendarTests(unittest.TestCase):
 
         self.assertEqual(1, len(list_events(self.db, today=self.today, limit=0)))
         self.assertEqual(1000, len(list_events(self.db, today=self.today, limit=2000)))
+
+    def test_window_query_is_not_capped_so_day_markers_see_late_events(self):
+        window_start = date(2026, 9, 21)
+        for index in range(56):
+            day = (window_start + timedelta(days=index)).isoformat()
+            self.add_event(
+                f"event-{index:02d}", start=f"{day}T09:00:00", end=f"{day}T10:00:00"
+            )
+        self.add_event(
+            "far-future", start="2026-12-01T09:00:00", end="2026-12-01T10:00:00"
+        )
+        marker_day = window_start + timedelta(days=54)
+        self.db.execute(
+            "UPDATE external_calendar_events SET no_training=1, training_relevant=0 WHERE id='event-54'"
+        )
+
+        events = list_events_in_window(
+            self.db, today=self.today, window_days=56, training_relevant_only=True
+        )
+        self.assertEqual(56, len(events))
+        self.assertNotIn("far-future", [event["id"] for event in events])
+
+        days = build_daily_planning_context(
+            planned=[],
+            checkins=[],
+            calendar_events=events,
+            weather_days=[],
+            recovery_by_date={},
+            health_by_date={},
+            activity_feedback=[],
+            today=self.today,
+            calendar_window_days=56,
+        )
+        marked_dates = [day["date"] for day in days if day.get("no_training")]
+        self.assertEqual([marker_day.isoformat()], marked_dates)
 
     def test_state_projects_fields_and_defaults_missing_kv(self):
         self.add_event("event")

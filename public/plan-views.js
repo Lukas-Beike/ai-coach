@@ -1,11 +1,17 @@
 globalThis.AppPlanViews = Object.freeze({ create });
 
 const CALENDAR_MARKERS = [
-  { key: "no_training", token: "[NO_TRAINING]", label: "Kein Training" },
-  { key: "no_intensity", token: "[NO_INTENSITY]", label: "Keine Intensität" },
-  { key: "short_only", token: "[SHORT_ONLY]", label: "Nur kurze Einheiten" },
+  { key: "no_training", name: "NO_TRAINING", label: "Kein Training" },
+  { key: "no_intensity", name: "NO_INTENSITY", label: "Keine Intensität" },
+  { key: "short_only", name: "SHORT_ONLY", label: "Nur kurze Einheiten" },
 ];
-const CALENDAR_MARKER_PATTERN = /\[(?:NO_TRAINING|NO_INTENSITY|SHORT_ONLY)\]/gi;
+// Mirrors backend/calendar/markers.py::has_marker: "[" or "(" opens, "]" or ")" closes,
+// the words may be separated by spaces, underscores or hyphens (or none), and case is ignored.
+const calendarMarkerSource = (name) => `[\\[(]\\s*${name.split("_").join("[\\s_-]*")}\\s*[\\])]`;
+const CALENDAR_MARKER_PATTERN = new RegExp(
+  CALENDAR_MARKERS.map(({ name }) => calendarMarkerSource(name)).join("|"),
+  "gi",
+);
 const PLANNED_DAY_STATUS_LABELS = new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]]);
 
 function stripCalendarMarkers(text) {
@@ -14,9 +20,9 @@ function stripCalendarMarkers(text) {
 
 function calendarMarkerKeys(source) {
   if (!source || typeof source !== "object") return [];
-  const name = String(source.name || "").toUpperCase();
+  const name = String(source.name || "");
   return CALENDAR_MARKERS
-    .filter(({ key, token }) => Boolean(source[key]) || name.includes(token))
+    .filter(({ key, name: markerName }) => Boolean(source[key]) || new RegExp(calendarMarkerSource(markerName), "i").test(name))
     .map(({ key }) => key);
 }
 

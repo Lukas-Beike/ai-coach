@@ -129,7 +129,9 @@ class PublicPlanStateService:
                 canonical_planned,
                 weather,
                 self._checkins.list(365),
-                self._external_calendar.list_events(50, training_relevant_only=True),
+                self._external_calendar.list_events_in_window(
+                    self._external_calendar_window_days, training_relevant_only=True
+                ),
             ),
             "planning": planning_season.planning_state(
                 competitions,

@@ -81,3 +81,20 @@ test("conflict badges use the backend labels as text and skip empty entries", ()
   );
   assert.deepEqual(plain(plannedConflictBadgeSpecs(undefined)), []);
 });
+
+test("tolerant marker spellings are stripped and detected like the backend", () => {
+  const { stripCalendarMarkers, calendarMarkerKeys, plannedAppointmentLabel } = helpers();
+  assert.equal(stripCalendarMarkers("Arzt (NO TRAINING) Termin"), "Arzt Termin");
+  assert.equal(stripCalendarMarkers("Physio [NO-TRAINING]"), "Physio");
+  assert.equal(stripCalendarMarkers("Sauna [ no intensity ]"), "Sauna");
+  assert.equal(stripCalendarMarkers("Lauf (short-only] Termin"), "Lauf Termin");
+  assert.equal(stripCalendarMarkers("Kurs [NOTRAINING]"), "Kurs");
+  assert.equal(stripCalendarMarkers("Stadtlauf Termin"), "Stadtlauf Termin");
+  assert.equal(stripCalendarMarkers("NO TRAINING ohne Klammern"), "NO TRAINING ohne Klammern");
+  assert.deepEqual(plain(calendarMarkerKeys({ name: "Arzt (NO TRAINING)" })), ["no_training"]);
+  assert.deepEqual(plain(calendarMarkerKeys({ name: "Lauf [short_only" })), []);
+  assert.equal(
+    plannedAppointmentLabel({ name: "Physio (No-Intensity)", start_local: "2026-10-10T08:30:00" }),
+    "Physio · 08:30",
+  );
+});
