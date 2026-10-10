@@ -3,63 +3,23 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Any, Final
 
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     NUTRITION_PRODUCTS_DDL,
-    current_schema_signature,
     database_schema_is_current,
     database_schema_signature,
 )
-
-_NO_TRAINING_COLUMN = ", no_training INTEGER NOT NULL DEFAULT 0"
-# SQLite places an ADD COLUMN after the last column's trailing whitespace, so the
-# normalized signature of an upgraded table keeps this exact spacing.
-_LOGGED_TIME_KNOWN_COLUMN = " , logged_time_known INTEGER NOT NULL DEFAULT 1)"
-_LOGGED_TIME_KNOWN_ABSENT = " )"
-
-
-def _expected_signature(
-    *,
-    without_products: bool = False,
-    without_no_training: bool = False,
-    without_logged_time_known: bool = False,
-) -> tuple[tuple[str, str, str, str], ...]:
-    """Return the current schema without objects or columns added after a release."""
-    expected: list[tuple[str, str, str, str]] = []
-    for kind, name, table, sql in current_schema_signature():
-        if without_products and table == "nutrition_products":
-            continue
-        if without_no_training and table == "external_calendar_events":
-            sql = sql.replace(_NO_TRAINING_COLUMN, "")
-        if without_logged_time_known and table == "nutrition_logs":
-            sql = sql.replace(_LOGGED_TIME_KNOWN_COLUMN, _LOGGED_TIME_KNOWN_ABSENT)
-        expected.append((kind, name, table, sql))
-    return tuple(expected)
-
-
-def _schema_is_1_12_19(db: Any) -> bool:
-    return database_schema_signature(db) == _expected_signature(
-        without_products=True,
-        without_no_training=True,
-        without_logged_time_known=True,
-    )
-
-
-def _schema_is_previous_calendar_schema(db: Any) -> bool:
-    """Recognize the released schema immediately before no_training."""
-    return database_schema_signature(db) == _expected_signature(
-        without_no_training=True, without_logged_time_known=True
-    )
-
-
-def _schema_is_previous_nutrition_schema(db: Any) -> bool:
-    """Recognize schemas 3 and 4, which lack only the meal-time signal."""
-    return database_schema_signature(db) == _expected_signature(
-        without_logged_time_known=True
-    )
-
+from backend.db.schema_history import (
+    ACCEPTED_SHAPES_BY_VERSION,
+    SHAPE_CURRENT,
+    SHAPE_RELEASE_1_12_19,
+    SHAPE_SCHEMA_V2,
+    SHAPE_SCHEMA_V3_V4,
+    released_shape,
+)
 
 _UNSUPPORTED_SCHEMA_MESSAGE = (
     "Die vorhandene Datenbank entspricht keinem unterstützten Schema. "
@@ -67,56 +27,22 @@ _UNSUPPORTED_SCHEMA_MESSAGE = (
 )
 
 
-def _schema_unsupported(
-    version: int,
-    current: bool,
-    current_shape: bool,
-    old_schema: bool,
-    previous_calendar_schema: bool,
-    previous_nutrition_schema: bool,
-) -> bool:
-    if version == 1:
-        return not old_schema
-    if version == 2:
-        return not previous_calendar_schema
-    if version in (3, 4):
-        return not previous_nutrition_schema
-    if current:
-        return False
-    if version == CURRENT_SCHEMA_VERSION:
-        return True
-    return not (
-        current_shape
-        or old_schema
-        or previous_calendar_schema
-        or previous_nutrition_schema
-    )
-
-
 def migrate_schema(db: Any) -> None:
     """Upgrade supported schemas and remove retired Gemini conversation state.
 
-    The caller owns the commit. Individual DDL statements deliberately avoid
-    executescript(), whose implicit commit would break rollback on failure.
+    The stored version and the frozen shape of the database are checked before
+    any write. A supported shape is then upgraded step by step inside one
+    savepoint. The caller owns the commit. Individual DDL statements deliberately
+    avoid executescript(), whose implicit commit would break rollback on failure.
     """
     version = db.execute("PRAGMA user_version").fetchone()["user_version"]
-    if version not in (0, 1, 2, 3, 4, CURRENT_SCHEMA_VERSION):
+    if version not in ACCEPTED_SHAPES_BY_VERSION:
         raise RuntimeError(
             "Die Datenbankversion wird von diesem Release nicht unterstützt."
         )
     current = database_schema_is_current(db)
-    current_shape = database_schema_signature(db) == current_schema_signature()
-    previous_nutrition_schema = not current and _schema_is_previous_nutrition_schema(db)
-    previous_calendar_schema = not current and _schema_is_previous_calendar_schema(db)
-    old_schema = not current and _schema_is_1_12_19(db)
-    if _schema_unsupported(
-        version,
-        current,
-        current_shape,
-        old_schema,
-        previous_calendar_schema,
-        previous_nutrition_schema,
-    ):
+    shape = SHAPE_CURRENT if current else released_shape(database_schema_signature(db))
+    if shape is None or shape not in ACCEPTED_SHAPES_BY_VERSION[version]:
         raise RuntimeError(_UNSUPPORTED_SCHEMA_MESSAGE)
     if current and version == CURRENT_SCHEMA_VERSION:
         return
@@ -124,12 +50,8 @@ def migrate_schema(db: Any) -> None:
         db.execute("BEGIN IMMEDIATE")
     db.execute("SAVEPOINT schema_migration")
     try:
-        if not current:
-            _upgrade_legacy_schema(
-                db,
-                old_schema=old_schema,
-                previous_calendar_schema=previous_calendar_schema,
-            )
+        if shape != SHAPE_CURRENT:
+            _upgrade_from_shape(db, shape)
         _remove_gemini_state(db)
         db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
         if not database_schema_is_current(db):
@@ -139,6 +61,15 @@ def migrate_schema(db: Any) -> None:
         db.execute("RELEASE schema_migration")
         raise
     db.execute("RELEASE schema_migration")
+
+
+def _upgrade_from_shape(db: Any, shape: str) -> None:
+    """Apply the registered steps, in order, from a released shape to the live one."""
+    pending = shape
+    while pending != SHAPE_CURRENT:
+        next_shape, step = UPGRADE_STEPS[pending]
+        step(db)
+        pending = next_shape
 
 
 def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -288,32 +219,48 @@ def _remove_gemini_state(db: Any) -> None:
     )
 
 
-def _upgrade_legacy_schema(
-    db: Any, *, old_schema: bool, previous_calendar_schema: bool
-) -> None:
-    if old_schema:
-        for statement in NUTRITION_PRODUCTS_DDL.split(";"):
-            if statement.strip():
-                db.execute(statement)
-    if old_schema or previous_calendar_schema:
-        db.execute(
-            "ALTER TABLE external_calendar_events "
-            "ADD COLUMN no_training INTEGER NOT NULL DEFAULT 0"
-        )
-        # v2 discarded descriptions; irrelevant rows can be ordinary appointments
-        # or description-only NO_TRAINING markers. Require fresh evidence rather
-        # than assigning a hard marker to an ambiguous row.
-        db.execute(
-            "UPDATE external_calendar_events SET no_training=1 "
-            "WHERE instr(upper(name), '[NO_TRAINING]') > 0"
-        )
-        db.execute(
-            "INSERT OR REPLACE INTO kv(key, value, updated_at) "
-            "SELECT 'external_calendar_constraints_refresh_required', '1', MAX(updated_at) "
-            "FROM external_calendar_events WHERE training_relevant=0 AND no_training=0 "
-            "HAVING COUNT(*) > 0"
-        )
+def _add_nutrition_products(db: Any) -> None:
+    """Released shape 1.12.19 -> schema version 2."""
+    for statement in NUTRITION_PRODUCTS_DDL.split(";"):
+        if statement.strip():
+            db.execute(statement)
+
+
+def _add_no_training_signal(db: Any) -> None:
+    """Schema version 2 -> schema versions 3 and 4."""
+    db.execute(
+        "ALTER TABLE external_calendar_events "
+        "ADD COLUMN no_training INTEGER NOT NULL DEFAULT 0"
+    )
+    # v2 discarded descriptions; irrelevant rows can be ordinary appointments
+    # or description-only NO_TRAINING markers. Require fresh evidence rather
+    # than assigning a hard marker to an ambiguous row.
+    db.execute(
+        "UPDATE external_calendar_events SET no_training=1 "
+        "WHERE instr(upper(name), '[NO_TRAINING]') > 0"
+    )
+    db.execute(
+        "INSERT OR REPLACE INTO kv(key, value, updated_at) "
+        "SELECT 'external_calendar_constraints_refresh_required', '1', MAX(updated_at) "
+        "FROM external_calendar_events WHERE training_relevant=0 AND no_training=0 "
+        "HAVING COUNT(*) > 0"
+    )
+
+
+def _add_logged_time_known(db: Any) -> None:
+    """Schema versions 3 and 4 -> the current schema."""
     # Existing meal logs were recorded with a time; they keep logged_time_known=1.
     db.execute(
         "ALTER TABLE nutrition_logs ADD COLUMN logged_time_known INTEGER NOT NULL DEFAULT 1"
     )
+
+
+UpgradeStep = Callable[[Any], None]
+
+# Released shape -> (shape reached after the step, step). Every released shape
+# is upgraded through the chain ending at the current shape.
+UPGRADE_STEPS: Final[Mapping[str, tuple[str, UpgradeStep]]] = {
+    SHAPE_RELEASE_1_12_19: (SHAPE_SCHEMA_V2, _add_nutrition_products),
+    SHAPE_SCHEMA_V2: (SHAPE_SCHEMA_V3_V4, _add_no_training_signal),
+    SHAPE_SCHEMA_V3_V4: (SHAPE_CURRENT, _add_logged_time_known),
+}
