@@ -146,6 +146,37 @@ function plannedDayNotes(dayContext) {
   return notes;
 }
 
+function plannedEntryDurationLabel(actual, entry) {
+  if (actual) return AppFormat.duration(actual.moving_time ?? actual.elapsed_time);
+  if (entry.duration_minutes) return AppFormat.duration(Number(entry.duration_minutes) * 60);
+  return AppFormat.duration(entry.moving_time);
+}
+
+function appendPlannedCalendarComparison(details, entry, actual) {
+  if (!actual || entry.is_completed_activity) return;
+  const comparison = document.createElement("div");
+  comparison.className = "planned-comparison";
+  const plannedDuration = entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time;
+  const planLine = document.createElement("p");
+  planLine.textContent = `Plan: ${[
+    entry.name,
+    AppFormat.duration(plannedDuration),
+    entry.icu_training_load != null ? `Load ${calendarMetricNumber(entry.icu_training_load)}` : null,
+  ].filter(Boolean).join(" · ")}`;
+  const actualLine = document.createElement("p");
+  actualLine.textContent = `Ist: ${[
+    AppFormat.duration(actual.moving_time ?? actual.elapsed_time),
+    actual.icu_training_load != null ? `Load ${calendarMetricNumber(actual.icu_training_load)}` : null,
+  ].filter(Boolean).join(" · ")}`;
+  comparison.append(planLine, actualLine);
+  if (entry.compliance?.percentage != null) {
+    const ratio = document.createElement("p");
+    ratio.textContent = `${entry.compliance.basis === "training_load" ? "Load" : "Umfang"} Plan/Ist: ${entry.compliance.percentage} %`;
+    comparison.append(ratio);
+  }
+  details.append(comparison);
+}
+
 function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
@@ -371,12 +402,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return true;
   }
 
-  function plannedEntryDurationLabel(actual, entry) {
-    if (actual) return AppFormat.duration(actual.moving_time ?? actual.elapsed_time);
-    if (entry.duration_minutes) return AppFormat.duration(Number(entry.duration_minutes) * 60);
-    return AppFormat.duration(entry.moving_time);
-  }
-
   function appendActualCalendarDetails(details, actual) {
     if (!actual) return;
     const primaryMetrics = document.createElement("span");
@@ -396,31 +421,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     appendCalendarFact(facts, "Pace", calendarPaceLabel(actual));
     appendCalendarFact(facts, "Höhenmeter", calendarMetricNumber(actual.total_elevation_gain, " hm"));
     details.append(primaryMetrics, facts);
-  }
-
-  function appendPlannedCalendarComparison(details, entry, actual) {
-    if (!actual || entry.is_completed_activity) return;
-    const comparison = document.createElement("div");
-    comparison.className = "planned-comparison";
-    const plannedDuration = entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time;
-    const planLine = document.createElement("p");
-    planLine.textContent = `Plan: ${[
-      entry.name,
-      AppFormat.duration(plannedDuration),
-      entry.icu_training_load != null ? `Load ${calendarMetricNumber(entry.icu_training_load)}` : null,
-    ].filter(Boolean).join(" · ")}`;
-    const actualLine = document.createElement("p");
-    actualLine.textContent = `Ist: ${[
-      AppFormat.duration(actual.moving_time ?? actual.elapsed_time),
-      actual.icu_training_load != null ? `Load ${calendarMetricNumber(actual.icu_training_load)}` : null,
-    ].filter(Boolean).join(" · ")}`;
-    comparison.append(planLine, actualLine);
-    if (entry.compliance?.percentage != null) {
-      const ratio = document.createElement("p");
-      ratio.textContent = `${entry.compliance.basis === "training_load" ? "Load" : "Umfang"} Plan/Ist: ${entry.compliance.percentage} %`;
-      comparison.append(ratio);
-    }
-    details.append(comparison);
   }
 
   function appendPlannedSessionHeader(cardSummary, entry, actual) {
