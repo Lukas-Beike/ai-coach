@@ -489,7 +489,9 @@ def _fixture_cycling_target(event_date):
     if existing is None:
         server.PLANNING_DATA.competition().save(target)
     elif existing.get("event_date") != target["event_date"]:
-        server.PLANNING_DATA.competition().save({**target, "id": existing["id"]})
+        server.PLANNING_DATA.competition().save(
+            {**target, "competition_id": existing["id"]}
+        )
 
 
 def ensure_training_features():

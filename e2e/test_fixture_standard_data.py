@@ -502,6 +502,62 @@ class StandardFixtureDataTests(unittest.TestCase):
         self.assertEqual(features["units"], first["units"])
         self.assertEqual(feature_ids, demo_ids)
 
+    def test_reseeding_on_a_later_date_moves_the_single_cycling_target(self):
+        server = fixture_runtime.server
+        original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)
+        seed_day = self.today
+        reseed_day = self.today + timedelta(days=3)
+
+        def cycling_targets():
+            return [
+                item
+                for item in server.PLANNING_DATA.competition().list(100)
+                if item["name"] == "Fixture cycling target"
+            ]
+
+        with TemporaryDirectory(prefix="fixture-reseed-test-") as directory:
+            root = Path(directory)
+            try:
+                DATABASE_MANAGER_CACHE.reset()
+                server.CONFIG = replace(server.CONFIG, app_password="")
+                server.DATA_DIR = root
+                server.DB_PATH = root / "fixture.db"
+                server.LOG_PATH = root / "fixture.log"
+                fixture_runtime.initialise_fixture()
+                with patch.object(
+                    server.ATHLETE_CLOCK,
+                    "now",
+                    return_value=datetime.combine(seed_day, time()),
+                ):
+                    fixture_runtime.seed_training_features()
+                first_targets = cycling_targets()
+                competitions_before = len(server.PLANNING_DATA.competition().list(100))
+                with patch.object(
+                    server.ATHLETE_CLOCK,
+                    "now",
+                    return_value=datetime.combine(reseed_day, time()),
+                ):
+                    fixture_runtime.seed_training_features()
+                reseeded_targets = cycling_targets()
+                competitions_after = len(server.PLANNING_DATA.competition().list(100))
+            finally:
+                DATABASE_MANAGER_CACHE.reset()
+                server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH = (
+                    original
+                )
+
+        self.assertEqual(len(first_targets), 1)
+        self.assertEqual(len(reseeded_targets), 1)
+        self.assertEqual(reseeded_targets[0]["id"], first_targets[0]["id"])
+        self.assertEqual(
+            reseeded_targets[0]["event_date"],
+            (reseed_day + timedelta(days=30)).isoformat(),
+        )
+        self.assertNotEqual(
+            first_targets[0]["event_date"], reseeded_targets[0]["event_date"]
+        )
+        self.assertEqual(competitions_after, competitions_before)
+
     def test_explicit_activity_seed_merges_into_existing_snapshot(self):
         server = fixture_runtime.server
         existing = {
