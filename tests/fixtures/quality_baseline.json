@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "7fc4eb57d7edee49f0ce4093c0e697e29fa605d4",
+  "base": "0b7e6d22c98a5165c085764929935d9367b62a0a",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
@@ -920,14 +920,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/http_api/handler.py",
-      "line": 236,
-      "column": 12,
-      "code": "arg-type",
-      "message_sha256": "f685cb5d563f596260359c7ec60fc7f872d16dfe84fb079fef2741fa26ae038d"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_planning_change_service.py",
       "line": 240,
       "column": 12,
@@ -945,10 +937,10 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 245,
+      "line": 244,
       "column": 12,
       "code": "arg-type",
-      "message_sha256": "6195198e495bd02c70500de218de463b7423c94c7b7371b88aae6a19d1792592"
+      "message_sha256": "f685cb5d563f596260359c7ec60fc7f872d16dfe84fb079fef2741fa26ae038d"
     },
     {
       "tool": "mypy",
@@ -961,7 +953,15 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 257,
+      "line": 253,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "6195198e495bd02c70500de218de463b7423c94c7b7371b88aae6a19d1792592"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/handler.py",
+      "line": 265,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "e96d723fc3eefce71127726ff03053febc050202cfdf394836d946e9e10b7309"
@@ -969,7 +969,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 298,
+      "line": 306,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "454abbaab0cc1828be65fbd1b78572b7e7e5ed8bc7cca575ab77dc69909bdeeb"
@@ -1393,7 +1393,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 247,
+      "line": 255,
       "column": 26,
       "code": "arg-type",
       "message_sha256": "202e95d88c01d1a85fa2f434c5a0096706c95cfdc41dcab4a22472c904bb44b0"
