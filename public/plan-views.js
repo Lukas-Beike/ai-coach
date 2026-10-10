@@ -265,6 +265,23 @@ function appendPlannedCalendarComparison(details, entry, actual) {
   details.append(comparison);
 }
 
+function appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey) {
+  if (status !== "completed" && status !== "missed" && status !== "skipped") return;
+  const statusText = document.createElement("span");
+  statusText.className = "planned-entry-status";
+  statusText.textContent = status === "skipped" ? `Entfallen (${restDayLabel})` : calendarStatusLabel(entry, dateKey, todayKey);
+  cardSummary.append(statusText);
+}
+
+function appendPlannedTarget(cardSummary, entry) {
+  const target = document.createElement("span");
+  target.className = "planned-session-target";
+  const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
+  if (entry.icu_training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.icu_training_load)}`);
+  target.textContent = `Plan: ${targetParts.join(" · ")}`;
+  cardSummary.append(target);
+}
+
 const SEASON_PHASE_LABELS = { base: "Basis", build: "Aufbau", peak: "Spezifische Vorbereitung", taper: "Taper", completed: "Vergangen" };
 
 function nextCompetitionSummary(next, dateLabel, todayKey) {
@@ -583,23 +600,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       svg.append(shape);
     }
     return svg;
-  }
-
-  function appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey) {
-    if (status !== "completed" && status !== "missed" && status !== "skipped") return;
-    const statusText = document.createElement("span");
-    statusText.className = "planned-entry-status";
-    statusText.textContent = status === "skipped" ? `Entfallen (${restDayLabel})` : calendarStatusLabel(entry, dateKey, todayKey);
-    cardSummary.append(statusText);
-  }
-
-  function appendPlannedTarget(cardSummary, entry) {
-    const target = document.createElement("span");
-    target.className = "planned-session-target";
-    const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
-    if (entry.icu_training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.icu_training_load)}`);
-    target.textContent = `Plan: ${targetParts.join(" · ")}`;
-    cardSummary.append(target);
   }
 
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}) {
