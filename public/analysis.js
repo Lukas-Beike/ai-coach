@@ -1310,6 +1310,7 @@ function appendSeasonScenario(event, section, generation) {
       const result = await api("/api/analysis/scenarios", {method:"POST",body:JSON.stringify(values)});
       if (generation !== seasonGeneration) return;
       output.replaceChildren(reportNode("p", "Lokales Standardmodell: CTL 42 Tage, ATL 7 Tage. Nicht geplante Tage werden mit 0 Belastung modelliert; die Alternative halbiert die Belastung zusätzlich in den gewählten letzten Tagen. CTL und Form sagen keine Wettkampfzeit voraus.", "muted"));
+      output.append(...seasonPlannedLoadEstimateNotes(result));
       if (result.status !== "ok") { output.append(reportNode("p", result.reason)); return; }
       output.append(analysisChart("Modellierte Form", result.curves.map((curve) => ({label:curve.name === "current" ? "Aktueller Plan" : "Alternative", points:curve.points.map((point) => ({date:point.date,value:point.tsb}))})), "TSB", result.curves[0].points[0].date, event.event_date, `Ausgang: CTL ${result.basis.ctl}, ATL ${result.basis.atl} vom ${result.basis.as_of}. Szenario ${result.input_sha256.slice(0,12)}; neue Aktivitäten oder Planänderungen erfordern eine Neuberechnung.`));
     } catch (error) { if (generation === seasonGeneration) output.textContent=error.message; }
@@ -1323,6 +1324,17 @@ function parseSeasonLoadFactor(text) {
   if (!/^\d+(?:[.,]\d+)?$/.test(normalized)) return null;
   const value = Number(normalized.replace(",", "."));
   return Number.isFinite(value) && value >= 0.5 && value <= 1.5 ? value : null;
+}
+
+function seasonPlannedLoadEstimateNotes(result) {
+  if (result.planned_load_estimated !== true) return [];
+  const units = Array.isArray(result.estimated_planned_units) ? result.estimated_planned_units : [];
+  const count = `${units.length} ${units.length === 1 ? "Einheit" : "Einheiten"}`;
+  const notes = [reportNode("p", `Geplante Belastung teilweise geschätzt (Quelle: Schätzung aus geplanter Dauer und Zielintensität): ${count}`, "muted")];
+  const shown = units.slice(0, 3).map((unit) => `${dateLabel(unit.date)} ${String(unit.name || "Training")} (Belastung ≈ ${Math.round(Number(unit.load) || 0)})`);
+  if (units.length > 3) shown.push("…");
+  if (shown.length) notes.push(reportNode("p", `Geschätzte Einheiten: ${shown.join(" · ")}`, "muted"));
+  return notes;
 }
 
 function seasonWeekSummary(week) {
