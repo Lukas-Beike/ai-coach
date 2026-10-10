@@ -3,7 +3,7 @@ const { test, expect } = require("@playwright/test");
 test("attachments can be removed, rejected and sent with an empty text draft", { tag: "@responsive" }, async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
-  await page.evaluate(() => jumpToChatComposer());
+  await page.evaluate(() => jumpToLatestMessages());
   await expect(page.locator("#attachmentButton svg")).toBeVisible();
   const buttonBox = await page.locator("#attachmentButton").boundingBox();
   const iconBox = await page.locator("#attachmentButton svg").boundingBox();
@@ -36,7 +36,7 @@ test("attachments can be removed, rejected and sent with an empty text draft", {
 test("attachments stay with their own queued message", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
-  await page.evaluate(() => jumpToChatComposer());
+  await page.evaluate(() => jumpToLatestMessages());
   const requests = [];
   let releaseFirst;
   const gate = new Promise(resolve => { releaseFirst = resolve; });

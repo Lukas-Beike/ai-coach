@@ -643,7 +643,8 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await expect(page.locator("#messages")).toHaveAttribute("aria-busy", "true");
     if (!await input.isVisible()) {
       await page.locator("#chatJumpToComposer").click();
-      await expect(input).toBeFocused();
+      if (touchProject) await expect(input).not.toBeFocused();
+      else await expect(input).toBeFocused();
     }
     await expect(input).toBeVisible();
     await page.evaluate(() => {
@@ -756,7 +757,8 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     const jumpBounds = await page.locator("#chatJumpToComposer").boundingBox();
     expect(jumpBounds.y + jumpBounds.height).toBeLessThanOrEqual((await page.viewportSize()).height);
     await page.locator("#chatJumpToComposer").click();
-    await expect(input).toBeFocused();
+    if (touchProject) await expect(input).not.toBeFocused();
+    else await expect(input).toBeFocused();
     await expect(page.locator("#chatForm")).toBeVisible();
     await expect(input).toHaveValue("Dieser Entwurf bleibt beim Tabwechsel erhalten.");
 

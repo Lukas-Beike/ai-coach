@@ -220,7 +220,7 @@ test("@responsive a small undecodable image falls back to attachment and allows 
   const validPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
-  await page.evaluate(() => jumpToChatComposer());
+  await page.evaluate(() => jumpToLatestMessages());
   await page.locator("#attachmentInput").setInputFiles({ name: "broken.png", mimeType: "image/png", buffer: Buffer.from("not an image") });
   await expect(page.locator("#chatAttachments")).toContainText("broken.png");
   await expect(page.locator("#sendButton")).toBeEnabled();

@@ -571,7 +571,7 @@ async function createNutritionProductDraft() {
   document.querySelector("#nutritionProductUseDialog")?.close();
   nutritionProductForUse = null;
   void AppRouter.navigate("coach", { historyMode: "push" });
-  jumpToChatComposer();
+  jumpToLatestMessages();
 }
 
 async function loadNutritionProducts(query = "") {
