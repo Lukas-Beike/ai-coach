@@ -357,6 +357,50 @@ class CoachPlanningContextReader:
         }
 
 
+def coach_performance_projection(performance: Any) -> Any:
+    """Keep baseline and sleep-regularity summaries, without repeated per-day arrays.
+
+    The UI keeps the full history. The Coach receives each baseline's summary and
+    each regularity series' summary, so an 84-day window fits the section budget
+    without dropping other performance keys.
+    """
+    if not isinstance(performance, dict):
+        return performance
+    recovery = performance.get("personal_recovery")
+    if not isinstance(recovery, dict):
+        return performance
+    projected_recovery = dict(recovery)
+    baselines = recovery.get("baselines")
+    if isinstance(baselines, list):
+        projected_recovery["baselines"] = [
+            {key: value for key, value in row.items() if key != "history"}
+            if isinstance(row, dict)
+            else row
+            for row in baselines
+        ]
+    regularity = recovery.get("regularity")
+    if isinstance(regularity, dict):
+        projected_regularity = {
+            key: value
+            for key, value in regularity.items()
+            if key not in {"sources", "points_14", "points_84"}
+        }
+        series = regularity.get("series")
+        if isinstance(series, list):
+            projected_regularity["series"] = [
+                {
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"points", "points_14", "points_84"}
+                }
+                if isinstance(item, dict)
+                else item
+                for item in series
+            ]
+        projected_recovery["regularity"] = projected_regularity
+    return {**performance, "personal_recovery": projected_recovery}
+
+
 class CoachPerformanceContextReader:
     """Read profile and provider performance projections without raw-data leaks."""
 
@@ -379,11 +423,13 @@ class CoachPerformanceContextReader:
         return CoachIntervalsContextService().project(snapshot, planned, self._today())
 
     def current_performance(self, snapshot: Any) -> Any:
-        return performance_context.current_performance_context(
-            snapshot,
-            self._garmin_payload_service.snapshot(),
-            self._profile_service.get(),
-            self._today(),
+        return coach_performance_projection(
+            performance_context.current_performance_context(
+                snapshot,
+                self._garmin_payload_service.snapshot(),
+                self._profile_service.get(),
+                self._today(),
+            )
         )
 
     def garmin(self, snapshot: Any) -> Any:
