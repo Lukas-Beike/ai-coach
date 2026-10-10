@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=287">
+  <link rel="stylesheet" href="/styles.css?v=288">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -83,7 +83,8 @@
           <div class="composer-actions">
             <button type="button" id="attachmentButton" class="secondary-button attachment-button" aria-label="GPX- oder FIT-Dateien oder Bilder anhängen" title="Datei anhängen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
             <button type="button" id="voiceButton" class="voice-button" aria-label="Spracheingabe starten" title="Spracheingabe starten"><svg class="nav-icon" aria-hidden="true"><use href="#icon-microphone"></use></svg></button>
-            <button type="button" id="steerButton" class="secondary-button steer-button" hidden>Steuern</button>
+            <button type="button" id="steerButton" class="secondary-button steer-button" aria-describedby="steerButtonHint" title="Als Nächstes senden" hidden>Als Nächstes senden</button>
+            <span id="steerButtonHint" class="sr-only"></span>
             <button type="button" id="cancelChatButton" class="composer-stop-button" hidden aria-label="Antwort stoppen" title="Antwort stoppen"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg></button>
             <button type="submit" id="sendButton" aria-label="Senden" title="Senden"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m0 0 6 6m-6-6-6 6"></path></svg></button>
           </div>
@@ -457,7 +458,7 @@
   <script src="/plan-views.js?v=3" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=12" defer></script>
+  <script src="/coach.js?v=13" defer></script>
   <script src="/shared.js?v=5" defer></script>
   <script src="/auth.js?v=3" defer></script>
   <script src="/sync-status.js?v=2" defer></script>

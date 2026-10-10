@@ -225,9 +225,17 @@ function removeQueuedChatMessage(id) {
   updateChatControls();
 }
 
+function queuedChatEditFitsDraft(entry, draftAttachments = []) {
+  return (entry.attachments || []).length + draftAttachments.length <= MAX_CHAT_ATTACHMENTS;
+}
+
 function editQueuedChatMessage(id) {
   const entry = state.chatQueue.find((item) => item.id === id);
   if (!entry) return;
+  if (!queuedChatEditFitsDraft(entry, state.chatAttachments || [])) {
+    toast(`Höchstens ${MAX_CHAT_ATTACHMENTS} Anhänge pro Nachricht. Entferne zuerst Anhänge aus dem Entwurf.`, true);
+    return;
+  }
   removeQueuedChatMessage(id);
   const input = $("#messageInput");
   input.value = input.value.trim() ? `${input.value.trimEnd()}\n${entry.message}` : entry.message;
@@ -627,6 +635,7 @@ async function resetCoachChat() {
 }
 
 const MAX_QUEUED_ATTACHMENT_BYTES = 16_000_000;
+const MAX_CHAT_ATTACHMENTS = 4;
 
 const VOICE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
@@ -1902,7 +1911,7 @@ function renderChatAttachments() {
 
 function validateChatAttachmentFiles(files) {
   const valid = file => file.size && /\.(gpx|fit|png|jpe?g|webp)$/i.test(file.name) && (/\.(gpx|fit)$/i.test(file.name) ? file.size <= 5000000 : file.size <= 15000000);
-  if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !valid(file))) throw new Error("Bis zu 4 Dateien auswählen. GPX/FIT dürfen höchstens 5 MB, Bilder höchstens 15 MB groß sein.");
+  if ((state.chatAttachments || []).length + files.length > MAX_CHAT_ATTACHMENTS || files.some(file => !valid(file))) throw new Error(`Bis zu ${MAX_CHAT_ATTACHMENTS} Dateien auswählen. GPX/FIT dürfen höchstens 5 MB, Bilder höchstens 15 MB groß sein.`);
 }
 async function fileBase64(file) {
   const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
