@@ -52,6 +52,7 @@ function showLogin() {
   state.chatScrollRestoring = false;
   cancelScheduledChatStreamRender();
   state.loadedAreas.clear();
+  clearAnalysisReportCache();
   AppState.setPlanSegment("overview");
   state.profileDirty = false;
   state.checkinDirty = false;

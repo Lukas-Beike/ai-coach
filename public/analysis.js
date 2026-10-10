@@ -502,10 +502,47 @@ function renderExistingPerformanceReports(endurance, profiles) {
   if (cards.length) root.append(reportNode("h3", "Ausdauer und Bestleistungen"), ...cards);
 }
 
+// Report responses are reused per content version (state_versions) and in-flight requests are shared.
+const analysisReportCache = new Map();
+
+function analysisReportVersionKey() {
+  const versions = state.data?.state_versions || {};
+  return JSON.stringify(Object.keys(versions).sort((left, right) => left.localeCompare(right)).map((key) => [key, versions[key]]));
+}
+
+function requestAnalysisReport(path) {
+  const version = analysisReportVersionKey();
+  const cached = analysisReportCache.get(path);
+  if (cached?.version === version) return cached.request;
+  const request = api(path).catch((error) => {
+    if (analysisReportCache.get(path)?.request === request) analysisReportCache.delete(path);
+    throw error;
+  });
+  analysisReportCache.set(path, { version, request });
+  return request;
+}
+
+function invalidateAnalysisReport(path) {
+  analysisReportCache.delete(path);
+}
+
+function clearAnalysisReportCache() {
+  analysisReportCache.clear();
+}
+
+function analysisRouteActive() {
+  return AppRouter.baseRoute(state.route) === "analysis";
+}
+
+function equipmentRouteActive() {
+  return state.route === "more/equipment";
+}
+
 async function loadAnalysisReports() {
+  if (!state.data || !analysisRouteActive()) return;
   const generation = ++analysisReportGeneration;
   try {
-    const results = await Promise.allSettled([api("/api/analysis/endurance"), api("/api/analysis/power-profiles")]);
+    const results = await Promise.allSettled([requestAnalysisReport("/api/analysis/endurance"), requestAnalysisReport("/api/analysis/power-profiles")]);
     if (generation !== analysisReportGeneration) return;
     renderExistingPerformanceReports(results[0].status === "fulfilled" ? results[0].value : null, results[1].status === "fulfilled" ? results[1].value : null);
   } catch (_) { /* individual report failures stay scoped to their cards */ }
@@ -762,10 +799,11 @@ let trainingRecordsGeneration = 0;
 let equipmentTab = "bike";
 
 async function renderTrainingRecords() { // NOSONAR
+  if (!state.data || !equipmentRouteActive()) return;
   const generation = ++trainingRecordsGeneration;
   const session = state.sessionGeneration;
   try {
-    const result = await api("/api/analysis/training-records");
+    const result = await requestAnalysisReport("/api/analysis/training-records");
     if (generation !== trainingRecordsGeneration || session !== state.sessionGeneration) return;
     const gear = document.getElementById("equipmentItems");
     const openDetails = new Set([...gear.querySelectorAll("details[open]")]
@@ -1036,6 +1074,8 @@ function maintenanceButton(item) {
     button.disabled = true;
     try {
       await api("/api/equipment/maintenance", { method: "POST", body: JSON.stringify({ equipment_id: item.id, date: timezoneDateKey(state.data?.profile?.timezone, new Date()) }) });
+      // Maintenance does not advance state_versions, so drop the cached response even if the athlete has left the route.
+      invalidateAnalysisReport("/api/analysis/training-records");
       await renderTrainingRecords();
     } catch (error) {
       button.disabled = false;
