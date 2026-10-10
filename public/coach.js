@@ -159,10 +159,20 @@ async function finishRecoveredChatStatus() {
   scrollChatToResponseStart();
 }
 
+function rescheduleChatStatusPoll(delay) {
+  if (chatStatusPollWanted()) scheduleChatStatusPoll(delay);
+}
+
+function settleChatStatusPoll(pollRequest, authFailed, running) {
+  if (state.chatStatusPollInFlight !== pollRequest) return;
+  state.chatStatusPollInFlight = null;
+  if (!authFailed) rescheduleChatStatusPoll(running ? 1_500 : 5_000);
+}
+
 async function pollChatStatus() {
   if (!state.data || document.visibilityState !== "visible") return;
   if (!navigator.onLine) {
-    if (chatStatusPollWanted()) scheduleChatStatusPoll(5_000);
+    rescheduleChatStatusPoll(5_000);
     return;
   }
   if (state.chatStatusPollInFlight) return;
@@ -183,10 +193,7 @@ async function pollChatStatus() {
   } catch (error) {
     authFailed = /Authentication/.test(error.message);
   } finally {
-    if (state.chatStatusPollInFlight === pollRequest) {
-      state.chatStatusPollInFlight = null;
-      if (!authFailed && chatStatusPollWanted()) scheduleChatStatusPoll(running ? 1_500 : 5_000);
-    }
+    settleChatStatusPoll(pollRequest, authFailed, running);
   }
 }
 
