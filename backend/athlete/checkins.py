@@ -17,6 +17,7 @@ CHECKIN_TEXT_LIMITS = {
 }
 CHECKIN_SCORE_FIELDS = ("soreness", "stress", "motivation", "session_rpe")
 CHECKIN_TAGS = ("travel", "late_meal", "high_stress")
+CHECKIN_DAY_STATUSES = ("unknown", "rest", "pause")
 
 
 def bounded_score(value: Any) -> int | None:
@@ -59,7 +60,7 @@ def normalize_checkin(value: Any, *, today: date) -> dict[str, Any]:
         raise AppError(400, "Ein Tages-Check-in kann nicht in der Zukunft liegen.")
     result: dict[str, Any] = {"checkin_date": checkin_date}
     if "day_status" in value:
-        if value["day_status"] not in ("unknown", "rest", "pause"):
+        if value["day_status"] not in CHECKIN_DAY_STATUSES:
             raise AppError(
                 400,
                 "Tagesstatus muss unbekannt, Ruhetag oder bestätigte Trainingspause sein.",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import socket
 import threading
 import time
@@ -362,7 +363,7 @@ class HttpResourceLimitsTests(unittest.TestCase):
 
         class Handler(RequestHandler):
             input_timeout_seconds = 0.2
-            dependencies = SimpleNamespace(max_body_bytes=1024)
+            dependencies = SimpleNamespace(max_body_bytes=1024, logger=logging.getLogger("test.resource_limits"))
 
             def do_POST(self):
                 try:

@@ -730,7 +730,7 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "planning_revision_conflict")
         self.assertEqual(
             caught.exception.message,
-            "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.",
+            "Die Planung wurde während der Reparatur geändert. Bitte erneut abgleichen.",
         )
         self.assertEqual(
             json.loads(self.unit()["payload"])["remote_event_id"], "event-1"

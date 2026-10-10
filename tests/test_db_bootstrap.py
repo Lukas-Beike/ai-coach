@@ -149,6 +149,7 @@ class DatabaseBootstrapTests(unittest.TestCase):
         )
         db.execute("DROP TABLE nutrition_products")
         db.execute("ALTER TABLE external_calendar_events DROP COLUMN no_training")
+        db.execute("ALTER TABLE nutrition_logs DROP COLUMN logged_time_known")
         db.execute("PRAGMA user_version = 1")
         db.commit()
 
@@ -187,6 +188,8 @@ class DatabaseBootstrapTests(unittest.TestCase):
             "INSERT INTO snapshots(payload, created_at) VALUES (?, ?)",
             [("old", old), ("recent", recent)],
         )
+        # Version 3 predates logged_time_known, so the legacy shape must match.
+        db.execute("ALTER TABLE nutrition_logs DROP COLUMN logged_time_known")
         db.execute("PRAGMA user_version = 3")
 
         self.bootstrap(db, retention_days=1)

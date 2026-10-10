@@ -188,13 +188,13 @@ def _workout_target(rest: str, number: int, target: str) -> tuple[str, str, bool
     if not intensity:
         raise WorkoutTextError(
             "missing_workout_target",
-            f"Workout-Zeile {number}: Auswertbares Intensitaetsziel fehlt.",
+            f"Workout-Zeile {number}: Auswertbares Intensitätsziel fehlt.",
         )
     cue = re.sub(r"[(),;]", " ", rest[intensity.end() :])
     if _target_match(cue, search=True):
         raise WorkoutTextError(
             "ambiguous_workout_target",
-            f"Workout-Zeile {number}: Mehrere Intensitaetsziele im selben Schritt.",
+            f"Workout-Zeile {number}: Mehrere Intensitätsziele im selben Schritt.",
         )
     parsed = intensity[0].upper()
     if "PACE" in parsed:
@@ -266,7 +266,7 @@ def _repeat_header(
     repeat = int(header[1])
     if repeat_pending or previous_step or not 1 <= repeat <= 100:
         raise WorkoutTextError(
-            "invalid_workout_repeat", "Wiederholungsbloecke mit Leerzeilen trennen."
+            "invalid_workout_repeat", "Wiederholungsblöcke mit Leerzeilen trennen."
         )
     return repeat, True, False
 
@@ -282,7 +282,7 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
             if repeat_pending:
                 raise WorkoutTextError(
                     "invalid_workout_repeat",
-                    "Nach einer Wiederholung muessen direkt Trainingsschritte folgen.",
+                    "Nach einer Wiederholung müssen direkt Trainingsschritte folgen.",
                 )
             result.extend(block * repeat)
             block, repeat, previous_step = [], 1, False
@@ -306,7 +306,7 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
     if len(result) > 5000:
         raise WorkoutTextError(
             "invalid_workout_repeat",
-            "Zu viele Trainingsschritte; Einheit in kleinere Bloecke aufteilen.",
+            "Zu viele Trainingsschritte; Einheit in kleinere Blöcke aufteilen.",
         )
     return result
 
@@ -321,7 +321,7 @@ def structured_duration(description: str, target: str = "AUTO") -> tuple[float, 
 def _readback_failure() -> NoReturn:
     raise WorkoutTextError(
         "intervals_workout_verification_failed",
-        "Intervals.icu hat die Einheit nicht korrekt bestaetigt.",
+        "Intervals.icu hat die Einheit nicht korrekt bestätigt.",
     )
 
 

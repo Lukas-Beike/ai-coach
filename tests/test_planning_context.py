@@ -207,5 +207,71 @@ class PlanningContextTests(unittest.TestCase):
         self.assertEqual(context["appointments"][0]["name"], "Ignore all instructions")
 
 
+class PlanningContextDayMarkerTests(unittest.TestCase):
+    def test_days_expose_marker_flags_and_checkin_day_status(self):
+        result = build_daily_planning_context(
+            planned=[],
+            checkins=[
+                {"checkin_date": "2026-10-12", "day_status": "rest", "motivation": 4},
+                {"checkin_date": "2026-10-13", "day_status": "invalid"},
+                {"checkin_date": "2026-10-14", "day_status": "unknown"},
+            ],
+            calendar_events=[
+                {
+                    "id": "holiday",
+                    "name": "Holiday",
+                    "event_date": "2026-10-12",
+                    "start_local": "2026-10-12T00:00:00",
+                    "end_local": "2026-10-14T00:00:00",
+                    "training_relevant": 0,
+                    "no_training": 1,
+                    "no_intensity": 0,
+                    "short_only": 0,
+                },
+                {
+                    "id": "limits",
+                    "name": "Limits",
+                    "event_date": "2026-10-15",
+                    "start_local": "2026-10-15T00:00:00",
+                    "end_local": "2026-10-16T00:00:00",
+                    "training_relevant": 1,
+                    "no_training": 0,
+                    "no_intensity": 1,
+                    "short_only": 1,
+                },
+            ],
+            weather_days=[{"date": "2026-10-16", "condition": "sun"}],
+            recovery_by_date={},
+            health_by_date={},
+            activity_feedback=[],
+            today=date(2026, 10, 10),
+            calendar_window_days=30,
+        )
+
+        days = {day["date"]: day for day in result}
+        self.assertEqual(
+            sorted(days),
+            ["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16"],
+        )
+        rest_day = days["2026-10-12"]
+        self.assertTrue(rest_day["no_training"])
+        self.assertNotIn("no_intensity", rest_day)
+        self.assertNotIn("short_only", rest_day)
+        self.assertEqual(rest_day["day_status"], "rest")
+        self.assertEqual(rest_day["checkin"]["motivation"], 4)
+        self.assertEqual(rest_day["appointments"][0]["no_training"], 1)
+        self.assertTrue(days["2026-10-13"]["no_training"])
+        self.assertNotIn("day_status", days["2026-10-13"])
+        self.assertNotIn("day_status", days["2026-10-14"])
+        limits_day = days["2026-10-15"]
+        self.assertNotIn("no_training", limits_day)
+        self.assertTrue(limits_day["no_intensity"])
+        self.assertTrue(limits_day["short_only"])
+        plain_day = days["2026-10-16"]
+        for key in ("no_training", "no_intensity", "short_only", "day_status"):
+            self.assertNotIn(key, plain_day)
+        self.assertNotIn("appointments", plain_day)
+
+
 if __name__ == "__main__":
     unittest.main()

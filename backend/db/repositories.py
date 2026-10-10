@@ -744,6 +744,39 @@ class SnapshotRepository:
         return row["payload"] if row else None
 
 
+NUTRITION_MACRO_FIELDS = ("carbs_g", "protein_g", "fat_g")
+_NUTRITION_ENTRY_COLUMNS = (
+    "id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, "
+    "fat_g, source, nutrition_basis, sync_state, created_at, updated_at, "
+    "logged_time_known"
+)
+
+
+def nutrition_macro_totals(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return complete daily macro totals and display-only sums of known values.
+
+    A total_* field stays None unless every entry reports that macro, so sync,
+    approval and Coach context never treat a partial sum as a daily total.
+    """
+    totals: dict[str, Any] = {}
+    known_totals: dict[str, float | None] = {}
+    for field in NUTRITION_MACRO_FIELDS:
+        known = [
+            float(entry[field]) for entry in entries if entry.get(field) is not None
+        ]
+        known_totals[field] = round(sum(known), 1) if known else None
+        totals[f"total_{field}"] = (
+            round(sum(known), 1) if len(known) == len(entries) else None
+        )
+    totals["known_macro_totals"] = known_totals
+    totals["entries_without_macros"] = sum(
+        1
+        for entry in entries
+        if any(entry.get(field) is None for field in NUTRITION_MACRO_FIELDS)
+    )
+    return totals
+
+
 class NutritionRepository:
     """Persist and query logged meals and nutrition totals without owning a connection."""
 
@@ -754,14 +787,15 @@ class NutritionRepository:
     def _entry(row: Any) -> dict[str, Any]:
         entry = dict(row)
         entry["nutrition_basis"] = json.loads(entry["nutrition_basis"])
+        entry["logged_time_known"] = bool(entry["logged_time_known"])
         return entry
 
     def create(self, db: Any, entry: dict[str, Any]) -> dict[str, Any]:
         now = self._now()
         entry_id = str(entry["id"])
         db.execute(
-            "INSERT INTO nutrition_logs(id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, nutrition_basis, sync_state, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO nutrition_logs(id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, nutrition_basis, sync_state, created_at, updated_at, logged_time_known) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 entry_id,
                 entry["meal_date"],
@@ -777,6 +811,7 @@ class NutritionRepository:
                 entry.get("sync_state", "local"),
                 now,
                 now,
+                1 if entry.get("logged_time_known", True) else 0,
             ),
         )
         self._mark_pending(db, entry["meal_date"], now)
@@ -784,8 +819,7 @@ class NutritionRepository:
 
     def get(self, db: Any, entry_id: str) -> dict[str, Any] | None:
         row = db.execute(
-            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, nutrition_basis, sync_state, created_at, updated_at "
-            "FROM nutrition_logs WHERE id = ?",
+            f"SELECT {_NUTRITION_ENTRY_COLUMNS} FROM nutrition_logs WHERE id = ?",
             (entry_id,),
         ).fetchone()
         return self._entry(row) if row else None
@@ -798,7 +832,7 @@ class NutritionRepository:
         if not existing:
             return None
         cursor = db.execute(
-            "UPDATE nutrition_logs SET meal_date=?, logged_at=?, meal_type=?, description=?, kcal=?, carbs_g=?, protein_g=?, fat_g=?, source=?, nutrition_basis=?, sync_state=?, updated_at=? "
+            "UPDATE nutrition_logs SET meal_date=?, logged_at=?, meal_type=?, description=?, kcal=?, carbs_g=?, protein_g=?, fat_g=?, source=?, nutrition_basis=?, sync_state=?, logged_time_known=?, updated_at=? "
             "WHERE id=?",
             (
                 entry["meal_date"],
@@ -812,6 +846,7 @@ class NutritionRepository:
                 entry.get("source", "manual"),
                 json.dumps(entry.get("nutrition_basis") or {}, ensure_ascii=False),
                 entry.get("sync_state", "local"),
+                1 if entry.get("logged_time_known", True) else 0,
                 now,
                 entry_id,
             ),
@@ -833,7 +868,7 @@ class NutritionRepository:
 
     def list_by_date(self, db: Any, meal_date: str) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, nutrition_basis, sync_state, created_at, updated_at "
+            f"SELECT {_NUTRITION_ENTRY_COLUMNS} "
             "FROM nutrition_logs WHERE meal_date = ? ORDER BY logged_at ASC, created_at ASC",
             (meal_date,),
         ).fetchall()
@@ -843,7 +878,7 @@ class NutritionRepository:
         self, db: Any, start_date: str, end_date: str
     ) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT id, meal_date, logged_at, meal_type, description, kcal, carbs_g, protein_g, fat_g, source, nutrition_basis, sync_state, created_at, updated_at "
+            f"SELECT {_NUTRITION_ENTRY_COLUMNS} "
             "FROM nutrition_logs WHERE meal_date >= ? AND meal_date <= ? ORDER BY meal_date ASC, logged_at ASC",
             (start_date, end_date),
         ).fetchall()
@@ -851,22 +886,10 @@ class NutritionRepository:
 
     def day_summary(self, db: Any, meal_date: str) -> dict[str, Any]:
         entries = self.list_by_date(db, meal_date)
-        total_kcal = sum(int(e["kcal"]) for e in entries)
-
-        def total(field: str) -> float | None:
-            if any(entry.get(field) is None for entry in entries):
-                return None if entries else 0.0
-            return round(sum(float(entry[field]) for entry in entries), 1)
-
-        total_carbs = total("carbs_g")
-        total_protein = total("protein_g")
-        total_fat = total("fat_g")
         return {
             "date": meal_date,
-            "total_kcal": total_kcal,
-            "total_carbs_g": total_carbs,
-            "total_protein_g": total_protein,
-            "total_fat_g": total_fat,
+            "total_kcal": sum(int(e["kcal"]) for e in entries),
+            **nutrition_macro_totals(entries),
             "entry_count": len(entries),
             "entries": entries,
         }

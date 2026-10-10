@@ -83,14 +83,14 @@ class CoachPlanningCommandService:
         if not isinstance(templates, list):
             raise AppError(
                 400,
-                "Vorlagenaenderungen benoetigen eine Liste.",
+                "Vorlagenänderungen benötigen eine Liste.",
                 reason="template_limit",
             )
         for template in templates:
             if not isinstance(template, dict):
                 raise AppError(
                     400,
-                    "Jede Vorlagenaenderung muss ein Objekt sein.",
+                    "Jede Vorlagenänderung muss ein Objekt sein.",
                     reason="template_limit",
                 )
             if str(template.get("action") or "create") in {
@@ -190,7 +190,7 @@ class CoachPlanningCommandService:
         if not isinstance(arguments, dict):
             raise AppError(
                 400,
-                "Das Planungskommando benoetigt arguments.",
+                "Das Planungskommando benötigt arguments.",
                 reason="invalid_planning_command",
             )
         intent = self._intent(payload, operation)
@@ -220,7 +220,7 @@ class CoachPlanningCommandService:
                 if previous.get("effect_key") != command_identity["effect_key"]:
                     raise AppError(
                         409,
-                        "Die Auftragskennung wurde fuer andere Argumente verwendet.",
+                        "Die Auftragskennung wurde für andere Argumente verwendet.",
                         reason="command_conflict",
                     )
             if (

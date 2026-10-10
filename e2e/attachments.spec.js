@@ -3,7 +3,7 @@ const { test, expect } = require("@playwright/test");
 test("attachments can be removed, rejected and sent with an empty text draft", { tag: "@responsive" }, async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
-  await page.evaluate(() => jumpToChatComposer());
+  await page.evaluate(() => jumpToLatestMessages());
   await expect(page.locator("#attachmentButton svg")).toBeVisible();
   const buttonBox = await page.locator("#attachmentButton").boundingBox();
   const iconBox = await page.locator("#attachmentButton svg").boundingBox();
@@ -14,14 +14,14 @@ test("attachments can be removed, rejected and sent with an empty text draft", {
   await page.locator("#attachmentInput").setInputFiles(file);
   await expect(page.locator("#chatAttachments")).toContainText("route.gpx");
   await expect(page.locator("#sendButton")).toBeEnabled();
-  await page.locator("#chatAttachments button").click();
+  await page.getByRole("button", { name: "Anhang route.gpx entfernen" }).click();
   await expect(page.locator("#chatAttachments")).toBeHidden();
   await expect(page.locator("#sendButton")).toBeDisabled();
   await page.locator("#attachmentInput").setInputFiles({ ...file, buffer: Buffer.from('invalid GPX') });
   await page.locator("#sendButton").click();
   await expect(page.locator("#chatAttachments")).toContainText("route.gpx");
   await expect(page.locator("#sendButton")).toBeEnabled();
-  await page.locator("#chatAttachments button").click();
+  await page.getByRole("button", { name: "Anhang route.gpx entfernen" }).click();
   await page.locator("#messageInput").fill("");
   await page.locator("#attachmentInput").setInputFiles([file, { name: "chart.png", mimeType: "image/png", buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAASUVORK5CYII=', 'base64') }]);
   await expect(page.locator("#chatAttachments button")).toHaveCount(2);
@@ -36,7 +36,7 @@ test("attachments can be removed, rejected and sent with an empty text draft", {
 test("attachments stay with their own queued message", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
-  await page.evaluate(() => jumpToChatComposer());
+  await page.evaluate(() => jumpToLatestMessages());
   const requests = [];
   let releaseFirst;
   const gate = new Promise(resolve => { releaseFirst = resolve; });

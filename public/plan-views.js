@@ -1,8 +1,65 @@
 globalThis.AppPlanViews = Object.freeze({ create });
 
+const CALENDAR_MARKERS = [
+  { key: "no_training", name: "NO_TRAINING", label: "Kein Training" },
+  { key: "no_intensity", name: "NO_INTENSITY", label: "Keine Intensität" },
+  { key: "short_only", name: "SHORT_ONLY", label: "Nur kurze Einheiten" },
+];
+// Mirrors backend/calendar/markers.py::has_marker: "[" or "(" opens, "]" or ")" closes,
+// the words may be separated by spaces, underscores or hyphens (or none), and case is ignored.
+const MARKER_WORD_GAP = String.raw`[\s_-]*`;
+const calendarMarkerSource = (name) => String.raw`[\[(]\s*${name.replaceAll("_", MARKER_WORD_GAP)}\s*[\])]`;
+const CALENDAR_MARKER_PATTERN = new RegExp(
+  CALENDAR_MARKERS.map(({ name }) => calendarMarkerSource(name)).join("|"),
+  "gi",
+);
+const PLANNED_DAY_STATUS_LABELS = new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]]);
+
+function stripCalendarMarkers(text) {
+  return String(text || "").replace(CALENDAR_MARKER_PATTERN, "").replace(/\s{2,}/g, " ").trim();
+}
+
+function calendarMarkerKeys(source) {
+  if (!source || typeof source !== "object") return [];
+  const name = String(source.name || "");
+  return CALENDAR_MARKERS
+    .filter(({ key, name: markerName }) => Boolean(source[key]) || new RegExp(calendarMarkerSource(markerName), "i").test(name))
+    .map(({ key }) => key);
+}
+
+function plannedDayStatusLabel(dayStatus) {
+  return PLANNED_DAY_STATUS_LABELS.get(dayStatus) || null;
+}
+
+function plannedConflictBadgeSpecs(conflicts) {
+  return (Array.isArray(conflicts) ? conflicts : [])
+    .map((conflict) => String(conflict?.label || "").trim())
+    .filter(Boolean)
+    .map((label) => ({ kind: "conflict", icon: "⚠", text: `Konflikt: ${label}` }));
+}
+
+function plannedDayBadgeSpecs(dayContext, competitions, dateKey) {
+  const context = dayContext && typeof dayContext === "object" ? dayContext : {};
+  const appointments = Array.isArray(context.appointments) ? context.appointments : [];
+  const specs = (Array.isArray(competitions) ? competitions : [])
+    .filter((competition) => String(competition?.event_date || "").slice(0, 10) === dateKey)
+    .map((competition) => ({
+      kind: "competition",
+      icon: "🏁",
+      text: `${competition.priority || "B"}-Wettkampf: ${String(competition.name || "").trim() || "Wettkampf"}`,
+    }));
+  const dayStatus = plannedDayStatusLabel(context.day_status);
+  if (dayStatus) specs.push({ kind: "day-status", icon: "", text: dayStatus });
+  const markerKeys = new Set(appointments.concat([context]).flatMap((source) => calendarMarkerKeys(source)));
+  for (const { key, label } of CALENDAR_MARKERS) {
+    if (markerKeys.has(key)) specs.push({ kind: "marker", icon: "", text: label });
+  }
+  return specs;
+}
+
 function plannedAppointmentLabel(event) {
   if (!event || typeof event !== "object") return "";
-  const name = String(event.name || "Trainingstermin").trim() || "Trainingstermin";
+  const name = stripCalendarMarkers(event.name) || "Trainingstermin";
   if (event.all_day) return `${name} · ganztägig`;
   const time = /(?:T|\s)(\d{2}:\d{2})/.exec(String(event.start_local || ""));
   return time ? `${name} · ${time[1]}` : name;
@@ -15,12 +72,30 @@ function calendarActualActivity(entry) {
   return actual && typeof actual === "object" ? actual : null;
 }
 
+// Sports that normally record a distance; only these count as "ohne Distanz" when the distance is missing.
+const DISTANCE_SPORT_TYPES = new Set(["ride", "virtualride", "gravelride", "mountainbikeride", "emountainbikeride", "ebikeride", "run", "virtualrun", "trailrun", "walk", "hike", "swim", "openwaterswim", "nordicski", "rollerski", "rowing", "virtualrow", "canoeing", "kayaking", "standuppaddling", "snowshoe"]);
+
 function calendarMetricNumber(value, suffix = "") {
   if (value == null || value === "") return null;
   const number = Number(value);
   if (!Number.isFinite(number)) return null;
-  const digits = Number.isInteger(number) ? 0 : 1;
-  return `${number.toLocaleString("de-DE", { maximumFractionDigits: digits })}${suffix}`;
+  return `${AppFormat.number(number, { digits: Number.isInteger(number) ? 0 : 1 })}${suffix}`;
+}
+
+// Every activity with a positive distance adds to the total; only distance sports without one count as missing.
+function calendarWeekDistanceLabel(activities) {
+  const measured = activities.filter((entry) => Number(entry.distance) > 0);
+  const unmeasured = activities.filter((entry) => {
+    const distance = Number(entry.distance);
+    return distance <= 0 || Number.isNaN(distance);
+  });
+  const missing = unmeasured.filter((entry) => DISTANCE_SPORT_TYPES.has(String(entry.type || "").toLowerCase())).length;
+  if (!measured.length && !missing) return "–";
+  const total = measured.length
+    ? AppFormat.distance(measured.reduce((sum, entry) => sum + Number(entry.distance), 0))
+    : "–";
+  if (!missing) return total;
+  return `${total} · ohne ${missing} ${missing === 1 ? "Aktivität" : "Aktivitäten"}`;
 }
 
 function calendarIntensityLabel(value) {
@@ -36,6 +111,12 @@ function calendarStartTime(value) {
   return match ? match[1] : null;
 }
 
+function plannedUnitStartTime(value) {
+  // Date-only planned units are stored as midnight; that is not a start time.
+  const time = calendarStartTime(value);
+  return time === "00:00" ? null : time;
+}
+
 function appendCalendarFact(root, label, value) {
   if (value == null || value === "") return;
   const item = document.createElement("span");
@@ -43,6 +124,26 @@ function appendCalendarFact(root, label, value) {
   title.textContent = label;
   item.append(title, document.createTextNode(` ${value}`));
   root.append(item);
+}
+
+function calendarBadge({ kind, icon, text }) {
+  const badge = document.createElement("span");
+  badge.className = `planned-badge is-${kind}`;
+  if (icon) {
+    const glyph = document.createElement("span");
+    glyph.setAttribute("aria-hidden", "true");
+    glyph.textContent = icon;
+    badge.append(glyph);
+  }
+  badge.append(document.createTextNode(text));
+  return badge;
+}
+
+function calendarBadgeRow(specs) {
+  const row = document.createElement("div");
+  row.className = "planned-badges";
+  row.append(...specs.map(calendarBadge));
+  return row;
 }
 
 function competitionSportLabel(sport) {
@@ -67,7 +168,7 @@ function calendarEntryStatus(entry, dateKey, todayKey) {
 
 function calendarStatusLabel(entry, dateKey, todayKey) {
   const status = calendarEntryStatus(entry, dateKey, todayKey);
-  if (status === "completed") return entry.is_completed_activity ? "✓ Zusätzlich absolviert" : "✓ Abgeschlossen";
+  if (status === "completed") return entry.is_completed_activity ? "✓ Zusätzlich" : "✓ Absolviert";
   if (status === "missed") return "Nicht absolviert";
   return status === "today" ? "Heute geplant" : "Geplant";
 }
@@ -79,6 +180,7 @@ function calendarRpeLabel(value) {
 }
 
 function appendPlannedExecution(cardSummary, entry, status) {
+  if (status === "skipped") return;
   const percentage = calendarMetricNumber(entry.compliance?.percentage);
   const measurable = percentage != null && ["training_load", "duration"].includes(entry.compliance?.basis);
   if (status !== "missed" && !measurable) return;
@@ -108,7 +210,7 @@ function plannedDayNotes(dayContext) {
   const notes = document.createElement("div");
   notes.className = "planned-day-notes";
   const appointments = (Array.isArray(dayContext.appointments) ? dayContext.appointments : [])
-    .filter((event) => event && event.training_relevant !== false)
+    .filter((event) => event && (event.training_relevant !== false || calendarMarkerKeys(event).length > 0))
     .map(plannedAppointmentLabel)
     .filter(Boolean);
   if (appointments.length) {
@@ -132,16 +234,69 @@ function plannedDayNotes(dayContext) {
   return notes;
 }
 
-function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
+function plannedEntryDurationLabel(actual, entry) {
+  if (actual) return AppFormat.duration(actual.moving_time ?? actual.elapsed_time);
+  if (entry.duration_minutes) return AppFormat.duration(Number(entry.duration_minutes) * 60);
+  return AppFormat.duration(entry.moving_time);
+}
+
+function appendPlannedCalendarComparison(details, entry, actual) {
+  if (!actual || entry.is_completed_activity) return;
+  const comparison = document.createElement("div");
+  comparison.className = "planned-comparison";
+  const plannedDuration = entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time;
+  const planLine = document.createElement("p");
+  planLine.textContent = `Plan: ${[
+    entry.name,
+    AppFormat.duration(plannedDuration),
+    entry.icu_training_load != null ? `Load ${calendarMetricNumber(entry.icu_training_load)}` : null,
+  ].filter(Boolean).join(" · ")}`;
+  const actualLine = document.createElement("p");
+  actualLine.textContent = `Ist: ${[
+    AppFormat.duration(actual.moving_time ?? actual.elapsed_time),
+    actual.icu_training_load != null ? `Load ${calendarMetricNumber(actual.icu_training_load)}` : null,
+  ].filter(Boolean).join(" · ")}`;
+  comparison.append(planLine, actualLine);
+  if (entry.compliance?.percentage != null) {
+    const ratio = document.createElement("p");
+    ratio.textContent = `${entry.compliance.basis === "training_load" ? "Load" : "Umfang"} Plan/Ist: ${entry.compliance.percentage} %`;
+    comparison.append(ratio);
+  }
+  details.append(comparison);
+}
+
+function appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey) {
+  if (status !== "completed" && status !== "missed" && status !== "skipped") return;
+  const statusText = document.createElement("span");
+  statusText.className = "planned-entry-status";
+  statusText.textContent = status === "skipped" ? `Entfallen (${restDayLabel})` : calendarStatusLabel(entry, dateKey, todayKey);
+  cardSummary.append(statusText);
+}
+
+function appendPlannedTarget(cardSummary, entry) {
+  const target = document.createElement("span");
+  target.className = "planned-session-target";
+  const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
+  if (entry.icu_training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.icu_training_load)}`);
+  target.textContent = `Plan: ${targetParts.join(" · ")}`;
+  cardSummary.append(target);
+}
+
+const SEASON_PHASE_LABELS = { base: "Basis", build: "Aufbau", peak: "Spezifische Vorbereitung", taper: "Taper", completed: "Vergangen" };
+
+function nextCompetitionSummary(next, dateLabel, todayKey) {
+  if (!next) return "Noch kein zukünftiger Wettkampf gespeichert.";
+  const when = AppFormat.relativeDay(next.event_date, todayKey) ?? `${next.days_until} Tage`;
+  const phase = SEASON_PHASE_LABELS[next.phase] || next.phase;
+  return `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${phase} · ${when}`;
+}
+
+function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue, openCheckinEditor, checkinSummary }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
     const next = planning.season?.next_event;
     const summary = $("#planningSummary");
-    if (summary) {
-      summary.textContent = next
-        ? `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${next.phase} · ${next.days_until} Tage`
-        : "Noch kein zukünftiger Wettkampf gespeichert.";
-    }
+    if (summary) summary.textContent = nextCompetitionSummary(next, dateLabel, todayIso());
     const preview = planning.latest_replan;
     const changes = Array.isArray(preview?.changes) ? preview.changes : [];
     const illness = String(data.local_feedback?.today?.illness || "").trim();
@@ -302,6 +457,15 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return section;
   }
 
+  function plannedWeatherHint() {
+    const hint = document.createElement("p");
+    hint.className = "planned-weather-hint";
+    hint.textContent = state.data?.weather?.configured
+      ? "Für die kommenden Tage liegt noch keine Wettervorhersage vor."
+      : "Wetter fehlt: Im Profil ist kein Wetterort hinterlegt.";
+    return hint;
+  }
+
   function plannedWeekSummary(weekKey, weekEndKey, weekEntries, compliance, todayKey) {
     const plannedEntryCount = weekEntries.filter((entry) => !entry.is_completed_activity).length;
     const plannedUnits = Number.isFinite(Number(compliance?.planned_units))
@@ -357,12 +521,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return true;
   }
 
-  function plannedEntryDurationLabel(actual, entry) {
-    if (actual) return formatDuration(actual.moving_time ?? actual.elapsed_time);
-    if (entry.duration_minutes) return `${entry.duration_minutes} Min.`;
-    return formatDuration(entry.moving_time);
-  }
-
   function appendActualCalendarDetails(details, actual) {
     if (!actual) return;
     const primaryMetrics = document.createElement("span");
@@ -372,7 +530,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     primaryMetrics.textContent = [load != null ? `Load ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
     const facts = document.createElement("div");
     facts.className = "planned-actual-facts";
-    appendCalendarFact(facts, "Dauer", formatDuration(actual.moving_time ?? actual.elapsed_time));
+    appendCalendarFact(facts, "Dauer", AppFormat.duration(actual.moving_time ?? actual.elapsed_time));
     appendCalendarFact(facts, "Distanz", distanceLabel(actual.distance));
     appendCalendarFact(facts, "Trainingsload", calendarMetricNumber(actual.icu_training_load));
     appendCalendarFact(facts, "RPE", rpe != null ? `${rpe}/10` : "nicht angegeben");
@@ -384,37 +542,12 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     details.append(primaryMetrics, facts);
   }
 
-  function appendPlannedCalendarComparison(details, entry, actual) {
-    if (!actual || entry.is_completed_activity) return;
-    const comparison = document.createElement("div");
-    comparison.className = "planned-comparison";
-    const plannedDuration = entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time;
-    const planLine = document.createElement("p");
-    planLine.textContent = `Plan: ${[
-      entry.name,
-      formatDuration(plannedDuration),
-      entry.icu_training_load != null ? `Load ${calendarMetricNumber(entry.icu_training_load)}` : null,
-    ].filter(Boolean).join(" · ")}`;
-    const actualLine = document.createElement("p");
-    actualLine.textContent = `Ist: ${[
-      formatDuration(actual.moving_time ?? actual.elapsed_time),
-      actual.icu_training_load != null ? `Load ${calendarMetricNumber(actual.icu_training_load)}` : null,
-    ].filter(Boolean).join(" · ")}`;
-    comparison.append(planLine, actualLine);
-    if (entry.compliance?.percentage != null) {
-      const ratio = document.createElement("p");
-      ratio.textContent = `${entry.compliance.basis === "training_load" ? "Load" : "Umfang"} Plan/Ist: ${entry.compliance.percentage} %`;
-      comparison.append(ratio);
-    }
-    details.append(comparison);
-  }
-
   function appendPlannedSessionHeader(cardSummary, entry, actual) {
     const displayed = actual || entry;
     const header = document.createElement("span");
     header.className = "planned-session-header";
     const sport = document.createElement("span");
-    sport.textContent = [activitySportLabel(displayed), calendarStartTime(displayed.start_date_local)].filter(Boolean).join(" · ");
+    sport.textContent = [activitySportLabel(displayed), actual ? calendarStartTime(actual.start_date_local) : plannedUnitStartTime(entry.start_date_local)].filter(Boolean).join(" · ");
     const duration = document.createElement("strong");
     duration.textContent = plannedEntryDurationLabel(actual, entry);
     const distance = document.createElement("span");
@@ -469,9 +602,11 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return svg;
   }
 
-  function renderPlannedEntry(entry, dateKey, todayKey) {
+  function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}) {
     const actual = calendarActualActivity(entry);
-    const status = calendarEntryStatus(entry, dateKey, todayKey);
+    const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
+    const restDayLabel = baseStatus === "missed" ? plannedDayStatusLabel(dayContext.day_status) : null;
+    const status = restDayLabel ? "skipped" : baseStatus;
     const card = document.createElement("details");
     card.className = `planned-entry is-${status}`;
     card.open = false;
@@ -484,29 +619,19 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     card.dataset.sport = activitySportLabel(displayed);
     meta.textContent = [
       activitySportLabel(displayed),
-      calendarStartTime(displayed.start_date_local),
+      actual ? calendarStartTime(actual.start_date_local) : plannedUnitStartTime(entry.start_date_local),
       plannedEntryDurationLabel(actual, entry),
     ].filter(Boolean).join(" · ");
     appendPlannedSessionHeader(cardSummary, entry, actual);
     cardSummary.append(meta);
-    if (status === "completed" || status === "missed") {
-      const statusText = document.createElement("span");
-      statusText.className = "planned-entry-status";
-      statusText.textContent = calendarStatusLabel(entry, dateKey, todayKey);
-      cardSummary.append(statusText);
-    }
+    appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey);
     appendPlannedExecution(cardSummary, entry, status);
     const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
     if (profile) cardSummary.append(profile);
     cardSummary.append(cardTitle);
-    if (actual && !entry.is_completed_activity) {
-      const target = document.createElement("span");
-      target.className = "planned-session-target";
-      const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
-      if (entry.icu_training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.icu_training_load)}`);
-      target.textContent = `Plan: ${targetParts.join(" · ")}`;
-      cardSummary.append(target);
-    }
+    const conflictSpecs = plannedConflictBadgeSpecs(entry.conflicts);
+    if (conflictSpecs.length) cardSummary.append(calendarBadgeRow(conflictSpecs));
+    if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
     appendActualCalendarDetails(details, actual);
@@ -573,16 +698,28 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       weatherText.title = [weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage", weather.condition, weatherLabel].filter(Boolean).join(": ");
       weatherText.setAttribute("aria-label", weatherText.title);
       heading.append(weatherText);
-    } else {
-      const weatherMissing = document.createElement("span");
-      weatherMissing.className = "planned-day-weather is-missing";
-      weatherMissing.textContent = "Wetter fehlt";
-      if (!state.data?.weather?.configured) weatherMissing.title = "Kein Wetterort im Profil hinterlegt";
-      else if (dateKey < todayKey) weatherMissing.title = "Für diesen Tag wurde keine Vorhersage gespeichert";
-      else weatherMissing.title = "Für diesen Tag ist keine Vorhersage verfügbar";
-      heading.append(weatherMissing);
     }
     day.append(heading);
+  }
+
+  function plannedDayCheckin(dateKey) {
+    // An empty check-in list is only authoritative once the feedback area has loaded.
+    const feedbackLoaded = state.loadedAreas.has("feedback");
+    const row = feedbackLoaded ? (state.data?.checkins || []).find((item) => item?.checkin_date === dateKey) || null : null;
+    const wrap = document.createElement("div");
+    wrap.className = "planned-day-checkin";
+    const status = document.createElement("p");
+    status.className = `planned-day-checkin-status${row ? " is-saved" : ""}`;
+    if (!feedbackLoaded) status.textContent = "Check-in wird geladen …";
+    else status.textContent = row ? `Check-in gespeichert · ${checkinSummary(row)}` : "Noch kein Check-in für heute";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button";
+    button.textContent = row ? "Check-in bearbeiten" : "Check-in";
+    button.disabled = !feedbackLoaded;
+    button.addEventListener("click", () => openCheckinEditor(dateKey));
+    wrap.append(status, button);
+    return wrap;
   }
 
   function renderPlannedDay(view, dateKey) {
@@ -596,7 +733,10 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     appendPlannedDayHeading(day, weather, dateKey, todayKey);
     const content = document.createElement("div");
     content.className = "planned-day-content";
+    if (dateKey === todayKey) content.append(plannedDayCheckin(dateKey));
     const notes = plannedDayNotes(dayContext);
+    const dayBadges = plannedDayBadgeSpecs(dayContext, state.data?.competitions, dateKey);
+    if (dayBadges.length) notes.prepend(calendarBadgeRow(dayBadges));
     if (notes.childElementCount) content.append(notes);
     if (!dayEntries.length) {
       const empty = document.createElement("p");
@@ -604,7 +744,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       empty.textContent = dateKey < todayKey ? "Keine Aktivität" : "Keine Einheit geplant";
       content.append(empty);
     }
-    dayEntries.forEach((entry) => content.append(renderPlannedEntry(entry, dateKey, todayKey)));
+    dayEntries.forEach((entry) => content.append(renderPlannedEntry(entry, dateKey, todayKey, dayContext)));
     const insights = plannedDayInsights(weather);
     if (insights) day.append(insights);
     day.append(content);
@@ -636,9 +776,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const plannedSeconds = sum(planned, (entry) => entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time);
     const actualSeconds = sum(actual, (entry) => entry.moving_time ?? entry.elapsed_time);
     for (const [label, value] of [
-      ["Geplant", formatDuration(plannedSeconds)],
-      ["Absolviert", formatDuration(actualSeconds)],
-      ["Distanz", actual.length && actual.every((entry) => entry.distance != null) ? distanceLabel(sum(actual, (entry) => entry.distance)) || "0 km" : "–"],
+      ["Geplant", plannedSeconds > 0 ? AppFormat.duration(plannedSeconds) : "–"],
+      ["Absolviert", AppFormat.duration(actualSeconds)],
+      ["Distanz", calendarWeekDistanceLabel(actual)],
       ["Belastung geplant", planned.length && planned.every((entry) => entry.icu_training_load != null) ? calendarMetricNumber(sum(planned, (entry) => entry.icu_training_load)) : "–"],
       ["Belastung absolviert", actual.length && actual.every((entry) => entry.icu_training_load != null) ? calendarMetricNumber(sum(actual, (entry) => entry.icu_training_load)) : "–"],
     ]) {
@@ -674,7 +814,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
     const currentWeekKey = planWeekStart(todayKey);
     const display = state.data?.calendar_display || {};
-    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance]);
+    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.checkins, state.data?.competitions, state.loadedAreas.has("feedback"), state.data?.weather]);
     if (snapshot === plannedRenderSnapshot && root.childElementCount) {
       if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
       return;
@@ -711,6 +851,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       eventsByDate.get(key).push(entry);
     });
 
+    const upcomingDays = Array.from({ length: (pastWeeks + futureWeeks + 1) * 7 }, (_, offset) => addDateKey(firstWeekKey, offset))
+      .filter((dateKey) => dateKey >= todayKey);
+    if (!upcomingDays.some((dateKey) => plannedWeatherLabel(plannedDayWeather(planningContextByDate.get(dateKey) || {}, dateKey)))) root.append(plannedWeatherHint());
     const view = {
       currentWeekKey,
       eventsByDate,
@@ -737,7 +880,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (!visible.length) {
       const empty = document.createElement("p");
       empty.className = "context-empty";
-      empty.textContent = "Noch keine Einheiten in der Bibliothek.";
+      empty.textContent = "Noch keine Einheiten in der Bibliothek. Der Coach legt hier Einheiten ab, wenn du sie planst.";
       root.append(empty);
       return;
     }

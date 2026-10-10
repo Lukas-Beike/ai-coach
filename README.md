@@ -67,7 +67,7 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 - **Unmatched Activity Display**: Prominent display of completed, unscheduled sessions alongside planned workouts without fabricating missing target metrics.
 - **Full Workout Lifecycle Management**: Direct UI and conversational controls to schedule, move, edit, duplicate, archive, restore, and delete planned workouts.
 - **Target Period Scoping**: Conversational plan adjustments strictly scoped to requested date ranges, leaving surrounding weeks and existing training blocks untouched.
-- **Daily Athlete Check-ins**: Dedicated check-in tracking morning readiness, sleep quality, muscle soreness, perceived stress, and free-form athlete notes.
+- **Daily Athlete Check-ins**: Dedicated check-in tracking morning readiness, sleep quality, muscle soreness, perceived stress, and free-form athlete notes. Open it with the **Check-in** action on today's card in *Geplant* or with *Mehr › Profil › Tages-Check-in*. After saving, the card shows the check-in status and the action changes to *Check-in bearbeiten*. Selecting an earlier check-in from the history list asks before an unsaved draft is replaced.
 - **Post-Activity Feedback**: Dedicated local feedback logging for completed workouts, capturing perceived exertion (RPE), equipment details, and workout execution notes.
 - **Multi-Phase Season Periodization**: Long-term seasonal planning mapping base, build, peak, taper, and recovery phases anchored to primary competition dates.
 
@@ -138,12 +138,12 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 - **Installable Progressive Web App**: Responsive PWA optimized for mobile, tablet, and desktop viewports, installable on iOS, Android, macOS, and Windows.
 - **Reliable Hash-Based Navigation**: Accessible URL routing (`#coach`, `#plan`, `#analysis`, `#more`) preserving browser history, deep links, and screen-reader announcements.
 - **Immutable Static Asset Caching**: Versioned static asset serving with one-year immutable cache headers, accompanied by instant service worker cache eviction on updates.
-- **Resilient Offline App Shell**: Pre-cached application shell allowing view navigation and inspection of previously loaded training data during network drops.
+- **Resilient Offline App Shell**: Pre-cached application shell allowing view navigation and inspection of previously loaded training data during network drops. Changes are not queued while offline: saving shows a connection message and nothing is sent later.
 - **Auto-Reconnecting SSE Streaming**: Server-Sent Events stream with exponential backoff (capping at 30 seconds) ensuring smooth recovery after connection drops.
 - **Touch-Friendly Collapsible Views**: Ergonomic mobile interface featuring collapsible profile headers, compact calendar cards, and thumb-friendly bottom navigation.
 - **Light and Dark Appearance**: Choose the system setting, light mode, or dark mode under More → Appearance; the choice is stored on this device.
 - **Chat Controls**: Keep the composer available while reading older messages, jump to the latest reply, stop a response, copy messages, and edit a prior user prompt as a new draft.
-- **Accessible Keyboard Shortcuts**: Desktop navigation supporting Enter-to-send, Shift+Enter for line breaks, Esc for modal dismissal, and ARIA live announcements.
+- **Accessible Keyboard Shortcuts**: Desktop navigation supporting Enter-to-send, Shift+Enter for line breaks, Esc for modal dismissal, and ARIA live announcements. On touch devices, Enter inserts a line break; the send button or Ctrl/Cmd+Enter sends.
 
 ### Privacy, Security & Data Management
 - **SQLCipher AES-256 Encryption**: Complete encryption of all athlete data, metrics, tokens, chat history, and attachments at rest using `APP_PASSWORD`.
@@ -609,12 +609,33 @@ and active, archived, component, zero-target, no-target, and over-target gear.
 All values are synthetic and providers remain blocked; no credentials or live
 athlete data are read. The seed is idempotent and carries a version marker so
 an older demo seed is upgraded in place when the disposable database is reused.
+Version 6 adds review scenarios on top of the v5 data: a rest day and a sick
+day with illness text in the check-ins, a planned 30-minute Swim unit with
+planned load next to a 20-minute swim at 11:00 and a fitting 30-minute swim at
+18:00 on the same day (activity matching ambiguity), a
+`[NO_INTENSITY]` camp day with a hard planned unit, a weekly `[SHORT_ONLY]`
+series with a 90-minute ride. Upgrades from v5 add these records once; repeated
+seeds and restarts keep the counts stable. The default seed does not add a long
+chat history; longer conversations are added on demand for specific scenarios.
+
+`FIXTURE_OPENAI_MODE` controls the simulated OpenAI path. The default
+`canned` keeps the canned Coach replies. `offline` makes each Coach
+request fail as an unreachable OpenAI endpoint (`network_error`) without any
+network call; the simulated failure does not reproduce the original transport
+error details. Unknown values stop the fixture at startup. OpenAI stays
+deliberately configured with a fake key (`OPENAI_API_KEY="e2e-fixture-openai-key"`)
+in every mode, so Coach requests still take the normal Responses API path and no
+real credential is needed.
+
 Use a fresh fixture browser profile and check the mobile-small and mobile
 projects when reviewing this preview.
 
 `scripts/demo-container.ps1` builds the image and starts a disposable demo
-container that seeds this data itself on every start (`FIXTURE_AUTO_SEED=1`;
-idempotent). Run it with
+container that seeds this data itself on every start (`FIXTURE_AUTO_SEED=1`).
+Restarts keep the seeded data unchanged, including with `-Persist`; the
+explicit `GET /api/fixture/features` and `GET /api/fixture/activity` test seeds
+add their synthetic activities to the existing snapshot instead of replacing
+it. Run it with
 `powershell -ExecutionPolicy Bypass -File scripts/demo-container.ps1`; add
 `-Persist` to keep the data in a named volume and `-Port`/`-Name` to adjust the
 container. The login password is the fixture password
@@ -637,7 +658,7 @@ pip-compile --allow-unsafe --generate-hashes --output-file=requirements-dev.txt 
 ### Continuous Integration & Native Codex Reviews
 - **Conventional Commits**: All commit messages and pull request titles must follow the Conventional Commits specification (e.g., `feat(coach): add structured response support` or `fix(sync): resolve Garmin sleep retry backoff`).
 
-- **Native Codex Reviews**: In [Codex Settings](https://chatgpt.com/codex/settings/code-review), enable automatic code review for this repository and select the trigger for new PRs and subsequent pushes. The watchdog waits at most three minutes for a native Codex comment. If none appears, it posts one `@codex review` fallback for that PR commit, then waits up to three minutes for the regular review or explicit exhausted-usage response. The latter grants an availability exception; continued silence fails the check. A later Codex comment or submitted review automatically reruns the check and recovers a late response. Inspect the reviewed commit and resolve all findings before merging. Local `codex review --base origin/develop` is an optional preflight. After adopting the watchdog on each protected branch, require its `Codex review availability` context in the ruleset. Account-level activation must be verified in Codex Settings. Copilot automatic review is disabled in repository rulesets.
+- **Native Codex Reviews**: In [Codex Settings](https://chatgpt.com/codex/settings/code-review), enable automatic code review for this repository and select the trigger for new PRs and subsequent pushes. The watchdog waits at most three minutes for a native Codex comment. If none appears, it posts one `@codex review` fallback for that PR commit, then waits up to three minutes for the regular review or explicit exhausted-usage response. The latter grants an availability exception. Continued silence after the bounded fallback wait is non-blocking and reported as review unavailable, never a completed review or proof of exhausted credits. Explicit integration failures and GitHub API errors remain blocking. Trusted same-repository release-bot version and promotion PRs receive an automation exception. All other required checks and review-thread protections remain enforced. A later Codex comment or submitted review automatically reruns the check and recovers a late response. Inspect the reviewed commit and resolve all findings before merging. Local `codex review --base origin/develop` is an optional preflight. Require the `Codex review availability` context in each protected branch's ruleset. Account-level activation must be verified in Codex Settings. Copilot automatic review is disabled in repository rulesets.
 - **Dependency Updates**: Dependabot updates pip, npm, Docker and GitHub Actions on `develop`. Squash auto-merge is enabled for patch, minor and major updates; protected-branch checks and review-thread resolution still apply. The privileged auto-merge workflow never checks out or executes PR code.
 - **Automated Daily Releases**: At 03:00 UTC, an automated workflow inspects `develop`. If new commits exist, it creates a version-bump PR and a promotion PR to protected `main`. Both branches require native, SQLCipher container, quality and browser checks without bypass actors. After successful main tests, the workflow creates an immutable GitHub release and publishes the container. The container digest is signed and verified before promoting `latest`; the version tag and `latest` must resolve to that same digest. A read-only release preflight also verifies `APP_VERSION` before its tag exists. Actions use read-only default permissions, with explicit job-level write permissions where needed.
 
@@ -659,11 +680,11 @@ Intervals Coach is open-source software licensed under the **GNU Affero General 
 
 Das Tagebuch zeigt jedes zusammengesetzte Essen als einen Eintrag; Zutaten lassen sich in der Karte aufklappen. Gespeicherte Produkt- und Datenbank-Snapshots bewahren die verwendete Herkunft auch nach späteren Produktänderungen. Unbekannte Nährwerte bleiben unbekannt und werden in Karten und Tagessummen nicht als Null ausgegeben. Der Eintrag bleibt lokal; eine Synchronisierung nach Intervals.icu erfolgt nur nach ausdrücklicher Freigabe.
 
-Der Tab **Ernährung** zeigt das Tagebuch mit Kalorien und Makros sowie **Meine Mahlzeiten**. Erfassung, Korrekturen und Löschen laufen über den Coach per Text, Sprache oder Foto. Aktionen im Tab bereiten eine bearbeitbare Nachricht vor; sie speichern und senden nichts automatisch. Ein vorhandener Chatentwurf bleibt erhalten.
+Der Tab **Ernährung** zeigt das Tagebuch mit Kalorien und Makros sowie **Meine Mahlzeiten**. Erfassung, Korrekturen und Löschen laufen über den Coach per Text, Sprache oder Foto. Aktionen im Tab bereiten eine bearbeitbare Nachricht vor; sie speichern und senden nichts automatisch. Ein vorhandener Chatentwurf bleibt erhalten. Nennst du keine Uhrzeit, speichert der Coach den Eintrag mit „Uhrzeit unbekannt“ und dem Mahlzeitentyp; die Karte zeigt dann nur den Typ statt einer erfundenen Uhrzeit.
 
 Mit "Definiere mein Standardfrühstück" lassen sich wiederverwendbare Mahlzeiten mit Zutaten, Mengen und Nährwerten für eine Portion anlegen. Der Coach zeigt die Vorlage zur Bestätigung, bevor er sie speichert. Eine Vorlage zählt noch nicht als gegessen. "Ich habe eine halbe Portion meines Standardfrühstücks gegessen" erfasst den Verzehr mit entsprechend skalierten Nährwerten. Einmalige Abweichungen verändern nur den Tagebucheintrag; dauerhafte Änderungen verändern die Vorlage und niemals frühere Einträge.
 
-Der Coach bevorzugt **BLS 4.0** für Grundnahrungsmittel und **Open Food Facts** für Markenprodukte und Barcodes. Der Backend-Code berechnet Kalorien und Makros aus den ausgewählten Lebensmittel-IDs und Mengen; Datenbankquelle, Bezugsmenge und Zutatenmengen bleiben im Eintrag und in Mahlzeitvorlagen erhalten und werden im Ernährungstab angezeigt. Die aktuelle OFF-Produkt-API wird über ihre strukturierte Nährwertdarstellung gelesen; automatisch ergänzte OFF-Schätzwerte und Angaben wie „kleiner als“ werden nicht als exakte Etikettwerte übernommen. Rohes und gegartes Gewicht sind nicht austauschbar; Gramm und Milliliter werden nicht ohne Dichte umgerechnet. Mehrdeutige Produkte oder unbekannte Mengen müssen geklärt werden. Ohne passenden Treffer bleiben Verpackungswerte oder ausdrücklich gekennzeichnete KI-Schätzungen möglich. Fehlende Makros und nicht erfasste Tage werden nicht als vollständige Nullwerte dargestellt.
+Der Coach bevorzugt **BLS 4.0** für Grundnahrungsmittel und **Open Food Facts** für Markenprodukte und Barcodes. Der Backend-Code berechnet Kalorien und Makros aus den ausgewählten Lebensmittel-IDs und Mengen; Datenbankquelle, Bezugsmenge und Zutatenmengen bleiben im Eintrag und in Mahlzeitvorlagen erhalten und werden im Ernährungstab angezeigt. Die aktuelle OFF-Produkt-API wird über ihre strukturierte Nährwertdarstellung gelesen; automatisch ergänzte OFF-Schätzwerte und Angaben wie „kleiner als“ werden nicht als exakte Etikettwerte übernommen. Rohes und gegartes Gewicht sind nicht austauschbar; Gramm und Milliliter werden nicht ohne Dichte umgerechnet. Mehrdeutige Produkte oder unbekannte Mengen müssen geklärt werden. Ohne passenden Treffer bleiben Verpackungswerte oder ausdrücklich gekennzeichnete KI-Schätzungen möglich. Fehlende Makros und nicht erfasste Tage werden nicht als vollständige Nullwerte dargestellt. Fehlen einzelnen Einträgen Makros, zeigt das Tagebuch die Summe der bekannten Werte als „unvollständig“ und nennt die Zahl der betroffenen Einträge; Synchronisierung, Freigabevorschau und Coach-Kontext verwenden weiterhin nur vollständige Tagessummen.
 
 **Zugang und Limits:** BLS ist als lokaler Datensatz eingebunden und funktioniert ohne API-Key, Konto oder laufende API-Abfragen. Open Food Facts benötigt für Lesezugriffe keinen API-Key; die Anwendung identifiziert sich mit einem User-Agent. Die aktuell dokumentierten IP-Limits sind 15 Produktabfragen und 10 Suchabfragen pro Minute. Die Anwendung begrenzt sich auf 14 bzw. 9 Abfragen pro Minute, speichert Antworten maximal 24 Stunden im begrenzten Arbeitsspeicher-Cache und pausiert bei 429/503. Andere Anwendungen hinter derselben öffentlichen IP teilen sich die Anbieterlimits. Keine Suche bei jedem Tastendruck. An Open Food Facts gehen nur Suchbegriffe/Barcodes für Lebensmittel, keine Mahlzeitmengen, Fotos, Profile oder Chatverläufe; der Anbieter sieht die Server-IP. Bei Ausfall oder Limit wird kein erfundener Datenbankwert verwendet.
 
@@ -688,7 +709,11 @@ Charts preserve provider provenance and observation dates. Garmin performance me
 Unter **Geplant → Übersicht** öffnet „Aktivität analysieren“ eine absolvierte
 Einheit mit ihren lokal gespeicherten Messreihen und Intervallen. „Detaildaten
 laden“ startet ausdrücklich einen Hintergrundjob mit ausschließlich lesenden
-Intervals.icu-Abfragen. Der vorherige Detailstand bleibt bei Fehlern erhalten;
+Intervals.icu-Abfragen; die Aktion ist nur für Intervals.icu-Aktivitäten
+verfügbar und bleibt ohne eingerichtete Intervals.icu-Anbindung deaktiviert.
+Solange Zugangsdaten fehlen, zeigt ein Einrichtungshinweis auf allen Tabs
+einen Link zu Mehr › Anbindungen; er lässt sich für die Browsersitzung
+ausblenden. Der vorherige Detailstand bleibt bei Fehlern erhalten;
 normale Synchronisierungen ersetzen ihn nicht. Fehlende Sensorwerte bleiben
 als Datenlücken sichtbar. Diagramme und Coach-Kontext zeigen höchstens 2.000
 Punkte je Messreihe; gespeichert werden die vollständigen Reihen bis zur

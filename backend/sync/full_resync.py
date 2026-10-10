@@ -50,11 +50,20 @@ class FullResyncProviderExecution:
     garmin_gate: ProviderResyncGate
     all_sync_days: int
 
+    def configured(self, provider: str) -> bool:
+        if provider == "intervals":
+            return bool(self.config.intervals_api_key)
+        if provider == "garmin":
+            return self.garmin_service.configured()
+        return True
+
     def validate_configuration(self, provider: str) -> None:
-        if provider == "intervals" and not self.config.intervals_api_key:
-            raise AppError(503, INTERVALS_API_KEY_ERROR)
-        if provider == "garmin" and not self.garmin_service.configured():
-            raise AppError(503, GARMIN_NOT_CONFIGURED_ERROR)
+        if self.configured(provider):
+            return
+        if provider == "intervals":
+            raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
+        if provider == "garmin":
+            raise AppError(503, GARMIN_NOT_CONFIGURED_ERROR, reason="not_configured")
 
     def gate(self, provider: str) -> ProviderResyncGate:
         return self.intervals_gate if provider == "intervals" else self.garmin_gate
@@ -244,6 +253,10 @@ class FullProviderResyncService:
         self._provider_execution = provider_execution
         self._state_store = state_store
         self._operation_journal = operation_journal
+
+    def provider_configured(self, provider: str) -> bool:
+        self._validate_provider(provider)
+        return self._provider_execution.configured(provider)
 
     def state(self, provider: str, db: Any | None = None) -> dict[str, Any]:
         self._validate_provider(provider)

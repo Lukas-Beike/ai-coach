@@ -3,10 +3,15 @@
 import json
 import os
 import sys
+import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
-FIXTURE_DEMO_SEED_VERSION = "5"
+FIXTURE_DEMO_SEED_VERSION = "6"
+FIXTURE_TRAINING_FEATURES_SEED_VERSION = "1"
+# canned keeps the canned Coach replies; offline simulates an unreachable OpenAI.
+FIXTURE_OPENAI_MODES = ("canned", "offline")
 
 # This file is mounted only in disposable test containers, never normal startup.
 os.environ.update(
@@ -25,6 +30,7 @@ os.environ.update(
 )
 sys.path.insert(0, "/app")
 import server
+from backend.errors import COACH_ABORTED_ERROR
 from backend.http_api import auth as http_auth
 
 FIXTURE_SOURCE = "synthetic fixture"
@@ -53,6 +59,72 @@ server.COACH_CONVERSATION.provision_service = FixtureConversationProvisionServic
 http_auth.RATE_LIMITER.allow = lambda key, limit, window_seconds: (True, 0)
 
 
+SLOW_STREAM_CHUNKS = (
+    "## Kurze Antwort\n\n",
+    "Heute passt ein ",
+    "lockerer Dauerlauf ",
+    "von 40 Minuten.\n\n",
+    "Achte auf **ausreichend Schlaf**",
+    " und regelmäßige Mahlzeiten.\n\n",
+    "- Trinke genug Wasser\n",
+    "- Steigere die Belastung nicht zu schnell.",
+)
+
+
+def _raise_if_fixture_cancelled(cancel_event):
+    """Raise the same chat-cancelled error as CoachResponseTransport."""
+    if cancel_event is not None and cancel_event.is_set():
+        raise server.AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+
+
+def _slow_stream_response(on_text_delta, cancel_event=None):
+    """Stream a German Markdown answer in ~3 s; the final text is returned as well.
+
+    A set cancel_event stops emission before the next chunk and after each wait,
+    so a cancelled request never reaches the success return, as with the real
+    streaming transport.
+    """
+    for chunk in SLOW_STREAM_CHUNKS:
+        _raise_if_fixture_cancelled(cancel_event)
+        if on_text_delta is not None:
+            on_text_delta(chunk)
+        if cancel_event is None:
+            time.sleep(0.4)
+        else:
+            cancel_event.wait(0.4)
+        _raise_if_fixture_cancelled(cancel_event)
+    return {"output_text": "".join(SLOW_STREAM_CHUNKS)}
+
+
+PROVIDER_FAILURE_CODES = {
+    "E2E fixture: OpenAI credit balance exhausted": "credit_balance_exhausted",
+    "E2E fixture: OpenAI model not found": "model_not_found",
+    "E2E fixture: OpenAI access denied": "permission_denied",
+}
+
+
+def _scripted_provider_response(current_message, on_text_delta, cancel_event=None):
+    """Return provider failures and streaming scenarios triggered by fixed messages."""
+    if current_message == "E2E fixture: OpenAI timeout":
+        raise server.AppError(
+            504, "Synthetic private provider detail", reason="provider_timeout"
+        )
+    if current_message in PROVIDER_FAILURE_CODES:
+        return server.provider_state_service().validate_openai_response(
+            "/responses",
+            {
+                "status": "failed",
+                "error": {
+                    "code": PROVIDER_FAILURE_CODES[current_message],
+                    "message": "Synthetic private provider detail",
+                },
+            },
+        )
+    if current_message == "E2E fixture: slow stream":
+        return _slow_stream_response(on_text_delta, cancel_event)
+    return None
+
+
 def fixture_coach_response(payload, **kwargs):
     """Canned model outputs exercise HTTP/worker/storage, not language inference."""
     value = payload.get("input")
@@ -68,26 +140,11 @@ def fixture_coach_response(payload, **kwargs):
         return {"output_text": question or "Deine Rückmeldung ist gespeichert."}
     decoded = json.loads(value)
     current_message = decoded.get("current_message")
-    if current_message == "E2E fixture: OpenAI timeout":
-        raise server.AppError(
-            504, "Synthetic private provider detail", reason="provider_timeout"
-        )
-    provider_failure_codes = {
-        "E2E fixture: OpenAI credit balance exhausted": "credit_balance_exhausted",
-        "E2E fixture: OpenAI model not found": "model_not_found",
-        "E2E fixture: OpenAI access denied": "permission_denied",
-    }
-    if current_message in provider_failure_codes:
-        return server.provider_state_service().validate_openai_response(
-            "/responses",
-            {
-                "status": "failed",
-                "error": {
-                    "code": provider_failure_codes[current_message],
-                    "message": "Synthetic private provider detail",
-                },
-            },
-        )
+    scripted = _scripted_provider_response(
+        current_message, kwargs.get("on_text_delta"), kwargs.get("cancel_event")
+    )
+    if scripted is not None:
+        return scripted
     context = decoded["dialogue"]
     current_id = context["current_user_message_id"]
     if current_message in {
@@ -239,15 +296,44 @@ def fixture_coach_response(payload, **kwargs):
     }
 
 
+def fixture_openai_mode():
+    """Return the simulated OpenAI mode from FIXTURE_OPENAI_MODE."""
+    mode = (os.environ.get("FIXTURE_OPENAI_MODE") or "canned").strip()
+    mode = mode.casefold()
+    if mode not in FIXTURE_OPENAI_MODES:
+        raise ValueError(f"Unsupported FIXTURE_OPENAI_MODE: {mode}")
+    return mode
+
+
+def _fixture_simulate_openai_mode():
+    """Fail like an unreachable OpenAI endpoint without any network call.
+
+    The real classifier and error factory are reused, so the stored provider
+    status and the HTTP-facing reason match a genuine network failure. Transport
+    details such as the original exception text are not simulated.
+    """
+    if fixture_openai_mode() != "offline":
+        return
+    from backend.errors import provider_error
+    from backend.providers.openai_error_classifier import OpenAIErrorClassifier
+
+    OpenAIErrorClassifier(
+        server.provider_state_service, server.runtime_clock.utc_now
+    ).on_network_error("openai")
+    raise provider_error("openai", "network")
+
+
 class FixtureResponseTransport:
     """Provider-free adapter for the canned browser conversation fixture."""
 
     def request(self, payload):
+        _fixture_simulate_openai_mode()
         return fixture_coach_response(payload)
 
     def background_request(
         self, payload, *, response_id=None, on_response_id=None, cancel_event=None
     ):
+        _fixture_simulate_openai_mode()
         return fixture_coach_response(
             payload,
             response_id=response_id,
@@ -258,7 +344,9 @@ class FixtureResponseTransport:
     def stream_request(
         self, payload, on_text_delta, cancel_event=None, on_response_id=None
     ):
-        # Preserve the fixture's previous behavior: no synthetic text deltas.
+        # Only "E2E fixture: slow stream" emits synthetic text deltas (~3 s);
+        # every other message keeps the previous no-delta behavior.
+        _fixture_simulate_openai_mode()
         return fixture_coach_response(
             payload,
             on_text_delta=on_text_delta,
@@ -314,7 +402,7 @@ def stage_fixture_artifact():
             ("fixture-stage",),
         )
 
-    today = server.ATHLETE_CLOCK.now().date()
+    today = server.ATHLETE_CLOCK.now().date() + timedelta(days=STAGED_OFFSET_DAYS)
     artifact.update(
         server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {
@@ -346,11 +434,11 @@ def stage_fixture_artifact():
 
 
 def initialise_fixture():
+    fixture_openai_mode()
     initialise()
-    # Opt-in standard data: the demo container seeds itself on every start.
-    # Both seeds are idempotent and versioned, so restarts are safe.
+    # Opt-in standard data for the demo container. The demo seed is versioned
+    # and seeds the training features once, so restarts leave the data as-is.
     if os.environ.get("FIXTURE_AUTO_SEED") == "1":
-        seed_training_features()
         seed_preview_demo()
 
 
@@ -382,6 +470,70 @@ def demo_performance_history(today):
             }
         )
     return history
+
+
+def _merge_snapshot_activities(activities, wellness=None):
+    """Upsert fixture activities into the latest snapshot without dropping others."""
+    with server.database_manager().unit_of_work() as db:
+        payload = server.SNAPSHOT_REPOSITORY.latest_payload(db)
+        snapshot = json.loads(payload) if payload else {"athlete": {}}
+        by_id = {
+            str(item.get("id")): item
+            for item in snapshot.get("recent_activities") or []
+            if isinstance(item, dict)
+        }
+        by_id.update({str(item["id"]): item for item in activities})
+        merged = sorted(
+            by_id.values(),
+            key=lambda item: str(item.get("start_date_local") or ""),
+            reverse=True,
+        )
+        raw = (
+            snapshot.get("raw_provider_data")
+            if isinstance(snapshot.get("raw_provider_data"), dict)
+            else {}
+        )
+        snapshot["recent_activities"] = merged
+        snapshot["raw_provider_data"] = {**raw, "activities": merged}
+        if wellness is not None:
+            snapshot["recent_wellness"] = wellness
+            snapshot["raw_provider_data"]["wellness"] = wellness
+        snapshot.setdefault("recent_wellness", [])
+        snapshot["synced_at"] = server.runtime_clock.utc_now()
+        server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
+    return snapshot
+
+
+def _fixture_cycling_target(event_date):
+    """Keep exactly one dated cycling target instead of adding one per seed."""
+    target = {
+        "name": "Fixture cycling target",
+        "event_date": event_date.isoformat(),
+        "sport": "Ride",
+        "priority": "A",
+    }
+    existing = next(
+        (
+            item
+            for item in server.PLANNING_DATA.competition().list(100)
+            if item.get("name") == target["name"]
+        ),
+        None,
+    )
+    if existing is None:
+        server.PLANNING_DATA.competition().save(target)
+    elif existing.get("event_date") != target["event_date"]:
+        server.PLANNING_DATA.competition().save(
+            {**target, "competition_id": existing["id"]}
+        )
+
+
+def ensure_training_features():
+    """Seed the training features once per seed version."""
+    with server.database_manager().unit_of_work() as db:
+        version = server.KEY_VALUE_REPOSITORY.get(db, "training_features_seed_version")
+    if version != FIXTURE_TRAINING_FEATURES_SEED_VERSION:
+        seed_training_features()
 
 
 def seed_training_features():
@@ -454,18 +606,13 @@ def seed_training_features():
                     "icu_training_load": 30,
                 }
             )
-    snapshot = {
-        "synced_at": server.runtime_clock.utc_now(),
-        "athlete": {},
-        "recent_wellness": wellness,
-        "recent_activities": rows,
-        "raw_provider_data": {"activities": rows, "wellness": wellness},
-    }
+    snapshot = _merge_snapshot_activities(rows, wellness)
     with server.database_manager().unit_of_work() as db:
+        # Explicit feature seeding resets local equipment so the panels start
+        # from the one synthetic bike below.
         db.execute(
             "DELETE FROM kv WHERE key LIKE 'equipment:%' OR key LIKE 'equipment_assignment:%' OR key LIKE 'equipment_maintenance:%' OR key = 'garmin_equipment_initialized'"
         )
-        server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
         garmin_full = _fixture_demo_garmin(
             now.date(), demo_performance_history(now.date())
         )
@@ -566,14 +713,7 @@ def seed_training_features():
     server.ATHLETE_DATA.equipment().assign(
         {"activity_id": "feature-ride-1", "equipment_id": equipment["id"]}
     )
-    server.PLANNING_DATA.competition().save(
-        {
-            "name": "Fixture cycling target",
-            "event_date": (now.date() + timedelta(days=30)).isoformat(),
-            "sport": "Ride",
-            "priority": "A",
-        }
-    )
+    _fixture_cycling_target(now.date() + timedelta(days=30))
     units = server.PLANNING_DATA.planned_unit().list(500)
     planned = next(
         (unit for unit in units if unit.get("name") == "Fixture fueling ride"), None
@@ -592,6 +732,10 @@ def seed_training_features():
                 }
             ]
         )[0]
+    with server.database_manager().unit_of_work() as db:
+        server.KEY_VALUE_REPOSITORY.set(
+            db, "training_features_seed_version", FIXTURE_TRAINING_FEATURES_SEED_VERSION
+        )
     return {"planned_unit_id": planned["id"], "equipment_id": equipment["id"]}
 
 
@@ -1313,6 +1457,155 @@ def _fixture_wave2_competitions(today):
             )
 
 
+FIXTURE_V6_REST_OFFSET = 9
+FIXTURE_V6_SICK_OFFSET = 13
+FIXTURE_V6_SWIM_OFFSET = 12
+FIXTURE_V6_CAMP_HARD_OFFSET = 7
+FIXTURE_V6_SHORT_ONLY_OFFSET = 9
+
+
+def _fixture_v6_checkin(day, **overrides):
+    return {
+        "checkin_date": day.isoformat(),
+        "soreness": 1,
+        "stress": 2,
+        "motivation": 7,
+        "available_minutes": 90,
+        "day_form": "Erholt",
+        "day_status": "unknown",
+        "tag_answers": {"travel": False, "late_meal": False, "high_stress": False},
+        **overrides,
+    }
+
+
+def _fixture_v6_unit_id(name):
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"intervals-coach-fixture:v6:{name}"))
+
+
+def _fixture_v6_units(today):
+    """Planned units that cover ambiguity, planned load and calendar markers."""
+    specs = [
+        # Same-day swim ambiguity (P2-04): a short 11:00 swim and a fitting 18:00 swim.
+        (
+            "swim-ambiguity",
+            -FIXTURE_V6_SWIM_OFFSET,
+            "Fixture swim intervals",
+            "Swim",
+            30,
+            "- 30m 70%",
+            40,
+        ),
+        # Camp day with [NO_INTENSITY]: hard steps must be flagged by constraints.
+        (
+            "camp-hard-no-intensity",
+            FIXTURE_V6_CAMP_HARD_OFFSET,
+            "Fixture hard intervals",
+            "Ride",
+            60,
+            "- 10m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 35m 50%",
+            75,
+        ),
+        # Active [SHORT_ONLY] occurrence (+16 is cancelled): 90 minutes exceed the limit.
+        (
+            "short-only-ride",
+            FIXTURE_V6_SHORT_ONLY_OFFSET,
+            "Fixture short-only ride",
+            "Ride",
+            90,
+            "- 90m 65%",
+            85,
+        ),
+    ]
+    return [
+        (
+            name,
+            {
+                "date": (today + timedelta(days=offset)).isoformat(),
+                "name": title,
+                "sport": sport,
+                "duration_minutes": duration,
+                "description": description,
+                "icu_training_load": load,
+                "target": "AUTO",
+                "rationale": "Synthetische Vorschau",
+            },
+        )
+        for name, offset, title, sport, duration, description, load in specs
+    ]
+
+
+def _fixture_database_is_real():
+    """The v1 contract test supplies a bare mocked connection without ``execute``."""
+    with server.database_manager().unit_of_work() as probe:
+        return hasattr(probe, "execute")
+
+
+def _fixture_seed_v6(today):
+    """Add v6 check-ins, swim activities and marker units through existing services.
+
+    Every record has a fixed identifier or key, so repeated upgrades and restarts
+    replace or skip the same fixture rows instead of duplicating them.
+    Returns False when the mocked contract-test connection cannot persist data.
+    """
+    from backend import change_history
+    from backend.planning import planned_units, workouts
+
+    if not _fixture_database_is_real():
+        return False
+    rest_day = today - timedelta(days=FIXTURE_V6_REST_OFFSET)
+    sick_day = today - timedelta(days=FIXTURE_V6_SICK_OFFSET)
+    server.ATHLETE_DATA.checkin().save(
+        _fixture_v6_checkin(rest_day, day_status="rest", day_form="Erholt")
+    )
+    server.ATHLETE_DATA.checkin().save(
+        _fixture_v6_checkin(
+            sick_day,
+            day_status="pause",
+            soreness=3,
+            motivation=3,
+            day_form="Krank, synthetisch",
+            illness="Erkältung, synthetisch",
+        )
+    )
+    swim_day = (today - timedelta(days=FIXTURE_V6_SWIM_OFFSET)).isoformat()
+    _merge_snapshot_activities(
+        [
+            {
+                "id": f"fixture-v6-swim-{suffix}",
+                "name": f"Fixture swim {suffix.upper()}",
+                "type": "Swim",
+                "start_date_local": f"{swim_day}T{start}",
+                "moving_time": minutes * 60,
+                "distance": minutes * 50,
+                "icu_training_load": load,
+            }
+            for suffix, start, minutes, load in (
+                ("a", "11:00:00", 20, 25),
+                ("b", "18:00:00", 30, 40),
+            )
+        ]
+    )
+    planned = server.PLANNING_DATA.planned_unit()
+    with server.database_manager().unit_of_work() as db:
+        for name, workout in _fixture_v6_units(today):
+            unit_id = _fixture_v6_unit_id(name)
+            if db.execute(
+                "SELECT 1 FROM planned_units WHERE id = ?", (unit_id,)
+            ).fetchone():
+                continue
+            entry = planned_units.normalize_planned_unit(
+                workout, local_id=unit_id, external_id=None, sync_status="local"
+            )
+            workouts.validate_workout_description(entry)
+            # Insert directly: marker-day units must exist to test constraints.
+            planned.insert(db, entry)
+            change_history.record_change(
+                db, "planned_unit", unit_id, "create", None, entry, source="fixture"
+            )
+            server.PLANNING_REVISION_SERVICE.bump(db)
+    return True
+
+
 def _upgrade_preview_demo(today):
     """Add the expanded standard-fixture records without duplicating v1 data."""
     with server.database_manager().unit_of_work() as db:
@@ -1378,6 +1671,7 @@ def _upgrade_preview_demo(today):
     _fixture_seed_equipment(today, garmin)
     _fixture_seed_calendar(today)
     _fixture_seed_wave2(today, snapshot, garmin)
+    _fixture_seed_v6(today)
     with server.database_manager().unit_of_work() as db:
         server.KEY_VALUE_REPOSITORY.set(
             db, "preview_demo_seed_version", FIXTURE_DEMO_SEED_VERSION
@@ -1394,7 +1688,7 @@ def seed_preview_demo():
             return {"ready": True}
     if legacy_seeded or version:
         return _upgrade_preview_demo(server.ATHLETE_CLOCK.now().date())
-    seed_training_features()
+    ensure_training_features()
     today = server.ATHLETE_CLOCK.now().date()
     server.ATHLETE_DATA.profile().save(
         {
@@ -1492,6 +1786,7 @@ def seed_preview_demo():
         payload = server.SNAPSHOT_REPOSITORY.latest_payload(db)
         snapshot = json.loads(payload) if payload else snapshot
     _fixture_seed_wave2(today, snapshot, garmin)
+    _fixture_seed_v6(today)
     with server.database_manager().unit_of_work() as db:
         server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(garmin))
         for role, content in [
@@ -1546,15 +1841,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 "distance": 25000,
                 "icu_training_load": 50,
             }
-            snapshot = {
-                "synced_at": datetime.now(timezone.utc).isoformat(),
-                "athlete": {},
-                "recent_wellness": [],
-                "recent_activities": [activity],
-                "raw_provider_data": {"activities": [activity]},
-            }
-            with server.database_manager().unit_of_work() as db:
-                server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
+            _merge_snapshot_activities([activity])
             detailed = {
                 **activity,
                 "icu_ftp": 250,
@@ -1600,5 +1887,10 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
 
 server.initialise_database = initialise_fixture
 server.HTTP_API.request_handler_class = lambda: FixtureHandler
+# Staged plan block starts this many days after the athlete's today. The standard
+# seed places planned units on +2, +3 and +5 and calendar events on +2..+9 and
+# later, so the block must stay clear of both for every simulated today; see
+# test_staged_plan_never_collides_with_seeded_units_on_any_weekday.
+STAGED_OFFSET_DAYS = 10
 if __name__ == "__main__":
     server.main()

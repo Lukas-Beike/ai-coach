@@ -262,9 +262,7 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
                 (raised.exception.status, raised.exception.reason),
                 (400, "invalid_action"),
             )
-            self.assertEqual(
-                raised.exception.message, "Diese Aktion benoetigt payload."
-            )
+            self.assertEqual(raised.exception.message, "Diese Aktion benötigt payload.")
 
         manager = Mock()
         feedback = ActivityFeedbackService(manager, Mock(), Mock())

@@ -24,8 +24,11 @@ function handleStateEvent(event) {
   if (payload.latest_event_id !== undefined) state.stateEventLastId = Number(payload.latest_event_id) || state.stateEventLastId;
   if (event.type === "reset") {
     scheduleStateEventRefresh(["chat", "plan", "library", "performance", "feedback", "profile"]);
+    scheduleChatStatusPoll(0);
     return;
   }
+  // A submitted Coach turn (possibly from another device) starts status polling once.
+  if (event.type === "coach" && payload.role === "user") scheduleChatStatusPoll(0);
   const areas = {
     coach: ["chat"],
     planning: ["plan", "library"],
@@ -229,7 +232,7 @@ function renderConnectivityStatus(online = navigator.onLine) {
   const notice = $("#connectivityNotice");
   if (!notice) return;
   notice.hidden = online;
-  notice.textContent = online ? "" : "Offline: Nur bereits geladene Daten sind verfügbar. Synchronisierung und Speichern warten auf die Verbindung.";
+  notice.textContent = online ? "" : "Offline – Änderungen können gerade nicht gespeichert werden. Bereits geladene Daten bleiben sichtbar.";
 }
 
 
@@ -281,9 +284,17 @@ function coachProviderLabel(provider) {
 }
 
 
+const NON_RETRYABLE_PROVIDER_ERRORS = Object.freeze(["auth_required", "invalid_configuration"]);
+
+
+function providerErrorIsNonRetryable(errorCode) {
+  return NON_RETRYABLE_PROVIDER_ERRORS.includes(errorCode);
+}
+
+
 function providerRequiresManualAttention(entry) {
   if (!entry?.configured) return false;
-  if (["auth_required", "invalid_configuration"].includes(entry.error_code)) return true;
+  if (providerErrorIsNonRetryable(entry.error_code)) return true;
   const hasFutureRetry = entry.next_retry_at && Date.parse(entry.next_retry_at) > Date.now();
   return ["error", "stale", "partial"].includes(entry.state) && !hasFutureRetry;
 }
@@ -300,6 +311,11 @@ function renderProviderAttention(data) {
     detail.textContent = "";
     return;
   }
+  // Only hard failures interrupt assistive technology; stale or partial data is a polite status.
+  const hasHardError = providers.some((entry) => entry.state === "error"
+    || ["auth_required", "invalid_configuration"].includes(entry.error_code));
+  banner.setAttribute("role", hasHardError ? "alert" : "status");
+  banner.setAttribute("aria-live", hasHardError ? "assertive" : "polite");
   const labels = [...new Set(providers.map((entry) => entry.label || entry.provider || "Eine Anbindung"))];
   detail.textContent = labels.length === 1
     ? `${labels[0]} benötigt manuelles Eingreifen.`
@@ -433,13 +449,17 @@ function renderProviderFreshness(data) {
     status.className = entry.state === "fresh" || entry.state === "partial" ? "configured" : "not-configured";
     status.textContent = PROVIDER_FRESHNESS_STATUS[entry.state] || "Unbekannter Status";
     header.append(title, status);
-    const meta = document.createElement("span");
-    meta.className = "provider-freshness-meta";
-    const attempt = entry.last_attempt_at ? `Letzter Versuch: ${formatTime(entry.last_attempt_at)}` : "Noch kein Versuch";
-    const success = entry.last_success_at ? `Letzter Erfolg: ${formatTime(entry.last_success_at)}` : "Noch kein erfolgreicher Abruf";
-    const retry = entry.next_retry_at ? `Nächster Versuch ab: ${formatTime(entry.next_retry_at)}` : "Kein automatischer Retry terminiert";
-    meta.textContent = `${attempt} · ${success} · ${retry}`;
-    item.append(header, meta);
+    if (entry.configured === false || entry.state === "not_configured") {
+      item.append(header);
+    } else {
+      const meta = document.createElement("span");
+      meta.className = "provider-freshness-meta";
+      const attempt = entry.last_attempt_at ? `Letzter Versuch: ${formatTime(entry.last_attempt_at)}` : "Noch kein Versuch";
+      const success = entry.last_success_at ? `Letzter Erfolg: ${formatTime(entry.last_success_at)}` : "Noch kein erfolgreicher Abruf";
+      const retry = entry.next_retry_at ? `Nächster Versuch ab: ${formatTime(entry.next_retry_at)}` : "Kein automatischer Retry terminiert";
+      meta.textContent = `${attempt} · ${success} · ${retry}`;
+      item.append(header, meta);
+    }
     if (entry.error_code) {
       const error = document.createElement("span");
       error.className = "error";

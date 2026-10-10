@@ -816,6 +816,10 @@ def build_structured_tool_schemas(
                             "type": "string",
                             "description": "Time of the meal HH:MM",
                         },
+                        "logged_time_known": {
+                            "type": "boolean",
+                            "description": "False only when the athlete did not say when they ate; then omit the time and set meal_type. Defaults to true.",
+                        },
                         "meal_type": {
                             "type": "string",
                             "enum": ["breakfast", "lunch", "dinner", "snack"],
@@ -894,6 +898,10 @@ def build_structured_tool_schemas(
                         "meal_date": {"type": "string"},
                         "logged_at": {"type": "string"},
                         "meal_time": {"type": "string"},
+                        "logged_time_known": {
+                            "type": "boolean",
+                            "description": "False only when the athlete did not say when they ate; then omit the time and set meal_type. Defaults to true.",
+                        },
                         "meal_type": {
                             "type": "string",
                             "enum": ["breakfast", "lunch", "dinner", "snack"],

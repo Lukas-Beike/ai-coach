@@ -63,7 +63,7 @@ class StructuredTrainingStateService:
             or not all(isinstance(value, str) for value in decoded["key"])
         ):
             raise AppError(
-                400, "Ungueltiger Planungscursor.", reason="invalid_page_cursor"
+                400, "Ungültiger Planungscursor.", reason="invalid_page_cursor"
             )
         if decoded and (
             decoded.get("revision") != revision_number
@@ -72,7 +72,7 @@ class StructuredTrainingStateService:
         ):
             raise AppError(
                 409,
-                "Die Planung hat sich waehrend des Lesens geaendert. Alle Seiten erneut lesen.",
+                "Die Planung hat sich während des Lesens geändert. Alle Seiten erneut lesen.",
                 reason="planning_revision_conflict",
             )
         return decoded["key"] if decoded else ["", "", ""]

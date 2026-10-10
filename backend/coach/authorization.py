@@ -197,4 +197,4 @@ def structured_action_payload(arguments: dict[str, Any]) -> dict[str, Any]:
     payload = arguments.get("payload")
     if isinstance(payload, dict):
         return payload
-    raise AppError(400, "Diese Aktion benoetigt payload.", reason="invalid_action")
+    raise AppError(400, "Diese Aktion benötigt payload.", reason="invalid_action")

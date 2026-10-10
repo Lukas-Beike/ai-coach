@@ -227,7 +227,7 @@ def sleep_regularity(
     for (source, method), records in sorted(groups.items()):
         series.append(_sleep_series(source, method, records, today))
     if not series:
-        reason = "Keine geprueften datierten Schlafbeginn- und Endzeiten verfuegbar."
+        reason = "Keine geprüften datierten Schlafbeginn- und Endzeiten verfügbar."
         return {
             "method": "sleep-regularity-v1",
             "timezone": timezone_name,
@@ -346,9 +346,9 @@ def _sleep_series(
         status = "ok"
     reason = None
     if count < 14:
-        reason = "Mindestens 14 fruehere datierte Schlafintervalle erforderlich."
+        reason = "Mindestens 14 frühere datierte Schlafintervalle erforderlich."
     if not count:
-        reason = "Keine geprueften datierten Schlafbeginn- und Endzeiten verfuegbar."
+        reason = "Keine geprüften datierten Schlafbeginn- und Endzeiten verfügbar."
     onset = (
         _circular_median([item["onset_minutes_local"] for item in prior])
         if prior

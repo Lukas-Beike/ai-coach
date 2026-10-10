@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from nutrition_service_support import build_nutrition_services
 
+from backend.athlete.clock import AthleteLocalClock
 from backend.db.manager import DatabaseManager
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -328,7 +329,62 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         )
         entry = self.service.log_template(template["id"], meal_date="2026-09-23")
         self.assertEqual(entry["meal_date"], "2026-09-23")
-        self.assertEqual(entry["logged_at"], "2026-09-23T12:00")
+        self.assertEqual(entry["logged_at"], "2026-09-23T12:00:00")
+        self.assertFalse(entry["logged_time_known"])
+
+    def test_template_without_meal_time_stores_unknown_time_and_keeps_meal_type(
+        self,
+    ) -> None:
+        template = self.library.save_template(
+            {
+                "name": "Breakfast bowl",
+                "description": "Oats and berries",
+                "kcal": 350,
+                "meal_type": "breakfast",
+                "source": "coach",
+            }
+        )
+        unknown = self.service.log_template(template["id"], meal_date="2026-09-23")
+        self.assertFalse(unknown["logged_time_known"])
+        self.assertEqual(unknown["meal_type"], "breakfast")
+        self.assertFalse(self.service.get_meal(unknown["id"])["logged_time_known"])
+        known = self.service.log_template(
+            template["id"], meal_date="2026-09-23", meal_time="13:05"
+        )
+        self.assertTrue(known["logged_time_known"])
+        self.assertEqual(known["logged_at"], "2026-09-23T13:05")
+        self.assertEqual(known["meal_type"], "breakfast")
+        self.assertTrue(self.service.get_meal(known["id"])["logged_time_known"])
+
+    def test_meal_logged_after_athlete_local_midnight_uses_athlete_local_day(
+        self,
+    ) -> None:
+        # 2026-10-09T22:30Z is 2026-10-10 00:30 in Europe/Berlin (CEST).
+        instant = datetime(2026, 10, 9, 22, 30, tzinfo=UTC)
+
+        class Profile:
+            def get(self) -> dict[str, str]:
+                return {"timezone": "Europe/Berlin"}
+
+        clock = AthleteLocalClock(Profile(), now=lambda tz: instant.astimezone(tz))
+        service, library = build_nutrition_services(
+            self.manager,
+            self.lock,
+            lambda: instant.isoformat(),
+            clock.now,
+        )
+        template = library.save_template(
+            {"name": "Oats", "description": "80 g oats", "kcal": 400}
+        )
+
+        entry = service.log_template(template["id"], 0.5)
+
+        self.assertEqual(clock.now().date().isoformat(), "2026-10-10")
+        self.assertEqual(entry["meal_date"], "2026-10-10")
+        summary = service.get_day_summary(clock.now().date().isoformat())
+        self.assertEqual(summary["entry_count"], 1)
+        self.assertEqual(summary["entries"][0]["id"], entry["id"])
+        self.assertEqual(service.get_day_summary("2026-10-09")["entry_count"], 0)
 
     def test_template_meal_type_defaults_from_consumption_time_and_keeps_explicit_type(
         self,

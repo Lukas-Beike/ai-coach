@@ -388,7 +388,7 @@ class OpenAIStreamClient:
 
     def _require_api_key(self) -> None:
         if not self.config.api_key:
-            raise AppError(503, OPENAI_API_KEY_ERROR)
+            raise AppError(503, OPENAI_API_KEY_ERROR, reason="not_configured")
 
     def _raise_if_cancelled(self, cancel_event: Any) -> None:
         if cancel_event is not None and cancel_event.is_set():

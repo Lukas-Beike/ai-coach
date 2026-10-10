@@ -24,6 +24,7 @@ from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
 
 BACKEND_SOURCE_ROOT = Path(__file__).resolve().parents[1]
+OPENAI_NOT_CONFIGURED_MESSAGE = "OpenAI ist nicht konfiguriert. Bitte hinterlege einen OPENAI_API_KEY in der Serverkonfiguration."
 OPENAI_USAGE_LIMIT_MESSAGE = (
     "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. "
     "Bitte das Limit im OpenAI-Konto prüfen."
@@ -196,7 +197,9 @@ class CoachTurnFailureService:
         if not isinstance(reason, str):
             reason = ""
         explanations = {
-            "openai_not_configured": "OpenAI ist nicht konfiguriert. Bitte hinterlege einen OPENAI_API_KEY in der Serverkonfiguration.",
+            "openai_not_configured": OPENAI_NOT_CONFIGURED_MESSAGE,
+            # OpenAI configuration errors carry the shared not_configured reason.
+            "not_configured": OPENAI_NOT_CONFIGURED_MESSAGE,
             "conversation_state_invalid": "Der KI-Dienst konnte den Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten.",
             "conversation_locked": "Der KI-Dienst verarbeitet noch eine andere Anfrage. Bitte warte kurz und versuche es erneut.",
             "authentication_or_permission": "Der KI-Dienst hat den Zugriff abgelehnt. Bitte prüfe den API-Zugang in den Einstellungen.",
@@ -255,7 +258,7 @@ class CoachTurnFailureService:
             ]
             if completed:
                 text += (
-                    "\nBereits erfolgreich ausgefuehrt: "
+                    "\nBereits erfolgreich ausgeführt: "
                     + "; ".join(coach_effect_label(step) for step in completed)
                     + ". Diese Schritte bleiben gespeichert."
                 )

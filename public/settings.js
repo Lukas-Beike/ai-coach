@@ -79,6 +79,7 @@ async function saveCheckin(event) {
   }
 }
 
+// Rejects when the backup fails so callers can report the error and keep their own state consistent.
 async function downloadDatabaseBackup() {
   const button = $("#backupDownloadButton");
   if (button) button.disabled = true;
@@ -89,13 +90,13 @@ async function downloadDatabaseBackup() {
       130_000,
     );
     const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    link.href = url;
     link.download = `intervals-coach-database-${todayIso()}.backup`;
     link.click();
-    URL.revokeObjectURL(link.href);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Verschlüsseltes Backup heruntergeladen");
-  } catch (error) { toast(error.message, true); }
-  finally { if (button) button.disabled = false; }
+  } finally { if (button) button.disabled = false; }
 }
 
 async function restoreDatabaseBackup() {
@@ -185,10 +186,11 @@ async function downloadPrivacyExport() {
       130_000,
     );
     const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    link.href = url;
     link.download = `intervals-coach-export-${todayIso()}.zip`;
     link.click();
-    URL.revokeObjectURL(link.href);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Datenexport erstellt");
   } catch (error) { toast(error.message, true); }
 }
@@ -201,10 +203,14 @@ async function deletePrivacyData() {
       `${(preview.remote_untouched || []).join("\n")}\n\n` +
       `${preview.openai_conversation || "Eine vorhandene OpenAI-Konversation wird separat behandelt."}\n\n` +
       "Erstelle bei Bedarf vorher ein verschlüsseltes Backup oder einen Export. Dieser Schritt kann nicht rückgängig gemacht werden.";
+    // The backend preview is the single source of the required text; fail closed without it.
+    if (!preview.confirmation_text) throw new Error("Die Löschbestätigung ist derzeit nicht verfügbar.");
     const confirmation = await requestConfirmation(scope, {
       title: "Lokale Daten endgültig löschen?",
       inputLabel: "Bestätigungstext",
       expectedText: preview.confirmation_text,
+      confirmLabel: "Endgültig löschen",
+      secondaryAction: { label: "Erst Backup erstellen", onClick: downloadDatabaseBackup },
     });
     if (!confirmation) return;
     const result = await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: confirmation }) });

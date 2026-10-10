@@ -164,7 +164,8 @@ test("history and library cursors expose and append another page once", async ({
     state.data.messages_next_cursor = "synthetic-history";
     renderMessages(state.data.messages);
   });
-  await page.locator('#messages [data-page-area="chat"]').click();
+  // The visible button may already have been consumed by the automatic top-of-chat loader; the button stays the fallback.
+  await page.evaluate(() => document.querySelector('#messages [data-page-area="chat"]')?.click());
   await expect.poll(() => page.evaluate(() => state.data.messages.map((item) => item.id))).toEqual([1, 2]);
   await page.evaluate(() => {
     state.data.library = [];

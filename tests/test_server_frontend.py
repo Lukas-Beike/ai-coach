@@ -9,6 +9,27 @@ from unittest.mock import Mock
 
 from server_test_support import ServerTestCase, server
 
+VERSIONED_ASSET_REF = re.compile(r'(?<=[="])(/[^"?\s]+)\?v=(\d+)(?=")')
+CACHE_NAME_PATTERN = r'const CACHE = "intervals-coach-v\d+";'
+
+
+def versioned_asset_refs(markup):
+    """Return every local ``/path?v=N`` reference found in quoted markup or JS."""
+    return [
+        f"{path}?v={version}" for path, version in VERSIONED_ASSET_REF.findall(markup)
+    ]
+
+
+def asset_ref(path):
+    """Return the ``path?v=N`` reference that index.html currently serves."""
+    index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+    matches = [
+        ref for ref in versioned_asset_refs(index) if ref.split("?", 1)[0] == path
+    ]
+    if len(matches) != 1:
+        raise AssertionError(f"Expected one versioned index reference for {path}")
+    return matches[0]
+
 
 def frontend_source():
     return "\n".join(
@@ -297,15 +318,63 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("const SYNC_POLL_ACTIVE_MS = 1_500;", app)
         self.assertNotIn("setInterval(() => {\n  if (state.localSync.intervals", app)
 
-    def test_mobile_busy_composer_keeps_round_actions_and_centers_controls(self):
+    def test_chat_jump_follows_latest_without_stealing_touch_focus(self):
+        public = Path(__file__).resolve().parents[1] / "public"
+        coach = (public / "coach.js").read_text(encoding="utf-8")
+        state = (public / "state.js").read_text(encoding="utf-8")
+        styles = (public / "styles.css").read_text(encoding="utf-8")
+        for path in public.glob("*.js"):
+            self.assertNotIn(
+                "jumpToChatComposer", path.read_text(encoding="utf-8"), path.name
+            )
+        self.assertIn("function jumpToLatestMessages()", coach)
+        self.assertIn("chatLatestVisibleNode(root)", coach)
+        self.assertIn("chatFollowLatest: true", state)
+        self.assertIn("state.chatFollowLatest = false", coach)
+        self.assertIn(
+            "if (shouldRestoreChatInputFocus()) input.focus({ preventScroll: true });",
+            coach,
+        )
+        self.assertIn("Zur neuesten Antwort springen", coach)
+        start = styles.index(".composer .chat-jump {")
+        jump_rule = styles[start : styles.index("}", start)]
+        self.assertIn("var(--composer-height", jump_rule)
+        self.assertIn("var(--composer-bg)", jump_rule)
+        self.assertIn("box-shadow: 0 8px 22px var(--composer-shadow);", jump_rule)
+
+    def test_composer_layout_is_identical_while_busy(self):
         styles = (
             Path(__file__).resolve().parents[1] / "public" / "styles.css"
         ).read_text(encoding="utf-8")
-        self.assertIn(".composer-actions { display: flex; align-items: center;", styles)
         self.assertIn(
-            ".composer.is-busy .composer-actions button:not(.attachment-button):not(.composer-stop-button):not(#sendButton)",
+            ".composer-actions { display: flex; align-items: flex-end;", styles
+        )
+        self.assertNotIn(".composer.is-busy", styles)
+
+    def test_chat_queue_offers_visible_controls_without_browser_persistence(self):
+        root = Path(__file__).resolve().parents[1] / "public"
+        coach = (root / "coach.js").read_text(encoding="utf-8")
+        shared = (root / "shared.js").read_text(encoding="utf-8")
+        index = (root / "index.html").read_text(encoding="utf-8")
+        styles = (root / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('"Als Nächstes"', coach)
+        self.assertIn('"Wird nach der aktuellen Antwort gesendet"', coach)
+        self.assertIn("`Bearbeiten: wartende Nachricht ${position}`", coach)
+        self.assertIn("`Entfernen: wartende Nachricht ${position}`", coach)
+        self.assertIn('"Folgefrage – wird danach gesendet"', coach)
+        self.assertIn('aria-label="Als Nächstes senden"', index)
+        self.assertIn('aria-describedby="steerButtonHint"', index)
+        self.assertIn('id="steerButtonHint" class="sr-only"', index)
+        self.assertIn('$("#steerButtonHint")', coach)
+        self.assertIn(
+            ".message.pending .pending-actions button { min-width: 44px; min-height: 44px; }",
             styles,
         )
+        # Queued text stays in memory only and is protected by the leave-page guard.
+        self.assertNotIn("coachQueuedMessages", coach + shared)
+        self.assertNotIn("localStorage", coach)
+        self.assertIn("state.chatQueue.length > 0", shared)
 
     def test_mobile_chat_layout_keeps_composer_clear_of_navigation_and_keyboard(self):
         coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
@@ -316,7 +385,11 @@ class ServerFrontendTests(ServerTestCase):
             Path(__file__).resolve().parents[1] / "public" / "styles.css"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            "#chatPanel .composer { bottom: calc(74px + max(12px, env(safe-area-inset-bottom))); }",
+            "#chatPanel .composer { bottom: var(--composer-offset); }",
+            styles,
+        )
+        self.assertIn(
+            "--composer-offset: calc(74px + max(12px, env(safe-area-inset-bottom)));",
             styles,
         )
         self.assertIn(
@@ -330,6 +403,30 @@ class ServerFrontendTests(ServerTestCase):
         )
         self.assertNotIn("chat-composer-hidden", app + styles)
         self.assertIn(".quick-message-templates::after", styles)
+
+    def test_message_actions_are_compact_icon_buttons_with_accessible_names(self):
+        root = Path(__file__).resolve().parents[1]
+        coach = (root / "public" / "coach.js").read_text(encoding="utf-8")
+        index = (root / "public" / "index.html").read_text(encoding="utf-8")
+        styles = (root / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn(
+            'const copy = messageActionButton("copy", "Nachricht kopieren");', coach
+        )
+        self.assertIn(
+            'const edit = messageActionButton("edit", "Als Entwurf bearbeiten");',
+            coach,
+        )
+        self.assertIn('button.setAttribute("aria-label", label);', coach)
+        self.assertIn("button.title = label;", coach)
+        self.assertNotIn('copy.textContent = "Kopieren";', coach)
+        self.assertIn('<symbol id="icon-copy"', index)
+        self.assertIn('<symbol id="icon-edit"', index)
+        self.assertRegex(styles, r"\.message\.user\s*\{[^}]*max-width:\s*85%;")
+        self.assertRegex(
+            styles,
+            r"\.message-action\s*\{[^}]*width:\s*44px;\s*height:\s*44px;",
+        )
+        self.assertIn(".message-action:focus-visible {", styles)
 
     def test_maintenance_ui_status_and_restore_asset_versions_are_present(self):
         coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
@@ -371,25 +468,25 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("globalThis.AppApi.request(path, options, () =>", app)
         self.assertIn("globalThis.AppApi.audio(path, blob, () =>", app)
         self.assertIn("renderModel(model)", views)
-        self.assertIn("/api.js?v=223", index)
-        self.assertIn("/navigation.js?v=231", index)
-        self.assertIn("/appearance.js?v=218", index)
+        self.assertIn(asset_ref("/api.js"), index)
+        self.assertIn(asset_ref("/navigation.js"), index)
+        self.assertIn(asset_ref("/appearance.js"), index)
         self.assertNotIn("<script>", index)
-        self.assertIn("/state.js?v=219", index)
-        self.assertIn("/views.js?v=220", index)
-        self.assertIn("/forms.js?v=217", index)
-        self.assertIn("/components.js?v=217", index)
-        self.assertIn("/coach.js?v=9", index)
-        self.assertIn("/app.js?v=276", index)
-        self.assertIn("/styles.css?v=281", index)
-        self.assertIn("intervals-coach-v370", service_worker)
-        self.assertIn("/analysis.js?v=94", index)
-        self.assertIn('"/navigation.js?v=231"', service_worker)
-        self.assertIn('"/appearance.js?v=218"', service_worker)
-        self.assertIn('"/state.js?v=219"', service_worker)
-        self.assertIn('"/views.js?v=220"', service_worker)
-        self.assertIn('"/forms.js?v=217"', service_worker)
-        self.assertIn('"/components.js?v=217"', service_worker)
+        self.assertIn(asset_ref("/state.js"), index)
+        self.assertIn(asset_ref("/views.js"), index)
+        self.assertIn(asset_ref("/forms.js"), index)
+        self.assertIn(asset_ref("/components.js"), index)
+        self.assertIn(asset_ref("/coach.js"), index)
+        self.assertIn(asset_ref("/app.js"), index)
+        self.assertIn(asset_ref("/styles.css"), index)
+        self.assertRegex(service_worker, CACHE_NAME_PATTERN)
+        self.assertIn(asset_ref("/analysis.js"), index)
+        self.assertIn(f'"{asset_ref("/navigation.js")}"', service_worker)
+        self.assertIn(f'"{asset_ref("/appearance.js")}"', service_worker)
+        self.assertIn(f'"{asset_ref("/state.js")}"', service_worker)
+        self.assertIn(f'"{asset_ref("/views.js")}"', service_worker)
+        self.assertIn(f'"{asset_ref("/forms.js")}"', service_worker)
+        self.assertIn(f'"{asset_ref("/components.js")}"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="logsDownloadButton"', index)
@@ -498,12 +595,16 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("function showAccessibleDialog(", app)
         self.assertNotIn("function restoreDialogFocus(", app)
         self.assertLess(
-            index.index("/forms.js?v=217"), index.index("/components.js?v=217")
+            index.index(asset_ref("/forms.js")),
+            index.index(asset_ref("/components.js")),
         )
         self.assertLess(
-            index.index("/components.js?v=217"), index.index("/coach.js?v=9")
+            index.index(asset_ref("/components.js")),
+            index.index(asset_ref("/coach.js")),
         )
-        self.assertLess(index.index("/coach.js?v=9"), index.index("/app.js?v=276"))
+        self.assertLess(
+            index.index(asset_ref("/coach.js")), index.index(asset_ref("/app.js"))
+        )
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn(
@@ -539,6 +640,14 @@ class ServerFrontendTests(ServerTestCase):
         )
         self.assertIn("if (!status || status.textContent === message) return;", coach)
         self.assertIn('announceChatStatus("Antwort fertig.")', coach)
+
+    def test_chat_operation_status_live_region_stays_mounted(self):
+        root = Path(__file__).resolve().parents[1]
+        index = (root / "public" / "index.html").read_text(encoding="utf-8")
+        markup = next(
+            line for line in index.splitlines() if 'id="chatOperationStatus"' in line
+        )
+        self.assertNotRegex(markup, r"\bhidden\b")
 
     def test_main_navigation_uses_stable_hash_links_and_focuses_active_panel(self):
         app = frontend_source()
@@ -686,11 +795,89 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("planned-day-health", plan_views)
         self.assertNotIn("function renderPlanned(", app)
         plan_markup = index[
-            index.index('id="workoutsPanel"') : index.index('id="checkinDialog"')
+            index.index('id="workoutsPanel"') : index.index('id="dataPanel"')
         ]
         self.assertNotIn("<button", plan_markup)
         self.assertNotIn("planningEditDirty", state)
         self.assertNotIn("plannedWeekOpen", state)
+
+    def test_calendar_badges_are_text_safe_and_status_aware(self):
+        root = Path(__file__).resolve().parents[1] / "public"
+        plan_views = (root / "plan-views.js").read_text(encoding="utf-8")
+        styles = (root / "styles.css").read_text(encoding="utf-8")
+        for helper in (
+            "function stripCalendarMarkers(",
+            "function calendarMarkerKeys(",
+            "function plannedDayBadgeSpecs(",
+            "function plannedConflictBadgeSpecs(",
+            "function calendarBadge(",
+            "function calendarBadgeRow(",
+        ):
+            self.assertIn(helper, plan_views)
+        self.assertIn('"Kein Training"', plan_views)
+        self.assertIn('"Keine Intensität"', plan_views)
+        self.assertIn('"Nur kurze Einheiten"', plan_views)
+        self.assertIn(
+            'new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]])', plan_views
+        )
+        self.assertIn("`Konflikt: ${label}`", plan_views)
+        self.assertIn("`Entfallen (${restDayLabel})`", plan_views)
+        self.assertIn('glyph.setAttribute("aria-hidden", "true");', plan_views)
+        self.assertIn("calendarMarkerKeys(event).length > 0", plan_views)
+        self.assertIn(
+            "plannedDayBadgeSpecs(dayContext, state.data?.competitions, dateKey)",
+            plan_views,
+        )
+        self.assertIn("notes.prepend(calendarBadgeRow(dayBadges))", plan_views)
+        self.assertIn("plannedConflictBadgeSpecs(entry.conflicts)", plan_views)
+        self.assertIn("state.data?.competitions, state.loadedAreas", plan_views)
+        self.assertNotIn("innerHTML", plan_views)
+        self.assertIn(
+            ".planned-badge.is-conflict { border-color: var(--danger-border-strong); color: var(--danger-ink);",
+            styles,
+        )
+        self.assertIn(".planned-entry.is-skipped .planned-entry-status", styles)
+        self.assertIn(".planned-badges { display: flex; flex-wrap: wrap;", styles)
+
+    def test_calendar_polish_texts_and_wrapping(self):
+        public = server.PUBLIC_DIR
+        plan_views = (public / "plan-views.js").read_text(encoding="utf-8")
+        styles = (public / "styles.css").read_text(encoding="utf-8")
+        index = (public / "index.html").read_text(encoding="utf-8")
+
+        def css_rule(selector):
+            start = styles.index(selector + " {")
+            return styles[start : styles.index("}", start)]
+
+        self.assertIn('<html lang="de">', index)
+        # Date-only planned units are stored as midnight and must not show "00:00";
+        # external appointments keep a genuine midnight start time.
+        self.assertIn("function plannedUnitStartTime(", plan_views)
+        self.assertIn('time === "00:00" ? null : time', plan_views)
+        self.assertIn("return time ? `${name} · ${time[1]}` : name;", plan_views)
+        # Extra activities and completed planned units have distinct labels.
+        self.assertIn('"✓ Zusätzlich" : "✓ Absolviert"', plan_views)
+        self.assertNotIn("Zusätzlich absolviert", plan_views)
+        self.assertNotIn("Abgeschlossen", plan_views)
+        # Missing weather is one hint for the visible range, not one per day.
+        self.assertIn("function plannedWeatherHint(", plan_views)
+        self.assertIn("upcomingDays", plan_views)
+        self.assertNotIn("is-missing", plan_views)
+        self.assertNotIn("weatherMissing", plan_views)
+        self.assertIn(".planned-weather-hint {", styles)
+        # Calendar titles wrap at word boundaries and may hyphenate German compounds.
+        for selector in (
+            ".planned-entry > summary > strong",
+            ".planned-session-header > :first-child",
+        ):
+            rule = css_rule(selector)
+            self.assertIn("overflow-wrap: break-word; hyphens: auto;", rule)
+            self.assertNotIn("overflow-wrap: anywhere", rule)
+        # Empty workout library explains where entries come from.
+        self.assertIn(
+            "Noch keine Einheiten in der Bibliothek. Der Coach legt hier Einheiten ab, wenn du sie planst.",
+            plan_views,
+        )
 
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
         app = frontend_source()
@@ -727,7 +914,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split("app.js?v=", 1)[1].split('"', 1)[0]
         self.assertIn(f"app.js?v={asset_version}", markup)
-        self.assertIn("intervals-coach-v370", service_worker)
+        self.assertRegex(service_worker, CACHE_NAME_PATTERN)
         self.assertIn(f"/app.js?v={asset_version}", service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -812,7 +999,7 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_nutrition_asset_is_served_as_immutable_javascript(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/nutrition.js", "/nutrition.js?v=21", None
+            "/nutrition.js", asset_ref("/nutrition.js"), None
         )
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
@@ -830,7 +1017,7 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_analysis_asset_is_served_and_precached_as_javascript(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/analysis.js", "/analysis.js?v=94", None
+            "/analysis.js", asset_ref("/analysis.js"), None
         )
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
@@ -840,11 +1027,11 @@ class ServerFrontendTests(ServerTestCase):
         )
         self.assertIn(b"function renderAnalysisHistory", response.body)
         worker = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/analysis.js?v=94"', worker)
+        self.assertIn(f'"{asset_ref("/analysis.js")}"', worker)
         index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
-        self.assertIn('/analysis.js?v=94"', index)
-        self.assertNotIn("/analysis.js?v=93", index + worker)
-        self.assertIn('const CACHE = "intervals-coach-v370";', worker)
+        self.assertIn(f'{asset_ref("/analysis.js")}"', index)
+        self.assertEqual(index.count("/analysis.js?v="), 1)
+        self.assertRegex(worker, CACHE_NAME_PATTERN)
         source = response.body.decode("utf-8")
         self.assertIn("equipment-archive", source)
         self.assertIn("function appendEquipmentLifetime", source)
@@ -852,9 +1039,57 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("history?.body", source)
         self.assertIn(r"Ziel \u00fcberschritten", source)
 
+    def test_analysis_and_activity_polish(self):
+        analysis = (server.PUBLIC_DIR / "analysis.js").read_text(encoding="utf-8")
+        self.assertIn('running_tolerance: "Lauf-Belastbarkeit"', analysis)
+        self.assertIn('endurance_score: "Ausdauer-Score"', analysis)
+        self.assertNotIn("Endurance Score", analysis)
+        self.assertNotIn("Running Tolerance", analysis)
+        self.assertIn('return { endurance_score: "Punkte" }[key] || "";', analysis)
+        self.assertIn("unit: providerMetricUnit(key)", analysis)
+        self.assertIn('const SPORT_FAMILIES = { VirtualRide: "Ride" };', analysis)
+        self.assertIn("analysisSportFamily(item.sport)", analysis)
+        self.assertIn("bestWindows.set(key", analysis)
+        self.assertIn("SPORT_LABELS[item.sport] || item.sport", analysis)
+        self.assertIn(
+            "Daten f\u00fcr ${count} von ${total} ${unitWord} vorhanden.", analysis
+        )
+        self.assertIn('item.cadenceDays === 7 ? "Wochen" : "Tagen"', analysis)
+        self.assertNotIn("Tage mit Messung", analysis)
+        self.assertNotIn("${readings.length}/${item.points.length}", analysis)
+        self.assertIn("function analysisIsoWeek(dateKey)", analysis)
+        self.assertIn(
+            "weekTicks ? analysisWeekTickLabel : analysisDayTickLabel", analysis
+        )
+        self.assertIn("function analysisWeekTickLabel(dateKey)", analysis)
+        self.assertIn("function analysisDayTickLabel(dateKey)", analysis)
+        self.assertIn("calendarWeeks: true", analysis)
+        self.assertIn("calendarWeeks = false", analysis)
+
+    def test_analysis_scroll_tables_are_keyboard_focusable(self):
+        shared = (server.PUBLIC_DIR / "shared.js").read_text(encoding="utf-8")
+        analysis = (server.PUBLIC_DIR / "analysis.js").read_text(encoding="utf-8")
+        details = (server.PUBLIC_DIR / "activity-details.js").read_text(
+            encoding="utf-8"
+        )
+        styles = (server.PUBLIC_DIR / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("function makeScrollRegionFocusable(element, label) {", shared)
+        self.assertIn("element.tabIndex = 0;", shared)
+        self.assertIn('element.setAttribute("role", "region");', shared)
+        self.assertIn('element.setAttribute("aria-label", label);', shared)
+        wrapper = (
+            'makeScrollRegionFocusable(reportNode("div", null, "analysis-chart-table")'
+        )
+        self.assertEqual(analysis.count(wrapper), 3)
+        self.assertIn(
+            'makeScrollRegionFocusable(node("div", null, "analysis-chart-table")',
+            details,
+        )
+        self.assertIn(".analysis-chart-table:focus-visible", styles)
+
     def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/appearance.js", "/appearance.js?v=218", None
+            "/appearance.js", asset_ref("/appearance.js"), None
         )
         headers = dict(response.headers)
         self.assertEqual(response.status, 200)
@@ -864,14 +1099,14 @@ class ServerFrontendTests(ServerTestCase):
         self.assertTrue(headers["ETag"].startswith('"'))
 
         cached = StaticAssetService(server.PUBLIC_DIR).render(
-            "/appearance.js", "/appearance.js?v=218", headers["ETag"]
+            "/appearance.js", asset_ref("/appearance.js"), headers["ETag"]
         )
         self.assertEqual(cached.status, 304)
         self.assertEqual(cached.body, b"")
         self.assertEqual(dict(cached.headers)["ETag"], headers["ETag"])
 
         handler = object.__new__(server.HTTP_API.request_handler_class())
-        handler.path = "/appearance.js?v=218"
+        handler.path = asset_ref("/appearance.js")
         handler.headers = {"If-None-Match": headers["ETag"]}
         handler.send_response = Mock()
         handler.send_header = Mock()
@@ -892,7 +1127,7 @@ class ServerFrontendTests(ServerTestCase):
         handler.wfile.write.assert_not_called()
 
         coach = StaticAssetService(server.PUBLIC_DIR).render(
-            "/coach.js", "/coach.js?v=9", None
+            "/coach.js", asset_ref("/coach.js"), None
         )
         self.assertEqual(coach.status, 200)
         self.assertEqual(
@@ -936,23 +1171,36 @@ class ServerFrontendTests(ServerTestCase):
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()
 
+    def test_pwa_asset_versions_match_service_worker_precache(self):
+        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        service_worker = (server.PUBLIC_DIR / "service-worker.js").read_text(
+            encoding="utf-8"
+        )
+        precache = re.search(r"const ASSETS = \[(.*?)\];", service_worker, re.DOTALL)
+        self.assertIsNotNone(precache)
+        index_refs = versioned_asset_refs(index)
+        self.assertTrue(index_refs)
+        for ref in index_refs:
+            self.assertIn(f'"{ref}"', precache.group(1))
+        self.assertRegex(service_worker, CACHE_NAME_PATTERN)
+
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=223"', source)
-        self.assertIn('"/navigation.js?v=231"', source)
-        self.assertIn('"/appearance.js?v=218"', source)
-        self.assertIn('"/state.js?v=219"', source)
-        self.assertIn('"/views.js?v=220"', source)
-        self.assertIn('"/plan-views.js?v=1"', source)
+        self.assertIn(f'"{asset_ref("/api.js")}"', source)
+        self.assertIn(f'"{asset_ref("/navigation.js")}"', source)
+        self.assertIn(f'"{asset_ref("/appearance.js")}"', source)
+        self.assertIn(f'"{asset_ref("/state.js")}"', source)
+        self.assertIn(f'"{asset_ref("/views.js")}"', source)
+        self.assertIn(f'"{asset_ref("/plan-views.js")}"', source)
         self.assertIn('"/plan-views.js"', source)
-        self.assertIn('"/forms.js?v=217"', source)
-        self.assertIn('"/components.js?v=217"', source)
+        self.assertIn(f'"{asset_ref("/forms.js")}"', source)
+        self.assertIn(f'"{asset_ref("/components.js")}"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/coach.js?v=9"', source)
-        self.assertIn('"/app.js?v=276"', source)
-        self.assertIn('"/nutrition.js?v=21"', source)
-        self.assertIn('"/icon.svg?v=217"', source)
-        self.assertIn('"/styles.css?v=281"', source)
+        self.assertIn(f'"{asset_ref("/coach.js")}"', source)
+        self.assertIn(f'"{asset_ref("/app.js")}"', source)
+        self.assertIn(f'"{asset_ref("/nutrition.js")}"', source)
+        self.assertIn(f'"{asset_ref("/icon.svg")}"', source)
+        self.assertIn(f'"{asset_ref("/styles.css")}"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -988,7 +1236,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn("v=217", index)
+        self.assertIn(asset_ref("/icon.svg"), index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
@@ -998,6 +1246,149 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('garmin: "Garmin"', app)
         self.assertIn('calendar: "Gemeinsamer Kalender"', app)
         self.assertIn('weather: "Open-Meteo"', app)
+
+    def test_shared_format_module_is_loaded_and_served_before_consumers(self):
+        root = Path(__file__).resolve().parents[1]
+        index = (root / "public" / "index.html").read_text(encoding="utf-8")
+        worker = (root / "public" / "service-worker.js").read_text(encoding="utf-8")
+        version = re.search(
+            r'<script src="/format\.js\?v=(\d+)" defer></script>', index
+        )
+        self.assertIsNotNone(version)
+        asset = f"/format.js?v={version.group(1)}"
+        self.assertLess(index.index(asset), index.index("/api.js?v="))
+        self.assertIn(f'"{asset}"', worker)
+        self.assertIn('"/format.js"', worker)
+        response = StaticAssetService(server.PUBLIC_DIR).render(
+            "/format.js", asset, None
+        )
+        self.assertEqual(response.status, 200)
+        self.assertIn("javascript", dict(response.headers)["Content-Type"])
+        self.assertEqual(
+            dict(response.headers)["Cache-Control"],
+            "public, max-age=31536000, immutable",
+        )
+
+    def test_user_visible_number_and_date_formatting_uses_app_format(self):
+        public = Path(__file__).resolve().parents[1] / "public"
+        forbidden = re.compile(
+            r"toLocale(?:Date|Time)?String\(\)"
+            r"|Intl\.(?:DateTimeFormat|NumberFormat)\(undefined"
+        )
+        offenders = [
+            path.name
+            for path in sorted(public.glob("*.js"))
+            if path.name != "format.js"
+            and forbidden.search(path.read_text(encoding="utf-8"))
+        ]
+        self.assertEqual(offenders, [])
+
+    def test_touch_targets_downloads_and_notification_retries_are_hardened(self):
+        styles = (server.PUBLIC_DIR / "styles.css").read_text(encoding="utf-8")
+        settings = (server.PUBLIC_DIR / "settings.js").read_text(encoding="utf-8")
+        notifications = (server.PUBLIC_DIR / "notifications.js").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            ".segmented-control > * { flex: 1 1 120px; min-height: 44px;", styles
+        )
+        self.assertNotIn("min-height: 40px; border: 0;", styles)
+
+        self.assertIsNone(
+            re.search(
+                r"link\.click\(\);\s*URL\.revokeObjectURL\(link\.href\)", settings
+            )
+        )
+        self.assertEqual(
+            settings.count("setTimeout(() => URL.revokeObjectURL(url), 1000);"), 2
+        )
+
+        self.assertIsNotNone(
+            re.search(
+                r"\} catch \{\s*state\.notificationKeys\.delete\(key\);\s*\}",
+                notifications,
+            )
+        )
+        self.assertNotIn("Tag(en)", notifications)
+        self.assertIn("function competitionCountdownText(name, days)", notifications)
+        self.assertIn("ist heute.", notifications)
+        self.assertIn("ist morgen.", notifications)
+        self.assertIn("ist in ${days} Tagen.", notifications)
+
+    def test_error_toasts_are_readable_dismissible_and_above_composer(self):
+        styles = (
+            Path(__file__).resolve().parents[1] / "public" / "styles.css"
+        ).read_text(encoding="utf-8")
+        shared = (server.PUBLIC_DIR / "shared.js").read_text(encoding="utf-8")
+        error_rule = re.search(
+            r"^\.error:not\(\.toast\) \{([^}]*)\}", styles, re.MULTILINE
+        )
+        self.assertIsNotNone(error_rule)
+        self.assertNotIn("!important", error_rule.group(1))
+        toast_error_rule = re.search(
+            r"^\.toast\.error \{([^}]*)\}", styles, re.MULTILINE
+        )
+        self.assertIsNotNone(toast_error_rule)
+        self.assertIn("color: var(--white);", toast_error_rule.group(1))
+        self.assertIn("toast-close", shared)
+        self.assertNotIn("style.bottom", shared)
+        self.assertIn("8000", shared)
+        self.assertIn("Meldung schließen", shared)
+        self.assertIn(".secondary-button.danger-button", styles)
+        self.assertIsNotNone(
+            re.search(
+                r"^body:has\(#chatPanel\.active\) \.toast \{[^}]*--composer-height",
+                styles,
+                re.MULTILINE,
+            )
+        )
+
+    def test_chat_history_page_keeps_reading_position(self):
+        coach = (server.PUBLIC_DIR / "coach.js").read_text(encoding="utf-8")
+
+        self.assertIn("preventScroll: true", coach)
+        self.assertIn("ältere Nachrichten geladen", coach)
+        self.assertIn("IntersectionObserver", coach)
+
+    def test_season_preparation_uses_relative_labels_archive_and_comma_factor(self):
+        public = Path(__file__).resolve().parents[1] / "public"
+        analysis = (public / "analysis.js").read_text(encoding="utf-8")
+        card_start = analysis.index("function seasonEventCard(")
+        card_end = analysis.index("\nfunction seasonStatusLabel(", card_start)
+        card = analysis[card_start:card_end]
+        self.assertIn("AppFormat.relativeDay(", card)
+        self.assertNotIn("${event.days_until} Tage · kalendarische", analysis)
+        self.assertIn("season-archive", analysis)
+        self.assertIn("parseSeasonLoadFactor", analysis)
+        self.assertIn('scale.inputMode="decimal"', analysis)
+        self.assertNotIn("scale.pattern", analysis)
+        plan_views = (public / "plan-views.js").read_text(encoding="utf-8")
+        self.assertIn("SEASON_PHASE_LABELS[next.phase]", plan_views)
+
+
+    def test_ux_copy_labels_and_readable_context_preview(self):
+        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        notifications = (server.PUBLIC_DIR / "notifications.js").read_text(
+            encoding="utf-8"
+        )
+        coach = (server.PUBLIC_DIR / "coach.js").read_text(encoding="utf-8")
+        analysis = (server.PUBLIC_DIR / "analysis.js").read_text(encoding="utf-8")
+        self.assertIn("Tab „Kalender“", index)
+        self.assertNotIn("Tab „Plan“", index)
+        self.assertNotIn("-1 = alle verfügbaren Daten", index)
+        self.assertNotIn("Aktiviert", notifications)
+        self.assertIn("function analysisCountLabel(count, singular, plural)", analysis)
+        self.assertIn("function analysisPercent(value)", analysis)
+        self.assertNotIn('analysisValue(percent, "%")', analysis)
+        self.assertNotIn(
+            'typeof value === "string" ? value : JSON.stringify(value, null, 2)', coach
+        )
+        self.assertIn('function contextValueNode(value, key = "", depth = 0)', coach)
+        self.assertIn("if (depth >= CONTEXT_PREVIEW_MAX_DEPTH)", coach)
+        views = (server.PUBLIC_DIR / "views.js").read_text(encoding="utf-8")
+        self.assertIn("function profileSportsLabel(sports)", views)
+        self.assertIn('Cycling: "Radfahren"', views)
 
 
 if __name__ == "__main__":

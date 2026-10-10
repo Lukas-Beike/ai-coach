@@ -50,7 +50,7 @@
     svg.append(path);
     section.append(svg, node("p", `${Math.round(min * 10) / 10}–${Math.round(max * 10) / 10} ${unit} · ${Math.round(start / 60)}–${Math.round(points.at(-1)[0] / 60)} min · ${times.length - points.length} fehlende Messpunkte`, "muted"));
     const details = node("details", null, "activity-values"); details.append(node("summary", `Alle ${points.length} Messwerte ansehen`));
-    const tableWrap = node("div", null, "analysis-chart-table"); const table = node("table");
+    const tableWrap = makeScrollRegionFocusable(node("div", null, "analysis-chart-table"), `${label} in ${unit}: Messwerte`); const table = node("table");
     table.append(node("caption", `${label} in ${unit}; fehlende Werte sind als Lücke markiert.`));
     const thead = node("thead"); const heading = node("tr"); ["Zeit", label].forEach((value) => { const cell = node("th", value); cell.scope = "col"; heading.append(cell); }); thead.append(heading); table.append(thead);
     const body = node("tbody");
@@ -99,7 +99,7 @@
       activity.type,
       activity.start_date_local?.replace("T", " "),
       activity.moving_time != null ? `${Math.round(activity.moving_time / 60)} min` : null,
-      activity.distance != null ? `${(activity.distance / 1000).toFixed(1)} km` : null,
+      AppFormat.distance(activity.distance),
       activity.icu_training_load != null ? `Belastung ${activity.icu_training_load}` : null,
     ].filter(Boolean);
     content.append(node("p", values.join(" · ")));
@@ -212,10 +212,21 @@
     const content = node("div");
     const status = node("p", "Lokale Daten werden geladen …", "muted");
     status.setAttribute("role", "status");
+    const actions = node("div", null, "dialog-actions");
+    const setupHint = node("p", "Intervals.icu ist nicht konfiguriert. ", "muted provider-setup-hint");
+    const setupLink = node("a", "Anbindung einrichten");
+    setupLink.href = "#more/connections";
+    setupLink.addEventListener("click", () => close(false));
+    setupHint.append(setupLink);
     const refresh = node("button", "Detaildaten laden", "secondary-button");
     refresh.type = "button";
-    const actions = node("div", null, "dialog-actions");
-    actions.append(refresh);
+    // Detail jobs read Intervals.icu only, so they are offered for Intervals.icu
+    // activities and need a configured Intervals.icu connection.
+    const detailsAvailable = isIntervalsActivity(activity);
+    const canRefresh = () => Boolean(state.data?.configured?.intervals);
+    refresh.disabled = !canRefresh();
+    setupHint.hidden = canRefresh();
+    if (detailsAvailable) actions.append(refresh, setupHint);
     dialog.append(back, title, content, status, actions);
     document.body.append(dialog);
     const currentDialog = dialog;
@@ -254,10 +265,17 @@
       } catch (error) {
         if (token === generation) status.textContent = error.message;
       } finally {
-        if (token === generation) refresh.disabled = false;
+        if (token === generation) refresh.disabled = !canRefresh();
       }
     });
     try { await load(); } catch (error) { if (token === generation) status.textContent = error.message; }
+  }
+
+  function isIntervalsActivity(activity) {
+    // Intervals.icu rows keep their device origin (for example "GARMIN") in
+    // `source`, so only an explicit provider field marks a non-Intervals record.
+    const provider = String(activity?.provider ?? "intervals").trim().toLowerCase();
+    return provider === "intervals" || provider === "intervals.icu";
   }
 
   function close(navigateBack = true) {

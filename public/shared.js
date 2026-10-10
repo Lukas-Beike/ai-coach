@@ -111,6 +111,8 @@ function ensureRouteData(route = state.route) {
   if (panelRoute === "plan" && !state.loadedAreas.has("plan")) requested.push("plan");
   if (panelRoute === "plan" && !state.loadedAreas.has("library")) requested.push("library");
   if (requested.length) load("/api/bootstrap?local=1", requested);
+  if (panelRoute === "analysis") void loadAnalysisReports();
+  if (route === "more/equipment") void renderTrainingRecords();
 }
 
 function renderActiveRoute(mainRoute, panelRoute) {
@@ -194,14 +196,40 @@ async function apiAudio(path, blob) {
 }
 
 
+function hideToast() {
+  const node = $("#toast");
+  clearTimeout(toast.timer);
+  node.className = "toast";
+  const close = node.querySelector(".toast-close");
+  if (close) close.inert = true;
+}
+
 function toast(message, error = false) {
   const node = $("#toast");
-  node.textContent = message;
+  const text = document.createElement("span");
+  text.textContent = message;
+  node.replaceChildren(text);
+  if (error) {
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "toast-close";
+    close.setAttribute("aria-label", "Meldung schließen");
+    close.textContent = "×";
+    close.addEventListener("click", hideToast);
+    node.append(close);
+  }
   node.setAttribute("role", error ? "alert" : "status");
   node.setAttribute("aria-live", error ? "assertive" : "polite");
   node.className = `toast show${error ? " error" : ""}`;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => { node.className = "toast"; }, 3000);
+  toast.timer = setTimeout(hideToast, error ? 8000 : 3000);
+}
+
+function makeScrollRegionFocusable(element, label) {
+  element.tabIndex = 0;
+  element.setAttribute("role", "region");
+  element.setAttribute("aria-label", label);
+  return element;
 }
 
 
@@ -211,13 +239,7 @@ function todayIso() { return timezoneDateKey(state.data?.profile?.timezone, new 
 
 function formatTime(value) {
   if (!value) return "Noch nicht aktualisiert";
-  const dt = new Date(value);
-  if (Number.isNaN(dt.valueOf())) return value;
-  try {
-    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: state.data?.profile?.timezone || undefined }).format(dt);
-  } catch (_) {
-    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(dt);
-  }
+  return AppFormat.dateTime(value, { timeZone: state.data?.profile?.timezone }) ?? value;
 }
 
 
@@ -234,8 +256,13 @@ function setDirtyIndicator(id, dirty) {
 }
 
 
+async function confirmDiscardDraft(isDirty) {
+  return !isDirty || Boolean(await requestConfirmation("Ungespeicherte Änderungen verwerfen?", { title: "Änderungen verwerfen?" }));
+}
+
+
 async function confirmDiscardChanges() {
-  return !hasUnsavedChanges({ includeChatDraft: false }) || Boolean(await requestConfirmation("Ungespeicherte Änderungen verwerfen?", { title: "Änderungen verwerfen?" }));
+  return confirmDiscardDraft(hasUnsavedChanges({ includeChatDraft: false }));
 }
 
 
@@ -246,27 +273,52 @@ function discardUnsavedChanges() {
 }
 
 
+const SETUP_BANNER_DISMISSED_KEY = "intervalsCoachSetupBannerDismissed";
+
+
+function setupBannerDismissed() {
+  // Session-only: dismissal must not persist beyond the browser session.
+  try { return sessionStorage.getItem(SETUP_BANNER_DISMISSED_KEY) === "1"; } catch { return false; }
+}
+
+
+function dismissSetupBanner() {
+  try { sessionStorage.setItem(SETUP_BANNER_DISMISSED_KEY, "1"); } catch { }
+  const banner = $("#setupBanner");
+  if (banner) banner.hidden = true;
+}
+
+
+function renderSetupBanner(missing) {
+  const banner = $("#setupBanner");
+  if (!banner) return;
+  banner.hidden = !missing.length || setupBannerDismissed();
+  const detail = $("#setupBannerDetail");
+  if (detail) detail.textContent = `Fehlt: ${missing.join(" + ")}. Ergänze die fehlende Serverkonfiguration.`;
+}
+
+
 function renderStatus(data) {
   const configured = data.configured;
   const morning = data.morning_checkin || {};
   const missing = [];
   if (!configured.openai) missing.push("OpenAI-API-Schlüssel");
   if (!configured.intervals) missing.push("Intervals.icu-API-Schlüssel");
+  // The setup state is shown by the page-wide setup banner on every tab, so the
+  // status card only reports runtime problems.
+  renderSetupBanner(missing);
   const performanceRefresh = data.performance_refresh || {};
   const openaiStatus = data.usage?.status || {};
   const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error || performanceRefresh.last_error
     || (openaiStatus.state === "error" ? openaiStatus.message : null);
   const statusCard = $("#statusCard");
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
-  const hasProblem = Boolean(missing.length || error);
+  const hasProblem = Boolean(error);
   statusCard.hidden = !hasProblem || activePanel === "settingsPanel";
   statusCard.classList.toggle("warning", hasProblem);
   let statusTitle = "Coach ist bereit";
   let statusDetail = "Bereit für deine nächste Frage";
-  if (missing.length) {
-    statusTitle = `Einrichtung nötig: ${missing.join(" + ")}`;
-    statusDetail = "Ergänze die fehlende Serverkonfiguration";
-  } else if (error) {
+  if (error) {
     statusTitle = "Coach benötigt Aufmerksamkeit";
     statusDetail = error;
   } else if (morning.status === "ready") {
@@ -280,41 +332,22 @@ function renderStatus(data) {
 
 function dateLabel(value) {
   if (!value) return "—";
-  const raw = String(value);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    const [year, month, day] = raw.split("-").map(Number);
-    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(year, month - 1, day));
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.valueOf())) return raw.slice(0, 10);
-  try {
-    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeZone: state.data?.profile?.timezone || undefined }).format(parsed);
-  } catch (_) {
-    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
-  }
+  return AppFormat.date(value, { timeZone: state.data?.profile?.timezone }) ?? String(value).slice(0, 10);
 }
 
 
 function distanceLabel(value) {
-  const distance = Number(value);
-  if (!Number.isFinite(distance) || distance <= 0) return null;
-  return `${(distance / 1000).toFixed(1)} km`;
+  return AppFormat.distance(value);
 }
 
 
 function formatDuration(seconds) {
-  if (seconds == null || Number.isNaN(Number(seconds))) return null;
-  const total = Math.round(Number(seconds));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const remainder = total % 60;
-  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}` : `${minutes}:${String(remainder).padStart(2, "0")}`;
+  return AppFormat.clock(seconds);
 }
 
 
 function formatWhole(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.round(number).toLocaleString("de-DE") : String(value);
+  return AppFormat.number(Math.round(Number(value)), { digits: 0 }) ?? String(value);
 }
 
 

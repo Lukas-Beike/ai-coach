@@ -244,7 +244,7 @@ class WorkoutLibraryRefreshService:
     ) -> dict[str, Any]:
         """Refresh local library from Intervals, preserving cancellation semantics."""
         if not self._config.intervals_api_key:
-            raise AppError(503, INTERVALS_API_KEY_ERROR)
+            raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
         self._raise_chat_cancelled(cancel_event)
         synced_at = self._get_sync_timestamp()
         if synced_at:
@@ -638,7 +638,7 @@ class WorkoutLibrarySyncService:
         except (ValueError, AttributeError) as exc:
             raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
         if not self._config.intervals_api_key:
-            raise AppError(503, INTERVALS_API_KEY_ERROR)
+            raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
         with self._lock:
             try:
                 return self._sync_entry_unlocked(normalized_id)

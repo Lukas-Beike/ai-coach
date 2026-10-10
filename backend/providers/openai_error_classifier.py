@@ -46,7 +46,7 @@ class OpenAIErrorClassifier:
                 "openai",
                 state="error",
                 reason="network_error",
-                message="OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung pruefen und spaeter erneut versuchen.",
+                message="OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung prüfen und später erneut versuchen.",
             )
 
     def on_client_error(self, service: str | None) -> None:
@@ -55,7 +55,7 @@ class OpenAIErrorClassifier:
                 "openai",
                 state="error",
                 reason="client_error",
-                message="Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte spaeter erneut versuchen.",
+                message="Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte später erneut versuchen.",
             )
 
     def on_success(self, service: str | None, response: Any) -> None:

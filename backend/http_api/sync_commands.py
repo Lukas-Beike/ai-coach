@@ -30,6 +30,16 @@ SYNC_POST_PATHS = frozenset(
         GARMIN_FULL_RESYNC_PATH,
     }
 )
+PROVIDER_NOT_CONFIGURED_MESSAGES = {
+    "intervals": (
+        "Intervals.icu ist nicht konfiguriert. Bitte INTERVALS_API_KEY in der "
+        "Serverkonfiguration hinterlegen."
+    ),
+    "garmin": (
+        "Garmin ist nicht konfiguriert. Bitte GARMIN_EMAIL oder einen vorhandenen "
+        "Garmin-Tokenstore einrichten."
+    ),
+}
 SYNC_BODY_PATHS = frozenset(
     {
         SYNC_JOBS_PATH,
@@ -85,6 +95,7 @@ class SyncCommandEndpoint:
                     for key in ("days", "force", "reason")
                     if key in payload
                 }
+            self._require_provider_configured(payload.get("provider"))
             return 202, self._queue.enqueue(
                 payload.get("provider"),
                 payload.get("type", "refresh"),
@@ -116,9 +127,24 @@ class SyncCommandEndpoint:
             )
         raise ValueError(f"Unsupported sync path: {path}")
 
+    def _require_provider_configured(self, provider: Any) -> None:
+        """Reject unconfigured provider work before any job or period is stored."""
+        if not isinstance(provider, str):
+            return
+        normalized = provider.strip().casefold()
+        if normalized not in PROVIDER_NOT_CONFIGURED_MESSAGES:
+            return
+        if not self._full_resync.provider_configured(normalized):
+            raise AppError(
+                409,
+                PROVIDER_NOT_CONFIGURED_MESSAGES[normalized],
+                reason="not_configured",
+            )
+
     def _enqueue_manual_refresh(
         self, provider: str, payload: dict[str, Any]
     ) -> tuple[int, dict[str, Any]]:
+        self._require_provider_configured(provider)
         requested_days = payload.get(
             "days",
             self._state.sync_period(

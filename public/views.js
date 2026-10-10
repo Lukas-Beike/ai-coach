@@ -137,18 +137,108 @@ function renderMarkdownLine(line, state, output) {
   state.paragraph.push(line);
 }
 
+function markdownCodeSpanEnd(text, start, end) {
+  let ticks = 0;
+  while (text[start + ticks] === "`") ticks += 1;
+  let index = start + ticks;
+  while (index < end) {
+    if (text[index] !== "`") {
+      index += 1;
+      continue;
+    }
+    let run = 0;
+    while (text[index + run] === "`") run += 1;
+    if (run === ticks) return index + run;
+    index += run;
+  }
+  return null;
+}
+
+function markdownTableCells(line) {
+  const text = line.trim();
+  const start = text.startsWith("|") ? 1 : 0;
+  const end = text.length > start && text.endsWith("|") && !text.endsWith(String.raw`\|`) ? text.length - 1 : text.length;
+  const cells = [];
+  let cell = "";
+  let index = start;
+  while (index < end) {
+    const character = text[index];
+    if (character === "\\" && text[index + 1] === "|") {
+      cell += "|";
+      index += 2;
+    } else if (character === "`") {
+      const spanEnd = markdownCodeSpanEnd(text, index, end);
+      if (spanEnd === null) {
+        cell += character;
+        index += 1;
+      } else {
+        cell += text.slice(index, spanEnd).replaceAll(String.raw`\|`, "|");
+        index = spanEnd;
+      }
+    } else if (character === "|") {
+      cells.push(cell.trim());
+      cell = "";
+      index += 1;
+    } else {
+      cell += character;
+      index += 1;
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function isMarkdownTableSeparator(line) {
+  const value = line.trim();
+  return value.includes("|") && value.includes("-") && /^[|:\- ]+$/.test(value);
+}
+
+function markdownTableRow(line, columnCount) {
+  const cells = markdownTableCells(line).slice(0, columnCount);
+  while (cells.length < columnCount) cells.push("");
+  const row = cells.map((cell) => `<td>${inlineMarkdown(cell)}</td>`).join("");
+  return `<tr>${row}</tr>`;
+}
+
+function renderMarkdownTable(lines, state, output) {
+  flushMarkdownParagraph(state, output);
+  closeMarkdownList(state, output);
+  const headers = markdownTableCells(lines[0]);
+  const head = headers.map((cell) => `<th scope="col">${inlineMarkdown(cell)}</th>`).join("");
+  const body = lines.slice(2).map((line) => markdownTableRow(line, headers.length)).join("");
+  output.push(`<div class="markdown-table" tabindex="0" role="region" aria-label="Tabelle"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`);
+}
+
+function flushMarkdownTable(state, output) {
+  if (!state.tableLines.length) return;
+  const lines = state.tableLines;
+  state.tableLines = [];
+  if (lines.length > 1 && isMarkdownTableSeparator(lines[1])) renderMarkdownTable(lines, state, output);
+  else for (const line of lines) renderMarkdownLine(line, state, output);
+}
+
+function renderMarkdownSourceLine(line, state, output) {
+  if (line.trimStart().startsWith("```")) {
+    flushMarkdownTable(state, output);
+    toggleMarkdownCode(state, output);
+  } else if (state.inCode) state.codeLines.push(line);
+  else if (line.includes("|")) state.tableLines.push(line);
+  else if (!line.trim()) {
+    flushMarkdownTable(state, output);
+    flushMarkdownParagraph(state, output);
+    closeMarkdownList(state, output);
+  } else {
+    flushMarkdownTable(state, output);
+    renderMarkdownLine(line, state, output);
+  }
+}
+
 function markdownToHtml(markdown) {
   const lines = String(markdown || "").replaceAll("\r", "").split("\n");
   const output = [];
-  const state = { paragraph: [], listType: null, inCode: false, codeLines: [] };
-  for (const line of lines) {
-    if (line.trimStart().startsWith("```")) toggleMarkdownCode(state, output);
-    else if (state.inCode) state.codeLines.push(line);
-    else if (!line.trim()) {
-      flushMarkdownParagraph(state, output);
-      closeMarkdownList(state, output);
-    } else renderMarkdownLine(line, state, output);
-  }
+  const state = { paragraph: [], listType: null, inCode: false, codeLines: [], tableLines: [] };
+  for (const line of lines) renderMarkdownSourceLine(line, state, output);
+  flushMarkdownTable(state, output);
   if (state.inCode) output.push(`<pre><code>${escapeHtml(state.codeLines.join("\n"))}</code></pre>`);
   flushMarkdownParagraph(state, output);
   closeMarkdownList(state, output);
@@ -268,10 +358,17 @@ function populateProfileField(form, key, value) {
   field.value = value || "";
 }
 
+const PROFILE_SPORT_LABELS = { Cycling: "Radfahren", Running: "Laufen", Swimming: "Schwimmen", Strength: "Krafttraining", WeightTraining: "Krafttraining", Triathlon: "Triathlon", Other: "Andere" };
+
+function profileSportsLabel(sports) {
+  return String(sports || "").split(",").map((item) => item.trim()).filter(Boolean)
+    .map((item) => (Object.hasOwn(PROFILE_SPORT_LABELS, item) ? PROFILE_SPORT_LABELS[item] : item)).join(", ");
+}
+
 function renderProfileSummary(profile) {
   const summary = $("#profileSummary");
   if (!summary) return;
-  const values = [profile.name, profile.sports, profile.typical_weekly_volume].filter(Boolean);
+  const values = [profile.name, profileSportsLabel(profile.sports), profile.typical_weekly_volume].filter(Boolean);
   summary.textContent = values.length ? values.join(" · ") : "Noch nicht ausgefüllt";
 }
 
@@ -295,6 +392,25 @@ function populateCheckin(checkin, timeZone) {
   form.elements.day_status.value = values.day_status || "unknown";
   for (const tag of ["travel", "late_meal", "high_stress"]) form.elements[`tag_${tag}`].value = values.tag_answers?.[tag] == null ? "" : String(values.tag_answers[tag]);
   state.checkinDirty = false;
+}
+
+async function openCheckinEditor(date = todayIso()) {
+  const dialog = $("#checkinDialog");
+  const form = $("#checkinForm");
+  if (!dialog || !form) return;
+  // Until feedback is loaded, an empty check-in list must not open a blank form that could overwrite a saved record.
+  if (!state.loadedAreas.has("feedback")) return;
+  const todayKey = todayIso();
+  if (date > todayKey) return;
+  form.elements.checkin_date.max = todayKey;
+  // Keeping an unsaved draft reopens the dialog with that draft instead of losing access to it.
+  if (await confirmDiscardDraft(state.checkinDirty)) {
+    const timeZone = state.data?.profile?.timezone;
+    const rows = state.data?.checkins || [];
+    populateCheckin(rows.find((row) => row.checkin_date === date) || { checkin_date: date }, timeZone);
+    renderCheckins(rows, timeZone);
+  }
+  showAccessibleDialog(dialog, form.elements.soreness);
 }
 
 function selectedCheckin(rows, timeZone) {
@@ -325,7 +441,8 @@ function checkinHistoryButton(row, rows, timeZone) {
   const summary = document.createElement("span");
   summary.textContent = checkinSummary(row);
   button.append(title, summary);
-  button.addEventListener("click", () => {
+  button.addEventListener("click", async () => {
+    if (!(await confirmDiscardDraft(state.checkinDirty))) return;
     populateCheckin(row, timeZone);
     renderCheckins(rows, timeZone);
   });
@@ -567,14 +684,16 @@ function renderIntervalsSyncControls(data, configured) {
   const fullResync = data.provider_resync?.intervals || {};
   const fullRunning = Boolean(fullResync.running || state.localSync.intervalsFull);
   const syncRunning = intervalsSyncRunning(data, fullRunning);
+  const intervalsConfigured = Boolean(configured.intervals);
+  setProviderSetupHint("#intervalsSetupHint", intervalsConfigured);
   const syncButton = $("#systemIntervalsSyncButton");
   if (syncButton) {
-    syncButton.disabled = syncRunning;
+    syncButton.disabled = syncRunning || !intervalsConfigured;
     syncButton.textContent = data.sync?.running || state.localSync.intervals ? "Synchronisierung läuft…" : "Synchronisieren";
   }
   const fullButton = $("#systemIntervalsFullResyncButton");
   if (fullButton) {
-    fullButton.disabled = !configured.intervals || fullRunning || Boolean(data.sync?.running || state.localSync.intervals);
+    fullButton.disabled = !intervalsConfigured || fullRunning || Boolean(data.sync?.running || state.localSync.intervals);
     fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
   }
   const status = $("#intervalsFullResyncStatus");
@@ -585,11 +704,20 @@ function renderIntervalsSyncControls(data, configured) {
 }
 
 function renderGarminSyncControl(data) {
+  const garminConfigured = Boolean(data.garmin?.configured);
+  setProviderSetupHint("#garminSetupHint", garminConfigured);
   const button = $("#garminSyncButton");
   if (!button) return;
   const running = Boolean(data.garmin_sync?.running || state.localSync.garmin);
-  button.disabled = running;
+  button.disabled = running || !garminConfigured;
   button.textContent = running ? "Synchronisierung läuft…" : "Garmin synchronisieren";
+  const fullButton = $("#garminFullResyncButton");
+  if (fullButton && !garminConfigured) fullButton.disabled = true;
+}
+
+function setProviderSetupHint(selector, configured) {
+  const hint = $(selector);
+  if (hint) hint.hidden = Boolean(configured);
 }
 
 function renderSettingsSyncControls(data, configured) {

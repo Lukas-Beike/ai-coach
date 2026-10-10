@@ -261,14 +261,12 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   const root = $("#performancePredictions");
   root.replaceChildren();
   const values = performance?.metrics || {};
-  const weight = values.weight_kg?.value != null ? values.weight_kg : null;
-  const predictions = [["5 km (geschätzt)", values.run_5k_seconds, formatDuration],
-    ["10 km (geschätzt)", values.run_10k_seconds, formatDuration],
-    ["Halbmarathon (geschätzt)", values.run_half_marathon_seconds, formatDuration],
-    ["Marathon (geschätzt)", values.run_marathon_seconds, formatDuration]].filter(([, metric]) => metric?.value != null);
-  root.hidden = !predictions.length && !weight;
-  if (predictions.length || weight) {
-    root.append(reportNode("h3", "Laufprognosen"));
+  const predictions = racePredictionRows(values);
+  root.hidden = false;
+  root.append(reportNode("h3", "Laufprognosen"));
+  if (!predictions.length) {
+    root.append(reportNode("p", racePredictionEmptyReason(values), "empty"));
+  } else {
     const table = reportNode("table");
     const head = reportNode("thead");
     const header = reportNode("tr");
@@ -277,17 +275,27 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
     }
     head.append(header); table.append(head);
     const body = reportNode("tbody");
-    for (const [label, metric, formatter] of predictions) {
+    for (const { label, metric } of predictions) {
       const row = reportNode("tr");
-      row.append(reportNode("td", label), reportNode("td", formatter(metric.value)), reportNode("td", metric.source || "Unbekannt"));
-      body.append(row);
-    }
-    if (weight) {
-      const row = reportNode("tr");
-      row.append(reportNode("td", "Gewicht"), reportNode("td", `${analysisValue(weight.value, "kg")}`), reportNode("td", weight.source || "Unbekannt"));
+      row.append(reportNode("td", label), reportNode("td", formatDuration(metric.value)), reportNode("td", metric.source || "Unbekannt"));
       body.append(row);
     }
     table.append(body); root.append(table);
   }
   renderAnalysisSegments(state.route);
+}
+
+function racePredictionRows(metrics) {
+  const distances = [["run_5k_seconds", "5 km (geschätzt)"], ["run_10k_seconds", "10 km (geschätzt)"],
+    ["run_half_marathon_seconds", "Halbmarathon (geschätzt)"], ["run_marathon_seconds", "Marathon (geschätzt)"]];
+  const values = metrics || {};
+  return distances.filter(([key]) => values[key]?.value != null).map(([key, label]) => ({ label, metric: values[key] }));
+}
+
+function racePredictionEmptyReason(metrics) {
+  const values = metrics || {};
+  const runningValues = ["run_threshold_pace_seconds_per_km", "running_vo2max_ml_kg_min"].some((key) => values[key]?.value != null);
+  return runningValues
+    ? "Noch keine Prognosen – Laufwerte sind vorhanden, aber es wurde keine Laufprognose geliefert."
+    : "Noch keine Prognosen – dafür fehlen aktuelle Leistungswerte aus Intervals.icu oder Garmin.";
 }

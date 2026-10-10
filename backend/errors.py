@@ -20,7 +20,7 @@ INVALID_PLANNING_DATE_ERROR = "Das Planungsdatum muss das Format JJJJ-MM-TT habe
 STALE_PLANNING_REVISION_ERROR = "Die lokale Planrevision ist inzwischen veraltet."
 UNSUPPORTED_BYDAY_ERROR = "BYDAY der Kalender-Wiederholung wird nicht unterstützt."
 PLANNED_CALENDAR_RECHECK_ERROR = (
-    "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen."
+    "Die Planung wurde während der Reparatur geändert. Bitte erneut abgleichen."
 )
 
 

@@ -470,6 +470,8 @@ class NutritionCompositionTests(unittest.TestCase):
             self.assertEqual(summary["entry_count"], 2)
             self.assertEqual(summary["total_kcal"], 60)
             self.assertIsNone(summary["total_carbs_g"])
+            self.assertEqual(summary["known_macro_totals"]["carbs_g"], 5.0)
+            self.assertEqual(summary["entries_without_macros"], 1)
 
     def test_update_meal_replaces_composite_components_even_when_totals_match(
         self,

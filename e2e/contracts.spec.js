@@ -2,6 +2,7 @@ const { test, expect } = require("@playwright/test");
 const { readFileSync } = require("node:fs");
 const path = require("node:path");
 const { captureReadFixture, installReadFixture } = require("./read-fixture");
+const { contrastRatio } = require("./helpers/ui");
 
 const SERVICE_WORKER_CACHE = readFileSync(path.join(__dirname, "..", "public", "service-worker.js"), "utf8").match(/const CACHE = "([^"]+)";/)[1];
 
@@ -275,7 +276,7 @@ test("rejection preserves a newer draft separately from the rejected message", a
   }));
   await page.locator("#messageInput").fill("Rejected original");
   await page.locator("#sendButton").click();
-  await page.evaluate(() => jumpToChatComposer());
+  await page.evaluate(() => jumpToLatestMessages());
   await page.locator("#messageInput").fill("New independent draft");
   await reject();
   await expect(page.locator("#messageInput")).toHaveValue("New independent draft");
@@ -528,7 +529,7 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   const matched = page.locator(".planned-entry", { hasText: "Aktivierung absolviert" });
   await expect(matched.locator(".planned-execution")).toHaveText("✓ 136 %");
   await expect(matched.locator(".planned-execution")).toHaveAttribute("aria-label", "136 Prozent des Plans · Belastung");
-  await expect(matched.locator(".planned-session-target")).toContainText("Plan: Aktivierung · 45 Min. · Belastung 25");
+  await expect(matched.locator(".planned-session-target")).toContainText("Plan: Aktivierung · 45 min · Belastung 25");
   await expect(matched.locator(".planned-session-metrics")).toContainText("125 bpm · 201 W · Belastung 34");
   await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveText("✕ 0 %");
   await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("aria-label", "0 Prozent des Plans");
@@ -538,7 +539,7 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(previous.locator(".planned-weather-detail")).toHaveAttribute("title", /Gespeicherte Wettervorhersage/);
   await expect(previous.locator(".planned-weather-metrics")).toHaveText("75 % Regen (max. 14:00 Uhr) · 21,1 km/h Wind");
   const workout = day.locator(".planned-entry").filter({ hasText: "Lockerer Dauerlauf mit Steigerungen" });
-  await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 18:30 · 45 Min.");
+  await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 18:30 · 45 min");
   await expect(workout.locator(".planned-session-header")).toContainText("Laufen · 18:30");
   await expect(workout.locator(".planned-session-header")).toBeVisible();
   await expect(workout.locator(".planned-description")).toBeHidden();
@@ -555,17 +556,11 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(completedHeaders).toHaveCount(6);
   for (const theme of ["dark", "light"]) {
     await page.evaluate((selectedTheme) => { document.documentElement.dataset.theme = selectedTheme; }, theme);
-    const contrasts = await completedHeaders.evaluateAll((headers) => headers.map((header) => {
-      const parse = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number).map((channel) => {
-        const normalized = channel / 255;
-        return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
-      });
-      const luminance = (rgb) => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    const computedColors = await completedHeaders.evaluateAll((headers) => headers.map((header) => {
       const style = getComputedStyle(header);
-      const foreground = luminance(parse(style.color));
-      const background = luminance(parse(style.backgroundColor));
-      return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+      return [style.color, style.backgroundColor];
     }));
+    const contrasts = computedColors.map(([foreground, background]) => contrastRatio(foreground, background));
     expect(contrasts.every((ratio) => ratio >= 4.5), `${theme} completed session contrast`).toBe(true);
   }
   await completed.locator("summary").click();
@@ -684,8 +679,8 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(running).not.toContainText("%");
   await expect(cycling).not.toContainText("%");
   await expect(cycling.locator(".analysis-coverage")).toHaveCount(0);
-  await cycling.getByRole("button", { name: "FTP", exact: true }).click();
-  await expect(cycling.locator(".analysis-info-tooltip:popover-open")).toContainText(/\d+\/\d+ datierte Werte/);
+  await cycling.getByRole("button", { name: "Erklärung zu FTP", exact: true }).click();
+  await expect(cycling.locator(".analysis-info-tooltip:popover-open")).toContainText(/Daten für \d+ von \d+ Wochen vorhanden\./);
   await page.keyboard.press("Escape");
   expect((await cycling.locator('path[data-series="0"]').first().getAttribute("d")).match(/M/g)).toHaveLength(1);
   const details = cycling.locator("details").filter({ has: page.getByText("Werte ansehen", { exact: true }) }).first();

@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=281">
+  <link rel="stylesheet" href="/styles.css?v=299">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -25,6 +25,8 @@
       <symbol id="icon-microphone" viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="12" rx="4"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></symbol>
       <symbol id="icon-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
       <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.5-4L4 9M4 5v4h4M4 13a8 8 0 0 0 14.5 4L20 15m0 4v-4h-4"/></symbol>
+      <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></symbol>
+      <symbol id="icon-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
     </svg>
     <aside class="desktop-nav" aria-label="Hauptnavigation">
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
@@ -44,9 +46,13 @@
         <span id="statusDetail">Trainingsbereich wird geprüft</span>
       </output>
       <section id="connectivityNotice" class="connectivity-notice" aria-live="polite" hidden></section>
-      <section id="providerAttentionBanner" class="provider-attention-banner" role="alert" aria-live="assertive" hidden>
+      <section id="providerAttentionBanner" class="provider-attention-banner" aria-live="polite" hidden>
         <div><strong>Anbindung benötigt Aufmerksamkeit</strong><span id="providerAttentionDetail"></span></div>
         <a href="#more/connections">Anbindungen öffnen</a>
+      </section>
+      <section id="setupBanner" class="provider-attention-banner setup-banner" aria-labelledby="setupBannerTitle" aria-live="polite" hidden>
+        <div><strong id="setupBannerTitle">Einrichtung nötig</strong><span id="setupBannerDetail"></span></div>
+        <div class="setup-banner-actions"><a href="#more/connections">Jetzt einrichten</a><button type="button" id="setupBannerDismiss" class="secondary-button">Für diese Sitzung ausblenden</button></div>
       </section>
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
@@ -54,7 +60,7 @@
           <div><strong>Deine Planung braucht eine Anpassung</strong><small>Bitte den Coach, die nächsten Einheiten zu prüfen.</small></div>
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Coach fragen</button>
         </div>
-        <output id="chatOperationStatus" class="sr-only" aria-live="polite" aria-atomic="true" hidden></output>
+        <output id="chatOperationStatus" class="sr-only" aria-live="polite" aria-atomic="true"></output>
         <div id="messages" class="messages"></div>
         <section id="coachActionReview" class="coach-action-review" aria-labelledby="coachActionReviewTitle" hidden>
           <div class="coach-action-review-heading">
@@ -64,6 +70,7 @@
           <div id="coachActionReviewContent"></div>
         </section>
         <section id="coachReceipts" class="coach-receipts" aria-label="Aktionsstatus" aria-live="polite" hidden></section>
+        <p id="voiceStatus" class="voice-status" aria-live="polite" hidden></p>
         <form id="chatForm" class="composer">
           <div id="quickMessageTemplates" class="quick-message-templates" hidden aria-label="Schnelle Nachrichten">
             <span class="quick-message-label">Schnellstart</span>
@@ -78,15 +85,16 @@
           <div class="composer-actions">
             <button type="button" id="attachmentButton" class="secondary-button attachment-button" aria-label="GPX- oder FIT-Dateien oder Bilder anhängen" title="Datei anhängen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
             <button type="button" id="voiceButton" class="voice-button" aria-label="Spracheingabe starten" title="Spracheingabe starten"><svg class="nav-icon" aria-hidden="true"><use href="#icon-microphone"></use></svg></button>
-            <button type="button" id="steerButton" class="secondary-button steer-button" hidden>Steuern</button>
+            <button type="button" id="steerButton" class="secondary-button steer-button" aria-label="Als Nächstes senden" aria-describedby="steerButtonHint" title="Als Nächstes senden" hidden>Als Nächstes</button>
+            <span id="steerButtonHint" class="sr-only"></span>
             <button type="button" id="cancelChatButton" class="composer-stop-button" hidden aria-label="Antwort stoppen" title="Antwort stoppen"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg></button>
             <button type="submit" id="sendButton" aria-label="Senden" title="Senden"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m0 0 6 6m-6-6-6 6"></path></svg></button>
           </div>
           <button type="button" id="chatJumpToComposer" class="chat-jump" hidden aria-label="Zu den neuesten Nachrichten springen" title="Zu den neuesten Nachrichten springen">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14m0 0 5-5m-5 5-5-5"></path></svg>
+            <span class="chat-jump-label" hidden>Neue Antwort</span>
           </button>
         </form>
-        <p id="voiceStatus" class="voice-status" aria-live="polite" hidden></p>
       </section>
 
       <section id="workoutsPanel" class="panel" aria-label="Trainingskalender und Trainingsbibliothek">
@@ -107,38 +115,6 @@
           <div class="plan-segment-heading"><div><span class="eyebrow">TRAININGSBIBLIOTHEK</span><h3 id="planLibraryTitle">Bibliothek</h3><span id="librarySummary" class="tab-sync-detail"></span></div></div>
           <div id="library" class="library" aria-live="polite"></div>
         </section>
-        <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle" aria-describedby="checkinDescription">
-          <div class="checkin-dialog-content">
-            <div class="settings-section-heading">
-              <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in <span id="checkinDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><p id="checkinDescription">Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach am ausgewählten Tag fest.</p></div>
-              <button type="button" id="checkinCloseButton" class="secondary-button">Schließen</button>
-            </div>
-            <form id="checkinForm" class="checkin-form">
-              <div class="form-grid">
-                <label>Datum<input name="checkin_date" type="date" required></label>
-                <label>Verfügbare Minuten<input name="available_minutes" type="number" min="0" max="1440" step="1" placeholder="Optional"></label>
-                <label>Muskelkater<input name="soreness" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-                <label>Stress<input name="stress" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-                <label>Motivation<input name="motivation" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-                <label>Session-RPE<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-              </div>
-              <label>Tagesform<textarea name="day_form" rows="2" placeholder="Zum Beispiel schwere Beine, Müdigkeit oder ungewöhnlich fit"></textarea></label>
-              <label class="checkin-critical-field">Krankheit (wichtig)<textarea name="illness" rows="2" placeholder="Zum Beispiel Erkältung, Fieber oder andere Symptome"></textarea></label>
-              <label>Schmerz<textarea name="pain" rows="2" placeholder="Ort, Intensität und Bewegungen, die Beschwerden auslösen"></textarea></label>
-              <label>Hinweise zur Verfügbarkeit<textarea name="availability_notes" rows="2" placeholder="Zum Beispiel Reise, wenig Schlaf oder nur Indoor möglich"></textarea></label>
-              <label>Notizen<textarea name="notes" rows="3" placeholder="Alles, was der Coach heute wissen sollte"></textarea></label>
-              <label>Tagesstatus<select name="day_status"><option value="unknown">Unbekannt</option><option value="rest">Bestätigter Ruhetag</option><option value="pause">Bestätigte Trainingspause</option></select></label>
-              <fieldset><legend>Bestätigte Tages-Tags</legend><p class="fine-print">Ohne Antwort bleibt die Einordnung unbekannt. Für Vergleiche auch „Nein“ ausdrücklich angeben.</p>
-                <label>Reise<select name="tag_travel"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
-                <label>Spätes Essen<select name="tag_late_meal"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
-                <label>Hoher Stress<select name="tag_high_stress"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
-              </fieldset>
-              <p id="checkinError" class="error" role="alert" aria-live="assertive"></p>
-              <button type="submit">Tages-Check-in speichern</button>
-            </form>
-            <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
-          </div>
-        </dialog>
       </section>
 
       <section id="dataPanel" class="panel" aria-label="Analyse">
@@ -201,6 +177,7 @@
       <section id="profilePanel" class="panel" aria-label="Profil">
         <div class="section-heading">
           <div><span class="eyebrow">MEHR · PROFIL</span><h2>Profil <span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2></div>
+          <button type="button" id="profileCheckinButton" class="secondary-button">Tages-Check-in</button>
         </div>
         <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
           <a href="#more/appearance" data-more-segment="appearance">Darstellung</a>
@@ -268,6 +245,9 @@
           <a href="#more/privacy" data-more-segment="privacy">Daten &amp; Datenschutz</a>
           <a href="#more/operations" data-more-segment="operations">Betrieb &amp; Diagnose</a>
         </nav>
+        <section class="settings-section session-settings" aria-label="Sitzung">
+          <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
+        </section>
         <section class="settings-section" data-more-segment-panel="equipment" hidden>
           <section id="equipmentItems" class="analysis-chart-card" aria-label="Ausrüstung und Wartung"></section>
         </section>
@@ -287,9 +267,9 @@
           <div class="connection-cards">
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine erscheinen im Tab „Plan“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="84"><small>-1 lädt alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small><p id="intervalsSetupHint" class="provider-setup-hint" hidden>Intervals.icu ist nicht konfiguriert. Hinterlege <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code> in der Serverkonfiguration und starte die App neu.</p></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 lädt alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small><p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist optional und nicht konfiguriert. Hinterlege <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> in der Serverkonfiguration und führe einmalig <code>garmin-login.py</code> aus (siehe README).</p></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine erscheinen im Tab „Kalender“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
           </div>
           <section class="provider-freshness" aria-labelledby="providerFreshnessTitle">
             <div class="settings-section-heading"><div><h3 id="providerFreshnessTitle">Datenfrische &amp; Retry-Verlauf</h3><p>Nur technische Zeitpunkte, Phasen und sichere Fehlerklassen; Providerantworten und private URLs werden nicht gespeichert.</p></div></div>
@@ -298,7 +278,7 @@
           <p class="fine-print settings-message">Zugangsdaten und die Athlete ID müssen über Container-Umgebungsvariablen gesetzt werden (Unraid: Docker-Template &rarr; Environment variables). Für den Coach ist <code>OPENAI_API_KEY</code> nötig; optional kann <code>OPENAI_BASE_URL</code> auf eine Responses-kompatible API zeigen. Außerdem <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code>. Für Garmin zusätzlich <code>GARMIN_EMAIL</code>, <code>GARMIN_PASSWORD</code> und <code>GARMINTOKENS</code> (z. B. <code>/data/garmin_tokens</code>). Nach Änderungen den Container in Unraid neu erstellen.</p>
           <p id="garminDetail" class="fine-print settings-message"></p>
           <p class="fine-print settings-message">Wetterdaten: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a> · Lizenz: CC BY 4.0.</p>
-          <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend. Termine werden im Tab „Plan“ angezeigt.</p>
+          <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend. Termine werden im Tab „Kalender“ angezeigt.</p>
         </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="appearance">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Kalenderansicht</span><span id="calendarDisplaySummary" class="collapsible-summary-meta">Einstellungen werden geladen...</span></summary>
@@ -368,10 +348,6 @@
             <label>Backup wiederherstellen<input id="backupFileInput" type="file" accept=".backup,.db,application/octet-stream"></label>
             <button id="backupRestoreButton" type="button" class="secondary-button danger-button">Backup wiederherstellen</button>
           </div>
-          <div class="settings-inline-action">
-            <span>Die Datenbank bleibt als verschlüsselte Datei bestehen; ihr Inhalt wird geleert.</span>
-            <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
-          </div>
         </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="operations">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Diagnose</span><span class="collapsible-summary-meta">Bereinigten Status herunterladen</span></summary>
@@ -401,7 +377,7 @@
   <dialog id="loginDialog" aria-labelledby="loginTitle">
     <form id="loginForm" method="dialog">
       <h2 id="loginTitle">Anmelden</h2>
-      <p>Gib das im Container gesetzte APP_PASSWORD ein.</p>
+      <p>Gib dein App-Passwort ein.</p>
       <label for="loginPassword">Passwort<input id="loginPassword" type="password" autocomplete="current-password" required></label>
       <p id="loginError" class="error" aria-live="polite"></p>
       <button type="submit" id="loginButton" class="login-button">
@@ -432,35 +408,71 @@
       <span class="eyebrow">BESTÄTIGUNG</span>
       <h2 id="confirmationDialogTitle">Aktion bestätigen</h2>
       <p id="confirmationDialogMessage"></p>
+      <p id="confirmationDialogExpected" class="fine-print" hidden></p>
       <label id="confirmationDialogInputLabel" for="confirmationDialogInput" hidden>Bestätigungstext
         <input id="confirmationDialogInput" type="text" autocomplete="off">
       </label>
+      <p id="confirmationDialogError" class="error" role="alert" aria-live="assertive" hidden></p>
       <div class="dialog-actions">
+        <button type="button" id="confirmationDialogSecondary" class="secondary-button" hidden></button>
         <button type="button" id="confirmationDialogCancel" class="secondary-button">Abbrechen</button>
         <button type="submit" id="confirmationDialogAccept" class="adaptive-planning-button">Bestätigen</button>
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=223" defer></script>
+  <script src="/format.js?v=1" defer></script>
+  <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle" aria-describedby="checkinDescription">
+    <div class="checkin-dialog-content">
+      <div class="settings-section-heading">
+        <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in <span id="checkinDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><p id="checkinDescription">Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach am ausgewählten Tag fest.</p></div>
+        <button type="button" id="checkinCloseButton" class="secondary-button">Schließen</button>
+      </div>
+      <form id="checkinForm" class="checkin-form">
+        <div class="form-grid">
+          <label>Datum<input name="checkin_date" type="date" required></label>
+          <label>Verfügbare Minuten<input name="available_minutes" type="number" min="0" max="1440" step="1" placeholder="Optional"></label>
+          <label>Muskelkater<input name="soreness" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+          <label>Stress<input name="stress" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+          <label>Motivation<input name="motivation" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+          <label>Session-RPE<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+        </div>
+        <label>Tagesform<textarea name="day_form" rows="2" placeholder="Zum Beispiel schwere Beine, Müdigkeit oder ungewöhnlich fit"></textarea></label>
+        <label class="checkin-critical-field">Krankheit (wichtig)<textarea name="illness" rows="2" placeholder="Zum Beispiel Erkältung, Fieber oder andere Symptome"></textarea></label>
+        <label>Schmerz<textarea name="pain" rows="2" placeholder="Ort, Intensität und Bewegungen, die Beschwerden auslösen"></textarea></label>
+        <label>Hinweise zur Verfügbarkeit<textarea name="availability_notes" rows="2" placeholder="Zum Beispiel Reise, wenig Schlaf oder nur Indoor möglich"></textarea></label>
+        <label>Notizen<textarea name="notes" rows="3" placeholder="Alles, was der Coach heute wissen sollte"></textarea></label>
+        <label>Tagesstatus<select name="day_status"><option value="unknown">Unbekannt</option><option value="rest">Bestätigter Ruhetag</option><option value="pause">Bestätigte Trainingspause</option></select></label>
+        <fieldset><legend>Bestätigte Tages-Tags</legend><p class="fine-print">Ohne Antwort bleibt die Einordnung unbekannt. Für Vergleiche auch „Nein“ ausdrücklich angeben.</p>
+          <label>Reise<select name="tag_travel"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
+          <label>Spätes Essen<select name="tag_late_meal"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
+          <label>Hoher Stress<select name="tag_high_stress"><option value="">Unbekannt</option><option value="true">Ja</option><option value="false">Nein</option></select></label>
+        </fieldset>
+        <p id="checkinError" class="error" role="alert" aria-live="assertive"></p>
+        <button type="submit">Tages-Check-in speichern</button>
+      </form>
+      <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
+    </div>
+  </dialog>
+  <script src="/api.js?v=224" defer></script>
   <script src="/navigation.js?v=231" defer></script>
-  <script src="/state.js?v=219" defer></script>
-  <script src="/views.js?v=220" defer></script>
-  <script src="/plan-views.js?v=1" defer></script>
+  <script src="/state.js?v=220" defer></script>
+  <script src="/views.js?v=224" defer></script>
+  <script src="/plan-views.js?v=6" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=9" defer></script>
-  <script src="/shared.js?v=1" defer></script>
-  <script src="/auth.js?v=1" defer></script>
-  <script src="/sync-status.js?v=1" defer></script>
-  <script src="/notifications.js?v=1" defer></script>
-  <script src="/nutrition.js?v=21" defer></script>
-  <script src="/analysis.js?v=94" defer></script>
-  <script src="/activity-details.js?v=9" defer></script>
-  <script src="/performance-view.js?v=1" defer></script>
-  <script src="/diagnostics.js?v=1" defer></script>
-  <script src="/state-loader.js?v=1" defer></script>
-  <script src="/sync-actions.js?v=1" defer></script>
-  <script src="/settings.js?v=1" defer></script>
-  <script src="/app.js?v=276" defer></script>
+  <script src="/coach.js?v=19" defer></script>
+  <script src="/shared.js?v=7" defer></script>
+  <script src="/auth.js?v=4" defer></script>
+  <script src="/sync-status.js?v=5" defer></script>
+  <script src="/notifications.js?v=3" defer></script>
+  <script src="/nutrition.js?v=24" defer></script>
+  <script src="/analysis.js?v=102" defer></script>
+  <script src="/activity-details.js?v=12" defer></script>
+  <script src="/performance-view.js?v=2" defer></script>
+  <script src="/diagnostics.js?v=2" defer></script>
+  <script src="/state-loader.js?v=2" defer></script>
+  <script src="/sync-actions.js?v=2" defer></script>
+  <script src="/settings.js?v=3" defer></script>
+  <script src="/app.js?v=281" defer></script>
 </body>
 </html>

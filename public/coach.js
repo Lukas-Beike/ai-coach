@@ -21,6 +21,19 @@ function scheduleChatStatusPoll(delay = 1_500) {
   }, delay);
 }
 
+function chatStatusJobActive() {
+  return Boolean(state.busy || state.chatRequest || state.chatServerOperationId || state.chatStream || pendingChatTurn());
+}
+
+function chatStatusPollWanted() {
+  return document.visibilityState === "visible" && chatStatusJobActive();
+}
+
+function stopChatStatusPoll() {
+  if (state.chatStatusTimer) clearTimeout(state.chatStatusTimer);
+  state.chatStatusTimer = null;
+}
+
 async function loadChatHistoryFresh() {
   await refreshChatHistoryState();
 }
@@ -146,15 +159,27 @@ async function finishRecoveredChatStatus() {
   scrollChatToResponseStart();
 }
 
+function rescheduleChatStatusPoll(delay) {
+  if (chatStatusPollWanted()) scheduleChatStatusPoll(delay);
+}
+
+function settleChatStatusPoll(pollRequest, authFailed, running) {
+  if (state.chatStatusPollInFlight !== pollRequest) return;
+  state.chatStatusPollInFlight = null;
+  if (!authFailed) rescheduleChatStatusPoll(running ? 1_500 : 5_000);
+}
+
 async function pollChatStatus() {
-  if (!state.data || document.visibilityState !== "visible" || !navigator.onLine) {
-    scheduleChatStatusPoll(5_000);
+  if (!state.data || document.visibilityState !== "visible") return;
+  if (!navigator.onLine) {
+    rescheduleChatStatusPoll(5_000);
     return;
   }
   if (state.chatStatusPollInFlight) return;
   const pollRequest = {};
   state.chatStatusPollInFlight = pollRequest;
   let running = false;
+  let authFailed = false;
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
   try {
@@ -166,12 +191,9 @@ async function pollChatStatus() {
     if (running) showRunningChatStatus(status);
     else await finishRecoveredChatStatus();
   } catch (error) {
-    if (state.chatStatusPollInFlight === pollRequest && !/Authentication/.test(error.message)) scheduleChatStatusPoll(5_000);
+    authFailed = /Authentication/.test(error.message);
   } finally {
-    if (state.chatStatusPollInFlight === pollRequest) {
-      state.chatStatusPollInFlight = null;
-      scheduleChatStatusPoll(running ? 1_500 : 5_000);
-    }
+    settleChatStatusPoll(pollRequest, authFailed, running);
   }
 }
 
@@ -219,6 +241,34 @@ function queueChatMessage(message, mode, requestKind = null, attachments = []) {
   return true;
 }
 
+function removeQueuedChatMessage(id) {
+  state.chatQueue = state.chatQueue.filter((entry) => entry.id !== id);
+  renderMessages(state.data?.messages || [], false, true);
+  updateChatControls();
+}
+
+function queuedChatEditFitsDraft(entry, draftAttachments = []) {
+  return (entry.attachments || []).length + draftAttachments.length <= MAX_CHAT_ATTACHMENTS;
+}
+
+function editQueuedChatMessage(id) {
+  const entry = state.chatQueue.find((item) => item.id === id);
+  if (!entry) return;
+  if (!queuedChatEditFitsDraft(entry, state.chatAttachments || [])) {
+    toast(`Höchstens ${MAX_CHAT_ATTACHMENTS} Anhänge pro Nachricht. Entferne zuerst Anhänge aus dem Entwurf.`, true);
+    return;
+  }
+  removeQueuedChatMessage(id);
+  const input = $("#messageInput");
+  input.value = input.value.trim() ? `${input.value.trimEnd()}\n${entry.message}` : entry.message;
+  if (entry.attachments.length) {
+    state.chatAttachments = [...entry.attachments, ...(state.chatAttachments || [])];
+    renderChatAttachments();
+  }
+  input.dispatchEvent(new Event("input"));
+  input.focus({ preventScroll: true });
+}
+
 function chatRequestIsCurrent(sessionGeneration, chatGeneration) {
   return sessionGeneration === state.sessionGeneration && chatGeneration === state.chatGeneration;
 }
@@ -253,7 +303,7 @@ function rejectChatStreamResponse(error, context) {
     renderChatAttachments();
     const input = $("#messageInput");
     if (input.value.trim()) state.rejectedMessages.push({ role: "user", content: message, client_turn_id: clientTurnId, error: "Bitte erneut anmelden." });
-    else input.value = message;
+    else { input.value = message; resizeChatInput(input); }
     state.chatDraftDirty = true;
   }
   throw error;
@@ -389,7 +439,8 @@ async function finishChatStream(context) {
   }
   if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
   await refreshCompletedChatStream(context);
-  if (completed) scrollChatToResponseStart();
+  if (completed && state.chatFollowLatest) scrollChatToResponseStart();
+  if (completed) markChatContentArrived();
   invalidateContextPreview();
   return completed ? "completed" : "failed";
 }
@@ -407,6 +458,7 @@ async function recoverChatRequestFailure(error, context) {
     } else {
       state.data.messages = (state.data.messages || []).filter((entry) => !(entry.optimistic && entry.client_turn_id === clientTurnId));
       input.value = message;
+      resizeChatInput(input);
       state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
       renderChatAttachments();
     }
@@ -451,6 +503,7 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
   const clientTurnId = AppState.secureToken("turn");
+  if (chatIsNearBottom()) state.chatFollowLatest = true;
   if (state.data) {
     state.data.messages = mergeChatMessages([{ role: "user", content: message, attachment_names: JSON.stringify(attachments.map(item => item.name)), client_turn_id: clientTurnId, created_at: new Date().toISOString(), optimistic: true }]);
     renderMessages(state.data.messages, true);
@@ -604,6 +657,7 @@ async function resetCoachChat() {
 }
 
 const MAX_QUEUED_ATTACHMENT_BYTES = 16_000_000;
+const MAX_CHAT_ATTACHMENTS = 4;
 
 const VOICE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
@@ -681,10 +735,21 @@ function updateChatSendButton(button, controls) {
   button.title = label;
 }
 
+function steerButtonHint(controls) {
+  if (controls.resuming || controls.reconciling) return "Der Coach lädt die Antwort noch.";
+  if (!controls.inputAvailable) return "Die Spracheingabe läuft noch.";
+  if (!controls.hasDraft) return "Schreibe zuerst eine Nachricht, um sie als Nächstes zu senden.";
+  return "Wird nach der aktuellen Antwort vor den übrigen wartenden Nachrichten gesendet.";
+}
+
 function updateChatSteerButton(button, controls) {
   if (!button) return;
   button.hidden = !state.busy || controls.resuming || controls.reconciling;
   button.disabled = !controls.hasDraft || !controls.inputAvailable || controls.resuming || controls.reconciling;
+  const hint = steerButtonHint(controls);
+  button.title = hint;
+  const hintNode = $("#steerButtonHint");
+  if (hintNode) hintNode.textContent = hint;
 }
 
 function updateChatCancelButton(button, controls) {
@@ -710,28 +775,38 @@ function updateChatControls() {
     // Drafting stays available while the Coach loads or works; readiness only
     // gates the actions that submit the draft.
     input.disabled = false;
-    if (!controls.aiConfigured) {
-      input.placeholder = "OPENAI_API_KEY in den Server-Einstellungen konfigurieren…";
-    } else if (controls.chatReady) {
-      input.placeholder = "Frage deinen Coach…";
-    } else {
-      input.placeholder = "Coach-Chat wird geladen…";
-    }
+    input.placeholder = chatInputPlaceholder(controls);
   }
   updateChatSendButton($("#sendButton"), controls);
   updateChatSteerButton($("#steerButton"), controls);
   updateChatCancelButton($("#cancelChatButton"), controls);
-  const progress = $("#chatOperationStatus");
-  if (progress) {
-    if (state.busy && !controls.reconciling) announceChatStatus(coachWorkingLabel());
-  }
+  syncChatWorkingStatus(controls);
   updateChatQueueStatus();
+}
+
+function chatInputPlaceholder(controls) {
+  if (!controls.aiConfigured) return "OPENAI_API_KEY in den Server-Einstellungen konfigurieren…";
+  if (!controls.chatReady) return "Coach-Chat wird geladen…";
+  return state.busy ? "Folgefrage – wird danach gesendet" : "Frage deinen Coach…";
+}
+
+function syncChatWorkingStatus(controls) {
+  const progress = $("#chatOperationStatus");
+  if (!progress) return;
+  const operationActive = Boolean(state.chatRequest || state.chatServerOperationId || state.chatQueue.length);
+  if (state.busy && operationActive && !controls.reconciling) {
+    announceChatStatus(coachWorkingLabel());
+    state.chatStatusWorking = true;
+  } else if (!state.busy && state.chatStatusWorking) {
+    // Keep the completion announcement; clear only a stale working status.
+    state.chatStatusWorking = false;
+    if (progress.textContent !== "Antwort fertig.") progress.textContent = "";
+  }
 }
 
 function announceChatStatus(message) {
   const status = $("#chatOperationStatus");
   if (!status || status.textContent === message) return;
-  status.hidden = false;
   status.textContent = message;
 }
 function stopVoiceCapture(recorder = state.voiceRecorder) {
@@ -981,15 +1056,112 @@ function updateChatComposerVisibility() {
   const panel = $("#chatPanel");
   if (!panel) return;
   const jump = $("#chatJumpToComposer");
-  if (jump) jump.hidden = chatIsNearBottom() || !$("#messages")?.childElementCount || !panel.classList.contains("active");
+  const active = panel.classList.contains("active");
+  const nearBottom = chatIsNearBottom();
+  // Reaching the latest content re-enables following; a hidden panel measures the wrong scroller and must not change it.
+  if (active && nearBottom) {
+    state.chatFollowLatest = true;
+    state.chatUnseenContent = false;
+  }
+  if (jump) {
+    jump.hidden = nearBottom || !$("#messages")?.childElementCount || !active;
+    updateChatJumpLabel(jump);
+  }
 }
 
-function jumpToChatComposer() {
+// Content that arrives while the reader is scrolled away is flagged so the jump button can say so.
+function markChatContentArrived() {
+  if (!state.chatFollowLatest) state.chatUnseenContent = true;
+  updateChatComposerVisibility();
+}
+
+function updateChatJumpLabel(jump) {
+  const unseen = Boolean(state.chatUnseenContent) && !state.chatFollowLatest;
+  const name = unseen ? "Zur neuesten Antwort springen" : "Zu den neuesten Nachrichten springen";
+  jump.classList.toggle("has-label", unseen);
+  jump.querySelector(".chat-jump-label")?.toggleAttribute("hidden", !unseen);
+  if (jump.getAttribute("aria-label") !== name) {
+    jump.setAttribute("aria-label", name);
+    jump.title = name;
+  }
+}
+
+// Only a real upward gesture leaves the latest content; programmatic scrolls never reach these listeners.
+let chatTouchLastY = null;
+function chatUserScrolledAway() {
+  if (!$("#chatPanel")?.classList.contains("active")) return;
+  state.chatFollowLatest = false;
+  updateChatComposerVisibility();
+}
+
+function handleChatWheel(event) {
+  if (event.deltaY < 0) chatUserScrolledAway();
+}
+
+function handleChatTouchStart(event) {
+  chatTouchLastY = event.touches[0]?.clientY ?? null;
+}
+
+function handleChatTouchMove(event) {
+  const y = event.touches[0]?.clientY;
+  if (y == null) return;
+  // A finger moving down scrolls the page up, away from the latest content.
+  if (chatTouchLastY != null && y > chatTouchLastY) chatUserScrolledAway();
+  chatTouchLastY = y;
+}
+
+function handleChatScrollKey(event) {
+  if (!["PageUp", "ArrowUp", "Home"].includes(event.key)) return;
+  // Editing the draft moves the caret, not the page.
+  if (event.target?.closest?.("input, textarea, [contenteditable]")) return;
+  chatUserScrolledAway();
+}
+
+// Offsets the app last set or accepted. A scroll that moves above them by more than a few pixels is the reader,
+// including a scrollbar drag, which sends no wheel event. Programmatic scrolls re-anchor through scrollWindowForChat.
+const CHAT_UPWARD_SCROLL_PX = 4;
+const chatScrollAnchors = { window: null, messages: null };
+function chatScrollMovedUp(kind, position) {
+  const anchor = chatScrollAnchors[kind];
+  if (anchor == null || position > anchor) {
+    chatScrollAnchors[kind] = position;
+    return false;
+  }
+  if (position >= anchor - CHAT_UPWARD_SCROLL_PX) return false;
+  chatScrollAnchors[kind] = position;
+  return true;
+}
+
+function scrollWindowForChat(top) {
+  globalThis.scrollTo({ top, behavior: "auto" });
+  chatScrollAnchors.window = globalThis.scrollY;
+}
+
+function chatAcceptsReaderScroll() {
+  return !state.chatInitialScrollPending && !state.chatScrollRestoring && Boolean($("#chatPanel")?.classList.contains("active"));
+}
+
+// A small upward drag near the newest content keeps following; anything further away leaves it.
+function chatReaderScrolledUp() {
+  if (chatIsNearBottom()) return;
+  chatUserScrolledAway();
+}
+
+function handleChatMessagesScroll(event) {
+  const movedUp = chatScrollMovedUp("messages", event.target.scrollTop);
+  if (movedUp && chatAcceptsReaderScroll()) chatReaderScrolledUp();
+  updateChatComposerVisibility();
+}
+
+function jumpToLatestMessages() {
   const input = $("#messageInput");
   if (!input) return;
   const jump = $("#chatJumpToComposer");
   if (jump) jump.hidden = true;
-  input.focus({ preventScroll: true });
+  state.chatFollowLatest = true;
+  state.chatUnseenContent = false;
+  // Touch devices keep the keyboard closed; focusing the draft there would open it.
+  if (shouldRestoreChatInputFocus()) input.focus({ preventScroll: true });
   scrollChatToLatest();
   updateChatComposerVisibility();
 }
@@ -1171,6 +1343,7 @@ function coachActionReceipt(proposal, result) {
 
 async function executeCoachActionProposal(proposal, button) {
   if (!proposal?.id || button.disabled || !["preview", "ready"].includes(proposal.status)) return;
+  const originalRoute = state.route;
   button.disabled = true;
   try {
     const confirmed = await api("/api/coach/actions/confirm", {
@@ -1187,10 +1360,12 @@ async function executeCoachActionProposal(proposal, button) {
     const receipt = coachActionReceipt(proposal, result);
     addCoachReceipt(receipt);
     toast(receipt.message);
+    if (state.route === originalRoute) {
+      if (receipt.nutritionProductWrite) await AppRouter.navigate("nutrition/products", { historyMode: "push" });
+      else if (receipt.localWrite) await AppRouter.navigate("nutrition/meals", { historyMode: "push" });
+      else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
+    }
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);
-    if (receipt.nutritionProductWrite) void AppRouter.navigate("nutrition/products", { historyMode: "push" });
-    else if (receipt.localWrite) void AppRouter.navigate("nutrition/meals", { historyMode: "push" });
-    else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) void AppRouter.navigate("plan", { historyMode: "push" });
   } catch (error) {
     addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
     if (error.reason === "proposal_expired") {
@@ -1205,11 +1380,34 @@ async function executeCoachActionProposal(proposal, button) {
   }
 }
 
-function createPendingMessage(entry) {
+function createPendingMessage(entry, index = 0) {
   const node = document.createElement("div");
   node.className = "message user pending";
-  node.textContent = entry.message;
+  const text = document.createElement("div");
+  text.textContent = entry.message;
+  const label = document.createElement("span");
+  label.className = "pending-label";
+  label.textContent = index === 0 ? "Als Nächstes" : "Wird nach der aktuellen Antwort gesendet";
+  const actions = document.createElement("div");
+  actions.className = "pending-actions";
+  const position = index + 1;
+  actions.append(
+    pendingQueueButton("Bearbeiten", `Bearbeiten: wartende Nachricht ${position}`, () => editQueuedChatMessage(entry.id)),
+    pendingQueueButton("Entfernen", `Entfernen: wartende Nachricht ${position}`, () => removeQueuedChatMessage(entry.id)),
+  );
+  node.append(text, label, actions);
   return node;
+}
+
+function pendingQueueButton(text, name, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "message-action";
+  button.textContent = text;
+  button.setAttribute("aria-label", name);
+  button.title = name;
+  button.addEventListener("click", onClick);
+  return button;
 }
 
 function mergeChatMessages(incoming, existing = state.data?.messages || []) {
@@ -1251,8 +1449,56 @@ function applyChatReceipt(receipt) {
   renderMessages(state.data?.messages || [], false);
 }
 
+let chatHistoryObserver = null;
+
+function chatHistoryScroller(root) {
+  return root.scrollHeight > root.clientHeight ? root : globalThis;
+}
+
+function chatHistoryAnchor(root) {
+  // Anchor the first message the reader can see, not merely the first one in the DOM.
+  const viewportTop = chatHistoryScroller(root) === root ? root.getBoundingClientRect().top : 0;
+  const nodes = [...root.querySelectorAll("[data-message-id]")];
+  const node = nodes.find((item) => item.getBoundingClientRect().bottom > viewportTop) || nodes[0];
+  return node ? { id: node.dataset.messageId, top: node.getBoundingClientRect().top } : null;
+}
+
+function restoreChatHistoryAnchor(root, anchor, added, moveFocus) {
+  const node = anchor && [...root.querySelectorAll("[data-message-id]")].find((item) => item.dataset.messageId === anchor.id);
+  if (!node) return;
+  chatHistoryScroller(root).scrollBy(0, node.getBoundingClientRect().top - anchor.top);
+  if (moveFocus) {
+    if (!node.hasAttribute("tabindex")) node.tabIndex = -1;
+    node.focus({ preventScroll: true });
+  }
+  if (added === 1) announceChatStatus("1 ältere Nachricht geladen");
+  else if (added > 1) announceChatStatus(`${added} ältere Nachrichten geladen`);
+}
+
+const chatFocusableSelector = "button, a[href], input, select, textarea, [tabindex]";
+
+function chatFocusSnapshot(root) {
+  // Automatic history loads replace every message node, which would drop focus from a message action to BODY.
+  const active = document.activeElement;
+  const message = active && root.contains(active) ? active.closest("[data-message-id]") : null;
+  if (!message) return null;
+  const index = active === message ? -1 : [...message.querySelectorAll(chatFocusableSelector)].indexOf(active);
+  return { messageId: message.dataset.messageId, index };
+}
+
+function restoreChatFocus(root, snapshot) {
+  if (!snapshot) return;
+  const message = [...root.querySelectorAll("[data-message-id]")].find((item) => item.dataset.messageId === snapshot.messageId);
+  if (!message) return;
+  const control = snapshot.index >= 0 ? [...message.querySelectorAll(chatFocusableSelector)][snapshot.index] : null;
+  const target = control || message;
+  if (!target.hasAttribute("tabindex") && target === message) message.tabIndex = -1;
+  target.focus({ preventScroll: true });
+}
+
 function appendHistoryPageButton(root, area) {
   const chat = area === "chat";
+  if (chat) chatHistoryObserver?.disconnect();
   const cursor = state.data?.[chat ? "messages_next_cursor" : "library_next_cursor"];
   if (!cursor) return;
   const button = document.createElement("button");
@@ -1260,7 +1506,11 @@ function appendHistoryPageButton(root, area) {
   button.className = "secondary-button";
   button.dataset.pageArea = area;
   button.textContent = chat ? "Weitere Nachrichten laden" : "Weitere Bibliothekseinheiten laden";
+  let autoLoad = false;
   button.addEventListener("click", async () => {
+    if (chat) chatHistoryObserver?.disconnect();
+    const moveFocus = !autoLoad;
+    autoLoad = false;
     const generation = state.sessionGeneration;
     const chatGeneration = state.chatGeneration;
     button.disabled = true;
@@ -1269,9 +1519,14 @@ function appendHistoryPageButton(root, area) {
       if (generation !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
       if (chat) {
         if (result.generation !== state.data.messages_generation) { await loadChatHistoryFresh(); return; }
+        const anchor = chatHistoryAnchor(root);
+        const focus = moveFocus ? null : chatFocusSnapshot(root);
+        const previousCount = (state.data.messages || []).length;
         state.data.messages = mergeChatMessages(result.messages || []);
         state.data.messages_next_cursor = result.next_cursor;
         renderMessages(state.data.messages, false, true);
+        restoreChatHistoryAnchor(root, anchor, state.data.messages.length - previousCount, moveFocus);
+        restoreChatFocus(root, focus);
       } else {
         const all = [...(state.data.library || []), ...(result.workouts || [])];
         state.data.library = [...new Map(all.map((entry) => [entry.id, entry])).values()];
@@ -1280,6 +1535,18 @@ function appendHistoryPageButton(root, area) {
       }
     } catch (error) { toast(error.message, true); button.disabled = false; }
   });
+  if (chat && "IntersectionObserver" in globalThis) {
+    const observer = new IntersectionObserver((entries) => {
+      // Wait until the initial jump to the latest message has settled; the next intersection re-arms loading.
+      if (!entries.some((entry) => entry.isIntersecting) || state.chatInitialScrollPending || state.chatScrollRestoring) return;
+      observer.disconnect();
+      if (button.disabled) return;
+      autoLoad = true;
+      button.click();
+    }, { rootMargin: "200px 0px 0px 0px" });
+    chatHistoryObserver = observer;
+    observer.observe(button);
+  }
   root.append(button);
 }
 
@@ -1297,13 +1564,14 @@ function restoreRejectedMessage(message) {
   const input = $("#messageInput");
   if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
   input.value = message.content;
+  resizeChatInput(input);
   state.chatAttachments = message.attachments || [];
   renderChatAttachments();
   state.chatDraftDirty = true;
   state.data.messages = state.data.messages.filter((entry) => entry !== message);
   state.rejectedMessages = state.rejectedMessages.filter((entry) => entry.client_turn_id !== message.client_turn_id);
   renderMessages(state.data.messages);
-  jumpToChatComposer();
+  jumpToLatestMessages();
   updateChatControls();
 }
 
@@ -1317,6 +1585,16 @@ function appendMessageRetry(node, message) {
   retry.textContent = "Als Entwurf übernehmen";
   retry.addEventListener("click", () => restoreRejectedMessage(message));
   node.append(error, retry);
+}
+
+function messageActionButton(icon, label) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "message-action";
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.innerHTML = `<svg class="message-action-icon" aria-hidden="true"><use href="#icon-${icon}"></use></svg>`;
+  return button;
 }
 
 function renderMessageNode(message) {
@@ -1335,11 +1613,7 @@ function renderMessageNode(message) {
   appendMessageRetry(node, message);
   const actions = document.createElement("div");
   actions.className = "message-actions";
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.className = "message-action";
-  copy.textContent = "Kopieren";
-  copy.setAttribute("aria-label", "Nachricht kopieren");
+  const copy = messageActionButton("copy", "Nachricht kopieren");
   copy.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(String(message.content || ""));
@@ -1348,18 +1622,14 @@ function renderMessageNode(message) {
   });
   actions.append(copy);
   if (message.role === "user" && !messageAttachmentLabel(message.attachment_names)) {
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "message-action";
-    edit.textContent = "Als Entwurf bearbeiten";
+    const edit = messageActionButton("edit", "Als Entwurf bearbeiten");
     edit.addEventListener("click", () => {
       const input = $("#messageInput");
       if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
       input.value = String(message.content || "");
       delete input.dataset.requestKind;
       input.dispatchEvent(new Event("input", { bubbles: true }));
-      jumpToChatComposer();
-      input.focus({ preventScroll: true });
+      jumpToLatestMessages();
     });
     actions.append(edit);
   }
@@ -1402,7 +1672,7 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
     root.append(appShellLoading ? createSkeletonStack(4) : createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest oder starte mit einer Schnellaktion."));
   }
   visibleMessages.forEach((message) => root.append(renderMessageNode(message)));
-  state.chatQueue.forEach((entry) => root.append(createPendingMessage(entry)));
+  state.chatQueue.forEach((entry, index) => root.append(createPendingMessage(entry, index)));
   const persistedResponse = Boolean(
     state.chatRequest?.responseMessageReceived
     || (state.chatRequest?.responseMessageId != null
@@ -1436,9 +1706,10 @@ function scheduleChatStreamRender(scrollToStart = false) {
     else {
       streaming.classList.toggle("is-recovering", state.chatRequest?.phase === "recovering");
       streaming.innerHTML = markdownToHtml(state.chatStreamText);
-      updateChatComposerVisibility();
+      if (!shouldScrollToStart) keepChatStreamInView(streaming);
+      markChatContentArrived();
     }
-    if (shouldScrollToStart) scrollChatToResponseStart();
+    if (shouldScrollToStart && state.chatFollowLatest) scrollChatToResponseStart();
   });
 }
 
@@ -1465,10 +1736,28 @@ function scrollChatToResponseStart() {
       return;
     }
     const topGap = 16;
-    globalThis.scrollTo({ top: Math.max(0, globalThis.scrollY + target.getBoundingClientRect().top - topGap), behavior: "auto" });
+    scrollWindowForChat(Math.max(0, globalThis.scrollY + target.getBoundingClientRect().top - topGap));
     state.chatResponseMessageId = null;
     requestAnimationFrame(updateChatComposerVisibility);
   });
+}
+
+// While following, growing stream content keeps the newest line above the composer without hiding the start of the reply.
+function keepChatStreamInView(streaming) {
+  if (!state.chatFollowLatest || !$("#chatPanel")?.classList.contains("active")) return;
+  const root = $("#messages");
+  const latest = root && chatLatestVisibleNode(root);
+  const composerTop = $("#chatForm")?.getBoundingClientRect().top;
+  if (!latest || !Number.isFinite(composerTop)) return;
+  const overlap = latest.getBoundingClientRect().bottom - (composerTop - 12);
+  const headroom = streaming.getBoundingClientRect().top - 16;
+  const delta = Math.min(overlap, headroom);
+  if (delta > 0) scrollWindowForChat(globalThis.scrollY + delta);
+}
+
+// The newest visible child: a working indicator, stream, queued or optimistic message can sit below the last persisted reply.
+function chatLatestVisibleNode(root) {
+  return [...root.children].findLast((node) => !node.hidden && node.getClientRects().length > 0) || null;
 }
 
 function scrollChatToLatest() {
@@ -1478,8 +1767,8 @@ function scrollChatToLatest() {
   requestAnimationFrame(() => {
     if (state.chatInitialScrollPending && (!state.initialStateLoaded || document.readyState !== "complete")) return;
     root.scrollTop = root.scrollHeight;
-    const messages = root.querySelectorAll(".message[data-message-id]");
-    const target = messages[messages.length - 1] || root.lastElementChild;
+    chatScrollAnchors.messages = root.scrollTop;
+    const target = chatLatestVisibleNode(root);
     if (!target) return;
     state.chatInitialScrollPending = false;
     const composer = $("#chatForm");
@@ -1492,7 +1781,7 @@ function scrollChatToLatest() {
       viewportBottom,
       Number.isFinite(composerTop) ? composerTop : viewportBottom,
     ) - targetGap;
-    globalThis.scrollTo({ top: Math.max(0, globalThis.scrollY + targetBottom - desiredBottom), behavior: "auto" });
+    scrollWindowForChat(Math.max(0, globalThis.scrollY + targetBottom - desiredBottom));
     requestAnimationFrame(updateChatComposerVisibility);
   });
 }
@@ -1507,9 +1796,9 @@ function restoreChatScrollPosition() {
       state.chatScrollRestoring = false;
       return;
     }
-    globalThis.scrollTo({ top: scrollY, behavior: "auto" });
+    scrollWindowForChat(scrollY);
     requestAnimationFrame(() => {
-      if (panel.classList.contains("active")) globalThis.scrollTo({ top: scrollY, behavior: "auto" });
+      if (panel.classList.contains("active")) scrollWindowForChat(scrollY);
       state.chatScrollRestoring = false;
       updateChatComposerVisibility();
     });
@@ -1518,10 +1807,102 @@ function restoreChatScrollPosition() {
 }
 
 function handleWindowScroll() {
-  if (!state.chatInitialScrollPending && !state.chatScrollRestoring && $("#chatPanel")?.classList.contains("active")) {
+  // The offset is tracked even while the chat is hidden, so a later comparison starts from the real position.
+  const movedUp = chatScrollMovedUp("window", globalThis.scrollY);
+  if (chatAcceptsReaderScroll()) {
     state.chatScrollY = globalThis.scrollY;
+    if (movedUp) chatReaderScrolledUp();
   }
   updateChatComposerVisibility();
+}
+
+const CONTEXT_KEY_LABELS = {
+  content: "Inhalt",
+  note: "Hinweis",
+  mode: "Modus",
+  included_separately: "Separat übergeben",
+  generated_at: "Erstellt am",
+  snapshot_truncated: "Snapshot gekürzt",
+  snapshot_compacted: "Snapshot kompakt aufbereitet",
+  context_characters: "Zeichen im Kontext",
+  projection: "Projektion",
+  name: "Name",
+  sports: "Sportarten",
+  typical_weekly_volume: "Typischer Wochenumfang",
+  timezone: "Zeitzone",
+  source: "Quelle",
+  status: "Status",
+  unit: "Einheit",
+  value: "Wert",
+  date: "Datum",
+  updated_at: "Aktualisiert am",
+};
+const CONTEXT_HIDDEN_KEYS = new Set(["field", "role"]);
+
+function contextPreNode(text) {
+  const pre = document.createElement("pre");
+  pre.textContent = text;
+  return pre;
+}
+
+function contextTextNode(text) {
+  const node = document.createElement("p");
+  node.className = "context-preview-text";
+  node.textContent = text;
+  return node;
+}
+
+function contextScalarText(key, value) {
+  if (value === null || value === undefined || value === "") return "–";
+  if (typeof value === "boolean") return value ? "Ja" : "Nein";
+  if (typeof value === "number") return value.toLocaleString("de-DE", { maximumFractionDigits: 2 });
+  if (typeof value === "string" && key.endsWith("_at")) return formatTime(value);
+  return String(value);
+}
+
+const CONTEXT_PREVIEW_MAX_DEPTH = 3;
+const CONTEXT_PREVIEW_MAX_ITEMS = 25;
+
+function contextListNode(items, depth) {
+  const list = document.createElement("ul");
+  list.className = "context-preview-list";
+  for (const item of items.slice(0, CONTEXT_PREVIEW_MAX_ITEMS)) {
+    const entry = document.createElement("li");
+    entry.append(contextValueNode(item, "", depth + 1));
+    list.append(entry);
+  }
+  if (items.length > CONTEXT_PREVIEW_MAX_ITEMS) {
+    const more = document.createElement("li");
+    more.textContent = `… ${(items.length - CONTEXT_PREVIEW_MAX_ITEMS).toLocaleString("de-DE")} weitere Einträge`;
+    list.append(more);
+  }
+  return list;
+}
+
+function contextObjectNode(object, depth) {
+  const list = document.createElement("dl");
+  list.className = "context-preview-values";
+  for (const [key, item] of Object.entries(object)) {
+    if (CONTEXT_HIDDEN_KEYS.has(key)) continue;
+    const term = document.createElement("dt");
+    term.textContent = CONTEXT_KEY_LABELS[key] || key.replaceAll("_", " ");
+    const definition = document.createElement("dd");
+    definition.append(contextValueNode(item, key, depth + 1));
+    list.append(term, definition);
+  }
+  return list;
+}
+
+function contextValueNode(value, key = "", depth = 0) {
+  if (value !== null && typeof value === "object") {
+    const empty = Array.isArray(value) ? value.length === 0 : Object.keys(value).length === 0;
+    if (empty) return contextTextNode("Keine Angaben");
+    // Deeply nested provider data stays compact instead of building a huge DOM tree.
+    if (depth >= CONTEXT_PREVIEW_MAX_DEPTH) return contextPreNode(JSON.stringify(value, null, 2));
+    return Array.isArray(value) ? contextListNode(value, depth) : contextObjectNode(value, depth);
+  }
+  if (key === "content" && typeof value === "string") return contextPreNode(value);
+  return contextTextNode(contextScalarText(key, value));
 }
 
 function renderContextPreview(preview) {
@@ -1543,8 +1924,8 @@ function renderContextPreview(preview) {
     ["Garmin-Kontext", preview.structured_athlete_context?.garmin],
     ["Gesprächskontinuität", preview.conversation],
     ["Intervals.icu-Snapshot", preview.latest_intervals_snapshot],
-    ["Letzte Chat-Eingabe (input)", preview.chat_prompt],
-    ["Kontext (instructions)", preview.context_text],
+    ["Letzte Chat-Eingabe", preview.chat_prompt],
+    ["Coach-Kontext (vollständiger Text)", preview.context_text],
   ];
   sections.forEach(([title, value], index) => {
     if (value == null) return;
@@ -1552,9 +1933,10 @@ function renderContextPreview(preview) {
     if (index < 4) details.open = true;
     const summary = document.createElement("summary");
     summary.textContent = title;
-    const pre = document.createElement("pre");
-    pre.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-    details.append(summary, pre);
+    const body = document.createElement("div");
+    body.className = "context-preview-body";
+    body.append(typeof value === "string" ? contextPreNode(value) : contextValueNode(value));
+    details.append(summary, body);
     content.append(details);
   });
   status.classList.remove("error");
@@ -1667,21 +2049,57 @@ async function refreshChatHistoryState() {
 }
 
 
+function chatAttachmentKind(name) {
+  if (/\.gpx$/i.test(name)) return "GPX";
+  if (/\.fit$/i.test(name)) return "FIT";
+  return "Bild";
+}
+
+function chatAttachmentSize(item) {
+  const data = String(item.data || "");
+  let padding = 0;
+  while (padding < 2 && data[data.length - 1 - padding] === "=") padding += 1;
+  const bytes = Math.max(0, Math.floor(data.length * 3 / 4) - padding);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 }).format(Math.round(bytes / 1024))} KB`;
+  return `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 }).format(bytes / (1024 * 1024))} MB`;
+}
+
 function renderChatAttachments() {
   const list = $("#chatAttachments");
   if (!list) return;
   list.replaceChildren();
   for (const [index, item] of (state.chatAttachments || []).entries()) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = `${item.name} ×`;
-    button.setAttribute("aria-label", `${item.name} entfernen`);
-    button.addEventListener("click", () => {
+    const chip = document.createElement("div");
+    chip.className = "chat-attachment";
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("class", "chat-attachment-icon");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("focusable", "false");
+    const iconPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    iconPath.setAttribute("d", "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5");
+    icon.append(iconPath);
+    const name = document.createElement("span");
+    name.className = "chat-attachment-name";
+    name.textContent = item.name;
+    name.title = item.name;
+    const meta = document.createElement("span");
+    meta.className = "chat-attachment-meta";
+    meta.textContent = `${chatAttachmentKind(item.name)} · ${chatAttachmentSize(item)}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "chat-attachment-remove";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Anhang ${item.name} entfernen`);
+    remove.title = `Anhang ${item.name} entfernen`;
+    remove.addEventListener("click", () => {
       state.chatAttachments.splice(index, 1);
       renderChatAttachments();
       updateChatControls();
     });
-    list.append(button);
+    chip.append(icon, name, meta, remove);
+    list.append(chip);
   }
   list.hidden = !list.childElementCount;
   updateChatComposerVisibility();
@@ -1690,7 +2108,7 @@ function renderChatAttachments() {
 
 function validateChatAttachmentFiles(files) {
   const valid = file => file.size && /\.(gpx|fit|png|jpe?g|webp)$/i.test(file.name) && (/\.(gpx|fit)$/i.test(file.name) ? file.size <= 5000000 : file.size <= 15000000);
-  if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !valid(file))) throw new Error("Bis zu 4 Dateien auswählen. GPX/FIT dürfen höchstens 5 MB, Bilder höchstens 15 MB groß sein.");
+  if ((state.chatAttachments || []).length + files.length > MAX_CHAT_ATTACHMENTS || files.some(file => !valid(file))) throw new Error(`Bis zu ${MAX_CHAT_ATTACHMENTS} Dateien auswählen. GPX/FIT dürfen höchstens 5 MB, Bilder höchstens 15 MB groß sein.`);
 }
 async function fileBase64(file) {
   const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
@@ -1708,7 +2126,36 @@ async function prepareChatAttachment(file) {
   }
 }
 
+function publishComposerHeight() {
+  const composer = $("#chatForm");
+  if (!composer || typeof ResizeObserver === "undefined") return;
+  const publish = () => document.documentElement.style.setProperty("--composer-height", `${composer.offsetHeight}px`);
+  new ResizeObserver(publish).observe(composer);
+  publish();
+}
+
+// Decides what Enter does in the chat draft. Touch-first devices keep Enter for
+// line breaks (the send button sends); desktop Enter sends and Shift+Enter breaks
+// the line. IME composition never sends.
+function chatEnterAction({ key, shiftKey = false, modifierKey = false, isComposing = false, touchFirst = false } = {}) {
+  if (key !== "Enter" || isComposing) return "none";
+  // Ctrl/Cmd+Enter keeps sending available to physical keyboards on touch devices.
+  if (touchFirst) return modifierKey && !shiftKey ? "send" : "newline";
+  return shiftKey ? "newline" : "send";
+}
+
+// Grows the draft up to the CSS max-height; the scrollbar appears only once the
+// content no longer fits.
+function resizeChatInput(input) {
+  input.style.overflowY = "hidden";
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight}px`;
+  if (input.scrollHeight > input.clientHeight + 1) input.style.overflowY = "auto";
+}
+
 function setupCoachEvents() {
+  publishComposerHeight();
+  $("#messageInput").setAttribute("enterkeyhint", hasTouchFirstInput() ? "enter" : "send");
   $("#attachmentButton").addEventListener("click", () => $("#attachmentInput").click());
 
   $("#attachmentInput").addEventListener("change", async (event) => {
@@ -1721,7 +2168,7 @@ function setupCoachEvents() {
       const attachments = await Promise.all(files.map(prepareChatAttachment));
       if (generation !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
       state.chatAttachments = [...(state.chatAttachments || []), ...attachments]; state.chatDraftDirty = true;
-      renderChatAttachments(); jumpToChatComposer();
+      renderChatAttachments(); jumpToLatestMessages();
     } catch (error) { toast(error.message, true); }
     finally { state.chatAttachmentsLoading = false; updateChatControls(); }
   });
@@ -1742,7 +2189,7 @@ function setupCoachEvents() {
   });
   $("#voiceButton").addEventListener("click", toggleVoiceInput);
   $("#chatJumpToComposer").addEventListener("click", () => {
-    jumpToChatComposer();
+    jumpToLatestMessages();
   });
 
   $("#coachAdaptivePlanningButton").addEventListener("click", () => askCoach("Prüfe meine nächsten geplanten Einheiten und schlage sinnvolle Anpassungen vor."));
@@ -1754,25 +2201,30 @@ function setupCoachEvents() {
     void loadContextPreview();
   });
   $("#messageInput").addEventListener("input", (event) => {
+    // Capture the scroll position before the draft grows; only a reader already at the latest message follows the growth.
     const keepLatestVisible = $("#chatPanel")?.classList.contains("active") && chatIsNearBottom();
     state.chatDraftDirty = Boolean(event.target.value.trim());
-    event.target.style.height = "auto";
-    event.target.style.height = `${Math.min(event.target.scrollHeight, 150)}px`;
+    resizeChatInput(event.target);
     updateChatControls();
-    if (keepLatestVisible) {
-      requestAnimationFrame(() => {
-        globalThis.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
-        updateChatComposerVisibility();
-      });
-    }
+    if (keepLatestVisible) scrollChatToLatest();
   });
   $("#messageInput").addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-      event.preventDefault();
-      $("#chatForm").requestSubmit();
-    }
+    const action = chatEnterAction({
+      key: event.key,
+      shiftKey: event.shiftKey,
+      modifierKey: event.ctrlKey || event.metaKey,
+      isComposing: event.isComposing || event.keyCode === 229,
+      touchFirst: hasTouchFirstInput(),
+    });
+    if (action !== "send") return;
+    event.preventDefault();
+    $("#chatForm").requestSubmit();
   });
 
   globalThis.addEventListener("scroll", handleWindowScroll, { passive: true });
-  $("#messages").addEventListener("scroll", updateChatComposerVisibility, { passive: true });
+  globalThis.addEventListener("wheel", handleChatWheel, { passive: true });
+  globalThis.addEventListener("touchstart", handleChatTouchStart, { passive: true });
+  globalThis.addEventListener("touchmove", handleChatTouchMove, { passive: true });
+  globalThis.addEventListener("keydown", handleChatScrollKey);
+  $("#messages").addEventListener("scroll", handleChatMessagesScroll, { passive: true });
 }

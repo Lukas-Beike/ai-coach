@@ -86,7 +86,9 @@ class ActivityDetailRefreshService:
                 reason="activity_details_not_found",
             )
         if not self._configured:
-            raise AppError(503, "Intervals.icu ist nicht konfiguriert.")
+            raise AppError(
+                503, "Intervals.icu ist nicht konfiguriert.", reason="not_configured"
+            )
         path = f"/activity/{quote(activity_id, safe='')}"
         detail = self._api_client.get(path, {"intervals": "true"})
         if not isinstance(detail, dict) or str(detail.get("id")) != activity_id:

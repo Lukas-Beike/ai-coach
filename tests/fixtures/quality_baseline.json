@@ -1,27 +1,11 @@
 {
   "schema": 1,
-  "base": "3c546a1aedfa9688271f04973660177fb8c08343",
+  "base": "9f49367526ea3917cc32bc4fdc51e87abf8642ff",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
   },
   "diagnostics": [
-    {
-      "tool": "ruff",
-      "path": "backend/nutrition/models.py",
-      "line": 175,
-      "column": 32,
-      "code": "FURB162",
-      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/nutrition/models.py",
-      "line": 185,
-      "column": 36,
-      "code": "FURB162",
-      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
-    },
     {
       "tool": "ruff",
       "path": "backend/sync/garmin.py",
@@ -93,6 +77,14 @@
       "column": 47,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "e2e/test_fixture_standard_data.py",
+      "line": 3,
+      "column": 1,
+      "code": "I001",
+      "message_sha256": "2ae03c24054492f44ee1ee930d27576b6f82dcbcd8a35fc5af09314810893d40"
     },
     {
       "tool": "ruff",
@@ -193,7 +185,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 108,
+      "line": 109,
       "column": 33,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -297,7 +289,7 @@
     {
       "tool": "ruff",
       "path": "e2e/fixture_runtime.py",
-      "line": 1073,
+      "line": 1217,
       "column": 40,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -305,7 +297,7 @@
     {
       "tool": "ruff",
       "path": "e2e/fixture_runtime.py",
-      "line": 1084,
+      "line": 1228,
       "column": 40,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -321,7 +313,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 151,
+      "line": 152,
       "column": 41,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -337,16 +329,8 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 69,
+      "line": 70,
       "column": 41,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "e2e/fixture_runtime.py",
-      "line": 1550,
-      "column": 43,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
     },
@@ -441,7 +425,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 46,
+      "line": 47,
       "column": 45,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -449,7 +433,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 75,
+      "line": 76,
       "column": 45,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -457,7 +441,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 92,
+      "line": 93,
       "column": 45,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -488,16 +472,16 @@
     },
     {
       "tool": "ruff",
-      "path": "e2e/fixture_runtime.py",
-      "line": 1578,
+      "path": "tests/test_personal_recovery.py",
+      "line": 164,
       "column": 49,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
     },
     {
       "tool": "ruff",
-      "path": "tests/test_personal_recovery.py",
-      "line": 164,
+      "path": "e2e/fixture_runtime.py",
+      "line": 1865,
       "column": 49,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -513,7 +497,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 86,
+      "line": 87,
       "column": 51,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -529,7 +513,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 34,
+      "line": 35,
       "column": 52,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -657,7 +641,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 39,
+      "line": 40,
       "column": 60,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -729,7 +713,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 130,
+      "line": 131,
       "column": 65,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -920,22 +904,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/http_api/handler.py",
-      "line": 225,
-      "column": 12,
-      "code": "arg-type",
-      "message_sha256": "f685cb5d563f596260359c7ec60fc7f872d16dfe84fb079fef2741fa26ae038d"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/http_api/handler.py",
-      "line": 234,
-      "column": 12,
-      "code": "arg-type",
-      "message_sha256": "6195198e495bd02c70500de218de463b7423c94c7b7371b88aae6a19d1792592"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_planning_change_service.py",
       "line": 240,
       "column": 12,
@@ -952,6 +920,14 @@
     },
     {
       "tool": "mypy",
+      "path": "backend/http_api/handler.py",
+      "line": 244,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "f685cb5d563f596260359c7ec60fc7f872d16dfe84fb079fef2741fa26ae038d"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_sync_worker.py",
       "line": 246,
       "column": 12,
@@ -961,7 +937,15 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 246,
+      "line": 253,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "6195198e495bd02c70500de218de463b7423c94c7b7371b88aae6a19d1792592"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/handler.py",
+      "line": 265,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "e96d723fc3eefce71127726ff03053febc050202cfdf394836d946e9e10b7309"
@@ -969,7 +953,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 287,
+      "line": 306,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "454abbaab0cc1828be65fbd1b78572b7e7e5ed8bc7cca575ab77dc69909bdeeb"
@@ -1192,6 +1176,14 @@
     },
     {
       "tool": "mypy",
+      "path": "backend/http_api/sync_commands.py",
+      "line": 100,
+      "column": 16,
+      "code": "arg-type",
+      "message_sha256": "b56eabb6d44884efdb0061ff020af3a73cfab3aeabdd645b01b9e03a91c6cf87"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/architecture_analysis.py",
       "line": 124,
       "column": 16,
@@ -1233,18 +1225,10 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/bootstrap_calendar.py",
-      "line": 83,
+      "line": 85,
       "column": 16,
       "code": "arg-type",
       "message_sha256": "1f0507db8f39955b7380d5ccd6ca09cdc2a0398a644e3e54cd387a5169d01c1a"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/http_api/sync_commands.py",
-      "line": 89,
-      "column": 16,
-      "code": "arg-type",
-      "message_sha256": "b56eabb6d44884efdb0061ff020af3a73cfab3aeabdd645b01b9e03a91c6cf87"
     },
     {
       "tool": "mypy",
@@ -1297,7 +1281,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 55,
+      "line": 58,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
@@ -1305,7 +1289,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 55,
+      "line": 58,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
@@ -1313,7 +1297,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 55,
+      "line": 58,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
@@ -1393,7 +1377,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 236,
+      "line": 255,
       "column": 26,
       "code": "arg-type",
       "message_sha256": "202e95d88c01d1a85fa2f434c5a0096706c95cfdc41dcab4a22472c904bb44b0"
@@ -1661,14 +1645,6 @@
       "column": 41,
       "code": "arg-type",
       "message_sha256": "457c40ecf7d19bbe1d602a357c1208738bebc65456b705296ef3d4e104a497bd"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 71,
-      "column": 41,
-      "code": "arg-type",
-      "message_sha256": "966ea7112a6233541bfd7ce485fee0d8b20fe75982bc8b21ac20f36adf0d644c"
     },
     {
       "tool": "mypy",
@@ -2393,7 +2369,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 49,
+      "line": 55,
       "column": 46,
       "code": "assignment",
       "message_sha256": "63b223df9d3230073bbf9e36a3d550827f18d71602d0883452c44841a538f293"
@@ -2401,7 +2377,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 270,
+      "line": 358,
       "column": 47,
       "code": "assignment",
       "message_sha256": "743bb04ffff3138838807d44ce17c43f5e5037ce50d3da58f08cd0e465dc8698"
@@ -2480,38 +2456,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 42,
-      "column": 16,
-      "code": "attr-defined",
-      "message_sha256": "f622591e2284b138b9ba2b223afcc1cef97c2ec78ad49ac8fba396e89b713a30"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 43,
-      "column": 16,
-      "code": "attr-defined",
-      "message_sha256": "f622591e2284b138b9ba2b223afcc1cef97c2ec78ad49ac8fba396e89b713a30"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 44,
-      "column": 16,
-      "code": "attr-defined",
-      "message_sha256": "2feef7cab6d05912db10ca627424a13f8ad67eac255768de8ce6d8c331173ffd"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 45,
-      "column": 16,
-      "code": "attr-defined",
-      "message_sha256": "125b93d5dd07a8ffe046f2cbcfebbe292937602a2d01b2ed711cbaac5da61c7c"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_coach_structured_tool_round.py",
       "line": 249,
       "column": 20,
@@ -2549,14 +2493,6 @@
       "column": 25,
       "code": "attr-defined",
       "message_sha256": "6894ca72a82864efd4dfd27c3771f0a621eec6084e87ce8d26dc3d7e29294744"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 67,
-      "column": 25,
-      "code": "attr-defined",
-      "message_sha256": "f099f627502ff19992e31dbb46ffbd99a2a93cb12680f88cbc2ed230f4ea12bb"
     },
     {
       "tool": "mypy",
@@ -2640,30 +2576,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 43,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "8c301cd9fb41b2948ce5a8284c1853f12da6959a5cf20892834c523f220ab7c6"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 44,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 45,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "0fd9c21c4052270bbe58e699e73585dfb58857469a000a8058fb25bdd6b662c0"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_coach_tool_failures.py",
       "line": 45,
       "column": 8,
@@ -2672,147 +2584,11 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 46,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "ef80729f7310b16af09639f74441883507a504188243d57e84dbfab30c99c9a7"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 50,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "4dc75def4aded67d415972778968fe069d1789ab4de37c124501f903cd77e134"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 51,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "891ce020204abd0c04f7c21f44ee66e3010d9abe0ad8bc49ab20d4e6d7a40fda"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 52,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "172427f12d5c1839aae8337fbe84d9727f6a576f13b81210f30848b1ce255f08"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 52,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "94ba754ee4786d8de5b70d8bcd1dbdb1e7c0d8b7a5cf5e64a2eeb2f375afaf54"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 53,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 54,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "26c8cb1cfecc0ba25827eff39867f9bc467d4c4b003dd507ec057c8c085df2ae"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 55,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "ef80729f7310b16af09639f74441883507a504188243d57e84dbfab30c99c9a7"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_planning_change_service.py",
       "line": 558,
       "column": 8,
       "code": "attr-defined",
       "message_sha256": "682546f5082752e1c00e4680e57dea0e350e0f823edfa0852ecf1b4ec657f83e"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 56,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "9ccb93f4219c62d95410fcd6a42c76b54b4d53864d0a82556f382db278dc037d"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 57,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "036e432d6a8ea2fb646257cc47cefeb01c5cbc7de2f1df3512b9fac7ba6ea0cc"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 58,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 59,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 60,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "e758c46a70630561e00465cd8d478d0977f580bdf1092bb216300a0c2d3ad96f"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 61,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "3f41b1984e52acf134388ec95039962ba46f74dc93c006022c6a10cde6d5ca73"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 62,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "ef80729f7310b16af09639f74441883507a504188243d57e84dbfab30c99c9a7"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 66,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "011b0c081f88b5bde99586f77a5fd5615099d2e63e56ea04ee028cf34e0a65f4"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_privacy_delete_confirmation.py",
-      "line": 68,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "90269da446c5c8b234b977f2419b0e385b423410774d7a2f7608b0db2c77812e"
     },
     {
       "tool": "mypy",
@@ -3441,7 +3217,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 1602,
+      "line": 1889,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3449,7 +3225,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 270,
+      "line": 358,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3457,7 +3233,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 41,
+      "line": 47,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3465,7 +3241,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 49,
+      "line": 55,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3473,7 +3249,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 53,
+      "line": 59,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3545,7 +3321,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 1512,
+      "line": 1807,
       "column": 21,
       "code": "misc",
       "message_sha256": "0ba1e959a9929a580b50012a0a160f4a70e2714e7183d6bc45b46b3eb2904c2c"
@@ -4033,7 +3809,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 272,
+      "line": 360,
       "column": 0,
       "code": "var-annotated",
       "message_sha256": "0bb96ea92df5309b23828a6df8207d75bdaaa062ec5c639bae3e1a91216449c2"

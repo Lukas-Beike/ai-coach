@@ -137,23 +137,35 @@ test("provider-backed API calls outlast their server deadlines", async ({ page }
   await openAuthenticatedApp(page);
   const timeouts = await page.evaluate(async () => {
     const delays = [];
+    let lastDelay = null;
+    let expectedPath = null;
     const originalSetTimeout = globalThis.setTimeout;
     const originalFetch = globalThis.fetch;
+    // The abort timer is armed synchronously before fetch, so pairing them ignores background polls.
     globalThis.setTimeout = (callback, delay, ...args) => {
-      delays.push(delay);
+      lastDelay = delay;
       return originalSetTimeout(callback, delay, ...args);
     };
-    globalThis.fetch = async (url) => new Response(JSON.stringify(
-      String(url).includes("/api/transcribe")
-        ? { transcript: "fixture transcript" }
-        : { status: "completed" },
-    ), { status: 200, headers: { "Content-Type": "application/json" } });
+    globalThis.fetch = async (url) => {
+      if (String(url) === expectedPath) {
+        delays.push(lastDelay);
+        expectedPath = null;
+      }
+      return new Response(JSON.stringify(
+        String(url).includes("/api/transcribe")
+          ? { transcript: "fixture transcript" }
+          : { status: "completed" },
+      ), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
     try {
+      expectedPath = "/api/health";
       await AppApi.request("/api/health", { method: "GET" });
+      expectedPath = "/api/coach/actions/execute";
       await AppApi.request("/api/coach/actions/execute", {
         method: "POST",
         body: "{}",
       });
+      expectedPath = "/api/transcribe";
       await AppApi.audio(
         "/api/transcribe",
         new Blob(["fixture audio"], { type: "audio/webm" }),
@@ -643,7 +655,8 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await expect(page.locator("#messages")).toHaveAttribute("aria-busy", "true");
     if (!await input.isVisible()) {
       await page.locator("#chatJumpToComposer").click();
-      await expect(input).toBeFocused();
+      if (touchProject) await expect(input).not.toBeFocused();
+      else await expect(input).toBeFocused();
     }
     await expect(input).toBeVisible();
     await page.evaluate(() => {
@@ -655,7 +668,9 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     });
     expect(await page.evaluate(() => window.__chatTest.draftStayedEnabled)).toBe(true);
     await input.fill("Entwurf beim Laden behalten.");
-    await input.press("Enter");
+    // Touch Enter inserts a line break, so submit the form directly there.
+    if (touchProject) await page.locator("#chatForm").evaluate((form) => form.requestSubmit());
+    else await input.press("Enter");
     await expect(input).toHaveValue("Entwurf beim Laden behalten.");
     await page.evaluate(() => window.__chatTest.restoreMessages());
     await input.fill("");
@@ -754,7 +769,8 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     const jumpBounds = await page.locator("#chatJumpToComposer").boundingBox();
     expect(jumpBounds.y + jumpBounds.height).toBeLessThanOrEqual((await page.viewportSize()).height);
     await page.locator("#chatJumpToComposer").click();
-    await expect(input).toBeFocused();
+    if (touchProject) await expect(input).not.toBeFocused();
+    else await expect(input).toBeFocused();
     await expect(page.locator("#chatForm")).toBeVisible();
     await expect(input).toHaveValue("Dieser Entwurf bleibt beim Tabwechsel erhalten.");
 

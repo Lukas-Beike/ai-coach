@@ -5,7 +5,8 @@ from __future__ import annotations
 import unittest
 from datetime import date
 from threading import Lock
-from unittest.mock import MagicMock, Mock, call, patch
+from typing import Any
+from unittest.mock import MagicMock, Mock, patch
 
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 
@@ -21,8 +22,8 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         planned = [{"id": "planned-1", "start_date_local": "2026-01-02T07:00:00"}]
         competitions = [{"id": "competition-1"}]
         external_1000 = [{"id": f"external-{index}"} for index in range(1000)]
-        external_50 = [{"id": f"daily-{index}"} for index in range(50)]
-        services = {
+        external_window = [{"id": f"daily-{index}"} for index in range(60)]
+        services: dict[str, Any] = {
             "sync": Mock(),
             "planned": Mock(),
             "feedback": Mock(),
@@ -51,7 +52,8 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         services["manager_factory"] = Mock(return_value=services["manager"])
         services["key_values"].get.return_value = "{}"
         services["plans"].list.return_value = []
-        services["external"].list_events.side_effect = [external_1000, external_50]
+        services["external"].list_events.side_effect = [external_1000]
+        services["external"].list_events_in_window.return_value = external_window
         services["external"].state.return_value = {"events": external_1000[:300]}
         services["external_sync"].running.return_value = False
         services["daily"].build.return_value = []
@@ -93,7 +95,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             planned,
             competitions,
             external_1000,
-            external_50,
+            external_window,
         )
 
     def test_local_read_keeps_bounds_calendar_scope_and_skips_weather_refresh(self):
@@ -105,7 +107,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             planned,
             competitions,
             external_1000,
-            external_50,
+            external_window,
         ) = self.make_service()
         with patch(
             "backend.http_api.public_plan.calendar_read_model.project_planning_calendar",
@@ -123,11 +125,11 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         services["followup"].check.assert_not_called()
         services["plans"].list.assert_called_once_with(limit=30)
         services["checkins"].list.assert_called_once_with(365)
-        services["external"].list_events.assert_has_calls(
-            [
-                call(1000, training_relevant_only=True),
-                call(50, training_relevant_only=True),
-            ]
+        services["external"].list_events.assert_called_once_with(
+            1000, training_relevant_only=True
+        )
+        services["external"].list_events_in_window.assert_called_once_with(
+            35, training_relevant_only=True
         )
         projection.assert_called_once()
         projected = projection.call_args.args
@@ -139,7 +141,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             projection.call_args.kwargs["provider_window"],
             snapshot["provider_sync"]["calendar_window"],
         )
-        self.assertEqual(services["daily"].build.call_args.args[-1], external_50)
+        self.assertEqual(services["daily"].build.call_args.args[-1], external_window)
         self.assertEqual(state["external_calendar"]["events"], external_1000[:300])
 
     def test_weather_refresh_followup_only_runs_when_weather_reports_refreshed(self):

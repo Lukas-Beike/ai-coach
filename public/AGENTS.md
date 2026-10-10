@@ -9,7 +9,9 @@
 - Keep Markdown rendering safe. Escape untrusted text before inserting HTML and
   do not treat provider records, calendar text, or coach content as executable
   instructions or markup without sanitisation.
-- Preserve chat keyboard behavior: Enter sends; Shift+Enter inserts a newline.
+- Preserve chat keyboard behavior: on desktop, Enter sends and Shift+Enter
+  inserts a newline. On touch-first devices, Enter inserts a newline; the send
+  button or Ctrl/Cmd+Enter sends.
   Keep voice transcripts editable before they are sent.
 - Workouts are stored directly in the local training library; the athlete can
   explicitly synchronize them to Intervals.icu later. Adaptive replan previews

@@ -15,7 +15,7 @@ test("@responsive nutrition diary and saved meals remain read-only and preserve 
   const send = async (text) => {
     await page.locator('a[href="#coach"]:visible').first().click();
     await page.locator("#messageInput").fill(text);
-    await page.locator("#messageInput").press("Enter");
+    await page.locator("#sendButton").click();
     await expect.poll(() => page.evaluate(() => !state.busy && !state.chatServerOperationId && !state.chatRequest)).toBe(true);
   };
   await send("E2E nutrition: confirm meal");
@@ -220,7 +220,7 @@ test("@responsive a small undecodable image falls back to attachment and allows 
   const validPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
-  await page.evaluate(() => jumpToChatComposer());
+  await page.evaluate(() => jumpToLatestMessages());
   await page.locator("#attachmentInput").setInputFiles({ name: "broken.png", mimeType: "image/png", buffer: Buffer.from("not an image") });
   await expect(page.locator("#chatAttachments")).toContainText("broken.png");
   await expect(page.locator("#sendButton")).toBeEnabled();
@@ -234,7 +234,7 @@ test("@responsive composite meal shows immutable ingredient snapshots and proven
   const initialEntries = await page.evaluate(async () => (await api("/api/nutrition/day")).entry_count);
   await page.goto("/#coach");
   await page.locator("#messageInput").fill("E2E nutrition: mixed meal");
-  await page.locator("#messageInput").press("Enter");
+  await page.locator("#sendButton").click();
   await expect.poll(() => page.evaluate(() => !state.busy && !state.chatServerOperationId && !state.chatRequest)).toBe(true);
   await expect.poll(() => page.evaluate(async () => (await api("/api/nutrition/day")).entry_count)).toBe(initialEntries + 1);
   await page.goto("/#nutrition/diary");

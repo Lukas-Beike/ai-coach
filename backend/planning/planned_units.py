@@ -102,7 +102,7 @@ def normalize_planned_unit(
     ):
         raise AppError(
             400,
-            "Eine geplante Einheit benoetigt ihre Sportart.",
+            "Eine geplante Einheit benötigt ihre Sportart.",
             reason="invalid_workout",
         )
     normalized = planning_library.normalize_library_workout(
