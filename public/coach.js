@@ -753,30 +753,33 @@ function updateChatControls() {
     // Drafting stays available while the Coach loads or works; readiness only
     // gates the actions that submit the draft.
     input.disabled = false;
-    if (!controls.aiConfigured) {
-      input.placeholder = "OPENAI_API_KEY in den Server-Einstellungen konfigurieren…";
-    } else if (controls.chatReady) {
-      input.placeholder = state.busy ? "Folgefrage – wird danach gesendet" : "Frage deinen Coach…";
-    } else {
-      input.placeholder = "Coach-Chat wird geladen…";
-    }
+    input.placeholder = chatInputPlaceholder(controls);
   }
   updateChatSendButton($("#sendButton"), controls);
   updateChatSteerButton($("#steerButton"), controls);
   updateChatCancelButton($("#cancelChatButton"), controls);
-  const progress = $("#chatOperationStatus");
-  if (progress) {
-    const operationActive = Boolean(state.chatRequest || state.chatServerOperationId || state.chatQueue.length);
-    if (state.busy && operationActive && !controls.reconciling) {
-      announceChatStatus(coachWorkingLabel());
-      state.chatStatusWorking = true;
-    } else if (!state.busy && state.chatStatusWorking) {
-      // Keep the completion announcement; clear only a stale working status.
-      state.chatStatusWorking = false;
-      if (progress.textContent !== "Antwort fertig.") progress.textContent = "";
-    }
-  }
+  syncChatWorkingStatus(controls);
   updateChatQueueStatus();
+}
+
+function chatInputPlaceholder(controls) {
+  if (!controls.aiConfigured) return "OPENAI_API_KEY in den Server-Einstellungen konfigurieren…";
+  if (!controls.chatReady) return "Coach-Chat wird geladen…";
+  return state.busy ? "Folgefrage – wird danach gesendet" : "Frage deinen Coach…";
+}
+
+function syncChatWorkingStatus(controls) {
+  const progress = $("#chatOperationStatus");
+  if (!progress) return;
+  const operationActive = Boolean(state.chatRequest || state.chatServerOperationId || state.chatQueue.length);
+  if (state.busy && operationActive && !controls.reconciling) {
+    announceChatStatus(coachWorkingLabel());
+    state.chatStatusWorking = true;
+  } else if (!state.busy && state.chatStatusWorking) {
+    // Keep the completion announcement; clear only a stale working status.
+    state.chatStatusWorking = false;
+    if (progress.textContent !== "Antwort fertig.") progress.textContent = "";
+  }
 }
 
 function announceChatStatus(message) {
