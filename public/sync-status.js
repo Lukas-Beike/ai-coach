@@ -232,7 +232,7 @@ function renderConnectivityStatus(online = navigator.onLine) {
   const notice = $("#connectivityNotice");
   if (!notice) return;
   notice.hidden = online;
-  notice.textContent = online ? "" : "Offline: Nur bereits geladene Daten sind verfügbar. Synchronisierung und Speichern warten auf die Verbindung.";
+  notice.textContent = online ? "" : "Offline – Änderungen können gerade nicht gespeichert werden. Bereits geladene Daten bleiben sichtbar.";
 }
 
 
@@ -311,6 +311,11 @@ function renderProviderAttention(data) {
     detail.textContent = "";
     return;
   }
+  // Only hard failures interrupt assistive technology; stale or partial data is a polite status.
+  const hasHardError = providers.some((entry) => entry.state === "error"
+    || ["auth_required", "invalid_configuration"].includes(entry.error_code));
+  banner.setAttribute("role", hasHardError ? "alert" : "status");
+  banner.setAttribute("aria-live", hasHardError ? "assertive" : "polite");
   const labels = [...new Set(providers.map((entry) => entry.label || entry.provider || "Eine Anbindung"))];
   detail.textContent = labels.length === 1
     ? `${labels[0]} benötigt manuelles Eingreifen.`

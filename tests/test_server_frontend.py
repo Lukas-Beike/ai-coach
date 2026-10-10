@@ -830,9 +830,7 @@ class ServerFrontendTests(ServerTestCase):
         )
         self.assertIn("notes.prepend(calendarBadgeRow(dayBadges))", plan_views)
         self.assertIn("plannedConflictBadgeSpecs(entry.conflicts)", plan_views)
-        self.assertIn(
-            "state.data?.competitions, state.loadedAreas", plan_views
-        )
+        self.assertIn("state.data?.competitions, state.loadedAreas", plan_views)
         self.assertNotIn("innerHTML", plan_views)
         self.assertIn(
             ".planned-badge.is-conflict { border-color: var(--danger-border-strong); color: var(--danger-ink);",
