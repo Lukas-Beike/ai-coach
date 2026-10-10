@@ -52,3 +52,28 @@ test("a table inside a code fence is rendered as code, not as a table", () => {
   assert.equal(html, "<pre><code>| a | b |\n| --- | --- |</code></pre>");
   assert.ok(!html.includes("<table"));
 });
+
+test("a table without outer pipes renders header and body cells", () => {
+  const html = markdownToHtml("Name | Wert\n--- | :---:\nA | 1\nB | 2");
+  assert.match(html, /^<div class="markdown-table"/);
+  assert.ok(html.includes("<th scope=\"col\">Name</th><th scope=\"col\">Wert</th>"));
+  assert.ok(html.includes("<tr><td>A</td><td>1</td></tr>"));
+  assert.ok(html.includes("<tr><td>B</td><td>2</td></tr>"));
+});
+
+test("an escaped pipe inside a code span stays inside one cell", () => {
+  const html = markdownToHtml("| Code | Wert |\n| --- | --- |\n| `a\\|b` | 2 |");
+  assert.ok(html.includes("<tr><td><code>a|b</code></td><td>2</td></tr>"));
+  assert.equal(html.match(/<td>/g).length, 2);
+});
+
+test("an escaped pipe outside a code span is a literal character in its cell", () => {
+  const html = markdownToHtml("| Text |\n| --- |\n| a \\| b |");
+  assert.ok(html.includes("<tr><td>a | b</td></tr>"));
+});
+
+test("a pipe line without a delimiter row stays a paragraph when it has no outer pipes", () => {
+  const html = markdownToHtml("Name | Wert\nA | 1");
+  assert.equal(html, "<p>Name | Wert<br>A | 1</p>");
+  assert.ok(!html.includes("<table"));
+});

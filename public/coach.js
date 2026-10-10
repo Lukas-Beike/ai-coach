@@ -766,7 +766,8 @@ function updateChatControls() {
   updateChatCancelButton($("#cancelChatButton"), controls);
   const progress = $("#chatOperationStatus");
   if (progress) {
-    if (state.busy && !controls.reconciling) {
+    const operationActive = Boolean(state.chatRequest || state.chatServerOperationId || state.chatQueue.length);
+    if (state.busy && operationActive && !controls.reconciling) {
       announceChatStatus(coachWorkingLabel());
       state.chatStatusWorking = true;
     } else if (!state.busy && state.chatStatusWorking) {
