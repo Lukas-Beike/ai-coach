@@ -137,23 +137,35 @@ test("provider-backed API calls outlast their server deadlines", async ({ page }
   await openAuthenticatedApp(page);
   const timeouts = await page.evaluate(async () => {
     const delays = [];
+    let lastDelay = null;
+    let expectedPath = null;
     const originalSetTimeout = globalThis.setTimeout;
     const originalFetch = globalThis.fetch;
+    // The abort timer is armed synchronously before fetch, so pairing them ignores background polls.
     globalThis.setTimeout = (callback, delay, ...args) => {
-      delays.push(delay);
+      lastDelay = delay;
       return originalSetTimeout(callback, delay, ...args);
     };
-    globalThis.fetch = async (url) => new Response(JSON.stringify(
-      String(url).includes("/api/transcribe")
-        ? { transcript: "fixture transcript" }
-        : { status: "completed" },
-    ), { status: 200, headers: { "Content-Type": "application/json" } });
+    globalThis.fetch = async (url) => {
+      if (String(url) === expectedPath) {
+        delays.push(lastDelay);
+        expectedPath = null;
+      }
+      return new Response(JSON.stringify(
+        String(url).includes("/api/transcribe")
+          ? { transcript: "fixture transcript" }
+          : { status: "completed" },
+      ), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
     try {
+      expectedPath = "/api/health";
       await AppApi.request("/api/health", { method: "GET" });
+      expectedPath = "/api/coach/actions/execute";
       await AppApi.request("/api/coach/actions/execute", {
         method: "POST",
         body: "{}",
       });
+      expectedPath = "/api/transcribe";
       await AppApi.audio(
         "/api/transcribe",
         new Blob(["fixture audio"], { type: "audio/webm" }),

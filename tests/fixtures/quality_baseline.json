@@ -921,18 +921,10 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 225,
+      "line": 236,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "f685cb5d563f596260359c7ec60fc7f872d16dfe84fb079fef2741fa26ae038d"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/http_api/handler.py",
-      "line": 234,
-      "column": 12,
-      "code": "arg-type",
-      "message_sha256": "6195198e495bd02c70500de218de463b7423c94c7b7371b88aae6a19d1792592"
     },
     {
       "tool": "mypy",
@@ -952,6 +944,14 @@
     },
     {
       "tool": "mypy",
+      "path": "backend/http_api/handler.py",
+      "line": 245,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "6195198e495bd02c70500de218de463b7423c94c7b7371b88aae6a19d1792592"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_sync_worker.py",
       "line": 246,
       "column": 12,
@@ -961,7 +961,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 246,
+      "line": 257,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "e96d723fc3eefce71127726ff03053febc050202cfdf394836d946e9e10b7309"
@@ -969,7 +969,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 287,
+      "line": 298,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "454abbaab0cc1828be65fbd1b78572b7e7e5ed8bc7cca575ab77dc69909bdeeb"
@@ -1297,7 +1297,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 55,
+      "line": 58,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
@@ -1305,7 +1305,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 55,
+      "line": 58,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
@@ -1313,7 +1313,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 55,
+      "line": 58,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
@@ -1393,7 +1393,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 236,
+      "line": 247,
       "column": 26,
       "code": "arg-type",
       "message_sha256": "202e95d88c01d1a85fa2f434c5a0096706c95cfdc41dcab4a22472c904bb44b0"

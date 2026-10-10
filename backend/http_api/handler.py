@@ -22,6 +22,7 @@ from backend.http_api.requests import (
     read_json as read_request_json,
 )
 from backend.http_api.static_assets import StaticAssetService
+from backend.observability import http_access_log_level
 from backend.runtime.socket_deadline import SocketDeadline
 
 
@@ -59,14 +60,23 @@ class RequestHandler(BaseHTTPRequestHandler):
     def auth_service(self) -> Any:
         return self.dependencies.session_auth_service()
 
+    def log_request(self, code: Any = "-", size: Any = "-") -> None:
+        self._access_log_status = code
+        super().log_request(code, size)
+
     def log_message(self, fmt: str, *args: Any) -> None:
-        self.dependencies.logger.info(
+        path = urlparse(self.path).path
+        level = http_access_log_level(
+            self.command, path, getattr(self, "_access_log_status", None)
+        )
+        self.dependencies.logger.log(
+            level,
             fmt % args,
             extra={
                 "event": "http_access",
                 "context": {
                     "method": self.command,
-                    "path": urlparse(self.path).path,
+                    "path": path,
                     "request_id": getattr(self, "request_id", None),
                 },
             },
@@ -87,6 +97,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def parse_request(self) -> bool:
+        self._access_log_status = None
         try:
             return super().parse_request()
         finally:

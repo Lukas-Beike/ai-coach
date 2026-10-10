@@ -539,6 +539,25 @@ def configure_logging(
     logger.addHandler(stream_handler)
 
 
+_ROUTINE_POLL_GET_PATHS = frozenset({"/api/chat/status", "/api/state/events"})
+
+
+def http_access_log_level(method: str | None, path: str, status: object) -> int:
+    """Return the access-log level for a request.
+
+    Successful GET requests to the chat status poll and the state event stream
+    are routine client traffic and are logged at DEBUG. Every other request,
+    and every non-2xx or unknown status, keeps the INFO access-log level.
+    """
+    if (
+        method == "GET"
+        and path in _ROUTINE_POLL_GET_PATHS
+        and str(status).startswith("2")
+    ):
+        return logging.DEBUG
+    return logging.INFO
+
+
 def external_result_context(result: Any) -> dict[str, Any]:
     """Return useful result metadata without logging response contents."""
     if result is None:

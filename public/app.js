@@ -82,9 +82,12 @@ $("#backupDownloadButton").addEventListener("click", () => { downloadDatabaseBac
 $("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);
 $("#logoutButton").addEventListener("click", logout);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") savePwaActivity();
-  else {
+  if (document.visibilityState === "hidden") {
+    savePwaActivity();
+    stopChatStatusPoll();
+  } else {
     checkPwaReturn();
+    // One check on return catches a Coach job started while this tab was hidden.
     scheduleChatStatusPoll(0);
     scheduleMobileViewportLayout();
   }
