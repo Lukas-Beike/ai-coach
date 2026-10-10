@@ -150,7 +150,8 @@ function isMarkdownTableSeparator(line) {
 function markdownTableRow(line, columnCount) {
   const cells = markdownTableCells(line).slice(0, columnCount);
   while (cells.length < columnCount) cells.push("");
-  return `<tr>${cells.map((cell) => `<td>${inlineMarkdown(cell)}</td>`).join("")}</tr>`;
+  const row = cells.map((cell) => `<td>${inlineMarkdown(cell)}</td>`).join("");
+  return `<tr>${row}</tr>`;
 }
 
 function renderMarkdownTable(lines, state, output) {
