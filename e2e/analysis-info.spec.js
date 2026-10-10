@@ -317,8 +317,8 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
     },
   });
   const performance = page.locator("#analysisHistoryCharts");
-  await expect(performance.getByRole("heading", { name: "Endurance Score" })).toBeVisible();
-  await expect(performance.getByRole("heading", { name: "Running Tolerance" })).toHaveCount(0);
+  await expect(performance.getByRole("heading", { name: "Ausdauer-Score" })).toBeVisible();
+  await expect(performance.getByRole("heading", { name: "Lauf-Belastbarkeit" })).toHaveCount(0);
   await expect(performance).not.toContainText("Garmin-Provider-Metriken");
   await expect(performance).not.toContainText("Rohfeld");
   await page.evaluate(async () => { await AppRouter.navigate("analysis/recovery", { historyMode: "replace" }); });

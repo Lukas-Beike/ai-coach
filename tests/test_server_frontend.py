@@ -961,6 +961,31 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("history?.body", source)
         self.assertIn(r"Ziel \u00fcberschritten", source)
 
+    def test_analysis_and_activity_polish(self):
+        analysis = (server.PUBLIC_DIR / "analysis.js").read_text(encoding="utf-8")
+        self.assertIn('running_tolerance: "Lauf-Belastbarkeit"', analysis)
+        self.assertIn('endurance_score: "Ausdauer-Score"', analysis)
+        self.assertNotIn("Endurance Score", analysis)
+        self.assertNotIn("Running Tolerance", analysis)
+        self.assertIn('return { endurance_score: "Punkte" }[key] || "";', analysis)
+        self.assertIn("unit: providerMetricUnit(key)", analysis)
+        self.assertIn('const SPORT_FAMILIES = { VirtualRide: "Ride" };', analysis)
+        self.assertIn("analysisSportFamily(item.sport)", analysis)
+        self.assertIn("bestWindows.set(key", analysis)
+        self.assertIn("SPORT_LABELS[item.sport] || item.sport", analysis)
+        self.assertIn(
+            "Daten f\u00fcr ${count} von ${total} ${unitWord} vorhanden.", analysis
+        )
+        self.assertIn('item.cadenceDays === 7 ? "Wochen" : "Tagen"', analysis)
+        self.assertNotIn("Tage mit Messung", analysis)
+        self.assertNotIn("${readings.length}/${item.points.length}", analysis)
+        self.assertIn("function analysisIsoWeek(dateKey)", analysis)
+        self.assertIn("weekTicks ? analysisWeekTickLabel : analysisDayTickLabel", analysis)
+        self.assertIn("function analysisWeekTickLabel(dateKey)", analysis)
+        self.assertIn("function analysisDayTickLabel(dateKey)", analysis)
+        self.assertIn("calendarWeeks: true", analysis)
+        self.assertIn("calendarWeeks = false", analysis)
+
     def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
             "/appearance.js", asset_ref("/appearance.js"), None
