@@ -2,6 +2,7 @@ const { test, expect } = require("@playwright/test");
 const { readFileSync } = require("node:fs");
 const path = require("node:path");
 const { captureReadFixture, installReadFixture } = require("./read-fixture");
+const { contrastRatio } = require("./helpers/ui");
 
 const SERVICE_WORKER_CACHE = readFileSync(path.join(__dirname, "..", "public", "service-worker.js"), "utf8").match(/const CACHE = "([^"]+)";/)[1];
 
@@ -555,17 +556,11 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(completedHeaders).toHaveCount(6);
   for (const theme of ["dark", "light"]) {
     await page.evaluate((selectedTheme) => { document.documentElement.dataset.theme = selectedTheme; }, theme);
-    const contrasts = await completedHeaders.evaluateAll((headers) => headers.map((header) => {
-      const parse = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number).map((channel) => {
-        const normalized = channel / 255;
-        return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
-      });
-      const luminance = (rgb) => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    const computedColors = await completedHeaders.evaluateAll((headers) => headers.map((header) => {
       const style = getComputedStyle(header);
-      const foreground = luminance(parse(style.color));
-      const background = luminance(parse(style.backgroundColor));
-      return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+      return [style.color, style.backgroundColor];
     }));
+    const contrasts = computedColors.map(([foreground, background]) => contrastRatio(foreground, background));
     expect(contrasts.every((ratio) => ratio >= 4.5), `${theme} completed session contrast`).toBe(true);
   }
   await completed.locator("summary").click();

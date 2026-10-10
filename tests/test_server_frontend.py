@@ -9,6 +9,27 @@ from unittest.mock import Mock
 
 from server_test_support import ServerTestCase, server
 
+VERSIONED_ASSET_REF = re.compile(r'(?<=[="])(/[^"?\s]+)\?v=(\d+)(?=")')
+CACHE_NAME_PATTERN = r'const CACHE = "intervals-coach-v\d+";'
+
+
+def versioned_asset_refs(markup):
+    """Return every local ``/path?v=N`` reference found in quoted markup or JS."""
+    return [
+        f"{path}?v={version}" for path, version in VERSIONED_ASSET_REF.findall(markup)
+    ]
+
+
+def asset_ref(path):
+    """Return the ``path?v=N`` reference that index.html currently serves."""
+    index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+    matches = [
+        ref for ref in versioned_asset_refs(index) if ref.split("?", 1)[0] == path
+    ]
+    if len(matches) != 1:
+        raise AssertionError(f"Expected one versioned index reference for {path}")
+    return matches[0]
+
 
 def frontend_source():
     return "\n".join(
@@ -371,25 +392,25 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("globalThis.AppApi.request(path, options, () =>", app)
         self.assertIn("globalThis.AppApi.audio(path, blob, () =>", app)
         self.assertIn("renderModel(model)", views)
-        self.assertIn("/api.js?v=223", index)
-        self.assertIn("/navigation.js?v=231", index)
-        self.assertIn("/appearance.js?v=218", index)
+        self.assertIn(asset_ref("/api.js"), index)
+        self.assertIn(asset_ref("/navigation.js"), index)
+        self.assertIn(asset_ref("/appearance.js"), index)
         self.assertNotIn("<script>", index)
-        self.assertIn("/state.js?v=219", index)
-        self.assertIn("/views.js?v=220", index)
-        self.assertIn("/forms.js?v=217", index)
-        self.assertIn("/components.js?v=217", index)
-        self.assertIn("/coach.js?v=9", index)
-        self.assertIn("/app.js?v=276", index)
-        self.assertIn("/styles.css?v=281", index)
-        self.assertIn("intervals-coach-v371", service_worker)
-        self.assertIn("/analysis.js?v=95", index)
-        self.assertIn('"/navigation.js?v=231"', service_worker)
-        self.assertIn('"/appearance.js?v=218"', service_worker)
-        self.assertIn('"/state.js?v=219"', service_worker)
-        self.assertIn('"/views.js?v=220"', service_worker)
-        self.assertIn('"/forms.js?v=217"', service_worker)
-        self.assertIn('"/components.js?v=217"', service_worker)
+        self.assertIn(asset_ref("/state.js"), index)
+        self.assertIn(asset_ref("/views.js"), index)
+        self.assertIn(asset_ref("/forms.js"), index)
+        self.assertIn(asset_ref("/components.js"), index)
+        self.assertIn(asset_ref("/coach.js"), index)
+        self.assertIn(asset_ref("/app.js"), index)
+        self.assertIn(asset_ref("/styles.css"), index)
+        self.assertRegex(service_worker, CACHE_NAME_PATTERN)
+        self.assertIn(asset_ref("/analysis.js"), index)
+        self.assertIn(f'"{asset_ref("/navigation.js")}"', service_worker)
+        self.assertIn(f'"{asset_ref("/appearance.js")}"', service_worker)
+        self.assertIn(f'"{asset_ref("/state.js")}"', service_worker)
+        self.assertIn(f'"{asset_ref("/views.js")}"', service_worker)
+        self.assertIn(f'"{asset_ref("/forms.js")}"', service_worker)
+        self.assertIn(f'"{asset_ref("/components.js")}"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="logsDownloadButton"', index)
@@ -498,12 +519,16 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("function showAccessibleDialog(", app)
         self.assertNotIn("function restoreDialogFocus(", app)
         self.assertLess(
-            index.index("/forms.js?v=217"), index.index("/components.js?v=217")
+            index.index(asset_ref("/forms.js")),
+            index.index(asset_ref("/components.js")),
         )
         self.assertLess(
-            index.index("/components.js?v=217"), index.index("/coach.js?v=9")
+            index.index(asset_ref("/components.js")),
+            index.index(asset_ref("/coach.js")),
         )
-        self.assertLess(index.index("/coach.js?v=9"), index.index("/app.js?v=276"))
+        self.assertLess(
+            index.index(asset_ref("/coach.js")), index.index(asset_ref("/app.js"))
+        )
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn(
@@ -727,7 +752,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split("app.js?v=", 1)[1].split('"', 1)[0]
         self.assertIn(f"app.js?v={asset_version}", markup)
-        self.assertIn("intervals-coach-v371", service_worker)
+        self.assertRegex(service_worker, CACHE_NAME_PATTERN)
         self.assertIn(f"/app.js?v={asset_version}", service_worker)
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
@@ -812,7 +837,7 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_nutrition_asset_is_served_as_immutable_javascript(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/nutrition.js", "/nutrition.js?v=22", None
+            "/nutrition.js", asset_ref("/nutrition.js"), None
         )
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
@@ -830,7 +855,7 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_analysis_asset_is_served_and_precached_as_javascript(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/analysis.js", "/analysis.js?v=95", None
+            "/analysis.js", asset_ref("/analysis.js"), None
         )
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
@@ -840,11 +865,11 @@ class ServerFrontendTests(ServerTestCase):
         )
         self.assertIn(b"function renderAnalysisHistory", response.body)
         worker = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/analysis.js?v=95"', worker)
+        self.assertIn(f'"{asset_ref("/analysis.js")}"', worker)
         index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
-        self.assertIn('/analysis.js?v=95"', index)
-        self.assertNotIn("/analysis.js?v=93", index + worker)
-        self.assertIn('const CACHE = "intervals-coach-v371";', worker)
+        self.assertIn(f'{asset_ref("/analysis.js")}"', index)
+        self.assertEqual(index.count("/analysis.js?v="), 1)
+        self.assertRegex(worker, CACHE_NAME_PATTERN)
         source = response.body.decode("utf-8")
         self.assertIn("equipment-archive", source)
         self.assertIn("function appendEquipmentLifetime", source)
@@ -854,7 +879,7 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(
-            "/appearance.js", "/appearance.js?v=218", None
+            "/appearance.js", asset_ref("/appearance.js"), None
         )
         headers = dict(response.headers)
         self.assertEqual(response.status, 200)
@@ -864,14 +889,14 @@ class ServerFrontendTests(ServerTestCase):
         self.assertTrue(headers["ETag"].startswith('"'))
 
         cached = StaticAssetService(server.PUBLIC_DIR).render(
-            "/appearance.js", "/appearance.js?v=218", headers["ETag"]
+            "/appearance.js", asset_ref("/appearance.js"), headers["ETag"]
         )
         self.assertEqual(cached.status, 304)
         self.assertEqual(cached.body, b"")
         self.assertEqual(dict(cached.headers)["ETag"], headers["ETag"])
 
         handler = object.__new__(server.HTTP_API.request_handler_class())
-        handler.path = "/appearance.js?v=218"
+        handler.path = asset_ref("/appearance.js")
         handler.headers = {"If-None-Match": headers["ETag"]}
         handler.send_response = Mock()
         handler.send_header = Mock()
@@ -892,7 +917,7 @@ class ServerFrontendTests(ServerTestCase):
         handler.wfile.write.assert_not_called()
 
         coach = StaticAssetService(server.PUBLIC_DIR).render(
-            "/coach.js", "/coach.js?v=9", None
+            "/coach.js", asset_ref("/coach.js"), None
         )
         self.assertEqual(coach.status, 200)
         self.assertEqual(
@@ -936,23 +961,36 @@ class ServerFrontendTests(ServerTestCase):
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()
 
+    def test_pwa_asset_versions_match_service_worker_precache(self):
+        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        service_worker = (server.PUBLIC_DIR / "service-worker.js").read_text(
+            encoding="utf-8"
+        )
+        precache = re.search(r"const ASSETS = \[(.*?)\];", service_worker, re.DOTALL)
+        self.assertIsNotNone(precache)
+        index_refs = versioned_asset_refs(index)
+        self.assertTrue(index_refs)
+        for ref in index_refs:
+            self.assertIn(f'"{ref}"', precache.group(1))
+        self.assertRegex(service_worker, CACHE_NAME_PATTERN)
+
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=223"', source)
-        self.assertIn('"/navigation.js?v=231"', source)
-        self.assertIn('"/appearance.js?v=218"', source)
-        self.assertIn('"/state.js?v=219"', source)
-        self.assertIn('"/views.js?v=220"', source)
-        self.assertIn('"/plan-views.js?v=2"', source)
+        self.assertIn(f'"{asset_ref("/api.js")}"', source)
+        self.assertIn(f'"{asset_ref("/navigation.js")}"', source)
+        self.assertIn(f'"{asset_ref("/appearance.js")}"', source)
+        self.assertIn(f'"{asset_ref("/state.js")}"', source)
+        self.assertIn(f'"{asset_ref("/views.js")}"', source)
+        self.assertIn(f'"{asset_ref("/plan-views.js")}"', source)
         self.assertIn('"/plan-views.js"', source)
-        self.assertIn('"/forms.js?v=217"', source)
-        self.assertIn('"/components.js?v=217"', source)
+        self.assertIn(f'"{asset_ref("/forms.js")}"', source)
+        self.assertIn(f'"{asset_ref("/components.js")}"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/coach.js?v=9"', source)
-        self.assertIn('"/app.js?v=276"', source)
-        self.assertIn('"/nutrition.js?v=22"', source)
-        self.assertIn('"/icon.svg?v=217"', source)
-        self.assertIn('"/styles.css?v=281"', source)
+        self.assertIn(f'"{asset_ref("/coach.js")}"', source)
+        self.assertIn(f'"{asset_ref("/app.js")}"', source)
+        self.assertIn(f'"{asset_ref("/nutrition.js")}"', source)
+        self.assertIn(f'"{asset_ref("/icon.svg")}"', source)
+        self.assertIn(f'"{asset_ref("/styles.css")}"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -988,7 +1026,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn("v=217", index)
+        self.assertIn(asset_ref("/icon.svg"), index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)

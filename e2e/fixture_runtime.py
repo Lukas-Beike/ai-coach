@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
@@ -25,6 +26,7 @@ os.environ.update(
 )
 sys.path.insert(0, "/app")
 import server
+from backend.errors import COACH_ABORTED_ERROR
 from backend.http_api import auth as http_auth
 
 FIXTURE_SOURCE = "synthetic fixture"
@@ -53,6 +55,72 @@ server.COACH_CONVERSATION.provision_service = FixtureConversationProvisionServic
 http_auth.RATE_LIMITER.allow = lambda key, limit, window_seconds: (True, 0)
 
 
+SLOW_STREAM_CHUNKS = (
+    "## Kurze Antwort\n\n",
+    "Heute passt ein ",
+    "lockerer Dauerlauf ",
+    "von 40 Minuten.\n\n",
+    "Achte auf **ausreichend Schlaf**",
+    " und regelmäßige Mahlzeiten.\n\n",
+    "- Trinke genug Wasser\n",
+    "- Steigere die Belastung nicht zu schnell.",
+)
+
+
+def _raise_if_fixture_cancelled(cancel_event):
+    """Raise the same chat-cancelled error as CoachResponseTransport."""
+    if cancel_event is not None and cancel_event.is_set():
+        raise server.AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+
+
+def _slow_stream_response(on_text_delta, cancel_event=None):
+    """Stream a German Markdown answer in ~3 s; the final text is returned as well.
+
+    A set cancel_event stops emission before the next chunk and after each wait,
+    so a cancelled request never reaches the success return, as with the real
+    streaming transport.
+    """
+    for chunk in SLOW_STREAM_CHUNKS:
+        _raise_if_fixture_cancelled(cancel_event)
+        if on_text_delta is not None:
+            on_text_delta(chunk)
+        if cancel_event is None:
+            time.sleep(0.4)
+        else:
+            cancel_event.wait(0.4)
+        _raise_if_fixture_cancelled(cancel_event)
+    return {"output_text": "".join(SLOW_STREAM_CHUNKS)}
+
+
+PROVIDER_FAILURE_CODES = {
+    "E2E fixture: OpenAI credit balance exhausted": "credit_balance_exhausted",
+    "E2E fixture: OpenAI model not found": "model_not_found",
+    "E2E fixture: OpenAI access denied": "permission_denied",
+}
+
+
+def _scripted_provider_response(current_message, on_text_delta, cancel_event=None):
+    """Return provider failures and streaming scenarios triggered by fixed messages."""
+    if current_message == "E2E fixture: OpenAI timeout":
+        raise server.AppError(
+            504, "Synthetic private provider detail", reason="provider_timeout"
+        )
+    if current_message in PROVIDER_FAILURE_CODES:
+        return server.provider_state_service().validate_openai_response(
+            "/responses",
+            {
+                "status": "failed",
+                "error": {
+                    "code": PROVIDER_FAILURE_CODES[current_message],
+                    "message": "Synthetic private provider detail",
+                },
+            },
+        )
+    if current_message == "E2E fixture: slow stream":
+        return _slow_stream_response(on_text_delta, cancel_event)
+    return None
+
+
 def fixture_coach_response(payload, **kwargs):
     """Canned model outputs exercise HTTP/worker/storage, not language inference."""
     value = payload.get("input")
@@ -68,26 +136,11 @@ def fixture_coach_response(payload, **kwargs):
         return {"output_text": question or "Deine Rückmeldung ist gespeichert."}
     decoded = json.loads(value)
     current_message = decoded.get("current_message")
-    if current_message == "E2E fixture: OpenAI timeout":
-        raise server.AppError(
-            504, "Synthetic private provider detail", reason="provider_timeout"
-        )
-    provider_failure_codes = {
-        "E2E fixture: OpenAI credit balance exhausted": "credit_balance_exhausted",
-        "E2E fixture: OpenAI model not found": "model_not_found",
-        "E2E fixture: OpenAI access denied": "permission_denied",
-    }
-    if current_message in provider_failure_codes:
-        return server.provider_state_service().validate_openai_response(
-            "/responses",
-            {
-                "status": "failed",
-                "error": {
-                    "code": provider_failure_codes[current_message],
-                    "message": "Synthetic private provider detail",
-                },
-            },
-        )
+    scripted = _scripted_provider_response(
+        current_message, kwargs.get("on_text_delta"), kwargs.get("cancel_event")
+    )
+    if scripted is not None:
+        return scripted
     context = decoded["dialogue"]
     current_id = context["current_user_message_id"]
     if current_message in {
@@ -258,7 +311,8 @@ class FixtureResponseTransport:
     def stream_request(
         self, payload, on_text_delta, cancel_event=None, on_response_id=None
     ):
-        # Preserve the fixture's previous behavior: no synthetic text deltas.
+        # Only "E2E fixture: slow stream" emits synthetic text deltas (~3 s);
+        # every other message keeps the previous no-delta behavior.
         return fixture_coach_response(
             payload,
             on_text_delta=on_text_delta,
