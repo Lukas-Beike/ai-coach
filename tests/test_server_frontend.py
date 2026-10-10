@@ -980,8 +980,12 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("Tage mit Messung", analysis)
         self.assertNotIn("${readings.length}/${item.points.length}", analysis)
         self.assertIn("function analysisIsoWeek(dateKey)", analysis)
-        self.assertIn("`KW ${analysisIsoWeek(date)}`", analysis)
-        self.assertIn("weekly = false", analysis)
+        self.assertIn("analysisTickLabel(date, calendarWeeks)", analysis)
+        self.assertIn(
+            "function analysisTickLabel(dateKey, calendarWeeks = false)", analysis
+        )
+        self.assertIn("calendarWeeks: true", analysis)
+        self.assertIn("calendarWeeks = false", analysis)
 
     def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(

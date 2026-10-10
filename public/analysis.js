@@ -94,7 +94,7 @@ function bindAnalysisPopover(button, info) {
 }
 
 function analysisChart(title, series, unit, start, end, note, {
-  sparse = false, zeroCentered = false, showLegend = true,
+  sparse = false, zeroCentered = false, showLegend = true, calendarWeeks = false,
 } = {}) {
   const section = reportNode("section", null, "analysis-chart-card");
   section.append(reportNode("h3", title));
@@ -145,7 +145,7 @@ function analysisChart(title, series, unit, start, end, note, {
   svg.append(analysisSvg("desc", {}, `Eigene Skala in ${unit || "Belastungspunkten"}. Fehlende Messungen bleiben unbekannt.`));
   appendAnalysisAxes(svg, unit, scales);
   appendAnalysisSeries(svg, series, unit, scales, zeroCentered, sparse);
-  appendAnalysisDateTicks(svg, start, end, scales, series.length > 0 && series.every((item) => item.cadenceDays === 7));
+  appendAnalysisDateTicks(svg, start, end, scales, calendarWeeks && series.length > 0 && series.every((item) => item.cadenceDays === 7));
   appendAnalysisPointInspectors(section, svg, series, unit, scales);
   section.append(svg);
   appendAnalysisReferenceNotes(section, series, unit);
@@ -391,7 +391,11 @@ function analysisIsoWeek(dateKey) {
   return 1 + Math.round((date - firstThursday) / (7 * 86400000));
 }
 
-function appendAnalysisDateTicks(svg, start, end, { chartWidth, x }, weekly = false) {
+function analysisTickLabel(dateKey, calendarWeeks = false) {
+  return calendarWeeks ? `KW ${analysisIsoWeek(dateKey)}` : dateKey.slice(5).split("-").reverse().join(".");
+}
+
+function appendAnalysisDateTicks(svg, start, end, { chartWidth, x }, calendarWeeks = false) {
   const days = Math.round((Date.parse(end) - Date.parse(start)) / 86400000);
   const intervals = Math.min(Math.max(1, days), chartWidth < 600 ? 3 : 7);
   for (let index = 0; index <= intervals; index++) {
@@ -399,8 +403,7 @@ function appendAnalysisDateTicks(svg, start, end, { chartWidth, x }, weekly = fa
     let anchor = "middle";
     if (index === 0) anchor = "start";
     else if (index === intervals) anchor = "end";
-    const label = weekly ? `KW ${analysisIsoWeek(date)}` : date.slice(5).split("-").reverse().join(".");
-    svg.append(analysisSvg("text", { x: x(date), y: 188, "text-anchor": anchor, class: "analysis-date-tick" }, label));
+    svg.append(analysisSvg("text", { x: x(date), y: 188, "text-anchor": anchor, class: "analysis-date-tick" }, analysisTickLabel(date, calendarWeeks)));
   }
 }
 
@@ -635,7 +638,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   const loadValues = loadSeries[0].points.filter(analysisValidPoint).map((point) => Number(point.value));
   const loadAverage = loadValues.length ? loadValues.reduce((sum, value) => sum + value, 0) / loadValues.length : null;
   const loadTitle = loadAverage == null ? "Akute Belastung" : `Akute Belastung \u00b7 \u00d8 ${analysisValue(loadAverage, "")}`;
-  const loadChart = analysisChart(loadTitle, loadSeries, "", start, end, "Garmin Connect: gemessene akute Trainingsbelastung. Gestrichelte Linie: Durchschnitt der angezeigten Werte. Fehlende Messungen bleiben L\u00fccken.");
+  const loadChart = analysisChart(loadTitle, loadSeries, "", start, end, "Garmin Connect: gemessene akute Trainingsbelastung. Gestrichelte Linie: Durchschnitt der angezeigten Werte. Fehlende Messungen bleiben L\u00fccken.", { calendarWeeks: analysisHistoryPeriod === "twelveWeeks" });
   loadChart.querySelector(".analysis-chart-legend")?.remove();
   loadRoot.append(loadChart);
   const timePoints = (history.training_time?.points || []).filter((point) => point.date >= start && point.date <= end).map((point) => ({ date: point.date, value: point.value }));
@@ -644,7 +647,7 @@ function renderAnalysisHistory(history) { // NOSONAR
     const timeSeries = [{ label: weekly ? "Trainingszeit pro Woche" : "Trainingszeit pro Tag", legendLabel: "Trainingszeit", source: history.training_time.source || "Intervals.icu", unit: "h", color: 1, cadenceDays: weekly ? 7 : 1, average: true, averageInHeading: true, points: weekly ? analysisWeeklySumPoints(timePoints, start, end) : timePoints }];
     const timeValues = timeSeries[0].points.filter(analysisValidPoint).map((point) => Number(point.value));
     const timeAverage = timeValues.reduce((sum, value) => sum + value, 0) / timeValues.length;
-    const timeChart = analysisChart(`Trainingszeit \u00b7 \u00d8 ${analysisValue(timeAverage, "h")}${weekly ? " pro Woche" : " pro Tag"}`, timeSeries, "h", start, end, "Intervals.icu: Summe der Bewegungszeit erfasster Aktivit\u00e4ten, jede Aktivit\u00e4t einmal. Tage und Wochen ohne erfasste Dauer bleiben L\u00fccken.");
+    const timeChart = analysisChart(`Trainingszeit \u00b7 \u00d8 ${analysisValue(timeAverage, "h")}${weekly ? " pro Woche" : " pro Tag"}`, timeSeries, "h", start, end, "Intervals.icu: Summe der Bewegungszeit erfasster Aktivit\u00e4ten, jede Aktivit\u00e4t einmal. Tage und Wochen ohne erfasste Dauer bleiben L\u00fccken.", { calendarWeeks: weekly });
     timeChart.querySelector(".analysis-chart-legend")?.remove();
     loadRoot.append(timeChart);
   }
@@ -664,7 +667,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   })));
   for (const [sport, title, primaryUnit] of [["Lauf", "Laufen", "s/km"], ["Rad", "Rad", "W"]]) {
     const sportSeries = performanceSeries.filter((item) => item.label.startsWith(sport));
-    const charts = [[primaryUnit, primaryUnit === "W" ? "Leistungsschwelle · FTP / eFTP" : "Schwellenpace"], ["ml/kg/min", "VO₂max · Schätzung"]].map(([unit, metric]) => analysisChart(metric, sportSeries.filter((item) => item.unit === unit), unit, performanceStart, end, "", { compactInfo: true, sparse: true, includeCoverage: false, showLegend: unit === "W" }));
+    const charts = [[primaryUnit, primaryUnit === "W" ? "Leistungsschwelle · FTP / eFTP" : "Schwellenpace"], ["ml/kg/min", "VO₂max · Schätzung"]].map(([unit, metric]) => analysisChart(metric, sportSeries.filter((item) => item.unit === unit), unit, performanceStart, end, "", { compactInfo: true, sparse: true, includeCoverage: false, showLegend: unit === "W", calendarWeeks: true }));
     root.append(analysisChartGroup(`Leistungsentwicklung · ${title}`, charts, sportSeries, "Letzte 12 Kalenderwochen einschließlich der laufenden Woche: letzter gültiger Wochenwert für FTP und Schwellenpace, Wochenmedian für eFTP und VO₂max. Jede Woche mit Messung bleibt als Punkt sichtbar; fehlende Wochen bleiben Lücken. Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Quellen und Messdatum bleiben sichtbar."));
   }
   renderProviderMetrics(history.provider_metrics, root, performanceStart, end);
@@ -727,7 +730,7 @@ function renderRacePredictionCharts(metrics, history, root, start, end) {
   if (historical.length) {
     section.append(reportNode("h4", "Historische Entwicklung"));
     for (const item of historical) {
-      section.append(analysisChart(item.label, [item], "s", start, end, `Wöchentlicher letzter Garmin-Messwert. Quelle: ${item.source}. Fehlende Wochen bleiben ohne Messwert; die Linie verbindet nur vorhandene Schätzungen.`, { sparse: true }));
+      section.append(analysisChart(item.label, [item], "s", start, end, `Wöchentlicher letzter Garmin-Messwert. Quelle: ${item.source}. Fehlende Wochen bleiben ohne Messwert; die Linie verbindet nur vorhandene Schätzungen.`, { sparse: true, calendarWeeks: true }));
     }
   }
   root.append(section);
@@ -774,7 +777,7 @@ function renderProviderMetrics(metrics, root, start, end) {
     if (!raw.some(analysisValidPoint)) return;
     const points = analysisWeeklyPerformancePoints(raw, start, end, false);
     const series = [{ label: providerMetricLabel(key), legendLabel: providerMetricLabel(key), source: item.source || "Garmin Connect", unit: providerMetricUnit(key), color: index, cadenceDays: 7, points, currentPoint: raw.filter((point) => point.date <= end).findLast(analysisValidPoint) }];
-    const chart = analysisChart(providerMetricLabel(key), series, providerMetricUnit(key), start, end, "", { sparse: true, showLegend: false });
+    const chart = analysisChart(providerMetricLabel(key), series, providerMetricUnit(key), start, end, "", { sparse: true, showLegend: false, calendarWeeks: true });
     chart.querySelector(".analysis-chart-legend")?.remove();
     root.append(chart);
   });
