@@ -255,7 +255,7 @@ button { cursor: pointer; }
 .status-chip[data-status="loading"], .status-chip.warning { color: var(--ink); background: var(--warning-surface); }
 .status-chip[data-status="error"], .status-chip.danger { color: var(--ink); background: var(--danger-status-surface); }
 .segmented-control { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--translucent-surface); }
-.segmented-control > * { flex: 1 1 120px; min-height: 40px; border: 0; border-radius: var(--radius-sm); color: var(--muted); background: var(--transparent); font-weight: 700; }
+.segmented-control > * { flex: 1 1 120px; min-height: 44px; border: 0; border-radius: var(--radius-sm); color: var(--muted); background: var(--transparent); font-weight: 700; }
 .segmented-control > .active { color: var(--ink); background: var(--accent-soft); }
 .empty-state { display: grid; gap: 8px; place-items: center; min-height: 132px; padding: var(--space-5); border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); color: var(--muted); text-align: center; }
 .empty-state strong { color: var(--ink); font-size: 20px; }
@@ -265,18 +265,6 @@ button { cursor: pointer; }
 @keyframes skeleton-shimmer { 50% { background-position: -100% 0; } }
 
 .desktop-nav { display: none; }
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0 4px;
-}
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 
 h1, h2, h3, p { margin-top: 0; }
 h1 {
@@ -1204,7 +1192,6 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   .desktop-nav .nav-item.active { color: var(--ink); background: var(--accent-soft); }
   .desktop-nav .nav-item.active .nav-icon { color: var(--accent-bright); }
   .desktop-nav .nav-item:last-child { margin-top: auto; }
-  .topbar { grid-area: header; min-width: 0; }
   main { grid-area: main; min-width: 0; }
   .bottom-nav { display: none; }
   .section-heading { margin-top: 8px; }
