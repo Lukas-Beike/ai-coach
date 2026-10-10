@@ -141,6 +141,39 @@ test("approved nutrition product write refreshes and opens the product catalog",
   assert.equal(JSON.stringify(routes), JSON.stringify([["nutrition/products", { historyMode: "push" }]]));
 });
 
+test("action destination precedes a slow refresh and preserves newer navigation", async () => {
+  const start = source.indexOf("function coachActionReceipt(");
+  const end = source.indexOf("\nfunction createPendingMessage", start);
+  for (const navigateDuringExecution of [false, true]) {
+    const routes = [];
+    let releaseRefresh;
+    let refreshStarted;
+    const refreshing = new Promise(resolve => { refreshStarted = resolve; });
+    const context = vm.createContext({
+      state: { route: "coach", coachActionProposals: [{ id: "proposal-1" }] },
+      api: async (url) => {
+        if (url.endsWith("/confirm")) return { action_token: "token", proposed_action: { payload_hash: "hash" } };
+        if (navigateDuringExecution) context.state.route = "analysis/performance";
+        return { ok: true, status: "applied" };
+      },
+      renderCoachActionReview() {}, addCoachReceipt() {}, toast() {},
+      load: () => { refreshStarted(); return new Promise(resolve => { releaseRefresh = resolve; }); },
+      AppRouter: { navigate: async (route) => { routes.push(route); context.state.route = route; } },
+    });
+    vm.runInContext(source.slice(start, end), context);
+    const action = context.executeCoachActionProposal(
+      { id: "proposal-1", action_type: "local_coach_write", status: "ready" },
+      { disabled: false },
+    );
+    await refreshing;
+    assert.deepEqual(routes, navigateDuringExecution ? [] : ["nutrition/meals"]);
+    context.state.route = "coach";
+    releaseRefresh();
+    await action;
+    assert.equal(context.state.route, "coach");
+  }
+});
+
 test("approval preview renders every bound remote-write value as text", () => {
   const start = source.indexOf("function coachActionDiff(");
   const end = source.indexOf("\nfunction coachActionButtons", start);

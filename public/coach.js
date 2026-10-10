@@ -1343,6 +1343,7 @@ function coachActionReceipt(proposal, result) {
 
 async function executeCoachActionProposal(proposal, button) {
   if (!proposal?.id || button.disabled || !["preview", "ready"].includes(proposal.status)) return;
+  const originalRoute = state.route;
   button.disabled = true;
   try {
     const confirmed = await api("/api/coach/actions/confirm", {
@@ -1359,10 +1360,12 @@ async function executeCoachActionProposal(proposal, button) {
     const receipt = coachActionReceipt(proposal, result);
     addCoachReceipt(receipt);
     toast(receipt.message);
+    if (state.route === originalRoute) {
+      if (receipt.nutritionProductWrite) await AppRouter.navigate("nutrition/products", { historyMode: "push" });
+      else if (receipt.localWrite) await AppRouter.navigate("nutrition/meals", { historyMode: "push" });
+      else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
+    }
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);
-    if (receipt.nutritionProductWrite) void AppRouter.navigate("nutrition/products", { historyMode: "push" });
-    else if (receipt.localWrite) void AppRouter.navigate("nutrition/meals", { historyMode: "push" });
-    else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) void AppRouter.navigate("plan", { historyMode: "push" });
   } catch (error) {
     addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
     if (error.reason === "proposal_expired") {
