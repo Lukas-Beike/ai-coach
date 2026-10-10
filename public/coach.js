@@ -1552,6 +1552,16 @@ function appendMessageRetry(node, message) {
   node.append(error, retry);
 }
 
+function messageActionButton(icon, label) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "message-action";
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.innerHTML = `<svg class="message-action-icon" aria-hidden="true"><use href="#icon-${icon}"></use></svg>`;
+  return button;
+}
+
 function renderMessageNode(message) {
   const node = document.createElement("div");
   node.className = `message ${message.role}`;
@@ -1568,11 +1578,7 @@ function renderMessageNode(message) {
   appendMessageRetry(node, message);
   const actions = document.createElement("div");
   actions.className = "message-actions";
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.className = "message-action";
-  copy.textContent = "Kopieren";
-  copy.setAttribute("aria-label", "Nachricht kopieren");
+  const copy = messageActionButton("copy", "Nachricht kopieren");
   copy.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(String(message.content || ""));
@@ -1581,10 +1587,7 @@ function renderMessageNode(message) {
   });
   actions.append(copy);
   if (message.role === "user" && !messageAttachmentLabel(message.attachment_names)) {
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "message-action";
-    edit.textContent = "Als Entwurf bearbeiten";
+    const edit = messageActionButton("edit", "Als Entwurf bearbeiten");
     edit.addEventListener("click", () => {
       const input = $("#messageInput");
       if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);

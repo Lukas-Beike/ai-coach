@@ -404,6 +404,30 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("chat-composer-hidden", app + styles)
         self.assertIn(".quick-message-templates::after", styles)
 
+    def test_message_actions_are_compact_icon_buttons_with_accessible_names(self):
+        root = Path(__file__).resolve().parents[1]
+        coach = (root / "public" / "coach.js").read_text(encoding="utf-8")
+        index = (root / "public" / "index.html").read_text(encoding="utf-8")
+        styles = (root / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn(
+            'const copy = messageActionButton("copy", "Nachricht kopieren");', coach
+        )
+        self.assertIn(
+            'const edit = messageActionButton("edit", "Als Entwurf bearbeiten");',
+            coach,
+        )
+        self.assertIn('button.setAttribute("aria-label", label);', coach)
+        self.assertIn("button.title = label;", coach)
+        self.assertNotIn('copy.textContent = "Kopieren";', coach)
+        self.assertIn('<symbol id="icon-copy"', index)
+        self.assertIn('<symbol id="icon-edit"', index)
+        self.assertRegex(styles, r"\.message\.user\s*\{[^}]*max-width:\s*85%;")
+        self.assertRegex(
+            styles,
+            r"\.message-action\s*\{[^}]*width:\s*44px;\s*height:\s*44px;",
+        )
+        self.assertIn(".message-action:focus-visible {", styles)
+
     def test_maintenance_ui_status_and_restore_asset_versions_are_present(self):
         coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
             encoding="utf-8"

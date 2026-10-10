@@ -488,6 +488,7 @@ h2 {
 }
 .message.user {
   align-self: flex-end;
+  max-width: 85%;
   color: var(--ink);
   background: var(--user-message-bg);
   border-radius: 20px;
@@ -534,10 +535,14 @@ h2 {
 .message.pending .pending-label { display: block; margin-top: 5px; color: var(--muted); font-size: .68rem; font-weight: 650; }
 .message.pending .pending-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .message.pending .pending-actions button { min-width: 44px; min-height: 44px; }
-.message-actions { display: flex; align-items: center; gap: 4px; margin: 8px 0 0 -8px; flex-wrap: wrap; }
-.message-action { min-height: 44px; border: 0; border-radius: 10px; padding: 8px; color: var(--subtle); background: var(--transparent); font-size: .7rem; }
-.message-action:hover { color: var(--ink); background: var(--surface-raised); }
-.message.assistant > .message-actions { margin-left: -8px; }
+/* Icon-only actions: each button has a 44px hit area, a 28px visible disc
+   (content-box background clip) and -8px vertical margins so the row stays 28px tall. */
+.message-actions { display: flex; align-items: center; justify-content: flex-end; margin: 4px -8px 0 0; }
+.message.assistant > .message-actions { justify-content: flex-start; margin: 4px 0 0 -8px; }
+.message-action { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; box-sizing: border-box; width: 44px; height: 44px; margin: -8px 0; padding: 8px; border: 0; border-radius: 50%; color: var(--subtle); background-color: var(--transparent); background-clip: content-box; }
+.message-action:hover { color: var(--ink); background-color: var(--surface-raised); }
+.message-action:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.message-action svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .empty { margin: auto; padding: 48px 24px; color: var(--muted); text-align: center; }
 .empty strong { display: block; margin-bottom: 8px; color: var(--ink); font-size: 1.35rem; letter-spacing: -.03em; }
 
