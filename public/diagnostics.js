@@ -1,9 +1,100 @@
 const CHANGE_HISTORY_LABELS = {
   profile: "Profil",
   workout_library: "Workout-Bibliothek",
+  planned_unit: "Geplante Einheit",
   competition: "Wettkampf",
   training_plan: "Trainingsplan",
 };
+
+const CHANGE_HISTORY_ACTIONS = {
+  create: "erstellt",
+  update: "geändert",
+  delete: "gelöscht",
+  undo: "zurückgenommen",
+};
+
+const CHANGE_HISTORY_SOURCES = {
+  coach_apply: "Coach-Freigabe",
+  coach_replacement: "Coach-Ersatzplan",
+  adaptive_replan: "Adaptive Planung",
+  training_status: "Trainingsstatus",
+  undo: "Rückgängig",
+};
+
+// Field keys delivered by the change-history endpoint (see backend/change_history.py).
+const CHANGE_HISTORY_FIELD_LABELS = {
+  name: "Name",
+  goals: "Ziele",
+  sports: "Sportarten",
+  training_background: "Trainingshintergrund",
+  typical_weekly_volume: "Typisches Wochenvolumen",
+  availability: "Verfügbarkeit",
+  constraints: "Einschränkungen",
+  equipment: "Ausrüstung",
+  training_preferences: "Trainingsvorlieben",
+  coaching_style: "Coaching-Stil",
+  timezone: "Zeitzone",
+  weather_location: "Wetterort",
+  weight_kg: "Gewicht",
+  body_fat_pct: "Körperfettanteil",
+  height_cm: "Körpergröße",
+  performance_notes: "Leistungsnotizen",
+  id: "Kennung",
+  type: "Typ",
+  description: "Beschreibung",
+  duration_minutes: "Dauer",
+  moving_time: "Bewegungszeit",
+  target: "Ziel",
+  date: "Datum",
+  source: "Quelle",
+  rationale: "Begründung",
+  plan_id: "Trainingsplan-Zuordnung",
+  plan_name: "Trainingsplanname",
+  archived: "Archivierung",
+  local_marked: "Lokale Markierung",
+  private_calendar_adjustment: "Private Kalenderanpassung",
+  sync_status: "Synchronisierungsstatus",
+  origin: "Herkunft",
+  remote_event_id: "Remote-Termin",
+  remote_event_external_id: "Externe Termin-ID",
+  local_deleted: "Lokal gelöscht",
+  event_date: "Wettkampfdatum",
+  start_date_local: "Startdatum",
+  sport: "Sportart",
+  priority: "Priorität",
+  category: "Kategorie",
+  distance: "Distanz",
+  course_profile: "Streckenprofil",
+  notes: "Notizen",
+  sync_state: "Synchronisierungsstatus",
+  goal: "Ziel",
+  start_date: "Startdatum",
+  end_date: "Enddatum",
+  status: "Status",
+};
+
+function changeFieldLabels(change) {
+  const labels = Object.keys(change?.diff?.fields || {}).map((field) => CHANGE_HISTORY_FIELD_LABELS[field] || "Sonstiges Feld");
+  return [...new Set(labels)];
+}
+
+function undoPreviewMessage(preview) {
+  const change = preview?.change || {};
+  const label = CHANGE_HISTORY_LABELS[change.entity_type] || "Lokales Objekt";
+  const action = CHANGE_HISTORY_ACTIONS[change.action] || "geändert";
+  let reset;
+  if (change.action === "create") {
+    reset = "Das durch diese Änderung angelegte Objekt wird wieder entfernt.";
+  } else if (change.action === "delete") {
+    reset = "Das gelöschte Objekt wird wiederhergestellt.";
+  } else {
+    const fields = changeFieldLabels(change);
+    reset = fields.length
+      ? `Diese Felder werden auf den Stand vor der Änderung zurückgesetzt: ${fields.join(", ")}.`
+      : "Der Stand vor der Änderung wird wiederhergestellt.";
+  }
+  return `${label}, ${action} am ${formatTime(change.created_at)}. ${reset} Die Änderung bleibt lokal; neuere Änderungen führen zu einem Konflikt.`;
+}
 
 function renderChangeHistory(changes = []) {
   const root = $("#changeHistoryList");
@@ -19,19 +110,16 @@ function renderChangeHistory(changes = []) {
     const header = document.createElement("div");
     header.className = "change-history-item-header";
     const title = document.createElement("strong");
-    let action = "geändert";
-    if (change.action === "create") action = "erstellt";
-    else if (change.action === "delete") action = "gelöscht";
-    else if (change.action === "undo") action = "zurückgenommen";
+    const action = CHANGE_HISTORY_ACTIONS[change.action] || "geändert";
     title.textContent = `${CHANGE_HISTORY_LABELS[change.entity_type] || "Lokales Objekt"} ${action}`;
     const time = document.createElement("time");
     time.dateTime = change.created_at || "";
     time.textContent = formatTime(change.created_at);
     header.append(title, time);
     const detail = document.createElement("span");
-    const fields = Object.keys(change.diff?.fields || {});
+    const fields = changeFieldLabels(change);
     const fieldLabel = fields.length ? `Felder: ${fields.join(", ")}` : "Keine Felddetails";
-    detail.textContent = `${fieldLabel} · Nur lokal · Quelle: ${change.source || "local"}`;
+    detail.textContent = `${fieldLabel} · Nur lokal · Quelle: ${CHANGE_HISTORY_SOURCES[change.source] || "App"}`;
     item.append(header, detail);
     if (change.action !== "undo") {
       const button = document.createElement("button");
@@ -62,12 +150,27 @@ async function loadChangeHistory() {
 }
 
 async function undoChange(changeId, button) {
-  if (!await requestConfirmation("Diese Änderung lokal zurücknehmen? Es wird kein Remote-Provider beschrieben. Neuere Änderungen führen zu einem Konflikt.", { title: "Lokale Änderung zurücknehmen?" })) return;
   button.disabled = true;
   try {
-    const preview = await api("/api/change-history/undo/preview", { method: "POST", body: JSON.stringify({ change_id: changeId }) });
-    if (!await requestConfirmation("Undo-Vorschau bestätigen? Die Mutation bleibt lokal; ein späterer Remote-Sync muss separat geprüft werden.", { title: "Undo-Vorschau bestätigen?" })) return;
-    await api("/api/change-history/undo", { method: "POST", body: JSON.stringify(preview.proposed_action.payload) });
+    let preview;
+    try {
+      preview = await api("/api/change-history/undo/preview", { method: "POST", body: JSON.stringify({ change_id: changeId }) });
+    } catch (error) {
+      toast(`${error.message || "Die Undo-Vorschau konnte nicht geladen werden."} Es wurde nichts zurückgenommen.`, true);
+      return;
+    }
+    // The preview is a one-shot approval proposal; its payload stays server-side, so undo runs through confirm and execute.
+    const proposalId = preview.proposed_action?.id;
+    if (!await requestConfirmation(undoPreviewMessage(preview), { title: "Lokale Änderung zurücknehmen?" })) {
+      if (proposalId) api("/api/coach/actions/cancel", { method: "POST", body: JSON.stringify({ proposal_id: proposalId }) }).catch(() => {});
+      return;
+    }
+    const confirmed = await api("/api/coach/actions/confirm", { method: "POST", body: JSON.stringify({ proposal_id: proposalId }) });
+    const result = await api("/api/coach/actions/execute", {
+      method: "POST",
+      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
+    });
+    if (result.status !== "undone") throw new Error("Die Undo-Bestätigung fehlt; bitte den aktuellen Stand prüfen.");
     toast("Lokale Änderung zurückgenommen");
     await load();
     await loadChangeHistory();
