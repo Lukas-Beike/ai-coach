@@ -1,0 +1,8 @@
+[
+  {
+    "calendarDate": "2026-10-10",
+    "generic": {"vo2MaxPreciseValue": 57.4},
+    "cycling": {"vo2MaxPreciseValue": 59.0},
+    "running": {"vo2MaxPreciseValue": 57.8}
+  }
+]

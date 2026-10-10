@@ -1,0 +1,30 @@
+{
+  "id": "i-synthetic-001",
+  "name": "Synthetic Athlete",
+  "sex": "M",
+  "weight": 70.0,
+  "height": 180.0,
+  "dob": "1990-01-01T00:00:00",
+  "icu_ftp": 260,
+  "icu_w_prime": 18000,
+  "sportSettings": [
+    {
+      "id": 1001,
+      "types": ["Ride"],
+      "ftp": 260,
+      "lthr": 168,
+      "max_hr": 190,
+      "eftp": 258,
+      "warmup_time": 600,
+      "cooldown_time": 300
+    },
+    {
+      "id": 1002,
+      "types": ["Run"],
+      "ftp": 290,
+      "lthr": 172,
+      "max_hr": 192,
+      "threshold_pace": 4.2
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+[
+  {
+    "uuid": "synthetic-gear-001",
+    "displayName": "Synthetic Road Bike",
+    "gearTypeName": "Bike",
+    "gearStatusName": "active",
+    "maximumMeter": 10000000
+  }
+]
