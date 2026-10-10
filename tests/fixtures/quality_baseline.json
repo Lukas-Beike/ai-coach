@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "75af8ec4e931b88a4a71568398da2ba072bf74d2",
+  "base": "7fc4eb57d7edee49f0ce4093c0e697e29fa605d4",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
@@ -93,6 +93,14 @@
       "column": 47,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
+    },
+    {
+      "tool": "ruff",
+      "path": "e2e/test_fixture_standard_data.py",
+      "line": 3,
+      "column": 1,
+      "code": "I001",
+      "message_sha256": "2ae03c24054492f44ee1ee930d27576b6f82dcbcd8a35fc5af09314810893d40"
     },
     {
       "tool": "ruff",
@@ -297,7 +305,7 @@
     {
       "tool": "ruff",
       "path": "e2e/fixture_runtime.py",
-      "line": 1183,
+      "line": 1217,
       "column": 40,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -305,7 +313,7 @@
     {
       "tool": "ruff",
       "path": "e2e/fixture_runtime.py",
-      "line": 1194,
+      "line": 1228,
       "column": 40,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -489,7 +497,7 @@
     {
       "tool": "ruff",
       "path": "e2e/fixture_runtime.py",
-      "line": 1680,
+      "line": 1865,
       "column": 49,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -2385,7 +2393,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 52,
+      "line": 55,
       "column": 46,
       "code": "assignment",
       "message_sha256": "63b223df9d3230073bbf9e36a3d550827f18d71602d0883452c44841a538f293"
@@ -2393,7 +2401,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 325,
+      "line": 358,
       "column": 47,
       "code": "assignment",
       "message_sha256": "743bb04ffff3138838807d44ce17c43f5e5037ce50d3da58f08cd0e465dc8698"
@@ -3433,7 +3441,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 1704,
+      "line": 1889,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3441,7 +3449,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 325,
+      "line": 358,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3449,7 +3457,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 44,
+      "line": 47,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3457,7 +3465,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 52,
+      "line": 55,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3465,7 +3473,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 56,
+      "line": 59,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3537,7 +3545,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 1622,
+      "line": 1807,
       "column": 21,
       "code": "misc",
       "message_sha256": "0ba1e959a9929a580b50012a0a160f4a70e2714e7183d6bc45b46b3eb2904c2c"
@@ -4025,7 +4033,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 327,
+      "line": 360,
       "column": 0,
       "code": "var-annotated",
       "message_sha256": "0bb96ea92df5309b23828a6df8207d75bdaaa062ec5c639bae3e1a91216449c2"
