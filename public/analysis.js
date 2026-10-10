@@ -23,7 +23,12 @@ function analysisValue(value, unit) {
 }
 
 function analysisRatioUnit(unit) {
-  return /\/bpm$/.test(String(unit || ""));
+  return String(unit || "").endsWith("/bpm");
+}
+
+function analysisMinimumPadding(unit, high) {
+  if (unit === "s/km") return 5;
+  return analysisRatioUnit(unit) ? Math.abs(high) * .02 : 1;
 }
 
 // Ratio units such as W/bpm keep three significant digits so small efficiencies are not rounded to zero.
@@ -211,7 +216,7 @@ function analysisPlotScales(series, start, end, { unit = "", zeroCentered = fals
   let low = Math.min(...values), high = Math.max(...values);
   if (zeroCentered) { const extent = Math.max(Math.abs(low), Math.abs(high), 1); low = -extent; high = extent; }
   if (series.some((item) => item.bars)) low = Math.min(0, low);
-  const padding = Math.max((high - low) * .12, unit === "s/km" ? 5 : analysisRatioUnit(unit) ? Math.abs(high) * .02 : 1);
+  const padding = Math.max((high - low) * .12, analysisMinimumPadding(unit, high));
   const rawStep = (high - low + padding * 2) / 4;
   const magnitude = 10 ** Math.floor(Math.log10(rawStep));
   let step = [1, 2, 5, 10].find((factor) => factor * magnitude >= rawStep) * magnitude;
