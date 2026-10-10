@@ -13,35 +13,52 @@ from backend.db.schema import (
     database_schema_signature,
 )
 
+_NO_TRAINING_COLUMN = ", no_training INTEGER NOT NULL DEFAULT 0"
+# SQLite places an ADD COLUMN after the last column's trailing whitespace, so the
+# normalized signature of an upgraded table keeps this exact spacing.
+_LOGGED_TIME_KNOWN_COLUMN = " , logged_time_known INTEGER NOT NULL DEFAULT 1)"
+_LOGGED_TIME_KNOWN_ABSENT = " )"
+
+
+def _expected_signature(
+    *,
+    without_products: bool = False,
+    without_no_training: bool = False,
+    without_logged_time_known: bool = False,
+) -> tuple[tuple[str, str, str, str], ...]:
+    """Return the current schema without objects or columns added after a release."""
+    expected: list[tuple[str, str, str, str]] = []
+    for kind, name, table, sql in current_schema_signature():
+        if without_products and table == "nutrition_products":
+            continue
+        if without_no_training and table == "external_calendar_events":
+            sql = sql.replace(_NO_TRAINING_COLUMN, "")
+        if without_logged_time_known and table == "nutrition_logs":
+            sql = sql.replace(_LOGGED_TIME_KNOWN_COLUMN, _LOGGED_TIME_KNOWN_ABSENT)
+        expected.append((kind, name, table, sql))
+    return tuple(expected)
+
 
 def _schema_is_1_12_19(db: Any) -> bool:
-    expected = tuple(
-        (
-            definition[0],
-            definition[1],
-            definition[2],
-            definition[3].replace(", no_training INTEGER NOT NULL DEFAULT 0", ""),
-        )
-        for definition in current_schema_signature()
-        if definition[2] != "nutrition_products"
+    return database_schema_signature(db) == _expected_signature(
+        without_products=True,
+        without_no_training=True,
+        without_logged_time_known=True,
     )
-    return database_schema_signature(db) == expected
 
 
 def _schema_is_previous_calendar_schema(db: Any) -> bool:
     """Recognize the released schema immediately before no_training."""
-    expected = tuple(
-        (
-            definition[0],
-            definition[1],
-            definition[2],
-            definition[3].replace(", no_training INTEGER NOT NULL DEFAULT 0", ""),
-        )
-        if definition[2] == "external_calendar_events"
-        else definition
-        for definition in current_schema_signature()
+    return database_schema_signature(db) == _expected_signature(
+        without_no_training=True, without_logged_time_known=True
     )
-    return database_schema_signature(db) == expected
+
+
+def _schema_is_previous_nutrition_schema(db: Any) -> bool:
+    """Recognize schemas 3 and 4, which lack only the meal-time signal."""
+    return database_schema_signature(db) == _expected_signature(
+        without_logged_time_known=True
+    )
 
 
 _UNSUPPORTED_SCHEMA_MESSAGE = (
@@ -56,18 +73,24 @@ def _schema_unsupported(
     current_shape: bool,
     old_schema: bool,
     previous_calendar_schema: bool,
+    previous_nutrition_schema: bool,
 ) -> bool:
     if version == 1:
         return not old_schema
     if version == 2:
         return not previous_calendar_schema
-    if version == 3 and not current_shape:
-        return True
+    if version in (3, 4):
+        return not previous_nutrition_schema
     if current:
         return False
     if version == CURRENT_SCHEMA_VERSION:
         return True
-    return not (current_shape or old_schema or previous_calendar_schema)
+    return not (
+        current_shape
+        or old_schema
+        or previous_calendar_schema
+        or previous_nutrition_schema
+    )
 
 
 def migrate_schema(db: Any) -> None:
@@ -77,16 +100,22 @@ def migrate_schema(db: Any) -> None:
     executescript(), whose implicit commit would break rollback on failure.
     """
     version = db.execute("PRAGMA user_version").fetchone()["user_version"]
-    if version not in (0, 1, 2, 3, CURRENT_SCHEMA_VERSION):
+    if version not in (0, 1, 2, 3, 4, CURRENT_SCHEMA_VERSION):
         raise RuntimeError(
             "Die Datenbankversion wird von diesem Release nicht unterstützt."
         )
     current = database_schema_is_current(db)
     current_shape = database_schema_signature(db) == current_schema_signature()
+    previous_nutrition_schema = not current and _schema_is_previous_nutrition_schema(db)
     previous_calendar_schema = not current and _schema_is_previous_calendar_schema(db)
     old_schema = not current and _schema_is_1_12_19(db)
     if _schema_unsupported(
-        version, current, current_shape, old_schema, previous_calendar_schema
+        version,
+        current,
+        current_shape,
+        old_schema,
+        previous_calendar_schema,
+        previous_nutrition_schema,
     ):
         raise RuntimeError(_UNSUPPORTED_SCHEMA_MESSAGE)
     if current and version == CURRENT_SCHEMA_VERSION:
@@ -95,8 +124,12 @@ def migrate_schema(db: Any) -> None:
         db.execute("BEGIN IMMEDIATE")
     db.execute("SAVEPOINT schema_migration")
     try:
-        if not current_shape and not current:
-            _upgrade_legacy_schema(db, old_schema)
+        if not current:
+            _upgrade_legacy_schema(
+                db,
+                old_schema=old_schema,
+                previous_calendar_schema=previous_calendar_schema,
+            )
         _remove_gemini_state(db)
         db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
         if not database_schema_is_current(db):
@@ -255,25 +288,32 @@ def _remove_gemini_state(db: Any) -> None:
     )
 
 
-def _upgrade_legacy_schema(db: Any, old_schema: bool) -> None:
+def _upgrade_legacy_schema(
+    db: Any, *, old_schema: bool, previous_calendar_schema: bool
+) -> None:
     if old_schema:
         for statement in NUTRITION_PRODUCTS_DDL.split(";"):
             if statement.strip():
                 db.execute(statement)
+    if old_schema or previous_calendar_schema:
+        db.execute(
+            "ALTER TABLE external_calendar_events "
+            "ADD COLUMN no_training INTEGER NOT NULL DEFAULT 0"
+        )
+        # v2 discarded descriptions; irrelevant rows can be ordinary appointments
+        # or description-only NO_TRAINING markers. Require fresh evidence rather
+        # than assigning a hard marker to an ambiguous row.
+        db.execute(
+            "UPDATE external_calendar_events SET no_training=1 "
+            "WHERE instr(upper(name), '[NO_TRAINING]') > 0"
+        )
+        db.execute(
+            "INSERT OR REPLACE INTO kv(key, value, updated_at) "
+            "SELECT 'external_calendar_constraints_refresh_required', '1', MAX(updated_at) "
+            "FROM external_calendar_events WHERE training_relevant=0 AND no_training=0 "
+            "HAVING COUNT(*) > 0"
+        )
+    # Existing meal logs were recorded with a time; they keep logged_time_known=1.
     db.execute(
-        "ALTER TABLE external_calendar_events "
-        "ADD COLUMN no_training INTEGER NOT NULL DEFAULT 0"
-    )
-    # v2 discarded descriptions; irrelevant rows can be ordinary appointments
-    # or description-only NO_TRAINING markers. Require fresh evidence rather
-    # than assigning a hard marker to an ambiguous row.
-    db.execute(
-        "UPDATE external_calendar_events SET no_training=1 "
-        "WHERE instr(upper(name), '[NO_TRAINING]') > 0"
-    )
-    db.execute(
-        "INSERT OR REPLACE INTO kv(key, value, updated_at) "
-        "SELECT 'external_calendar_constraints_refresh_required', '1', MAX(updated_at) "
-        "FROM external_calendar_events WHERE training_relevant=0 AND no_training=0 "
-        "HAVING COUNT(*) > 0"
+        "ALTER TABLE nutrition_logs ADD COLUMN logged_time_known INTEGER NOT NULL DEFAULT 1"
     )

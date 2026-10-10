@@ -148,6 +148,9 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 connection.execute(
                     "ALTER TABLE external_calendar_events DROP COLUMN no_training"
                 )
+                connection.execute(
+                    "ALTER TABLE nutrition_logs DROP COLUMN logged_time_known"
+                )
                 connection.execute("PRAGMA user_version = 1")
                 connection.execute(
                     "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES ('token', 'csrf', 1, 'now', 'now')"
@@ -342,6 +345,9 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 connection.execute("DROP TABLE nutrition_products")
                 connection.execute(
                     "ALTER TABLE external_calendar_events DROP COLUMN no_training"
+                )
+                connection.execute(
+                    "ALTER TABLE nutrition_logs DROP COLUMN logged_time_known"
                 )
                 connection.execute("PRAGMA user_version = 1")
                 connection.execute(
