@@ -1153,6 +1153,13 @@ class ServerFrontendTests(ServerTestCase):
             )
         )
 
+    def test_chat_history_page_keeps_reading_position(self):
+        coach = (server.PUBLIC_DIR / "coach.js").read_text(encoding="utf-8")
+
+        self.assertIn("preventScroll: true", coach)
+        self.assertIn("ältere Nachrichten geladen", coach)
+        self.assertIn("IntersectionObserver", coach)
+
 
 if __name__ == "__main__":
     unittest.main()
