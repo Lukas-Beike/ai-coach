@@ -1093,6 +1093,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIsNotNone(toast_error_rule)
         self.assertIn("color: var(--white);", toast_error_rule.group(1))
         self.assertIn("toast-close", shared)
+        self.assertNotIn("style.bottom", shared)
         self.assertIn("8000", shared)
         self.assertIn("Meldung schließen", shared)
         self.assertIn(".secondary-button.danger-button", styles)

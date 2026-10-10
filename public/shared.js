@@ -202,15 +202,6 @@ function hideToast() {
   if (close) close.inert = true;
 }
 
-// The composer only sticks to the viewport bottom in long chats, so the toast clears its measured top edge.
-function toastComposerClearance() {
-  const composer = document.querySelector("#chatPanel.active #chatForm");
-  if (!composer) return "";
-  const top = composer.getBoundingClientRect().top;
-  if (!(top > 0 && top < window.innerHeight)) return "";
-  return `${Math.ceil(window.innerHeight - top + 12)}px`;
-}
-
 function toast(message, error = false) {
   const node = $("#toast");
   const text = document.createElement("span");
@@ -227,7 +218,6 @@ function toast(message, error = false) {
   }
   node.setAttribute("role", error ? "alert" : "status");
   node.setAttribute("aria-live", error ? "assertive" : "polite");
-  node.style.bottom = toastComposerClearance();
   node.className = `toast show${error ? " error" : ""}`;
   clearTimeout(toast.timer);
   toast.timer = setTimeout(hideToast, error ? 8000 : 3000);

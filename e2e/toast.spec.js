@@ -38,6 +38,14 @@ test("@responsive error toasts are readable, dismissible and stay above the coac
   const composerBox = await page.locator("#chatForm").boundingBox();
   expect(toastBox.y + toastBox.height).toBeLessThanOrEqual(composerBox.y + 1);
 
+  // Growing the composer while the toast is visible must move the toast up with it.
+  await page.locator("#chatForm textarea").fill("Zeile\n".repeat(12));
+  await expect.poll(async () => (await page.locator("#chatForm").boundingBox()).height).toBeGreaterThan(composerBox.height);
+  await expect.poll(async () => {
+    const [grownToast, grownComposer] = await Promise.all([toastNode.boundingBox(), page.locator("#chatForm").boundingBox()]);
+    return grownToast.y + grownToast.height <= grownComposer.y + 1;
+  }, { message: "toast stays above the grown composer" }).toBe(true);
+
   await close.click();
   await expect(toastNode).not.toHaveClass(/show/);
 

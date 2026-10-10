@@ -1295,6 +1295,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   html.chat-keyboard-open #chatPanel .composer::after { content: none; }
   html.chat-keyboard-open #chatPanel { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   html.chat-keyboard-open .coach-working { bottom: calc(148px + env(safe-area-inset-bottom)); }
+  html.chat-keyboard-open body:has(#chatPanel.active) .toast { bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--composer-height, 0px) + 12px); }
 }
 .change-history-list {
   display: grid;
