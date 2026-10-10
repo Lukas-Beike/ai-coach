@@ -225,6 +225,13 @@ function toast(message, error = false) {
   toast.timer = setTimeout(hideToast, error ? 8000 : 3000);
 }
 
+function makeScrollRegionFocusable(element, label) {
+  element.tabIndex = 0;
+  element.setAttribute("role", "region");
+  element.setAttribute("aria-label", label);
+  return element;
+}
+
 
 function todayIso() { return timezoneDateKey(state.data?.profile?.timezone, new Date()); }
 

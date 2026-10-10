@@ -980,11 +980,34 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("Tage mit Messung", analysis)
         self.assertNotIn("${readings.length}/${item.points.length}", analysis)
         self.assertIn("function analysisIsoWeek(dateKey)", analysis)
-        self.assertIn("weekTicks ? analysisWeekTickLabel : analysisDayTickLabel", analysis)
+        self.assertIn(
+            "weekTicks ? analysisWeekTickLabel : analysisDayTickLabel", analysis
+        )
         self.assertIn("function analysisWeekTickLabel(dateKey)", analysis)
         self.assertIn("function analysisDayTickLabel(dateKey)", analysis)
         self.assertIn("calendarWeeks: true", analysis)
         self.assertIn("calendarWeeks = false", analysis)
+
+    def test_analysis_scroll_tables_are_keyboard_focusable(self):
+        shared = (server.PUBLIC_DIR / "shared.js").read_text(encoding="utf-8")
+        analysis = (server.PUBLIC_DIR / "analysis.js").read_text(encoding="utf-8")
+        details = (server.PUBLIC_DIR / "activity-details.js").read_text(
+            encoding="utf-8"
+        )
+        styles = (server.PUBLIC_DIR / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("function makeScrollRegionFocusable(element, label) {", shared)
+        self.assertIn("element.tabIndex = 0;", shared)
+        self.assertIn('element.setAttribute("role", "region");', shared)
+        self.assertIn('element.setAttribute("aria-label", label);', shared)
+        wrapper = (
+            'makeScrollRegionFocusable(reportNode("div", null, "analysis-chart-table")'
+        )
+        self.assertEqual(analysis.count(wrapper), 3)
+        self.assertIn(
+            'makeScrollRegionFocusable(node("div", null, "analysis-chart-table")',
+            details,
+        )
+        self.assertIn(".analysis-chart-table:focus-visible", styles)
 
     def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
         response = StaticAssetService(server.PUBLIC_DIR).render(

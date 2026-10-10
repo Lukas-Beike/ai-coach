@@ -187,10 +187,7 @@ function analysisValidPoint(point) {
 function appendAnalysisTable(section, title, series, unit) {
   const details = reportNode("details");
   details.append(reportNode("summary", "Werte ansehen"));
-  const scroll = reportNode("div", null, "analysis-chart-table");
-  scroll.tabIndex = 0;
-  scroll.setAttribute("role", "region");
-  scroll.setAttribute("aria-label", `${title}: Einzelwerte`);
+  const scroll = makeScrollRegionFocusable(reportNode("div", null, "analysis-chart-table"), `${title}: Einzelwerte`);
   const table = reportNode("table");
   table.append(reportNode("caption", `${title} · ${unit || "Belastungspunkte"} · nur vorhandene Werte`));
   const header = reportNode("tr");
@@ -557,7 +554,7 @@ function renderExistingPerformanceReports(endurance, profiles) {
   if (best.length) {
     const card = reportNode("section", null, "analysis-chart-card");
     card.append(reportNode("h3", "Beste Fenster je Aktivit\u00e4t"));
-    const wrap = reportNode("div", null, "analysis-chart-table");
+    const wrap = makeScrollRegionFocusable(reportNode("div", null, "analysis-chart-table"), "Beste Fenster je Aktivität");
     const table = reportNode("table"); const head = reportNode("tr");
     ["Sport", "Fenster", "Watt", "Datum"].forEach((label) => head.append(reportNode("th", label)));
     const thead = reportNode("thead"); thead.append(head); table.append(thead);
@@ -1280,7 +1277,7 @@ function appendSeasonWeeklyHistory(weeks, source, root) {
     body.append(row);
   }
   table.append(body);
-  const wrap = reportNode("div", null, "analysis-chart-table"); wrap.append(table); root.append(wrap);
+  const wrap = makeScrollRegionFocusable(reportNode("div", null, "analysis-chart-table"), `Wochenabdeckung · ${source}`); wrap.append(table); root.append(wrap);
 }
 
 function appendSeasonScenario(event, section, generation) {

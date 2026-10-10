@@ -50,7 +50,7 @@
     svg.append(path);
     section.append(svg, node("p", `${Math.round(min * 10) / 10}–${Math.round(max * 10) / 10} ${unit} · ${Math.round(start / 60)}–${Math.round(points.at(-1)[0] / 60)} min · ${times.length - points.length} fehlende Messpunkte`, "muted"));
     const details = node("details", null, "activity-values"); details.append(node("summary", `Alle ${points.length} Messwerte ansehen`));
-    const tableWrap = node("div", null, "analysis-chart-table"); const table = node("table");
+    const tableWrap = makeScrollRegionFocusable(node("div", null, "analysis-chart-table"), `${label} in ${unit}: Messwerte`); const table = node("table");
     table.append(node("caption", `${label} in ${unit}; fehlende Werte sind als Lücke markiert.`));
     const thead = node("thead"); const heading = node("tr"); ["Zeit", label].forEach((value) => { const cell = node("th", value); cell.scope = "col"; heading.append(cell); }); thead.append(heading); table.append(thead);
     const body = node("tbody");
