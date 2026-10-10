@@ -46,6 +46,9 @@ test("@responsive error toasts are readable, dismissible and stay above the coac
     return grownToast.y + grownToast.height <= grownComposer.y + 1;
   }, { message: "toast stays above the grown composer" }).toBe(true);
 
+  // The geometry checks can outlast the 8 s error lifetime on a slow runner, so dismiss a freshly shown toast.
+  await page.evaluate(() => toast("Testfehler", true));
+  await expect(close).toBeVisible();
   await close.click();
   await expect(toastNode).not.toHaveClass(/show/);
 
