@@ -530,7 +530,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const header = document.createElement("span");
     header.className = "planned-session-header";
     const sport = document.createElement("span");
-    sport.textContent = [activitySportLabel(displayed), calendarStartTime(displayed.start_date_local)].filter(Boolean).join(" · ");
+    sport.textContent = [activitySportLabel(displayed), actual ? calendarStartTime(actual.start_date_local) : plannedUnitStartTime(entry.start_date_local)].filter(Boolean).join(" · ");
     const duration = document.createElement("strong");
     duration.textContent = plannedEntryDurationLabel(actual, entry);
     const distance = document.createElement("span");
