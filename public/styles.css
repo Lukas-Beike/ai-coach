@@ -518,6 +518,10 @@ h2 {
 .message.assistant code { padding: 2px 5px; border-radius: 6px; color: var(--ink); background: var(--accent-code-wash); font: .86em ui-monospace, SFMono-Regular, Consolas, monospace; }
 .message.assistant pre { margin: 0 0 10px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; overflow-x: auto; color: var(--ink); background: var(--code-bg); white-space: pre; }
 .message.assistant pre code { padding: 0; color: inherit; background: var(--transparent); }
+.markdown-table { overflow-x: auto; max-width: 100%; margin: 8px 0; white-space: normal; }
+.markdown-table table { border-collapse: collapse; min-width: 100%; }
+.markdown-table th, .markdown-table td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+.markdown-table:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 .message.assistant a { color: var(--link); overflow-wrap: anywhere; text-decoration: none; }
 .message.assistant.streaming { position: relative; border-color: var(--streaming-border); }
 .message.assistant.streaming::after { display: inline-block; width: 6px; height: 1em; margin-left: 4px; border-radius: 2px; background: var(--accent-bright); content: ""; vertical-align: -.12em; animation: stream-caret 1s steps(2, jump-none) infinite; }

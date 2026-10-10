@@ -137,18 +137,108 @@ function renderMarkdownLine(line, state, output) {
   state.paragraph.push(line);
 }
 
+function markdownCodeSpanEnd(text, start, end) {
+  let ticks = 0;
+  while (text[start + ticks] === "`") ticks += 1;
+  let index = start + ticks;
+  while (index < end) {
+    if (text[index] !== "`") {
+      index += 1;
+      continue;
+    }
+    let run = 0;
+    while (text[index + run] === "`") run += 1;
+    if (run === ticks) return index + run;
+    index += run;
+  }
+  return null;
+}
+
+function markdownTableCells(line) {
+  const text = line.trim();
+  const start = text.startsWith("|") ? 1 : 0;
+  const end = text.length > start && text.endsWith("|") && !text.endsWith(String.raw`\|`) ? text.length - 1 : text.length;
+  const cells = [];
+  let cell = "";
+  let index = start;
+  while (index < end) {
+    const character = text[index];
+    if (character === "\\" && text[index + 1] === "|") {
+      cell += "|";
+      index += 2;
+    } else if (character === "`") {
+      const spanEnd = markdownCodeSpanEnd(text, index, end);
+      if (spanEnd === null) {
+        cell += character;
+        index += 1;
+      } else {
+        cell += text.slice(index, spanEnd).replaceAll(String.raw`\|`, "|");
+        index = spanEnd;
+      }
+    } else if (character === "|") {
+      cells.push(cell.trim());
+      cell = "";
+      index += 1;
+    } else {
+      cell += character;
+      index += 1;
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function isMarkdownTableSeparator(line) {
+  const value = line.trim();
+  return value.includes("|") && value.includes("-") && /^[|:\- ]+$/.test(value);
+}
+
+function markdownTableRow(line, columnCount) {
+  const cells = markdownTableCells(line).slice(0, columnCount);
+  while (cells.length < columnCount) cells.push("");
+  const row = cells.map((cell) => `<td>${inlineMarkdown(cell)}</td>`).join("");
+  return `<tr>${row}</tr>`;
+}
+
+function renderMarkdownTable(lines, state, output) {
+  flushMarkdownParagraph(state, output);
+  closeMarkdownList(state, output);
+  const headers = markdownTableCells(lines[0]);
+  const head = headers.map((cell) => `<th scope="col">${inlineMarkdown(cell)}</th>`).join("");
+  const body = lines.slice(2).map((line) => markdownTableRow(line, headers.length)).join("");
+  output.push(`<div class="markdown-table" tabindex="0" role="region" aria-label="Tabelle"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`);
+}
+
+function flushMarkdownTable(state, output) {
+  if (!state.tableLines.length) return;
+  const lines = state.tableLines;
+  state.tableLines = [];
+  if (lines.length > 1 && isMarkdownTableSeparator(lines[1])) renderMarkdownTable(lines, state, output);
+  else for (const line of lines) renderMarkdownLine(line, state, output);
+}
+
+function renderMarkdownSourceLine(line, state, output) {
+  if (line.trimStart().startsWith("```")) {
+    flushMarkdownTable(state, output);
+    toggleMarkdownCode(state, output);
+  } else if (state.inCode) state.codeLines.push(line);
+  else if (line.includes("|")) state.tableLines.push(line);
+  else if (!line.trim()) {
+    flushMarkdownTable(state, output);
+    flushMarkdownParagraph(state, output);
+    closeMarkdownList(state, output);
+  } else {
+    flushMarkdownTable(state, output);
+    renderMarkdownLine(line, state, output);
+  }
+}
+
 function markdownToHtml(markdown) {
   const lines = String(markdown || "").replaceAll("\r", "").split("\n");
   const output = [];
-  const state = { paragraph: [], listType: null, inCode: false, codeLines: [] };
-  for (const line of lines) {
-    if (line.trimStart().startsWith("```")) toggleMarkdownCode(state, output);
-    else if (state.inCode) state.codeLines.push(line);
-    else if (!line.trim()) {
-      flushMarkdownParagraph(state, output);
-      closeMarkdownList(state, output);
-    } else renderMarkdownLine(line, state, output);
-  }
+  const state = { paragraph: [], listType: null, inCode: false, codeLines: [], tableLines: [] };
+  for (const line of lines) renderMarkdownSourceLine(line, state, output);
+  flushMarkdownTable(state, output);
   if (state.inCode) output.push(`<pre><code>${escapeHtml(state.codeLines.join("\n"))}</code></pre>`);
   flushMarkdownParagraph(state, output);
   closeMarkdownList(state, output);
