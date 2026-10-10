@@ -69,7 +69,7 @@ test("@responsive sparse performance shows measurements and the current value li
   await expect(root.locator("path[data-series]")).toHaveCount(2);
   expect(await root.locator(".analysis-point-value").allTextContents()).toEqual(expect.arrayContaining(["4:50", "210"]));
   await expect(root).toContainText("08.09.2026 · Garmin Connect");
-  const button = root.getByRole("button", { name: "FTP", exact: true });
+  const button = root.getByRole("button", { name: "Erklärung zu FTP", exact: true });
   await button.click();
   const info = root.getByRole("tooltip").filter({ hasText: "FTP · Garmin Connect" });
   await expect(info).toBeVisible();
@@ -149,7 +149,7 @@ test("@responsive repeated performance values are labelled once without a normal
   await expect(root.locator('circle[data-series="0"]')).toHaveCount(5);
   await expect(root.locator(".analysis-current-line")).toHaveCount(0);
   await expect(root.locator(".analysis-baseline-band")).toHaveCount(0);
-  await root.getByRole("button", { name: "FTP", exact: true }).click();
+  await root.getByRole("button", { name: "Erklärung zu FTP", exact: true }).click();
   await expect(root.locator(".analysis-info-tooltip:popover-open")).not.toContainText("Grüner Bereich");
 });
 
@@ -326,5 +326,107 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
   await expect(recovery).not.toContainText("Schlafdefizit");
   await expect(recovery).not.toContainText("Schlafregelm");
   await expect(page.locator("#analysisTagImpact, #analysisComparisons")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("@responsive predictions list only race estimates and never body weight", async ({ page }) => {
+  await performanceFixture(page, { metrics: {
+    weight_kg: { value: 72.4, unit: "kg", source: "Garmin Connect" },
+    run_10k_seconds: { value: 2500, unit: "s", source: "Garmin Connect", note: "Garmin Connect Laufprognose" },
+  } });
+  const predictions = page.locator("#performancePredictions");
+  await expect(predictions.getByRole("heading", { name: "Laufprognosen" })).toBeVisible();
+  await expect(predictions.locator("tbody tr")).toHaveCount(1);
+  await expect(predictions).toContainText("10 km (geschätzt)");
+  await expect(predictions).toContainText("Garmin Connect");
+  await expect(predictions).not.toContainText("Gewicht");
+  await expect(predictions).not.toContainText("72");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("@responsive missing race predictions explain the reason instead of an empty block", async ({ page }) => {
+  await performanceFixture(page, { metrics: {
+    weight_kg: { value: 72.4, unit: "kg", source: "Garmin Connect" },
+  } });
+  const predictions = page.locator("#performancePredictions");
+  await expect(predictions).toBeVisible();
+  await expect(predictions.getByRole("heading", { name: "Laufprognosen" })).toBeVisible();
+  await expect(predictions).toContainText("Noch keine Prognosen – dafür fehlen aktuelle Leistungswerte aus Intervals.icu oder Garmin.");
+  await expect(predictions.locator("table")).toHaveCount(0);
+  await expect(predictions).not.toContainText("Gewicht");
+});
+
+test("@responsive legend info buttons have a 44px layout box, a German name and popovers inside the viewport", async ({ page }) => {
+  await performanceFixture(page, { history: {
+    start: "2026-09-01", end: "2026-09-08", load: { points: [] },
+    metrics: { cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }] },
+  } });
+  const root = page.locator("#analysisHistoryCharts");
+  const button = root.getByRole("button", { name: "Erklärung zu FTP", exact: true });
+  await expect(button).toHaveAttribute("aria-expanded", "false");
+  await button.evaluate((element) => element.scrollIntoView({ block: "center", inline: "center" }));
+  const box = await button.boundingBox();
+  expect(box.width).toBeGreaterThanOrEqual(44);
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const hits = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest(".analysis-legend-info")?.getAttribute("aria-label") ?? null, { x: center.x + 20, y: center.y });
+  expect(hits).toBe("Erklärung zu FTP");
+  await button.click();
+  const info = root.getByRole("tooltip").filter({ hasText: "FTP · Garmin Connect" });
+  await expect(info).toBeVisible();
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+  const viewport = page.viewportSize();
+  const bounds = await info.boundingBox();
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.y).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("@responsive legend info buttons are at least 44x44 and never overlap each other", async ({ page }) => {
+  await performanceFixture(page, { history: {
+    start: "2026-09-01", end: "2026-09-08", load: { points: [] },
+    metrics: {
+      cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }],
+      // The FTP chart shows its legend; FTP and eFTP give two neighbouring info buttons.
+      cycling_eftp_watts: [{ source: "Intervals.icu", points: [{ date: "2026-09-01", value: 205 }, { date: "2026-09-08", value: 212 }] }],
+    },
+  } });
+  const buttons = page.locator("#analysisHistoryCharts .analysis-chart-legend .analysis-legend-info");
+  const count = await buttons.count();
+  expect(count).toBeGreaterThanOrEqual(2);
+  const boxes = [];
+  for (let index = 0; index < count; index += 1) {
+    const box = await buttons.nth(index).boundingBox();
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    boxes.push(box);
+  }
+  for (let first = 0; first < boxes.length; first += 1) {
+    for (let second = first + 1; second < boxes.length; second += 1) {
+      const a = boxes[first], b = boxes[second];
+      const overlaps = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+      expect(overlaps, `legend buttons ${first} and ${second} overlap`).toBe(false);
+    }
+  }
+});
+
+test("@responsive endurance efficiency keeps small ratios readable instead of rounding them to zero", async ({ page }) => {
+  await page.route("**/api/analysis/endurance", (route) => route.fulfill({ json: { status: "ok", activities: [
+    { activity_id: "a1", sport: "Run", date: "2026-09-01", name: "A", aerobic: { efficiency: 0.0234, unit: "(m/s)/bpm", drift_percent: 2 } },
+    { activity_id: "a2", sport: "Run", date: "2026-09-02", name: "B", aerobic: { efficiency: 0.0241, unit: "(m/s)/bpm", drift_percent: 1 } },
+    { activity_id: "a3", sport: "Run", date: "2026-09-03", name: "C", aerobic: { efficiency: 0.0229, unit: "(m/s)/bpm", drift_percent: 1 } },
+  ] } }));
+  await page.route("**/api/analysis/power-profiles", (route) => route.fulfill({ json: { status: "ok", best: [], activities: [] } }));
+  await performanceFixture(page, {}, "performance");
+  const chart = page.locator("#existingPerformanceReports svg");
+  await expect(chart).toHaveCount(1);
+  const ticks = await chart.locator(".analysis-value-tick").allTextContents();
+  expect(new Set(ticks).size).toBe(ticks.length);
+  expect(ticks).not.toContain("0");
+  const values = await chart.locator(".analysis-point-value").allTextContents();
+  expect(values.length).toBeGreaterThan(0);
+  expect(values.every((value) => value.startsWith("0,02"))).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
