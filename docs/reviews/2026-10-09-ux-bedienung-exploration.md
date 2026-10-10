@@ -232,14 +232,14 @@ Keine Befunde. Es gab keinen Datenverlust, kein Sicherheitsleck und keinen Bypas
 #### P2-12 Logout oder 401 verwirft wartende Chat-Nachrichten
 
 - **Ort:** `public/auth.js:18-19,172-176`, `public/shared.js:237-239` und `public/coach.js:249-258`.
-- **Abhilfe:** Die Warteschlange in `sessionStorage` sichern und nach dem Login zur Wiederaufnahme anbieten.
+- **Abhilfe:** Die Warteschlange in `sessionStorage` sichern. Ein Ablauf der Sitzung (401) bewahrt Warteschlange und Entwurf und bietet sie nach dem erneuten Login zur Wiederaufnahme an. Ein explizites Abmelden löscht beides. Beide Pfade werden getrennt getestet (siehe V22). Einträge mit Anhang (GPX, FIT, Bild) werden nie automatisch gesendet: Nach einem Neuladen erscheinen sie nur als bearbeitbarer Entwurf mit dem Hinweis „Anhang erneut hinzufügen“.
 
 #### P2-13 Abmelden: irreführender Text, versteckter Ort und technischer Login-Text
 
 - **Ort:** `public/index.html:345-374`, `:372` und `:404`.
 - **Szenario:**
   - „Abmelden“ liegt in „Datenschutz & Verbrauch“.
-  - Der Text daneben lautet: „Die Datenbank bleibt als verschlüsselte Datei bestehen; ihr Inhalt wird geleert.“ Ein Logout leert aber nichts.
+  - Der Text daneben lautet: „Die Datenbank bleibt als verschlüsselte Datei bestehen; ihr Inhalt wird geleert.“ Ein Logout leert aber nichts in der Datenbank.
   - Der Login-Text lautet „Gib das im Container gesetzte APP_PASSWORD ein.“
 - **Abhilfe:**
   - „Abmelden“ als eigenen Eintrag in der Mehr-Hauptliste führen.
@@ -383,7 +383,7 @@ Keine Befunde. Es gab keinen Datenverlust, kein Sicherheitsleck und keinen Bypas
 | V7 | **Subjektive Erholung in der Analyse** (Stress, Muskelkater, Motivation, Krankheitstage neben HRV und Schlaf) | Verbindet Gefühl und Messwerte | Daten nur lokal, Kontext für den Coach mit Quellenlabel |
 | V8 | **Gemeinsame Format-Hilfen** (`format.js`) und ein Glossar deutscher Sport- und Fachbegriffe | Behebt P2-17 und viele P3 dauerhaft | Node-Tests und Architekturtest |
 | V9 | **Ehrliches Offline-Verhalten:** `network_error`-Mapping und optional eine Outbox für Check-in und Ernährung | Kein „Failed to fetch“, keine falschen Versprechen | Outbox darf keine Remote-Writes auslösen |
-| V10 | **Chat-Warteschlange über 401 hinweg retten**, `#chatQueueStatus` sichtbar | Keine verlorenen Nachrichten | Kein Speichern sensibler Inhalte über die Sitzung hinaus |
+| V10 | **Chat-Warteschlange über 401 hinweg retten**, `#chatQueueStatus` sichtbar | Keine verlorenen Nachrichten bei abgelaufener Sitzung | Kein Speichern sensibler Inhalte über die Sitzung hinaus; explizites Abmelden löscht die Warteschlange (siehe P2-12, V22) |
 | V11 | **Dirty-Guard-Helfer** für alle Formulare (Check-in, Profil, Ernährung) | Kein stilles Überschreiben von Entwürfen | Router hat bereits einen Guard; vereinheitlichen |
 | V12 | **Saison-Zeitstrahl** (Wettkämpfe mit Phasen, eingeklappte Karten, Archiv) | Überblick statt 11.000 px Scrollen | – |
 | V13 | **Provider-bewusste Aktionen:** Buttons nur für konfigurierte Provider; Setup-Banner schließbar mit Direktlink | Behebt die Ursachen von P1-01 in der UI | – |
@@ -795,7 +795,7 @@ Gleiche Umgebung wie oben (Demo-Container, iPhone 12 Pro 390×844, Light- und Da
 8. **Anhänge** als kompakte Chip-Reihe über dem Eingabefeld (C-11).
 9. **Sprung-Button** deckend über dem Composer, mit Hinweis auf neue Inhalte, ohne Fokus auf Touch-Geräten (C-01, C-02, C-10).
 10. **Tastatur offen:** Composer direkt über der Tastatur, Navigation ausgeblendet. Das ist mit `chat-keyboard-open` angelegt, hier aber nicht prüfbar (siehe 8.4).
-11. **Entwurf** übersteht Reload und App-Wechsel (V22).
+11. **Entwurf** übersteht Reload und Navigation in derselben Browsersitzung; das Schließen der PWA verwirft ihn (V22).
 
 ### 8.4 Geprüft ohne Befund und Grenzen
 
@@ -804,14 +804,14 @@ Gleiche Umgebung wie oben (Demo-Container, iPhone 12 Pro 390×844, Light- und Da
 - **„↓“ ohne wartende Inhalte:** Die letzte Nachricht landet 12 px über dem Composer.
 - **Nachrichtenaktionen:** 44 px Trefferfläche, ausreichender Kontrast.
 - **Desktop 1280×800:** Composer 760 px breit, Eingabefeld 585 px, sonst passend; betroffen sind nur C-04 (Durchscheinen), C-05 („+“) und C-10.
-- **Grenze Touch:** Das Preview emuliert kein Touch (`maxTouchPoints` 0, kein grober Zeiger). Das Layout bei offener Tastatur (`chat-keyboard-open`, `visualViewport`) ist nur statisch geprüft und muss im Playwright-Projekt mit `hasTouch` oder auf einem echten Gerät nachgeprüft werden.
+- **Grenze Touch:** Das Preview emuliert kein Touch (`maxTouchPoints` 0, kein grober Zeiger). Das Layout bei offener Tastatur (`chat-keyboard-open`, `visualViewport`) ist nur statisch geprüft und muss im Playwright-Projekt `mobile` (Touch über `devices["Pixel 5"]`) oder auf einem echten Gerät nachgeprüft werden.
 - **Grenze Streaming:** Der Fixture-Coach antwortet ohne Text-Deltas. Live-Streaming und das Scrollverhalten während des Streams sind ungeprüft. Empfehlung: einen Fixture-Trigger mit verzögerten Deltas ergänzen, zum Beispiel „E2E fixture: slow stream“.
 
 ### 8.5 Weitere Vorschläge
 
 | # | Vorschlag | Nutzen | Hinweise zum Vertrag |
 | --- | --- | --- | --- |
-| V22 | **Entwurf sichern:** Text und Warteschlange in `sessionStorage` halten (wie `coachPendingTurn`, `public/coach.js:1240`); nach dem Senden und beim Logout löschen | Ein Reload oder das Beenden der PWA verwirft keine halb geschriebene Nachricht mehr; heute warnt nur `beforeunload` | Athletentext liegt dann unverschlüsselt im Browser. Nur `sessionStorage`, nie `localStorage`, Anhänge nicht speichern, beim Logout und Sitzungsende löschen |
+| V22 | **Entwurf sichern:** Text und Warteschlange in `sessionStorage` halten (wie `coachPendingTurn`, `public/coach.js:1240`); nach dem Senden löschen. Ein Reload oder die Navigation innerhalb derselben Browsersitzung behält sie. Das Schließen der PWA verwirft sie bewusst (konsistent mit Audit-Finding F06 aus #439: keine persistente Textspeicherung im Browser). Explizites Abmelden löscht sie; ein Ablauf der Sitzung (401) bewahrt sie für die Wiederaufnahme nach dem Login | Ein Reload oder ein Sitzungsablauf verwirft keine halb geschriebene Nachricht mehr; heute warnt nur `beforeunload` | Athletentext liegt dann unverschlüsselt im Browser. Nur `sessionStorage`, nie `localStorage`. Anhänge werden nicht gespeichert; Einträge mit Anhang werden nie automatisch gesendet und erscheinen nach dem Neuladen nur als bearbeitbarer Entwurf mit dem Hinweis „Anhang erneut hinzufügen“. Regressionstest ist verpflichtend |
 | V23 | **Sprung-Button mit Hinweis „Neue Antwort“** oder Zähler, wenn während des Lesens Inhalte hinzukommen | Man verpasst keine Antwort und wird trotzdem nicht weggescrollt (C-03) | Rein clientseitig |
 | V24 | **Älteres automatisch nachladen**, sobald der Chat-Anfang sichtbar wird (IntersectionObserver), mit Positionserhalt aus C-08 | Durchgehendes Scrollen statt Button | Nutzt das vorhandene Cursor-Paging; der Button bleibt als Fallback für Tastatur und Screenreader |
 
@@ -819,14 +819,14 @@ Gleiche Umgebung wie oben (Demo-Container, iPhone 12 Pro 390×844, Light- und Da
 
 | Reihenfolge | PR-Titel | Inhalt | Nachweis |
 | --- | --- | --- | --- |
-| 25 | `test(e2e): delayed streaming fixture and touch-enabled mobile project` | Fixture-Trigger mit verzögerten Deltas, Playwright-Projekt mit `hasTouch`; Grundlage für 26–31 | Neue Specs laufen gegen die Fixture |
+| 25 | `test(e2e): delayed streaming fixture and shared browser helpers` | Fixture-Trigger mit verzögerten Deltas und gemeinsame Browser-Helfer; Grundlage für 26–31. Kein neues Touch-Projekt nötig: `mobile` und `mobile-small` emulieren Touch bereits (`devices["Pixel 5"]`) | Neue Specs laufen gegen die Fixture |
 | 26 | `fix(coach): scroll to newest content and jump without keyboard` | C-01, C-02, C-03, C-10, V23 | Playwright mit verzögertem Stream, Touch- und Desktop-Projekt |
 | 27 | `fix(ui): stable sticky composer offset and backdrop` | C-04 | Playwright misst die Composer-Position an drei Scrollpunkten |
 | 28 | `feat(coach): two-row composer with consistent controls and mobile Enter` | C-05, C-06, C-11, P2-14 | Playwright mobile-small bis desktop in beiden Themes; Enter und Shift+Enter am Desktop manuell |
 | 29 | `feat(coach): explain and manage queued messages` | C-07 | Playwright mit verzögertem Stream |
 | 30 | `fix(coach): keep reading position when loading older messages` | C-08, V24 | Playwright mit Positionsvergleich |
 | 31 | `style(coach): compact message actions and bubble width` | C-09 | Playwright mobile, Messung der Chathöhe |
-| 32 | `feat(coach): keep the chat draft for the browser session` | V22 | Node-Test; Playwright: Reload behält den Entwurf, Logout löscht ihn |
+| 32 | `feat(coach): keep the chat draft for the browser session` | V22 | Node-Test; Playwright getrennt: Reload behält den Entwurf, 401 behält Warteschlange für die Wiederaufnahme, explizites Logout löscht beides; Eintrag mit Anhang wird nicht automatisch gesendet |
 
 Auch hier gilt für jedes Frontend-PR: Asset-Querys und Service-Worker-Cache bumpen. Bei 28 zusätzlich Mikrofonberechtigung und Enter-Verhalten manuell prüfen.
 
