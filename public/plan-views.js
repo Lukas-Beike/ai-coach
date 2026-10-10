@@ -111,6 +111,12 @@ function calendarStartTime(value) {
   return match ? match[1] : null;
 }
 
+function plannedUnitStartTime(value) {
+  // Date-only planned units are stored as midnight; that is not a start time.
+  const time = calendarStartTime(value);
+  return time === "00:00" ? null : time;
+}
+
 function appendCalendarFact(root, label, value) {
   if (value == null || value === "") return;
   const item = document.createElement("span");
@@ -162,7 +168,7 @@ function calendarEntryStatus(entry, dateKey, todayKey) {
 
 function calendarStatusLabel(entry, dateKey, todayKey) {
   const status = calendarEntryStatus(entry, dateKey, todayKey);
-  if (status === "completed") return entry.is_completed_activity ? "✓ Zusätzlich absolviert" : "✓ Abgeschlossen";
+  if (status === "completed") return entry.is_completed_activity ? "✓ Zusätzlich" : "✓ Absolviert";
   if (status === "missed") return "Nicht absolviert";
   return status === "today" ? "Heute geplant" : "Geplant";
 }
@@ -257,6 +263,23 @@ function appendPlannedCalendarComparison(details, entry, actual) {
     comparison.append(ratio);
   }
   details.append(comparison);
+}
+
+function appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey) {
+  if (status !== "completed" && status !== "missed" && status !== "skipped") return;
+  const statusText = document.createElement("span");
+  statusText.className = "planned-entry-status";
+  statusText.textContent = status === "skipped" ? `Entfallen (${restDayLabel})` : calendarStatusLabel(entry, dateKey, todayKey);
+  cardSummary.append(statusText);
+}
+
+function appendPlannedTarget(cardSummary, entry) {
+  const target = document.createElement("span");
+  target.className = "planned-session-target";
+  const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
+  if (entry.icu_training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.icu_training_load)}`);
+  target.textContent = `Plan: ${targetParts.join(" · ")}`;
+  cardSummary.append(target);
 }
 
 const SEASON_PHASE_LABELS = { base: "Basis", build: "Aufbau", peak: "Spezifische Vorbereitung", taper: "Taper", completed: "Vergangen" };
@@ -434,6 +457,15 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return section;
   }
 
+  function plannedWeatherHint() {
+    const hint = document.createElement("p");
+    hint.className = "planned-weather-hint";
+    hint.textContent = state.data?.weather?.configured
+      ? "Für die kommenden Tage liegt noch keine Wettervorhersage vor."
+      : "Wetter fehlt: Im Profil ist kein Wetterort hinterlegt.";
+    return hint;
+  }
+
   function plannedWeekSummary(weekKey, weekEndKey, weekEntries, compliance, todayKey) {
     const plannedEntryCount = weekEntries.filter((entry) => !entry.is_completed_activity).length;
     const plannedUnits = Number.isFinite(Number(compliance?.planned_units))
@@ -515,7 +547,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const header = document.createElement("span");
     header.className = "planned-session-header";
     const sport = document.createElement("span");
-    sport.textContent = [activitySportLabel(displayed), calendarStartTime(displayed.start_date_local)].filter(Boolean).join(" · ");
+    sport.textContent = [activitySportLabel(displayed), actual ? calendarStartTime(actual.start_date_local) : plannedUnitStartTime(entry.start_date_local)].filter(Boolean).join(" · ");
     const duration = document.createElement("strong");
     duration.textContent = plannedEntryDurationLabel(actual, entry);
     const distance = document.createElement("span");
@@ -587,31 +619,19 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     card.dataset.sport = activitySportLabel(displayed);
     meta.textContent = [
       activitySportLabel(displayed),
-      calendarStartTime(displayed.start_date_local),
+      actual ? calendarStartTime(actual.start_date_local) : plannedUnitStartTime(entry.start_date_local),
       plannedEntryDurationLabel(actual, entry),
     ].filter(Boolean).join(" · ");
     appendPlannedSessionHeader(cardSummary, entry, actual);
     cardSummary.append(meta);
-    if (status === "completed" || status === "missed" || status === "skipped") {
-      const statusText = document.createElement("span");
-      statusText.className = "planned-entry-status";
-      statusText.textContent = status === "skipped" ? `Entfallen (${restDayLabel})` : calendarStatusLabel(entry, dateKey, todayKey);
-      cardSummary.append(statusText);
-    }
+    appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey);
     appendPlannedExecution(cardSummary, entry, status);
     const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
     if (profile) cardSummary.append(profile);
     cardSummary.append(cardTitle);
     const conflictSpecs = plannedConflictBadgeSpecs(entry.conflicts);
     if (conflictSpecs.length) cardSummary.append(calendarBadgeRow(conflictSpecs));
-    if (actual && !entry.is_completed_activity) {
-      const target = document.createElement("span");
-      target.className = "planned-session-target";
-      const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
-      if (entry.icu_training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.icu_training_load)}`);
-      target.textContent = `Plan: ${targetParts.join(" · ")}`;
-      cardSummary.append(target);
-    }
+    if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
     appendActualCalendarDetails(details, actual);
@@ -678,14 +698,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       weatherText.title = [weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage", weather.condition, weatherLabel].filter(Boolean).join(": ");
       weatherText.setAttribute("aria-label", weatherText.title);
       heading.append(weatherText);
-    } else {
-      const weatherMissing = document.createElement("span");
-      weatherMissing.className = "planned-day-weather is-missing";
-      weatherMissing.textContent = "Wetter fehlt";
-      if (!state.data?.weather?.configured) weatherMissing.title = "Kein Wetterort im Profil hinterlegt";
-      else if (dateKey < todayKey) weatherMissing.title = "Für diesen Tag wurde keine Vorhersage gespeichert";
-      else weatherMissing.title = "Für diesen Tag ist keine Vorhersage verfügbar";
-      heading.append(weatherMissing);
     }
     day.append(heading);
   }
@@ -802,7 +814,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
     const currentWeekKey = planWeekStart(todayKey);
     const display = state.data?.calendar_display || {};
-    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.checkins, state.data?.competitions, state.loadedAreas.has("feedback")]);
+    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.checkins, state.data?.competitions, state.loadedAreas.has("feedback"), state.data?.weather]);
     if (snapshot === plannedRenderSnapshot && root.childElementCount) {
       if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
       return;
@@ -839,6 +851,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       eventsByDate.get(key).push(entry);
     });
 
+    const upcomingDays = Array.from({ length: (pastWeeks + futureWeeks + 1) * 7 }, (_, offset) => addDateKey(firstWeekKey, offset))
+      .filter((dateKey) => dateKey >= todayKey);
+    if (!upcomingDays.some((dateKey) => plannedWeatherLabel(plannedDayWeather(planningContextByDate.get(dateKey) || {}, dateKey)))) root.append(plannedWeatherHint());
     const view = {
       currentWeekKey,
       eventsByDate,
@@ -865,7 +880,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (!visible.length) {
       const empty = document.createElement("p");
       empty.className = "context-empty";
-      empty.textContent = "Noch keine Einheiten in der Bibliothek.";
+      empty.textContent = "Noch keine Einheiten in der Bibliothek. Der Coach legt hier Einheiten ab, wenn du sie planst.";
       root.append(empty);
       return;
     }
