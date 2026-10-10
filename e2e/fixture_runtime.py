@@ -1461,7 +1461,7 @@ FIXTURE_V6_REST_OFFSET = 9
 FIXTURE_V6_SICK_OFFSET = 13
 FIXTURE_V6_SWIM_OFFSET = 12
 FIXTURE_V6_CAMP_HARD_OFFSET = 7
-FIXTURE_V6_SHORT_ONLY_OFFSET = 16
+FIXTURE_V6_SHORT_ONLY_OFFSET = 9
 
 
 def _fixture_v6_checkin(day, **overrides):
@@ -1505,7 +1505,7 @@ def _fixture_v6_units(today):
             "- 10m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 35m 50%",
             75,
         ),
-        # Weekly [SHORT_ONLY] series: a 90 minute ride exceeds the short limit.
+        # Active [SHORT_ONLY] occurrence (+16 is cancelled): 90 minutes exceed the limit.
         (
             "short-only-ride",
             FIXTURE_V6_SHORT_ONLY_OFFSET,

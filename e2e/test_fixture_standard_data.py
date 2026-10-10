@@ -634,6 +634,11 @@ class StandardFixtureDataTests(unittest.TestCase):
             result = fixture_runtime.seed_preview_demo()
             today = server.ATHLETE_CLOCK.now().date()
             scenarios = self._v6_scenarios(server, today)
+            short_constraints = (
+                server.PLANNING_WORKFLOWS.calendar_conflict_service().constraints(
+                    scenarios["short_units"][0]
+                )
+            )
 
         self.assertEqual(result, {"ready": True})
         self.assertEqual(
@@ -661,6 +666,13 @@ class StandardFixtureDataTests(unittest.TestCase):
         self.assertEqual(
             scenarios["unit_name_counts"],
             {name: 1 for name in V6_UNIT_NAMES},
+        )
+        self.assertEqual(
+            [(item["constraint"], item["reason"]) for item in short_constraints],
+            [("[SHORT_ONLY]", "short_only")],
+        )
+        self.assertEqual(
+            short_constraints[0]["date"], scenarios["short_units"][0]["date"]
         )
 
     def test_v5_database_upgrades_to_v6_scenarios_without_duplicates(self):
