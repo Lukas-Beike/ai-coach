@@ -558,13 +558,24 @@ class GarminFixtureLoader:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError as exc:
-            raise AppError(503, f"Garmin-Testdatei nicht gefunden: {path}") from exc
-        except (OSError, json.JSONDecodeError) as exc:
             raise AppError(
-                503, f"Garmin-Testdatei konnte nicht gelesen werden: {exc}"
+                503,
+                f"Garmin-Testdatei nicht gefunden: {path}",
+                reason="not_configured",
+            ) from exc
+        except (OSError, ValueError) as exc:
+            # ValueError covers malformed JSON and undecodable (non-UTF-8) bytes.
+            raise AppError(
+                503,
+                f"Garmin-Testdatei konnte nicht gelesen werden: {exc}",
+                reason="not_configured",
             ) from exc
         if not isinstance(value, dict):
-            raise AppError(503, "Die Garmin-Testdatei muss ein JSON-Objekt enthalten.")
+            raise AppError(
+                503,
+                "Die Garmin-Testdatei muss ein JSON-Objekt enthalten.",
+                reason="not_configured",
+            )
         today = self._local_now().date()
         start = (
             self._earliest_date
