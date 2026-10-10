@@ -62,7 +62,7 @@ function plannedAppointmentLabel(event) {
   const name = stripCalendarMarkers(event.name) || "Trainingstermin";
   if (event.all_day) return `${name} · ganztägig`;
   const time = /(?:T|\s)(\d{2}:\d{2})/.exec(String(event.start_local || ""));
-  return time && time[1] !== "00:00" ? `${name} · ${time[1]}` : name;
+  return time ? `${name} · ${time[1]}` : name;
 }
 
 function calendarActualActivity(entry) {
@@ -108,8 +108,13 @@ function calendarIntensityLabel(value) {
 
 function calendarStartTime(value) {
   const match = /(?:T|\s)(\d{2}:\d{2})/.exec(String(value || ""));
+  return match ? match[1] : null;
+}
+
+function plannedUnitStartTime(value) {
   // Date-only planned units are stored as midnight; that is not a start time.
-  return match && match[1] !== "00:00" ? match[1] : null;
+  const time = calendarStartTime(value);
+  return time === "00:00" ? null : time;
 }
 
 function appendCalendarFact(root, label, value) {
@@ -597,7 +602,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     card.dataset.sport = activitySportLabel(displayed);
     meta.textContent = [
       activitySportLabel(displayed),
-      calendarStartTime(displayed.start_date_local),
+      actual ? calendarStartTime(actual.start_date_local) : plannedUnitStartTime(entry.start_date_local),
       plannedEntryDurationLabel(actual, entry),
     ].filter(Boolean).join(" · ");
     appendPlannedSessionHeader(cardSummary, entry, actual);
@@ -804,7 +809,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
     const currentWeekKey = planWeekStart(todayKey);
     const display = state.data?.calendar_display || {};
-    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.checkins, state.data?.competitions, state.loadedAreas.has("feedback")]);
+    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.checkins, state.data?.competitions, state.loadedAreas.has("feedback"), state.data?.weather]);
     if (snapshot === plannedRenderSnapshot && root.childElementCount) {
       if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
       return;

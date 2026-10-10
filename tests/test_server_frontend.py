@@ -852,9 +852,11 @@ class ServerFrontendTests(ServerTestCase):
             return styles[start : styles.index("}", start)]
 
         self.assertIn('<html lang="de">', index)
-        # Date-only planned units are stored as midnight and must not show "00:00".
-        self.assertIn('match && match[1] !== "00:00"', plan_views)
-        self.assertIn('time && time[1] !== "00:00"', plan_views)
+        # Date-only planned units are stored as midnight and must not show "00:00";
+        # external appointments keep a genuine midnight start time.
+        self.assertIn("function plannedUnitStartTime(", plan_views)
+        self.assertIn('time === "00:00" ? null : time', plan_views)
+        self.assertIn("return time ? `${name} · ${time[1]}` : name;", plan_views)
         # Extra activities and completed planned units have distinct labels.
         self.assertIn('"✓ Zusätzlich" : "✓ Absolviert"', plan_views)
         self.assertNotIn("Zusätzlich absolviert", plan_views)
