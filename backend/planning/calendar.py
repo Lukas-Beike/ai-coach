@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.calendar.markers import has_marker
 
 _HARD_EFFORT_PATTERNS = (
@@ -106,3 +108,46 @@ def calendar_constraint_decision(
             "marker": "[SHORT_ONLY]",
         }
     return None
+
+
+MARKER_LABELS = {
+    "no_training": "Kein Training",
+    "no_intensity": "Keine Intensität",
+    "short_only": "Nur kurze Einheiten",
+}
+_REASON_BY_MARKER = {
+    "[NO_TRAINING]": "no_training",
+    "[NO_INTENSITY]": "no_intensity",
+    "[SHORT_ONLY]": "short_only",
+}
+COMPETITION_AB_CONFLICT = "competition_ab"
+COMPETITION_C_CONFLICT = "competition_c"
+COMPETITION_CONFLICT_LABELS = {
+    COMPETITION_AB_CONFLICT: "Hartes Training am Vortag oder am Tag eines A/B-Wettkampfs",
+    COMPETITION_C_CONFLICT: "Hartes Training am Tag eines C-Wettkampfs",
+}
+
+
+def marker_label(reason: Any) -> str:
+    return MARKER_LABELS.get(str(reason or ""), "Kalenderbeschränkung")
+
+
+def marker_conflict_message(day: Any, conflicts: list[dict[str, Any]]) -> str:
+    """Name the planned day and the first blocking calendar marker."""
+    first = conflicts[0] if conflicts else {}
+    reason = first.get("reason") or _REASON_BY_MARKER.get(
+        str(first.get("constraint") or "")
+    )
+    iso_day = iso_date_prefix(str(day or first.get("date") or ""))
+    return (
+        f"Am {_german_date(iso_day)} ist „{marker_label(reason)}“ eingetragen. "
+        "Die lokale Einheit verletzt diese Kalenderbeschränkung."
+    )
+
+
+def _german_date(value: str) -> str:
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        return value
+    return f"{parsed.day:02d}.{parsed.month:02d}.{parsed.year}"

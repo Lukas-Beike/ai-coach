@@ -6,7 +6,55 @@ import copy
 import unittest
 from datetime import date, timedelta
 
-from backend.planning.calendar_read_model import project_planning_calendar
+from backend.planning.calendar_read_model import (
+    planned_unit_conflicts,
+    project_planning_calendar,
+)
+
+
+def _unit(name, moving_time=3600, *, day="2026-10-12", **extra):
+    return {
+        "id": f"unit-{name}-{day}",
+        "date": day,
+        "start_date_local": f"{day}T09:00:00",
+        "name": name,
+        "type": "Ride",
+        "moving_time": moving_time,
+        **extra,
+    }
+
+
+def _marker(day="2026-10-12", **flags):
+    return {
+        "id": f"marker-{day}-{sorted(flags)}",
+        "name": "Calendar marker",
+        "event_date": day,
+        "start_local": f"{day}T00:00:00",
+        "end_local": f"{date.fromisoformat(day) + timedelta(days=1)}T00:00:00",
+        "training_relevant": 0,
+        "no_training": 0,
+        "no_intensity": 0,
+        "short_only": 0,
+        **flags,
+    }
+
+
+def _race(day, priority):
+    return {
+        "id": f"race-{priority}",
+        "name": "Race",
+        "event_date": day,
+        "priority": priority,
+        "category": f"RACE_{priority}",
+    }
+
+
+_REST_UNIT = {
+    "id": "rest-unit",
+    "date": "2026-10-12",
+    "name": "Rest day",
+    "duration_minutes": 0,
+}
 
 
 class PlanningCalendarReadModelTests(unittest.TestCase):
@@ -156,6 +204,173 @@ class PlanningCalendarReadModelTests(unittest.TestCase):
         self.assertEqual(
             (local_planned, activities, weather, competitions, external_events),
             originals,
+        )
+
+
+class PlannedUnitCalendarConflictTests(unittest.TestCase):
+    def test_conflict_rules_follow_marker_and_race_priority_table(self):
+        short = _marker(short_only=1)
+        cases = [
+            (
+                "no_training blocks a training unit",
+                _unit("Recovery spin"),
+                [_marker(no_training=1)],
+                [],
+                ["no_training"],
+            ),
+            (
+                "no_training allows a rest unit",
+                _REST_UNIT,
+                [_marker(no_training=1)],
+                [],
+                [],
+            ),
+            (
+                "no_intensity blocks a hard unit",
+                _unit("VO2 intervals"),
+                [_marker(no_intensity=1)],
+                [],
+                ["no_intensity"],
+            ),
+            (
+                "no_intensity allows an explicitly easy unit",
+                _unit("Recovery spin"),
+                [_marker(no_intensity=1)],
+                [],
+                [],
+            ),
+            (
+                "short_only blocks a unit above 60 minutes",
+                _unit("Recovery spin", 5400),
+                [short],
+                [],
+                ["short_only"],
+            ),
+            (
+                "short_only allows a unit at the 60 minute limit",
+                _unit("Recovery spin", 3600),
+                [short],
+                [],
+                [],
+            ),
+            (
+                "A race blocks a hard unit on the day before",
+                _unit("VO2 intervals", day="2026-10-13"),
+                [],
+                [_race("2026-10-14", "A")],
+                ["competition_ab"],
+            ),
+            (
+                "B race blocks a hard unit on race day",
+                _unit("VO2 intervals", day="2026-10-14"),
+                [],
+                [_race("2026-10-14", "B")],
+                ["competition_ab"],
+            ),
+            (
+                "A race allows a hard unit two days before",
+                _unit("VO2 intervals", day="2026-10-12"),
+                [],
+                [_race("2026-10-14", "A")],
+                [],
+            ),
+            (
+                "A race allows an easy unit on the day before",
+                _unit("Recovery spin", day="2026-10-13"),
+                [],
+                [_race("2026-10-14", "A")],
+                [],
+            ),
+            (
+                "C race blocks a hard unit on race day",
+                _unit("VO2 intervals", day="2026-10-14"),
+                [],
+                [_race("2026-10-14", "C")],
+                ["competition_c"],
+            ),
+            (
+                "C race allows a hard unit on the day before",
+                _unit("VO2 intervals", day="2026-10-13"),
+                [],
+                [_race("2026-10-14", "C")],
+                [],
+            ),
+            (
+                "hard unit without markers or races has no conflict",
+                _unit("VO2 intervals"),
+                [],
+                [],
+                [],
+            ),
+            (
+                "marker and race conflicts are reported in source order",
+                _unit("VO2 intervals", day="2026-10-14"),
+                [_marker(day="2026-10-14", no_intensity=1)],
+                [_race("2026-10-14", "A")],
+                ["no_intensity", "competition_ab"],
+            ),
+        ]
+        for name, unit, events, competitions, expected in cases:
+            with self.subTest(name):
+                conflicts = planned_unit_conflicts(unit, events, competitions)
+                self.assertEqual([item["code"] for item in conflicts], expected)
+                self.assertTrue(all(item["label"] for item in conflicts))
+
+    def test_conflict_labels_are_german_marker_and_race_texts(self):
+        conflicts = planned_unit_conflicts(
+            _unit("VO2 intervals", 5400, day="2026-10-14"),
+            [
+                _marker(day="2026-10-14", no_intensity=1),
+                _marker(day="2026-10-14", short_only=1),
+            ],
+            [_race("2026-10-14", "C")],
+        )
+
+        self.assertEqual(
+            conflicts,
+            [
+                {"code": "no_intensity", "label": "Keine Intensität"},
+                {"code": "short_only", "label": "Nur kurze Einheiten"},
+                {
+                    "code": "competition_c",
+                    "label": "Hartes Training am Tag eines C-Wettkampfs",
+                },
+            ],
+        )
+
+    def test_archived_or_deleted_units_have_no_conflicts(self):
+        marked = [_marker(no_training=1)]
+
+        for flag in ("archived", "local_deleted"):
+            with self.subTest(flag):
+                unit = _unit("Recovery spin", **{flag: True})
+                self.assertEqual(planned_unit_conflicts(unit, marked, []), [])
+
+    def test_project_planning_calendar_attaches_conflicts_to_planned_units(self):
+        result = project_planning_calendar(
+            [_unit("Recovery spin"), _unit("VO2 intervals", day="2026-10-13")],
+            [],
+            {},
+            [_race("2026-10-14", "A")],
+            [_marker(no_training=1)],
+            today=date(2026, 10, 10),
+            provider_window={},
+            default_name="Planned workout",
+        )
+
+        by_id = {item["id"]: item for item in result["planned"]}
+        self.assertEqual(
+            by_id["unit-Recovery spin-2026-10-12"]["conflicts"],
+            [{"code": "no_training", "label": "Kein Training"}],
+        )
+        self.assertEqual(
+            by_id["unit-VO2 intervals-2026-10-13"]["conflicts"],
+            [
+                {
+                    "code": "competition_ab",
+                    "label": "Hartes Training am Vortag oder am Tag eines A/B-Wettkampfs",
+                }
+            ],
         )
 
 
