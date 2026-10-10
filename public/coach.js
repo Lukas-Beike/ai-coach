@@ -389,7 +389,8 @@ async function finishChatStream(context) {
   }
   if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
   await refreshCompletedChatStream(context);
-  if (completed) scrollChatToResponseStart();
+  if (completed && state.chatFollowLatest) scrollChatToResponseStart();
+  if (completed) markChatContentArrived();
   invalidateContextPreview();
   return completed ? "completed" : "failed";
 }
@@ -452,6 +453,7 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
   const clientTurnId = AppState.secureToken("turn");
+  if (chatIsNearBottom()) state.chatFollowLatest = true;
   if (state.data) {
     state.data.messages = mergeChatMessages([{ role: "user", content: message, attachment_names: JSON.stringify(attachments.map(item => item.name)), client_turn_id: clientTurnId, created_at: new Date().toISOString(), optimistic: true }]);
     renderMessages(state.data.messages, true);
@@ -982,15 +984,112 @@ function updateChatComposerVisibility() {
   const panel = $("#chatPanel");
   if (!panel) return;
   const jump = $("#chatJumpToComposer");
-  if (jump) jump.hidden = chatIsNearBottom() || !$("#messages")?.childElementCount || !panel.classList.contains("active");
+  const active = panel.classList.contains("active");
+  const nearBottom = chatIsNearBottom();
+  // Reaching the latest content re-enables following; a hidden panel measures the wrong scroller and must not change it.
+  if (active && nearBottom) {
+    state.chatFollowLatest = true;
+    state.chatUnseenContent = false;
+  }
+  if (jump) {
+    jump.hidden = nearBottom || !$("#messages")?.childElementCount || !active;
+    updateChatJumpLabel(jump);
+  }
 }
 
-function jumpToChatComposer() {
+// Content that arrives while the reader is scrolled away is flagged so the jump button can say so.
+function markChatContentArrived() {
+  if (!state.chatFollowLatest) state.chatUnseenContent = true;
+  updateChatComposerVisibility();
+}
+
+function updateChatJumpLabel(jump) {
+  const unseen = Boolean(state.chatUnseenContent) && !state.chatFollowLatest;
+  const name = unseen ? "Zur neuesten Antwort springen" : "Zu den neuesten Nachrichten springen";
+  jump.classList.toggle("has-label", unseen);
+  jump.querySelector(".chat-jump-label")?.toggleAttribute("hidden", !unseen);
+  if (jump.getAttribute("aria-label") !== name) {
+    jump.setAttribute("aria-label", name);
+    jump.title = name;
+  }
+}
+
+// Only a real upward gesture leaves the latest content; programmatic scrolls never reach these listeners.
+let chatTouchLastY = null;
+function chatUserScrolledAway() {
+  if (!$("#chatPanel")?.classList.contains("active")) return;
+  state.chatFollowLatest = false;
+  updateChatComposerVisibility();
+}
+
+function handleChatWheel(event) {
+  if (event.deltaY < 0) chatUserScrolledAway();
+}
+
+function handleChatTouchStart(event) {
+  chatTouchLastY = event.touches[0]?.clientY ?? null;
+}
+
+function handleChatTouchMove(event) {
+  const y = event.touches[0]?.clientY;
+  if (y == null) return;
+  // A finger moving down scrolls the page up, away from the latest content.
+  if (chatTouchLastY != null && y > chatTouchLastY) chatUserScrolledAway();
+  chatTouchLastY = y;
+}
+
+function handleChatScrollKey(event) {
+  if (!["PageUp", "ArrowUp", "Home"].includes(event.key)) return;
+  // Editing the draft moves the caret, not the page.
+  if (event.target?.closest?.("input, textarea, [contenteditable]")) return;
+  chatUserScrolledAway();
+}
+
+// Offsets the app last set or accepted. A scroll that moves above them by more than a few pixels is the reader,
+// including a scrollbar drag, which sends no wheel event. Programmatic scrolls re-anchor through scrollWindowForChat.
+const CHAT_UPWARD_SCROLL_PX = 4;
+const chatScrollAnchors = { window: null, messages: null };
+function chatScrollMovedUp(kind, position) {
+  const anchor = chatScrollAnchors[kind];
+  if (anchor == null || position > anchor) {
+    chatScrollAnchors[kind] = position;
+    return false;
+  }
+  if (position >= anchor - CHAT_UPWARD_SCROLL_PX) return false;
+  chatScrollAnchors[kind] = position;
+  return true;
+}
+
+function scrollWindowForChat(top) {
+  globalThis.scrollTo({ top, behavior: "auto" });
+  chatScrollAnchors.window = globalThis.scrollY;
+}
+
+function chatAcceptsReaderScroll() {
+  return !state.chatInitialScrollPending && !state.chatScrollRestoring && Boolean($("#chatPanel")?.classList.contains("active"));
+}
+
+// A small upward drag near the newest content keeps following; anything further away leaves it.
+function chatReaderScrolledUp() {
+  if (chatIsNearBottom()) return;
+  chatUserScrolledAway();
+}
+
+function handleChatMessagesScroll(event) {
+  const movedUp = chatScrollMovedUp("messages", event.target.scrollTop);
+  if (movedUp && chatAcceptsReaderScroll()) chatReaderScrolledUp();
+  updateChatComposerVisibility();
+}
+
+function jumpToLatestMessages() {
   const input = $("#messageInput");
   if (!input) return;
   const jump = $("#chatJumpToComposer");
   if (jump) jump.hidden = true;
-  input.focus({ preventScroll: true });
+  state.chatFollowLatest = true;
+  state.chatUnseenContent = false;
+  // Touch devices keep the keyboard closed; focusing the draft there would open it.
+  if (shouldRestoreChatInputFocus()) input.focus({ preventScroll: true });
   scrollChatToLatest();
   updateChatComposerVisibility();
 }
@@ -1305,7 +1404,7 @@ function restoreRejectedMessage(message) {
   state.data.messages = state.data.messages.filter((entry) => entry !== message);
   state.rejectedMessages = state.rejectedMessages.filter((entry) => entry.client_turn_id !== message.client_turn_id);
   renderMessages(state.data.messages);
-  jumpToChatComposer();
+  jumpToLatestMessages();
   updateChatControls();
 }
 
@@ -1360,8 +1459,7 @@ function renderMessageNode(message) {
       input.value = String(message.content || "");
       delete input.dataset.requestKind;
       input.dispatchEvent(new Event("input", { bubbles: true }));
-      jumpToChatComposer();
-      input.focus({ preventScroll: true });
+      jumpToLatestMessages();
     });
     actions.append(edit);
   }
@@ -1438,9 +1536,10 @@ function scheduleChatStreamRender(scrollToStart = false) {
     else {
       streaming.classList.toggle("is-recovering", state.chatRequest?.phase === "recovering");
       streaming.innerHTML = markdownToHtml(state.chatStreamText);
-      updateChatComposerVisibility();
+      if (!shouldScrollToStart) keepChatStreamInView(streaming);
+      markChatContentArrived();
     }
-    if (shouldScrollToStart) scrollChatToResponseStart();
+    if (shouldScrollToStart && state.chatFollowLatest) scrollChatToResponseStart();
   });
 }
 
@@ -1467,10 +1566,28 @@ function scrollChatToResponseStart() {
       return;
     }
     const topGap = 16;
-    globalThis.scrollTo({ top: Math.max(0, globalThis.scrollY + target.getBoundingClientRect().top - topGap), behavior: "auto" });
+    scrollWindowForChat(Math.max(0, globalThis.scrollY + target.getBoundingClientRect().top - topGap));
     state.chatResponseMessageId = null;
     requestAnimationFrame(updateChatComposerVisibility);
   });
+}
+
+// While following, growing stream content keeps the newest line above the composer without hiding the start of the reply.
+function keepChatStreamInView(streaming) {
+  if (!state.chatFollowLatest || !$("#chatPanel")?.classList.contains("active")) return;
+  const root = $("#messages");
+  const latest = root && chatLatestVisibleNode(root);
+  const composerTop = $("#chatForm")?.getBoundingClientRect().top;
+  if (!latest || !Number.isFinite(composerTop)) return;
+  const overlap = latest.getBoundingClientRect().bottom - (composerTop - 12);
+  const headroom = streaming.getBoundingClientRect().top - 16;
+  const delta = Math.min(overlap, headroom);
+  if (delta > 0) scrollWindowForChat(globalThis.scrollY + delta);
+}
+
+// The newest visible child: a working indicator, stream, queued or optimistic message can sit below the last persisted reply.
+function chatLatestVisibleNode(root) {
+  return [...root.children].findLast((node) => !node.hidden && node.getClientRects().length > 0) || null;
 }
 
 function scrollChatToLatest() {
@@ -1480,8 +1597,8 @@ function scrollChatToLatest() {
   requestAnimationFrame(() => {
     if (state.chatInitialScrollPending && (!state.initialStateLoaded || document.readyState !== "complete")) return;
     root.scrollTop = root.scrollHeight;
-    const messages = root.querySelectorAll(".message[data-message-id]");
-    const target = messages[messages.length - 1] || root.lastElementChild;
+    chatScrollAnchors.messages = root.scrollTop;
+    const target = chatLatestVisibleNode(root);
     if (!target) return;
     state.chatInitialScrollPending = false;
     const composer = $("#chatForm");
@@ -1494,7 +1611,7 @@ function scrollChatToLatest() {
       viewportBottom,
       Number.isFinite(composerTop) ? composerTop : viewportBottom,
     ) - targetGap;
-    globalThis.scrollTo({ top: Math.max(0, globalThis.scrollY + targetBottom - desiredBottom), behavior: "auto" });
+    scrollWindowForChat(Math.max(0, globalThis.scrollY + targetBottom - desiredBottom));
     requestAnimationFrame(updateChatComposerVisibility);
   });
 }
@@ -1509,9 +1626,9 @@ function restoreChatScrollPosition() {
       state.chatScrollRestoring = false;
       return;
     }
-    globalThis.scrollTo({ top: scrollY, behavior: "auto" });
+    scrollWindowForChat(scrollY);
     requestAnimationFrame(() => {
-      if (panel.classList.contains("active")) globalThis.scrollTo({ top: scrollY, behavior: "auto" });
+      if (panel.classList.contains("active")) scrollWindowForChat(scrollY);
       state.chatScrollRestoring = false;
       updateChatComposerVisibility();
     });
@@ -1520,8 +1637,11 @@ function restoreChatScrollPosition() {
 }
 
 function handleWindowScroll() {
-  if (!state.chatInitialScrollPending && !state.chatScrollRestoring && $("#chatPanel")?.classList.contains("active")) {
+  // The offset is tracked even while the chat is hidden, so a later comparison starts from the real position.
+  const movedUp = chatScrollMovedUp("window", globalThis.scrollY);
+  if (chatAcceptsReaderScroll()) {
     state.chatScrollY = globalThis.scrollY;
+    if (movedUp) chatReaderScrolledUp();
   }
   updateChatComposerVisibility();
 }
@@ -1788,7 +1908,7 @@ function setupCoachEvents() {
       const attachments = await Promise.all(files.map(prepareChatAttachment));
       if (generation !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
       state.chatAttachments = [...(state.chatAttachments || []), ...attachments]; state.chatDraftDirty = true;
-      renderChatAttachments(); jumpToChatComposer();
+      renderChatAttachments(); jumpToLatestMessages();
     } catch (error) { toast(error.message, true); }
     finally { state.chatAttachmentsLoading = false; updateChatControls(); }
   });
@@ -1809,7 +1929,7 @@ function setupCoachEvents() {
   });
   $("#voiceButton").addEventListener("click", toggleVoiceInput);
   $("#chatJumpToComposer").addEventListener("click", () => {
-    jumpToChatComposer();
+    jumpToLatestMessages();
   });
 
   $("#coachAdaptivePlanningButton").addEventListener("click", () => askCoach("Prüfe meine nächsten geplanten Einheiten und schlage sinnvolle Anpassungen vor."));
@@ -1842,5 +1962,9 @@ function setupCoachEvents() {
   });
 
   globalThis.addEventListener("scroll", handleWindowScroll, { passive: true });
-  $("#messages").addEventListener("scroll", updateChatComposerVisibility, { passive: true });
+  globalThis.addEventListener("wheel", handleChatWheel, { passive: true });
+  globalThis.addEventListener("touchstart", handleChatTouchStart, { passive: true });
+  globalThis.addEventListener("touchmove", handleChatTouchMove, { passive: true });
+  globalThis.addEventListener("keydown", handleChatScrollKey);
+  $("#messages").addEventListener("scroll", handleChatMessagesScroll, { passive: true });
 }

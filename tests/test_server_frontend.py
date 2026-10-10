@@ -318,6 +318,30 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("const SYNC_POLL_ACTIVE_MS = 1_500;", app)
         self.assertNotIn("setInterval(() => {\n  if (state.localSync.intervals", app)
 
+    def test_chat_jump_follows_latest_without_stealing_touch_focus(self):
+        public = Path(__file__).resolve().parents[1] / "public"
+        coach = (public / "coach.js").read_text(encoding="utf-8")
+        state = (public / "state.js").read_text(encoding="utf-8")
+        styles = (public / "styles.css").read_text(encoding="utf-8")
+        for path in public.glob("*.js"):
+            self.assertNotIn(
+                "jumpToChatComposer", path.read_text(encoding="utf-8"), path.name
+            )
+        self.assertIn("function jumpToLatestMessages()", coach)
+        self.assertIn("chatLatestVisibleNode(root)", coach)
+        self.assertIn("chatFollowLatest: true", state)
+        self.assertIn("state.chatFollowLatest = false", coach)
+        self.assertIn(
+            "if (shouldRestoreChatInputFocus()) input.focus({ preventScroll: true });",
+            coach,
+        )
+        self.assertIn("Zur neuesten Antwort springen", coach)
+        start = styles.index(".composer .chat-jump {")
+        jump_rule = styles[start : styles.index("}", start)]
+        self.assertIn("var(--composer-height", jump_rule)
+        self.assertIn("var(--composer-bg)", jump_rule)
+        self.assertIn("box-shadow: 0 8px 22px var(--composer-shadow);", jump_rule)
+
     def test_composer_layout_is_identical_while_busy(self):
         styles = (
             Path(__file__).resolve().parents[1] / "public" / "styles.css"

@@ -659,7 +659,7 @@ h2 {
   z-index: 4;
   left: 50%;
   right: auto;
-  bottom: calc(100% + 12px);
+  bottom: calc(var(--composer-height, 100%) + 12px);
   display: grid;
   width: 48px;
   min-width: 48px;
@@ -671,14 +671,17 @@ h2 {
   border-radius: 50%;
   padding: 0;
   color: var(--ink);
-  background: var(--transparent);
-  box-shadow: none;
+  background: linear-gradient(var(--composer-bg), var(--composer-bg)) var(--bg);
+  box-shadow: 0 8px 22px var(--composer-shadow);
   font-weight: 700;
 }
 .composer .chat-jump svg { display: block; width: 21px; height: 21px; transform: translateY(-1px); fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
-.composer .chat-jump:hover { transform: translateX(-50%); border-color: var(--accent-bright); background: var(--transparent); filter: none; }
+.composer .chat-jump:hover { transform: translateX(-50%); border-color: var(--accent-bright); background: linear-gradient(var(--composer-bg), var(--composer-bg)) var(--bg); filter: none; }
 .composer .chat-jump:active { transform: translateX(-50%) scale(.97); }
 .composer .chat-jump[hidden] { display: none; }
+.composer .chat-jump.has-label { width: auto; min-width: 48px; grid-auto-flow: column; gap: 6px; border-radius: 24px; padding: 0 16px; }
+.composer .chat-jump-label { font-size: .9rem; white-space: nowrap; }
+.composer .chat-jump-label[hidden] { display: none; }
 .composer .attachment-button {
   display: grid;
   flex: 0 0 44px;

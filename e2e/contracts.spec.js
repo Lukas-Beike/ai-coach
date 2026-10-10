@@ -276,7 +276,7 @@ test("rejection preserves a newer draft separately from the rejected message", a
   }));
   await page.locator("#messageInput").fill("Rejected original");
   await page.locator("#sendButton").click();
-  await page.evaluate(() => jumpToChatComposer());
+  await page.evaluate(() => jumpToLatestMessages());
   await page.locator("#messageInput").fill("New independent draft");
   await reject();
   await expect(page.locator("#messageInput")).toHaveValue("New independent draft");

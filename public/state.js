@@ -37,6 +37,8 @@ globalThis.AppState = (() => {
     chatInitialScrollPending: true,
     chatScrollY: null,
     chatScrollRestoring: false,
+    chatFollowLatest: true,
+    chatUnseenContent: false,
     stateEventSource: null,
     stateEventReconnectTimer: null,
     stateEventRefreshTimer: null,
