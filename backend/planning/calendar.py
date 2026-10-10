@@ -60,6 +60,9 @@ def workout_is_rest(workout: dict[str, Any]) -> bool:
 
 
 SHORT_ONLY_MAX_MINUTES = 60
+NO_TRAINING_MARKER = "[NO_TRAINING]"
+NO_INTENSITY_MARKER = "[NO_INTENSITY]"
+SHORT_ONLY_MARKER = "[SHORT_ONLY]"
 
 
 def _workout_minutes(workout: dict[str, Any]) -> float | None:
@@ -80,32 +83,32 @@ def calendar_constraint_decision(
     """Centralize external event constraints used by every planning mutation."""
     marker_text = f"{event.get('name', '')} {event.get('description', '')}".casefold()
     no_training = bool(event.get("no_training")) or has_marker(
-        marker_text, "[NO_TRAINING]"
+        marker_text, NO_TRAINING_MARKER
     )
     no_intensity = bool(event.get("no_intensity")) or has_marker(
-        marker_text, "[NO_INTENSITY]"
+        marker_text, NO_INTENSITY_MARKER
     )
     short_only = bool(event.get("short_only")) or has_marker(
-        marker_text, "[SHORT_ONLY]"
+        marker_text, SHORT_ONLY_MARKER
     )
     if no_training and not workout_is_rest(workout):
         return {
             "blocked": True,
             "reason": "no_training",
-            "marker": "[NO_TRAINING]",
+            "marker": NO_TRAINING_MARKER,
         }
     if no_intensity and not workout_is_explicitly_easy(workout):
         return {
             "blocked": True,
             "reason": "no_intensity",
-            "marker": "[NO_INTENSITY]",
+            "marker": NO_INTENSITY_MARKER,
         }
     minutes = _workout_minutes(workout)
     if short_only and minutes is not None and minutes > SHORT_ONLY_MAX_MINUTES:
         return {
             "blocked": True,
             "reason": "short_only",
-            "marker": "[SHORT_ONLY]",
+            "marker": SHORT_ONLY_MARKER,
         }
     return None
 
@@ -116,9 +119,9 @@ MARKER_LABELS = {
     "short_only": "Nur kurze Einheiten",
 }
 _REASON_BY_MARKER = {
-    "[NO_TRAINING]": "no_training",
-    "[NO_INTENSITY]": "no_intensity",
-    "[SHORT_ONLY]": "short_only",
+    NO_TRAINING_MARKER: "no_training",
+    NO_INTENSITY_MARKER: "no_intensity",
+    SHORT_ONLY_MARKER: "short_only",
 }
 COMPETITION_AB_CONFLICT = "competition_ab"
 COMPETITION_C_CONFLICT = "competition_c"

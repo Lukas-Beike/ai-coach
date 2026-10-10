@@ -59,6 +59,16 @@ APPOINTMENT_FIELDS = (
     "short_only",
 )
 MARKER_DAY_KEYS = ("no_training", "no_intensity", "short_only")
+OPTIONAL_DAY_KEYS = (
+    *MARKER_DAY_KEYS,
+    "checkin",
+    "recovery",
+    "health",
+    "weather",
+    "planned",
+    "appointments",
+    "activity_feedback",
+)
 PLANNED_FIELDS = (
     "id",
     "local_id",
@@ -457,13 +467,7 @@ def _sort_and_clean_daily_planning_days(
         value.get("activity_feedback", []).sort(
             key=lambda item: str(item.get("activity_id") or "")
         )
-        for key in MARKER_DAY_KEYS:
-            if not value.get(key):
-                value.pop(key, None)
-        for key in ("checkin", "recovery", "health", "weather"):
-            if not value.get(key):
-                value.pop(key, None)
-        for key in ("planned", "appointments", "activity_feedback"):
+        for key in OPTIONAL_DAY_KEYS:
             if not value.get(key):
                 value.pop(key, None)
     return [days[key] for key in sorted(days)]
