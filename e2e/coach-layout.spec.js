@@ -18,13 +18,7 @@ async function nextFrames(page) {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
-test("coach composer keeps a stable bottom edge and publishes its height @responsive", async ({ page }) => {
-  await openCoachWithScrollableChat(page);
-
-  const composerHeight = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--composer-height").trim());
-  expect(composerHeight).toMatch(/^\d+(\.\d+)?px$/);
-  expect(Number.parseFloat(composerHeight)).toBeGreaterThan(0);
-
+async function expectComposerBottomStable(page) {
   const maxScroll = await page.evaluate(() => document.documentElement.scrollHeight - globalThis.innerHeight);
   expect(maxScroll).toBeGreaterThan(0);
 
@@ -43,4 +37,32 @@ test("coach composer keeps a stable bottom edge and publishes its height @respon
   for (const bottom of bottoms) {
     expect(Math.abs(bottom - bottoms[0])).toBeLessThanOrEqual(1);
   }
+}
+
+test("coach composer keeps a stable bottom edge and publishes its height @responsive", async ({ page }) => {
+  await openCoachWithScrollableChat(page);
+
+  const composerHeight = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--composer-height").trim());
+  expect(composerHeight).toMatch(/^\d+(\.\d+)?px$/);
+  expect(Number.parseFloat(composerHeight)).toBeGreaterThan(0);
+
+  await expectComposerBottomStable(page);
+});
+
+test("coach composer keeps a stable bottom edge in phone landscape @responsive", async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 400 });
+  await openCoachWithScrollableChat(page);
+
+  await expectComposerBottomStable(page);
+});
+
+test("coach composer keeps a stable bottom edge while the voice status is visible @responsive", async ({ page }) => {
+  await openCoachWithScrollableChat(page);
+  await page.evaluate(() => {
+    const status = document.querySelector("#voiceStatus");
+    status.textContent = "Aufnahme läuft";
+    status.hidden = false;
+  });
+
+  await expectComposerBottomStable(page);
 });

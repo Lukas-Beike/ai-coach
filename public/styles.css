@@ -722,7 +722,7 @@ h2 {
 #appShell.is-loading .composer, #appShell.is-loading .bottom-nav { visibility: hidden; }
 .button-spinner { display: none; width: 15px; height: 15px; border: 2px solid var(--spinner-track); border-top-color: var(--white); border-radius: 50%; }
 .login-button.is-loading .button-spinner { display: inline-block; animation: spin .7s linear infinite; }
-.voice-status { margin: 9px 4px 0; color: var(--muted); text-align: center; font-size: .72rem; }
+.voice-status { margin: 0 4px 9px; color: var(--muted); text-align: center; font-size: .72rem; }
 .voice-button .button-spinner { display: inline-block; animation: spin .7s linear infinite; }
 .voice-status.error { color: var(--danger-ink); }
 .voice-status[hidden] { display: none; }
@@ -1287,9 +1287,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   html.chat-keyboard-open #chatPanel .composer::after { content: none; }
   html.chat-keyboard-open #chatPanel { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   html.chat-keyboard-open .coach-working { bottom: calc(148px + env(safe-area-inset-bottom)); }
-}
-@media (max-height: 500px) and (min-width: 560px) {
-  #chatPanel .composer { position: sticky; bottom: 12px; }
 }
 .change-history-list {
   display: grid;
