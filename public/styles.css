@@ -546,14 +546,18 @@ h2 {
   bottom: 12px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
   padding: 7px 7px 7px 13px;
   border: 1px solid var(--line-strong);
   border-radius: 22px;
   background: var(--composer-bg);
   box-shadow: 0 14px 42px var(--composer-shadow);
   backdrop-filter: blur(24px) saturate(145%);
+}
+.composer:focus-within {
+  border-color: var(--focus-accent-border);
+  box-shadow: 0 14px 42px var(--composer-shadow), 0 0 0 3px var(--accent-soft);
 }
 .quick-message-templates {
   position: relative;
@@ -593,7 +597,10 @@ h2 {
 .composer .quick-message-templates button:hover { border-color: var(--focus-accent-border); background: var(--accent-soft); }
 .composer .quick-message-templates button:active { transform: scale(.97); }
 .composer textarea {
+  width: 100%;
+  min-width: 0;
   max-height: 150px;
+  max-height: 40dvh;
   resize: none;
   border: 0;
   outline: 0;
@@ -602,13 +609,20 @@ h2 {
   background: var(--transparent);
 }
 .composer textarea::placeholder { color: var(--subtle); }
-.composer-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.composer-actions { display: flex; align-items: flex-end; gap: 6px; flex-wrap: nowrap; }
 .composer-actions button { min-height: 44px; }
-.composer.is-busy .voice-button { display: none; }
 .composer .voice-button {
+  display: grid;
+  flex: 0 0 44px;
+  place-items: center;
+  width: 44px;
   min-width: 44px;
-  padding: 9px 11px;
+  height: 44px;
+  min-height: 44px;
+  margin-inline-end: auto;
+  padding: 0;
   border: 1px solid var(--line-strong);
+  border-radius: 50%;
   color: var(--ink);
   background: var(--surface-raised);
   box-shadow: none;
@@ -667,16 +681,22 @@ h2 {
 .composer .chat-jump[hidden] { display: none; }
 .composer .attachment-button {
   display: grid;
+  flex: 0 0 44px;
   place-items: center;
   height: 44px;
   width: 44px;
   min-width: 44px;
   justify-content: center;
   padding: 0;
+  border: 1px solid var(--line-strong);
   border-radius: 50%;
+  color: var(--ink);
+  background: var(--surface-raised);
+  box-shadow: none;
   font-size: 1.4rem;
   line-height: 1;
 }
+.composer .attachment-button:hover { border-color: var(--focus-accent-border); background: var(--surface); }
 .composer .attachment-button svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
 .training-focus-distribution { margin: 18px 0; }
 #sessionPerformance > h3 { display: flex; align-items: center; gap: 8px; }
@@ -1079,7 +1099,7 @@ input, textarea, select {
 }
 textarea { line-height: 1.45; overflow-wrap: anywhere; }
 input::placeholder, textarea::placeholder { color: var(--subtle); }
-input:focus, textarea:focus, select:focus { border-color: var(--accent-bright); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
+input:focus, textarea:focus:not(#messageInput), select:focus { border-color: var(--accent-bright); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 .bottom-nav {
   position: fixed;
@@ -1198,10 +1218,6 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
     font-weight: 700;
     pointer-events: none;
   }
-  .composer.is-busy { grid-template-columns: minmax(0, 1fr); padding-left: 7px; }
-  .composer.is-busy textarea { grid-column: 1 / -1; }
-  .composer.is-busy .composer-actions { display: flex; width: 100%; grid-column: 1 / -1; }
-  .composer.is-busy .composer-actions button:not(.attachment-button):not(.composer-stop-button):not(#sendButton) { min-width: 0; flex: 1 1 0; padding-right: 9px; padding-left: 9px; }
   .coach-provider-status { grid-template-columns: 1fr; }
   h1 { font-size: 1.55rem; }
   h2 { font-size: 1.35rem; }
@@ -1373,8 +1389,14 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .chat-operation-status[hidden] { display: none; }
 .chat-operation-status button { min-height: 44px; }
 
-.chat-attachments { display: flex; gap: .4rem; flex-wrap: wrap; grid-column: 1 / -1; }
-.chat-attachments button { max-width: 100%; overflow-wrap: anywhere; font-size: .8rem; }
+.chat-attachments { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; grid-column: 1 / -1; overflow-x: auto; scrollbar-width: none; }
+.chat-attachments::-webkit-scrollbar { display: none; }
+.chat-attachment { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; max-width: min(100%, 280px); min-height: 44px; padding: 0 0 0 11px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--ink); background: var(--control-bg); font-size: .78rem; }
+.chat-attachment-icon { display: block; flex: 0 0 auto; width: 16px; height: 16px; fill: none; stroke: var(--subtle); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.chat-attachment-name { min-width: 0; max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+.chat-attachment-meta { flex: 0 0 auto; color: var(--subtle); font-size: .68rem; font-weight: 650; white-space: nowrap; }
+.composer .chat-attachment-remove { display: grid; flex: 0 0 44px; place-items: center; width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 50%; color: var(--subtle); background: var(--transparent); box-shadow: none; font-size: 1.25rem; font-weight: 500; line-height: 1; }
+.composer .chat-attachment-remove:hover { color: var(--ink); background: var(--transparent); filter: none; }
 
 
 .nutrition-toolbar { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; margin: 20px 0; }

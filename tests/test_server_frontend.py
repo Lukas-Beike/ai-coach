@@ -318,15 +318,12 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("const SYNC_POLL_ACTIVE_MS = 1_500;", app)
         self.assertNotIn("setInterval(() => {\n  if (state.localSync.intervals", app)
 
-    def test_mobile_busy_composer_keeps_round_actions_and_centers_controls(self):
+    def test_composer_layout_is_identical_while_busy(self):
         styles = (
             Path(__file__).resolve().parents[1] / "public" / "styles.css"
         ).read_text(encoding="utf-8")
-        self.assertIn(".composer-actions { display: flex; align-items: center;", styles)
-        self.assertIn(
-            ".composer.is-busy .composer-actions button:not(.attachment-button):not(.composer-stop-button):not(#sendButton)",
-            styles,
-        )
+        self.assertIn(".composer-actions { display: flex; align-items: flex-end;", styles)
+        self.assertNotIn(".composer.is-busy", styles)
 
     def test_mobile_chat_layout_keeps_composer_clear_of_navigation_and_keyboard(self):
         coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(

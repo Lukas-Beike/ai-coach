@@ -655,7 +655,9 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     });
     expect(await page.evaluate(() => window.__chatTest.draftStayedEnabled)).toBe(true);
     await input.fill("Entwurf beim Laden behalten.");
-    await input.press("Enter");
+    // Touch Enter inserts a line break, so submit the form directly there.
+    if (touchProject) await page.locator("#chatForm").evaluate((form) => form.requestSubmit());
+    else await input.press("Enter");
     await expect(input).toHaveValue("Entwurf beim Laden behalten.");
     await page.evaluate(() => window.__chatTest.restoreMessages());
     await input.fill("");
