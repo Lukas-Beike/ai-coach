@@ -1,0 +1,1254 @@
+{
+  "description": "Ratchet baseline for provider-specific coupling outside backend/providers/ and backend/canonical/. Entries may only shrink: move new coupling behind a provider adapter or canonical model, and regenerate this file after removing coupling.",
+  "regeneration": "python tests/provider_coupling.py --snapshot",
+  "entries": [
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/activities/duplicates.py",
+      "token": "startTimeLocal",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/athlete/equipment.py",
+      "token": "gearName",
+      "count": 3
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/athlete/equipment.py",
+      "token": "gearUUID",
+      "count": 6
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/activity_validation.py",
+      "token": "functionalThresholdPower",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/activity_validation.py",
+      "token": "vO2MaxValue",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/body.py",
+      "token": "calendarDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/body.py",
+      "token": "functionalThresholdPower",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/body.py",
+      "token": "summaryDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/body.py",
+      "token": "weightKg",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/chart_history.py",
+      "token": "calendarDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/chart_history.py",
+      "token": "summaryDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_metric_history.py",
+      "token": "calendarDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_metric_history.py",
+      "token": "functionalThresholdPower",
+      "count": 2
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_metric_history.py",
+      "token": "summaryDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_metrics.py",
+      "token": "maxHeartRateUsed",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_observations.py",
+      "token": "calendarDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_observations.py",
+      "token": "startTimeLocal",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_observations.py",
+      "token": "summaryDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_observations.py",
+      "token": "timestampGMT",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "calendarDate",
+      "count": 16
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "functionalThresholdPower",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "hrvLastNight",
+      "count": 2
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "hrvWeeklyAvg",
+      "count": 2
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "lastNightAvg",
+      "count": 2
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "restingHeartRate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "sleepTimeSeconds",
+      "count": 2
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "startTimeLocal",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "summaryDate",
+      "count": 5
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "trainingReadinessScore",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "vO2MaxValue",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "weeklyAvg",
+      "count": 2
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_projection.py",
+      "token": "weightKg",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_weight.py",
+      "token": "calendarDate",
+      "count": 2
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_weight.py",
+      "token": "summaryDate",
+      "count": 2
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_weight.py",
+      "token": "timestampGMT",
+      "count": 3
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/garmin_weight.py",
+      "token": "weightKg",
+      "count": 2
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/personal_recovery.py",
+      "token": "lastNightAvg",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/personal_recovery.py",
+      "token": "restingHeartRate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/personal_recovery.py",
+      "token": "sleepTimeSeconds",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/planning_recovery.py",
+      "token": "calendarDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/planning_recovery.py",
+      "token": "hrvLastNight",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/planning_recovery.py",
+      "token": "hrvWeeklyAvg",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/planning_recovery.py",
+      "token": "lastNightAvg",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/planning_recovery.py",
+      "token": "restingHeartRate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/planning_recovery.py",
+      "token": "sleepTimeSeconds",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/planning_recovery.py",
+      "token": "trainingReadinessScore",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/planning_recovery.py",
+      "token": "weeklyAvg",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/recovery.py",
+      "token": "calendarDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/recovery.py",
+      "token": "summaryDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/recovery_context.py",
+      "token": "hrvLastNight",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/recovery_context.py",
+      "token": "hrvWeeklyAvg",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/recovery_context.py",
+      "token": "lastNightAvg",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/recovery_context.py",
+      "token": "restingHeartRate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/recovery_context.py",
+      "token": "sleepTimeSeconds",
+      "count": 2
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/recovery_context.py",
+      "token": "weeklyAvg",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/training_focus.py",
+      "token": "startTimeLocal",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/performance/wellness.py",
+      "token": "calendarDate",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/planning/context.py",
+      "token": "vO2MaxValue",
+      "count": 1
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/sync/garmin.py",
+      "token": "calendarDate",
+      "count": 2
+    },
+    {
+      "rule": "garmin_wire_key",
+      "path": "backend/sync/garmin.py",
+      "token": "summaryDate",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/calendar_projection.py",
+      "token": "icu_intensity",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/calendar_projection.py",
+      "token": "icu_pace",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/calendar_projection.py",
+      "token": "icu_rpe",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/calendar_projection.py",
+      "token": "icu_training_load",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/calendar_projection.py",
+      "token": "icu_weighted_avg_speed",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/calendar_projection.py",
+      "token": "icu_weighted_avg_watts",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/detail_projection.py",
+      "token": "icu_ftp",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/detail_projection.py",
+      "token": "icu_intensity",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/detail_projection.py",
+      "token": "icu_pace",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/detail_projection.py",
+      "token": "icu_rolling_ftp",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/detail_projection.py",
+      "token": "icu_rpe",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/detail_projection.py",
+      "token": "icu_training_load",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/detail_projection.py",
+      "token": "icu_weighted_avg_speed",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/detail_projection.py",
+      "token": "icu_weighted_avg_watts",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/matching.py",
+      "token": "icu_training_load",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/workout_profile.py",
+      "token": "icu_ftp",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/activities/workout_text.py",
+      "token": "icu_training_load",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/coach/context.py",
+      "token": "icu_intensity",
+      "count": 4
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/coach/context.py",
+      "token": "icu_pace",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/coach/context.py",
+      "token": "icu_rpe",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/coach/context.py",
+      "token": "icu_training_load",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/coach/context.py",
+      "token": "icu_weighted_avg_speed",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/coach/context.py",
+      "token": "icu_weighted_avg_watts",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/nutrition/fueling.py",
+      "token": "icu_training_load",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/activity_validation.py",
+      "token": "icu_eftp",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/activity_validation.py",
+      "token": "icu_ftp",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/activity_validation.py",
+      "token": "icu_intensity",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/activity_validation.py",
+      "token": "icu_pace",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/activity_validation.py",
+      "token": "icu_rpe",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/activity_validation.py",
+      "token": "icu_training_load",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/activity_validation.py",
+      "token": "icu_vo2max",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/activity_validation.py",
+      "token": "icu_weighted_avg_speed",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/activity_validation.py",
+      "token": "icu_weighted_avg_watts",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/context.py",
+      "token": "icu_ftp",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/context.py",
+      "token": "icu_w_prime",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/current_metrics.py",
+      "token": "icu_eftp",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/current_metrics.py",
+      "token": "icu_ftp",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/eftp.py",
+      "token": "icu_eftp",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/load.py",
+      "token": "icu_training_load",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/session_analysis.py",
+      "token": "icu_ftp",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/tag_impact.py",
+      "token": "icu_training_load",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/training_report.py",
+      "token": "icu_hr_zone_times",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/training_report.py",
+      "token": "icu_training_load",
+      "count": 7
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/performance/training_report.py",
+      "token": "icu_zone_times",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/adaptive.py",
+      "token": "icu_intensity",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/adaptive.py",
+      "token": "icu_training_load",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_atl",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_ctl",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_eftp",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_ftp",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_intensity",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_pace",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_rpe",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_training_load",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_vo2max",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_w_prime",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_weighted_avg_speed",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/context.py",
+      "token": "icu_weighted_avg_watts",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/library.py",
+      "token": "icu_intensity",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/library.py",
+      "token": "icu_training_load",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/planned_units.py",
+      "token": "icu_intensity",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/planned_units.py",
+      "token": "icu_training_load",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/season_preparation.py",
+      "token": "icu_intensity",
+      "count": 3
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/season_preparation.py",
+      "token": "icu_training_load",
+      "count": 3
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/planning/target_snapshot.py",
+      "token": "icu_ftp",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/sync/activity_details.py",
+      "token": "icu_intervals",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/sync/reconcile.py",
+      "token": "icu_intensity",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "backend/sync/reconcile.py",
+      "token": "icu_training_load",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "public/activity-details.js",
+      "token": "icu_training_load",
+      "count": 2
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "public/plan-views.js",
+      "token": "icu_intensity",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "public/plan-views.js",
+      "token": "icu_rpe",
+      "count": 1
+    },
+    {
+      "rule": "icu_identifier",
+      "path": "public/plan-views.js",
+      "token": "icu_training_load",
+      "count": 14
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/activities/duplicate_service.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/activities/duplicates.py",
+      "token": "garmin",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/activities/duplicates.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/activities/identity.py",
+      "token": "garmin",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/athlete/equipment.py",
+      "token": "garmin",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/calendar/canonical.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/adaptive_apply.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/authorization.py",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/authorization.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/context.py",
+      "token": "garmin",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/context.py",
+      "token": "intervals",
+      "count": 5
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/context_selection.py",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/context_selection.py",
+      "token": "intervals",
+      "count": 4
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/dialogue_action.py",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/dialogue_action.py",
+      "token": "intervals",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/outcomes.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/proposal_creation.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/proposal_validation.py",
+      "token": "intervals",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/sync_tools.py",
+      "token": "intervals",
+      "count": 7
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/tool_preparation.py",
+      "token": "intervals",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/tool_schemas.py",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/coach/tool_schemas.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/diagnostics/report.py",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/errors.py",
+      "token": "garmin",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/errors.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/http_api/bootstrap_state.py",
+      "token": "garmin",
+      "count": 4
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/http_api/bootstrap_state.py",
+      "token": "intervals",
+      "count": 5
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/http_api/nutrition.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/http_api/public_performance.py",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/http_api/public_state.py",
+      "token": "garmin",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/http_api/public_state.py",
+      "token": "intervals",
+      "count": 5
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/http_api/state_versions.py",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/http_api/sync_commands.py",
+      "token": "garmin",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/http_api/sync_commands.py",
+      "token": "intervals",
+      "count": 4
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/performance/morning_battery_service.py",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/performance/training_report.py",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/planning/calendar.py",
+      "token": "intervals",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/planning/context.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/planning/planned_unit_service.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/planning/planned_units.py",
+      "token": "intervals",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/activity_details.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/commands.py",
+      "token": "intervals",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/daily.py",
+      "token": "garmin",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/daily.py",
+      "token": "intervals",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/executor.py",
+      "token": "garmin",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/executor.py",
+      "token": "intervals",
+      "count": 5
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/freshness.py",
+      "token": "garmin",
+      "count": 6
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/freshness.py",
+      "token": "intervals",
+      "count": 16
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/full_resync.py",
+      "token": "garmin",
+      "count": 5
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/full_resync.py",
+      "token": "intervals",
+      "count": 6
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/garmin.py",
+      "token": "garmin",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/garmin_service.py",
+      "token": "garmin",
+      "count": 4
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/gates.py",
+      "token": "garmin",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/gates.py",
+      "token": "intervals",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/intervals.py",
+      "token": "intervals",
+      "count": 6
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/jobs.py",
+      "token": "garmin",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/jobs.py",
+      "token": "intervals",
+      "count": 9
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/performance.py",
+      "token": "intervals",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/plan_commands.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/queue.py",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/queue.py",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/scheduler.py",
+      "token": "garmin",
+      "count": 6
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/scheduler.py",
+      "token": "intervals",
+      "count": 8
+    },
+    {
+      "rule": "provider_literal",
+      "path": "backend/sync/state.py",
+      "token": "intervals",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "public/activity-details.js",
+      "token": "intervals",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "public/analysis.js",
+      "token": "garmin",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "public/app.js",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "public/app.js",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "public/state-loader.js",
+      "token": "garmin",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "public/sync-actions.js",
+      "token": "garmin",
+      "count": 2
+    },
+    {
+      "rule": "provider_literal",
+      "path": "public/sync-status.js",
+      "token": "garmin",
+      "count": 6
+    },
+    {
+      "rule": "provider_literal",
+      "path": "public/sync-status.js",
+      "token": "intervals",
+      "count": 3
+    },
+    {
+      "rule": "provider_literal",
+      "path": "public/views.js",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "public/views.js",
+      "token": "intervals",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "server.py",
+      "token": "garmin",
+      "count": 1
+    },
+    {
+      "rule": "provider_literal",
+      "path": "server.py",
+      "token": "intervals",
+      "count": 1
+    }
+  ]
+}
