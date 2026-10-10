@@ -253,7 +253,7 @@ function rejectChatStreamResponse(error, context) {
     renderChatAttachments();
     const input = $("#messageInput");
     if (input.value.trim()) state.rejectedMessages.push({ role: "user", content: message, client_turn_id: clientTurnId, error: "Bitte erneut anmelden." });
-    else input.value = message;
+    else { input.value = message; resizeChatInput(input); }
     state.chatDraftDirty = true;
   }
   throw error;
@@ -407,6 +407,7 @@ async function recoverChatRequestFailure(error, context) {
     } else {
       state.data.messages = (state.data.messages || []).filter((entry) => !(entry.optimistic && entry.client_turn_id === clientTurnId));
       input.value = message;
+      resizeChatInput(input);
       state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
       renderChatAttachments();
     }
@@ -1297,6 +1298,7 @@ function restoreRejectedMessage(message) {
   const input = $("#messageInput");
   if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
   input.value = message.content;
+  resizeChatInput(input);
   state.chatAttachments = message.attachments || [];
   renderChatAttachments();
   state.chatDraftDirty = true;
@@ -1667,21 +1669,57 @@ async function refreshChatHistoryState() {
 }
 
 
+function chatAttachmentKind(name) {
+  if (/\.gpx$/i.test(name)) return "GPX";
+  if (/\.fit$/i.test(name)) return "FIT";
+  return "Bild";
+}
+
+function chatAttachmentSize(item) {
+  const data = String(item.data || "");
+  let padding = 0;
+  while (padding < 2 && data[data.length - 1 - padding] === "=") padding += 1;
+  const bytes = Math.max(0, Math.floor(data.length * 3 / 4) - padding);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 }).format(Math.round(bytes / 1024))} KB`;
+  return `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 }).format(bytes / (1024 * 1024))} MB`;
+}
+
 function renderChatAttachments() {
   const list = $("#chatAttachments");
   if (!list) return;
   list.replaceChildren();
   for (const [index, item] of (state.chatAttachments || []).entries()) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = `${item.name} ×`;
-    button.setAttribute("aria-label", `${item.name} entfernen`);
-    button.addEventListener("click", () => {
+    const chip = document.createElement("div");
+    chip.className = "chat-attachment";
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("class", "chat-attachment-icon");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("focusable", "false");
+    const iconPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    iconPath.setAttribute("d", "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5");
+    icon.append(iconPath);
+    const name = document.createElement("span");
+    name.className = "chat-attachment-name";
+    name.textContent = item.name;
+    name.title = item.name;
+    const meta = document.createElement("span");
+    meta.className = "chat-attachment-meta";
+    meta.textContent = `${chatAttachmentKind(item.name)} · ${chatAttachmentSize(item)}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "chat-attachment-remove";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Anhang ${item.name} entfernen`);
+    remove.title = `Anhang ${item.name} entfernen`;
+    remove.addEventListener("click", () => {
       state.chatAttachments.splice(index, 1);
       renderChatAttachments();
       updateChatControls();
     });
-    list.append(button);
+    chip.append(icon, name, meta, remove);
+    list.append(chip);
   }
   list.hidden = !list.childElementCount;
   updateChatComposerVisibility();
@@ -1716,8 +1754,28 @@ function publishComposerHeight() {
   publish();
 }
 
+// Decides what Enter does in the chat draft. Touch-first devices keep Enter for
+// line breaks (the send button sends); desktop Enter sends and Shift+Enter breaks
+// the line. IME composition never sends.
+function chatEnterAction({ key, shiftKey = false, modifierKey = false, isComposing = false, touchFirst = false } = {}) {
+  if (key !== "Enter" || isComposing) return "none";
+  // Ctrl/Cmd+Enter keeps sending available to physical keyboards on touch devices.
+  if (touchFirst) return modifierKey && !shiftKey ? "send" : "newline";
+  return shiftKey ? "newline" : "send";
+}
+
+// Grows the draft up to the CSS max-height; the scrollbar appears only once the
+// content no longer fits.
+function resizeChatInput(input) {
+  input.style.overflowY = "hidden";
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight}px`;
+  if (input.scrollHeight > input.clientHeight + 1) input.style.overflowY = "auto";
+}
+
 function setupCoachEvents() {
   publishComposerHeight();
+  $("#messageInput").setAttribute("enterkeyhint", hasTouchFirstInput() ? "enter" : "send");
   $("#attachmentButton").addEventListener("click", () => $("#attachmentInput").click());
 
   $("#attachmentInput").addEventListener("change", async (event) => {
@@ -1763,23 +1821,24 @@ function setupCoachEvents() {
     void loadContextPreview();
   });
   $("#messageInput").addEventListener("input", (event) => {
+    // Capture the scroll position before the draft grows; only a reader already at the latest message follows the growth.
     const keepLatestVisible = $("#chatPanel")?.classList.contains("active") && chatIsNearBottom();
     state.chatDraftDirty = Boolean(event.target.value.trim());
-    event.target.style.height = "auto";
-    event.target.style.height = `${Math.min(event.target.scrollHeight, 150)}px`;
+    resizeChatInput(event.target);
     updateChatControls();
-    if (keepLatestVisible) {
-      requestAnimationFrame(() => {
-        globalThis.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
-        updateChatComposerVisibility();
-      });
-    }
+    if (keepLatestVisible) scrollChatToLatest();
   });
   $("#messageInput").addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-      event.preventDefault();
-      $("#chatForm").requestSubmit();
-    }
+    const action = chatEnterAction({
+      key: event.key,
+      shiftKey: event.shiftKey,
+      modifierKey: event.ctrlKey || event.metaKey,
+      isComposing: event.isComposing || event.keyCode === 229,
+      touchFirst: hasTouchFirstInput(),
+    });
+    if (action !== "send") return;
+    event.preventDefault();
+    $("#chatForm").requestSubmit();
   });
 
   globalThis.addEventListener("scroll", handleWindowScroll, { passive: true });

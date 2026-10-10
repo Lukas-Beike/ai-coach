@@ -15,7 +15,7 @@ test("@responsive nutrition diary and saved meals remain read-only and preserve 
   const send = async (text) => {
     await page.locator('a[href="#coach"]:visible').first().click();
     await page.locator("#messageInput").fill(text);
-    await page.locator("#messageInput").press("Enter");
+    await page.locator("#sendButton").click();
     await expect.poll(() => page.evaluate(() => !state.busy && !state.chatServerOperationId && !state.chatRequest)).toBe(true);
   };
   await send("E2E nutrition: confirm meal");
@@ -234,7 +234,7 @@ test("@responsive composite meal shows immutable ingredient snapshots and proven
   const initialEntries = await page.evaluate(async () => (await api("/api/nutrition/day")).entry_count);
   await page.goto("/#coach");
   await page.locator("#messageInput").fill("E2E nutrition: mixed meal");
-  await page.locator("#messageInput").press("Enter");
+  await page.locator("#sendButton").click();
   await expect.poll(() => page.evaluate(() => !state.busy && !state.chatServerOperationId && !state.chatRequest)).toBe(true);
   await expect.poll(() => page.evaluate(async () => (await api("/api/nutrition/day")).entry_count)).toBe(initialEntries + 1);
   await page.goto("/#nutrition/diary");
