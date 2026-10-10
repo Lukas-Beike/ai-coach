@@ -11,8 +11,9 @@ function renderNotificationStatus() {
   else if (permission === "denied") node.textContent = "Im Browser blockiert";
   else if (permission === "unsupported") node.textContent = "Von diesem Browser nicht unterstützt";
   else node.textContent = "Noch nicht aktiviert";
-  button.disabled = permission === "granted" || permission === "unsupported";
-  button.textContent = permission === "granted" ? "Aktiviert" : "Benachrichtigungen aktivieren";
+  button.hidden = permission === "granted";
+  button.disabled = permission === "unsupported";
+  button.textContent = "Benachrichtigungen aktivieren";
 }
 
 async function enableNotifications() {

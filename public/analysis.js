@@ -40,6 +40,15 @@ function analysisNumber(value, unit) {
   return AppFormat.number(numeric, { digits: Math.max(1, 2 - Math.floor(Math.log10(Math.abs(numeric)))) });
 }
 
+function analysisCountLabel(count, singular, plural) {
+  const value = Number.isFinite(Number(count)) ? Number(count) : 0;
+  return `${value.toLocaleString("de-DE")} ${value === 1 ? singular : plural}`;
+}
+
+function analysisPercent(value) {
+  return `${Number(value).toLocaleString("de-DE", { maximumFractionDigits: 1 })}%`;
+}
+
 function analysisLegendText(item, latest, unit) {
   if (!latest) return `${item.label}: keine Werte`;
   return `${item.label}: ${analysisPointValue(item, latest, unit)} · ${dateLabel(latest.observedDate || latest.date)}`;
@@ -1127,7 +1136,7 @@ function localEquipmentCard(item) {
   const usage = item.usage || {};
   card.append(reportNode("h4", item.name));
   card.append(reportNode("p", [KIND_LABELS[item.kind] || item.kind, item.sport_pending ? "Sportart offen" : (SPORT_LABELS[item.sport] || item.sport), item.parent_pending ? "Fahrrad offen" : "", item.status === "archived" ? "ausgemustert" : "aktiv"].filter(Boolean).join(" \u00b7 ")));
-  card.append(reportNode("p", `${analysisValue(usage.distance_km, "km")} \u00b7 ${analysisValue(usage.hours, "h")} \u00b7 ${usage.assigned_sessions || 0} zugeordnete Einheiten`));
+  card.append(reportNode("p", `${analysisValue(usage.distance_km, "km")} \u00b7 ${analysisValue(usage.hours, "h")} \u00b7 ${analysisCountLabel(usage.assigned_sessions, "zugeordnete Einheit", "zugeordnete Einheiten")}`));
   const garminStatus = String(item.garmin_status || "").trim();
   if (garminStatus && normalizeEquipmentStatus(garminStatus) !== item.status) {
     card.append(reportNode("p", `Statuskonflikt \u00b7 Coach: ${item.status === "archived" ? "archiviert" : "aktiv"} \u00b7 Garmin: ${garminStatus}`, "muted"));
@@ -1169,7 +1178,7 @@ function garminEquipmentCard(item) {
   const card = reportNode("section", null, "garmin-equipment-card");
   card.append(reportNode("h4", item.name));
   card.append(reportNode("p", [KIND_LABELS[item.kind] || item.kind, item.garmin_status || "Unbekannter Garmin-Status"].filter(Boolean).join(" \u00b7 ")));
-  if (item.sessions != null) card.append(reportNode("p", `${item.sessions} Einheiten`));
+  if (item.sessions != null) card.append(reportNode("p", `${analysisCountLabel(item.sessions, "Einheit", "Einheiten")}`));
   appendEquipmentLifetime(card, item.lifetime, item.distance_km, item.goal_km);
   return card;
 }
@@ -1196,8 +1205,8 @@ function appendEquipmentLifetime(card, lifetime, usageKm, targetKm) {
   progress.max = 100;
   progress.value = Math.min(100, Math.max(0, Number.isFinite(lifetime?.progress_percent) ? lifetime.progress_percent : percent));
   const overage = percent > 100;
-  progress.setAttribute("aria-label", `${card.querySelector("h4")?.textContent || "Ausr\u00fcstung"}: ${percent}% Lebensdauer${overage ? ", Ziel \u00fcberschritten" : ""}`);
-  card.append(progress, reportNode("p", `${analysisValue(usage, "km")} von ${analysisValue(target, "km")} \u00b7 ${percent}%${overage ? " \u00b7 Ziel \u00fcberschritten" : ""}`));
+  progress.setAttribute("aria-label", `${card.querySelector("h4")?.textContent || "Ausr\u00fcstung"}: ${analysisPercent(percent)} Lebensdauer${overage ? ", Ziel \u00fcberschritten" : ""}`);
+  card.append(progress, reportNode("p", `${analysisValue(usage, "km")} von ${analysisValue(target, "km")} \u00b7 ${analysisPercent(percent)}${overage ? " \u00b7 Ziel \u00fcberschritten" : ""}`));
 }
 
 function seasonEventCard(event, generation, { open = false } = {}) {
@@ -1208,7 +1217,7 @@ function seasonEventCard(event, generation, { open = false } = {}) {
   summary.append(reportNode("h4", `${event.name} · ${dateLabel(event.event_date)} · Priorität ${event.priority}`), reportNode("span", when, "season-event-when"));
   section.append(summary);
   const phase = {base:"Basis",build:"Aufbau",peak:"Spezifische Vorbereitung",taper:"Taper",completed:"Vergangen"}[event.phase];
-  section.append(reportNode("p", `${when} · kalendarische Phase: ${phase} · ${event.preparation.sessions_84_days} passende Einheiten in 84 Tagen`));
+  section.append(reportNode("p", `${when} · kalendarische Phase: ${phase} · ${analysisCountLabel(event.preparation.sessions_84_days, "passende Einheit", "passende Einheiten")} in 84 Tagen`));
   const weekly = reportNode("details"); weekly.append(reportNode("summary", `Daten für ${event.preparation.weeks_with_recorded_training} von 12 Wochen mit erfasstem sportartspezifischem Training vorhanden.`));
   for (const week of event.preparation.weeks || []) weekly.append(reportNode("p", seasonWeekSummary(week)));
   weekly.append(reportNode("p", "Wochen ohne Aufzeichnung beweisen keine Trainingspause; Umfang enthält nur lokal bekannte Einheiten.", "muted")); section.append(weekly);
@@ -1252,7 +1261,7 @@ function appendSeasonEvidence(preparation, section) {
   details.append(reportNode("p", `Zielkontext · Sport: ${target.sport || "unbekannt"} · Distanz: ${target.distance_confirmed ? seasonDistance(target.distance_meters) : "unbekannt"} · Ziel: ${target.target_confirmed ? target.target : "unbekannt"} · Quelle: ${target.source || "unbekannt"}`));
   details.append(reportNode("p", `Wöchentlicher beobachteter Umfang · Status: ${seasonStatusLabel(weekly.status)} · ${weekly.weeks_with_sessions ?? 0}/${weekly.weeks_total ?? 12} Wochen mit Einheiten · ${weekly.sessions ?? 0} Einheiten · Dauer: ${seasonDuration(weekly.duration_seconds)} (${weekly.duration_known_sessions ?? 0} bekannte Einheiten) · Distanz: ${seasonDistance(weekly.distance_meters)} (${weekly.distance_known_sessions ?? 0} bekannte Einheiten) · Quelle: ${weekly.source || "unbekannt"}`));
   appendSeasonWeeklyHistory(preparation.weeks || [], weekly.source || "Intervals.icu recorded activities", details);
-  details.append(reportNode("p", `Lange Einheit · Status: ${seasonStatusLabel(long.status)} · ${long.sessions ?? 0} Nachweise · längste Dauer: ${seasonDuration(long.duration_seconds)} · längste Distanz: ${seasonDistance(long.distance_meters)} · Quelle: ${long.source || "unbekannt"}`));
+  details.append(reportNode("p", `Lange Einheit · Status: ${seasonStatusLabel(long.status)} · ${analysisCountLabel(long.sessions, "Nachweis", "Nachweise")} · längste Dauer: ${seasonDuration(long.duration_seconds)} · längste Distanz: ${seasonDistance(long.distance_meters)} · Quelle: ${long.source || "unbekannt"}`));
   const dimensions = specificity.known_dimensions || {};
   details.append(reportNode("p", `Spezifitätsnachweise · Status: ${seasonStatusLabel(specificity.status)} · Ausdauer: ${dimensions.aerobic ?? 0} · Power-Profil: ${dimensions.power_profile ?? 0} · Intervallqualität: ${dimensions.interval_quality ?? 0} · Quelle: ${specificity.source || "unbekannt"}`));
   details.append(reportNode("p", `Zieldistanzvergleich · Status: ${seasonStatusLabel(comparison.status)} · Ziel: ${seasonDistance(comparison.target_distance_meters)} · beobachtete lange Einheit: ${seasonDistance(comparison.observed_long_session_distance_meters)} · Quelle: ${comparison.source || "unbekannt"}`));
@@ -1340,7 +1349,7 @@ function seasonPlannedLoadEstimateNotes(result) {
 function seasonWeekSummary(week) {
   const duration = week.duration_seconds == null ? "Dauer unbekannt" : AppFormat.duration(week.duration_seconds);
   const distance = week.distance_meters == null ? "Distanz unbekannt" : (AppFormat.distance(week.distance_meters) ?? "0 km");
-  return `${dateLabel(week.start)} \u2013 ${dateLabel(week.end)}: ${week.sessions} erfasste Einheiten \u00b7 ${duration} (${week.duration_known_sessions}/${week.sessions} gemessen) \u00b7 ${distance} (${week.distance_known_sessions}/${week.sessions} gemessen)`;
+  return `${dateLabel(week.start)} \u2013 ${dateLabel(week.end)}: ${analysisCountLabel(week.sessions, "erfasste Einheit", "erfasste Einheiten")} \u00b7 ${duration} (${week.duration_known_sessions}/${week.sessions} gemessen) \u00b7 ${distance} (${week.distance_known_sessions}/${week.sessions} gemessen)`;
 }
 
 function analysisWeeklyPerformancePoints(points, start, end, median = false) {

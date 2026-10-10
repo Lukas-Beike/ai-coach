@@ -449,13 +449,17 @@ function renderProviderFreshness(data) {
     status.className = entry.state === "fresh" || entry.state === "partial" ? "configured" : "not-configured";
     status.textContent = PROVIDER_FRESHNESS_STATUS[entry.state] || "Unbekannter Status";
     header.append(title, status);
-    const meta = document.createElement("span");
-    meta.className = "provider-freshness-meta";
-    const attempt = entry.last_attempt_at ? `Letzter Versuch: ${formatTime(entry.last_attempt_at)}` : "Noch kein Versuch";
-    const success = entry.last_success_at ? `Letzter Erfolg: ${formatTime(entry.last_success_at)}` : "Noch kein erfolgreicher Abruf";
-    const retry = entry.next_retry_at ? `Nächster Versuch ab: ${formatTime(entry.next_retry_at)}` : "Kein automatischer Retry terminiert";
-    meta.textContent = `${attempt} · ${success} · ${retry}`;
-    item.append(header, meta);
+    if (entry.configured === false || entry.state === "not_configured") {
+      item.append(header);
+    } else {
+      const meta = document.createElement("span");
+      meta.className = "provider-freshness-meta";
+      const attempt = entry.last_attempt_at ? `Letzter Versuch: ${formatTime(entry.last_attempt_at)}` : "Noch kein Versuch";
+      const success = entry.last_success_at ? `Letzter Erfolg: ${formatTime(entry.last_success_at)}` : "Noch kein erfolgreicher Abruf";
+      const retry = entry.next_retry_at ? `Nächster Versuch ab: ${formatTime(entry.next_retry_at)}` : "Kein automatischer Retry terminiert";
+      meta.textContent = `${attempt} · ${success} · ${retry}`;
+      item.append(header, meta);
+    }
     if (entry.error_code) {
       const error = document.createElement("span");
       error.className = "error";

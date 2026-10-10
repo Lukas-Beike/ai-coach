@@ -1023,6 +1023,14 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .context-preview-content summary { cursor: pointer; padding: 11px 13px; color: var(--ink); font-size: .78rem; font-weight: 700; }
 .context-preview-content summary::marker { color: var(--accent-bright); }
 .context-preview-content pre { max-height: 360px; margin: 0; overflow: auto; padding: 0 13px 13px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; font: .68rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.context-preview-body { padding: 0 13px 13px; }
+.context-preview-body pre { padding: 0; }
+.context-preview-values { display: grid; gap: 8px; margin: 0; }
+.context-preview-values dt { color: var(--ink); font-size: .72rem; font-weight: 700; }
+.context-preview-values dd { margin: 2px 0 0; color: var(--muted); font-size: .72rem; line-height: 1.45; overflow-wrap: anywhere; }
+.context-preview-values .context-preview-values { padding-left: 10px; border-left: 1px solid var(--line); }
+.context-preview-list { margin: 0; padding-left: 18px; color: var(--muted); font-size: .72rem; line-height: 1.45; }
+.context-preview-text { margin: 0; color: var(--muted); font-size: .72rem; line-height: 1.45; overflow-wrap: anywhere; }
 .checkin-form { display: grid; gap: 12px; margin-top: 14px; }
 .checkin-critical-field { color: var(--checkin-critical-ink); }
 .checkin-form > button { justify-self: start; min-height: 44px; }

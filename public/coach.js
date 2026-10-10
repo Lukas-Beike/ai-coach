@@ -1813,6 +1813,95 @@ function handleWindowScroll() {
   updateChatComposerVisibility();
 }
 
+const CONTEXT_KEY_LABELS = {
+  content: "Inhalt",
+  note: "Hinweis",
+  mode: "Modus",
+  included_separately: "Separat übergeben",
+  generated_at: "Erstellt am",
+  snapshot_truncated: "Snapshot gekürzt",
+  snapshot_compacted: "Snapshot kompakt aufbereitet",
+  context_characters: "Zeichen im Kontext",
+  projection: "Projektion",
+  name: "Name",
+  sports: "Sportarten",
+  typical_weekly_volume: "Typischer Wochenumfang",
+  timezone: "Zeitzone",
+  source: "Quelle",
+  status: "Status",
+  unit: "Einheit",
+  value: "Wert",
+  date: "Datum",
+  updated_at: "Aktualisiert am",
+};
+const CONTEXT_HIDDEN_KEYS = new Set(["field", "role"]);
+
+function contextPreNode(text) {
+  const pre = document.createElement("pre");
+  pre.textContent = text;
+  return pre;
+}
+
+function contextTextNode(text) {
+  const node = document.createElement("p");
+  node.className = "context-preview-text";
+  node.textContent = text;
+  return node;
+}
+
+function contextScalarText(key, value) {
+  if (value === null || value === undefined || value === "") return "–";
+  if (typeof value === "boolean") return value ? "Ja" : "Nein";
+  if (typeof value === "number") return value.toLocaleString("de-DE", { maximumFractionDigits: 2 });
+  if (typeof value === "string" && key.endsWith("_at")) return formatTime(value);
+  return String(value);
+}
+
+const CONTEXT_PREVIEW_MAX_DEPTH = 3;
+const CONTEXT_PREVIEW_MAX_ITEMS = 25;
+
+function contextListNode(items, depth) {
+  const list = document.createElement("ul");
+  list.className = "context-preview-list";
+  for (const item of items.slice(0, CONTEXT_PREVIEW_MAX_ITEMS)) {
+    const entry = document.createElement("li");
+    entry.append(contextValueNode(item, "", depth + 1));
+    list.append(entry);
+  }
+  if (items.length > CONTEXT_PREVIEW_MAX_ITEMS) {
+    const more = document.createElement("li");
+    more.textContent = `… ${(items.length - CONTEXT_PREVIEW_MAX_ITEMS).toLocaleString("de-DE")} weitere Einträge`;
+    list.append(more);
+  }
+  return list;
+}
+
+function contextObjectNode(object, depth) {
+  const list = document.createElement("dl");
+  list.className = "context-preview-values";
+  for (const [key, item] of Object.entries(object)) {
+    if (CONTEXT_HIDDEN_KEYS.has(key)) continue;
+    const term = document.createElement("dt");
+    term.textContent = CONTEXT_KEY_LABELS[key] || key.replace(/_/g, " ");
+    const definition = document.createElement("dd");
+    definition.append(contextValueNode(item, key, depth + 1));
+    list.append(term, definition);
+  }
+  return list;
+}
+
+function contextValueNode(value, key = "", depth = 0) {
+  if (value !== null && typeof value === "object") {
+    const empty = Array.isArray(value) ? value.length === 0 : Object.keys(value).length === 0;
+    if (empty) return contextTextNode("Keine Angaben");
+    // Deeply nested provider data stays compact instead of building a huge DOM tree.
+    if (depth >= CONTEXT_PREVIEW_MAX_DEPTH) return contextPreNode(JSON.stringify(value, null, 2));
+    return Array.isArray(value) ? contextListNode(value, depth) : contextObjectNode(value, depth);
+  }
+  if (key === "content" && typeof value === "string") return contextPreNode(value);
+  return contextTextNode(contextScalarText(key, value));
+}
+
 function renderContextPreview(preview) {
   const status = $("#systemContextPreviewStatus");
   const content = $("#systemContextPreviewContent");
@@ -1832,8 +1921,8 @@ function renderContextPreview(preview) {
     ["Garmin-Kontext", preview.structured_athlete_context?.garmin],
     ["Gesprächskontinuität", preview.conversation],
     ["Intervals.icu-Snapshot", preview.latest_intervals_snapshot],
-    ["Letzte Chat-Eingabe (input)", preview.chat_prompt],
-    ["Kontext (instructions)", preview.context_text],
+    ["Letzte Chat-Eingabe", preview.chat_prompt],
+    ["Coach-Kontext (vollständiger Text)", preview.context_text],
   ];
   sections.forEach(([title, value], index) => {
     if (value == null) return;
@@ -1841,9 +1930,10 @@ function renderContextPreview(preview) {
     if (index < 4) details.open = true;
     const summary = document.createElement("summary");
     summary.textContent = title;
-    const pre = document.createElement("pre");
-    pre.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-    details.append(summary, pre);
+    const body = document.createElement("div");
+    body.className = "context-preview-body";
+    body.append(typeof value === "string" ? contextPreNode(value) : contextValueNode(value));
+    details.append(summary, body);
     content.append(details);
   });
   status.classList.remove("error");

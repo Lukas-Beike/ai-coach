@@ -1367,5 +1367,29 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("SEASON_PHASE_LABELS[next.phase]", plan_views)
 
 
+    def test_ux_copy_labels_and_readable_context_preview(self):
+        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        notifications = (server.PUBLIC_DIR / "notifications.js").read_text(
+            encoding="utf-8"
+        )
+        coach = (server.PUBLIC_DIR / "coach.js").read_text(encoding="utf-8")
+        analysis = (server.PUBLIC_DIR / "analysis.js").read_text(encoding="utf-8")
+        self.assertIn("Tab „Kalender“", index)
+        self.assertNotIn("Tab „Plan“", index)
+        self.assertNotIn("-1 = alle verfügbaren Daten", index)
+        self.assertNotIn("Aktiviert", notifications)
+        self.assertIn("function analysisCountLabel(count, singular, plural)", analysis)
+        self.assertIn("function analysisPercent(value)", analysis)
+        self.assertNotIn('analysisValue(percent, "%")', analysis)
+        self.assertNotIn(
+            'typeof value === "string" ? value : JSON.stringify(value, null, 2)', coach
+        )
+        self.assertIn('function contextValueNode(value, key = "", depth = 0)', coach)
+        self.assertIn("if (depth >= CONTEXT_PREVIEW_MAX_DEPTH)", coach)
+        views = (server.PUBLIC_DIR / "views.js").read_text(encoding="utf-8")
+        self.assertIn("function profileSportsLabel(sports)", views)
+        self.assertIn('Cycling: "Radfahren"', views)
+
+
 if __name__ == "__main__":
     unittest.main()
