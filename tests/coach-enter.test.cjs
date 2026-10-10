@@ -33,6 +33,11 @@ test("touch Shift+Enter inserts a line break", () => {
   assert.equal(chatEnterAction({ key: "Enter", shiftKey: true, isComposing: false, touchFirst: true }), "newline");
 });
 
+test("touch Ctrl/Cmd+Enter sends from a physical keyboard", () => {
+  assert.equal(chatEnterAction({ key: "Enter", modifierKey: true, touchFirst: true }), "send");
+  assert.equal(chatEnterAction({ key: "Enter", shiftKey: true, modifierKey: true, touchFirst: true }), "newline");
+});
+
 test("IME composition never triggers an action", () => {
   assert.equal(chatEnterAction({ key: "Enter", shiftKey: false, isComposing: true, touchFirst: false }), "none");
   assert.equal(chatEnterAction({ key: "Enter", shiftKey: false, isComposing: true, touchFirst: true }), "none");

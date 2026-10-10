@@ -1757,9 +1757,10 @@ function publishComposerHeight() {
 // Decides what Enter does in the chat draft. Touch-first devices keep Enter for
 // line breaks (the send button sends); desktop Enter sends and Shift+Enter breaks
 // the line. IME composition never sends.
-function chatEnterAction({ key, shiftKey = false, isComposing = false, touchFirst = false } = {}) {
+function chatEnterAction({ key, shiftKey = false, modifierKey = false, isComposing = false, touchFirst = false } = {}) {
   if (key !== "Enter" || isComposing) return "none";
-  if (touchFirst) return "newline";
+  // Ctrl/Cmd+Enter keeps sending available to physical keyboards on touch devices.
+  if (touchFirst) return modifierKey && !shiftKey ? "send" : "newline";
   return shiftKey ? "newline" : "send";
 }
 
@@ -1831,6 +1832,7 @@ function setupCoachEvents() {
     const action = chatEnterAction({
       key: event.key,
       shiftKey: event.shiftKey,
+      modifierKey: event.ctrlKey || event.metaKey,
       isComposing: event.isComposing || event.keyCode === 229,
       touchFirst: hasTouchFirstInput(),
     });
