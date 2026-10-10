@@ -1077,6 +1077,33 @@ class ServerFrontendTests(ServerTestCase):
         ]
         self.assertEqual(offenders, [])
 
+    def test_error_toasts_are_readable_dismissible_and_above_composer(self):
+        styles = (
+            Path(__file__).resolve().parents[1] / "public" / "styles.css"
+        ).read_text(encoding="utf-8")
+        shared = (server.PUBLIC_DIR / "shared.js").read_text(encoding="utf-8")
+        error_rule = re.search(
+            r"^\.error:not\(\.toast\) \{([^}]*)\}", styles, re.MULTILINE
+        )
+        self.assertIsNotNone(error_rule)
+        self.assertNotIn("!important", error_rule.group(1))
+        toast_error_rule = re.search(
+            r"^\.toast\.error \{([^}]*)\}", styles, re.MULTILINE
+        )
+        self.assertIsNotNone(toast_error_rule)
+        self.assertIn("color: var(--white);", toast_error_rule.group(1))
+        self.assertIn("toast-close", shared)
+        self.assertIn("8000", shared)
+        self.assertIn("Meldung schließen", shared)
+        self.assertIn(".secondary-button.danger-button", styles)
+        self.assertIsNotNone(
+            re.search(
+                r"^body:has\(#chatPanel\.active\) \.toast \{[^}]*--composer-height",
+                styles,
+                re.MULTILINE,
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

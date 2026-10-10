@@ -28,6 +28,7 @@
   --orange: #ff9f0a;
   --yellow: #ffd60a;
   --danger: #ff453a;
+  --danger-toast: #b42318;
   --shadow: 0 20px 60px rgba(0, 0, 0, .32);
   --shadow-soft: 0 8px 24px rgba(0, 0, 0, .18);
   --space-1: 4px;
@@ -163,6 +164,7 @@
   --link: #0969da;
   --orange: #8a5300;
   --danger: #b42318;
+  --danger-toast: #b42318;
   --ink: #212121;
   --muted: #5d5d5d;
   --subtle: #666666;
@@ -1060,6 +1062,8 @@ h2 {
 .secondary-button:disabled { cursor: wait; opacity: .55; }
 .secondary-button.busy { animation: pulse-button 1.4s ease-in-out infinite; }
 @keyframes pulse-button { 50% { opacity: .65; } }
+.secondary-button.danger-button { border-color: var(--danger-border); color: var(--danger-ink); }
+.secondary-button.danger-button:hover { border-color: var(--danger-border-strong); background: var(--danger-surface); }
 
 label { display: grid; min-width: 0; gap: 7px; color: var(--muted); font-size: .76rem; font-weight: 650; }
 input, textarea, select {
@@ -1109,10 +1113,13 @@ dialog::backdrop { background: var(--overlay-scrim); backdrop-filter: blur(8px);
 dialog form { display: grid; gap: 15px; }
 dialog h2 { margin-bottom: 0; }
 dialog p { margin-bottom: 0; color: var(--muted); }
-.error { min-height: 1.2em; color: var(--danger-ink) !important; font-size: .8rem; }
-.toast { position: fixed; z-index: 10; left: 50%; bottom: 102px; max-width: min(90vw, 500px); padding: 11px 16px; transform: translate(-50%, 20px); border-radius: 999px; color: var(--white); background: var(--accent); box-shadow: 0 8px 24px var(--toast-shadow); opacity: 0; pointer-events: none; transition: .2s ease; font-size: .8rem; font-weight: 700; overflow-wrap: anywhere; text-align: center; }
-.toast.show { transform: translate(-50%, 0); opacity: 1; }
-.toast.error { background: var(--danger); box-shadow: 0 8px 24px var(--error-toast-shadow); }
+.error:not(.toast) { min-height: 1.2em; color: var(--danger-ink); font-size: .8rem; }
+.toast { position: fixed; z-index: 10; left: 0; right: 0; bottom: 102px; margin-inline: auto; width: fit-content; max-width: min(calc(100vw - 32px), 500px); display: flex; align-items: center; gap: 8px; padding: 11px 16px; transform: translateY(20px); border-radius: 16px; color: var(--white); background: var(--accent); box-shadow: 0 8px 24px var(--toast-shadow); opacity: 0; pointer-events: none; transition: .2s ease; font-size: .8rem; font-weight: 700; overflow-wrap: anywhere; text-align: center; }
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast.error { color: var(--white); background: var(--danger-toast); box-shadow: 0 8px 24px var(--error-toast-shadow); }
+.toast .toast-close { display: inline-flex; flex: 0 0 auto; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; margin: -10px -8px -10px 4px; padding: 0; border: 0; color: inherit; background: none; font-size: 1.1rem; line-height: 1; vertical-align: middle; cursor: pointer; }
+.toast.show .toast-close { pointer-events: auto; }
+body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 24px); }
 
 @media (min-width: 768px) {
   .shell { display: grid; grid-template-columns: 72px minmax(0, 1fr); grid-template-areas: "nav header" "nav main"; gap: 0 24px; padding: 0 24px 32px 0; }
@@ -1159,6 +1166,7 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .shell:has(#chatPanel.active) { padding-bottom: 0; }
   #chatPanel { padding-bottom: var(--composer-offset); }
   #chatPanel .composer { bottom: var(--composer-offset); }
+  body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-offset) + var(--composer-height, 0px) + 12px); }
   /* Opaque backdrop from the composer's lower edge down to the bottom navigation. */
   /* border-image-outset bleeds to the viewport edges as ink overflow, so the composer gains no scrollable width. */
   #chatPanel .composer::after {
