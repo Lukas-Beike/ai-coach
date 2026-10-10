@@ -532,6 +532,8 @@ h2 {
 @keyframes working-dot { 0%, 60%, 100% { opacity: .35; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 .message.pending { border: 1px dashed var(--accent-border-strong); box-shadow: none; }
 .message.pending .pending-label { display: block; margin-top: 5px; color: var(--muted); font-size: .68rem; font-weight: 650; }
+.message.pending .pending-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.message.pending .pending-actions button { min-width: 44px; min-height: 44px; }
 .message-actions { display: flex; align-items: center; gap: 4px; margin: 8px 0 0 -8px; flex-wrap: wrap; }
 .message-action { min-height: 44px; border: 0; border-radius: 10px; padding: 8px; color: var(--subtle); background: var(--transparent); font-size: .7rem; }
 .message-action:hover { color: var(--ink); background: var(--surface-raised); }
@@ -631,8 +633,12 @@ h2 {
 .composer .voice-button:hover { border-color: var(--focus-accent-border); background: var(--surface); }
 .composer .voice-button.recording { border-color: var(--recording-border); color: var(--white); background: var(--stop-surface); animation: voice-recording 1.2s ease-in-out infinite; }
 .composer .voice-button.transcribing { cursor: wait; }
-.composer .steer-button { min-height: 44px; padding-right: 12px; padding-left: 12px; color: var(--ink); background: var(--control-bg); box-shadow: none; font-size: .74rem; }
+.composer .steer-button { min-height: 44px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 12px; padding-left: 12px; color: var(--ink); background: var(--control-bg); box-shadow: none; font-size: .74rem; }
 .composer .steer-button:hover { border-color: var(--focus-accent-border); background: var(--accent-soft); }
+@media (max-width: 360px) {
+  .composer-actions { gap: 4px; }
+  .composer .steer-button { padding-right: 8px; padding-left: 8px; font-size: .68rem; }
+}
 .composer #sendButton, .composer-stop-button { display: grid; width: 44px; min-width: 44px; height: 44px; place-items: center; border-radius: 50%; padding: 0; }
 .composer #sendButton { color: var(--primary-control-ink); background: var(--primary-control-bg); box-shadow: none; }
 .composer #sendButton svg, .composer-stop-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
