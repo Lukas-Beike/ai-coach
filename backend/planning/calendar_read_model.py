@@ -9,7 +9,6 @@ from backend.activities import calendar_projection, grouping
 from backend.activities.workout_profile import planned_profile
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import canonical, local
-from backend.planning import adaptive
 from backend.planning import calendar as planning_calendar
 from backend.planning.conflicts import calendar_items_share_local_day
 from backend.weather import history
@@ -28,7 +27,7 @@ def _competition_conflict_codes(
     unit_day: str, unit: dict[str, Any], competitions: list[Any]
 ) -> list[str]:
     """Hard units conflict with A/B races (race day and the day before) and C races (race day)."""
-    if not unit_day or not adaptive.workout_is_hard(unit):
+    if not unit_day or not planning_calendar.workout_is_hard_effort(unit):
         return []
     codes: list[str] = []
     for competition in competitions:

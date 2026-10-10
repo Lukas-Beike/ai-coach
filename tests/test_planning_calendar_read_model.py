@@ -296,6 +296,38 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
                 [],
             ),
             (
+                "zone 5 in the description makes a generic unit hard",
+                _unit("Generic session", 300, day="2026-10-13", description="- 5m Z5"),
+                [],
+                [_race("2026-10-14", "A")],
+                ["competition_ab"],
+            ),
+            (
+                "percentage above 100 in the description makes a generic unit hard",
+                _unit(
+                    "Generic session", 600, day="2026-10-14", description="- 10m 105%"
+                ),
+                [],
+                [_race("2026-10-14", "B")],
+                ["competition_ab"],
+            ),
+            (
+                "zone 2 endurance is not hard and has no race conflict",
+                _unit(
+                    "Generic session", 3600, day="2026-10-13", description="- 60m Z2"
+                ),
+                [],
+                [_race("2026-10-14", "A")],
+                [],
+            ),
+            (
+                "no_intensity stays conservative for a zone 2 unit",
+                _unit("Generic session", 3600, description="- 60m Z2 Easy"),
+                [_marker(no_intensity=1)],
+                [],
+                ["no_intensity"],
+            ),
+            (
                 "hard unit without markers or races has no conflict",
                 _unit("VO2 intervals"),
                 [],

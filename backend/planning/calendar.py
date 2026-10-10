@@ -9,26 +9,45 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar.markers import has_marker
 
+_HARD_KEYWORD_PATTERN = re.compile(
+    r"\b(intervals?|vo2(max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b"
+)
+_HARD_PERCENT_PATTERN = re.compile(r"\b(9\d|[1-9]\d{2})%", re.ASCII)
+# [NO_INTENSITY] and rest classification stay conservative: a named zone from Z2 up is not easy.
 _HARD_EFFORT_PATTERNS = (
-    re.compile(
-        r"\b(intervals?|vo2(max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b"
-    ),
+    _HARD_KEYWORD_PATTERN,
     re.compile(r"\bz(one)?\s*[2-9]\b"),
-    re.compile(r"\b(9\d|[1-9]\d{2})%", re.ASCII),
+    _HARD_PERCENT_PATTERN,
+)
+# Race-proximity conflicts treat zone 2 endurance as easy; only Z3+ counts as hard.
+_RACE_HARD_EFFORT_PATTERNS = (
+    _HARD_KEYWORD_PATTERN,
+    re.compile(r"\bz(one)?\s*[3-9]\b"),
+    _HARD_PERCENT_PATTERN,
 )
 _EASY_EFFORT_PATTERN = re.compile(
     r"\b(?:easy|recovery|regeneration|locker|ruhetag|z1|zone\s*1)\b"
 )
 
 
-def workout_is_explicitly_easy(workout: dict[str, Any]) -> bool:
-    """Return whether a workout explicitly opts into easy effort."""
-    text = (
+def _effort_text(workout: dict[str, Any]) -> str:
+    return (
         f"{workout.get('name', '')} {workout.get('description', '')} "
         f"{workout.get('target', '')} "
         f"{workout.get('steps', '')} {workout.get('intervals', '')} "
         f"{workout.get('workout_steps', '')}"
     ).casefold()
+
+
+def workout_is_hard_effort(workout: dict[str, Any]) -> bool:
+    """Return whether name, description, targets or steps name race-relevant hard effort."""
+    text = _effort_text(workout)
+    return any(pattern.search(text) for pattern in _RACE_HARD_EFFORT_PATTERNS)
+
+
+def workout_is_explicitly_easy(workout: dict[str, Any]) -> bool:
+    """Return whether a workout explicitly opts into easy effort."""
+    text = _effort_text(workout)
     if any(pattern.search(text) for pattern in _HARD_EFFORT_PATTERNS):
         return False
     return bool(_EASY_EFFORT_PATTERN.search(text))
