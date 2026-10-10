@@ -14,6 +14,10 @@ from backend.planning.competitions import supported_competition_sport
 from backend.planning.season import season_plan_summary
 
 ACTIVITY_SOURCE = "Intervals.icu recorded activities"
+PREPARATION_WEEKS = 12
+PLANNED_LOAD_ESTIMATE_SOURCE = (
+    "estimated from planned duration and icu_intensity (hours x IF^2 x 100)"
+)
 
 
 def season_preparation(
@@ -27,25 +31,28 @@ def season_preparation(
     rows, _ = canonical_rows(snapshot)
     for event in result["events"]:
         sport = supported_competition_sport(event.get("sport"))
+        window_start, window_end = _evidence_window(event, today)
         eligible = [
             row
             for row in rows
             if row.get("type") == sport
-            and (today - timedelta(days=83)).isoformat()
+            and window_start.isoformat()
             <= activity_day(row, timezone)
-            <= today.isoformat()
+            <= window_end.isoformat()
         ]
         longest = sorted(
             [row for row in eligible if number(row.get("moving_time"))],
             key=lambda row: number(row.get("moving_time")) or -1,
             reverse=True,
         )[:3]
-        weeks = _preparation_weeks(eligible, today, timezone)
+        weeks = _preparation_weeks(eligible, window_start, timezone)
         analyses = {row["activity_id"]: row for row in (observations or [])}
         target_context = _target_context(event)
         event["preparation"] = {
             "status": "observations" if eligible else "insufficient_data",
             "sport": sport,
+            "window_start": window_start.isoformat(),
+            "window_end": window_end.isoformat(),
             "sessions_84_days": len(eligible),
             "weeks": weeks,
             "weeks_with_recorded_training": sum(
@@ -222,7 +229,7 @@ def load_scenarios(
         "method": "explicit-local-exponential-model-v1",
         "basis": basis,
         "parameters": {"ctl_days": 42, "atl_days": 7},
-        "assumptions": "Local standard time constants, not verified provider configuration. Unplanned days are modeled as zero planned load. Missing planned load blocks both scenarios. CTL/TSB do not predict performance, health or race time.",
+        "assumptions": "Local standard time constants, not verified provider configuration. Unplanned days are modeled as zero planned load. Planned units without a recorded load use a labelled duration-and-intensity estimate; units with neither block both scenarios. CTL/TSB do not predict performance, health or race time.",
         "input_sha256": hashlib.sha256(
             json.dumps(
                 {
@@ -252,11 +259,15 @@ def load_scenarios(
         <= iso_date_prefix(str(row.get("start_date_local") or row.get("date") or ""))
         <= end.isoformat()
     ]
-    if any(number(row.get("icu_training_load")) is None for row in calendar):
+    planned_loads, estimated, missing = _planned_loads(calendar)
+    if missing:
         return {
             **base,
             "status": "insufficient_data",
             "reason": "Mindestens einer geplanten Einheit fehlt die Belastung.",
+            "units_without_load": missing,
+            "planned_load_estimated": bool(estimated),
+            "estimated_planned_units": estimated,
         }
     if any(number(row.get("icu_training_load")) is None for row in completed_today):
         return {
@@ -267,7 +278,7 @@ def load_scenarios(
     actual_today_load = sum(float(row["icu_training_load"]) for row in completed_today)
     curves = [
         _scenario_curve(
-            calendar,
+            planned_loads,
             (today, end),
             (ctl, atl),
             (label, multiplier, taper),
@@ -284,14 +295,33 @@ def load_scenarios(
             "taper_days": taper,
             "end": end.isoformat(),
         },
+        "planned_load_estimated": bool(estimated),
+        "estimated_planned_units": estimated,
         "apply": "Request an adaptive preview using current planning state, then explicitly approve. Simulation does not change local or remote workouts.",
     }
 
 
-def _preparation_weeks(eligible: list[dict], today: date, timezone: str) -> list[dict]:
+def _evidence_window(event: dict[str, Any], today: date) -> tuple[date, date]:
+    """Return the 12 Monday-Sunday weeks of evidence before the competition.
+
+    Evidence ends at the event date for completed competitions and at today
+    for future ones, so a past race is judged by its own preparation.
+    """
+    window_end = min(today, date.fromisoformat(event["event_date"]))
+    window_start = _week_start(window_end) - timedelta(weeks=PREPARATION_WEEKS - 1)
+    return window_start, window_end
+
+
+def _week_start(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
+def _preparation_weeks(
+    eligible: list[dict], window_start: date, timezone: str
+) -> list[dict]:
     weeks = []
-    for offset in range(12):
-        start = today - timedelta(days=83 - 7 * offset)
+    for offset in range(PREPARATION_WEEKS):
+        start = window_start + timedelta(weeks=offset)
         end = start + timedelta(days=6)
         measured = [
             row
@@ -326,7 +356,7 @@ def _preparation_weeks(eligible: list[dict], today: date, timezone: str) -> list
 def _scenario_values(values: dict, today: date) -> tuple[date, float, int]:
     try:
         end = date.fromisoformat(str(values.get("end")))
-        scale = float(values.get("load_scale", 1))
+        scale = _decimal(values.get("load_scale", 1))
         taper = int(values.get("taper_days", 0))
     except (TypeError, ValueError) as exc:
         raise AppError(400, "Ungültiges Szenario.") from exc
@@ -344,8 +374,57 @@ def _scenario_values(values: dict, today: date) -> tuple[date, float, int]:
     return end, scale, taper
 
 
-def _scenario_curve(
+def _decimal(value: Any) -> float:
+    """Parse a number that may use a German decimal comma (for example 0,85)."""
+    if isinstance(value, str):
+        value = value.strip().replace(",", ".")
+    return float(value)
+
+
+def _planned_loads(
     calendar: list[dict],
+) -> tuple[list[tuple[str, float]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (date key, load) pairs, estimated units and units without any load."""
+    loads: list[tuple[str, float]] = []
+    estimated: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for row in calendar:
+        key = str(row.get("start_date_local") or row.get("date") or "")
+        day = iso_date_prefix(key)
+        name = str(row.get("name") or "Training")[:200]
+        load = number(row.get("icu_training_load"))
+        if load is None:
+            load = _estimated_load(row)
+            if load is None:
+                missing.append({"date": day, "name": name})
+                continue
+            estimated.append(
+                {
+                    "date": day,
+                    "name": name,
+                    "load": round(load, 2),
+                    "source": PLANNED_LOAD_ESTIMATE_SOURCE,
+                }
+            )
+        loads.append((key, load))
+    return loads, estimated, missing
+
+
+def _estimated_load(row: dict[str, Any]) -> float | None:
+    """TSS-like estimate: hours x IF^2 x 100, from planned duration and icu_intensity."""
+    seconds = number(row.get("moving_time"))
+    intensity = number(row.get("icu_intensity"))
+    if not seconds or seconds <= 0 or intensity is None:
+        return None
+    # Intervals.icu reports intensity in percent; plain intensity factors are accepted too.
+    factor = intensity / 100 if intensity > 1.5 else intensity
+    if not 0 < factor <= 1.5:
+        return None
+    return seconds / 3600 * factor**2 * 100
+
+
+def _scenario_curve(
+    planned_loads: list[tuple[str, float]],
     dates: tuple[date, date],
     basis: tuple[float, float],
     scenario: tuple[str, float, int],
@@ -358,11 +437,9 @@ def _scenario_curve(
     day = today
     while day <= end:
         load = sum(
-            float(row["icu_training_load"])
-            for row in calendar
-            if str(row.get("start_date_local") or row.get("date") or "").startswith(
-                day.isoformat()
-            )
+            planned_load
+            for key, planned_load in planned_loads
+            if key.startswith(day.isoformat())
         )
         load *= multiplier
         if label == "alternative" and taper and 0 <= (end - day).days < taper:
