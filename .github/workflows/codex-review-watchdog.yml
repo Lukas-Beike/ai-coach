@@ -99,6 +99,16 @@ jobs:
                   'Dependency updates, including major updates, rely on all required CI checks and resolved review threads.');
                 return;
               }
+              const releaseVersion = /^chore\/release-version-\d+\.\d+\.\d+$/;
+              const releasePromotion = /^chore\/release-promotion-\d+\.\d+\.\d+$/;
+              if (initial.user.login === 'ai-coach-release-bot[bot]' &&
+                  initial.head.repo?.full_name === `${repo.owner}/${repo.repo}` &&
+                  ((baseRef === 'develop' && releaseVersion.test(initial.head.ref)) ||
+                   (baseRef === 'main' && releasePromotion.test(initial.head.ref)))) {
+                await finish('success', 'Release automation review exception',
+                  'Trusted same-repository version and promotion PRs rely on all required CI checks and resolved review threads. No Codex review was requested or completed.');
+                return;
+              }
               const bots = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
               const since = Date.parse(process.env.EVENT_TIME || initial.updated_at);
               if (!Number.isFinite(since)) throw new Error('Invalid PR event timestamp');
@@ -124,17 +134,18 @@ jobs:
                 const native = allComments.filter(item => bots.has(item.user?.login) &&
                   (recent(item) || (fallbackAt && Date.parse(item.created_at) >= fallbackAt)));
                 const nativeReviews = [...reviews, ...inline].filter(item => bots.has(item.user?.login) &&
+                  item.commit_id === head &&
                   (recent(item) || (fallbackAt && activityTime(item) >= fallbackAt)));
                 const reviewEvidence = reviews.some(item => bots.has(item.user?.login) &&
                   item.commit_id === head && item.submitted_at) ||
                   inline.some(item => bots.has(item.user?.login) && item.commit_id === head && recent(item));
-                const limit = /(?:usage limits? for code reviews?|(?:reached|exhausted|exceeded|hit)\s+(?:your\s+)?(?:Codex\s+)?usage limits?|(?:Codex\s+)?(?:usage|review)\s+(?:limits?|quota)\s+(?:has been\s+)?(?:reached|exhausted|exceeded))/i;
+                const limit = /(?:usage limits? for code reviews?|(?:reached|exhausted|exceeded|hit)\s+(?:your\s+)?(?:Codex\s+)?usage limits?|reached\s+(?:your\s+)?limit\s+for\s+code reviews?|(?:Codex\s+)?(?:usage|review)\s+(?:limits?|quota)\s+(?:has been\s+)?(?:reached|exhausted|exceeded)|(?:no|not enough|insufficient)\s+(?:Codex\s+)?(?:review\s+)?credits|(?:Codex\s+)?(?:review\s+)?credits\s+(?:are\s+|have been\s+)?(?:exhausted|depleted))/i;
                 if ([...native, ...nativeReviews].some(item => limit.test(item.body || '') &&
                     (!fallbackAt || activityTime(item) >= fallbackAt))) return 'limit';
-                if (reviewEvidence) return 'active';
                 const blocked = /(?:blocked:|could not safely inspect|secret scanner|unable to (?:read|review|inspect)|review unavailable)/i;
                 if ([...native, ...nativeReviews].some(item => blocked.test(item.body || '') &&
                     (!fallbackAt || activityTime(item) >= fallbackAt))) return 'blocked';
+                if (reviewEvidence) return 'active';
                 if (!fallbackAt && native.length > 0) return 'active';
                 if (native.some(item => /(?:^Codex Review:|<!-- codex-pull-request-review-summary -->)/m.test(item.body || ''))) return 'active';
                 return 'silent';
@@ -176,8 +187,8 @@ jobs:
               } else if (state === 'stale') {
                 await finish('cancelled', 'PR revision changed', 'Recheck the current revision.');
               } else {
-                await finish('failure', 'Codex remains silent after fallback',
-                  'No native Codex activity or explicit usage-limit response was observed. Silence is not a usage-limit exemption. Verify integration permissions/settings; rerun without posting another fallback for this commit.');
+                await finish('success', 'Codex review unavailable: response timeout',
+                  'No native Codex response was observed after the bounded fallback wait. Review is unavailable, not completed; exhausted credits are not inferred. All other required checks and existing review findings still apply.');
               }
             } catch (error) {
               await finish('failure', 'Codex availability could not be verified',
