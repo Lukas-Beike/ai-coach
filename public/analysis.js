@@ -145,7 +145,8 @@ function analysisChart(title, series, unit, start, end, note, {
   svg.append(analysisSvg("desc", {}, `Eigene Skala in ${unit || "Belastungspunkten"}. Fehlende Messungen bleiben unbekannt.`));
   appendAnalysisAxes(svg, unit, scales);
   appendAnalysisSeries(svg, series, unit, scales, zeroCentered, sparse);
-  appendAnalysisDateTicks(svg, start, end, scales, calendarWeeks && series.length > 0 && series.every((item) => item.cadenceDays === 7));
+  const weekTicks = calendarWeeks && series.length > 0 && series.every((item) => item.cadenceDays === 7);
+  appendAnalysisDateTicks(svg, start, end, scales, weekTicks ? analysisWeekTickLabel : analysisDayTickLabel);
   appendAnalysisPointInspectors(section, svg, series, unit, scales);
   section.append(svg);
   appendAnalysisReferenceNotes(section, series, unit);
@@ -391,11 +392,15 @@ function analysisIsoWeek(dateKey) {
   return 1 + Math.round((date - firstThursday) / (7 * 86400000));
 }
 
-function analysisTickLabel(dateKey, calendarWeeks = false) {
-  return calendarWeeks ? `KW ${analysisIsoWeek(dateKey)}` : dateKey.slice(5).split("-").reverse().join(".");
+function analysisWeekTickLabel(dateKey) {
+  return `KW ${analysisIsoWeek(dateKey)}`;
 }
 
-function appendAnalysisDateTicks(svg, start, end, { chartWidth, x }, calendarWeeks = false) {
+function analysisDayTickLabel(dateKey) {
+  return dateKey.slice(5).split("-").reverse().join(".");
+}
+
+function appendAnalysisDateTicks(svg, start, end, { chartWidth, x }, tickLabel = analysisDayTickLabel) {
   const days = Math.round((Date.parse(end) - Date.parse(start)) / 86400000);
   const intervals = Math.min(Math.max(1, days), chartWidth < 600 ? 3 : 7);
   for (let index = 0; index <= intervals; index++) {
@@ -403,7 +408,7 @@ function appendAnalysisDateTicks(svg, start, end, { chartWidth, x }, calendarWee
     let anchor = "middle";
     if (index === 0) anchor = "start";
     else if (index === intervals) anchor = "end";
-    svg.append(analysisSvg("text", { x: x(date), y: 188, "text-anchor": anchor, class: "analysis-date-tick" }, analysisTickLabel(date, calendarWeeks)));
+    svg.append(analysisSvg("text", { x: x(date), y: 188, "text-anchor": anchor, class: "analysis-date-tick" }, tickLabel(date)));
   }
 }
 
