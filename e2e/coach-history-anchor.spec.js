@@ -9,7 +9,7 @@ function historyMessage(id, index, day) {
   };
 }
 
-test("older chat history keeps the reading position without moving focus @responsive", async ({ page }) => {
+async function openHistoryFixture(page) {
   const generation = "e2e-history-anchor";
   const olderMessages = Array.from({ length: 30 }, (_, index) => historyMessage(60_000 + index, index, "2026-10-01"));
   const recentMessages = Array.from({ length: 40 }, (_, index) => historyMessage(61_000 + index, index, "2026-10-02"));
@@ -36,6 +36,11 @@ test("older chat history keeps the reading position without moving focus @respon
   await expect(page.locator(`#messages [data-message-id="${firstId}"]`)).toBeAttached();
   await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
   await expect(page.locator('#messages [data-page-area="chat"]')).toBeAttached();
+  return { firstId };
+}
+
+test("older chat history keeps the reading position without moving focus @responsive", async ({ page }) => {
+  const { firstId } = await openHistoryFixture(page);
 
   // Scrolling the history button into view triggers the observer; the visible anchor is restored after the older page renders.
   const before = await page.evaluate((messageId) => {
@@ -52,4 +57,29 @@ test("older chat history keeps the reading position without moving focus @respon
   expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
   // Automatic loading must not move focus away from where the reader is.
   expect(await page.evaluate(() => document.activeElement?.matches("[data-message-id]"))).toBe(false);
+});
+
+test("automatic older chat loading keeps focus on the focused message action @responsive", async ({ page }) => {
+  const { firstId } = await openHistoryFixture(page);
+
+  // Focus a message action in the first loaded message before the scroll triggers the automatic load, as a keyboard user moving toward the start would.
+  const focused = await page.evaluate((messageId) => {
+    const action = document.querySelector(`#messages [data-message-id="${messageId}"] .message-action[aria-label="Nachricht kopieren"]`);
+    action.focus({ preventScroll: true });
+    const root = document.querySelector("#messages");
+    window.scrollTo({ top: window.scrollY + root.getBoundingClientRect().top, behavior: "auto" });
+    return document.activeElement === action;
+  }, firstId);
+  expect(focused).toBe(true);
+
+  await expect(page.locator("#messages [data-message-id]")).toHaveCount(70);
+  await expect(page.locator("#chatOperationStatus")).toHaveText("30 ältere Nachrichten geladen");
+  expect(await page.evaluate(() => {
+    const active = document.activeElement;
+    return {
+      tag: active?.tagName ?? null,
+      label: active?.getAttribute("aria-label") ?? null,
+      messageId: active?.closest("[data-message-id]")?.dataset.messageId ?? null,
+    };
+  })).toEqual({ tag: "BUTTON", label: "Nachricht kopieren", messageId: String(firstId) });
 });

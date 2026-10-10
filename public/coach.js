@@ -1440,6 +1440,27 @@ function restoreChatHistoryAnchor(root, anchor, added, moveFocus) {
   else if (added > 1) announceChatStatus(`${added} ältere Nachrichten geladen`);
 }
 
+const chatFocusableSelector = "button, a[href], input, select, textarea, [tabindex]";
+
+function chatFocusSnapshot(root) {
+  // Automatic history loads replace every message node, which would drop focus from a message action to BODY.
+  const active = document.activeElement;
+  const message = active && root.contains(active) ? active.closest("[data-message-id]") : null;
+  if (!message) return null;
+  const index = active === message ? -1 : [...message.querySelectorAll(chatFocusableSelector)].indexOf(active);
+  return { messageId: message.dataset.messageId, index };
+}
+
+function restoreChatFocus(root, snapshot) {
+  if (!snapshot) return;
+  const message = [...root.querySelectorAll("[data-message-id]")].find((item) => item.dataset.messageId === snapshot.messageId);
+  if (!message) return;
+  const control = snapshot.index >= 0 ? [...message.querySelectorAll(chatFocusableSelector)][snapshot.index] : null;
+  const target = control || message;
+  if (!target.hasAttribute("tabindex") && target === message) message.tabIndex = -1;
+  target.focus({ preventScroll: true });
+}
+
 function appendHistoryPageButton(root, area) {
   const chat = area === "chat";
   if (chat) chatHistoryObserver?.disconnect();
@@ -1464,11 +1485,13 @@ function appendHistoryPageButton(root, area) {
       if (chat) {
         if (result.generation !== state.data.messages_generation) { await loadChatHistoryFresh(); return; }
         const anchor = chatHistoryAnchor(root);
+        const focus = moveFocus ? null : chatFocusSnapshot(root);
         const previousCount = (state.data.messages || []).length;
         state.data.messages = mergeChatMessages(result.messages || []);
         state.data.messages_next_cursor = result.next_cursor;
         renderMessages(state.data.messages, false, true);
         restoreChatHistoryAnchor(root, anchor, state.data.messages.length - previousCount, moveFocus);
+        restoreChatFocus(root, focus);
       } else {
         const all = [...(state.data.library || []), ...(result.workouts || [])];
         state.data.library = [...new Map(all.map((entry) => [entry.id, entry])).values()];
