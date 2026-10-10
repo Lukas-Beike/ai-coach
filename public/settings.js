@@ -79,6 +79,7 @@ async function saveCheckin(event) {
   }
 }
 
+// Rejects when the backup fails so callers can report the error and keep their own state consistent.
 async function downloadDatabaseBackup() {
   const button = $("#backupDownloadButton");
   if (button) button.disabled = true;
@@ -94,8 +95,7 @@ async function downloadDatabaseBackup() {
     link.click();
     URL.revokeObjectURL(link.href);
     toast("Verschlüsseltes Backup heruntergeladen");
-  } catch (error) { toast(error.message, true); }
-  finally { if (button) button.disabled = false; }
+  } finally { if (button) button.disabled = false; }
 }
 
 async function restoreDatabaseBackup() {

@@ -12,6 +12,44 @@ test.beforeEach(async ({ page }) => {
   await page.waitForFunction(() => state.initialStateLoaded);
 });
 
+// Runs before the deletion test, which removes the login sessions.
+test("the deletion stays locked while the backup before deletion is running", async ({ page }) => {
+  let releaseBackup;
+  const backupReleased = new Promise((resolve) => { releaseBackup = resolve; });
+  await page.route("**/api/privacy/backup", async (route) => {
+    await backupReleased;
+    await route.continue();
+  });
+
+  await page.goto("/#more/privacy");
+  const panel = page.locator('details[data-more-segment-panel="privacy"]');
+  await expect(panel).toBeVisible();
+  if (!(await panel.evaluate((element) => element.open))) {
+    await panel.locator("summary").click();
+  }
+
+  await page.locator("#privacyDeleteButton").click();
+  await expect(page.locator("#confirmationDialog")).toBeVisible();
+
+  const input = page.locator("#confirmationDialogInput");
+  const accept = page.locator("#confirmationDialogAccept");
+  const backup = page.getByRole("button", { name: "Erst Backup erstellen" });
+  await input.fill(REQUIRED_TEXT);
+  await expect(accept).toBeEnabled();
+
+  const backupRequest = page.waitForRequest("**/api/privacy/backup");
+  await backup.click();
+  await backupRequest;
+  await expect(backup).toBeDisabled();
+  await expect(backup).toHaveAttribute("aria-busy", "true");
+  await expect(accept).toBeDisabled();
+
+  releaseBackup();
+  await expect(backup).toBeEnabled();
+  await expect(backup).not.toHaveAttribute("aria-busy", "true");
+  await expect(accept).toBeEnabled();
+});
+
 test("local data deletion requires the exact confirmation text", async ({ page }) => {
   await page.goto("/#more/privacy");
   const panel = page.locator('details[data-more-segment-panel="privacy"]');
