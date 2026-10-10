@@ -510,16 +510,20 @@ function analysisReportVersionKey() {
   return JSON.stringify(Object.keys(versions).sort((left, right) => left.localeCompare(right)).map((key) => [key, versions[key]]));
 }
 
-function requestAnalysisReport(path, { force = false } = {}) {
+function requestAnalysisReport(path) {
   const version = analysisReportVersionKey();
   const cached = analysisReportCache.get(path);
-  if (!force && cached?.version === version) return cached.request;
+  if (cached?.version === version) return cached.request;
   const request = api(path).catch((error) => {
     if (analysisReportCache.get(path)?.request === request) analysisReportCache.delete(path);
     throw error;
   });
   analysisReportCache.set(path, { version, request });
   return request;
+}
+
+function invalidateAnalysisReport(path) {
+  analysisReportCache.delete(path);
 }
 
 function clearAnalysisReportCache() {
@@ -794,12 +798,12 @@ let seasonGeneration = 0;
 let trainingRecordsGeneration = 0;
 let equipmentTab = "bike";
 
-async function renderTrainingRecords({ force = false } = {}) { // NOSONAR
+async function renderTrainingRecords() { // NOSONAR
   if (!state.data || !equipmentRouteActive()) return;
   const generation = ++trainingRecordsGeneration;
   const session = state.sessionGeneration;
   try {
-    const result = await requestAnalysisReport("/api/analysis/training-records", { force });
+    const result = await requestAnalysisReport("/api/analysis/training-records");
     if (generation !== trainingRecordsGeneration || session !== state.sessionGeneration) return;
     const gear = document.getElementById("equipmentItems");
     const openDetails = new Set([...gear.querySelectorAll("details[open]")]
@@ -1070,7 +1074,9 @@ function maintenanceButton(item) {
     button.disabled = true;
     try {
       await api("/api/equipment/maintenance", { method: "POST", body: JSON.stringify({ equipment_id: item.id, date: timezoneDateKey(state.data?.profile?.timezone, new Date()) }) });
-      await renderTrainingRecords({ force: true });
+      // Maintenance does not advance state_versions, so drop the cached response even if the athlete has left the route.
+      invalidateAnalysisReport("/api/analysis/training-records");
+      await renderTrainingRecords();
     } catch (error) {
       button.disabled = false;
       button.textContent = error.message || "Wartung fehlgeschlagen";
