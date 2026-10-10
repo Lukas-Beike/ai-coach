@@ -1036,6 +1036,13 @@ h2 {
 .connection-card .sync-period { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--subtle); font-size: .67rem; font-weight: 500; }
 .connection-card .sync-period input { width: 76px; padding: 7px 8px; text-align: center; font-size: .76rem; }
 .connection-resync-status { display: block; line-height: 1.4; }
+.provider-setup-hint { margin: 0; color: var(--subtle); font-size: .64rem; line-height: 1.4; }
+.provider-setup-hint[hidden] { display: none; }
+.provider-setup-hint a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent-bright); font-weight: 700; }
+.provider-setup-hint code { font: .95em ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+.setup-banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.setup-banner-actions a { min-height: 44px; display: inline-flex; align-items: center; }
+.setup-banner-actions .secondary-button { min-height: 44px; }
 .connections-sync-progress { display: grid; gap: 8px; padding: 11px; border: 1px solid var(--sync-progress-border); border-radius: 13px; background: var(--sync-progress-surface); }
 .connections-sync-progress[hidden] { display: none; }
 .connection-sync-progress-item { display: grid; gap: 6px; }
@@ -1254,6 +1261,7 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   .connection-card .sync-period { grid-column: 1 / -1; grid-row: 2; width: 100%; }
   .connection-card .sync-period input { width: 82px; }
   .connection-card .connection-resync-status { grid-column: 1 / -1; grid-row: 4; }
+  .connection-card .provider-setup-hint { grid-column: 1 / -1; grid-row: 5; }
   .provider-attention-banner { align-items: flex-start; flex-direction: column; }
   .provider-attention-banner a { min-height: 44px; display: inline-flex; align-items: center; }
   .settings-message { overflow-wrap: anywhere; }

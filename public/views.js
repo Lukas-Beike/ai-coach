@@ -567,14 +567,16 @@ function renderIntervalsSyncControls(data, configured) {
   const fullResync = data.provider_resync?.intervals || {};
   const fullRunning = Boolean(fullResync.running || state.localSync.intervalsFull);
   const syncRunning = intervalsSyncRunning(data, fullRunning);
+  const intervalsConfigured = Boolean(configured.intervals);
+  setProviderSetupHint("#intervalsSetupHint", intervalsConfigured);
   const syncButton = $("#systemIntervalsSyncButton");
   if (syncButton) {
-    syncButton.disabled = syncRunning;
+    syncButton.disabled = syncRunning || !intervalsConfigured;
     syncButton.textContent = data.sync?.running || state.localSync.intervals ? "Synchronisierung läuft…" : "Synchronisieren";
   }
   const fullButton = $("#systemIntervalsFullResyncButton");
   if (fullButton) {
-    fullButton.disabled = !configured.intervals || fullRunning || Boolean(data.sync?.running || state.localSync.intervals);
+    fullButton.disabled = !intervalsConfigured || fullRunning || Boolean(data.sync?.running || state.localSync.intervals);
     fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
   }
   const status = $("#intervalsFullResyncStatus");
@@ -585,11 +587,20 @@ function renderIntervalsSyncControls(data, configured) {
 }
 
 function renderGarminSyncControl(data) {
+  const garminConfigured = Boolean(data.garmin?.configured);
+  setProviderSetupHint("#garminSetupHint", garminConfigured);
   const button = $("#garminSyncButton");
   if (!button) return;
   const running = Boolean(data.garmin_sync?.running || state.localSync.garmin);
-  button.disabled = running;
+  button.disabled = running || !garminConfigured;
   button.textContent = running ? "Synchronisierung läuft…" : "Garmin synchronisieren";
+  const fullButton = $("#garminFullResyncButton");
+  if (fullButton && !garminConfigured) fullButton.disabled = true;
+}
+
+function setProviderSetupHint(selector, configured) {
+  const hint = $(selector);
+  if (hint) hint.hidden = Boolean(configured);
 }
 
 function renderSettingsSyncControls(data, configured) {

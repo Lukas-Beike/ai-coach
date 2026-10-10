@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=285">
+  <link rel="stylesheet" href="/styles.css?v=286">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -47,6 +47,10 @@
       <section id="providerAttentionBanner" class="provider-attention-banner" role="alert" aria-live="assertive" hidden>
         <div><strong>Anbindung benötigt Aufmerksamkeit</strong><span id="providerAttentionDetail"></span></div>
         <a href="#more/connections">Anbindungen öffnen</a>
+      </section>
+      <section id="setupBanner" class="provider-attention-banner setup-banner" aria-labelledby="setupBannerTitle" aria-live="polite" hidden>
+        <div><strong id="setupBannerTitle">Einrichtung nötig</strong><span id="setupBannerDetail"></span></div>
+        <div class="setup-banner-actions"><a href="#more/connections">Jetzt einrichten</a><button type="button" id="setupBannerDismiss" class="secondary-button">Für diese Sitzung ausblenden</button></div>
       </section>
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
@@ -291,8 +295,8 @@
           <div class="connection-cards">
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small><p id="intervalsSetupHint" class="provider-setup-hint" hidden>Intervals.icu ist nicht konfiguriert. Hinterlege <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code> in der Serverkonfiguration und starte die App neu.</p></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small><p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist optional und nicht konfiguriert. Hinterlege <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> in der Serverkonfiguration und führe einmalig <code>garmin-login.py</code> aus (siehe README).</p></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine erscheinen im Tab „Plan“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
           </div>
           <section class="provider-freshness" aria-labelledby="providerFreshnessTitle">
@@ -448,23 +452,23 @@
   <script src="/api.js?v=223" defer></script>
   <script src="/navigation.js?v=231" defer></script>
   <script src="/state.js?v=220" defer></script>
-  <script src="/views.js?v=220" defer></script>
+  <script src="/views.js?v=221" defer></script>
   <script src="/plan-views.js?v=2" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=12" defer></script>
-  <script src="/shared.js?v=3" defer></script>
+  <script src="/shared.js?v=4" defer></script>
   <script src="/auth.js?v=3" defer></script>
-  <script src="/sync-status.js?v=1" defer></script>
+  <script src="/sync-status.js?v=2" defer></script>
   <script src="/notifications.js?v=1" defer></script>
   <script src="/nutrition.js?v=23" defer></script>
   <script src="/analysis.js?v=95" defer></script>
-  <script src="/activity-details.js?v=10" defer></script>
+  <script src="/activity-details.js?v=11" defer></script>
   <script src="/performance-view.js?v=1" defer></script>
   <script src="/diagnostics.js?v=1" defer></script>
   <script src="/state-loader.js?v=1" defer></script>
-  <script src="/sync-actions.js?v=1" defer></script>
+  <script src="/sync-actions.js?v=2" defer></script>
   <script src="/settings.js?v=2" defer></script>
-  <script src="/app.js?v=278" defer></script>
+  <script src="/app.js?v=279" defer></script>
 </body>
 </html>
