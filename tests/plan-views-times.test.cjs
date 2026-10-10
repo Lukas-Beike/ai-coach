@@ -15,7 +15,8 @@ function functionSource(name) {
 }
 
 function loadHelpers() {
-  const context = vm.createContext({});
+  // Marker stripping is covered elsewhere; these tests only exercise the time handling.
+  const context = vm.createContext({ stripCalendarMarkers: (text) => String(text || "") });
   vm.runInContext(
     ["plannedAppointmentLabel", "calendarStartTime", "plannedUnitStartTime"].map(functionSource).join("\n"),
     context,
