@@ -85,7 +85,10 @@ function calendarMetricNumber(value, suffix = "") {
 // Every activity with a positive distance adds to the total; only distance sports without one count as missing.
 function calendarWeekDistanceLabel(activities) {
   const measured = activities.filter((entry) => Number(entry.distance) > 0);
-  const unmeasured = activities.filter((entry) => !(Number(entry.distance) > 0));
+  const unmeasured = activities.filter((entry) => {
+    const distance = Number(entry.distance);
+    return distance <= 0 || Number.isNaN(distance);
+  });
   const missing = unmeasured.filter((entry) => DISTANCE_SPORT_TYPES.has(String(entry.type || "").toLowerCase())).length;
   if (!measured.length && !missing) return "–";
   const total = measured.length
