@@ -37,10 +37,10 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
                 calls.append(("external_state", kwargs))
                 return external_state
 
-            def list_events(
-                self, limit: int, *, training_relevant_only: bool
+            def list_events_in_window(
+                self, window_days: int, *, training_relevant_only: bool
             ) -> list[dict[str, str]]:
-                calls.append(("external_events", (limit, training_relevant_only)))
+                calls.append(("external_window", (window_days, training_relevant_only)))
                 return [{"name": "Relevant event"}]
 
         class ExternalCalendarSync:
@@ -85,7 +85,7 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
                 "competitions",
                 "running",
                 "external_state",
-                "external_events",
+                "external_window",
                 "daily_context",
             ],
         )
@@ -97,7 +97,7 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
                 {"configured": True, "running": True, "window_days": 56},
             ),
         )
-        self.assertEqual(calls[4], ("external_events", (50, True)))
+        self.assertEqual(calls[4], ("external_window", (56, True)))
         self.assertEqual(
             calls[5],
             (

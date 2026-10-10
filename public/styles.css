@@ -936,6 +936,13 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .planned-meta { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .planned-entry-status { color: var(--accent-bright); font-size: .7rem; line-height: 1.4; }
 .planned-entry.is-missed .planned-entry-status { color: var(--orange); }
+.planned-entry.is-skipped .planned-entry-status { color: var(--muted); }
+.planned-badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; min-width: 0; }
+.planned-day-notes .planned-badges { justify-content: flex-start; }
+.planned-badge { display: inline-flex; max-width: 100%; min-height: 24px; align-items: center; gap: 4px; padding: 3px 9px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--ink); background: var(--surface-input); font-size: .68rem; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; text-align: left; }
+.planned-badge.is-competition { border-color: var(--accent-border); background: var(--accent-soft); }
+.planned-badge.is-marker { border-color: var(--warning-border); background: var(--warning-surface-soft); }
+.planned-badge.is-conflict { border-color: var(--danger-border-strong); color: var(--danger-ink); background: var(--danger-surface); }
 .planned-entry-details { display: grid; gap: 10px; padding: 12px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .planned-actual-summary { color: var(--accent-bright); font-size: .75rem; }
 .planned-actual-facts { display: flex; flex-wrap: wrap; gap: 7px 13px; color: var(--muted); font-size: .75rem; }

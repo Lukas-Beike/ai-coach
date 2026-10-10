@@ -1,8 +1,65 @@
 globalThis.AppPlanViews = Object.freeze({ create });
 
+const CALENDAR_MARKERS = [
+  { key: "no_training", name: "NO_TRAINING", label: "Kein Training" },
+  { key: "no_intensity", name: "NO_INTENSITY", label: "Keine Intensität" },
+  { key: "short_only", name: "SHORT_ONLY", label: "Nur kurze Einheiten" },
+];
+// Mirrors backend/calendar/markers.py::has_marker: "[" or "(" opens, "]" or ")" closes,
+// the words may be separated by spaces, underscores or hyphens (or none), and case is ignored.
+const MARKER_WORD_GAP = String.raw`[\s_-]*`;
+const calendarMarkerSource = (name) => String.raw`[\[(]\s*${name.replaceAll("_", MARKER_WORD_GAP)}\s*[\])]`;
+const CALENDAR_MARKER_PATTERN = new RegExp(
+  CALENDAR_MARKERS.map(({ name }) => calendarMarkerSource(name)).join("|"),
+  "gi",
+);
+const PLANNED_DAY_STATUS_LABELS = new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]]);
+
+function stripCalendarMarkers(text) {
+  return String(text || "").replace(CALENDAR_MARKER_PATTERN, "").replace(/\s{2,}/g, " ").trim();
+}
+
+function calendarMarkerKeys(source) {
+  if (!source || typeof source !== "object") return [];
+  const name = String(source.name || "");
+  return CALENDAR_MARKERS
+    .filter(({ key, name: markerName }) => Boolean(source[key]) || new RegExp(calendarMarkerSource(markerName), "i").test(name))
+    .map(({ key }) => key);
+}
+
+function plannedDayStatusLabel(dayStatus) {
+  return PLANNED_DAY_STATUS_LABELS.get(dayStatus) || null;
+}
+
+function plannedConflictBadgeSpecs(conflicts) {
+  return (Array.isArray(conflicts) ? conflicts : [])
+    .map((conflict) => String(conflict?.label || "").trim())
+    .filter(Boolean)
+    .map((label) => ({ kind: "conflict", icon: "⚠", text: `Konflikt: ${label}` }));
+}
+
+function plannedDayBadgeSpecs(dayContext, competitions, dateKey) {
+  const context = dayContext && typeof dayContext === "object" ? dayContext : {};
+  const appointments = Array.isArray(context.appointments) ? context.appointments : [];
+  const specs = (Array.isArray(competitions) ? competitions : [])
+    .filter((competition) => String(competition?.event_date || "").slice(0, 10) === dateKey)
+    .map((competition) => ({
+      kind: "competition",
+      icon: "🏁",
+      text: `${competition.priority || "B"}-Wettkampf: ${String(competition.name || "").trim() || "Wettkampf"}`,
+    }));
+  const dayStatus = plannedDayStatusLabel(context.day_status);
+  if (dayStatus) specs.push({ kind: "day-status", icon: "", text: dayStatus });
+  const markerKeys = new Set(appointments.concat([context]).flatMap((source) => calendarMarkerKeys(source)));
+  for (const { key, label } of CALENDAR_MARKERS) {
+    if (markerKeys.has(key)) specs.push({ kind: "marker", icon: "", text: label });
+  }
+  return specs;
+}
+
 function plannedAppointmentLabel(event) {
   if (!event || typeof event !== "object") return "";
-  const name = String(event.name || "Trainingstermin").trim() || "Trainingstermin";
+  const name = stripCalendarMarkers(event.name) || "Trainingstermin";
   if (event.all_day) return `${name} · ganztägig`;
   const time = /(?:T|\s)(\d{2}:\d{2})/.exec(String(event.start_local || ""));
   return time ? `${name} · ${time[1]}` : name;
@@ -59,6 +116,26 @@ function appendCalendarFact(root, label, value) {
   root.append(item);
 }
 
+function calendarBadge({ kind, icon, text }) {
+  const badge = document.createElement("span");
+  badge.className = `planned-badge is-${kind}`;
+  if (icon) {
+    const glyph = document.createElement("span");
+    glyph.setAttribute("aria-hidden", "true");
+    glyph.textContent = icon;
+    badge.append(glyph);
+  }
+  badge.append(document.createTextNode(text));
+  return badge;
+}
+
+function calendarBadgeRow(specs) {
+  const row = document.createElement("div");
+  row.className = "planned-badges";
+  row.append(...specs.map(calendarBadge));
+  return row;
+}
+
 function competitionSportLabel(sport) {
   return ({ Cycling: "Radfahren", Ride: "Radfahren", VirtualRide: "Rad indoor", Running: "Laufen", Run: "Laufen", Swim: "Schwimmen", Strength: "Krafttraining" })[sport] || sport || "–";
 }
@@ -93,6 +170,7 @@ function calendarRpeLabel(value) {
 }
 
 function appendPlannedExecution(cardSummary, entry, status) {
+  if (status === "skipped") return;
   const percentage = calendarMetricNumber(entry.compliance?.percentage);
   const measurable = percentage != null && ["training_load", "duration"].includes(entry.compliance?.basis);
   if (status !== "missed" && !measurable) return;
@@ -122,7 +200,7 @@ function plannedDayNotes(dayContext) {
   const notes = document.createElement("div");
   notes.className = "planned-day-notes";
   const appointments = (Array.isArray(dayContext.appointments) ? dayContext.appointments : [])
-    .filter((event) => event && event.training_relevant !== false)
+    .filter((event) => event && (event.training_relevant !== false || calendarMarkerKeys(event).length > 0))
     .map(plannedAppointmentLabel)
     .filter(Boolean);
   if (appointments.length) {
@@ -483,9 +561,11 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return svg;
   }
 
-  function renderPlannedEntry(entry, dateKey, todayKey) {
+  function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}) {
     const actual = calendarActualActivity(entry);
-    const status = calendarEntryStatus(entry, dateKey, todayKey);
+    const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
+    const restDayLabel = baseStatus === "missed" ? plannedDayStatusLabel(dayContext.day_status) : null;
+    const status = restDayLabel ? "skipped" : baseStatus;
     const card = document.createElement("details");
     card.className = `planned-entry is-${status}`;
     card.open = false;
@@ -503,16 +583,18 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     ].filter(Boolean).join(" · ");
     appendPlannedSessionHeader(cardSummary, entry, actual);
     cardSummary.append(meta);
-    if (status === "completed" || status === "missed") {
+    if (status === "completed" || status === "missed" || status === "skipped") {
       const statusText = document.createElement("span");
       statusText.className = "planned-entry-status";
-      statusText.textContent = calendarStatusLabel(entry, dateKey, todayKey);
+      statusText.textContent = status === "skipped" ? `Entfallen (${restDayLabel})` : calendarStatusLabel(entry, dateKey, todayKey);
       cardSummary.append(statusText);
     }
     appendPlannedExecution(cardSummary, entry, status);
     const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
     if (profile) cardSummary.append(profile);
     cardSummary.append(cardTitle);
+    const conflictSpecs = plannedConflictBadgeSpecs(entry.conflicts);
+    if (conflictSpecs.length) cardSummary.append(calendarBadgeRow(conflictSpecs));
     if (actual && !entry.is_completed_activity) {
       const target = document.createElement("span");
       target.className = "planned-session-target";
@@ -632,6 +714,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     content.className = "planned-day-content";
     if (dateKey === todayKey) content.append(plannedDayCheckin(dateKey));
     const notes = plannedDayNotes(dayContext);
+    const dayBadges = plannedDayBadgeSpecs(dayContext, state.data?.competitions, dateKey);
+    if (dayBadges.length) notes.prepend(calendarBadgeRow(dayBadges));
     if (notes.childElementCount) content.append(notes);
     if (!dayEntries.length) {
       const empty = document.createElement("p");
@@ -639,7 +723,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       empty.textContent = dateKey < todayKey ? "Keine Aktivität" : "Keine Einheit geplant";
       content.append(empty);
     }
-    dayEntries.forEach((entry) => content.append(renderPlannedEntry(entry, dateKey, todayKey)));
+    dayEntries.forEach((entry) => content.append(renderPlannedEntry(entry, dateKey, todayKey, dayContext)));
     const insights = plannedDayInsights(weather);
     if (insights) day.append(insights);
     day.append(content);
@@ -709,7 +793,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
     const currentWeekKey = planWeekStart(todayKey);
     const display = state.data?.calendar_display || {};
-    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.checkins, state.loadedAreas.has("feedback")]);
+    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.checkins, state.data?.competitions, state.loadedAreas.has("feedback")]);
     if (snapshot === plannedRenderSnapshot && root.childElementCount) {
       if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
       return;

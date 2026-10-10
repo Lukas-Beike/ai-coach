@@ -801,6 +801,46 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("planningEditDirty", state)
         self.assertNotIn("plannedWeekOpen", state)
 
+    def test_calendar_badges_are_text_safe_and_status_aware(self):
+        root = Path(__file__).resolve().parents[1] / "public"
+        plan_views = (root / "plan-views.js").read_text(encoding="utf-8")
+        styles = (root / "styles.css").read_text(encoding="utf-8")
+        for helper in (
+            "function stripCalendarMarkers(",
+            "function calendarMarkerKeys(",
+            "function plannedDayBadgeSpecs(",
+            "function plannedConflictBadgeSpecs(",
+            "function calendarBadge(",
+            "function calendarBadgeRow(",
+        ):
+            self.assertIn(helper, plan_views)
+        self.assertIn('"Kein Training"', plan_views)
+        self.assertIn('"Keine Intensität"', plan_views)
+        self.assertIn('"Nur kurze Einheiten"', plan_views)
+        self.assertIn(
+            'new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]])', plan_views
+        )
+        self.assertIn("`Konflikt: ${label}`", plan_views)
+        self.assertIn("`Entfallen (${restDayLabel})`", plan_views)
+        self.assertIn('glyph.setAttribute("aria-hidden", "true");', plan_views)
+        self.assertIn("calendarMarkerKeys(event).length > 0", plan_views)
+        self.assertIn(
+            "plannedDayBadgeSpecs(dayContext, state.data?.competitions, dateKey)",
+            plan_views,
+        )
+        self.assertIn("notes.prepend(calendarBadgeRow(dayBadges))", plan_views)
+        self.assertIn("plannedConflictBadgeSpecs(entry.conflicts)", plan_views)
+        self.assertIn(
+            "state.data?.competitions, state.loadedAreas", plan_views
+        )
+        self.assertNotIn("innerHTML", plan_views)
+        self.assertIn(
+            ".planned-badge.is-conflict { border-color: var(--danger-border-strong); color: var(--danger-ink);",
+            styles,
+        )
+        self.assertIn(".planned-entry.is-skipped .planned-entry-status", styles)
+        self.assertIn(".planned-badges { display: flex; flex-wrap: wrap;", styles)
+
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
         app = frontend_source()
         views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(

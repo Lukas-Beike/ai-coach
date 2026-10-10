@@ -72,7 +72,9 @@ class PublicStateCalendarProjection:
             canonical_planned,
             weather,
             checkins,
-            self._external_calendar.list_events(50, training_relevant_only=True),
+            self._external_calendar.list_events_in_window(
+                self._external_calendar_window_days, training_relevant_only=True
+            ),
         )
         calendar_projection = calendar_read_model.project_planning_calendar(
             local_planned,

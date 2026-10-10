@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "0b7e6d22c98a5165c085764929935d9367b62a0a",
+  "base": "9f49367526ea3917cc32bc4fdc51e87abf8642ff",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
@@ -1241,7 +1241,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/bootstrap_calendar.py",
-      "line": 83,
+      "line": 85,
       "column": 16,
       "code": "arg-type",
       "message_sha256": "1f0507db8f39955b7380d5ccd6ca09cdc2a0398a644e3e54cd387a5169d01c1a"
@@ -1661,14 +1661,6 @@
       "column": 41,
       "code": "arg-type",
       "message_sha256": "457c40ecf7d19bbe1d602a357c1208738bebc65456b705296ef3d4e104a497bd"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 71,
-      "column": 41,
-      "code": "arg-type",
-      "message_sha256": "966ea7112a6233541bfd7ce485fee0d8b20fe75982bc8b21ac20f36adf0d644c"
     },
     {
       "tool": "mypy",
@@ -2600,30 +2592,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 43,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "8c301cd9fb41b2948ce5a8284c1853f12da6959a5cf20892834c523f220ab7c6"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 44,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 45,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "0fd9c21c4052270bbe58e699e73585dfb58857469a000a8058fb25bdd6b662c0"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_coach_tool_failures.py",
       "line": 45,
       "column": 8,
@@ -2632,115 +2600,11 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 46,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "ef80729f7310b16af09639f74441883507a504188243d57e84dbfab30c99c9a7"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 50,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "4dc75def4aded67d415972778968fe069d1789ab4de37c124501f903cd77e134"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 52,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "94ba754ee4786d8de5b70d8bcd1dbdb1e7c0d8b7a5cf5e64a2eeb2f375afaf54"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 53,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 54,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "26c8cb1cfecc0ba25827eff39867f9bc467d4c4b003dd507ec057c8c085df2ae"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 55,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "ef80729f7310b16af09639f74441883507a504188243d57e84dbfab30c99c9a7"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_planning_change_service.py",
       "line": 558,
       "column": 8,
       "code": "attr-defined",
       "message_sha256": "682546f5082752e1c00e4680e57dea0e350e0f823edfa0852ecf1b4ec657f83e"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 56,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "9ccb93f4219c62d95410fcd6a42c76b54b4d53864d0a82556f382db278dc037d"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 57,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "036e432d6a8ea2fb646257cc47cefeb01c5cbc7de2f1df3512b9fac7ba6ea0cc"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 58,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 59,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "079e93e0bae503d7fa8dd2277b6ba46511838c745f9a893f17318fb815a5f54f"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 60,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "e758c46a70630561e00465cd8d478d0977f580bdf1092bb216300a0c2d3ad96f"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 61,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "3f41b1984e52acf134388ec95039962ba46f74dc93c006022c6a10cde6d5ca73"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_plan.py",
-      "line": 62,
-      "column": 8,
-      "code": "attr-defined",
-      "message_sha256": "ef80729f7310b16af09639f74441883507a504188243d57e84dbfab30c99c9a7"
     },
     {
       "tool": "mypy",
