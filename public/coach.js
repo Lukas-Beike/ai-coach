@@ -1708,7 +1708,16 @@ async function prepareChatAttachment(file) {
   }
 }
 
+function publishComposerHeight() {
+  const composer = $("#chatForm");
+  if (!composer || typeof ResizeObserver === "undefined") return;
+  const publish = () => document.documentElement.style.setProperty("--composer-height", `${composer.offsetHeight}px`);
+  new ResizeObserver(publish).observe(composer);
+  publish();
+}
+
 function setupCoachEvents() {
+  publishComposerHeight();
   $("#attachmentButton").addEventListener("click", () => $("#attachmentInput").click());
 
   $("#attachmentInput").addEventListener("change", async (event) => {

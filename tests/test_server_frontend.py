@@ -337,7 +337,11 @@ class ServerFrontendTests(ServerTestCase):
             Path(__file__).resolve().parents[1] / "public" / "styles.css"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            "#chatPanel .composer { bottom: calc(74px + max(12px, env(safe-area-inset-bottom))); }",
+            "#chatPanel .composer { bottom: var(--composer-offset); }",
+            styles,
+        )
+        self.assertIn(
+            "--composer-offset: calc(74px + max(12px, env(safe-area-inset-bottom)));",
             styles,
         )
         self.assertIn(
