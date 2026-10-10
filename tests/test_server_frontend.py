@@ -831,7 +831,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("notes.prepend(calendarBadgeRow(dayBadges))", plan_views)
         self.assertIn("plannedConflictBadgeSpecs(entry.conflicts)", plan_views)
         self.assertIn(
-            "state.data?.planning_compliance, state.data?.competitions]", plan_views
+            "state.data?.competitions, state.loadedAreas", plan_views
         )
         self.assertNotIn("innerHTML", plan_views)
         self.assertIn(
