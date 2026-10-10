@@ -2,13 +2,85 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from backend.activities import calendar_projection, grouping
 from backend.activities.workout_profile import planned_profile
+from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import canonical, local
+from backend.planning import calendar as planning_calendar
+from backend.planning.conflicts import calendar_items_share_local_day
 from backend.weather import history
+
+
+def _competition_priority(competition: dict[str, Any]) -> str:
+    priority = str(competition.get("priority") or "").strip().upper()
+    if priority not in {"A", "B", "C"}:
+        priority = (
+            str(competition.get("category") or "").strip().upper().removeprefix("RACE_")
+        )
+    return priority if priority in {"A", "B", "C"} else ""
+
+
+def _competition_conflict_codes(
+    unit_day: str, unit: dict[str, Any], competitions: list[Any]
+) -> list[str]:
+    """Hard units conflict with A/B races (race day and the day before) and C races (race day)."""
+    if not unit_day or not planning_calendar.workout_is_hard_effort(unit):
+        return []
+    codes: list[str] = []
+    for competition in competitions:
+        if not isinstance(competition, dict):
+            continue
+        event_day = iso_date_prefix(str(competition.get("event_date") or ""))
+        try:
+            day_before = (date.fromisoformat(event_day) - timedelta(days=1)).isoformat()
+        except ValueError:
+            continue
+        priority = _competition_priority(competition)
+        if priority in {"A", "B"} and unit_day in {event_day, day_before}:
+            codes.append(planning_calendar.COMPETITION_AB_CONFLICT)
+        elif priority == "C" and unit_day == event_day:
+            codes.append(planning_calendar.COMPETITION_C_CONFLICT)
+    return codes
+
+
+def _marker_conflict_reasons(
+    unit: dict[str, Any], external_events: list[Any]
+) -> list[str]:
+    reasons: list[str] = []
+    for event in external_events:
+        if not isinstance(event, dict) or not any(
+            event.get(reason) for reason in planning_calendar.MARKER_LABELS
+        ):
+            continue
+        if not calendar_items_share_local_day(unit, event):
+            continue
+        decision = planning_calendar.calendar_constraint_decision(unit, event)
+        if decision and decision["reason"] not in reasons:
+            reasons.append(decision["reason"])
+    return reasons
+
+
+def planned_unit_conflicts(
+    unit: dict[str, Any], external_events: list[Any], competitions: list[Any]
+) -> list[dict[str, str]]:
+    """Read-only calendar conflicts for one planned unit, using planning rules."""
+    if unit.get("archived") or unit.get("local_deleted"):
+        return []
+    unit_day = iso_date_prefix(
+        str(unit.get("date") or unit.get("start_date_local") or "")
+    )
+    codes = [
+        *_marker_conflict_reasons(unit, external_events),
+        *_competition_conflict_codes(unit_day, unit, competitions),
+    ]
+    labels = {
+        **planning_calendar.MARKER_LABELS,
+        **planning_calendar.COMPETITION_CONFLICT_LABELS,
+    }
+    return [{"code": code, "label": labels[code]} for code in dict.fromkeys(codes)]
 
 
 def project_planning_calendar(
@@ -36,6 +108,13 @@ def project_planning_calendar(
         {**row, "workout_profile": profile}
         if (profile := planned_profile(row))
         else row
+        for row in weather_planned
+    ]
+    weather_planned = [
+        {
+            **row,
+            "conflicts": planned_unit_conflicts(row, external_events, competitions),
+        }
         for row in weather_planned
     ]
     return {

@@ -522,6 +522,36 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "plan_date_conflict")
         self.assertEqual(len(self.calendar_conflicts.constraint_calls), 2)
 
+    def test_marker_conflict_on_create_names_the_planned_day_and_marker(self):
+        self.calendar_conflicts.constraint_results = [
+            {"constraint": "[SHORT_ONLY]", "reason": "short_only", "date": "2026-09-21"}
+        ]
+
+        with self.assertRaises(AppError) as caught:
+            self.service.create(self.workout())
+
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(caught.exception.reason, "plan_date_conflict")
+        self.assertEqual(
+            caught.exception.message,
+            "Am 21.09.2026 ist „Nur kurze Einheiten“ eingetragen. "
+            "Die lokale Einheit verletzt diese Kalenderbeschränkung.",
+        )
+
+    def test_marker_conflict_on_update_falls_back_to_constraint_marker(self):
+        self.service.create(self.workout())
+        self.calendar_conflicts.constraint_results = [{"constraint": "[NO_INTENSITY]"}]
+
+        with self.assertRaises(AppError) as caught:
+            self.service.update(str(self.id), {"name": "Hard intervals"})
+
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(caught.exception.reason, "plan_date_conflict")
+        self.assertIn(
+            "Am 21.09.2026 ist „Keine Intensität“ eingetragen.",
+            caught.exception.message,
+        )
+
     def test_external_transaction_owns_commit_revision_and_event_publication(self):
         manager = CountingDatabaseManager(self.manager)
         service = PlannedUnitService(

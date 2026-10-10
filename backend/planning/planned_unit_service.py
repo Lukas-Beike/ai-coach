@@ -11,6 +11,7 @@ from backend import change_history
 from backend.athlete.local_date import LocalDate
 from backend.calendar.canonical import canonical_planned_workouts
 from backend.errors import CORRUPT_PLANNING_ERROR, AppError
+from backend.planning import calendar as planning_calendar
 from backend.planning import planned_units, workouts
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 
@@ -242,7 +243,9 @@ class PlannedUnitService:
                 if conflicts:
                     raise AppError(
                         409,
-                        "Die lokale Einheit verletzt eine aktuelle Kalenderbeschränkung.",
+                        planning_calendar.marker_conflict_message(
+                            entry.get("date"), conflicts
+                        ),
                         reason="plan_date_conflict",
                     )
             self.insert(connection, entry)
@@ -486,14 +489,17 @@ class PlannedUnitService:
         )
         date_changed = planned_units.prepare_planned_workout_date(candidate, current)
         is_active = not candidate.get("archived") and not candidate.get("local_deleted")
-        if (
-            is_active
-            and hasattr(self._calendar_conflict_service, "constraints")
-            and self._calendar_conflict_service.constraints(candidate)
-        ):
+        marker_conflicts = (
+            self._calendar_conflict_service.constraints(candidate)
+            if is_active and hasattr(self._calendar_conflict_service, "constraints")
+            else []
+        )
+        if marker_conflicts:
             raise AppError(
                 409,
-                "Die lokale Einheit verletzt eine aktuelle Kalenderbeschränkung.",
+                planning_calendar.marker_conflict_message(
+                    candidate.get("date"), marker_conflicts
+                ),
                 reason="plan_date_conflict",
             )
         if is_active and not skip_calendar_conflict and date_changed:

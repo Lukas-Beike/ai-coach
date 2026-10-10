@@ -54,8 +54,20 @@ APPOINTMENT_FIELDS = (
     "duration_minutes",
     "all_day",
     "training_relevant",
+    "no_training",
     "no_intensity",
     "short_only",
+)
+MARKER_DAY_KEYS = ("no_training", "no_intensity", "short_only")
+OPTIONAL_DAY_KEYS = (
+    *MARKER_DAY_KEYS,
+    "checkin",
+    "recovery",
+    "health",
+    "weather",
+    "planned",
+    "appointments",
+    "activity_feedback",
 )
 PLANNED_FIELDS = (
     "id",
@@ -376,7 +388,11 @@ def _project_checkin_days(
             continue
         value = planning_date(checkin.get("checkin_date"))
         if value:
-            _day(days, value)["checkin"] = selected(checkin, CHECKIN_FIELDS)
+            day = _day(days, value)
+            day["checkin"] = selected(checkin, CHECKIN_FIELDS)
+            # "unknown" is the default and would only add prompt noise.
+            if checkin.get("day_status") in ("rest", "pause"):
+                day["day_status"] = checkin["day_status"]
 
 
 def _project_calendar_days(
@@ -389,12 +405,14 @@ def _project_calendar_days(
     for event in calendar_events:
         if not isinstance(event, dict):
             continue
+        active_markers = [key for key in MARKER_DAY_KEYS if event.get(key)]
         for value in external_calendar_event_dates(
             event, today=today, window_days=calendar_window_days
         ):
-            _day(days, value)["appointments"].append(
-                selected(event, APPOINTMENT_FIELDS)
-            )
+            day = _day(days, value)
+            day["appointments"].append(selected(event, APPOINTMENT_FIELDS))
+            for key in active_markers:
+                day[key] = True
 
 
 def _project_activity_feedback_days(
@@ -449,10 +467,7 @@ def _sort_and_clean_daily_planning_days(
         value.get("activity_feedback", []).sort(
             key=lambda item: str(item.get("activity_id") or "")
         )
-        for key in ("checkin", "recovery", "health", "weather"):
-            if not value.get(key):
-                value.pop(key, None)
-        for key in ("planned", "appointments", "activity_feedback"):
+        for key in OPTIONAL_DAY_KEYS:
             if not value.get(key):
                 value.pop(key, None)
     return [days[key] for key in sorted(days)]
