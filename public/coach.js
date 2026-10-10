@@ -1882,7 +1882,7 @@ function contextObjectNode(object, depth) {
   for (const [key, item] of Object.entries(object)) {
     if (CONTEXT_HIDDEN_KEYS.has(key)) continue;
     const term = document.createElement("dt");
-    term.textContent = CONTEXT_KEY_LABELS[key] || key.replace(/_/g, " ");
+    term.textContent = CONTEXT_KEY_LABELS[key] || key.replaceAll("_", " ");
     const definition = document.createElement("dd");
     definition.append(contextValueNode(item, key, depth + 1));
     list.append(term, definition);
