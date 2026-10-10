@@ -28,7 +28,7 @@ def power_profile(activity: dict[str, Any]) -> dict[str, Any]:
         return {
             **base,
             "status": "insufficient_data",
-            "reason": "Vollstaendige Rad-Leistungsmessreihe fehlt.",
+            "reason": "Vollständige Rad-Leistungsmessreihe fehlt.",
             "points": [],
             "duration_curve": [],
         }
@@ -64,7 +64,7 @@ def running_profile(activity: dict[str, Any]) -> dict[str, Any]:
         return {
             **base,
             "status": "insufficient_data",
-            "reason": "Keine Laufaktivitaet.",
+            "reason": "Keine Laufaktivität.",
             "speed": [],
             "distance": [],
         }
@@ -85,7 +85,7 @@ def running_profile(activity: dict[str, Any]) -> dict[str, Any]:
         return {
             **base,
             "status": "insufficient_data",
-            "reason": "Vollstaendige Lauf-Zeitreihe fehlt.",
+            "reason": "Vollständige Lauf-Zeitreihe fehlt.",
             "speed": [],
             "distance": [],
         }

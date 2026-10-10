@@ -409,7 +409,7 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
                 self.assertRaisesRegex(AppError, "zwischen 5 und 1440"),
             ):
                 self.service.create_template({"duration_minutes": duration})
-        with self.assertRaisesRegex(AppError, "Ungueltige Sportart"):
+        with self.assertRaisesRegex(AppError, "Ungültige Sportart"):
             self.service.create_template({"sport": "Hike"})
         for invalid in (None, [], {"date": "2026-09-20"}):
             with (

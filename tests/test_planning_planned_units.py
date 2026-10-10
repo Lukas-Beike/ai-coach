@@ -100,7 +100,7 @@ class NormalizePlannedUnitTests(unittest.TestCase):
                 self.assertEqual(raised.exception.status, 400)
                 self.assertEqual(
                     raised.exception.message,
-                    "Eine geplante Einheit benoetigt ihre Sportart.",
+                    "Eine geplante Einheit benötigt ihre Sportart.",
                 )
                 self.assertEqual(raised.exception.reason, "invalid_workout")
 

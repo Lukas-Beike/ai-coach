@@ -228,7 +228,7 @@ class WorkoutLibraryService:
             )
         sport = str(workout.get("sport") or "Ride")
         if sport not in {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining"}:
-            raise AppError(400, "Ungueltige Sportart der Vorlage.")
+            raise AppError(400, "Ungültige Sportart der Vorlage.")
         return self.create_local_entry(
             {
                 "sport": sport,

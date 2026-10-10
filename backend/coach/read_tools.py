@@ -182,7 +182,7 @@ class CoachReadToolService:
         ):
             raise AppError(
                 400,
-                "Komponenten koennen nicht mit Legacy-Lebensmittelreferenzen kombiniert werden.",
+                "Komponenten können nicht mit Legacy-Lebensmittelreferenzen kombiniert werden.",
             )
         if arguments.get("product_id"):
             return nutrition.calculate_product(

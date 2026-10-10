@@ -87,7 +87,7 @@ class CoachProposalValidationTests(unittest.TestCase):
                 self.assert_invalid({**self.undo, field: invalid}, shape_error)
 
     def test_rejects_empty_diffs_and_wrong_action_targets(self):
-        action_error = "Die geschuetzte Aktion benoetigt das passende Ziel und einen sichtbaren Diff."
+        action_error = "Die geschützte Aktion benötigt das passende Ziel und einen sichtbaren Diff."
         for diff in ({}, []):
             with self.subTest(diff=diff):
                 self.assert_invalid({**self.undo, "diff": diff}, action_error)

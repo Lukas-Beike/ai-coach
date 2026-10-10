@@ -109,7 +109,7 @@ class PlannedCalendarSyncService:
         ) != planning_library.library_payload_hash(original_payload):
             raise AppError(
                 409,
-                "Die Planung wurde waehrend der Synchronisation geaendert.",
+                "Die Planung wurde während der Synchronisation geändert.",
                 reason="planning_revision_conflict",
             )
 
@@ -165,7 +165,7 @@ class PlannedCalendarSyncService:
         if self._remote_event_is_invalid(remote_id, event):
             raise AppError(
                 409,
-                "Die zugeordnete Einheit ist keine freie zukuenftige Planung mehr.",
+                "Die zugeordnete Einheit ist keine freie zukünftige Planung mehr.",
                 reason="intervals_workout_identity_conflict",
             )
         self._recheck(normalized_id, original_payload)
@@ -465,7 +465,7 @@ class PlannedCalendarRepairService:
         ):
             raise AppError(
                 409,
-                "Die Planung hat sich seit dem Reparaturauftrag geaendert.",
+                "Die Planung hat sich seit dem Reparaturauftrag geändert.",
                 reason="planning_revision_conflict",
             )
         workout = json.loads(row["payload"])
@@ -474,7 +474,7 @@ class PlannedCalendarRepairService:
         if planned_date < today:
             raise AppError(
                 400,
-                "Reparatur-Sync ist nur fuer zukuenftige geplante Einheiten erlaubt.",
+                "Reparatur-Sync ist nur für zukünftige geplante Einheiten erlaubt.",
                 reason="invalid_plan",
             )
         client = batch.client if batch is not None else self._provider_client_factory()
@@ -578,7 +578,7 @@ class PlannedCalendarRepairService:
             if self._event_is_invalid(context, event, belongs_elsewhere):
                 raise AppError(
                     409,
-                    "Eine zugeordnete Einheit ist keine freie zukuenftige Planung mehr.",
+                    "Eine zugeordnete Einheit ist keine freie zukünftige Planung mehr.",
                     reason="intervals_workout_identity_conflict",
                 )
             return True
@@ -586,7 +586,7 @@ class PlannedCalendarRepairService:
             raise AppError(
                 409,
                 "Eine gleichnamige Remote-Einheit am selben Tag ist nicht eindeutig "
-                "zugeordnet. Keine automatische Kopie oder Loeschung durchgefuehrt.",
+                "zugeordnet. Keine automatische Kopie oder Löschung durchgeführt.",
                 reason="intervals_workout_identity_ambiguous",
             )
         return False
@@ -662,7 +662,7 @@ class PlannedCalendarRepairService:
         if not isinstance(result, dict) or not str(result.get("id") or "").strip():
             raise AppError(
                 502,
-                "Intervals.icu hat keine eindeutige reparierte Einheit zurueckgegeben.",
+                "Intervals.icu hat keine eindeutige reparierte Einheit zurückgegeben.",
                 reason="intervals_workout_verification_failed",
             )
         context.remote_id = str(result["id"])
@@ -687,7 +687,7 @@ class PlannedCalendarRepairService:
                     db,
                     context.local_id,
                     "sync_error",
-                    "Planung waehrend der Reparatur geaendert.",
+                    "Planung während der Reparatur geändert.",
                     saved_event,
                     now=self._now(),
                 )
@@ -719,7 +719,7 @@ class PlannedCalendarRepairService:
         ) or result.get("name") != context.workout.get("name"):
             raise AppError(
                 502,
-                "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestaetigt.",
+                "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestätigt.",
                 reason="intervals_workout_verification_failed",
             )
         planning_workouts.validate_intervals_workout_result(context.workout, result)
@@ -758,7 +758,7 @@ class PlannedCalendarRepairService:
             ):
                 raise AppError(
                     502,
-                    "Der Kalender bestaetigt keine eindeutige reparierte Einheit.",
+                    "Der Kalender bestätigt keine eindeutige reparierte Einheit.",
                     reason="intervals_workout_verification_failed",
                 )
             else:
@@ -768,7 +768,7 @@ class PlannedCalendarRepairService:
                 ) or event.get("name") != context.workout.get("name"):
                     raise AppError(
                         502,
-                        "Der Kalender bestaetigt Datum oder Namen der reparierten Einheit nicht.",
+                        "Der Kalender bestätigt Datum oder Namen der reparierten Einheit nicht.",
                         reason="intervals_workout_verification_failed",
                     )
                 planning_workouts.validate_intervals_workout_result(

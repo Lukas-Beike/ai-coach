@@ -855,7 +855,7 @@ class ServerCoachTests(ServerTestCase):
         )
         self.assertEqual(status, "completed")
         self.assertTrue(text.startswith("Wie fühlst du dich?"))
-        self.assertIn("Bereits erfolgreich ausgefuehrt", text)
+        self.assertIn("Bereits erfolgreich ausgeführt", text)
         self.assertEqual(question, "Wie fühlst du dich?")
         self.assertFalse(cancelled)
 

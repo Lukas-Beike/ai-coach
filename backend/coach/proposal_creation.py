@@ -41,7 +41,7 @@ def _approval_date(value: Any) -> str:
         return LocalDate.parse(value).isoformat()
     except (TypeError, ValueError) as exc:
         raise AppError(
-            409, "Die Vorschau enthaelt ein ungueltiges Datum.", reason="invalid_date"
+            409, "Die Vorschau enthält ein ungültiges Datum.", reason="invalid_date"
         ) from exc
 
 
@@ -249,7 +249,7 @@ class CoachProposalCreationService:
     ) -> None:
         if "components" in values:
             if self._nutrition_meal_library_service is None:
-                raise AppError(503, "Lebensmitteldatenbank ist nicht verfuegbar.")
+                raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
             calculation = self._nutrition_meal_library_service().calculate_components(
                 values["components"]
             )
@@ -461,7 +461,7 @@ def _competition_detail(db: Any, item: dict[str, Any]) -> dict[str, str]:
         if not row:
             return {}
         _validate_manifest_row(
-            row, item, "Der Wettkampfbestand hat sich vor der Freigabe geaendert."
+            row, item, "Der Wettkampfbestand hat sich vor der Freigabe geändert."
         )
         return {
             "name": str(row["name"] or "Wettkampf")[:120],
@@ -495,7 +495,7 @@ def _validate_manifest_row(row: Any, item: dict[str, Any], message: str) -> None
 def _check_approval_row_limit(rows: list[Any]) -> None:
     if len(rows) > _MAX_REMOTE_APPROVAL_DETAILS:
         raise AppError(
-            409, "Der Plan enthaelt zu viele Sync-Einheiten fuer eine Freigabe."
+            409, "Der Plan enthält zu viele Sync-Einheiten für eine Freigabe."
         )
 
 
@@ -529,7 +529,7 @@ def _duplicate_approval_arguments(
         requested = arguments.get(field)
         if requested and str(requested) != str(duplicate[field]):
             raise AppError(
-                409, "Das angeforderte Duplikat stimmt nicht mit der Vorschau ueberein."
+                409, "Das angeforderte Duplikat stimmt nicht mit der Vorschau überein."
             )
     manifest = {
         "canonical_id": duplicate["canonical_id"],

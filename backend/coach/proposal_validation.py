@@ -56,7 +56,7 @@ def validated_coach_action_preview_input(
     elif target_system != expected_target or not diff:
         raise AppError(
             400,
-            "Die geschuetzte Aktion benoetigt das passende Ziel und einen sichtbaren Diff.",
+            "Die geschützte Aktion benötigt das passende Ziel und einen sichtbaren Diff.",
         )
     if action_type == "remote_coach_write":
         _validate_remote_coach_write(payload)
@@ -201,7 +201,7 @@ def _summary_date(value: Any) -> str:
     except (TypeError, ValueError) as exc:
         raise AppError(
             409,
-            "Die Aktionsvorschau enthaelt ein ungueltiges Datum.",
+            "Die Aktionsvorschau enthält ein ungültiges Datum.",
             reason="invalid_date",
         ) from exc
 

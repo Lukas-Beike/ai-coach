@@ -275,7 +275,7 @@ class CoachDialogueActionService:
         if request["sync_scope"] != "selected" or not period:
             raise AppError(
                 400,
-                "Reparatur-Sync benoetigt eine Auswahl und einen Zeitraum.",
+                "Reparatur-Sync benötigt eine Auswahl und einen Zeitraum.",
                 reason="request_sync",
             )
         action["_repair_period"] = {

@@ -116,7 +116,7 @@ class PlanningArtifactTests(unittest.TestCase):
                 self.assertEqual(raised.exception.status, 400)
                 self.assertEqual(raised.exception.reason, "invalid_plan")
                 self.assertEqual(
-                    str(raised.exception), "Ein Planartefakt benoetigt payload."
+                    str(raised.exception), "Ein Planartefakt benötigt payload."
                 )
 
 

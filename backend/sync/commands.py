@@ -48,7 +48,7 @@ class ProviderRefreshCommandService:
         if provider != "intervals":
             raise AppError(
                 400,
-                "Ein synchroner Vorababruf ist nur fuer Intervals.icu zulaessig.",
+                "Ein synchroner Vorababruf ist nur für Intervals.icu zulässig.",
                 reason="invalid_refresh_request",
             )
 
@@ -98,13 +98,13 @@ class ProviderRefreshCommandService:
         except (TypeError, ValueError) as exc:
             raise AppError(
                 400,
-                "Der synchrone Aktivitaetsabruf benoetigt einen gueltigen Zeitraum.",
+                "Der synchrone Aktivitätsabruf benötigt einen gültigen Zeitraum.",
                 reason="invalid_refresh_request",
             ) from exc
         if activity_days != self._all_sync_days and not 1 <= activity_days <= 3660:
             raise AppError(
                 400,
-                "Der Synchronisationszeitraum ist zu gross.",
+                "Der Synchronisationszeitraum ist zu groß.",
                 reason="invalid_refresh_request",
             )
         return activity_days

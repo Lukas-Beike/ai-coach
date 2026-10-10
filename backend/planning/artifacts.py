@@ -11,7 +11,7 @@ def structured_artifact_payload(arguments: dict[str, Any]) -> dict[str, Any]:
     payload = arguments.get("payload")
     if isinstance(payload, dict):
         return payload
-    raise AppError(400, "Ein Planartefakt benoetigt payload.", reason="invalid_plan")
+    raise AppError(400, "Ein Planartefakt benötigt payload.", reason="invalid_plan")
 
 
 def validate_structured_plan_limits(payload: dict[str, Any]) -> None:
