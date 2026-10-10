@@ -45,7 +45,7 @@ def season_preparation(
             key=lambda row: number(row.get("moving_time")) or -1,
             reverse=True,
         )[:3]
-        weeks = _preparation_weeks(eligible, window_start, window_end, timezone)
+        weeks = _preparation_weeks(eligible, window_start, timezone)
         analyses = {row["activity_id"]: row for row in (observations or [])}
         target_context = _target_context(event)
         event["preparation"] = {
@@ -317,7 +317,7 @@ def _week_start(day: date) -> date:
 
 
 def _preparation_weeks(
-    eligible: list[dict], window_start: date, window_end: date, timezone: str
+    eligible: list[dict], window_start: date, timezone: str
 ) -> list[dict]:
     weeks = []
     for offset in range(PREPARATION_WEEKS):
