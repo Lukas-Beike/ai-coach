@@ -1003,13 +1003,17 @@ class ServerFrontendTests(ServerTestCase):
         root = Path(__file__).resolve().parents[1]
         index = (root / "public" / "index.html").read_text(encoding="utf-8")
         worker = (root / "public" / "service-worker.js").read_text(encoding="utf-8")
-        version = re.search(r'<script src="/format\.js\?v=(\d+)" defer></script>', index)
+        version = re.search(
+            r'<script src="/format\.js\?v=(\d+)" defer></script>', index
+        )
         self.assertIsNotNone(version)
         asset = f"/format.js?v={version.group(1)}"
         self.assertLess(index.index(asset), index.index("/api.js?v="))
         self.assertIn(f'"{asset}"', worker)
         self.assertIn('"/format.js"', worker)
-        response = StaticAssetService(server.PUBLIC_DIR).render("/format.js", asset, None)
+        response = StaticAssetService(server.PUBLIC_DIR).render(
+            "/format.js", asset, None
+        )
         self.assertEqual(response.status, 200)
         self.assertIn("javascript", dict(response.headers)["Content-Type"])
         self.assertEqual(
