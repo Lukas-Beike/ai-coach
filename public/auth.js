@@ -2,6 +2,10 @@ function cookie(name) {
   return document.cookie.split("; ").find((part) => part.startsWith(`${name}=`))?.split("=").slice(1).join("=") || "";
 }
 
+// True while the app is locked behind the login dialog. Escape must not leave
+// the athlete on a blank app, so the dialog is kept open until login succeeds.
+let loginDialogRequired = false;
+
 function showLogin() {
   state.sessionGeneration += 1;
   state.voiceAcquiring = false;
@@ -57,7 +61,24 @@ function showLogin() {
   $("#appShell").hidden = true;
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
+  loginDialogRequired = true;
   showAccessibleDialog(dialog, $("#loginPassword"));
+}
+
+function installLoginDialogGuards() {
+  const dialog = $("#loginDialog");
+  if (!dialog) return;
+  dialog.addEventListener("cancel", (event) => {
+    if (loginDialogRequired) event.preventDefault();
+  });
+  dialog.addEventListener("close", () => {
+    if (!loginDialogRequired) return;
+    // Defer so the global close handler restores focus first; the password field must keep focus.
+    // Only reopen while the app shell is still locked, so a programmatic session handover is not undone.
+    setTimeout(() => {
+      if (loginDialogRequired && !dialog.open && $("#appShell").hidden) showAccessibleDialog(dialog, $("#loginPassword"));
+    }, 0);
+  });
 }
 
 let confirmationResolver = null;
@@ -197,6 +218,7 @@ async function bootstrapAuth() {
     renderMaintenanceStatus(status.maintenance);
     if (status.authenticated) {
       $("#authLoading").hidden = true;
+      loginDialogRequired = false;
       $("#loginDialog").close();
       showAppShellLoading();
       notePwaActivity();
@@ -223,6 +245,7 @@ async function login(event) {
   try {
     await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#loginPassword").value }) });
     $("#loginPassword").value = "";
+    loginDialogRequired = false;
     $("#loginDialog").close();
     showAppShellLoading();
     notePwaActivity();
@@ -240,6 +263,8 @@ async function login(event) {
 
 async function logout() {
   if (!await confirmDiscardChanges()) return;
+  const confirmed = await requestConfirmation("Du wirst auf diesem Gerät abgemeldet. Deine Daten bleiben verschlüsselt gespeichert.", { title: "Abmelden?" });
+  if (!confirmed) return;
   try { await api("/api/logout", { method: "POST", body: "{}" }); } catch { }
   showLogin();
 }
