@@ -2,6 +2,45 @@ const { test, expect } = require("@playwright/test");
 
 const todayCardFor = (page) => page.locator("#plannedCalendar .planned-day.is-today");
 const todayCheckinAction = (page) => todayCardFor(page).locator(".planned-day-checkin button");
+const CHECKIN_FIELDS = ["soreness", "stress", "motivation", "session_rpe", "day_form", "available_minutes", "illness", "pain", "availability_notes", "notes"];
+
+const waitForFeedbackLoaded = (page) => expect.poll(() => page.evaluate(() => state.loadedAreas.has("feedback"))).toBe(true);
+
+const fetchCheckin = (page, dateKey) => page.evaluate(async (key) => {
+  const data = await api("/api/feedback");
+  return (data.checkins || []).find((row) => row.checkin_date === key) || null;
+}, dateKey);
+
+const restoreCheckin = (page, original) => {
+  const body = {
+    checkin_date: original.checkin_date,
+    day_status: original.day_status ?? "unknown",
+    tag_answers: original.tag_answers ?? {},
+    ...Object.fromEntries(CHECKIN_FIELDS.map((field) => [field, original[field] ?? null])),
+  };
+  return page.evaluate(async (payload) => {
+    const result = await api("/api/feedback", { method: "POST", body: JSON.stringify(payload) });
+    return result.checkin?.checkin_date ?? null;
+  }, body);
+};
+
+// The fixture runtime is shared across specs, so today's seeded check-in is captured before each test and restored after it.
+let originalTodayCheckin = null;
+
+test.beforeEach(async ({ page }) => {
+  await openPlanOverview(page);
+  await waitForFeedbackLoaded(page);
+  const dateKey = await todayCardFor(page).getAttribute("data-date");
+  originalTodayCheckin = await fetchCheckin(page, dateKey);
+  if (!originalTodayCheckin) throw new Error("The fixture must seed today's check-in so it can be restored.");
+});
+
+test.afterEach(async ({ page }) => {
+  if (!originalTodayCheckin) return;
+  const restoredDate = await restoreCheckin(page, originalTodayCheckin);
+  expect(restoredDate).toBe(originalTodayCheckin.checkin_date);
+  originalTodayCheckin = null;
+});
 
 const openPlanOverview = async (page) => {
   await page.goto("/#plan/overview");
@@ -75,6 +114,7 @@ test("@responsive check-in history asks before replacing an unsaved draft", asyn
 test("Mehr profile opens the daily check-in for today", async ({ page }) => {
   await page.goto("/#more/profile");
   await expect(page.locator("#appShell")).toBeVisible();
+  await waitForFeedbackLoaded(page);
   await page.locator("#profileCheckinButton").click();
   const dialog = page.locator("#checkinDialog");
   await expect(dialog).toBeVisible();

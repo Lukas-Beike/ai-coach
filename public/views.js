@@ -301,6 +301,8 @@ async function openCheckinEditor(date = todayIso()) {
   const dialog = $("#checkinDialog");
   const form = $("#checkinForm");
   if (!dialog || !form) return;
+  // Until feedback is loaded, an empty check-in list must not open a blank form that could overwrite a saved record.
+  if (!state.loadedAreas.has("feedback")) return;
   const todayKey = todayIso();
   if (date > todayKey) return;
   form.elements.checkin_date.max = todayKey;

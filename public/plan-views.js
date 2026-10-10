@@ -600,16 +600,20 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   }
 
   function plannedDayCheckin(dateKey) {
-    const row = (state.data?.checkins || []).find((item) => item?.checkin_date === dateKey) || null;
+    // An empty check-in list is only authoritative once the feedback area has loaded.
+    const feedbackLoaded = state.loadedAreas.has("feedback");
+    const row = feedbackLoaded ? (state.data?.checkins || []).find((item) => item?.checkin_date === dateKey) || null : null;
     const wrap = document.createElement("div");
     wrap.className = "planned-day-checkin";
     const status = document.createElement("p");
     status.className = `planned-day-checkin-status${row ? " is-saved" : ""}`;
-    status.textContent = row ? `Check-in gespeichert · ${checkinSummary(row)}` : "Noch kein Check-in für heute";
+    if (!feedbackLoaded) status.textContent = "Check-in wird geladen …";
+    else status.textContent = row ? `Check-in gespeichert · ${checkinSummary(row)}` : "Noch kein Check-in für heute";
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary-button";
     button.textContent = row ? "Check-in bearbeiten" : "Check-in";
+    button.disabled = !feedbackLoaded;
     button.addEventListener("click", () => openCheckinEditor(dateKey));
     wrap.append(status, button);
     return wrap;
@@ -705,7 +709,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
     const currentWeekKey = planWeekStart(todayKey);
     const display = state.data?.calendar_display || {};
-    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.checkins]);
+    const snapshot = JSON.stringify([trainingCalendar, todayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.checkins, state.loadedAreas.has("feedback")]);
     if (snapshot === plannedRenderSnapshot && root.childElementCount) {
       if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
       return;
