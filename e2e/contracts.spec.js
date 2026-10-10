@@ -680,7 +680,7 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(cycling).not.toContainText("%");
   await expect(cycling.locator(".analysis-coverage")).toHaveCount(0);
   await cycling.getByRole("button", { name: "Erklärung zu FTP", exact: true }).click();
-  await expect(cycling.locator(".analysis-info-tooltip:popover-open")).toContainText(/\d+\/\d+ datierte Werte/);
+  await expect(cycling.locator(".analysis-info-tooltip:popover-open")).toContainText(/Daten für \d+ von \d+ Wochen vorhanden\./);
   await page.keyboard.press("Escape");
   expect((await cycling.locator('path[data-series="0"]').first().getAttribute("d")).match(/M/g)).toHaveLength(1);
   const details = cycling.locator("details").filter({ has: page.getByText("Werte ansehen", { exact: true }) }).first();
