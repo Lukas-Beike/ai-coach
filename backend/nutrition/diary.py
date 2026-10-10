@@ -123,11 +123,14 @@ class NutritionDiaryService:
                 **template,
                 "description": f"{template['name']} · {amount:g} Portion(en): {template['description']}",
                 "meal_date": meal_date,
-                "meal_time": meal_time or "12:00",
+                "meal_time": meal_time,
+                # Without a time from the athlete, the diary must not show an invented one.
+                "logged_time_known": bool(meal_time),
             }
             payload.pop("id")
             payload.pop("meal_type", None)
-            if template.get("meal_type_explicit"):
+            # An unknown time keeps the template's own meal type instead of inferring one.
+            if template.get("meal_type_explicit") or not meal_time:
                 payload["meal_type"] = template["meal_type"]
             payload["source"] = (
                 "coach" if template.get("source") == "coach" else template["source"]

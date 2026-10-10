@@ -279,14 +279,16 @@ async function loadNutrition() {
     dateInput.value = day.date;
     renderNutritionExpenditure(day.energy_expenditure, day.date);
     status.textContent = day.entry_count ? "" : "Noch keine Mahlzeiten erfasst. Das bedeutet nicht, dass du nichts gegessen hast.";
-    const totals = document.querySelector("#nutritionTotals");
+    const totals = document.querySelector("#nutritionTotals");
+    // Empty days report zero totals, which are unknown, so the tiles stay at "–".
+    const hasEntries = Number(day.entry_count) > 0;
     for (const [label, key, unit] of [["Kalorien", "kcal", "kcal"], ["Kohlenhydrate", "carbs_g", "g"], ["Protein", "protein_g", "g"], ["Fett", "fat_g", "g"]]) {
       const tile = document.createElement("div");
       tile.className = "nutrition-total";
       const value = document.createElement("strong");
-      const complete = day[`total_${key}`];
+      const complete = hasEntries ? day[`total_${key}`] : null;
       // A partial sum of known values is shown only with an explicit incompleteness label.
-      const total = complete ?? day.known_macro_totals?.[key];
+      const total = hasEntries ? (complete ?? day.known_macro_totals?.[key]) : null;
       const totalText = total != null ? nutritionNumber(total) : "–";
       value.textContent = `${totalText} ${unit}`;
       const caption = document.createElement("span");
