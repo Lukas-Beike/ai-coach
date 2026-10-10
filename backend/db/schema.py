@@ -267,6 +267,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "sync_state",
         "created_at",
         "updated_at",
+        "logged_time_known",
     },
     "nutrition_sync_dates": {"meal_date", "revision", "sync_state", "updated_at"},
     "nutrition_templates": {"id", "name", "payload", "updated_at"},
@@ -314,7 +315,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 NUTRITION_PRODUCTS_DDL = """
     CREATE TABLE nutrition_products (
@@ -650,8 +651,7 @@ def initialize_schema(db: Any) -> None:
         source TEXT NOT NULL DEFAULT 'manual',
         sync_state TEXT NOT NULL DEFAULT 'local',
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    );
+        updated_at TEXT NOT NULL , logged_time_known INTEGER NOT NULL DEFAULT 1);
     CREATE INDEX idx_nutrition_logs_date ON nutrition_logs(meal_date, logged_at DESC);
     CREATE TABLE nutrition_sync_dates (
         meal_date TEXT PRIMARY KEY,

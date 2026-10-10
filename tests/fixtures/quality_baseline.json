@@ -9,7 +9,7 @@
     {
       "tool": "ruff",
       "path": "backend/nutrition/models.py",
-      "line": 175,
+      "line": 197,
       "column": 32,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -17,7 +17,7 @@
     {
       "tool": "ruff",
       "path": "backend/nutrition/models.py",
-      "line": 185,
+      "line": 207,
       "column": 36,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"

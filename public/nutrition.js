@@ -141,8 +141,8 @@ function nutritionCard(item, template) {
   const title = document.createElement("h3");
   const mealLabels = { breakfast: "Frühstück", lunch: "Mittagessen", dinner: "Abendessen", snack: "Snack" };
   const mealLabel = mealLabels[item.meal_type] || "Mahlzeit";
-  const mealTime = String(item.logged_at).split("T")[1]?.slice(0, 5) || "";
-  title.textContent = template ? item.name : `${mealTime} · ${mealLabel}`;
+  const mealTime = item.logged_time_known === false ? "" : String(item.logged_at).split("T")[1]?.slice(0, 5) || "";
+  title.textContent = template ? item.name : (mealTime ? `${mealTime} · ${mealLabel}` : mealLabel);
   const description = document.createElement("p");
   description.textContent = item.description;
   const values = document.createElement("p");
@@ -283,13 +283,21 @@ async function loadNutrition() {
       const tile = document.createElement("div");
       tile.className = "nutrition-total";
       const value = document.createElement("strong");
-      const known = day.entries.some((entry) => entry[key] != null);
-      const total = day[`total_${key}`];
-      value.textContent = `${known && total != null ? nutritionNumber(total) : "–"} ${unit}`;
+      const complete = day[`total_${key}`];
+      // A partial sum of known values is shown only with an explicit incompleteness label.
+      const total = complete ?? day.known_macro_totals?.[key];
+      value.textContent = `${total != null ? nutritionNumber(total) : "–"} ${unit}`;
       const caption = document.createElement("span");
-      caption.textContent = label + (known && day.entries.some((entry) => entry[key] == null) ? " · unvollständig" : "");
+      caption.textContent = label + (complete == null && total != null ? " · unvollständig" : "");
       tile.append(value, caption);
       totals.append(tile);
+    }
+    const entriesWithoutMacros = Number(day.entries_without_macros) || 0;
+    if (entriesWithoutMacros > 0) {
+      const note = document.createElement("p");
+      note.className = "nutrition-total-note";
+      note.textContent = entriesWithoutMacros === 1 ? "1 Eintrag ohne vollständige Makros" : `${entriesWithoutMacros} Einträge ohne vollständige Makros`;
+      totals.append(note);
     }
     document.querySelector("#nutritionEntries").replaceChildren(...day.entries.map((item) => nutritionCard(item, false)));
     const templates = document.querySelector("#nutritionTemplates");
@@ -441,7 +449,7 @@ function normalizeNutritionProduct(product = {}) {
 function nutritionProductForm(product = {}) {
   const form = document.createElement("form");
   form.className = "nutrition-product-form";
-  form.innerHTML = `<input name="id" type="hidden"><input name="source" type="hidden"><input name="source_url" type="hidden"><input name="external_id" type="hidden"><input name="provenance" type="hidden"><input name="warnings" type="hidden"><label>Marke<input name="brand" maxlength="120"></label><label>EAN/GTIN<input name="barcode" inputmode="numeric" pattern="[0-9]{8,14}" maxlength="14"></label><div class="nutrition-product-grid"><label>Name<input name="name" required maxlength="160"></label><label>kcal<input name="kcal" type="number" min="0" step="0.1"></label><label>Kohlenhydrate (g)<input name="carbs_g" type="number" min="0" step="0.1"></label><label>Protein (g)<input name="protein_g" type="number" min="0" step="0.1"></label><label>Fett (g)<input name="fat_g" type="number" min="0" step="0.1"></label><label>Bezugsmenge<input name="basis_amount" type="number" min="0.1" step="0.1" value="100"></label><label>Einheit<select name="basis_unit"><option value="g">pro 100 g</option><option value="ml">pro 100 ml</option><option value="portion">pro Portion</option></select></label></div><p class="fine-print" data-extraction-confidence></p><p class="fine-print">Leere Nährwerte bleiben unbekannt. Bitte prüfe jede erkannte Zahl vor dem Speichern.</p><div class="nutrition-actions"><button type="submit" class="push-button">Produkt lokal speichern</button><button type="button" class="secondary-button" data-product-cancel>Abbrechen</button></div>`;
+  form.innerHTML = `<input name="id" type="hidden"><input name="source" type="hidden"><input name="source_url" type="hidden"><input name="external_id" type="hidden"><input name="provenance" type="hidden"><input name="warnings" type="hidden"><label>Marke<input name="brand" maxlength="120"></label><label>EAN/GTIN<input name="barcode" inputmode="numeric" pattern="[0-9]{8,14}" maxlength="14"></label><div class="nutrition-product-grid"><label>Name<input name="name" required maxlength="160"></label><label>kcal<input name="kcal" type="number" min="0" step="0.1"></label><label>Kohlenhydrate (g)<input name="carbs_g" type="number" min="0" step="0.1"></label><label>Protein (g)<input name="protein_g" type="number" min="0" step="0.1"></label><label>Fett (g)<input name="fat_g" type="number" min="0" step="0.1"></label><label>Bezugsmenge<input name="basis_amount" type="number" min="0.1" step="0.1" value="100"></label><label>Einheit<select name="basis_unit"><option value="g">pro 100 g</option><option value="ml">pro 100 ml</option><option value="portion">pro Portion</option></select></label></div><p class="fine-print" data-extraction-confidence></p><ul class="nutrition-warning-checklist" data-extraction-warnings aria-label="Hinweise zur Prüfung" hidden></ul><p class="fine-print">Leere Nährwerte bleiben unbekannt. Bitte prüfe jede erkannte Zahl vor dem Speichern.</p><div class="nutrition-actions"><button type="submit" class="push-button">Produkt lokal speichern</button><button type="button" class="secondary-button" data-product-cancel>Abbrechen</button></div>`;
   populateNutritionProductFields(form, product);
   form.elements.source.value = product.source || "packaging_label";
   const confidenceInput = document.createElement("input"); confidenceInput.name = "confidence"; confidenceInput.type = "hidden"; confidenceInput.value = nutritionProductValue(product.confidence); form.append(confidenceInput);
@@ -485,9 +493,12 @@ function setNutritionProductMetadata(form, product) {
 function setNutritionProductConfidence(form, product) {
   const confidence = Number(product.confidence);
   const warning = Number.isFinite(confidence) && confidence < 0.65 ? "Geringe Erkennungssicherheit. Werte besonders sorgfältig prüfen." : "Erkannte Werte bitte mit dem Etikett abgleichen.";
-  const warningDetails = product.warnings?.length ? ` Hinweise: ${product.warnings.join("; ")}` : "";
   const confidenceLine = form.querySelector("[data-extraction-confidence]");
-  confidenceLine.textContent = Number.isFinite(confidence) ? `Erkennungssicherheit: ${Math.round(confidence * 100)} %. ${warning}` : warning + warningDetails;
+  confidenceLine.textContent = Number.isFinite(confidence) ? `Erkennungssicherheit: ${Math.round(confidence * 100)} %. ${warning}` : warning;
+  const checklist = form.querySelector("[data-extraction-warnings]");
+  const warnings = Array.isArray(product.warnings) ? product.warnings.map((text) => String(text ?? "").trim()).filter(Boolean) : [];
+  checklist.replaceChildren(...warnings.map((text) => { const row = document.createElement("li"); row.textContent = text; return row; }));
+  checklist.hidden = warnings.length === 0;
   for (const [field, score] of Object.entries(product.field_confidence || {})) {
     const input = form.elements.namedItem(field);
     if (input && Number(score) < 0.65) { input.classList.add("nutrition-low-confidence"); input.title = "Unsichere Fotoerkennung; bitte am Etikett prüfen."; }

@@ -81,6 +81,7 @@ class NutritionEntry:
     created_at: str = ""
     updated_at: str = ""
     nutrition_basis: dict[str, Any] = field(default_factory=dict)
+    logged_time_known: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -104,6 +105,7 @@ class NutritionEntry:
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
             nutrition_basis=data.get("nutrition_basis") or {},
+            logged_time_known=_logged_time_known_flag(data.get("logged_time_known")),
         )
 
 
@@ -115,6 +117,8 @@ class NutritionDaySummary:
     total_protein_g: float | None
     total_fat_g: float | None
     entry_count: int
+    known_macro_totals: dict[str, float | None]
+    entries_without_macros: int
     entries: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, Any]:
@@ -140,9 +144,18 @@ def normalize_nutrition_entry(
     if not raw_date:
         raise AppError(400, MEAL_DATE_REQUIRED)
     meal_date = validate_iso_date(raw_date)
-    logged_at = _normalize_logged_at(
-        meal_date, raw.get("logged_at") or raw.get("meal_time") or default_time
-    )
+    logged_time_known = _logged_time_known_flag(raw.get("logged_time_known"))
+    if logged_time_known:
+        logged_at = _normalize_logged_at(
+            meal_date, raw.get("logged_at") or raw.get("meal_time") or default_time
+        )
+    else:
+        # Without a known time the entry keeps a neutral noon anchor for ordering only.
+        if not str(raw.get("meal_type") or "").strip():
+            raise AppError(
+                400, "Bei unbekannter Uhrzeit ist der Mahlzeittyp erforderlich."
+            )
+        logged_at = f"{meal_date}T12:00:00"
     meal_type = _normalize_meal_type(raw.get("meal_type"), logged_at)
     raw_desc = str(raw.get("description") or "").strip()
     if not raw_desc:
@@ -161,8 +174,17 @@ def normalize_nutrition_entry(
         "source": _normalize_source(raw.get("source")),
         "sync_state": "local",
         "nutrition_basis": raw.get("nutrition_basis") or {"kind": "manual"},
+        "logged_time_known": logged_time_known,
         **({"id": str(raw["id"])} if raw.get("id") else {}),
     }
+
+
+def _logged_time_known_flag(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    raise AppError(400, "logged_time_known muss true oder false sein.")
 
 
 def _normalize_logged_at(meal_date: str, value: Any) -> str:

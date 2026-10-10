@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import NutritionRepository
+from backend.db.repositories import NutritionRepository, nutrition_macro_totals
 from backend.errors import AppError
 from backend.nutrition.food_database import NUTRIENTS
 from backend.nutrition.meal_library import (
@@ -30,10 +30,11 @@ INVALID_ENTRY_ID = "Ungültige Eintrags-ID."
 ENTRY_NOT_FOUND = "Ernährungseintrag nicht gefunden."
 
 
-def _known_daily_total(entries: list[dict[str, Any]], field: str) -> float | None:
-    if any(entry.get(field) is None for entry in entries):
-        return None
-    return round(sum(float(entry[field]) for entry in entries), 1)
+def _names_time_without_flag(changes: dict[str, Any]) -> bool:
+    """A newly named meal time is known even when the stored entry had none."""
+    return bool({"logged_at", "meal_time"} & set(changes)) and (
+        "logged_time_known" not in changes
+    )
 
 
 class NutritionDiaryService:
@@ -251,6 +252,8 @@ class NutritionDiaryService:
             if not existing:
                 raise AppError(404, ENTRY_NOT_FOUND)
             merged_payload = {**existing, **payload}
+            if _names_time_without_flag(payload):
+                merged_payload["logged_time_known"] = True
             if "components" in payload:
                 validate_component_payload(payload)
                 prepared = {
@@ -317,6 +320,7 @@ class NutritionDiaryService:
             "logged_at",
             "meal_time",
             "meal_type",
+            "logged_time_known",
             "description",
             "kcal",
             "calories",
@@ -358,6 +362,8 @@ class NutritionDiaryService:
             str(aliases.get(key, key)): value for key, value in changes.items()
         }
         merged = {**existing, **canonical}
+        if _names_time_without_flag(canonical):
+            merged["logged_time_known"] = True
         if "components" in changes:
             validate_component_payload(changes)
             merged.update(
@@ -430,9 +436,7 @@ class NutritionDiaryService:
                 NutritionDaySummary(
                     date=date_key,
                     total_kcal=sum(int(e["kcal"]) for e in day_entries),
-                    total_carbs_g=_known_daily_total(day_entries, "carbs_g"),
-                    total_protein_g=_known_daily_total(day_entries, "protein_g"),
-                    total_fat_g=_known_daily_total(day_entries, "fat_g"),
+                    **nutrition_macro_totals(day_entries),
                     entry_count=len(day_entries),
                     entries=[
                         NutritionEntry.from_dict(e).to_dict() for e in day_entries

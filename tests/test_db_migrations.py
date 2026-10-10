@@ -20,6 +20,7 @@ from backend.db.schema import (
 RELEASE_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_19.sql.txt"
 PREVIOUS_SCHEMA = Path(__file__).with_name("fixtures") / "schema_v2.sql.txt"
 RELEASE_1_12_26_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_26.sql.txt"
+SCHEMA_V4 = Path(__file__).with_name("fixtures") / "schema_v4.sql.txt"
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -44,6 +45,11 @@ class DatabaseMigrationTests(unittest.TestCase):
         db.executescript(PREVIOUS_SCHEMA.read_text(encoding="utf-8"))
         # A prior release may have left the v2 schema unversioned.
         db.execute("PRAGMA user_version = 0")
+        return db
+
+    def schema_v4_database(self):
+        db = self.connect()
+        db.executescript(SCHEMA_V4.read_text(encoding="utf-8"))
         return db
 
     def release_1_12_26_database(self):
@@ -80,11 +86,16 @@ class DatabaseMigrationTests(unittest.TestCase):
         db.commit()
 
     def rows(self, db):
+        # Columns added by later schema versions are checked separately.
+        added_later = {
+            ("external_calendar_events", "no_training"),
+            ("nutrition_logs", "logged_time_known"),
+        }
         return {
             table: [
                 tuple(row)
                 for row in db.execute(
-                    f"SELECT {','.join(column['name'] for column in db.execute(f'PRAGMA table_info({table})') if not (table == 'external_calendar_events' and column['name'] == 'no_training'))} FROM {table}"
+                    f"SELECT {','.join(column['name'] for column in db.execute(f'PRAGMA table_info({table})') if (table, column['name']) not in added_later)} FROM {table}"
                 )
             ]
             for table in CURRENT_DATABASE_SCHEMA
@@ -787,8 +798,89 @@ class DatabaseMigrationTests(unittest.TestCase):
         )
         self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 0)
 
+    def test_schema_v4_upgrade_preserves_data_and_defaults_meal_time_known(self):
+        db = self.schema_v4_database()
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
+        self.seed_all_tables(db)
+        before = self.rows(db)
+
+        migrate_schema(db)
+        db.commit()
+        migrate_schema(db)
+        db.commit()
+
+        self.assertEqual(self.rows(db), before)
+        self.assertEqual(
+            db.execute("SELECT logged_time_known FROM nutrition_logs").fetchone()[0],
+            1,
+        )
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+        self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+
+    def test_release_1_12_26_upgrades_directly_to_current_and_keeps_meal_logs(self):
+        db = self.release_1_12_26_database()
+        db.execute(
+            "INSERT INTO nutrition_logs(id, meal_date, logged_at, meal_type, description, kcal, created_at, updated_at) "
+            "VALUES ('meal-1', '2026-09-15', '2026-09-15T13:00:00', 'lunch', 'Synthetic meal', 500, 'now', 'now')"
+        )
+        db.commit()
+
+        migrate_schema(db)
+        db.commit()
+
+        self.assertEqual(
+            tuple(
+                db.execute(
+                    "SELECT description, meal_type, logged_time_known FROM nutrition_logs WHERE id='meal-1'"
+                ).fetchone()
+            ),
+            ("Synthetic meal", "lunch", 1),
+        )
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+
+    def test_schema_v4_failed_validation_rolls_back_and_can_be_retried(self):
+        db = self.schema_v4_database()
+        self.seed_all_tables(db)
+        before = self.rows(db)
+        with (
+            patch(
+                "backend.db.migrations.database_schema_is_current",
+                return_value=False,
+            ),
+            self.assertRaisesRegex(RuntimeError, "validiert"),
+        ):
+            migrate_schema(db)
+
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
+        columns = {
+            row["name"] for row in db.execute("PRAGMA table_info(nutrition_logs)")
+        }
+        self.assertNotIn("logged_time_known", columns)
+        self.assertEqual(self.rows(db), before)
+
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
+
+    def test_schema_v4_marked_as_current_is_rejected_without_mutation(self):
+        db = self.schema_v4_database()
+        db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+        db.commit()
+        before = list(db.iterdump())
+
+        with self.assertRaises(RuntimeError):
+            migrate_schema(db)
+
+        self.assertEqual(list(db.iterdump()), before)
+
     def test_unknown_or_newer_schema_is_not_modified(self):
-        for version in (None, 5, 99):
+        for version in (None, 5, 6, 99):
             with self.subTest(version=version):
                 db = self.old_database()
                 if version is not None:
