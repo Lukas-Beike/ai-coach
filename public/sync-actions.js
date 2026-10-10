@@ -9,7 +9,7 @@ async function syncNow(event) {
     const result = await api("/api/sync", { method: "POST", body: JSON.stringify({ days: configuredDays }) });
     if (!result.id) throw new Error("Die Jobbestätigung fehlt.");
     const completed = await waitForSyncJob(result.id);
-    if (completed.status !== "completed") throw new Error(completed.error_detail || "Synchronisierung nicht vollständig abgeschlossen.");
+    if (completed.status !== "completed") throw new Error(providerJobErrorDetail(completed) || "Synchronisierung nicht vollständig abgeschlossen.");
     toast("Aktualisierung abgeschlossen");
     invalidateContextPreview();
     await load();
@@ -99,6 +99,13 @@ async function fullResync(source) {
   }
 }
 
+// The job DTO exposes the redacted explanation on its items; the job itself has no error_detail.
+function providerJobErrorDetail(job) {
+  const details = (Array.isArray(job?.items) ? job.items : []).filter((item) => typeof item?.error_detail === "string" && item.error_detail);
+  const actionable = details.find((item) => providerErrorIsNonRetryable(item.error_class)) || details.find((item) => item.status === "failed");
+  return actionable?.error_detail || job?.error_detail || "";
+}
+
 async function waitForSyncJob(jobId) {
   if (!jobId) return { status: "unknown" };
   for (let attempt = 0; attempt < 180; attempt += 1) {
@@ -106,7 +113,7 @@ async function waitForSyncJob(jobId) {
     // A non-retryable error (for example a missing provider configuration) will
     // not change while polling, so stop now and show the job's own message.
     if ([job.error_class, job.error_code].some(providerErrorIsNonRetryable)) {
-      throw new Error(job.error_detail || "Die Anbindung ist nicht vollständig konfiguriert. Bitte die Verbindungseinstellungen unter Mehr prüfen.");
+      throw new Error(providerJobErrorDetail(job) || "Die Anbindung ist nicht vollständig konfiguriert. Bitte die Verbindungseinstellungen unter Mehr prüfen.");
     }
     if (["completed", "partial", "failed"].includes(job.status)) return job;
     await new Promise((resolve) => setTimeout(resolve, 1000));
