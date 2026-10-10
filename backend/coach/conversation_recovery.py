@@ -42,14 +42,12 @@ class CoachConversationRecoveryService:
         command_receipts: list[dict[str, Any]],
         attachments: list[dict[str, Any]],
         client_turn_id: str,
-        ai_provider: str,
         recovery_state: dict[str, bool],
         request_delta_emitted: bool,
         attempt: int,
     ) -> bool:
         if (
-            ai_provider != "openai"
-            or exc.reason != "conversation_state_invalid"
+            exc.reason != "conversation_state_invalid"
             or recovery_state["conversation_recovered"]
             or request_delta_emitted
             or attempt >= 2

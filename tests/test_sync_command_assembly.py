@@ -86,7 +86,9 @@ class SyncCommandAssemblyTests(unittest.TestCase):
     def test_illness_pause_uses_current_config_and_sync_authority_dependencies(self):
         assembly = self.make_assembly()
         result = object()
-        with patch("backend.sync.command_assembly.IllnessPauseSyncService", return_value=result) as factory:
+        with patch(
+            "backend.sync.command_assembly.IllnessPauseSyncService", return_value=result
+        ) as factory:
             self.assertIs(assembly.illness_pause(), result)
 
         self.config.assert_called_once_with()

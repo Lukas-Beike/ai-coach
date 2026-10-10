@@ -31,28 +31,59 @@ class CoachAdaptiveApplyService:
         self._database_lock = database_lock
 
     def apply(
-        self, arguments: dict[str, Any], intent: dict[str, Any], client_turn_id: str,
+        self,
+        arguments: dict[str, Any],
+        intent: dict[str, Any],
+        client_turn_id: str,
     ) -> dict[str, Any]:
         if "apply_adaptive_replan" not in authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+            raise AppError(
+                403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
+            )
         adjustment_id = str(arguments.get("adjustment_id") or "").strip()
-        require_coach_scope(intent, f"adaptive_replan:{adjustment_id}", "adaptive_replan")
+        require_coach_scope(
+            intent, f"adaptive_replan:{adjustment_id}", "adaptive_replan"
+        )
         sync_illness = bool(arguments.get("sync_illness_to_intervals"))
-        if sync_illness and (intent.get("target_system") != "intervals" or "intervals_sync" not in scope_values(intent)):
-            raise AppError(403, "Der Intervals.icu-Sync der Krankheitspause muss ausdrücklich benannt werden.", reason="intent_scope_denied")
+        if sync_illness and (
+            intent.get("target_system") != "intervals"
+            or "intervals_sync" not in scope_values(intent)
+        ):
+            raise AppError(
+                403,
+                "Der Intervals.icu-Sync der Krankheitspause muss ausdrücklich benannt werden.",
+                reason="intent_scope_denied",
+            )
         latest = self._preview.latest_preview()
-        if not latest or str(latest.get("id")) != adjustment_id or latest.get("status") != "preview":
-            raise AppError(409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen.")
+        if (
+            not latest
+            or str(latest.get("id")) != adjustment_id
+            or latest.get("status") != "preview"
+        ):
+            raise AppError(
+                409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen."
+            )
         with self._database_lock, self._database_manager.unit_of_work() as db:
             current_user = db.execute(
-                "SELECT id FROM messages WHERE client_turn_id=? AND role='user'", (client_turn_id,)
+                "SELECT id FROM messages WHERE client_turn_id=? AND role='user'",
+                (client_turn_id,),
             ).fetchone()
             publication = db.execute(
                 "SELECT id FROM messages WHERE id=? AND role='assistant'",
                 (latest.get("published_message_id"),),
             ).fetchone()
-        if not current_user or not publication or current_user["id"] <= publication["id"] or current_user["id"] not in (intent.get("request") or {}).get("source_message_ids", []):
-            raise AppError(403, "Die Vorschau muss zuerst angezeigt und in einer folgenden Nachricht freigegeben werden.", reason="adaptive_approval_required")
+        if (
+            not current_user
+            or not publication
+            or current_user["id"] <= publication["id"]
+            or current_user["id"]
+            not in (intent.get("request") or {}).get("source_message_ids", [])
+        ):
+            raise AppError(
+                403,
+                "Die Vorschau muss zuerst angezeigt und in einer folgenden Nachricht freigegeben werden.",
+                reason="adaptive_approval_required",
+            )
         return {
             "ok": True,
             **self._illness_sync.apply(

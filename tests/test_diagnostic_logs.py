@@ -17,9 +17,6 @@ def _redactor() -> Redactor:
         openai_api_key="sk-test-secret-value",
         openai_base_url="https://api.openai.com/v1",
         openai_model="gpt-6-luna",
-        gemini_api_key="",
-        gemini_model="gemini-test",
-        ai_provider="openai",
         intervals_api_key="",
         intervals_athlete_id="",
         garmin_email="",
@@ -32,6 +29,15 @@ def _redactor() -> Redactor:
         data_retention_days=30,
     )
     return Redactor(lambda: config)
+
+
+class LegacyGeminiRedactionTests(unittest.TestCase):
+    def test_retired_gemini_key_signature_stays_redacted(self) -> None:
+        legacy_key = "AIza" + "x" * 35
+        redacted = _redactor().redact_text(f"legacy key {legacy_key} in log")
+
+        self.assertNotIn(legacy_key, redacted)
+        self.assertIn("[REDACTED_GEMINI_KEY]", redacted)
 
 
 class RecentLogEntriesServiceTests(unittest.TestCase):

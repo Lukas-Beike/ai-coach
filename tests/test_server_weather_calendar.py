@@ -1217,15 +1217,14 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 client, "post", side_effect=[{"id": 12345}, {"id": "remote-1"}]
             ) as post,
         ):
-            result = client.create_library_workouts(
-                [
-                    {
-                        "name": "Tempo",
-                        "description": "- 30m 85%",
-                        "sport": "Cycling",
-                    }
-                ]
+            payload = planning_workouts.library_workout_payload(
+                {
+                    "name": "Tempo",
+                    "description": "- 30m 85%",
+                    "sport": "Cycling",
+                }
             )
+            result = client.create_library_workouts([payload])
         self.assertEqual(result, [{"id": "remote-1"}])
         self.assertEqual(
             post.call_args_list[0].args,
@@ -1258,14 +1257,18 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "moving_time": 2400,
         }
         client = server.PROVIDER_TRANSPORT.intervals_client()
+        library_payload = planning_workouts.library_workout_payload(workout)
+        plan_date = (
+            _local_datetime.now().astimezone().date() + timedelta(days=1)
+        ).isoformat()
         with (
             patch.object(client, "get_or_create_workout_folder", return_value=1),
             patch.object(client, "post", return_value={"id": "synthetic"}) as post,
             patch.object(client, "put", return_value={"id": "synthetic"}) as put,
         ):
-            client.create_library_workouts([workout])
+            client.create_library_workouts([library_payload])
             self.assertEqual(post.call_args.args[1]["description"], description)
-            client.update_library_workout("synthetic", workout)
+            client.update_library_workout("synthetic", library_payload)
             self.assertEqual(put.call_args.args[1]["description"], description)
             post.return_value = [
                 {
@@ -1281,11 +1284,12 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 }
             ]
             client.plan_library_workout(
-                "synthetic",
-                workout,
-                (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
-                ).isoformat(),
+                planning_workouts.library_workout_event_payload(
+                    "synthetic",
+                    workout,
+                    plan_date,
+                    today=server.ATHLETE_CLOCK.now().date(),
+                )
             )
             payload = post.call_args.args[1][0]
             self.assertEqual(payload["description"], description)
@@ -1503,12 +1507,17 @@ class ServerWeatherCalendarTests(ServerTestCase):
     def test_explicit_plan_push_records_a_remote_calendar_write(self):
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
+        record_plan = client.plan_library_workout
+        client.plan_library_workout = lambda payload: {
+            **record_plan(payload),
+            **parsed_workout_fixture(3600, value=65),
+        }
         with patch.object(
             server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
         ):
             result = server.WORKOUT_LIBRARY_SYNC.sync_service().plan_remote(
                 "remote-workout-1",
-                {"name": "Planned", "type": "Ride"},
+                {"name": "Planned", "type": "Ride", "description": "- 60m 65%"},
                 (
                     _local_datetime.now().astimezone().date() + timedelta(days=1)
                 ).isoformat(),

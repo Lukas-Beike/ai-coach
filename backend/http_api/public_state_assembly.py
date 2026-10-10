@@ -35,6 +35,7 @@ class PublicStateCoreInputs:
     app_name: str
     app_version: str
     key_values: Callable[[], Any]
+    key_value_service: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,7 @@ class PublicStateAssembly:
         self._app_name = core.app_name
         self._app_version = core.app_version
         self._key_values = core.key_values
+        self._key_value_service = core.key_value_service
         self._snapshot_repository = owners.snapshot_repository
         self._sync_persistence = owners.sync_persistence
         self._planning_data = owners.planning_data
@@ -162,7 +164,7 @@ class PublicStateAssembly:
     def state_version_service(self) -> StateVersionService:
         return StateVersionService(
             self._database_manager(),
-            self._key_values(),
+            self._key_value_service(),
             self._snapshot_repository,
             self._athlete_data().profile(),
         )
@@ -209,7 +211,7 @@ class PublicStateAssembly:
                 config=config,
                 app_name=self._app_name,
                 app_version=self._app_version,
-                key_values=self._key_values(),
+                key_values=self._key_value_service(),
                 sync_state_repository=sync.state_repository,
                 planned_unit_service=planning.planned_unit,
                 competition_service=planning.competition,
@@ -330,7 +332,7 @@ class PublicStateAssembly:
                     calendar_projection=self.calendar_projection_service(),
                     database_manager=self._database_manager,
                     database_lock=database_lock,
-                    key_values=self._key_values(),
+                    key_values=self._key_value_service(),
                     app_name=self._app_name,
                     app_version=self._app_version,
                     config=config,

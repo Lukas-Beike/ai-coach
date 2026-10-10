@@ -106,9 +106,6 @@ class ExternalCalendarSyncTests(unittest.TestCase):
             openai_api_key="",
             openai_base_url="https://api.openai.com/v1",
             openai_model="test",
-            gemini_api_key="",
-            gemini_model="",
-            ai_provider="openai",
             intervals_api_key="",
             intervals_athlete_id="",
             garmin_email="",
@@ -155,10 +152,7 @@ class ExternalCalendarSyncTests(unittest.TestCase):
             "end_local": "2026-09-21T11:30:00+02:00",
             "duration_minutes": 90,
             "all_day": False,
-            "training_relevant": True,
-            "no_training": True,
-            "no_intensity": True,
-            "short_only": False,
+            "description": "[NO_TRAINING] [NO_INTENSITY]",
             **overrides,
         }
 

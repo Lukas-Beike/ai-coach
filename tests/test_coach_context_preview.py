@@ -1,5 +1,5 @@
 import unittest
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from unittest.mock import Mock
 
 from backend.coach.context import (
@@ -76,11 +76,11 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
                 activity_limit_per_sport=5,
                 planned_event_limit=50,
             ),
-            utc_now=lambda: datetime(2026, 9, 23, 10, 30, tzinfo=timezone.utc),
+            utc_now=lambda: datetime(2026, 9, 23, 10, 30, tzinfo=UTC),
         )
 
     def test_preview_layout_snapshot_last_message_and_read_calls(self):
-        preview = self.service.preview("openai")
+        preview = self.service.preview()
 
         self.assertEqual(
             list(preview),
@@ -112,19 +112,24 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
         )
 
     def test_projection_bounds_and_privacy(self):
-        preview = self.service.preview("openai")
+        preview = self.service.preview()
 
         self.assertEqual(preview["local_training_library"][0]["description"], "d" * 12)
         self.assertEqual(preview["projection"]["library_items"], 1)
         self.assertEqual(preview["projection"]["planned_local_items"], 1)
-        self.assertEqual(preview["projection"]["budgets"], {
-            "activity_feedback": 32,
-            "total": 100,
-        })
+        self.assertEqual(
+            preview["projection"]["budgets"],
+            {
+                "activity_feedback": 32,
+                "total": 100,
+            },
+        )
         projected_plan = preview["projection"]
         self.assertGreaterEqual(len(projected_plan["truncated_sections"]), 1)
         self.assertEqual(
-            preview["latest_intervals_snapshot"]["recent_activities_by_sport"]["Laufen"][0],
+            preview["latest_intervals_snapshot"]["recent_activities_by_sport"][
+                "Laufen"
+            ][0],
             {
                 "id": "7",
                 "start_date_local": "2026-09-22T07:00:00",
@@ -139,13 +144,9 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
         self.assertEqual(self.training_context.build.call_count, 1)
         self.assertEqual(self.library.list.call_count, 2)
 
-    def test_provider_mode_is_selected_by_argument(self):
+    def test_conversation_preview_documents_responses_chain(self):
         self.assertEqual(
-            self.service.preview("gemini")["conversation"]["mode"],
-            "Gemini local conversation history",
-        )
-        self.assertEqual(
-            self.service.preview("openai")["conversation"]["mode"],
+            self.service.preview()["conversation"]["mode"],
             "Bounded local dialogue with per-command Responses chain",
         )
 

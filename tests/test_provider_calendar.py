@@ -1,23 +1,35 @@
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+from backend.calendar.ical_mapping import (
+    calendar_event_constraints,
+    ical_no_intensity,
+    ical_short_only,
+    ical_training_impact,
+    ical_training_relevant,
+)
 from backend.errors import AppError
 from backend.providers import calendar as calendar_provider
 from backend.providers.calendar import (
     EXTERNAL_CALENDAR_WINDOW_DAYS,
     MAX_EXTERNAL_CALENDAR_BYTES,
     ical_duration,
-    ical_no_intensity,
-    ical_short_only,
-    ical_training_impact,
-    ical_training_relevant,
-    parse_ical_calendar,
     parse_ics_date,
     parse_ics_value,
     unfold_ical,
 )
+from backend.providers.calendar import (
+    parse_ical_calendar as provider_calendar_events,
+)
+
+
+def parse_ical_calendar(payload, **kwargs):
+    return [
+        calendar_event_constraints(event)
+        for event in provider_calendar_events(payload, **kwargs)
+    ]
 
 
 def feed(*events: str) -> bytes:
@@ -28,7 +40,7 @@ def feed(*events: str) -> bytes:
     ).encode()
 
 
-def parse(payload: bytes, *, start=date(2026, 9, 1), end=None, zone=timezone.utc):
+def parse(payload: bytes, *, start=date(2026, 9, 1), end=None, zone=UTC):
     end = end or start + timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS)
     return parse_ical_calendar(
         payload, local_zone=zone, today=start, window_start=start, window_end=end
@@ -36,6 +48,31 @@ def parse(payload: bytes, *, start=date(2026, 9, 1), end=None, zone=timezone.utc
 
 
 class CalendarProviderTests(unittest.TestCase):
+    def test_provider_returns_dto_and_domain_maps_constraints_without_mutation(self):
+        records = provider_calendar_events(
+            feed(
+                "UID:synthetic\r\nDTSTART:20260901T100000Z\r\nSUMMARY:Trip\r\nDESCRIPTION:[NO_TRAINING] [NO_INTENSITY] [SHORT_ONLY]"
+            ),
+            local_zone=UTC,
+            today=date(2026, 9, 1),
+        )
+        original = dict(records[0])
+        self.assertTrue(
+            {
+                "training_impact",
+                "training_relevant",
+                "no_training",
+                "no_intensity",
+                "short_only",
+            }.isdisjoint(original)
+        )
+        mapped = calendar_event_constraints(records[0])
+        self.assertEqual(records[0], original)
+        self.assertNotIn("description", mapped)
+        self.assertFalse(mapped["training_relevant"])
+        for field in ("training_impact", "no_training", "no_intensity", "short_only"):
+            self.assertTrue(mapped[field])
+
     def test_external_calendar_url_validates_https_credentials_ports_and_local_hosts(
         self,
     ):
@@ -403,22 +440,20 @@ class CalendarProviderTests(unittest.TestCase):
     def test_malformed_structure_utf8_and_limits(self):
         with self.assertRaisesRegex(AppError, "vollständiges"):
             parse_ical_calendar(
-                b"BEGIN:VCALENDAR\r\n", local_zone=timezone.utc, today=date(2026, 9, 1)
+                b"BEGIN:VCALENDAR\r\n", local_zone=UTC, today=date(2026, 9, 1)
             )
         with self.assertRaisesRegex(AppError, "UTF-8"):
-            parse_ical_calendar(
-                b"\xff", local_zone=timezone.utc, today=date(2026, 9, 1)
-            )
+            parse_ical_calendar(b"\xff", local_zone=UTC, today=date(2026, 9, 1))
         with self.assertRaisesRegex(AppError, "zu groß"):
             parse_ical_calendar(
                 b"x" * (MAX_EXTERNAL_CALENDAR_BYTES + 1),
-                local_zone=timezone.utc,
+                local_zone=UTC,
                 today=date(2026, 9, 1),
             )
         with self.assertRaisesRegex(AppError, "fenster"):
             parse_ical_calendar(
                 feed("UID:x\r\nDTSTART:20260901T100000Z"),
-                local_zone=timezone.utc,
+                local_zone=UTC,
                 today=date(2026, 9, 1),
                 window_end=date(2027, 1, 1),
             )
@@ -426,7 +461,7 @@ class CalendarProviderTests(unittest.TestCase):
             len(
                 parse_ical_calendar(
                     feed("UID:x\r\nDTSTART:20260901T100000Z"),
-                    local_zone=timezone.utc,
+                    local_zone=UTC,
                     today=date(2026, 9, 1),
                     window_start=date(2026, 9, 1),
                     window_end=date(2026, 10, 27),
@@ -437,7 +472,7 @@ class CalendarProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(AppError, "fenster"):
             parse_ical_calendar(
                 feed("UID:x\r\nDTSTART:20260901T100000Z"),
-                local_zone=timezone.utc,
+                local_zone=UTC,
                 today=date(2026, 9, 1),
                 window_start=date(2026, 9, 1),
                 window_end=date(2026, 10, 28),
@@ -574,7 +609,7 @@ class CalendarProviderTests(unittest.TestCase):
         self.assertFalse(ical_short_only("x"))
 
     def test_recurrence_iteration_caps_are_fixed_not_tautological(self):
-        base = datetime(1900, 1, 1, tzinfo=timezone.utc)
+        base = datetime(1900, 1, 1, tzinfo=UTC)
         daily_rule = {
             "count": None,
             "interval": 1,

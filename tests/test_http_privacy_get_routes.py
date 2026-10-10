@@ -105,7 +105,10 @@ class PrivacyGetRoutesTests(unittest.TestCase):
         )
 
         for _ in auth_instances:
-            routes.handle(self.handler("/api/privacy/delete/preview"), "/api/privacy/delete/preview")
+            routes.handle(
+                self.handler("/api/privacy/delete/preview"),
+                "/api/privacy/delete/preview",
+            )
 
         self.assertEqual(auth_factory.call_count, 2)
         for auth in auth_instances:

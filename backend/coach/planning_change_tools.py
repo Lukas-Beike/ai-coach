@@ -23,7 +23,9 @@ class CoachPlanningChangeToolService:
 
     def __init__(
         self,
-        plan_replacement_service: Callable[[], StructuredTrainingPlanReplacementService],
+        plan_replacement_service: Callable[
+            [], StructuredTrainingPlanReplacementService
+        ],
         training_change_service: Callable[[], StructuredTrainingChangeService],
     ) -> None:
         self._plan_replacement_service = plan_replacement_service
@@ -43,7 +45,9 @@ class CoachPlanningChangeToolService:
         self, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any]:
         if "replace_training_plan" not in authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+            raise AppError(
+                403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
+            )
 
         selected_plan_ids = self._selected_plan_ids(intent)
         if len(selected_plan_ids) > 1:
@@ -72,7 +76,9 @@ class CoachPlanningChangeToolService:
         self, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any]:
         if "apply_training_changes" not in authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+            raise AppError(
+                403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
+            )
 
         changes = arguments.get("changes")
         if not isinstance(changes, list):

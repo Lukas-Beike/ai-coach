@@ -99,7 +99,7 @@ def fixture_coach_response(payload, **kwargs):
         "E2E nutrition: confirm database meal",
         "E2E nutrition: mixed meal",
     }:
-        nutrition = server.NUTRITION_ASSEMBLY.service()
+        nutrition = server.NUTRITION_ASSEMBLY.meal_library_service()
         templates = nutrition.list_templates()
         if current_message == "E2E nutrition: mixed meal":
             product = nutrition.save_product(
@@ -949,6 +949,7 @@ def _fixture_seed_calendar(today):
     """Parse a representative iCalendar payload and persist its expanded rows."""
     from zoneinfo import ZoneInfo
 
+    from backend.calendar.ical_mapping import calendar_event_constraints
     from backend.providers.calendar import parse_ical_calendar
 
     events = parse_ical_calendar(
@@ -958,6 +959,7 @@ def _fixture_seed_calendar(today):
         window_start=today,
         window_end=today + timedelta(days=56),
     )
+    events = [calendar_event_constraints(event) for event in events]
     now = server.runtime_clock.utc_now()
     with server.database_manager().unit_of_work() as db:
         db.execute("DELETE FROM external_calendar_events WHERE uid LIKE 'fixture-%'")
@@ -1119,6 +1121,21 @@ def _fixture_seed_wave2(today, snapshot, garmin):
         server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(garmin))
 
 
+def _fixture_completed_sports(today, by_id):
+    for sport in ("Ride", "Run", "Swim", "WeightTraining"):
+        activity_id = f"contrast-completed-{sport}"
+        by_id[activity_id] = {
+            "id": activity_id,
+            "name": f"Synthetic completed {sport}",
+            "type": sport,
+            "start_date_local": f"{(today - timedelta(days=1)).isoformat()}T12:00:00",
+            "moving_time": 1800,
+            "icu_training_load": 20,
+            "source": FIXTURE_SOURCE,
+        }
+    return by_id
+
+
 def _fixture_wave2_summaries(today, snapshot):
     activities = [
         item
@@ -1157,7 +1174,7 @@ def _fixture_wave2_summaries(today, snapshot):
         }
         by_id[activity_id] = row
     merged = sorted(
-        by_id.values(),
+        _fixture_completed_sports(today, by_id).values(),
         key=lambda item: str(item.get("start_date_local") or ""),
         reverse=True,
     )
@@ -1317,7 +1334,7 @@ def _upgrade_preview_demo(today):
             day = datetime.fromisoformat(
                 str(row.get("id") or row.get("date"))[:10]
             ).date()
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         offset = (today - day).days
         if not 0 <= offset < 90:
@@ -1413,8 +1430,7 @@ def seed_preview_demo():
                 },
             }
         )
-    nutrition = server.NUTRITION_ASSEMBLY.service()
-    nutrition.save_template(
+    server.NUTRITION_ASSEMBLY.meal_library_service().save_template(
         {
             "name": "Demo-Porridge",
             "description": "Haferflocken, Banane und Joghurt",
@@ -1431,7 +1447,7 @@ def seed_preview_demo():
             ("Reis mit Gemüse und Tofu", 720, 95, 32, 22),
             ("Pasta mit Tomatensauce", 650, 90, 25, 18),
         ]:
-            nutrition.log_meal(
+            server.NUTRITION_ASSEMBLY.diary_service().log_meal(
                 {
                     "meal_date": (today - timedelta(days=offset)).isoformat(),
                     "description": description,

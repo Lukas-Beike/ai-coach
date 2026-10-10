@@ -12,7 +12,7 @@ def _decoded(value: Any) -> Any:
     if isinstance(value, (str, bytes, bytearray)):
         try:
             return json.loads(value)
-        except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        except TypeError, UnicodeDecodeError, json.JSONDecodeError:
             return None
     return value
 
@@ -22,13 +22,13 @@ def _count(value: Any) -> int:
         return 0
     try:
         return max(0, int(value or 0))
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return 0
 
 
 def _provider(provider: Any) -> str:
-    if provider not in ("openai", "gemini"):
-        raise ValueError("provider must be exactly 'openai' or 'gemini'")
+    if provider != "openai":
+        raise ValueError("provider must be exactly 'openai'")
     return provider
 
 

@@ -5,17 +5,17 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from nutrition_service_support import build_nutrition_services
+
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import NutritionRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
-from backend.nutrition import NutritionService
 
 
 class NutritionCompositionTests(unittest.TestCase):
@@ -27,16 +27,14 @@ class NutritionCompositionTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
         self.fixed_now = "2026-09-24T12:00:00+00:00"
-        self.repo = NutritionRepository(now=lambda: self.fixed_now)
         self._make_service()
 
     def _make_service(self) -> None:
-        self.service = NutritionService(
-            database_manager=self.manager,
-            db_lock=self.lock,
-            nutrition_repository=self.repo,
-            utc_now=lambda: self.fixed_now,
-            local_now=lambda: datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc),
+        self.service, self.library = build_nutrition_services(
+            self.manager,
+            self.lock,
+            lambda: self.fixed_now,
+            lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
 
     def tearDown(self) -> None:
@@ -44,7 +42,7 @@ class NutritionCompositionTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_composite_components_resolve_and_freeze_mixed_sources(self):
-        product = self.service.save_product(
+        product = self.library.save_product(
             {
                 "name": "Synthetic whey",
                 "basis_amount": 100,
@@ -74,7 +72,7 @@ class NutritionCompositionTests(unittest.TestCase):
                 "fat_g": 0,
             },
         ]
-        result = self.service.calculate_components(components)
+        result = self.library.calculate_components(components)
         self.assertEqual(result["nutrition_basis"]["kind"], "composite")
         self.assertEqual(
             [item["kind"] for item in result["nutrition_basis"]["components"]],
@@ -89,7 +87,7 @@ class NutritionCompositionTests(unittest.TestCase):
         self.assertEqual(
             self.service.get_day_summary(entry["meal_date"])["entry_count"], 1
         )
-        self.service.update_product(product["id"], {"kcal": 400})
+        self.library.update_product(product["id"], {"kcal": 400})
         self.assertEqual(self.service.get_meal(entry["id"])["kcal"], result["kcal"])
 
     def test_composite_rejects_forged_authoritative_values_and_unknown_macros_propagate(
@@ -116,7 +114,7 @@ class NutritionCompositionTests(unittest.TestCase):
             },
         ):
             with self.subTest(component=component), self.assertRaises(AppError):
-                self.service.calculate_components([component])
+                self.library.calculate_components([component])
         estimated = {
             "kind": "estimate",
             "name": "Unknown carbs",
@@ -156,8 +154,8 @@ class NutritionCompositionTests(unittest.TestCase):
                 "fat_g": 0,
             }
         ]
-        calculation = self.service.calculate_components(components)
-        template = self.service.save_template(
+        calculation = self.library.calculate_components(components)
+        template = self.library.save_template(
             {"name": "Gel", "description": "Race gel", "components": components},
             expected_calculation=calculation,
         )
@@ -167,7 +165,7 @@ class NutritionCompositionTests(unittest.TestCase):
             "nutrition_basis": {**calculation["nutrition_basis"], "components": []},
         }
         with self.assertRaises(AppError) as raised:
-            self.service.save_template(
+            self.library.save_template(
                 {
                     "name": "Stale gel",
                     "description": "Race gel",
@@ -207,16 +205,16 @@ class NutritionCompositionTests(unittest.TestCase):
         self.assertEqual(
             changed["nutrition_basis"]["components"][0]["kind"], "estimate"
         )
-        template = self.service.save_template(
+        template = self.library.save_template(
             {"name": "Meal", "description": "Meal", "components": first}
         )
-        replaced = self.service.save_template(
+        replaced = self.library.save_template(
             {"id": template["id"], "name": "Meal", "components": second}
         )
         self.assertEqual(
             replaced["nutrition_basis"]["components"][0]["kind"], "estimate"
         )
-        scaled = self.service.save_template(
+        scaled = self.library.save_template(
             {
                 "name": "Fraction",
                 "description": "Fraction",
@@ -290,11 +288,11 @@ class NutritionCompositionTests(unittest.TestCase):
             }
         ] * 21
         with self.assertRaises(AppError):
-            self.service.save_template(
+            self.library.save_template(
                 {"name": "Too many", "description": "Invalid", "components": many}
             )
         self.assertEqual(self.service.get_today_summary()["entry_count"], 0)
-        product = self.service.save_product(
+        product = self.library.save_product(
             {
                 "name": "Archive test",
                 "basis_amount": 100,
@@ -318,7 +316,7 @@ class NutritionCompositionTests(unittest.TestCase):
                 ],
             }
         )
-        self.service.archive_product(product["id"])
+        self.library.archive_product(product["id"])
         renamed = self.service.update_meal(consumed["id"], {"description": "Renamed"})
         self.assertEqual(renamed["nutrition_basis"], consumed["nutrition_basis"])
 
@@ -335,9 +333,9 @@ class NutritionCompositionTests(unittest.TestCase):
         }
         for field, value in (("kind", []), ("unit", {})):
             with self.subTest(field=field), self.assertRaises(AppError):
-                self.service.calculate_components([{**valid, field: value}])
+                self.library.calculate_components([{**valid, field: value}])
         with self.assertRaises(AppError):
-            self.service.calculate_components(
+            self.library.calculate_components(
                 [{"kind": "database", "food_id": [], "amount": 1, "unit": "g"}]
             )
 
@@ -354,7 +352,7 @@ class NutritionCompositionTests(unittest.TestCase):
             "protein_g": 0,
             "fat_g": 0,
         }
-        mixed = self.service.calculate_components(
+        mixed = self.library.calculate_components(
             [valid, {**valid, "name": "Unknown", "carbs_g": None}]
         )
         self.assertIsNone(mixed["carbs_g"])
@@ -369,7 +367,7 @@ class NutritionCompositionTests(unittest.TestCase):
             )
         self.assertEqual(self.service.get_today_summary()["entry_count"], 0)
         with self.assertRaises(AppError):
-            self.service.calculate_components([{**valid, "kcal": 10001}])
+            self.library.calculate_components([{**valid, "kcal": 10001}])
 
     def test_restart_and_database_backup_keep_composite_entries_and_templates(
         self,
@@ -389,7 +387,7 @@ class NutritionCompositionTests(unittest.TestCase):
         entry = self.service.log_meal(
             {"description": "Race gel", "components": components}
         )
-        template = self.service.save_template(
+        template = self.library.save_template(
             {
                 "name": "Race gel",
                 "description": "Gel",
@@ -438,7 +436,7 @@ class NutritionCompositionTests(unittest.TestCase):
             self.service.get_meal(entry["id"])["nutrition_basis"], expected_entry_basis
         )
         self.assertEqual(
-            self.service.list_templates()[0]["nutrition_basis"], expected_template_basis
+            self.library.list_templates()[0]["nutrition_basis"], expected_template_basis
         )
 
     def test_composite_unknown_nutrients_flow_through_day_range_and_sync(self) -> None:
@@ -503,7 +501,7 @@ class NutritionCompositionTests(unittest.TestCase):
     def test_local_product_requires_calories_and_rejects_archived_products(
         self,
     ) -> None:
-        product = self.service.save_product(
+        product = self.library.save_product(
             {
                 "name": "Incomplete",
                 "basis_amount": 100,
@@ -520,9 +518,9 @@ class NutritionCompositionTests(unittest.TestCase):
             "unit": "g",
         }
         with self.assertRaises(AppError):
-            self.service.calculate_components([component])
-        complete = self.service.update_product(product["id"], {"kcal": 10})
+            self.library.calculate_components([component])
+        complete = self.library.update_product(product["id"], {"kcal": 10})
         self.assertEqual(complete["kcal"], 10)
-        self.service.archive_product(product["id"])
+        self.library.archive_product(product["id"])
         with self.assertRaises(AppError):
-            self.service.calculate_components([component])
+            self.library.calculate_components([component])

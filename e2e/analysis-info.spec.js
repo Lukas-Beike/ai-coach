@@ -28,7 +28,7 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   const root = page.locator("#personalRecovery");
   await expect(root.locator(".analysis-chart-card")).toHaveCount(1);
   await expect(root.locator(".analysis-subchart")).toHaveCount(3);
-  await expect(root.locator("svg")).toHaveCount(3);
+  await expect(root.locator("svg")).toHaveCount(2);
   await expect(root.locator(".analysis-secondary-axis, .analysis-extremum")).toHaveCount(0);
   await expect(root.getByRole("heading", { name: /^Erholung · Letzte 14 Tage/ })).toBeVisible();
   await expect(root.getByRole("button", { name: "Erholung · Letzte 14 Tage: Informationen", exact: true })).toBeVisible();
@@ -43,7 +43,7 @@ test("@responsive Garmin acute load switches fourteen days and twelve weeks with
   const root = page.locator("#analysisLoadCharts");
   await expect(root.locator("svg")).toHaveCount(1);
   await expect(root.locator("circle[data-series='0']")).toHaveCount(11);
-  await expect(root.locator("path[data-series='0']")).toHaveAttribute("d", /M.*M/);
+  await expect(root.locator("path[data-series='0']")).toHaveAttribute("d", /M.*L/);
   await expect(root).not.toContainText("Fitness");
   await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(14);
@@ -64,10 +64,10 @@ test("@responsive sparse performance shows measurements and the current value li
   } });
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator(".analysis-chart-card")).toHaveCount(2);
-  await expect(root.locator("svg")).toHaveCount(3);
-  await expect(root.locator(".analysis-current-line")).toHaveCount(3);
-  expect(await root.locator(".analysis-point-value").allTextContents()).toEqual(expect.arrayContaining(["4:50", "49", "210"]));
-  await expect(root).toContainText("kein belastbarer Trend");
+  await expect(root.locator("svg")).toHaveCount(2);
+  await expect(root.locator(".analysis-current-line")).toHaveCount(0);
+  await expect(root.locator("path[data-series]")).toHaveCount(2);
+  expect(await root.locator(".analysis-point-value").allTextContents()).toEqual(expect.arrayContaining(["4:50", "210"]));
   await expect(root).toContainText("08.09.2026 · Garmin Connect");
   const button = root.getByRole("button", { name: "FTP", exact: true });
   await button.click();
@@ -90,8 +90,8 @@ test("sparse FTP uses a current value line alongside a dense eFTP series", async
   const chart = page.locator("#analysisHistoryCharts svg");
   await expect(chart).toHaveCount(1);
   await expect(chart.locator('circle[data-series="0"]')).toHaveCount(2);
-  await expect(chart.locator('path[data-series="0"]')).toHaveCount(0);
-  await expect(chart.locator('.analysis-current-line[data-series="0"]')).toHaveCount(1);
+  await expect(chart.locator('path[data-series="0"]')).toHaveCount(1);
+  await expect(chart.locator('.analysis-current-line[data-series="0"]')).toHaveCount(0);
   await expect(chart.locator('path[data-series="1"]')).toHaveCount(1);
   await expect(page.locator("#analysisHistoryCharts")).toContainText("Seit 01.09.2026: +10 W");
 });
@@ -147,7 +147,7 @@ test("@responsive repeated performance values are labelled once without a normal
   await expect(root.locator(".analysis-period-controls")).toHaveCount(0);
   expect((await root.locator(".analysis-point-value").allTextContents()).sort()).toEqual(["200", "210"]);
   await expect(root.locator('circle[data-series="0"]')).toHaveCount(5);
-  await expect(root.locator(".analysis-current-line")).toHaveCount(1);
+  await expect(root.locator(".analysis-current-line")).toHaveCount(0);
   await expect(root.locator(".analysis-baseline-band")).toHaveCount(0);
   await root.getByRole("button", { name: "FTP", exact: true }).click();
   await expect(root.locator(".analysis-info-tooltip:popover-open")).not.toContainText("Grüner Bereich");
@@ -176,9 +176,9 @@ test("@responsive performance uses weekly last values and medians, keeps equal w
   const pace = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schwellenpace", exact: true }) });
   await pace.getByText("Werte ansehen", { exact: true }).click();
   await expect(pace.locator("tbody td:nth-child(2)")).toHaveText([/4:50 min\/km/, /4:50 min\/km/]);
-  await page.evaluate(async () => { await applyNavigationRoute("analysis/load", { historyMode: "replace" }); });
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/load", { historyMode: "replace" }); });
   await page.locator("#analysisLoadCharts").getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
-  await page.evaluate(async () => { await applyNavigationRoute("analysis/performance", { historyMode: "replace" }); });
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/performance", { historyMode: "replace" }); });
   await expect(ftp.locator("tbody tr")).toHaveCount(2);
 });
 
@@ -188,12 +188,34 @@ test("@responsive latest measurement stays visible without inventing measurement
   } } });
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator(".analysis-period-controls")).toHaveCount(0);
-  await expect(root.locator("svg")).toHaveCount(1);
-  await expect(root.locator(".analysis-current-line")).toHaveCount(1);
-  await expect(root.locator(".analysis-point-value")).toHaveText(["49"]);
-  await expect(root.locator("circle")).toHaveCount(1);
-  await root.getByText("Werte ansehen", { exact: true }).click();
-  await expect(root.locator("tbody tr")).toHaveCount(1);
+  await expect(root.locator("svg")).toHaveCount(0);
+  await expect(root.locator(".analysis-current-line")).toHaveCount(0);
+  await expect(root.locator(".analysis-point-value")).toHaveCount(0);
+  await expect(root).toContainText("Ein einzelner Messwert zeigt noch keinen Verlauf");
+  const values = root.locator(".analysis-subchart").filter({ hasText: "49" }).first().locator("details");
+  await values.locator("summary").click();
+  await expect(values.locator("tbody tr")).toHaveCount(1);
+});
+
+test("@responsive stale current value cannot float above the connected history line", async ({ page }) => {
+  await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-15", load: { points: [] }, metrics: {
+    running_vo2max_ml_kg_min: [{ source: "Garmin Connect", points: [
+      { date: "2026-09-01", value: 53 }, { date: "2026-09-02", value: 53 },
+      { date: "2026-09-08", value: 53 }, { date: "2026-09-09", value: 53 }, { date: "2026-09-10", value: 53.5 },
+    ] }],
+  } } });
+  const chart = page.locator("#analysisHistoryCharts svg");
+  await expect(chart.locator(".analysis-current-line")).toHaveCount(0);
+  const geometry = await chart.evaluate((svg) => {
+    const path = svg.querySelector("path[data-series='0']").getAttribute("d");
+    const line = [...path.matchAll(/[ML](-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g)]
+      .map((match) => [Number(match[1]).toFixed(2), Number(match[2]).toFixed(2)]);
+    const markers = [...svg.querySelectorAll("circle[data-series='0']")]
+      .map((circle) => [Number(circle.getAttribute("cx")).toFixed(2), Number(circle.getAttribute("cy")).toFixed(2)]);
+    return { line, markers };
+  });
+  expect(geometry.line).toEqual(geometry.markers);
+  await expect(chart).not.toContainText("53.5");
 });
 
 test("@responsive dense performance retains every measured week without overlapping labels", async ({ page }) => {
@@ -214,19 +236,63 @@ test("@responsive dense performance retains every measured week without overlapp
   }));
   expect(geometry.map((chart) => chart.count)).toEqual([12, 24]);
   for (const chart of geometry) expect(chart.overlap).toBe(false);
-  await page.locator("#analysisHistoryCharts details").first().locator("summary").click();
-  await expect(page.locator("#analysisHistoryCharts details").first().locator("tbody tr")).toHaveCount(12);
+  const vo2max = page.locator("#analysisHistoryCharts .analysis-subchart").filter({ has: page.getByRole("heading", { name: "VO₂max · Schätzung", exact: true }) }).filter({ has: page.locator("circle[data-series='0']") }).first();
+  await vo2max.locator("details summary").click();
+  await expect(vo2max.locator("tbody tr")).toHaveCount(12);
 });
 
 test("@responsive performance keeps predictions in the dedicated table", async ({ page }) => {
   await performanceFixture(page, { available: true, metrics: {
     cycling_ftp_watts: { value: 280, unit: "W" }, running_vo2max_ml_kg_min: { value: 52 },
     weight_kg: { value: 72, unit: "kg", source: "Garmin Connect" },
-    run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect Laufprognose" },
+    run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect", note: "Garmin Connect Laufprognose" },
   } });
   await expect(page.locator("#performancePredictions")).toContainText("Laufprognosen");
   await expect(page.locator("#performancePredictions")).toContainText("20:00");
   await expect(page.locator("#performanceSummary")).toBeHidden();
+});
+
+test("@responsive race estimates chart current times and reports missing history honestly", async ({ page }) => {
+  await performanceFixture(page, {
+    metrics: {
+      run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect", note: "Garmin Connect Laufprognose" },
+      run_10k_seconds: { value: 2500, unit: "s", source: "Garmin Connect", note: "Garmin Connect Laufprognose" },
+    },
+    history: { start: "2026-09-01", end: "2026-10-01", load: { points: [] }, metrics: {} },
+  });
+  const root = page.locator("#analysisHistoryCharts");
+  const chart = root.locator("svg[aria-label='Garmin Connect Laufprognosen nach Distanz']");
+  await expect(chart.locator("rect[data-race-distance]")).toHaveCount(2);
+  await expect(chart).toContainText("20:00");
+  await expect(root).toContainText("Noch keine historische Entwicklung der Laufprognosen verfügbar.");
+});
+
+test("@responsive race prediction history renders a sourced connected line across missing weeks", async ({ page }) => {
+  const points = [
+    { date: "2026-09-01", value: 1200 },
+    { date: "2026-09-08", value: null },
+    { date: "2026-09-15", value: 1180 },
+  ];
+  await performanceFixture(page, {
+    metrics: {},
+    history: { start: "2026-09-01", end: "2026-10-01", load: { points: [] }, metrics: {
+      run_5k_seconds: [{ source: "Garmin Connect", points }],
+    } },
+  });
+  const root = page.locator("#analysisHistoryCharts");
+  const chart = root.locator(".analysis-chart-card").first().locator("svg").last();
+  await expect(chart.locator("circle[data-series='0']")).toHaveCount(2);
+  const geometry = await chart.evaluate((svg) => {
+    const path = svg.querySelector("path[data-series='0']").getAttribute("d");
+    const line = [...path.matchAll(/[ML](-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g)]
+      .map((match) => [Number(match[1]).toFixed(2), Number(match[2]).toFixed(2)]);
+    const markers = [...svg.querySelectorAll("circle[data-series='0']")]
+      .map((circle) => [Number(circle.getAttribute("cx")).toFixed(2), Number(circle.getAttribute("cy")).toFixed(2)]);
+    return { path, line, markers };
+  });
+  expect(geometry.path).not.toMatch(/M.*M/);
+  expect(geometry.line).toEqual(geometry.markers);
+  await expect(root).toContainText("Quelle: Garmin Connect");
 });
 
 test("@responsive provider metrics render as charts without raw text", async ({ page }) => {
@@ -255,7 +321,7 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
   await expect(performance.getByRole("heading", { name: "Running Tolerance" })).toHaveCount(0);
   await expect(performance).not.toContainText("Garmin-Provider-Metriken");
   await expect(performance).not.toContainText("Rohfeld");
-  await page.evaluate(async () => { await applyNavigationRoute("analysis/recovery", { historyMode: "replace" }); });
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/recovery", { historyMode: "replace" }); });
   const recovery = page.locator("#personalRecovery");
   await expect(recovery).not.toContainText("Schlafdefizit");
   await expect(recovery).not.toContainText("Schlafregelm");

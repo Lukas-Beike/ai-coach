@@ -116,7 +116,7 @@ def _audit_payload_projection(value: Any) -> Any:
         return value
     try:
         payload = json.loads(value["payload"])
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         payload = {}
     return {
         **payload,
@@ -145,7 +145,7 @@ def audit_projection(entity_type: str, value: Any) -> dict[str, Any] | None:
                 separators=(",", ":"),
                 default=str,
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if len(encoded) > 4000:
             continue
@@ -270,7 +270,7 @@ def public_view(row: dict[str, Any]) -> dict[str, Any]:
     """Remove retained athlete values from the public history representation."""
     try:
         diff = json.loads(row.get("diff") or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         diff = {"fields": {}}
     safe_fields = {
         field: {"changed": True}

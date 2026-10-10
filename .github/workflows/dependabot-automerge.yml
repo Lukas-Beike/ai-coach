@@ -4,14 +4,15 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened]
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   enable-automerge:
     if: github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.base.ref == 'develop' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Enable squash auto-merge
         env:

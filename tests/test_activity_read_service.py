@@ -3,8 +3,9 @@ import unittest
 from contextlib import contextmanager
 from datetime import date
 
-from backend.activities.read_service import ActivityReadService
 from backend.errors import AppError
+from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.sync.snapshot_reader import SnapshotRepositoryReader
 
 
 class _Manager:
@@ -19,6 +20,9 @@ class _Snapshots:
 
     def latest_payload(self, _db):
         return self.payload
+
+    def latest_snapshot(self, _db):
+        return json.loads(self.payload)
 
 
 class _Feedback:
@@ -65,7 +69,11 @@ class ActivityReadServiceTests(unittest.TestCase):
                 ]
             },
         }
-        return ActivityReadService(_Manager(), _Snapshots(snapshot), _Feedback())
+        return ActivityAnalysisReadService(
+            _Manager(),
+            _Snapshots(snapshot),
+            _Feedback(),
+        )
 
     def test_page_filters_orders_attaches_feedback_and_uses_cursor(self):
         service = self.service()
@@ -104,6 +112,20 @@ class ActivityReadServiceTests(unittest.TestCase):
                 "missing", garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
             )
         self.assertEqual("activity_details_not_found", missing.exception.reason)
+
+    def test_snapshot_reader_preserves_provider_provenance_and_freshness(self):
+        snapshot = {
+            "synced_at": "2026-09-20T08:00:00+00:00",
+            "source_freshness": {"intervals": {"freshness": "current"}},
+            "provider_sync": {"source": "intervals", "cursor": "synthetic"},
+            "recent_activities": [],
+        }
+        service = ActivityAnalysisReadService(
+            _Manager(),
+            SnapshotRepositoryReader(_Snapshots(snapshot)),
+            _Feedback(),
+        )
+        self.assertEqual(service._snapshot(), snapshot)
 
 
 if __name__ == "__main__":

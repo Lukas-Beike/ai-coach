@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.activities.identity import activity_datetime
 from backend.activities.matching import is_planned_workout_event, match_planned_workouts
+from backend.athlete.local_date import iso_date_prefix
 
 CALENDAR_ACTIVITY_FIELDS = (
     "id",
@@ -49,7 +50,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -69,7 +70,7 @@ def activity_metric(record: Any, keys: tuple[str, ...]) -> float | int | None:
 
 def _record_date(value: Any) -> str:
     parsed = activity_datetime(value)
-    return parsed.date().isoformat() if parsed else str(value or "")[:10]
+    return parsed.date().isoformat() if parsed else iso_date_prefix(str(value or ""))
 
 
 def calendar_activity_payload(activity: Any) -> dict[str, Any]:

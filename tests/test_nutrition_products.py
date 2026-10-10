@@ -5,21 +5,21 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from nutrition_service_support import build_nutrition_services
+
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import NutritionRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.nutrition.photo import (
     NutritionPhotoExtractionService,
     validate_packaging_extraction,
 )
-from backend.nutrition.service import NutritionService
 
 
 class NutritionProductContractTests(unittest.TestCase):
@@ -55,16 +55,18 @@ class NutritionProductContractTests(unittest.TestCase):
             ],
             "source": "open_food_facts",
         }
-        self.service = NutritionService(
-            database_manager=self.manager,
-            db_lock=self.lock,
-            nutrition_repository=NutritionRepository(
-                now=lambda: "2026-10-05T12:00:00+00:00"
-            ),
-            utc_now=lambda: "2026-10-05T12:00:00+00:00",
-            local_now=lambda: datetime(2026, 10, 5, 14, 0, tzinfo=timezone.utc),
+        self.service = self.build_service()
+
+    def build_service(self, photo_extractor=None):
+        self.diary, self.library = build_nutrition_services(
+            self.manager,
+            self.lock,
+            lambda: "2026-10-05T12:00:00+00:00",
+            lambda: datetime(2026, 10, 5, 14, 0, tzinfo=UTC),
             food_database=self.food_database,
+            photo_extractor=photo_extractor,
         )
+        return self.library
 
     @staticmethod
     def product_payload(**changes):
@@ -88,42 +90,42 @@ class NutritionProductContractTests(unittest.TestCase):
         }
 
     def test_confirmed_product_is_persistent_and_can_be_archived(self):
-        saved = self.service.save_product(self.product_payload())
+        saved = self.library.save_product(self.product_payload())
 
         self.assertTrue(saved["id"])
         self.assertEqual(saved["barcode"], "4006381333931")
         self.assertEqual(saved["source"], "packaging_label")
         self.assertEqual(saved["status"], "active")
-        self.assertEqual(self.service.get_product(saved["id"])["name"], saved["name"])
+        self.assertEqual(self.library.get_product(saved["id"])["name"], saved["name"])
         self.assertEqual(
-            self.service.list_products(barcode="4006381333931")[0]["id"], saved["id"]
+            self.library.list_products(barcode="4006381333931")[0]["id"], saved["id"]
         )
 
-        updated = self.service.update_product(saved["id"], {"protein_g": 80.0})
+        updated = self.library.update_product(saved["id"], {"protein_g": 80.0})
         self.assertEqual(updated["protein_g"], 80.0)
-        self.assertEqual(self.service.get_product(saved["id"])["protein_g"], 80.0)
+        self.assertEqual(self.library.get_product(saved["id"])["protein_g"], 80.0)
 
-        archived = self.service.archive_product(saved["id"])
+        archived = self.library.archive_product(saved["id"])
         self.assertEqual(archived["status"], "archived")
-        self.assertEqual(self.service.list_products(barcode="4006381333931"), [])
+        self.assertEqual(self.library.list_products(barcode="4006381333931"), [])
         self.assertEqual(
-            self.service.list_products(barcode="4006381333931", include_archived=True)[
+            self.library.list_products(barcode="4006381333931", include_archived=True)[
                 0
             ]["status"],
             "archived",
         )
 
     def test_barcode_lookup_prefers_local_product_and_never_calls_remote(self):
-        saved = self.service.save_product(self.product_payload())
+        saved = self.library.save_product(self.product_payload())
 
-        result = self.service.lookup_product({"barcode": "4006381333931"})
+        result = self.library.lookup_product({"barcode": "4006381333931"})
 
         self.assertEqual(result["source"], "local")
         self.assertEqual(result["foods"][0]["id"], saved["id"])
         self.food_database.lookup.assert_not_called()
 
     def test_unknown_barcode_falls_back_to_food_database_and_labels_source(self):
-        result = self.service.lookup_product({"barcode": "4006381333999"})
+        result = self.library.lookup_product({"barcode": "4006381333999"})
 
         self.assertEqual(result["source"], "open_food_facts")
         self.assertEqual(result["foods"][0]["id"], "off:4006381333999")
@@ -150,7 +152,7 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertTrue(candidate["requires_confirmation"])
         self.assertEqual(candidate["provenance"], "packaging_label")
         self.assertNotIn("image", candidate["candidate"])
-        self.assertEqual(self.service.list_products(), [])
+        self.assertEqual(self.library.list_products(), [])
 
     def test_packaging_extraction_rejects_invalid_or_estimated_values(self):
         for payload in (
@@ -166,18 +168,18 @@ class NutritionProductContractTests(unittest.TestCase):
             with self.subTest(payload=payload), self.assertRaises(AppError):
                 validate_packaging_extraction(payload)
         with self.assertRaises(AppError):
-            self.service.save_product(self.product_payload(source="coach"))
+            self.library.save_product(self.product_payload(source="coach"))
 
     def test_product_nutrients_are_snapshotted_when_consumed(self):
-        saved = self.service.save_product(self.product_payload())
-        entry = self.service.log_product(saved["id"], 50, "g")
+        saved = self.library.save_product(self.product_payload())
+        entry = self.diary.log_product(saved["id"], 50, "g")
         self.assertEqual(entry["kcal"], 188)
         self.assertEqual(entry["protein_g"], 39)
         self.assertEqual(entry["nutrition_basis"]["kind"], "local_product")
 
-        self.service.update_product(saved["id"], {"kcal": 400, "protein_g": 82})
+        self.library.update_product(saved["id"], {"kcal": 400, "protein_g": 82})
 
-        fetched = self.service.get_meal(entry["id"])
+        fetched = self.diary.get_meal(entry["id"])
         self.assertEqual(fetched["kcal"], 188)
         self.assertEqual(fetched["protein_g"], 39)
         self.assertEqual(fetched["nutrition_basis"]["product"]["kcal"], 376)
@@ -185,46 +187,45 @@ class NutritionProductContractTests(unittest.TestCase):
     def test_product_calculation_preserves_unknown_nutrients_and_does_not_convert_units(
         self,
     ):
-        saved = self.service.save_product(
+        saved = self.library.save_product(
             self.product_payload(basis_unit="ml", carbs_g=None, protein_g=None)
         )
 
-        result = self.service.calculate_product(saved["id"], 250, "ml")
+        result = self.library.calculate_product(saved["id"], 250, "ml")
 
         self.assertEqual(result["kcal"], 940)
         self.assertIsNone(result["carbs_g"])
         self.assertIsNone(result["protein_g"])
         with self.assertRaises(AppError):
-            self.service.calculate_product(saved["id"], 250, "g")
+            self.library.calculate_product(saved["id"], 250, "g")
 
     def test_photo_candidate_is_not_saved_until_explicit_save(self):
         response = {
             "output_text": '{"name":"Synthetic cocoa mix","basis_amount":100,"basis_unit":"g","kcal":376,"protein_g":78}'
         }
         extractor = NutritionPhotoExtractionService(
-            selected_provider=lambda: "openai",
-            selected_model=lambda _provider: "gpt-6-luna",
+            selected_model=lambda: "gpt-6-luna",
             openai_request=lambda _path, _payload: response,
         )
-        self.service._photo_extractor = extractor
+        self.service = self.build_service(photo_extractor=extractor)
         data_url = "data:image/jpeg;base64," + base64.b64encode(
             b"\xff\xd8\xffsynthetic-image"
         ).decode("ascii")
 
-        candidate = self.service.extract_packaging_photo({"image_data_url": data_url})
+        candidate = self.library.extract_packaging_photo({"image_data_url": data_url})
 
         self.assertTrue(candidate["requires_confirmation"])
         self.assertEqual(candidate["provenance"], "packaging_label")
         self.assertNotIn("image_data_url", candidate)
-        self.assertEqual(self.service.list_products(), [])
+        self.assertEqual(self.library.list_products(), [])
         self.assertTrue(
-            self.service.save_product({**candidate["candidate"], "confirmed": True})[
+            self.library.save_product({**candidate["candidate"], "confirmed": True})[
                 "id"
             ]
         )
 
     def test_database_backup_contains_confirmed_products(self):
-        self.service.save_product(self.product_payload())
+        self.library.save_product(self.product_payload())
         config = DatabaseBackupConfig(
             database_path=self.manager.path,
             data_dir=Path(self.temporary.name),

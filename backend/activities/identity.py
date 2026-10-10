@@ -23,7 +23,7 @@ def activity_datetime(value: Any) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", _UTC_OFFSET_SUFFIX))
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return None
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)

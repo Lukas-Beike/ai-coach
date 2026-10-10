@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from backend.coach.constants import AI_PROVIDER
 from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
@@ -49,18 +50,28 @@ class CoachFinalReceiptService:
             **receipt,
             "status": status,
             "awaiting_clarification": awaiting_clarification,
-            "response_status": response.get("status") if response.get("status") in {"completed", "incomplete", "failed", "cancelled"} else None,
+            "response_status": response.get("status")
+            if response.get("status")
+            in {"completed", "incomplete", "failed", "cancelled"}
+            else None,
             "client_turn_id": client_turn_id,
             "command_receipts": command_receipts,
             "sync_job_ids": sync_job_ids,
             "intent": intent,
             "tool_rounds": rounds,
             "pending_operations": sorted({entry["tool"] for entry in failures}),
-            "proposed_actions": [entry["result"]["proposed_action"] for entry in command_receipts if entry.get("result", {}).get("proposed_action")],
+            "proposed_actions": [
+                entry["result"]["proposed_action"]
+                for entry in command_receipts
+                if entry.get("result", {}).get("proposed_action")
+            ],
         }
         for key in (
-            "openai_response_id", "pending_tool_outputs", "pending_tool_calls",
-            "response_input", "previous_response_id",
+            "openai_response_id",
+            "pending_tool_outputs",
+            "pending_tool_calls",
+            "response_input",
+            "previous_response_id",
         ):
             final_receipt.pop(key, None)
         return final_receipt
@@ -71,7 +82,6 @@ class CoachFinalReceiptService:
         *,
         client_turn_id: str,
         command_receipts: list[dict[str, Any]],
-        ai_provider: str,
     ) -> dict[str, Any]:
         with self._database_lock, self._database_manager.unit_of_work() as db:
             current_command = db.execute(
@@ -82,10 +92,15 @@ class CoachFinalReceiptService:
                 return command_receipt(current_command["receipt"])
 
             final_receipt["message"] = self._chat_repository.add(
-                db, "assistant", final_receipt["text"], client_turn_id=client_turn_id,
+                db,
+                "assistant",
+                final_receipt["text"],
+                client_turn_id=client_turn_id,
             )
             for step in command_receipts:
-                if step["tool"] == "preview_adaptive_replan" and step.get("result", {}).get("ok"):
+                if step["tool"] == "preview_adaptive_replan" and step.get(
+                    "result", {}
+                ).get("ok"):
                     preview_id = step["result"].get("id")
                     preview_row = db.execute(
                         "SELECT payload FROM plan_adjustments WHERE id=? AND status='preview'",
@@ -93,17 +108,26 @@ class CoachFinalReceiptService:
                     ).fetchone()
                     if preview_row:
                         preview_payload = json.loads(preview_row["payload"])
-                        preview_payload["published_message_id"] = final_receipt["message"]["id"]
+                        preview_payload["published_message_id"] = final_receipt[
+                            "message"
+                        ]["id"]
                         db.execute(
                             "UPDATE plan_adjustments SET payload=? WHERE id=?",
-                            (json.dumps(preview_payload, ensure_ascii=False), preview_id),
+                            (
+                                json.dumps(preview_payload, ensure_ascii=False),
+                                preview_id,
+                            ),
                         )
-            self._key_values.set(db, "last_coach_ai_provider", ai_provider)
+            self._key_values.set(db, "last_coach_ai_provider", AI_PROVIDER)
             db.execute(
                 "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
                 (
                     json.dumps(
-                        {key: value for key, value in final_receipt.items() if key != "text"},
+                        {
+                            key: value
+                            for key, value in final_receipt.items()
+                            if key != "text"
+                        },
                         ensure_ascii=False,
                     ),
                     self._now(),

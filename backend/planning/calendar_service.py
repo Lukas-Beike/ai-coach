@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import markers
 from backend.errors import AppError
 from backend.planning import calendar, context
+from backend.planning.conflicts import (
+    calendar_conflicts_for_items,
+    calendar_items_conflict,
+    calendar_items_share_local_day,
+)
 
 
 class CalendarConflictService:
@@ -31,12 +37,12 @@ class CalendarConflictService:
         )
         for event in source_events:
             decision = calendar.calendar_constraint_decision(workout, event)
-            matches = calendar._calendar_items_share_local_day(workout, event)
+            matches = calendar_items_share_local_day(workout, event)
             if not matches or not decision:
                 continue
-            event_date = str(event.get("event_date") or event.get("start_local") or "")[
-                :10
-            ]
+            event_date = iso_date_prefix(
+                str(event.get("event_date") or event.get("start_local") or "")
+            )
             conflicts.append(
                 {
                     "id": event.get("id"),
@@ -109,18 +115,14 @@ class CalendarConflictService:
                 or markers.has_marker(marker_text, "[NO_INTENSITY]")
                 or markers.has_marker(marker_text, "[SHORT_ONLY]")
             )
-            event_matches, _match = calendar._calendar_items_conflict(workout, event)
+            event_matches, _match = calendar_items_conflict(workout, event)
             if not event_matches or not is_marked:
                 ordinary_events.append(event)
         return (
             constraint_conflicts
-            + calendar.calendar_conflicts_for_items(
-                workout, library_entries, "local_library"
-            )
-            + calendar.calendar_conflicts_for_items(
-                workout, competitions, "local_competition"
-            )
-            + calendar.calendar_conflicts_for_items(
+            + calendar_conflicts_for_items(workout, library_entries, "local_library")
+            + calendar_conflicts_for_items(workout, competitions, "local_competition")
+            + calendar_conflicts_for_items(
                 workout, ordinary_events, "external_calendar"
             )
         )

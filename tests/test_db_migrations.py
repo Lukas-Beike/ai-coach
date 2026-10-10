@@ -1,5 +1,6 @@
-"""Upgrade regression tests against the frozen schema of release 1.12.19."""
+"""Data-preserving upgrades against supported frozen release schemas."""
 
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -18,6 +19,7 @@ from backend.db.schema import (
 
 RELEASE_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_19.sql.txt"
 PREVIOUS_SCHEMA = Path(__file__).with_name("fixtures") / "schema_v2.sql.txt"
+RELEASE_1_12_26_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_26.sql.txt"
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -42,6 +44,11 @@ class DatabaseMigrationTests(unittest.TestCase):
         db.executescript(PREVIOUS_SCHEMA.read_text(encoding="utf-8"))
         # A prior release may have left the v2 schema unversioned.
         db.execute("PRAGMA user_version = 0")
+        return db
+
+    def release_1_12_26_database(self):
+        db = self.connect()
+        db.executescript(RELEASE_1_12_26_SCHEMA.read_text(encoding="utf-8"))
         return db
 
     def seed_all_tables(self, db):
@@ -218,6 +225,527 @@ class DatabaseMigrationTests(unittest.TestCase):
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
         )
 
+    def test_version_2_schema_upgrade_is_supported(self):
+        db = self.previous_database()
+        db.execute("PRAGMA user_version = 2")
+
+        migrate_schema(db)
+        db.commit()
+
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+
+    def test_1_12_26_upgrade_removes_gemini_state_and_preserves_other_data(self):
+        db = self.release_1_12_26_database()
+        db.execute("PRAGMA foreign_keys = ON")
+        db.executemany(
+            "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, 'before')",
+            [
+                ("profile", '{"name":"Synthetic athlete"}'),
+                ("selected_ai_provider", "gemini"),
+                ("selected_model_openai", "gpt-6-luna"),
+                ("selected_model_gemini", "gemini-test-model"),
+                ("openai_conversation_id", "openai-conversation"),
+                ("openai_status", '{"state":"ok"}'),
+                ("openai_usage", '{"2026-10-07":{"requests":1}}'),
+                ("openai_rate_limits", '{"remaining":9}'),
+                ("last_coach_ai_provider", "gemini"),
+                ("gemini_status", '{"state":"error"}'),
+                ("gemini_usage", '{"2026-10-07":{"requests":2}}'),
+                ("gemini_conversation_id", "gemini-conversation"),
+                ("gemini_conversation_history", '[{"role":"user"}]'),
+                ("gemini_call_names", '{"call":"private-name"}'),
+            ],
+        )
+        db.executemany(
+            "INSERT INTO messages(role, content, client_turn_id, created_at) "
+            "VALUES ('user', ?, ?, 'before')",
+            [
+                ("Gemini queued prompt", "gemini-queued"),
+                ("Gemini running prompt", "gemini-running"),
+                ("Gemini completed prompt", "gemini-completed"),
+                ("OpenAI prompt", "openai-turn"),
+                ("Unattributed legacy prompt", None),
+                ("Malformed legacy prompt", "malformed-turn"),
+                ("Unknown receipt prompt", "unknown-turn"),
+            ],
+        )
+        command_rows = (
+            ("gemini-queued", "queued", "gemini"),
+            ("gemini-running", "running", "gemini"),
+            ("gemini-completed", "completed", "gemini"),
+            ("openai-turn", "queued", "openai"),
+        )
+        for turn_id, status, provider in command_rows:
+            receipt = {
+                "ai_provider": provider,
+                "status": "partial",
+                "awaiting_clarification": False,
+                "error": "Synthetic safe failure",
+                "diagnostic_error": {"type": "SyntheticError", "frames": []},
+                "client_turn_id": turn_id,
+                "sync_job_ids": [],
+                "intent": {
+                    "operation": "save_checkin",
+                    "request": "Synthetic private athlete dialogue",
+                    "follow_up_operations": ["apply_workout_library_plan"],
+                },
+                "pending_operations": ["apply_workout_library_plan"],
+                "pending_tool_calls": [
+                    {
+                        "tool": "apply_workout_library_plan",
+                        "arguments": {"notes": "private"},
+                    }
+                ],
+                "pending_tool_outputs": [{"output": "private"}],
+                "user_message_id": turn_id,
+                "message": {
+                    "id": 41,
+                    "role": "assistant",
+                    "content": "private response text",
+                    "client_turn_id": turn_id,
+                },
+                "command_receipts": [
+                    {
+                        "tool": "save_checkin",
+                        "arguments": {"checkin_date": "2026-10-07"},
+                        "result": {"ok": True, "status": "saved"},
+                    }
+                ],
+                "proposed_actions": [
+                    {"action_type": "save_checkin", "proposal_id": "proposal-1"}
+                ],
+            }
+            db.execute(
+                "INSERT INTO coach_commands(id, client_turn_id, conversation_id, "
+                "intent, target_system, status, receipt, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, 'local', ?, ?, 'before', 'before')",
+                (
+                    f"command-{turn_id}",
+                    turn_id,
+                    f"{provider}-conversation",
+                    '{"scope":"synthetic"}',
+                    status,
+                    json.dumps(receipt),
+                ),
+            )
+        db.execute(
+            "INSERT INTO coach_commands(id, client_turn_id, conversation_id, "
+            "intent, target_system, status, receipt, created_at, updated_at) "
+            "VALUES ('malformed-command', 'malformed-turn', 'legacy-conversation', "
+            "'{}', 'local', 'completed', 'not-json', 'before', 'before')"
+        )
+        db.execute(
+            "INSERT INTO coach_commands(id, client_turn_id, conversation_id, "
+            "intent, target_system, status, receipt, created_at, updated_at) "
+            "VALUES ('unknown-command', 'unknown-turn', 'unknown-conversation', "
+            "'{}', 'local', 'completed', '{\"model\":\"legacy\"}', 'before', 'before')"
+        )
+        db.executemany(
+            "INSERT INTO coach_plan_artifacts(id, conversation_id, client_turn_id, "
+            "base_revision, status, payload, created_at, updated_at) "
+            "VALUES (?, ?, ?, 0, 'draft', '{}', 'before', 'before')",
+            [
+                ("gemini-artifact", "artifact-gemini-conversation", "gemini-completed"),
+                ("openai-artifact", "openai-artifact-conversation", "openai-turn"),
+            ],
+        )
+        db.execute(
+            "UPDATE coach_plan_artifacts SET payload=? WHERE id='gemini-artifact'",
+            ('{"approved_action":"preserve","plan":"synthetic"}',),
+        )
+        db.execute(
+            "INSERT INTO training_plans(id, name, goal, start_date, end_date, status, created_at, updated_at) "
+            "VALUES ('plan', 'Synthetic plan', 'Base', '2026-10-01', '2026-10-31', 'active', 'before', 'before')"
+        )
+        db.execute(
+            "INSERT INTO workout_library(id, local_id, payload, updated_at) "
+            "VALUES ('workout', 'local-workout', '{\"date\":\"2026-10-01\"}', 'before')"
+        )
+        db.commit()
+
+        migrate_schema(db)
+        db.commit()
+        after_first_run = list(db.iterdump())
+        migrate_schema(db)
+        db.commit()
+
+        self.assertEqual(list(db.iterdump()), after_first_run)
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+        values = dict(db.execute("SELECT key, value FROM kv").fetchall())
+        self.assertEqual(values["profile"], '{"name":"Synthetic athlete"}')
+        self.assertEqual(values["selected_ai_provider"], "openai")
+        selected_provider = db.execute(
+            "SELECT updated_at FROM kv WHERE key='selected_ai_provider'"
+        ).fetchone()[0]
+        self.assertNotEqual(selected_provider, "before")
+        self.assertEqual(values["selected_model_openai"], "gpt-6-luna")
+        self.assertEqual(values["openai_conversation_id"], "openai-conversation")
+        self.assertEqual(values["openai_status"], '{"state":"ok"}')
+        self.assertEqual(values["openai_usage"], '{"2026-10-07":{"requests":1}}')
+        self.assertEqual(values["openai_rate_limits"], '{"remaining":9}')
+        self.assertNotIn("last_coach_ai_provider", values)
+        self.assertNotIn("selected_model_gemini", values)
+        self.assertNotIn("gemini_status", values)
+        self.assertNotIn("gemini_usage", values)
+        self.assertNotIn("gemini_conversation_id", values)
+        self.assertNotIn("gemini_conversation_history", values)
+        self.assertNotIn("gemini_call_names", values)
+        self.assertEqual(
+            [row[0] for row in db.execute("SELECT content FROM messages ORDER BY id")],
+            [
+                "OpenAI prompt",
+                "Unattributed legacy prompt",
+                "Malformed legacy prompt",
+                "Unknown receipt prompt",
+            ],
+        )
+        self.assertEqual(
+            [
+                row[0]
+                for row in db.execute(
+                    "SELECT content FROM messages WHERE client_turn_id IN "
+                    "('malformed-turn', 'unknown-turn') ORDER BY id"
+                )
+            ],
+            ["Malformed legacy prompt", "Unknown receipt prompt"],
+        )
+        commands = {
+            row["client_turn_id"]: row
+            for row in db.execute(
+                "SELECT client_turn_id, conversation_id, intent, status, error_class, receipt "
+                "FROM coach_commands"
+            )
+        }
+        for turn_id in ("gemini-queued", "gemini-running"):
+            self.assertEqual(commands[turn_id]["status"], "cancelled")
+            self.assertEqual(
+                commands[turn_id]["error_class"], "gemini_provider_state_removed"
+            )
+            self.assertIsNone(commands[turn_id]["conversation_id"])
+            self.assertEqual(commands[turn_id]["intent"], "{}")
+            self.assertEqual(
+                json.loads(commands[turn_id]["receipt"]),
+                {
+                    "status": "cancelled",
+                    "phase": "migration_gemini_removed",
+                    "error": "gemini_provider_state_removed",
+                },
+            )
+        completed_receipt = json.loads(commands["gemini-completed"]["receipt"])
+        self.assertEqual(
+            completed_receipt["command_receipts"],
+            [
+                {
+                    "tool": "save_checkin",
+                    "arguments": {"checkin_date": "2026-10-07"},
+                    "result": {"ok": True, "status": "saved"},
+                }
+            ],
+        )
+        self.assertNotIn("message", completed_receipt)
+        for key in (
+            "intent",
+            "pending_operations",
+            "pending_tool_calls",
+            "pending_tool_outputs",
+        ):
+            self.assertNotIn(key, completed_receipt)
+        self.assertEqual(commands["gemini-completed"]["intent"], "{}")
+        self.assertEqual(
+            completed_receipt["proposed_actions"],
+            [{"action_type": "save_checkin", "proposal_id": "proposal-1"}],
+        )
+        self.assertEqual(commands["openai-turn"]["status"], "queued")
+        self.assertEqual(
+            commands["openai-turn"]["conversation_id"], "openai-conversation"
+        )
+        self.assertEqual(
+            commands["malformed-turn"]["conversation_id"], "legacy-conversation"
+        )
+        self.assertEqual(
+            commands["unknown-turn"]["conversation_id"], "unknown-conversation"
+        )
+        self.assertIsNone(
+            db.execute(
+                "SELECT conversation_id FROM coach_plan_artifacts "
+                "WHERE id='gemini-artifact'"
+            ).fetchone()[0]
+        )
+        self.assertEqual(
+            db.execute(
+                "SELECT payload FROM coach_plan_artifacts WHERE id='gemini-artifact'"
+            ).fetchone()[0],
+            '{"approved_action":"preserve","plan":"synthetic"}',
+        )
+        self.assertEqual(
+            db.execute(
+                "SELECT conversation_id FROM coach_plan_artifacts "
+                "WHERE id='openai-artifact'"
+            ).fetchone()[0],
+            "openai-artifact-conversation",
+        )
+        self.assertEqual(
+            db.execute("SELECT name FROM training_plans").fetchone()[0],
+            "Synthetic plan",
+        )
+        self.assertEqual(
+            db.execute("SELECT local_id FROM workout_library").fetchone()[0],
+            "local-workout",
+        )
+
+    def test_gemini_cleanup_runs_for_every_supported_schema(self):
+        for factory, version in (
+            (self.old_database, 0),
+            (self.old_database, 1),
+            (self.previous_database, 0),
+            (self.previous_database, 2),
+            (self.release_1_12_26_database, 0),
+            (self.release_1_12_26_database, 3),
+        ):
+            with self.subTest(schema=factory.__name__, version=version):
+                db = factory()
+                db.execute(f"PRAGMA user_version = {version}")
+                self.seed_all_tables(db)
+                db.executemany(
+                    "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, 'before')",
+                    [("selected_ai_provider", "gemini"), ("gemini_usage", "{}")],
+                )
+                db.commit()
+                before = self.rows(db)
+                before_kv = dict(db.execute("SELECT key, value FROM kv"))
+
+                migrate_schema(db)
+                db.commit()
+                self.assertTrue(database_schema_is_current(db))
+                values = dict(db.execute("SELECT key, value FROM kv"))
+                expected_kv = {
+                    key: value
+                    for key, value in before_kv.items()
+                    if key != "gemini_usage"
+                }
+                expected_kv["selected_ai_provider"] = "openai"
+                self.assertEqual(values, expected_kv)
+                after = self.rows(db)
+                before.pop("kv")
+                after.pop("kv")
+                self.assertEqual(after, before)
+                snapshot = list(db.iterdump())
+                migrate_schema(db)
+                db.commit()
+                self.assertEqual(list(db.iterdump()), snapshot)
+
+    def test_openai_provider_configuration_is_byte_for_byte_preserved(self):
+        db = self.release_1_12_26_database()
+        db.executemany(
+            "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, 'before')",
+            [
+                ("selected_ai_provider", "openai"),
+                ("last_coach_ai_provider", "openai"),
+                ("selected_model_openai", "gpt-6-luna"),
+                ("openai_conversation_id", "conv_openai"),
+                ("openai_usage", "{}"),
+                ("openai_status", "{}"),
+                ("openai_rate_limits", "{}"),
+            ],
+        )
+        db.commit()
+        before = {
+            row["key"]: (row["value"], row["updated_at"])
+            for row in db.execute("SELECT key, value, updated_at FROM kv")
+        }
+        migrate_schema(db)
+        db.commit()
+        self.assertEqual(
+            {
+                row["key"]: (row["value"], row["updated_at"])
+                for row in db.execute("SELECT key, value, updated_at FROM kv")
+            },
+            before,
+        )
+
+    def test_unknown_and_malformed_receipts_never_attribute_messages_to_gemini(self):
+        for receipt in (
+            None,
+            "",
+            "not-json",
+            "null",
+            "[]",
+            '"gemini"',
+            "{}",
+            '{"model":"gemini-legacy"}',
+            '{"ai_provider":"openai"}',
+            '{"ai_provider":"unknown"}',
+            '{"ai_provider":null}',
+            '{"ai_provider":["gemini"]}',
+            '{"ai_provider":"GEMINI"}',
+            '{"provider":"gemini"}',
+            '{"ai_provider":"openai","ai_provider":"gemini"}',
+            '{"ai_provider":"gemini","usage":NaN}',
+        ):
+            with self.subTest(receipt=receipt):
+                db = self.release_1_12_26_database()
+                db.execute(
+                    "INSERT INTO kv VALUES ('selected_ai_provider', 'gemini', 'before')"
+                )
+                db.execute(
+                    "INSERT INTO messages(role, content, client_turn_id, created_at) "
+                    "VALUES ('user', 'Unknown provenance', 'turn', 'before')"
+                )
+                db.execute(
+                    "INSERT INTO coach_commands(id, client_turn_id, conversation_id, "
+                    "intent, target_system, status, receipt, created_at, updated_at) "
+                    "VALUES ('command', 'turn', 'conv_unknown', '{}', 'local', "
+                    "'queued', ?, 'before', 'before')",
+                    (receipt,),
+                )
+                before_commands = [
+                    tuple(row) for row in db.execute("SELECT * FROM coach_commands")
+                ]
+                before_messages = [
+                    tuple(row) for row in db.execute("SELECT * FROM messages")
+                ]
+                migrate_schema(db)
+                db.commit()
+                self.assertEqual(
+                    [tuple(row) for row in db.execute("SELECT * FROM coach_commands")],
+                    before_commands,
+                )
+                self.assertEqual(
+                    [tuple(row) for row in db.execute("SELECT * FROM messages")],
+                    before_messages,
+                )
+
+    def test_only_explicit_gemini_conversation_references_are_cleared(self):
+        db = self.release_1_12_26_database()
+        db.executemany(
+            "INSERT INTO kv VALUES (?, ?, 'before')",
+            [
+                ("gemini_conversation_id", "legacy_gemini_id"),
+                ("openai_conversation_id", "conv_openai"),
+            ],
+        )
+        for conversation_id in (
+            "gemini_explicit",
+            "legacy_gemini_id",
+            "conv_openai",
+            "conv_unknown",
+        ):
+            db.execute(
+                "INSERT INTO coach_commands(id, client_turn_id, conversation_id, "
+                "intent, target_system, status, receipt, created_at, updated_at) "
+                "VALUES (?, ?, ?, '{}', 'local', 'completed', '{}', 'before', 'before')",
+                (conversation_id, conversation_id, conversation_id),
+            )
+            db.execute(
+                "INSERT INTO coach_plan_artifacts(id, conversation_id, base_revision, "
+                "status, payload, created_at, updated_at) "
+                "VALUES (?, ?, 0, 'committed', '{}', 'before', 'before')",
+                (conversation_id, conversation_id),
+            )
+        migrate_schema(db)
+        db.commit()
+        for table in ("coach_commands", "coach_plan_artifacts"):
+            self.assertEqual(
+                dict(db.execute(f"SELECT id, conversation_id FROM {table}")),
+                {
+                    "gemini_explicit": None,
+                    "legacy_gemini_id": None,
+                    "conv_openai": "conv_openai",
+                    "conv_unknown": "conv_unknown",
+                },
+            )
+
+    def test_pending_dialogue_erasure_requires_exclusively_proven_gemini_sources(self):
+        for source_ids, remove in (
+            ([1], True),
+            ([1, 1], True),
+            ([2], False),
+            ([1, 2], False),
+            ([999], False),
+            ([], False),
+            ([True], False),
+            (["1"], False),
+            (None, False),
+        ):
+            with self.subTest(source_ids=source_ids):
+                db = self.release_1_12_26_database()
+                for message_id, provider in ((1, "gemini"), (2, "openai")):
+                    db.execute(
+                        "INSERT INTO messages(id, role, content, client_turn_id, created_at) "
+                        "VALUES (?, 'user', 'Synthetic prompt', ?, 'before')",
+                        (message_id, provider),
+                    )
+                    db.execute(
+                        "INSERT INTO coach_commands(id, client_turn_id, intent, "
+                        "target_system, status, receipt, created_at, updated_at) "
+                        "VALUES (?, ?, '{}', 'local', 'completed', ?, 'before', 'before')",
+                        (provider, provider, json.dumps({"ai_provider": provider})),
+                    )
+                pending = json.dumps(
+                    {
+                        "summary": "Synthetic pending request",
+                        "source_message_ids": source_ids,
+                    }
+                )
+                db.execute(
+                    "INSERT INTO kv VALUES ('coach_pending_request', ?, 'before')",
+                    (pending,),
+                )
+                migrate_schema(db)
+                db.commit()
+                remaining = db.execute(
+                    "SELECT value FROM kv WHERE key='coach_pending_request'"
+                ).fetchone()
+                if remove:
+                    self.assertIsNone(remaining)
+                else:
+                    self.assertEqual(remaining[0], pending)
+
+    def test_gemini_migration_sql_failure_rolls_back_state_messages_and_version(self):
+        db = self.release_1_12_26_database()
+        db.execute(
+            "INSERT INTO kv(key, value, updated_at) VALUES "
+            "('gemini_conversation_history', 'synthetic-history', 'before')"
+        )
+        db.executemany(
+            "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, 'before')",
+            [("selected_ai_provider", "gemini"), ("gemini_usage", "synthetic-usage")],
+        )
+        db.execute(
+            "INSERT INTO messages(role, content, client_turn_id, created_at) "
+            "VALUES ('user', 'synthetic Gemini text', 'turn', 'before')"
+        )
+        db.execute(
+            "INSERT INTO kv VALUES ('coach_pending_request', "
+            '\'{"summary":"Synthetic pending request","source_message_ids":[1]}\', \'before\')'
+        )
+        db.execute(
+            "INSERT INTO coach_commands(id, client_turn_id, intent, target_system, status, receipt, created_at, updated_at) "
+            "VALUES ('command', 'turn', '{\"private\":true}', 'local', 'running', '{\"ai_provider\":\"gemini\",\"message\":\"private\"}', 'before', 'before')"
+        )
+        db.commit()
+        before = list(db.iterdump())
+        db.execute(
+            "CREATE TEMP TRIGGER fail_gemini_cleanup BEFORE DELETE ON main.kv "
+            "WHEN OLD.key='gemini_usage' BEGIN "
+            "SELECT RAISE(ABORT, 'injected cleanup failure'); END"
+        )
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "injected cleanup failure"):
+            migrate_schema(db)
+
+        self.assertEqual(list(db.iterdump()), before)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
+        db.execute("DROP TRIGGER fail_gemini_cleanup")
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
+
     def test_failure_after_table_creation_rolls_back_and_can_be_retried(self):
         db = self.old_database()
         self.seed_all_tables(db)
@@ -260,11 +788,11 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 0)
 
     def test_unknown_or_newer_schema_is_not_modified(self):
-        for newer in (False, True):
-            with self.subTest(newer=newer):
+        for version in (None, 5, 99):
+            with self.subTest(version=version):
                 db = self.old_database()
-                if newer:
-                    db.execute("PRAGMA user_version = 99")
+                if version is not None:
+                    db.execute(f"PRAGMA user_version = {version}")
                 else:
                     db.execute("ALTER TABLE messages ADD COLUMN unknown TEXT")
                 db.commit()
@@ -273,7 +801,8 @@ class DatabaseMigrationTests(unittest.TestCase):
                     migrate_schema(db)
                 self.assertEqual(list(db.iterdump()), before)
                 self.assertEqual(
-                    db.execute("PRAGMA user_version").fetchone()[0], 99 if newer else 0
+                    db.execute("PRAGMA user_version").fetchone()[0],
+                    0 if version is None else version,
                 )
 
     def test_old_schema_with_changed_column_definition_is_not_migrated(self):
@@ -373,6 +902,68 @@ class DatabaseMigrationTests(unittest.TestCase):
             finally:
                 reopened.close()
             self.assertNotEqual(path.read_bytes()[:16], b"SQLite format 3\x00")
+
+    @unittest.skipIf(
+        cipher_backend is None, "SQLCipher requires the Docker runtime on Windows"
+    )
+    def test_encrypted_1_12_26_gemini_migration_reopens_idempotently(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "encrypted.db"
+            options = {
+                "password": "synthetic-migration-test-key",
+                "configure": configure_cipher,
+                "row_factory": cipher_backend.Row,
+            }
+            manager = DatabaseManager(path, cipher_backend, **options)
+            try:
+                with manager.unit_of_work() as db:
+                    db.executescript(RELEASE_1_12_26_SCHEMA.read_text(encoding="utf-8"))
+                    db.execute(
+                        "INSERT INTO kv(key, value, updated_at) VALUES "
+                        "('gemini_conversation_history', 'synthetic-history', 'before')"
+                    )
+                    db.execute(
+                        "INSERT INTO messages(role, content, client_turn_id, created_at) "
+                        "VALUES ('user', 'Gemini prompt', 'gemini-turn', 'before')"
+                    )
+                    db.execute(
+                        "INSERT INTO coach_commands(id, client_turn_id, intent, target_system, "
+                        "status, receipt, created_at, updated_at) VALUES "
+                        "('command', 'gemini-turn', '{}', 'local', 'running', "
+                        "'{\"ai_provider\":\"gemini\"}', 'before', 'before')"
+                    )
+                with manager.unit_of_work() as db:
+                    migrate_schema(db)
+            finally:
+                manager.close()
+
+            reopened = DatabaseManager(path, cipher_backend, **options)
+            try:
+                with reopened.unit_of_work() as db:
+                    migrate_schema(db)
+                    self.assertTrue(database_schema_is_current(db))
+                    self.assertIsNone(
+                        db.execute(
+                            "SELECT value FROM kv WHERE key='gemini_conversation_history'"
+                        ).fetchone()
+                    )
+                    self.assertEqual(
+                        db.execute(
+                            "SELECT status FROM coach_commands WHERE client_turn_id='gemini-turn'"
+                        ).fetchone()[0],
+                        "cancelled",
+                    )
+                    self.assertEqual(
+                        db.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+                    )
+                    self.assertEqual(
+                        db.execute("PRAGMA cipher_integrity_check").fetchall(), []
+                    )
+                    self.assertEqual(
+                        db.execute("PRAGMA foreign_key_check").fetchall(), []
+                    )
+            finally:
+                reopened.close()
 
 
 if __name__ == "__main__":

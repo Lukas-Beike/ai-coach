@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.db.repositories import PlanningStateRepository
 from backend.errors import (
     INVALID_PLANNING_DATE_ERROR,
@@ -15,6 +16,7 @@ from backend.errors import (
     AppError,
 )
 from backend.planning import library as planning_library
+from backend.planning.conflicts import calendar_items_conflict
 from backend.planning.workouts import normalize_workout
 
 _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
@@ -30,24 +32,22 @@ def _project_existing_training_change(
     if not start_date_local or change.get("start_date_local"):
         return candidate
     try:
-        parsed_start = datetime.fromisoformat(
-            str(start_date_local).strip().replace("Z", "+00:00")
-        )
+        parsed_start = datetime.fromisoformat(str(start_date_local).strip())
+        target_date = LocalDate.parse(candidate_date).to_date()
         candidate["start_date_local"] = parsed_start.replace(
-            year=int(candidate_date[:4]),
-            month=int(candidate_date[5:7]),
-            day=int(candidate_date[8:10]),
+            year=target_date.year,
+            month=target_date.month,
+            day=target_date.day,
         ).isoformat()
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         candidate.pop("start_date_local", None)
     return candidate
 
 
 def validated_training_date(value: Any) -> str:
-    candidate_date = str(value or "").strip()[:10]
     try:
-        date.fromisoformat(candidate_date)
-    except ValueError as exc:
+        candidate_date = LocalDate.parse(value).isoformat()
+    except (TypeError, ValueError) as exc:
         raise AppError(
             400, INVALID_PLANNING_DATE_ERROR, reason="invalid_change"
         ) from exc
@@ -160,7 +160,7 @@ class StructuredTrainingChangeValidator:
         final_dates: dict[str, str],
         final_active: dict[str, bool],
     ) -> None:
-        candidate_date = str(change.get("date") or "").strip()[:10]
+        candidate_date = str(change.get("date") or "").strip()
         if not candidate_date:
             raise AppError(
                 400,
@@ -190,11 +190,11 @@ class StructuredTrainingChangeValidator:
             return
         try:
             current = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             current = {}
         if not isinstance(current, dict):
             return
-        current_date = str(current.get("date") or "").strip()[:10]
+        current_date = str(current.get("date") or "").strip()
         if current_date:
             original_dates.setdefault(change_identity, current_date)
         final_active.setdefault(
@@ -213,7 +213,7 @@ class StructuredTrainingChangeValidator:
             or final_dates.get(change_identity)
             or current.get("date")
             or ""
-        ).strip()[:10]
+        ).strip()
         if candidate_date:
             final_dates[change_identity] = validated_training_date(candidate_date)
         changes_by_identity[change_identity] = _project_existing_training_change(
@@ -226,8 +226,6 @@ class StructuredTrainingChangeValidator:
         final_dates: dict[str, str],
         final_active: dict[str, bool],
     ) -> None:
-        from backend.planning import calendar as planning_calendar
-
         active_ids = [ident for ident in final_dates if final_active.get(ident, True)]
         for i, id_a in enumerate(active_ids):
             date_a = final_dates[id_a]
@@ -236,9 +234,7 @@ class StructuredTrainingChangeValidator:
                 if final_dates[id_b] != date_a:
                     continue
                 change_b = changes_by_identity.get(id_b, {"date": date_a})
-                matches, match = planning_calendar._calendar_items_conflict(
-                    change_a, change_b
-                )
+                matches, match = calendar_items_conflict(change_a, change_b)
                 if matches and match == "time_window":
                     raise AppError(
                         409,
@@ -480,13 +476,15 @@ class StructuredTrainingPlanResolver:
     ) -> bool:
         if action in {"delete", "archive", "restore"}:
             return True
-        return (
-            action == "update"
-            and "date" in change
-            and not str(change.get("date") or "").startswith(
-                str(current.get("date") or "")[:10]
+        if action != "update" or "date" not in change:
+            return False
+        try:
+            return (
+                LocalDate.parse(change.get("date")).isoformat()
+                != LocalDate.parse(current.get("date")).isoformat()
             )
-        )
+        except TypeError, ValueError:
+            return True
 
     def _membership_update(
         self, change: dict[str, Any], db: Any
@@ -500,7 +498,7 @@ class StructuredTrainingPlanResolver:
             return None, None
         try:
             current = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             current = {}
         if not isinstance(current, dict):
             return None, None

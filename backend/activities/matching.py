@@ -7,6 +7,7 @@ from typing import Any
 
 from backend.activities.identity import activity_datetime as _activity_datetime
 from backend.activities.identity import activity_kind as _activity_kind
+from backend.athlete.local_date import iso_date_prefix
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -22,7 +23,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -46,7 +47,7 @@ def is_planned_workout_event(event: Any) -> bool:
 
 def record_date(value: Any) -> str:
     parsed = _activity_datetime(value)
-    return parsed.date().isoformat() if parsed else str(value or "")[:10]
+    return parsed.date().isoformat() if parsed else iso_date_prefix(str(value or ""))
 
 
 def _planned_workout_rows(planned: list[Any]) -> list[tuple[int, dict[str, Any]]]:

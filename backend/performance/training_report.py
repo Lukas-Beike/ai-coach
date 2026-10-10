@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -13,14 +12,10 @@ from backend.activities.duplicates import (
     intervals_cycling_activities_match,
 )
 from backend.activities.identity import intervals_activity_device_source
+from backend.athlete.local_date import iso_date_prefix
+from backend.athlete.measurements import number
 
 METHOD = "local-training-report-v1"
-
-
-def number(value: Any) -> float | None:
-    if type(value) not in {float, int} or not math.isfinite(value) or value < 0:
-        return None
-    return float(value)
 
 
 def canonical_rows(snapshot: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
@@ -46,9 +41,9 @@ def activity_day(row: dict[str, Any], timezone: str = "UTC") -> str:
             started = datetime.fromisoformat(str(absolute).replace("Z", "+00:00"))
             if started.tzinfo is not None:
                 return started.astimezone(ZoneInfo(timezone)).date().isoformat()
-        except (ValueError, ZoneInfoNotFoundError):
+        except ValueError, ZoneInfoNotFoundError:
             pass
-    return str(row.get("start_date_local") or row.get("date") or "")[:10]
+    return iso_date_prefix(str(row.get("start_date_local") or row.get("date") or ""))
 
 
 def _totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -173,7 +168,7 @@ def training_report(
         row
         for row in (checkins or [])
         if start.isoformat()
-        <= str(row.get("checkin_date") or row.get("date") or "")[:10]
+        <= iso_date_prefix(str(row.get("checkin_date") or row.get("date") or ""))
         <= effective_end.isoformat()
     ]
     return {

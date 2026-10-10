@@ -81,10 +81,13 @@ class ServerRuntimeTests(ServerTestCase):
         self.assertEqual(gate.state(), {"active": False, "running_operations": 0})
 
     def test_more_segments_group_settings_and_localize_sensitive_inputs(self):
-        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(
+        app = (
+            Path(__file__).resolve().parents[1] / "public" / "settings.js"
+        ).read_text(encoding="utf-8")
+        forms = (Path(__file__).resolve().parents[1] / "public" / "forms.js").read_text(
             encoding="utf-8"
         )
-        forms = (Path(__file__).resolve().parents[1] / "public" / "forms.js").read_text(
+        views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(
             encoding="utf-8"
         )
         navigation = (
@@ -96,19 +99,24 @@ class ServerRuntimeTests(ServerTestCase):
         for segment in ("profile", "connections", "coach", "privacy", "operations"):
             self.assertIn(f'"more/{segment}"', navigation)
             self.assertIn(f'href="#more/{segment}"', index)
-        self.assertIn("function moreSegmentFromRoute(route = state.route)", navigation)
         self.assertIn(
-            "function renderMoreSegments(segment = moreSegmentFromRoute())", app
+            "function moreSegmentFromRoute(route = AppState.state.route)", navigation
         )
+        self.assertIn("function renderMoreSegments(segment)", views)
         self.assertIn('formData.getAll("sports")', app)
         self.assertNotIn("function collectCompetitions()", forms)
-        self.assertIn("function competitionCard(", app)
+        plan_views = (
+            Path(__file__).resolve().parents[1] / "public" / "plan-views.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("function competitionCard(", plan_views)
+        self.assertNotIn("function competitionCard(", app)
         self.assertIn('name="sports" multiple', index)
         self.assertIn('name="timezone" autocomplete="off"', index)
         self.assertIn('id="profileContextNotice"', index)
-        self.assertIn("Erwartete Dauer (hh:mm)", app)
+        self.assertIn("Erwartete Dauer (hh:mm)", plan_views)
         self.assertIn(
-            'competitionFact("Distanz", distanceLabel(competition.distance))', app
+            'competitionFact("Distanz", distanceLabel(competition.distance))',
+            plan_views,
         )
         self.assertIn('data-more-segment-panel="privacy"', index)
         self.assertIn('data-more-segment-panel="operations"', index)

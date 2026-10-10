@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from backend.diagnostics.readiness_probe import ReadinessProbeService
 from backend.http_api.analysis import AnalysisRoutes
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
@@ -54,7 +55,15 @@ from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.transcribe_post import TranscribePostRoutes
-from backend.performance.report_service import TrainingReportService
+from backend.performance.report_service import (
+    TrainingDerivedReadService,
+    TrainingProfileSelectionService,
+    TrainingRecordsService,
+    TrainingReportReadService,
+    TrainingReportServices,
+    TrainingSeasonReadService,
+)
+from backend.planning.season_preparation import load_scenarios, season_preparation
 
 
 @dataclass(frozen=True)
@@ -68,7 +77,6 @@ class HttpHandlerIdentity:
 @dataclass(frozen=True)
 class HttpHandlerErrors:
     redact_text: Callable[[str], str]
-    public_app_error_status: Callable[[Any], int]
     internal_server_error: str
 
 
@@ -217,7 +225,8 @@ class HttpSyncServices:
 
 @dataclass(frozen=True)
 class HttpNutritionServices:
-    nutrition: Callable[[], Any]
+    diary: Callable[[], Any]
+    meal_library: Callable[[], Any]
     intervals_sync: Callable[[], Any]
     audio_transcription: Callable[[], Any]
 
@@ -240,6 +249,7 @@ class HttpReadRouteServices:
     athlete: HttpAthleteServices
     history: HttpHistoryServices
     diagnostics: HttpDiagnosticsServices
+    workout_library: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -273,6 +283,7 @@ class HttpApiAssembly:
         athlete = dependencies.reads.athlete
         history = dependencies.reads.history
         diagnostics = dependencies.reads.diagnostics
+        workout_library = dependencies.reads.workout_library
         privacy = dependencies.domains.privacy
         sync = dependencies.domains.sync
         nutrition = dependencies.domains.nutrition
@@ -336,12 +347,14 @@ class HttpApiAssembly:
         sync_period_defaults = sync.period_defaults
         all_sync_days = sync.all_sync_days
         uuid_factory = sync.uuid_factory
-        nutrition_service = nutrition.nutrition
+        diary_service = nutrition.diary
+        meal_library_service = nutrition.meal_library
         audio_transcription_client = nutrition.audio_transcription
         self._database_manager = database_manager
         self._database_lock = database_lock
         self._data_dir = data_dir
         self._readiness_maintenance_gate = readiness_maintenance_gate
+        self._workout_library = workout_library
         self._conversation_history_service = conversation_history_service
         self._proposal_read_service = proposal_read_service
         self._chat_page_max = chat_page_max
@@ -388,39 +401,68 @@ class HttpApiAssembly:
         self.history_get_routes = HistoryGetRoutes(
             session_auth_service, change_history_service
         )
-        self.training_reports = lambda: TrainingReportService(
-            read_snapshot=lambda: sync_state_repository().latest_snapshot(),
-            read_plan=lambda: public_plan_state_service().read(local_only=True),
-            read_checkins=lambda: checkin_service().list(365),
-            read_feedback=lambda: (
-                athlete.activity_feedback().list(500)
-                if athlete.activity_feedback
-                else []
-            ),
-            database_manager=database_manager(),
-            today=local_today,
-            timezone=lambda: str(profile_service().get().get("timezone") or "UTC"),
-            read_competitions=lambda: competition_service().list(100),
-            read_equipment=lambda: (
-                athlete.equipment().read() if athlete.equipment else {}
-            ),
-            read_record=lambda kind, record_id: (
-                {
-                    "record_type": kind,
-                    "record": athlete.equipment().read(record_id)["items"][0],
-                }
-                if kind == "equipment" and athlete.equipment
-                else {}
-            ),
-            read_recovery=lambda: (
-                public_performance_state_service()
-                .performance_state()["performance"]
-                .get("personal_recovery", {})
-            ),
-            read_performance=lambda: (
-                public_performance_state_service().performance_state()["performance"]
-            ),
+        report_snapshot = lambda: sync_state_repository().latest_snapshot()
+        report_plan = lambda: public_plan_state_service().read(local_only=True)
+        report_checkins = lambda: checkin_service().list(365)
+        report_feedback = lambda: (
+            athlete.activity_feedback().list(500) if athlete.activity_feedback else []
         )
+        report_timezone = lambda: str(profile_service().get().get("timezone") or "UTC")
+        report_recovery = lambda: (
+            public_performance_state_service()
+            .performance_state()["performance"]
+            .get("personal_recovery", {})
+        )
+        report_performance = lambda: (
+            public_performance_state_service().performance_state()["performance"]
+        )
+
+        def training_report_services() -> TrainingReportServices:
+            records = TrainingRecordsService(
+                database_manager=database_manager(),
+                read_snapshot=report_snapshot,
+                read_equipment=lambda: (
+                    athlete.equipment().read() if athlete.equipment else {}
+                ),
+                read_record=lambda kind, record_id: (
+                    {
+                        "record_type": kind,
+                        "record": athlete.equipment().read(record_id)["items"][0],
+                    }
+                    if kind == "equipment" and athlete.equipment
+                    else {}
+                ),
+            )
+            report_read = TrainingReportReadService(
+                read_snapshot=report_snapshot,
+                read_plan=report_plan,
+                read_checkins=report_checkins,
+                read_feedback=report_feedback,
+                today=local_today,
+                load_scenarios=load_scenarios,
+            )
+            return TrainingReportServices(
+                records=records,
+                profiles=TrainingProfileSelectionService(local_today),
+                report=report_read,
+                derived=TrainingDerivedReadService(
+                    read_snapshot=report_snapshot,
+                    read_checkins=report_checkins,
+                    read_recovery=report_recovery,
+                    read_performance=report_performance,
+                    today=local_today,
+                ),
+                season=TrainingSeasonReadService(
+                    read_snapshot=report_snapshot,
+                    read_competitions=lambda: competition_service().list(100),
+                    read_observations=records.observations,
+                    today=local_today,
+                    season_preparation=season_preparation,
+                ),
+                timezone=report_timezone,
+            )
+
+        self.training_reports = training_report_services
         self.analysis_routes = AnalysisRoutes(
             session_auth_service, self.training_reports
         )
@@ -447,7 +489,6 @@ class HttpApiAssembly:
             response_timeout_seconds=timeout,
         )
         self.transcribe_post_routes = TranscribePostRoutes(
-            settings,
             audio_transcription_client,
         )
         self.privacy_delete_post_routes = PrivacyDeletePostRoutes(
@@ -491,14 +532,18 @@ class HttpApiAssembly:
         self.auth_post_routes = AuthPostRoutes(session_auth_service, maintenance_gate)
         self.nutrition_get_routes = NutritionGetRoutes(
             session_auth_service,
-            nutrition_service,
+            diary_service,
+            meal_library_service,
             athlete_clock.now,
         )
         self.nutrition_post_routes = NutritionPostRoutes(
-            nutrition_service,
+            diary_service,
+            meal_library_service,
             sync_job_queue_service,
         )
-        self.nutrition_put_routes = NutritionPutRoutes(nutrition_service)
+        self.nutrition_put_routes = NutritionPutRoutes(
+            diary_service, meal_library_service
+        )
         self.route_dispatcher = HttpRouteDispatcher(
             (
                 self.public_get_routes,
@@ -563,6 +608,7 @@ class HttpApiAssembly:
             self._database_lock(),
             self._data_dir(),
             self._readiness_maintenance_gate(),
+            ReadinessProbeService(),
         )
 
     def export_stream_transport(self) -> ExportStreamTransport:
@@ -574,7 +620,7 @@ class HttpApiAssembly:
         )
 
     def library_page_service(self) -> LibraryPageService:
-        return LibraryPageService(self._database_manager())
+        return LibraryPageService(self._database_manager(), self._workout_library())
 
     def chat_history_page_service(self) -> ChatHistoryPageService:
         return ChatHistoryPageService(
@@ -606,7 +652,6 @@ class HttpApiAssembly:
                 response_transport=self.response_transport,
                 maintenance_gate=handler.identity.maintenance_gate,
                 redact_text=handler.errors.redact_text,
-                public_app_error_status=handler.errors.public_app_error_status,
                 internal_server_error=handler.errors.internal_server_error,
                 max_body_bytes=handler.body_limits.max_body_bytes,
                 max_audio_body_bytes=handler.body_limits.max_audio_body_bytes,

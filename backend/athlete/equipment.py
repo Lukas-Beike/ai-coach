@@ -7,8 +7,9 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+from backend.athlete.measurements import number
 from backend.errors import AppError
-from backend.performance.training_report import canonical_rows, number
 
 EQUIPMENT_PREFIX = "equipment:"
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
@@ -21,6 +22,7 @@ class EquipmentService:
         read_snapshot: Callable[[], dict[str, Any]],
         today: Callable[[], date],
         utc_now: Callable[[], str],
+        canonical_rows: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], int]],
     ):
         self._manager, self._read_snapshot, self._today, self._utc_now = (
             manager,
@@ -28,6 +30,7 @@ class EquipmentService:
             today,
             utc_now,
         )
+        self._canonical_rows = canonical_rows
 
     def _records(self, db: Any, prefix: str, limit: int) -> list[dict[str, Any]]:
         return [
@@ -39,14 +42,14 @@ class EquipmentService:
         ]
 
     def read(self, item_id: str | None = None) -> dict[str, Any]:
-        rows, duplicates = canonical_rows(self._read_snapshot() or {})
+        rows, duplicates = self._canonical_rows(self._read_snapshot() or {})
         with self._manager.unit_of_work() as db:
             garmin_row = db.execute(
                 "SELECT value FROM kv WHERE key='garmin_snapshot'"
             ).fetchone()
             try:
                 garmin = json.loads(garmin_row["value"]) if garmin_row else {}
-            except (TypeError, json.JSONDecodeError):
+            except TypeError, json.JSONDecodeError:
                 garmin = {}
             garmin = garmin if isinstance(garmin, dict) else {}
             if garmin.get("source") == "fixture":
@@ -209,7 +212,7 @@ class EquipmentService:
             "equipment_id",
         }:
             raise AppError(400, "Aktivität und Ausrüstung sind erforderlich.")
-        rows, _ = canonical_rows(self._read_snapshot() or {})
+        rows, _ = self._canonical_rows(self._read_snapshot() or {})
         row = next(
             (row for row in rows if str(row.get("id")) == str(payload["activity_id"])),
             None,
@@ -606,7 +609,7 @@ def _update_usage(
         if (assignments.get(str(row.get("id"))) or {}).get("equipment_id")
         == (item.get("parent_id") or item["id"])
         and item["start_date"]
-        <= str(row.get("start_date_local") or "")[:10]
+        <= iso_date_prefix(str(row.get("start_date_local") or ""))
         <= today.isoformat()
     ]
     events = sorted(
@@ -686,7 +689,8 @@ def _maintenance_sessions(
     since = [
         row
         for row in eligible
-        if not latest or str(row.get("start_date_local") or "")[:10] > latest["date"]
+        if not latest
+        or iso_date_prefix(str(row.get("start_date_local") or "")) > latest["date"]
     ]
     return ambiguous, since
 

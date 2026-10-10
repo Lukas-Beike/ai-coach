@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import local as calendar_local
 from backend.coach.context_selection import CONTEXT_SECTIONS, CoachContextSelection
 from backend.coach.conversation import CoachMessageService
@@ -193,7 +194,9 @@ def future_coach_planned_workouts(
     for event in events:
         if not isinstance(event, dict):
             continue
-        raw_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+        raw_date = iso_date_prefix(
+            str(event.get("start_date_local") or event.get("date") or "")
+        )
         try:
             event_date = date.fromisoformat(raw_date)
         except ValueError:
@@ -893,7 +896,7 @@ class CoachContextPreviewService:
         self._limits = limits
         self._utc_now = utc_now
 
-    def preview(self, selected_ai_provider: str) -> dict[str, Any]:
+    def preview(self) -> dict[str, Any]:
         """Return the exact user-inspectable preview without mutating state."""
         snapshot = self._sync_state_repository.latest_snapshot()
         last_user_message = next(
@@ -956,9 +959,7 @@ class CoachContextPreviewService:
                 "KI-Anbieter-Konversation: Dialogkontinuität; nicht autoritativ für dauerhafte Athletenfakten",
             ],
             "conversation": {
-                "mode": "Gemini local conversation history"
-                if selected_ai_provider == "gemini"
-                else "Bounded local dialogue with per-command Responses chain",
+                "mode": "Bounded local dialogue with per-command Responses chain",
                 "included_separately": True,
                 "note": "Der bisherige Dialog wird für Kontinuität mitgeführt. Dauerhafte Athletenfakten stammen ausschließlich aus Profil, Wettkämpfen und aktuellem Datensnapshot.",
             },

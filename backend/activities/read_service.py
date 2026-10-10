@@ -8,13 +8,9 @@ from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
 
-from backend.activities import detail_projection
-from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
+from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.matching import record_date
-from backend.errors import AppError
-from backend.performance import activity_validation
-from backend.performance import context as performance_context
-from backend.sync.snapshots import latest_snapshot
+from backend.runtime.ports import ProviderSnapshotReader
 
 ALL_DAYS = -1
 PAGE_DEFAULT = 100
@@ -51,38 +47,38 @@ def _decode_cursor(value: Any) -> Any | None:
     try:
         padding = "=" * (-len(str(value)) % 4)
         return json.loads(base64.urlsafe_b64decode(f"{value}{padding}"))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
 def _page_limit(raw: Any) -> int:
     try:
         return max(1, min(int(raw), PAGE_MAX))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return PAGE_DEFAULT
 
 
 class ActivityReadService:
-    """Own activity listing and detailed analysis without provider refreshes."""
+    """Own activity listing without provider refreshes."""
 
     def __init__(
         self,
         database_manager: Any,
-        snapshot_repository: Any,
+        snapshot_reader: ProviderSnapshotReader,
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
         *,
         read_equipment: Callable[[], dict[str, Any]] = dict,
     ):
         self._database_manager = database_manager
-        self._snapshot_repository = snapshot_repository
+        self._snapshot_reader = snapshot_reader
         self._feedback_service = feedback_service
         self._detail_store = detail_store
         self._read_equipment = read_equipment
 
     def _snapshot(self) -> dict[str, Any]:
         with self._database_manager.unit_of_work() as db:
-            snapshot = latest_snapshot(db, self._snapshot_repository)
+            snapshot = self._snapshot_reader.latest_snapshot(db)
         return snapshot if isinstance(snapshot, dict) else {}
 
     @staticmethod
@@ -106,7 +102,7 @@ class ActivityReadService:
         activities = self._activities(snapshot)
         try:
             days_value = int(days)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             days_value = ALL_DAYS
         if days_value != ALL_DAYS:
             cutoff = today - timedelta(days=max(1, days_value) - 1)
@@ -155,128 +151,3 @@ class ActivityReadService:
             ),
             "days": days,
         }
-
-    def detail(
-        self,
-        activity_id: Any,
-        *,
-        garmin_snapshot: dict[str, Any],
-        profile: dict[str, Any],
-        today: date,
-    ) -> dict[str, Any]:
-        normalized_id = str(activity_id or "").strip()
-        if not normalized_id or len(normalized_id) > 200:
-            raise AppError(
-                400,
-                "Die Aktivität konnte nicht eindeutig zugeordnet werden.",
-                reason="invalid_activity_request",
-            )
-        snapshot = self._snapshot()
-        activity = _raw_activity(snapshot, normalized_id)
-        cached = self._detail_store.get(normalized_id) if self._detail_store else None
-        stale = bool(
-            cached
-            and cached.get("summary_sha256")
-            and cached["summary_sha256"] != summary_fingerprint(activity)
-        )
-        if cached:
-            activity = {**activity, **cached["activity"]}
-        feedback = next(
-            (
-                item
-                for item in self._feedback_service.list(500)
-                if item.get("activity_id") == normalized_id
-            ),
-            None,
-        )
-        performance = performance_context.current_performance_context(
-            snapshot, garmin_snapshot, profile, today
-        )
-        equipment = _activity_equipment(self._read_equipment(), normalized_id)
-        return {
-            "ok": True,
-            "snapshot_synced_at": snapshot.get("synced_at"),
-            "activity": detail_projection.detailed_activity(activity),
-            "activity_validation": activity_validation.activity_performance_validation(
-                [activity],
-                performance.get("metrics", {}),
-                performance.get("comparisons", {}),
-            ),
-            "activity_feedback": feedback,
-            "equipment": equipment,
-            "session_analysis": cached.get("session_analysis", {})
-            if cached and not stale
-            else {},
-            "activity_id": normalized_id,
-            "detail_data": _detail_metadata(cached, stale, activity),
-            "data_scope": "bounded sanitized detail projection of exactly one Intervals.icu activity",
-        }
-
-
-def _raw_activity(snapshot: dict, normalized_id: str) -> dict:
-    raw_provider_data = snapshot.get("raw_provider_data")
-    raw_activities = (
-        raw_provider_data.get("activities")
-        if isinstance(raw_provider_data, dict)
-        else None
-    )
-    activity = (
-        next(
-            (
-                item
-                for item in raw_activities
-                if isinstance(item, dict)
-                and str(_first_present(item, ("id", "activityId", "external_id")) or "")
-                == normalized_id
-            ),
-            None,
-        )
-        if isinstance(raw_activities, list)
-        else None
-    )
-    if activity is None:
-        raise AppError(
-            404,
-            "Die vollständigen Rohdaten dieser Aktivität sind im lokalen Intervals.icu-Snapshot nicht vorhanden.",
-            reason="activity_details_not_found",
-        )
-
-    return activity
-
-
-def _detail_metadata(
-    cached: dict | None, stale: bool, activity: dict
-) -> dict[str, Any]:
-    return {
-        "source": "Intervals.icu",
-        "observed_at": cached.get("observed_at") if cached else None,
-        "full_resolution": bool(cached and cached.get("full_resolution")),
-        "stale": stale,
-        "content_sha256": cached.get("content_sha256") if cached else None,
-        "coverage": cached.get("coverage", {}) if cached else {},
-        "available_streams": cached.get("available_streams", []) if cached else [],
-        "display_sampled": bool(
-            cached
-            and any(
-                len(series) > detail_projection.COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS
-                for series in activity.get("streams", {}).values()
-            )
-        ),
-    }
-
-
-def _activity_equipment(equipment: dict, activity_id: str) -> list[dict]:
-    assignment = next(
-        (
-            row
-            for row in equipment.get("assignments", [])
-            if row["activity_id"] == activity_id
-        ),
-        None,
-    )
-    equipment_ids = {assignment["equipment_id"]} if assignment else set()
-    return [
-        row
-        for row in equipment.get("items", [])
-        if row["id"] in equipment_ids or row.get("parent_id") in equipment_ids
-    ]

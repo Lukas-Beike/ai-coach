@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.activities.duplicate_service import DuplicateActivityService
-from backend.coach.proposals import (
+from backend.coach.proposal_creation import CoachProposalCreationService
+from backend.coach.proposal_execution import CoachProposalExecutionService
+from backend.coach.proposal_read import (
     CoachProposalConfirmationService,
-    CoachProposalCreationService,
-    CoachProposalExecutionService,
     CoachProposalReadService,
 )
 from backend.db.manager import DatabaseManager
@@ -24,7 +24,8 @@ from backend.sync.state import SyncStateRepository
 class ProposalPersistence:
     database_manager: Callable[[], DatabaseManager]
     sync_state_repository: Callable[[], SyncStateRepository]
-    nutrition_service: Callable[[], Any]
+    nutrition_diary_service: Callable[[], Any]
+    nutrition_meal_library_service: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,10 @@ class CoachProposalAssembly:
         clock = dependencies.clock
         self._database_manager = persistence.database_manager
         self._sync_state_repository = persistence.sync_state_repository
-        self._nutrition_service = persistence.nutrition_service
+        self._nutrition_diary_service = persistence.nutrition_diary_service
+        self._nutrition_meal_library_service = (
+            persistence.nutrition_meal_library_service
+        )
         self._duplicate_activity_service = execution.duplicate_activity_service
         self._history_undo_service = execution.history_undo_service
         self._intervals_client_factory = execution.intervals_client_factory
@@ -82,7 +86,8 @@ class CoachProposalAssembly:
             now=self._now,
             utc_now=self._utc_now,
             uuid_factory=self._uuid_factory,
-            nutrition_service=self._nutrition_service,
+            nutrition_diary_service=self._nutrition_diary_service,
+            nutrition_meal_library_service=self._nutrition_meal_library_service,
         )
 
     def confirmation_service(self) -> CoachProposalConfirmationService:

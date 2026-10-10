@@ -1,0 +1,186 @@
+name: Native Codex review watchdog
+
+on:
+  pull_request_target:
+    branches: [develop, main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Recheck native review availability for an open PR
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+permissions: {}
+
+concurrency:
+  group: >-
+    codex-watchdog-${{
+    (github.event_name == 'issue_comment' &&
+      (github.event.comment.user.login == 'chatgpt-codex-connector[bot]' ||
+       github.event.comment.user.login == 'chatgpt-codex-connector') &&
+      github.event.issue.number) ||
+    (github.event_name == 'pull_request_review' &&
+      (github.event.review.user.login == 'chatgpt-codex-connector[bot]' ||
+       github.event.review.user.login == 'chatgpt-codex-connector') &&
+      github.event.pull_request.number) ||
+    (github.event_name == 'workflow_dispatch' && inputs.pull_request_number) ||
+    (github.event_name == 'pull_request_target' && github.event.pull_request.number) ||
+    github.run_id
+    }}
+  cancel-in-progress: true
+
+jobs:
+  availability:
+    name: Native Codex watchdog
+    if: >-
+      (github.event_name != 'issue_comment' ||
+      github.event.comment.user.login == 'chatgpt-codex-connector[bot]' ||
+      github.event.comment.user.login == 'chatgpt-codex-connector') &&
+      (github.event_name != 'pull_request_review' ||
+      github.event.review.user.login == 'chatgpt-codex-connector[bot]' ||
+      github.event.review.user.login == 'chatgpt-codex-connector')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      issues: write
+      pull-requests: write
+      checks: write
+    steps:
+      - name: Observe native review and request one fallback
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pull_request_number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha || '' }}
+          EVENT_TIME: ${{ github.event.pull_request.updated_at || '' }}
+        with:
+          script: |
+            const number = Number(process.env.PR_NUMBER);
+            if (!Number.isSafeInteger(number) || number < 1) throw new Error('Invalid PR number');
+            const repo = context.repo;
+            const getPull = async () => (await github.rest.pulls.get({
+              ...repo, pull_number: number,
+            })).data;
+            const initial = await getPull();
+            if (initial.state !== 'open' || initial.draft ||
+                !['develop', 'main'].includes(initial.base.ref)) return;
+            const head = initial.head.sha;
+            const baseRef = initial.base.ref;
+            if (process.env.EVENT_HEAD && process.env.EVENT_HEAD !== head) return;
+            const check = (await github.rest.checks.create({
+              ...repo, name: 'Codex review availability', head_sha: head,
+              status: 'in_progress', output: {
+                title: 'Waiting for native Codex activity',
+                summary: 'Wait up to 180 seconds, then request one fallback for this PR commit.',
+              },
+            })).data;
+            const finish = async (conclusion, title, summary) => {
+              const current = await getPull();
+              if (current.state !== 'open' || current.draft ||
+                  current.head.sha !== head || current.base.ref !== baseRef) {
+                conclusion = 'cancelled';
+                title = 'PR revision changed';
+                summary = 'Evaluate the current head and base in a new run.';
+              }
+              await github.rest.checks.update({
+                ...repo, check_run_id: check.id, status: 'completed', conclusion,
+                completed_at: new Date().toISOString(), output: { title, summary },
+              });
+            };
+            try {
+              if (initial.user.login === 'dependabot[bot]' &&
+                  initial.base.ref === 'develop' &&
+                  initial.head.repo?.full_name === `${repo.owner}/${repo.repo}`) {
+                await finish('success', 'Dependabot review exception',
+                  'Dependency updates, including major updates, rely on all required CI checks and resolved review threads.');
+                return;
+              }
+              const bots = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
+              const since = Date.parse(process.env.EVENT_TIME || initial.updated_at);
+              if (!Number.isFinite(since)) throw new Error('Invalid PR event timestamp');
+              const marker = `<!-- codex-watchdog:${number}:${head} -->`;
+              const activityTime = (item) => Date.parse(item.updated_at || item.created_at || item.submitted_at);
+              const recent = (item) => activityTime(item) >= since;
+              const comments = async () => github.paginate(github.rest.issues.listComments, {
+                ...repo, issue_number: number, per_page: 100,
+              });
+              const observe = async (fallbackAt) => {
+                const current = await getPull();
+                if (current.state !== 'open' || current.draft ||
+                    current.head.sha !== head || current.base.ref !== baseRef) return 'stale';
+                const [allComments, reviews, inline] = await Promise.all([
+                  comments(),
+                  github.paginate(github.rest.pulls.listReviews, {
+                    ...repo, pull_number: number, per_page: 100,
+                  }),
+                  github.paginate(github.rest.pulls.listReviewComments, {
+                    ...repo, pull_number: number, per_page: 100,
+                  }),
+                ]);
+                const native = allComments.filter(item => bots.has(item.user?.login) &&
+                  (recent(item) || (fallbackAt && Date.parse(item.created_at) >= fallbackAt)));
+                const nativeReviews = [...reviews, ...inline].filter(item => bots.has(item.user?.login) &&
+                  (recent(item) || (fallbackAt && activityTime(item) >= fallbackAt)));
+                const reviewEvidence = reviews.some(item => bots.has(item.user?.login) &&
+                  item.commit_id === head && item.submitted_at) ||
+                  inline.some(item => bots.has(item.user?.login) && item.commit_id === head && recent(item));
+                const limit = /(?:usage limits? for code reviews?|(?:reached|exhausted|exceeded|hit)\s+(?:your\s+)?(?:Codex\s+)?usage limits?|(?:Codex\s+)?(?:usage|review)\s+(?:limits?|quota)\s+(?:has been\s+)?(?:reached|exhausted|exceeded))/i;
+                if ([...native, ...nativeReviews].some(item => limit.test(item.body || '') &&
+                    (!fallbackAt || activityTime(item) >= fallbackAt))) return 'limit';
+                if (reviewEvidence) return 'active';
+                const blocked = /(?:blocked:|could not safely inspect|secret scanner|unable to (?:read|review|inspect)|review unavailable)/i;
+                if ([...native, ...nativeReviews].some(item => blocked.test(item.body || '') &&
+                    (!fallbackAt || activityTime(item) >= fallbackAt))) return 'blocked';
+                if (!fallbackAt && native.length > 0) return 'active';
+                if (native.some(item => /(?:^Codex Review:|<!-- codex-pull-request-review-summary -->)/m.test(item.body || ''))) return 'active';
+                return 'silent';
+              };
+              const waitForActivity = async (fallbackAt) => {
+                const deadline = Date.now() + 180000;
+                while (true) {
+                  const state = await observe(fallbackAt);
+                  if (state !== 'silent' || Date.now() >= deadline) return state;
+                  await new Promise(resolve => setTimeout(resolve, Math.min(10000, deadline - Date.now())));
+                }
+              };
+              const existing = (await comments()).find(item =>
+                item.user?.login === 'github-actions[bot]' && (item.body || '').includes(marker));
+              let fallbackAt = existing ? Date.parse(existing.created_at) : null;
+              let state = await waitForActivity(fallbackAt);
+              if (state === 'silent' && !existing) {
+                const current = await getPull();
+                if (current.head.sha !== head || current.base.ref !== baseRef ||
+                    current.state !== 'open' || current.draft) state = 'stale';
+                else {
+                  const response = await github.rest.issues.createComment({
+                    ...repo, issue_number: number,
+                    body: `@codex review\n\n${marker}\nNo native Codex comment appeared within 180 seconds. This is the single fallback request for commit ${head}.`,
+                  });
+                  fallbackAt = Date.parse(response.data.created_at);
+                  state = await waitForActivity(fallbackAt);
+                }
+              }
+              if (state === 'active') {
+                await finish('success', 'Native Codex activity observed',
+                  'Codex responded. This check verifies availability only, not review completion. Inspect the reviewed commit and resolve all findings before merging.');
+              } else if (state === 'limit') {
+                await finish('success', 'Codex review unavailable: explicit usage limit',
+                  'Codex explicitly reported exhausted review usage. Review is exempted, not completed. All other required checks and existing review findings still apply.');
+              } else if (state === 'blocked') {
+                await finish('failure', 'Codex review blocked',
+                  'Codex reported that it could not inspect the repository. This is not a usage-limit exemption; fix the integration or repository guidance and rerun the current head.');
+              } else if (state === 'stale') {
+                await finish('cancelled', 'PR revision changed', 'Recheck the current revision.');
+              } else {
+                await finish('failure', 'Codex remains silent after fallback',
+                  'No native Codex activity or explicit usage-limit response was observed. Silence is not a usage-limit exemption. Verify integration permissions/settings; rerun without posting another fallback for this commit.');
+              }
+            } catch (error) {
+              await finish('failure', 'Codex availability could not be verified',
+                'GitHub API or integration failure. Inspect the failed workflow; no review exemption was granted.');
+              throw error;
+            }

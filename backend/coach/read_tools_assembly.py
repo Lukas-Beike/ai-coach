@@ -17,7 +17,7 @@ class CoachActivityReadSources:
     garmin_payload_service: Callable[[], Any]
     profile_service: Callable[[], Any]
     today: Callable[[], date]
-    report_service: Callable[[], Any] | None = None
+    report_services: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -32,7 +32,8 @@ class CoachPlanningReadSources:
 
 @dataclass(frozen=True)
 class CoachReadToolPolicy:
-    nutrition_service: Callable[[], Any]
+    nutrition_diary: Callable[[], Any]
+    nutrition_meal_library: Callable[[], Any]
     training_change_limit: Callable[[], int]
     context_service: Callable[[], Any] | None = None
 
@@ -58,7 +59,7 @@ class CoachReadToolsAssembly:
         self._garmin_payload_service = activity.garmin_payload_service
         self._profile_service = activity.profile_service
         self._today = activity.today
-        self._report_service = activity.report_service
+        self._report_services = activity.report_services
         self._structured_training_state_service = (
             planning.structured_training_state_service
         )
@@ -67,7 +68,8 @@ class CoachReadToolsAssembly:
         self._change_history_service = planning.change_history_service
         self._competition_service = planning.competition_service
         self._training_plan_service = planning.training_plan_service
-        self._nutrition_service = policy.nutrition_service
+        self._nutrition_diary = policy.nutrition_diary
+        self._nutrition_meal_library = policy.nutrition_meal_library
         self._training_change_limit = policy.training_change_limit
         self._context_service = policy.context_service
 
@@ -77,7 +79,7 @@ class CoachReadToolsAssembly:
             self._garmin_payload_service(),
             self._profile_service(),
             self._today,
-            self._report_service() if self._report_service else None,
+            self._report_services() if self._report_services else None,
         )
 
     def read_service(self) -> CoachReadToolService:
@@ -91,6 +93,7 @@ class CoachReadToolsAssembly:
             self._competition_service,
             self._training_plan_service,
             self._training_change_limit(),
-            self._nutrition_service,
+            self._nutrition_diary,
+            self._nutrition_meal_library,
             self._context_service,
         )

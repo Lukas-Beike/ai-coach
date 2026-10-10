@@ -65,10 +65,12 @@ private VPN; it must not be exposed directly to the public internet.
 - `backend/`: owns application logic. New business logic and use-case
   orchestration must live in the appropriate domain module here, never in
   `server.py`. Use `coach/` for Coach workflows, `planning/` for training-plan
-  changes, `sync/` for synchronization and scheduling, `providers/` for external
-  service adapters, `db/` for persistence, `http_api/` for HTTP handling,
+  changes and season preparation, `sync/` for synchronization and scheduling,
+  `providers/` for external service adapters, `db/` for persistence, `http_api/`
+  for HTTP handling and route assembly (including `athlete_assembly.py`),
   `backup/` for backup/export workflows, `athlete/` for profile/check-ins and
-  athlete-local time, `activities/` for activity feedback and reads,
+  athlete-local time, `activities/` for activity feedback, reads, workout
+  profiles and workout text,
   `calendar/` for public/external calendar data, `diagnostics/` for safe
   diagnostics, `history/` for change history and undo, `nutrition/` for
   nutrition workflows, `performance/` for derived/readiness context,
@@ -131,13 +133,12 @@ status. Treat all of it as durable athlete data.
 - When a prompt explicitly requests current data, refresh through the existing
   sync path before coaching where supported. Do not add unconditional provider
   refreshes to every chat request.
-- The selector contains the GPT-6 option `gpt-6-luna`. A configured
-  `OPENAI_MODEL` is also surfaced by the current implementation; do not
-  silently change or hardcode a different model policy.
-- Gemini is a separately configured AI provider with its own model options
-  and response adapter. Preserve explicit provider selection, provider-specific
-  errors, freshness/provenance, and conversation continuity. Diagnose OpenAI
-  independently; a successful Gemini response does not verify the OpenAI path.
+- Model options and defaults come from the provider implementation and
+  configuration. Preserve explicit model selection; verify the code before
+  documenting or changing model policy.
+- Coach uses only the OpenAI Responses API contract. `OPENAI_BASE_URL` may point
+  to an OpenAI Responses-compatible endpoint; Chat Completions and provider
+  fallback paths are unsupported.
 - `APP_VERSION` in `server.py` must match the GitHub release tag. If a release
   needs a version update, the daily release workflow opens a PR; it must not
   push directly to protected `main`. The container publishing workflow must
@@ -182,88 +183,26 @@ CI and the container image use Python 3.14. Keep code compatible with that
 toolchain unless intentionally changing the toolchain and CI together.
 
 Browser tests use Playwright through `npm run test:e2e`, with projects for
-mobile-small, mobile, tablet, tablet-landscape, and desktop. There is no
-frontend unit-test runner. For browser-facing changes, run the affected
+mobile-small, mobile, tablet, tablet-landscape, and desktop. Focused JavaScript
+regression tests use Node's built-in runner (`node --test tests/*.cjs`).
+For browser-facing changes, run the affected
 Playwright project and manually verify login, fresh PWA installation/offline
 assets, safe Markdown rendering, Enter-to-send versus Shift+Enter, microphone
 permissions, notifications, and the affected UI flow when a browser is
 available.
 
-### Local Docker workflow (Windows)
+### Local runtime (Windows)
 
-- Use the local Docker image as the canonical runtime for UI development and
-  integration debugging. The pinned `sqlcipher3-binary` dependency does not
-  provide the required Windows wheel, and the application must refuse to start
-  without SQLCipher; do not remove the dependency or bypass the secure-startup
-  check to make native Windows execution work.
-- Create the local environment from the template and keep the real file
-  uncommitted:
+Use Docker for application and UI integration: the pinned SQLCipher dependency
+has no Windows wheel. Never bypass encrypted startup. Follow the setup and
+Garmin-login recipes in `README.md`; keep operational commands there as the
+single maintained runbook. Prefer the disposable fixture described by
+`.agents/skills/ai-coach-pwa-e2e/references/browser-validation.md` for browser
+checks. Native unit tests use temporary data and mocked providers.
 
-  ```powershell
-   if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
-  New-Item -ItemType Directory -Force .\data
-  ```
-
-  Set the required API values and a development `APP_PASSWORD` of at least 12
-  characters in `.env`. For the Docker runtime use
-  `GARMINTOKENS=/data/garmin_tokens`. Garmin email and password may remain
-  unset after a token store has been created. Never print or commit `.env`,
-  Garmin credentials, tokens, or database contents.
-- Build the image from the repository root after backend, frontend, dependency,
-  Dockerfile, or startup changes:
-
-  ```powershell
-  docker build -t ai-coach:local .
-  ```
-
-- Complete the one-time Garmin login interactively so the credentials and MFA
-  code are entered locally, not through chat or source files. The bind mount
-  makes the token store persistent:
-
-  ```powershell
-  docker run --rm -it `
-    --env-file .env `
-    -v "${PWD}\data:/data" `
-    ai-coach:local `
-    python /app/garmin-login.py
-  ```
-
-- Start or recreate the local container with the same bind mount. Rebuild the
-  image first when code changes; stop and remove only the container before
-  recreating it. Never use `docker rm -v`, and never remove or replace the
-  `data` directory, encrypted database, Garmin token store, or recovery
-  backups:
-
-  ```powershell
-  docker stop ai-coach
-  docker rm ai-coach
-  docker run -d --name ai-coach `
-    --restart unless-stopped `
-    --read-only `
-    --security-opt no-new-privileges:true `
-    -p 8090:8090 `
-    -v "${PWD}\data:/data" `
-    --env-file .env `
-    ai-coach:local
-  ```
-
-- Open `http://localhost:8090` for browser verification. Use
-  `docker logs -f ai-coach` and `Invoke-WebRequest http://localhost:8090/api/health`
-  for local diagnostics. Do not expose port 8090 publicly.
-- For UI work that does not need live Garmin data, prefer the fixture path so
-  no Garmin login is required. Mount the fixture into the container and set
-  `GARMIN_FIXTURE_PATH=/app/garmin-fixture.example.json`; the fixture remains
-  untrusted test data and must not contain credentials.
-- Keep the native Python unit tests and syntax checks separate from the browser
-  loop. Run them from the repository root with temporary data and mocked
-  providers; use the Docker build and local browser for the SQLCipher-backed
-  application and provider/UI integration:
-
-  ```powershell
-  python -m unittest discover -s tests -v
-  python -m compileall -q server.py backend tests
-  docker build -t ai-coach:local .
-  ```
+Rebuild the image after application, dependency or startup changes. Preserve
+the existing data mount, token store and recovery backups when recreating a
+container; never use `docker rm -v`. Keep the app on a trusted LAN/VPN.
 
 ## Git conventions
 
@@ -335,4 +274,11 @@ If the command reports that the file contains a secret, **do not read the file**
 1. Inform the user that the file appears to contain a secret or credential and that reading it would expose the value in chat history, logs, and any downstream telemetry.
 2. Advise them to rotate the leaked credential at its source of truth and remove it from the file.
 3. Do not proceed with the original request until the secret has been removed.
+
+GitHub-hosted native Codex reviews are an explicit execution environment
+without the local `sonar` executable. They may use the platform's protected
+repository inspection and secret-scanning controls; do not classify the
+absence of the local executable as an athlete credential or usage-limit
+finding. If the hosted review reports a concrete secret, keep the stop and
+rotation rules above.
 <!-- sonar:end:codex-secrets-on-read -->

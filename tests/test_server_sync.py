@@ -7,7 +7,7 @@ import threading
 import unittest
 import uuid
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from datetime import datetime as _local_datetime
 from io import BytesIO
 from pathlib import Path
@@ -40,6 +40,7 @@ from backend.planning import adaptive as planning_adaptive
 from backend.planning import competitions as planning_competitions
 from backend.planning import context as planning_context
 from backend.planning import library as planning_library
+from backend.planning import workouts as planning_workouts
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import executor as sync_executor
@@ -685,7 +686,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn("activities", json.dumps(status["message"]))
 
     def test_daily_sync_markers_are_separate_per_provider(self):
-        local_day = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+        local_day = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
         markers = server.SYNC_PERSISTENCE.daily_markers()
         markers.mark("intervals", local_day)
         self.assertFalse(markers.is_due("intervals", local_day))
@@ -707,7 +708,7 @@ class ServerSyncTests(ServerTestCase):
         )
 
         values = {}
-        current = datetime(2026, 3, 30, 0, 30, tzinfo=timezone.utc)
+        current = datetime(2026, 3, 30, 0, 30, tzinfo=UTC)
 
         self.assertTrue(daily_sync_is_due("intervals", current, get_value=values.get))
         mark_daily_sync("intervals", current, set_value=values.__setitem__)
@@ -1057,9 +1058,10 @@ class ServerSyncTests(ServerTestCase):
             ),
             patch.object(client, "post", return_value={"id": "remote-1"}) as post,
         ):
-            client.create_library_workouts(
-                [{"name": "Easy", "description": "- 30m Z2", "sport": "Ride"}]
+            payload = planning_workouts.library_workout_payload(
+                {"name": "Easy", "description": "- 30m Z2", "sport": "Ride"}
             )
+            client.create_library_workouts([payload])
         post.assert_called_once_with(
             "/athlete/athlete-1/workouts",
             {
@@ -1420,9 +1422,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn("Ride 5", context)
         self.assertNotIn("LATEST INTERVALS.ICU SNAPSHOT", context)
         self.assertEqual(context.count('"local_planned_workouts"'), 1)
-        preview = server.COACH_CONTEXT.preview_service().preview(
-            server.SETTINGS.selected_ai_provider()
-        )
+        preview = server.COACH_CONTEXT.preview_service().preview()
         self.assertTrue(preview["snapshot_compacted"])
         self.assertFalse(preview["snapshot_truncated"])
         self.assertTrue(preview["projection"]["within_total_budget"])

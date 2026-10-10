@@ -32,7 +32,7 @@ class SyncStateRepository:
             stored = self._key_value_repository.get(db, f"{source}_sync_days")
         try:
             value = int(stored or default)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             value = default
         if value == all_days:
             return all_days

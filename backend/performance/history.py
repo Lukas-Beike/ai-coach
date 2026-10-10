@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.performance import freshness as performance_freshness
 from backend.performance import garmin_metric_history
 from backend.performance import garmin_metrics as performance_garmin_metrics
@@ -34,7 +35,7 @@ def append_garmin_performance_history(
             or not data.get("observed_at")
         ):
             continue
-        observed = str(data["observed_at"])[:10]
+        observed = iso_date_prefix(str(data["observed_at"]))
         entry = unique.setdefault(observed, {"date": observed, "metrics": {}})
         entry["metrics"][key] = data["value"]
     # Historical FTP rows are the only source allowed to add past FTP values;

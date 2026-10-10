@@ -3,6 +3,7 @@
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import LocalDate
 from backend.errors import AppError
 from backend.planning.artifacts import (
     structured_artifact_payload,
@@ -48,10 +49,17 @@ def validate_replacement_workouts(
     workouts: list[dict[str, Any]], today: str, period: dict[str, str]
 ) -> None:
     """Reject past, out-of-period, or overlapping-time workouts in a replacement."""
-    from backend.planning import calendar as planning_calendar
+    from backend.planning.conflicts import calendar_items_conflict
 
     for i, workout in enumerate(workouts):
-        workout_date = str(workout.get("date") or "")[:10]
+        try:
+            workout_date = LocalDate.parse(workout.get("date")).isoformat()
+        except (TypeError, ValueError) as exc:
+            raise AppError(
+                400,
+                "Ein vollständiger Planersatz darf keine ungültigen Einheiten enthalten.",
+                reason="invalid_plan",
+            ) from exc
         if workout_date < today or not period["start"] <= workout_date <= period["end"]:
             raise AppError(
                 400,
@@ -59,7 +67,7 @@ def validate_replacement_workouts(
                 reason="invalid_plan",
             )
         for other in workouts[i + 1 :]:
-            matches, match = planning_calendar._calendar_items_conflict(workout, other)
+            matches, match = calendar_items_conflict(workout, other)
             if matches and match == "time_window":
                 raise AppError(
                     409,

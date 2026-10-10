@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=278">
+  <link rel="stylesheet" href="/styles.css?v=281">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -39,10 +39,10 @@
     </header>
 
     <main>
-      <section id="statusCard" class="status-card" aria-live="polite">
-        <div><span class="pulse"></span><strong id="statusTitle">Verbindung wird hergestellt…</strong></div>
+      <output id="statusCard" class="status-card" aria-live="polite">
+        <span class="status-card-row"><span class="pulse"></span><strong id="statusTitle">Verbindung wird hergestellt…</strong></span>
         <span id="statusDetail">Trainingsbereich wird geprüft</span>
-      </section>
+      </output>
       <section id="connectivityNotice" class="connectivity-notice" aria-live="polite" hidden></section>
       <section id="providerAttentionBanner" class="provider-attention-banner" role="alert" aria-live="assertive" hidden>
         <div><strong>Anbindung benötigt Aufmerksamkeit</strong><span id="providerAttentionDetail"></span></div>
@@ -54,8 +54,8 @@
           <div><strong>Deine Planung braucht eine Anpassung</strong><small>Bitte den Coach, die nächsten Einheiten zu prüfen.</small></div>
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Coach fragen</button>
         </div>
-        <div id="chatOperationStatus" class="sr-only" aria-live="polite" hidden></div>
-        <div id="messages" class="messages" aria-live="polite" aria-atomic="false"></div>
+        <output id="chatOperationStatus" class="sr-only" aria-live="polite" aria-atomic="true" hidden></output>
+        <div id="messages" class="messages"></div>
         <section id="coachActionReview" class="coach-action-review" aria-labelledby="coachActionReviewTitle" hidden>
           <div class="coach-action-review-heading">
             <div><span class="eyebrow">VORSCHLAG PRÜFEN</span><h2 id="coachActionReviewTitle">Lokale Planung</h2></div>
@@ -283,11 +283,10 @@
         </section>
         <details class="settings-section collapsible-section" data-more-segment-panel="connections">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
-          <section id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></section>
+          <output id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></output>
           <div class="connection-cards">
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Gemini</strong><span id="geminiConnectionStatus">Status wird geprüft…</span><small id="geminiConnectionDetail"></small></div><button id="chatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine erscheinen im Tab „Plan“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
@@ -296,7 +295,7 @@
             <div class="settings-section-heading"><div><h3 id="providerFreshnessTitle">Datenfrische &amp; Retry-Verlauf</h3><p>Nur technische Zeitpunkte, Phasen und sichere Fehlerklassen; Providerantworten und private URLs werden nicht gespeichert.</p></div></div>
             <div id="providerFreshnessTimeline" class="provider-freshness-list" aria-live="polite">Status wird geladen…</div>
           </section>
-          <p class="fine-print settings-message">Zugangsdaten und die Athlete ID müssen über Container-Umgebungsvariablen gesetzt werden (Unraid: Docker-Template &rarr; Environment variables). Für den Coach ist <code>OPENAI_API_KEY</code> oder <code>GEMINI_API_KEY</code> nötig; außerdem <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code>. Für Garmin zusätzlich <code>GARMIN_EMAIL</code>, <code>GARMIN_PASSWORD</code> und <code>GARMINTOKENS</code> (z. B. <code>/data/garmin_tokens</code>). Nach Änderungen den Container in Unraid neu erstellen.</p>
+          <p class="fine-print settings-message">Zugangsdaten und die Athlete ID müssen über Container-Umgebungsvariablen gesetzt werden (Unraid: Docker-Template &rarr; Environment variables). Für den Coach ist <code>OPENAI_API_KEY</code> nötig; optional kann <code>OPENAI_BASE_URL</code> auf eine Responses-kompatible API zeigen. Außerdem <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code>. Für Garmin zusätzlich <code>GARMIN_EMAIL</code>, <code>GARMIN_PASSWORD</code> und <code>GARMINTOKENS</code> (z. B. <code>/data/garmin_tokens</code>). Nach Änderungen den Container in Unraid neu erstellen.</p>
           <p id="garminDetail" class="fine-print settings-message"></p>
           <p class="fine-print settings-message">Wetterdaten: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a> · Lizenz: CC BY 4.0.</p>
           <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend. Termine werden im Tab „Plan“ angezeigt.</p>
@@ -316,8 +315,6 @@
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Coach-Modell &amp; Thinking</span><span id="modelSettingsSummary" class="collapsible-summary-meta">Auswahl wird geladen…</span></summary>
           <div id="modelSettingsTarget">
             <div class="model-selector">
-              <label for="aiProviderSelect">KI-Anbieter<select id="aiProviderSelect" aria-describedby="aiProviderDescription"></select></label>
-              <p id="aiProviderDescription" class="fine-print">Der ausgewählte Anbieter erhält den Coach-Kontext.</p>
             </div>
             <div class="model-selector">
               <label for="modelSelect">Coach-Modell<select id="modelSelect" aria-describedby="modelDescription"></select></label>
@@ -399,7 +396,7 @@
     </nav>
   </div>
 
-  <div id="toast" class="toast" aria-live="polite"></div>
+  <output id="toast" class="toast" aria-live="polite"></output>
   <div id="authLoading" class="auth-loading" aria-live="polite">Trainingsbereich wird gepr&uuml;ft&hellip;</div>
   <dialog id="loginDialog" aria-labelledby="loginTitle">
     <form id="loginForm" method="dialog">
@@ -444,16 +441,26 @@
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=221" defer></script>
-  <script src="/navigation.js?v=230" defer></script>
-  <script src="/state.js?v=218" defer></script>
-  <script src="/views.js?v=218" defer></script>
+  <script src="/api.js?v=223" defer></script>
+  <script src="/navigation.js?v=231" defer></script>
+  <script src="/state.js?v=219" defer></script>
+  <script src="/views.js?v=220" defer></script>
+  <script src="/plan-views.js?v=1" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=6" defer></script>
-  <script src="/nutrition.js?v=19" defer></script>
-  <script src="/analysis.js?v=93" defer></script>
+  <script src="/coach.js?v=9" defer></script>
+  <script src="/shared.js?v=1" defer></script>
+  <script src="/auth.js?v=1" defer></script>
+  <script src="/sync-status.js?v=1" defer></script>
+  <script src="/notifications.js?v=1" defer></script>
+  <script src="/nutrition.js?v=21" defer></script>
+  <script src="/analysis.js?v=94" defer></script>
   <script src="/activity-details.js?v=9" defer></script>
-  <script src="/app.js?v=271" defer></script>
+  <script src="/performance-view.js?v=1" defer></script>
+  <script src="/diagnostics.js?v=1" defer></script>
+  <script src="/state-loader.js?v=1" defer></script>
+  <script src="/sync-actions.js?v=1" defer></script>
+  <script src="/settings.js?v=1" defer></script>
+  <script src="/app.js?v=276" defer></script>
 </body>
 </html>

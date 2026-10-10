@@ -10,7 +10,6 @@ from typing import Any
 from backend.config import Config
 from backend.observability import DiagnosticCapture
 from backend.providers import audio as audio_provider
-from backend.providers import gemini as gemini_provider
 from backend.providers import openai as openai_provider
 from backend.providers.http import JsonHttpClient
 from backend.providers.state import ProviderStateService
@@ -26,7 +25,6 @@ class ModelProviderOwners:
 
 @dataclass(frozen=True)
 class ModelEndpointSettings:
-    gemini_base_url: str
     default_openai_base_url: str
     openai_responses_path: str
     json_media_type: str
@@ -88,7 +86,6 @@ class ModelTransportAssembly:
         self._diagnostic_capture = diagnostics.diagnostic_capture
         self._logger = diagnostics.logger
         self._app_version = diagnostics.app_version
-        self._gemini_base_url = endpoints.gemini_base_url
         self._default_openai_base_url = endpoints.default_openai_base_url
         self._openai_responses_path = endpoints.openai_responses_path
         self._json_media_type = endpoints.json_media_type
@@ -104,44 +101,16 @@ class ModelTransportAssembly:
         self._wait = clock.wait
         self._utc_now = clock.utc_now
 
-    def gemini_json_client(self) -> gemini_provider.GeminiJsonClient:
-        config = self._config()
-        return gemini_provider.GeminiJsonClient(
-            api_key=config.gemini_api_key,
-            base_url=self._gemini_base_url,
-            response_timeout_seconds=self._response_timeout_seconds,
-            http_client=self._provider_http_client(),
-            provider_state=self._provider_state_service(),
-        )
-
     def audio_transcription_client(self) -> audio_provider.AudioTranscriptionClient:
         config = self._config()
         return audio_provider.AudioTranscriptionClient(
             max_audio_bytes=self._max_audio_bytes,
             openai_api_key=config.openai_api_key,
-            gemini_api_key=config.gemini_api_key,
             openai_base_url=config.openai_base_url,
             default_openai_base_url=self._default_openai_base_url,
             openai_transcription_model=self._transcription_model,
             response_timeout_seconds=self._audio_timeout_seconds,
             http_client=self._provider_http_client(),
-            gemini_client=self.gemini_json_client(),
-        )
-
-    def gemini_stream_client(self) -> gemini_provider.GeminiStreamClient:
-        config = self._config()
-        return gemini_provider.GeminiStreamClient(
-            api_key=config.gemini_api_key,
-            base_url=self._gemini_base_url,
-            response_timeout_seconds=self._response_timeout_seconds,
-            max_bytes=self._max_response_bytes(),
-            app_version=self._app_version,
-            json_media_type=self._json_media_type,
-            provider_state=self._provider_state_service(),
-            logger=self._logger,
-            opener=gemini_provider.urlopen,
-            monotonic=self._monotonic,
-            now=self._utc_now,
         )
 
     def openai_responses_client(self) -> openai_provider.OpenAIResponsesClient:

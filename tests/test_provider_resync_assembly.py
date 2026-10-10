@@ -21,34 +21,36 @@ class ProviderResyncAssemblyTests(unittest.TestCase):
         def current_client_factory():
             return transport["client_factory"]()
 
-        assembly = ProviderResyncAssembly(dependencies=ProviderResyncAssembly.Inputs(
-            competition=CompetitionSyncOwners(
-                config=Mock(return_value=Mock()),
-                intervals_client=current_client_factory,
-                competition_service=Mock(),
-            ),
-            resync=ResyncProviderOwners(
-                config=Mock(return_value=Mock()),
-                intervals_sync_service=Mock(),
-                garmin_sync_service=Mock(),
-                intervals_resync_gate=Mock(),
-                garmin_resync_gate=Mock(),
-                all_sync_days=90,
-            ),
-            persistence=ProviderResyncPersistence(
-                database_manager=Mock(),
-                key_values=Mock(),
-                event_buffer=Mock(),
-                redactor=Mock(),
-            ),
-            runtime=ProviderResyncRuntime(
-                logger=logging.getLogger("test.provider.resync.assembly"),
-                utc_now=Mock(),
-                uuid_factory=Mock(),
-                monotonic=Mock(),
-                operation_observer=Mock(),
-            ),
-        ))
+        assembly = ProviderResyncAssembly(
+            dependencies=ProviderResyncAssembly.Inputs(
+                competition=CompetitionSyncOwners(
+                    config=Mock(return_value=Mock()),
+                    intervals_client=current_client_factory,
+                    competition_service=Mock(),
+                ),
+                resync=ResyncProviderOwners(
+                    config=Mock(return_value=Mock()),
+                    intervals_sync_service=Mock(),
+                    garmin_sync_service=Mock(),
+                    intervals_resync_gate=Mock(),
+                    garmin_resync_gate=Mock(),
+                    all_sync_days=90,
+                ),
+                persistence=ProviderResyncPersistence(
+                    database_manager=Mock(),
+                    key_values=Mock(),
+                    event_buffer=Mock(),
+                    redactor=Mock(),
+                ),
+                runtime=ProviderResyncRuntime(
+                    logger=logging.getLogger("test.provider.resync.assembly"),
+                    utc_now=Mock(),
+                    uuid_factory=Mock(),
+                    monotonic=Mock(),
+                    operation_observer=Mock(),
+                ),
+            )
+        )
 
         with patch.object(assembly_module, "CompetitionSyncService") as service_type:
             service = assembly.competition_sync_service()

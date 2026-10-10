@@ -29,7 +29,7 @@ from backend.planning.competition_service import CompetitionService
 from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.training_plans import TrainingPlanService
-from backend.providers.openai import OpenAIResponsesClient
+from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.maintenance import MaintenanceGate
 from backend.weather import cache as weather_cache
 
@@ -66,7 +66,7 @@ class PrivacyDataExportService:
             value = dependencies.key_value_repository.get(db, key)
         try:
             return json.loads(value or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return {}
 
     def export(self) -> dict[str, Any]:
@@ -122,7 +122,7 @@ class PrivacyDataExportService:
             value = row["value"]
             try:
                 application_state[key] = json.loads(value)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 application_state[key] = value
 
         garmin_data = self._stored_json("garmin_snapshot")

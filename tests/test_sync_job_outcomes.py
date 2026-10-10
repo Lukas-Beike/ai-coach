@@ -84,6 +84,7 @@ class SyncJobOutcomeServiceTests(unittest.TestCase):
 
     def test_complete_maps_fallback_statuses_and_publishes_snapshots(self):
         completed = self.enqueue()
+        self.claim(completed)
         self.assertEqual(
             self.service.complete(completed["id"], {"status": "ok"}), "completed"
         )
@@ -91,6 +92,7 @@ class SyncJobOutcomeServiceTests(unittest.TestCase):
         self.assertEqual(self.events()[-1]["data"]["status"], "completed")
 
         partial = self.enqueue()
+        self.claim(partial)
         self.assertEqual(
             self.service.complete(partial["id"], {"status": "partial"}), "partial"
         )
@@ -99,6 +101,7 @@ class SyncJobOutcomeServiceTests(unittest.TestCase):
         for result_status in ("error", "failed"):
             with self.subTest(result_status=result_status):
                 failed = self.enqueue()
+                self.claim(failed)
                 self.assertEqual(
                     self.service.complete(failed["id"], {"status": result_status}),
                     "failed",
@@ -112,6 +115,7 @@ class SyncJobOutcomeServiceTests(unittest.TestCase):
                 {"item_key": "workout-b", "operation": "push"},
             ]
         )
+        self.claim(job)
         fallback_status = self.service.complete(
             job["id"],
             {

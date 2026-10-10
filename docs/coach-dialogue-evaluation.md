@@ -74,7 +74,7 @@ Record provider, model, thinking level and the actual tool sequence when measuri
 model behavior. Compare paraphrases using the same synthetic initial state.
 
 The catalogue has been reviewed against the tool and persistence contracts.
-No live OpenAI/Gemini accuracy score is claimed: repository tests must mock external
+No live OpenAI accuracy score is claimed: repository tests must mock external
 services and must not use the real installation or provider accounts. Captured
 synthetic model outputs can be reviewed separately against this rubric without
 reading athlete data or exposing credentials.

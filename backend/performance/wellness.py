@@ -6,6 +6,8 @@ import math
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
     if not isinstance(item, dict):
@@ -20,7 +22,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -40,7 +42,7 @@ def wellness_average(
     for row in rows:
         try:
             row_date = date.fromisoformat(
-                str(row.get("id") or row.get("date") or "")[:10]
+                iso_date_prefix(str(row.get("id") or row.get("date") or ""))
             )
         except ValueError:
             continue
@@ -150,7 +152,7 @@ def wellness_form_average(
     for row in rows:
         try:
             row_date = date.fromisoformat(
-                str(row.get("id") or row.get("date") or "")[:10]
+                iso_date_prefix(str(row.get("id") or row.get("date") or ""))
             )
         except ValueError:
             continue

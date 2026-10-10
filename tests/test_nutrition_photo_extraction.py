@@ -34,11 +34,12 @@ class NutritionPhotoExtractionTests(unittest.TestCase):
             }
         )
 
-    def test_openai_request_uses_selected_model_transient_image_and_json_candidate(self):
+    def test_openai_request_uses_selected_model_transient_image_and_json_candidate(
+        self,
+    ):
         request = Mock(return_value={"output_text": self.candidate_json()})
         service = NutritionPhotoExtractionService(
-            selected_provider=lambda: "openai",
-            selected_model=lambda provider: "gpt-6-luna" if provider == "openai" else "unused",
+            selected_model=lambda: "gpt-6-luna",
             openai_request=request,
         )
 
@@ -57,32 +58,11 @@ class NutritionPhotoExtractionTests(unittest.TestCase):
         self.assertNotIn("image", result)
         self.assertNotIn("image_data_url", result)
 
-    def test_gemini_selection_calls_only_gemini_adapter(self):
-        gemini = Mock(
-            return_value={
-                "candidates": [{"content": {"parts": [{"text": self.candidate_json()}]}}]
-            }
-        )
-        openai = Mock()
+    def test_invalid_provider_response_fails_without_returning_provider_text_or_image(
+        self,
+    ):
         service = NutritionPhotoExtractionService(
-            selected_provider=lambda: "gemini",
-            selected_model=lambda provider: "gemini-test-model",
-            openai_request=openai,
-            gemini_generate=gemini,
-        )
-
-        result = service.extract(self.data_url())
-
-        self.assertEqual(result["candidate"]["name"], "Synthetic whey")
-        self.assertEqual(gemini.call_args.args[0], "gemini-test-model")
-        inline_image = gemini.call_args.args[1]["contents"][0]["parts"][0]["inlineData"]
-        self.assertEqual(base64.b64decode(inline_image["data"]), b"\xff\xd8\xffsynthetic-image")
-        openai.assert_not_called()
-
-    def test_invalid_provider_response_fails_without_returning_provider_text_or_image(self):
-        service = NutritionPhotoExtractionService(
-            selected_provider=lambda: "openai",
-            selected_model=lambda _provider: "gpt-6-luna",
+            selected_model=lambda: "gpt-6-luna",
             openai_request=lambda _path, _payload: {
                 "output_text": "Synthetic secret provider response",
             },
@@ -94,22 +74,23 @@ class NutritionPhotoExtractionTests(unittest.TestCase):
         self.assertEqual(raised.exception.reason, "invalid_provider_response")
         self.assertNotIn("Synthetic secret", str(raised.exception))
 
-    def test_invalid_photo_and_missing_selected_provider_are_rejected_before_network(self):
+    def test_invalid_photo_and_missing_model_are_rejected_before_network(
+        self,
+    ):
         request = Mock()
         service = NutritionPhotoExtractionService(
-            selected_provider=lambda: "openai",
-            selected_model=lambda _provider: "gpt-6-luna",
+            selected_model=lambda: "gpt-6-luna",
             openai_request=request,
         )
-        for data_url in ("https://example.test/photo.jpg", "data:image/svg+xml;base64,AA=="):
+        for data_url in (
+            "https://example.test/photo.jpg",
+            "data:image/svg+xml;base64,AA==",
+        ):
             with self.subTest(data_url=data_url), self.assertRaises(AppError):
                 service.extract(data_url)
         request.assert_not_called()
 
-        unavailable = NutritionPhotoExtractionService(
-            selected_provider=lambda: "gemini",
-            selected_model=lambda _provider: "gemini-test-model",
-        )
+        unavailable = NutritionPhotoExtractionService()
         with self.assertRaises(AppError) as raised:
             unavailable.extract(self.data_url())
         self.assertEqual(raised.exception.reason, "provider_unavailable")

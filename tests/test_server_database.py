@@ -11,7 +11,7 @@ import unittest
 import zipfile
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,7 +36,6 @@ from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.public_state import PublicStateService
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.response_transport import STREAM_CHUNK_BYTES
-from backend.providers import gemini as gemini_provider
 from backend.providers import openai as openai_provider
 from backend.runtime import clock as runtime_clock
 from backend.runtime import maintenance as runtime_maintenance
@@ -225,7 +224,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertIsNot(second_refresh_tracker, first_refresh_tracker)
         self.assertIsNot(second_weather_service, first_weather_service)
         self.assertIsNot(second_morning_service, first_morning_service)
-        self.assertIs(second_http_client.provider_state, second)
+        self.assertIs(second_http_client.provider_error_details.cache_key(), second)
         second.record_status(
             "openai",
             state="ok",
@@ -528,8 +527,6 @@ class ServerDatabaseTests(ServerTestCase):
             return result
 
         settings = Mock()
-        settings.selected_ai_provider.return_value = ""
-        settings.available_ai_providers.return_value = []
         settings.selected_model.return_value = ""
         settings.available_model_options.return_value = []
         settings.selected_thinking_level.return_value = ""
@@ -573,7 +570,6 @@ class ServerDatabaseTests(ServerTestCase):
                 garmin_tokenstore=str(Path("missing-garmin-tokenstore")),
                 intervals_api_key="",
                 openai_api_key="",
-                gemini_api_key="",
                 calendar_ical_url="",
             ),
             settings=settings,
@@ -606,7 +602,7 @@ class ServerDatabaseTests(ServerTestCase):
             all_sync_days=3650,
             calendar_history_days=30,
             calendar_future_days=90,
-            local_now=lambda: datetime(2026, 9, 23, tzinfo=timezone.utc),
+            local_now=lambda: datetime(2026, 9, 23, tzinfo=UTC),
         )
         service = PublicStateService(dependencies)
 
@@ -786,7 +782,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertEqual(exported["weather_cache"], {})
 
     def test_privacy_json_projection_uses_composed_local_clock(self):
-        fixed_local_time = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
+        fixed_local_time = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
         with patch.object(
             server.ATHLETE_CLOCK, "now", return_value=fixed_local_time
         ) as local_clock:
@@ -1388,17 +1384,6 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertEqual(
             server.PLANNING_DATA.workout_library().list(include_archived=True), []
         )
-
-    def test_gemini_function_schemas_keep_openai_nullable_fields_as_json_schema(self):
-        schema = {
-            "type": "object",
-            "properties": {"notes": {"type": ["string", "null"]}},
-        }
-        declaration = gemini_provider.function_tools(
-            [{"type": "function", "name": "save_feedback", "parameters": schema}]
-        )[0]["functionDeclarations"][0]
-        self.assertEqual(declaration["parametersJsonSchema"], schema)
-        self.assertNotIn("parameters", declaration)
 
     def test_training_change_tool_schema_exposes_complete_plan_limit(self):
         tool = next(

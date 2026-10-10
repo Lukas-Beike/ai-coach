@@ -9,6 +9,7 @@ import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -16,6 +17,7 @@ from backend.config import Config
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, INVALID_LIBRARY_ID_ERROR, AppError
+from backend.planning import workouts as planning_workouts
 from backend.sync.library import (
     WorkoutLibraryRefreshService,
     WorkoutLibraryRemoteReconciler,
@@ -601,9 +603,6 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
             openai_api_key="",
             openai_base_url="",
             openai_model="",
-            gemini_api_key="",
-            gemini_model="",
-            ai_provider="",
             intervals_api_key="fake-key",
             intervals_athlete_id="0",
             garmin_email="",
@@ -616,6 +615,7 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
             data_retention_days=-1,
         )
         self.client = Mock()
+        self.client.local_today.return_value = date(2026, 9, 20)
         self.service = self.new_service()
 
     def tearDown(self):
@@ -682,7 +682,7 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         synced = self.service.sync_entry(LIBRARY_ID)
 
         self.client.update_library_workout.assert_called_once_with(
-            "remote-old", self.workout()
+            "remote-old", planning_workouts.library_workout_payload(self.workout())
         )
         self.client.get_workout_library.assert_not_called()
         self.client.create_library_workouts.assert_not_called()
@@ -710,7 +710,9 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         synced = self.service.sync_entry(LIBRARY_ID)
 
         self.client.get_workout_library.assert_called_once_with()
-        self.client.create_library_workouts.assert_called_once_with([self.workout()])
+        self.client.create_library_workouts.assert_called_once_with(
+            [planning_workouts.library_workout_payload(self.workout())]
+        )
         self.assertEqual(synced["external_id"], "remote-created")
         self.assertEqual(self.library_row()["sync_state"], "synced")
 
@@ -792,6 +794,20 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 502)
         self.client.plan_library_workout.assert_not_called()
 
+    def test_sync_calendar_entry_rejects_invalid_date_before_provider(self):
+        self.add_entry()
+        workout = {
+            **self.workout(),
+            "date": "not-a-date",
+            "external_id": "remote-1",
+        }
+
+        with self.assertRaises(AppError) as raised:
+            self.service.sync_calendar_entry(LIBRARY_ID, workout)
+
+        self.assertEqual(raised.exception.status, 400)
+        self.client.plan_library_workout.assert_not_called()
+
     def test_sync_calendar_entry_rechecks_constraints_before_remote_write(self):
         constraints = Mock(
             constraints=Mock(
@@ -820,7 +836,32 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             self.service.sync_calendar_entry(
                 LIBRARY_ID,
-                {"date": "2026-10-01T08:00:00", "external_id": "remote-1"},
+                {
+                    **self.workout(),
+                    "date": "2026-10-01T08:00:00",
+                    "external_id": "remote-1",
+                },
+            )
+
+        self.assertEqual(raised.exception.status, 502)
+        payload = json.loads(self.library_row()["payload"])
+        self.assertNotIn("remote_event_id", payload)
+
+    def test_sync_calendar_entry_rejects_provider_workout_mismatch(self):
+        self.add_entry()
+        self.client.plan_library_workout.return_value = {
+            "id": "remote-event",
+            "type": "Run",
+        }
+
+        with self.assertRaises(AppError) as raised:
+            self.service.sync_calendar_entry(
+                LIBRARY_ID,
+                {
+                    **self.workout(),
+                    "date": "2026-10-01T08:00:00",
+                    "external_id": "remote-1",
+                },
             )
 
         self.assertEqual(raised.exception.status, 502)
@@ -829,7 +870,7 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
 
     def test_sync_calendar_entry_persists_remote_calendar_identity(self):
         self.add_entry()
-        event = {"id": 123, "external_id": "calendar-1"}
+        event = {"id": 123, "external_id": "calendar-1", "type": "WeightTraining"}
         workout = {
             **self.workout(),
             "date": "2026-10-01T08:00:00",
@@ -840,7 +881,9 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         result = self.service.sync_calendar_entry(LIBRARY_ID, workout)
 
         self.client.plan_library_workout.assert_called_once_with(
-            "remote-1", workout, "2026-10-01"
+            planning_workouts.library_workout_event_payload(
+                "remote-1", workout, "2026-10-01", today=date(2026, 9, 20)
+            )
         )
         self.assertEqual(result, event)
         self.assertEqual(
@@ -848,14 +891,16 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         )
 
     def test_plan_remote_is_a_thin_provider_operation(self):
-        event = {"id": "calendar-1"}
+        event = {"id": "calendar-1", "type": "WeightTraining"}
         self.client.plan_library_workout.return_value = event
         workout = self.workout()
 
         result = self.service.plan_remote("remote-1", workout, "2026-10-01")
 
         self.client.plan_library_workout.assert_called_once_with(
-            "remote-1", workout, "2026-10-01"
+            planning_workouts.library_workout_event_payload(
+                "remote-1", workout, "2026-10-01", today=date(2026, 9, 20)
+            )
         )
         self.assertIs(result, event)
 
@@ -1139,9 +1184,6 @@ class WorkoutLibraryRefreshServiceTests(unittest.TestCase):
             openai_api_key="",
             openai_base_url="",
             openai_model="",
-            gemini_api_key="",
-            gemini_model="",
-            ai_provider="",
             intervals_api_key="fake-key",
             intervals_athlete_id="0",
             garmin_email="",

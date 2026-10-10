@@ -16,12 +16,18 @@ from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.plan_selection import StructuredPlanSyncService
 from backend.sync.queue import SyncJobQueueService
 
-COACH_SYNC_TOOL_NAMES = frozenset({
-    "start_intervals_plan_sync", "get_sync_job", "sync_competitions",
-    "sync_nutrition",
-    "resolve_training_sync_conflict", "start_provider_refresh", "refresh_current_performance",
-    "delete_duplicate_intervals_activity",
-})
+COACH_SYNC_TOOL_NAMES = frozenset(
+    {
+        "start_intervals_plan_sync",
+        "get_sync_job",
+        "sync_competitions",
+        "sync_nutrition",
+        "resolve_training_sync_conflict",
+        "start_provider_refresh",
+        "refresh_current_performance",
+        "delete_duplicate_intervals_activity",
+    }
+)
 
 
 class CoachSyncToolService:
@@ -38,7 +44,7 @@ class CoachSyncToolService:
         provider_refresh: ProviderRefreshCommandService,
         duplicate_activity: Any | None = None,
         intervals_client_factory: Callable[[], Any] | None = None,
-        nutrition_service: Any | None = None,
+        nutrition_diary: Any | None = None,
     ) -> None:
         self._queue = queue
         self._authority = authority
@@ -49,7 +55,7 @@ class CoachSyncToolService:
         self._provider_refresh = provider_refresh
         self._duplicate_activity = duplicate_activity
         self._intervals_client_factory = intervals_client_factory
-        self._nutrition_service = nutrition_service
+        self._nutrition_diary = nutrition_diary
 
     def execute(
         self,
@@ -74,7 +80,9 @@ class CoachSyncToolService:
         if name == "resolve_training_sync_conflict":
             return self._resolve_conflict(arguments, intent, sync_job_ids)
         if name == "start_provider_refresh":
-            return self._start_provider_refresh(arguments, intent, sync_job_ids, cancel_event)
+            return self._start_provider_refresh(
+                arguments, intent, sync_job_ids, cancel_event
+            )
         if name == "refresh_current_performance":
             return self._refresh_current_performance(arguments, intent, sync_job_ids)
         if name == "delete_duplicate_intervals_activity":
@@ -88,47 +96,83 @@ class CoachSyncToolService:
             "sync_nutrition" not in authorized_operations(intent)
             or intent.get("target_system") != "intervals"
         ):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+            raise AppError(
+                403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
+            )
         require_coach_scope(intent, "local_nutrition", "intervals_sync")
         manifest = arguments.get("_approval_manifest")
-        if not isinstance(manifest, list) or self._nutrition_service is None:
+        if not isinstance(manifest, list) or self._nutrition_diary is None:
             raise AppError(409, "Die freigegebene Ern\u00e4hrungsvorschau fehlt.")
         dates = [entry.get("date") for entry in manifest if isinstance(entry, dict)]
         if len(dates) != len(manifest):
-            raise AppError(409, "Die freigegebene Ern\u00e4hrungsvorschau ist ung\u00fcltig.")
+            raise AppError(
+                409, "Die freigegebene Ern\u00e4hrungsvorschau ist ung\u00fcltig."
+            )
         date_value = str(arguments.get("date") or "").strip()
         limit = arguments.get("pending_limit")
         if bool(date_value) == (limit is not None):
-            raise AppError(400, "W\u00e4hle ein Datum oder ausstehende Tage.", reason="invalid_job_request")
+            raise AppError(
+                400,
+                "W\u00e4hle ein Datum oder ausstehende Tage.",
+                reason="invalid_job_request",
+            )
         if date_value and dates != [date_value]:
-            raise AppError(409, "Das freigegebene Ern\u00e4hrungsdatum hat sich ge\u00e4ndert.")
+            raise AppError(
+                409, "Das freigegebene Ern\u00e4hrungsdatum hat sich ge\u00e4ndert."
+            )
         if limit is not None and (type(limit) is not int or len(dates) > limit):
-            raise AppError(409, "Der freigegebene Ern\u00e4hrungszeitraum ist ung\u00fcltig.")
-        if self._nutrition_service.approval_manifest(dates=dates) != manifest:
-            raise AppError(409, "Die Ern\u00e4hrungsdaten haben sich seit der Freigabe ge\u00e4ndert.")
+            raise AppError(
+                409, "Der freigegebene Ern\u00e4hrungszeitraum ist ung\u00fcltig."
+            )
+        if self._nutrition_diary.approval_manifest(dates=dates) != manifest:
+            raise AppError(
+                409,
+                "Die Ern\u00e4hrungsdaten haben sich seit der Freigabe ge\u00e4ndert.",
+            )
         job = self._queue.enqueue(
-            "intervals", "nutrition_sync", {"approval_manifest": manifest}, requested_by="coach"
+            "intervals",
+            "nutrition_sync",
+            {"approval_manifest": manifest},
+            requested_by="coach",
         )
         sync_job_ids.append(job["id"])
         return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
+
     def _start_provider_refresh(
-        self, arguments: dict[str, Any], intent: dict[str, Any],
-        sync_job_ids: list[str], cancel_event: threading.Event | None,
+        self,
+        arguments: dict[str, Any],
+        intent: dict[str, Any],
+        sync_job_ids: list[str],
+        cancel_event: threading.Event | None,
     ) -> dict[str, Any]:
         if "start_provider_refresh" not in authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+            raise AppError(
+                403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
+            )
         provider = str(intent.get("target_system") or "")
         require_coach_scope(intent, f"{provider}_refresh")
-        result = self._provider_refresh.start(provider, arguments, cancel_event=cancel_event)
+        result = self._provider_refresh.start(
+            provider, arguments, cancel_event=cancel_event
+        )
         if result.get("status") == "queued":
             sync_job_ids.append(result["sync_job_id"])
         return result
 
     def _refresh_current_performance(
-        self, arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str],
+        self,
+        arguments: dict[str, Any],
+        intent: dict[str, Any],
+        sync_job_ids: list[str],
     ) -> dict[str, Any]:
-        if "refresh_current_performance" not in authorized_operations(intent) or intent.get("target_system") != "intervals":
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Refresh nicht.", reason="intent_scope_denied")
+        if (
+            "refresh_current_performance" not in authorized_operations(intent)
+            or intent.get("target_system") != "intervals"
+        ):
+            raise AppError(
+                403,
+                "Die strukturierte Coach-Autorisierung erlaubt diesen Refresh nicht.",
+                reason="intent_scope_denied",
+            )
         require_coach_scope(intent, "intervals_refresh")
         result = self._provider_refresh.queue_performance_refresh(arguments)
         sync_job_ids.append(result["sync_job_id"])
@@ -137,32 +181,50 @@ class CoachSyncToolService:
     def _start_plan_sync(
         self, arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str]
     ) -> dict[str, Any]:
-        if "start_intervals_plan_sync" not in authorized_operations(intent) or intent.get("target_system") != "intervals":
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+        if (
+            "start_intervals_plan_sync" not in authorized_operations(intent)
+            or intent.get("target_system") != "intervals"
+        ):
+            raise AppError(
+                403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
+            )
         entries = arguments.get("entries")
         if "repair" in arguments and type(arguments["repair"]) is not bool:
-            raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
+            raise AppError(
+                400, "repair muss ein Boolean sein.", reason="invalid_job_request"
+            )
         if arguments.get("repair"):
             prepared = self._plan_repair.prepare(arguments, intent)
             for scope_group in prepared.required_scope_groups:
                 require_coach_scope(intent, *scope_group)
             manifest = self._plan_repair.execute(prepared)
             return self._plan_push.enqueue(
-                manifest, sync_job_ids,
-                reason=str(arguments.get("reason") or "Coach-Reparatur"), repair=True,
+                manifest,
+                sync_job_ids,
+                reason=str(arguments.get("reason") or "Coach-Reparatur"),
+                repair=True,
             )
         prepared = self._plan_sync.prepare(entries, intent)
         for scope_group in prepared.required_scope_groups:
             require_coach_scope(intent, *scope_group)
         return self._plan_sync.execute(
-            prepared, sync_job_ids, reason=str(arguments.get("reason") or "Coach-Anfrage")
+            prepared,
+            sync_job_ids,
+            reason=str(arguments.get("reason") or "Coach-Anfrage"),
         )
 
     def _sync_competitions(
         self, arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str]
     ) -> dict[str, Any]:
-        if "sync_competitions" not in authorized_operations(intent) or intent.get("target_system") != "intervals":
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.", reason="intent_scope_denied")
+        if (
+            "sync_competitions" not in authorized_operations(intent)
+            or intent.get("target_system") != "intervals"
+        ):
+            raise AppError(
+                403,
+                "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.",
+                reason="intent_scope_denied",
+            )
         require_coach_scope(intent, "local_competitions")
         approval_manifest = arguments.get("_approval_manifest")
         if not isinstance(approval_manifest, list):
@@ -171,7 +233,8 @@ class CoachSyncToolService:
         if not isinstance(manifest, list):
             raise AppError(500, "Die bestätigte Wettkampf-Vorschau ist ungültig.")
         job = self._queue.enqueue(
-            "intervals", "competition_push",
+            "intervals",
+            "competition_push",
             {
                 "reason": str(arguments.get("reason") or "Bestätigter Coach-Auftrag"),
                 "approval_manifest": manifest,
@@ -185,12 +248,17 @@ class CoachSyncToolService:
         self, arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str]
     ) -> dict[str, Any]:
         if "resolve_training_sync_conflict" not in authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+            raise AppError(
+                403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
+            )
         local_id = str(arguments.get("local_id") or "").strip()
         if local_id:
-            require_coach_scope(intent, f"planned_unit:{local_id}", f"competition:{local_id}")
+            require_coach_scope(
+                intent, f"planned_unit:{local_id}", f"competition:{local_id}"
+            )
             return self._conflicts.resolve_local(
-                local_id, str(arguments.get("strategy") or "keep_local").strip().casefold()
+                local_id,
+                str(arguments.get("strategy") or "keep_local").strip().casefold(),
             )
         job_id = str(arguments.get("job_id") or "").strip()
         require_coach_scope(intent, f"sync_job:{job_id}")
@@ -198,8 +266,15 @@ class CoachSyncToolService:
         provider = previous_job["provider"]
         push = self._conflicts.is_push_job(previous_job)
         require_coach_scope(intent, "intervals_sync" if push else f"{provider}_refresh")
-        if intent.get("target_system") != provider or bool((intent.get("request") or {}).get("remote_write")) != push:
-            raise AppError(403, "Die Wiederholung benötigt den passenden Anbieterauftrag.", reason="request_target")
+        if (
+            intent.get("target_system") != provider
+            or bool((intent.get("request") or {}).get("remote_write")) != push
+        ):
+            raise AppError(
+                403,
+                "Die Wiederholung benötigt den passenden Anbieterauftrag.",
+                reason="request_target",
+            )
         result = self._conflicts.retry_job(job_id)
         sync_job_ids.append(job_id)
         return result
@@ -207,8 +282,15 @@ class CoachSyncToolService:
     def _delete_duplicate_activity(
         self, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any]:
-        if "delete_duplicate_intervals_activity" not in authorized_operations(intent) or intent.get("target_system") != "intervals":
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.", reason="intent_scope_denied")
+        if (
+            "delete_duplicate_intervals_activity" not in authorized_operations(intent)
+            or intent.get("target_system") != "intervals"
+        ):
+            raise AppError(
+                403,
+                "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.",
+                reason="intent_scope_denied",
+            )
         require_coach_scope(intent, "intervals_sync")
         if not self._duplicate_activity or not self._intervals_client_factory:
             raise AppError(500, "Duplikat-Bereinigung ist nicht verfuegbar.")
@@ -218,7 +300,9 @@ class CoachSyncToolService:
         for field in ("canonical_id", "duplicate_id"):
             requested = arguments.get(field)
             if requested and str(requested) != str(manifest.get(field) or ""):
-                raise AppError(409, "Die freigegebene Duplikatvorschau stimmt nicht ueberein.")
+                raise AppError(
+                    409, "Die freigegebene Duplikatvorschau stimmt nicht ueberein."
+                )
         result = self._duplicate_activity.delete(
             {
                 field: manifest[field]

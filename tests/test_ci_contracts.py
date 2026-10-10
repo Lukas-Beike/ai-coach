@@ -1,12 +1,15 @@
 """Exercise source selection and shard discovery without remote CI side effects."""
 
 import importlib.util
+import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 import run_tests
@@ -20,6 +23,91 @@ SPEC.loader.exec_module(release_source)
 
 
 class WorkflowSourceTests(unittest.TestCase):
+    def test_dependabot_covers_all_manifests_on_develop(self):
+        root = Path(__file__).resolve().parents[1]
+        configuration = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
+        updates = re.split(r"  - package-ecosystem: ", configuration)[1:]
+        self.assertEqual(
+            {update.splitlines()[0] for update in updates},
+            {"pip", "npm", "docker", "github-actions"},
+        )
+        for update in updates:
+            self.assertIn("target-branch: develop", update)
+            self.assertIn("commit-message:", update)
+            self.assertNotIn("ignore:", update)
+
+    def test_workflow_actions_are_immutable_and_ci_does_not_persist_credentials(self):
+        root = Path(__file__).resolve().parents[1]
+        for path in (root / ".github/workflows").glob("*.yml"):
+            workflow = path.read_text(encoding="utf-8")
+            for action in re.findall(r"uses: ([^\s#]+)", workflow):
+                self.assertRegex(action, r"^[^@]+@[0-9a-f]{40}$", str(path))
+        container = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(
+            container.count("uses: actions/checkout@"),
+            container.count("persist-credentials: false"),
+        )
+
+    def test_quality_checks_all_sources_and_merges_every_shard(self):
+        root = Path(__file__).resolve().parents[1]
+        config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(config["tool"]["ruff"]["target-version"], "py314")
+        self.assertIn("DTZ", config["tool"]["ruff"]["lint"]["extend-select"])
+        self.assertEqual(config["tool"]["mypy"]["python_version"], "3.14")
+        self.assertEqual(config["tool"]["mypy"]["files"], ["."])
+        self.assertNotIn("exclude", config["tool"]["mypy"])
+        coverage = config["tool"]["coverage"]["run"]
+        self.assertEqual(coverage["source"], ["server", "backend"])
+        self.assertTrue(coverage["branch"])
+        self.assertTrue(coverage["relative_files"])
+        self.assertTrue(coverage["parallel"])
+        evidence = json.loads(
+            (root / "tests/fixtures/quality_baseline.json").read_text(encoding="utf-8")
+        )
+        diagnostics = evidence["diagnostics"]
+        self.assertEqual({item["tool"] for item in diagnostics}, {"ruff", "mypy"})
+        evidence = evidence["coverage_evidence"]
+        totals = evidence["totals"]
+        measured = (
+            Decimal(totals["covered_lines"] + totals["covered_branches"])
+            * 100
+            / Decimal(totals["num_statements"] + totals["num_branches"])
+        )
+        threshold = config["tool"]["coverage"]["report"]["fail_under"]
+        self.assertGreater(threshold, 0)
+        self.assertEqual(
+            Decimal(str(threshold)),
+            measured.quantize(Decimal("0.01"), rounding=ROUND_DOWN),
+        )
+        self.assertEqual(config["tool"]["coverage"]["report"]["precision"], 2)
+        self.assertEqual(evidence["shards"], 4)
+
+        shards = workflow.split("  test_shards:\n", 1)[1].split("  syntax:\n", 1)[0]
+        self.assertIn("coverage run tests/run_tests.py --shard", shards)
+        self.assertIn("python-coverage-${{ matrix.shard }}", shards)
+        self.assertIn("include-hidden-files: true", shards)
+        self.assertIn("if-no-files-found: error", shards)
+        quality = workflow.split("  quality:\n", 1)[1].split("  image_sbom:\n", 1)[0]
+        self.assertIn("pattern: python-coverage-*", quality)
+        self.assertIn("merge-multiple: true", quality)
+        self.assertIn("coverage combine coverage-data", quality)
+        self.assertIn("coverage report", quality)
+        self.assertIn("-ne 4", quality)
+        self.assertIn("exit 1", quality)
+        self.assertNotIn("coverage run", quality)
+        self.assertNotIn("--fail-under", quality)
+        self.assertNotIn("ruff format", quality)
+        self.assertIn("python tools/quality_baseline.py", quality)
+        self.assertNotIn("Run lint baseline", quality)
+        self.assertIn("/review/pyproject.toml:ro", workflow)
+        self.assertIn("/app/tools:ro", workflow)
+
     def test_dependabot_pip_compile_updates_the_hash_locked_docker_inputs(self):
         root = Path(__file__).resolve().parents[1]
         dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
@@ -164,218 +252,25 @@ class CodexReviewWorkflowTests(unittest.TestCase):
             workflow,
         )
 
-    def test_codex_gate_uses_subscription_review_and_required_check_context(self):
+    def test_dependabot_automerge_security_and_major_updates(self):
         root = Path(__file__).resolve().parents[1]
-        workflow = (root / ".github/workflows/codex-code-review.yml").read_text(
+        workflow = (root / ".github/workflows/dependabot-automerge.yml").read_text(
             encoding="utf-8"
         )
-        action = (root / ".github/actions/codex-review-gate/action.yml").read_text(
-            encoding="utf-8"
-        )
-
+        self.assertIn("permissions: {}", workflow)
         self.assertIn("pull_request_target:", workflow)
-        self.assertIn("ready_for_review", workflow)
-        self.assertIn("issue_comment:", workflow)
-        self.assertIn("pullRequest.draft !== true", workflow)
-        self.assertRegex(
-            workflow,
-            r"uses: Lukas-Beike/ai-coach/\.github/actions/codex-review-gate@[0-9a-f]{40}",
-        )
+        self.assertIn("--auto --squash", workflow)
         self.assertNotIn("actions/checkout", workflow)
-        self.assertRegex(
-            workflow,
-            r"(?ms)  gate:.*?    permissions:\n      contents: read\n      issues: read\n      pull-requests: read\n      checks: write",
-        )
-        self.assertNotIn("github.rest.issues.createComment", workflow)
-        self.assertNotIn(
-            "Request a fresh Codex review for pull-request events", workflow
-        )
-        self.assertNotIn("steps.request_review.outputs.requested_at", workflow)
-        self.assertIn("const dependabotLogin = 'dependabot[bot]'", workflow)
-        self.assertIn("pullRequest.user?.login === dependabotLogin &&", workflow)
-        self.assertIn("pullRequest.base?.ref === 'develop'", workflow)
-        self.assertIn("const releaseBotLogin = 'ai-coach-release-bot[bot]'", workflow)
-        self.assertIn("pullRequest.base?.ref === 'develop'", workflow)
-        self.assertIn(
-            "pullRequest.title === `chore(release): set application version to ${versionMatch[1]}`",
-            workflow,
-        )
-        self.assertIn(
-            "const skipCodexReview = shouldSkipCodexReview(pullRequest)", workflow
-        )
-        self.assertIn(
-            "Mark trusted Dependabot or release-bot PR as Codex-exempt", workflow
-        )
-        self.assertIn("matrix.skipCodexReview == true", workflow)
-        self.assertIn("matrix.skipCodexReview != true", workflow)
-        self.assertIn(
-            "Codex review skipped for trusted Dependabot or release-bot PR", workflow
-        )
-        self.assertIn(
-            "The Dependabot Codex exemption requires a same-repository develop pull request",
-            workflow,
-        )
-        self.assertIn(
-            "![dependabotLogin, releaseBotLogin].includes(authorLogin)", workflow
-        )
-        self.assertIn("github.rest.pulls.listCommits", workflow)
-        self.assertIn("commit.author?.login === dependabotLogin", workflow)
-        self.assertIn("allowedDependencyFiles", workflow)
-        self.assertIn("'requirements.in'", workflow)
-        self.assertIn("actionPinLinePattern", workflow)
-        self.assertIn(
-            "const manualReviewCheckName = 'Codex manual review request'", workflow
-        )
-        self.assertIn("getManualReviewRequest", workflow)
-        self.assertIn("Manual Codex review requested", workflow)
-        self.assertIn("pushReviewRequestedAt", workflow)
-        self.assertIn("/^chore\\/release-version-(\\d+\\.\\d+\\.\\d+)$/", workflow)
-        self.assertIn("pullRequest.data.title !== expectedTitle", workflow)
-        self.assertIn(
-            "pullRequest.data.head.repo?.full_name !== expectedHeadRepository", workflow
-        )
-        self.assertIn("github.rest.pulls.listFiles", workflow)
-        self.assertIn("file.filename !== 'server.py'", workflow)
-        self.assertIn("file.additions !== 1", workflow)
-        self.assertIn("hasExpectedVersion", workflow)
-        self.assertIn("hasPreviousVersion", workflow)
-        self.assertIn("reviewRequestedAt: ''", workflow)
-        self.assertIn("reviewRequestedAt: context.payload.comment.created_at", workflow)
-        self.assertIn("conclusion: 'success'", workflow)
-        self.assertIn("push:", workflow)
-        self.assertIn("edited", workflow)
-        self.assertIn(
-            "const baseChanged = context.payload.action === 'edited'", workflow
-        )
-        self.assertIn(
-            "const titleChanged = context.payload.action === 'edited'", workflow
-        )
-        self.assertIn(
-            "const releaseBotTitleChanged = titleChanged && pullRequest.user?.login === releaseBotLogin",
-            workflow,
-        )
-        self.assertIn(
-            "const reviewBaselineChanged = baseChanged || releaseBotTitleChanged || context.payload.action === 'reopened'",
-            workflow,
-        )
-        self.assertIn(
-            "context.payload.changes.base",
-            workflow.replace("changes?.base", "changes.base"),
-        )
-        self.assertIn(
-            "context.payload.changes.title",
-            workflow.replace("changes?.title", "changes.title"),
-        )
-        self.assertIn("Explicit Codex review required", workflow)
-        self.assertIn("A subscription usage limit is an explicit", workflow)
-        self.assertIn("matrix.runCodexReview == true", workflow)
-        self.assertIn("getUnresolvedCodexReviewIds", workflow)
-        self.assertIn("hasCompletedCleanReaction", workflow)
-        self.assertIn(
-            "reviewAllowed = ['initial', 'p1'].includes(reviewRequirement)", workflow
-        )
-        self.assertIn("context.payload.comment?.user?.type !== 'Bot'", workflow)
-        self.assertIn("['OWNER', 'MEMBER', 'COLLABORATOR'].includes", workflow)
-        self.assertIn(
-            "pull_requests: ${{ steps.resolve_base.outputs.pull_requests }}", workflow
-        )
-        self.assertIn(
-            "has_pull_requests: ${{ steps.resolve_base.outputs.has_pull_requests }}",
-            workflow,
-        )
-        self.assertIn(
-            "core.setOutput('has_pull_requests', affectedPullRequests.length > 0 ? 'true' : 'false')",
-            workflow,
-        )
-        self.assertIn("fromJSON(needs.discover.outputs.pull_requests)", workflow)
-        self.assertIn("pullRequestNumber: 0", workflow)
-        self.assertIn("skip: true", workflow)
-        self.assertIn(
-            "if: needs.discover.outputs.has_pull_requests == 'true'", workflow
-        )
-        self.assertIn("matrix.pullRequestNumber", workflow)
-        self.assertIn("matrix.baseRef", workflow)
-        self.assertNotIn("ref: develop", workflow)
-        self.assertNotIn("ref: main", workflow)
-        self.assertNotIn("steps.resolve_base.outputs.base_sha", workflow)
-        self.assertIn("EXPECTED_BASE_REF: ${{ matrix.baseRef }}", workflow)
-        self.assertIn("cancel-in-progress: true", workflow)
-        self.assertIn("review-requested-at: ${{ matrix.reviewRequestedAt }}", workflow)
-        self.assertIn(
-            "checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review'",
-            workflow,
-        )
-        self.assertIn("CHECK_NAME: ${{ matrix.checkName }}", workflow)
-        self.assertIn("check-name: ${{ matrix.checkName }}", workflow)
-        self.assertIn("skipCodexReview: false", workflow)
-        self.assertIn("name: process.env.CHECK_NAME", workflow)
-        self.assertIn("hasCodexUsageLimit", workflow)
-        self.assertIn("Codex review skipped (usage limit reached)", workflow)
-        self.assertNotIn("openai/codex-action", workflow)
-        self.assertNotIn("openai-api-key", workflow)
+        self.assertNotIn("--admin", workflow)
+        self.assertNotIn("update-type", workflow)
 
-        self.assertIn("checks.create", action)
-        self.assertIn("issues.listComments", action)
-        self.assertIn("pulls.listReviews", action)
-        self.assertIn("reactions.listForIssue", action)
-        self.assertIn("codex-pull-request-review-summary", action)
-        self.assertIn("parseCodeReviewSummary", action)
-        self.assertIn("isCodexUsageLimitComment", action)
-        self.assertIn("Codex review skipped (usage limit reached)", action)
-        self.assertIn("commitMatchesHead", action)
-        self.assertNotIn("repos.compareCommits", action)
-        self.assertNotIn("commitBelongsToHead", action)
-        self.assertIn("reviewThreads(first: 100", action)
-        self.assertIn("getUnresolvedCodexReviewIds", action)
-        self.assertIn("isAtOrAfterTimestamp", action)
-        self.assertNotIn("parseCodexSummaryMetadata", action)
-        self.assertIn("summaryStatus === 'completed'", action)
-        self.assertIn("context.payload.comment?.created_at", action)
-        self.assertIn("REVIEW_REQUESTED_AT", action)
-        self.assertIn("const baseSha = initialPullRequest.base.sha", action)
-        self.assertIn("currentPullRequest.base.sha !== baseSha", action)
-        self.assertIn("currentPullRequest.state !== 'open'", action)
-        self.assertIn("'cancelled'", action)
-        self.assertIn("Date.parse(review.submitted_at) >= minimumSubmittedAt", action)
-        self.assertIn("/\\[P[0-3]\\]/gi", action)
-        self.assertIn("Math.min(currentPollSeconds * 2, 120)", action)
-        self.assertIn("pull_request_review_id", action)
-        self.assertNotIn("review.commit_id !== headSha", action)
-        self.assertIn(
-            "comments.length > 0 && !unresolvedReviewIds.has(review.id)", action
-        )
-        self.assertNotIn("comment.commit_id === headSha", action)
-        self.assertIn("reaction.content === '+1'", action)
-        self.assertIn("waiting for a submitted review or clean reaction", action)
-        self.assertIn("core.setFailed", action)
-        self.assertFalse((root / ".github/codex/prompts/review.md").exists())
-
-    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
-    def test_codex_summary_parser(self):
+    def test_native_review_removes_legacy_release_dispatch(self):
         root = Path(__file__).resolve().parents[1]
-        subprocess.run(
-            ["node", "--test", str(root / "tests/codex-review-gate.test.cjs")],
-            cwd=root,
-            check=True,
+        release = (root / ".github/workflows/daily-release.yml").read_text(
+            encoding="utf-8"
         )
-
-    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
-    def test_release_promotion_gate(self):
-        root = Path(__file__).resolve().parents[1]
-        subprocess.run(
-            ["node", "--test", str(root / "tests/release-promotion-gate.test.cjs")],
-            cwd=root,
-            check=True,
-        )
-
-    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
-    def test_codex_review_followup(self):
-        root = Path(__file__).resolve().parents[1]
-        subprocess.run(
-            ["node", "--test", str(root / "tests/codex-review-followup.test.cjs")],
-            cwd=root,
-            check=True,
-        )
+        self.assertNotIn("codex-code-review.yml", release)
+        self.assertFalse((root / ".github/workflows/codex-code-review.yml").exists())
 
 
 class DiscoveryTests(unittest.TestCase):

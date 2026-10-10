@@ -11,12 +11,12 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import Mock
 
-from backend.coach.proposals import (
-    CoachProposalReadService,
+from backend.coach.proposal_models import (
     coach_action_hash,
     coach_action_view,
     prune_expired_coach_proposals,
 )
+from backend.coach.proposal_read import CoachProposalReadService
 from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
 

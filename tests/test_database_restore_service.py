@@ -7,11 +7,16 @@ import tempfile
 import threading
 import unittest
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
-from backend.backup.restore import DatabaseRestoreConfig, DatabaseRestoreService
+from backend.backup.restore import (
+    DatabaseRestoreConfig,
+    DatabaseRestoreService,
+    RestoreDependencies,
+)
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 
@@ -62,26 +67,34 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.validation.validate.side_effect = validate
         self.backup.checkpoint.side_effect = lambda: self.calls.append("checkpoint")
         self.manager.restore_drain.side_effect = drain
-        self.sync_jobs.resume_interrupted.side_effect = lambda: self.calls.append("sync-resume")
-        self.coach_jobs.resume_interrupted.side_effect = lambda _failures: self.calls.append("coach-resume")
+        self.sync_jobs.resume_interrupted.side_effect = lambda: self.calls.append(
+            "sync-resume"
+        )
+        self.coach_jobs.resume_interrupted.side_effect = lambda _failures: (
+            self.calls.append("coach-resume")
+        )
         self.sync_wake.set.side_effect = lambda: self.calls.append("sync-wake")
         self.coach_wake.set.side_effect = lambda: self.calls.append("coach-wake")
         self.service = DatabaseRestoreService(
-            self.validation,
-            self.backup,
-            manager,
-            self.lock,
-            self.gate,
-            self.sync_jobs,
-            self.coach_jobs,
-            self.coach_failures,
-            self.sync_wake,
-            self.coach_wake,
-            DatabaseRestoreConfig(self.data_dir, self.database_path),
-            lambda _message: "redacted",
+            RestoreDependencies(
+                validation=self.validation,
+                backup=self.backup,
+                database_manager=manager,
+                database_lock=self.lock,
+                maintenance_gate=self.gate,
+                sync_jobs=self.sync_jobs,
+                coach_jobs=self.coach_jobs,
+                coach_failures=self.coach_failures,
+                sync_wake=self.sync_wake,
+                coach_wake=self.coach_wake,
+                config=DatabaseRestoreConfig(self.data_dir, self.database_path),
+                redact=lambda _message: "redacted",
+            )
         )
 
-    def test_restores_after_checkpoint_and_drain_then_resumes_both_job_owners(self) -> None:
+    def test_restores_after_checkpoint_and_drain_then_resumes_both_job_owners(
+        self,
+    ) -> None:
         Path(f"{self.database_path}-wal").write_bytes(b"stale wal")
         Path(f"{self.database_path}-shm").write_bytes(b"stale shm")
 
@@ -99,7 +112,16 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.assertFalse((self.data_dir / "staged.db").exists())
         self.assertEqual(
             self.calls,
-            ["stage", "validate", "checkpoint", "drain", "sync-resume", "coach-resume", "sync-wake", "coach-wake"],
+            [
+                "stage",
+                "validate",
+                "checkpoint",
+                "drain",
+                "sync-resume",
+                "coach-resume",
+                "sync-wake",
+                "coach-wake",
+            ],
         )
         self.coach_jobs.resume_interrupted.assert_called_once_with(self.coach_failures)
         self.assertFalse(self.gate.state()["active"])
@@ -121,7 +143,9 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         first = self.service.restore(b"replacement database")
         second = self.service.restore(b"replacement database")
 
-        self.assertNotEqual(first["previous_database_backup"], second["previous_database_backup"])
+        self.assertNotEqual(
+            first["previous_database_backup"], second["previous_database_backup"]
+        )
         self.assertEqual(
             (self.data_dir / first["previous_database_backup"]).read_bytes(),
             b"previous database",
@@ -149,7 +173,7 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
             ),
             logger,
         )
-        self.service._backup = backup
+        self.service._dependencies = replace(self.service._dependencies, backup=backup)
 
         result = self.service.restore(b"replacement database")
 
@@ -175,7 +199,10 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
 
     def test_swap_failure_preserves_previous_database_and_releases_gate(self) -> None:
         with (
-            patch("backend.backup.restore.os.replace", side_effect=OSError("sensitive path")),
+            patch(
+                "backend.backup.restore.os.replace",
+                side_effect=OSError("sensitive path"),
+            ),
             self.assertRaises(AppError) as raised,
         ):
             self.service.restore(b"replacement database")

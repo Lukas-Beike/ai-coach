@@ -31,7 +31,9 @@ class CoachAdaptiveApplyTests(unittest.TestCase):
             "request": {"source_message_ids": [20]},
         }
         self.preview.latest_preview.return_value = {
-            "id": "adjustment-1", "status": "preview", "published_message_id": 10,
+            "id": "adjustment-1",
+            "status": "preview",
+            "published_message_id": 10,
         }
         self.db.execute.side_effect = [
             Mock(fetchone=Mock(return_value={"id": 20})),
@@ -41,7 +43,9 @@ class CoachAdaptiveApplyTests(unittest.TestCase):
 
     def test_later_turn_apply_succeeds_without_remote_sync(self):
         self.assertEqual(
-            self.service.apply({"adjustment_id": "adjustment-1"}, self.intent, "turn-2"),
+            self.service.apply(
+                {"adjustment_id": "adjustment-1"}, self.intent, "turn-2"
+            ),
             {"ok": True, "updated": 1},
         )
         self.illness_sync.apply.assert_called_once_with(
@@ -62,7 +66,8 @@ class CoachAdaptiveApplyTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             self.service.apply(
                 {"adjustment_id": "adjustment-1", "sync_illness_to_intervals": True},
-                self.intent, "turn-2",
+                self.intent,
+                "turn-2",
             )
         self.assertEqual(raised.exception.reason, "intent_scope_denied")
         self.preview.latest_preview.assert_not_called()

@@ -62,12 +62,12 @@ class ServerAthleteTests(ServerTestCase):
         self.assertEqual(raised.exception.status, 400)
 
     def test_profile_save_resets_button_before_follow_up_refresh(self):
-        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(
-            encoding="utf-8"
-        )
+        app = (
+            Path(__file__).resolve().parents[1] / "public" / "settings.js"
+        ).read_text(encoding="utf-8")
         save_profile = app[
             app.index("async function saveProfile") : app.index(
-                "function registerServiceWorker"
+                "async function saveCheckin"
             )
         ]
         self.assertIn(

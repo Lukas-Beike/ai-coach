@@ -226,11 +226,15 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
 
         self.assertEqual(changed, 1)
         self.assertEqual(self.planned("invalid")["sync_state"], "local")
-        self.assertEqual(json.loads(self.planned("invalid")["payload"]), {"sync_status": "local"})
+        self.assertEqual(
+            json.loads(self.planned("invalid")["payload"]), {"sync_status": "local"}
+        )
         self.assertEqual(self.planned("deleted")["sync_state"], "sync_error")
         self.assertEqual(self.revision(), 5)
 
-    def test_revision_bumps_once_per_authority_request_even_for_same_payload(self) -> None:
+    def test_revision_bumps_once_per_authority_request_even_for_same_payload(
+        self,
+    ) -> None:
         self.add_planned("change", state="conflict", payload={"name": "Run"})
         self.add_planned(
             "unchanged",

@@ -6,6 +6,8 @@ import math
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+
 GARMIN_SOURCE = "Garmin Connect"
 
 _DATE_KEYS = ("date", "calendarDate", "summaryDate")
@@ -16,7 +18,7 @@ def _day(value: Any) -> date | None:
     if not isinstance(value, str):
         return None
     try:
-        return date.fromisoformat(value[:10])
+        return date.fromisoformat(iso_date_prefix(value))
     except ValueError:
         return None
 
@@ -26,7 +28,7 @@ def _number(value: Any) -> float | None:
         return None
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return number if math.isfinite(number) else None
 

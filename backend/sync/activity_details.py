@@ -16,10 +16,10 @@ from backend.activities.detail_projection import (
     detailed_activity,
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
-from backend.activities.target_snapshot import freeze_targets
 from backend.errors import AppError
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
+from backend.planning.target_snapshot import freeze_targets
 
 MAX_STREAM_POINTS = 172_800
 MAX_DETAIL_BYTES = 24 * 1024 * 1024

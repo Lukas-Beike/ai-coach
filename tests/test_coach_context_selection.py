@@ -29,7 +29,6 @@ class CoachContextSelectionTests(unittest.TestCase):
             command_receipts=[],
             tools=server.COACH_DIALOGUE_TOOLS,
             allow_mutations=True,
-            ai_provider="openai",
             model="synthetic-model",
             thinking_level="medium",
             conversation_id="synthetic-conversation",

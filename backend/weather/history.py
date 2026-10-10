@@ -6,6 +6,7 @@ import json
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.weather import projection
 
 
@@ -16,7 +17,7 @@ def decode_history(value: Any) -> dict[str, Any]:
         return {}
     try:
         parsed = json.loads(value)
-    except (TypeError, ValueError, RecursionError):
+    except TypeError, ValueError, RecursionError:
         return {}
     return parsed.copy() if isinstance(parsed, dict) else {}
 
@@ -62,7 +63,7 @@ def calendar_state(history: Any, weather: Any, *, today: date) -> dict[str, Any]
 
 
 def _date_name(item: dict[str, Any], default_name: str) -> tuple[str, str]:
-    day = str(item.get("start_date_local") or item.get("date") or "")[:10]
+    day = iso_date_prefix(str(item.get("start_date_local") or item.get("date") or ""))
     name = str(item.get("name") or default_name)[:200]
     return day, name
 

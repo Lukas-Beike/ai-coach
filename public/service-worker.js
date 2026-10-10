@@ -1,6 +1,6 @@
-const CACHE = "intervals-coach-v364";
-const ASSETS = ["/", "/styles.css?v=278", "/api.js?v=221", "/navigation.js?v=230", "/appearance.js?v=218", "/state.js?v=218", "/views.js?v=218", "/forms.js?v=217", "/components.js?v=217", "/coach.js?v=6", "/app.js?v=271", "/nutrition.js?v=19", "/analysis.js?v=93", "/activity-details.js?v=9", "/icon.svg?v=217", "/manifest.webmanifest"];
-const VERSIONED_ASSETS = new Set(["/activity-details.js", "/analysis.js", "/nutrition.js", "/api.js", "/navigation.js", "/appearance.js", "/state.js", "/views.js", "/forms.js", "/components.js", "/coach.js", "/app.js", "/styles.css", "/logo.png", "/icon.svg"]);
+const CACHE = "intervals-coach-v370";
+const ASSETS = ["/", "/styles.css?v=281", "/api.js?v=223", "/navigation.js?v=231", "/appearance.js?v=218", "/state.js?v=219", "/views.js?v=220", "/plan-views.js?v=1", "/forms.js?v=217", "/components.js?v=217", "/coach.js?v=9", "/shared.js?v=1", "/auth.js?v=1", "/sync-status.js?v=1", "/notifications.js?v=1", "/nutrition.js?v=21", "/analysis.js?v=94", "/activity-details.js?v=9", "/performance-view.js?v=1", "/diagnostics.js?v=1", "/state-loader.js?v=1", "/sync-actions.js?v=1", "/settings.js?v=1", "/app.js?v=276", "/icon.svg?v=217", "/manifest.webmanifest"];
+const VERSIONED_ASSETS = new Set(["/activity-details.js", "/analysis.js", "/nutrition.js", "/api.js", "/navigation.js", "/appearance.js", "/state.js", "/views.js", "/plan-views.js", "/forms.js", "/components.js", "/coach.js", "/shared.js", "/auth.js", "/sync-status.js", "/notifications.js", "/performance-view.js", "/diagnostics.js", "/state-loader.js", "/sync-actions.js", "/settings.js", "/app.js", "/styles.css", "/logo.png", "/icon.svg"]);
 globalThis.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS))));
 globalThis.addEventListener("activate", (event) => event.waitUntil((async () => {
   const keys = await caches.keys();

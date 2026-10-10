@@ -6,8 +6,8 @@ from datetime import date
 from typing import Any
 
 from backend.activities import calendar_projection, grouping
+from backend.activities.workout_profile import planned_profile
 from backend.calendar import canonical, local
-from backend.performance.workout_profile import planned_profile
 from backend.weather import history
 
 

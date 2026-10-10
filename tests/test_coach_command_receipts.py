@@ -50,7 +50,9 @@ class CoachCommandReceiptServiceTests(unittest.TestCase):
         self.manager.close()
         self.directory.cleanup()
 
-    def _proposal(self, proposal_id: str, session: str, status: str, expires: float) -> None:
+    def _proposal(
+        self, proposal_id: str, session: str, status: str, expires: float
+    ) -> None:
         with self.manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO coach_action_proposals "
@@ -71,11 +73,17 @@ class CoachCommandReceiptServiceTests(unittest.TestCase):
         for invalid in (None, "  ", "x" * 121):
             with self.subTest(invalid=invalid), self.assertRaises(AppError) as caught:
                 self.service.read(invalid, self.session)
-            self.assertEqual((400, "invalid_client_turn"), (caught.exception.status, caught.exception.reason))
+            self.assertEqual(
+                (400, "invalid_client_turn"),
+                (caught.exception.status, caught.exception.reason),
+            )
 
         with self.assertRaises(AppError) as caught:
             self.service.read("missing", self.session)
-        self.assertEqual((404, "command_not_found"), (caught.exception.status, caught.exception.reason))
+        self.assertEqual(
+            (404, "command_not_found"),
+            (caught.exception.status, caught.exception.reason),
+        )
 
     def test_read_projects_owned_proposals_and_redacts_session_key(self) -> None:
         self._proposal("expired", self.session, "preview", 99)
@@ -109,7 +117,10 @@ class CoachCommandReceiptServiceTests(unittest.TestCase):
         with self.assertRaises(AppError) as caught:
             self.service.read("turn-b", self.session)
 
-        self.assertEqual((403, "command_scope_denied"), (caught.exception.status, caught.exception.reason))
+        self.assertEqual(
+            (403, "command_scope_denied"),
+            (caught.exception.status, caught.exception.reason),
+        )
 
     def test_read_uses_manager_transactions_compatible_with_restore_drain(self) -> None:
         self._receipt(
@@ -120,7 +131,9 @@ class CoachCommandReceiptServiceTests(unittest.TestCase):
         with self.manager.restore_drain():
             pass
 
-        self.assertEqual("completed", self.service.read("turn-c", self.session)["status"])
+        self.assertEqual(
+            "completed", self.service.read("turn-c", self.session)["status"]
+        )
 
 
 if __name__ == "__main__":

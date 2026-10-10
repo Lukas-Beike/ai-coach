@@ -133,16 +133,6 @@ jobs:
               --field "publish_container=false"
           }
 
-          ensure_promotion_gate() {
-            local pull_request_number="$1"
-            # Run the proof of an unchanged develop snapshot from the trusted
-            # integration branch, including when main still has an older gate.
-            gh workflow run codex-code-review.yml \
-              --repo "$REPOSITORY" \
-              --ref develop \
-              --field "pull_request_number=$pull_request_number"
-          }
-
           ensure_release_test() {
             local pull_request_number="$1"
             local source_ref="$2"
@@ -252,7 +242,6 @@ jobs:
             existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head "$promotion_branch" --state open --json number --jq '.[0].number // empty')"
             if [[ -n "$existing_pr" ]]; then
               echo "Release promotion PR #$existing_pr is already open."
-              ensure_promotion_gate "$existing_pr"
               enable_auto_merge "$existing_pr"
               ensure_release_test "$existing_pr" "$promotion_branch" "$app_version"
               exit 0
@@ -278,7 +267,6 @@ jobs:
               --title "chore(release): promote $app_version to main" \
               --body "Promote APP_VERSION $app_version from develop to protected main. Merge this PR to create the GitHub release and publish the container.")"
             promotion_pr_number="$(gh pr view "$promotion_pr_url" --repo "$REPOSITORY" --json number --jq '.number')"
-            ensure_promotion_gate "$promotion_pr_number"
             enable_auto_merge "$promotion_pr_url"
             ensure_release_test "$promotion_pr_number" "$promotion_branch" "$app_version"
             exit 0

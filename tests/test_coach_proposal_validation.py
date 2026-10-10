@@ -1,10 +1,8 @@
 import copy
 import unittest
 
-from backend.coach.proposals import (
-    COACH_ACTION_TYPES,
-    validated_coach_action_preview_input,
-)
+from backend.coach.proposal_models import COACH_ACTION_TYPES
+from backend.coach.proposal_validation import validated_coach_action_preview_input
 from backend.errors import AppError
 
 
@@ -37,7 +35,12 @@ class CoachProposalValidationTests(unittest.TestCase):
     def test_valid_undo_local_and_duplicate_intervals(self):
         self.assertEqual(
             COACH_ACTION_TYPES,
-            {"undo_change", "delete_duplicate_intervals_activity", "remote_coach_write", "local_coach_write"},
+            {
+                "undo_change",
+                "delete_duplicate_intervals_activity",
+                "remote_coach_write",
+                "local_coach_write",
+            },
         )
         for values in (self.undo, self.duplicate):
             before = copy.deepcopy(values)
@@ -57,12 +60,18 @@ class CoachProposalValidationTests(unittest.TestCase):
         object_error = "Die Aktionsvorschau muss ein Objekt sein."
         self.assert_invalid(None, object_error)
         self.assert_invalid([], object_error)
-        self.assert_invalid({**self.undo, "action_type": "unknown"}, "Unbekannter Coach-Aktionstyp.")
-        self.assert_invalid({**self.undo, "action_type": []}, "Unbekannter Coach-Aktionstyp.")
+        self.assert_invalid(
+            {**self.undo, "action_type": "unknown"}, "Unbekannter Coach-Aktionstyp."
+        )
+        self.assert_invalid(
+            {**self.undo, "action_type": []}, "Unbekannter Coach-Aktionstyp."
+        )
         target_error = "Die Aktionsvorschau benötigt ein gültiges Zielsystem."
         for target in (None, "remote", [], {}):
             with self.subTest(target=target):
-                self.assert_invalid({**self.undo, "target_system": target}, target_error)
+                self.assert_invalid(
+                    {**self.undo, "target_system": target}, target_error
+                )
 
     def test_rejects_invalid_object_diff_and_payload_types(self):
         shape_error = "Die Aktionsvorschau benötigt Objekt-IDs, Diff und Payload."
@@ -84,8 +93,12 @@ class CoachProposalValidationTests(unittest.TestCase):
                 self.assert_invalid({**self.undo, "diff": diff}, action_error)
         self.assert_invalid({**self.undo, "target_system": "intervals"}, action_error)
         self.assert_invalid({**self.duplicate, "target_system": "local"}, action_error)
-        self.assert_invalid({**self.undo, "target_system": "local+intervals"}, action_error)
-        self.assert_invalid({**self.duplicate, "target_system": "local+intervals"}, action_error)
+        self.assert_invalid(
+            {**self.undo, "target_system": "local+intervals"}, action_error
+        )
+        self.assert_invalid(
+            {**self.duplicate, "target_system": "local+intervals"}, action_error
+        )
 
 
 if __name__ == "__main__":

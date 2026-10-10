@@ -6,6 +6,7 @@ import math
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.performance import recovery as performance_recovery
 from backend.performance import wellness as performance_wellness
 
@@ -27,7 +28,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -35,7 +36,7 @@ def _as_number(value: Any) -> float | int | None:
 
 
 def _planning_context_date(value: Any) -> str:
-    raw = str(value or "").replace("Z", UTC_OFFSET_SUFFIX)[:10]
+    raw = iso_date_prefix(str(value or "").replace("Z", UTC_OFFSET_SUFFIX))
     try:
         return date.fromisoformat(raw).isoformat()
     except ValueError:
@@ -65,7 +66,7 @@ def _planning_sleep_hours(
         return sleep_hours
     try:
         return round(float(sleep_seconds) / 3600, 1)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

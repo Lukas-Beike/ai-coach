@@ -27,12 +27,16 @@ class DailySyncLoopTests(unittest.TestCase):
     def make_loop(self, scheduler, morning, iterations=1):
         sleeper = LimitedSleeper(iterations)
         logger = Mock(spec=logging.Logger)
-        return DailySyncLoop(
-            scheduler,
-            morning,
-            sleep=sleeper,
-            logger=logger,
-        ), sleeper, logger
+        return (
+            DailySyncLoop(
+                scheduler,
+                morning,
+                sleep=sleeper,
+                logger=logger,
+            ),
+            sleeper,
+            logger,
+        )
 
     def test_sleeps_before_scheduling_then_refreshes_each_iteration(self):
         events = []
@@ -58,7 +62,10 @@ class DailySyncLoopTests(unittest.TestCase):
         with self.assertRaises(StopLoop):
             loop.run()
 
-        self.assertEqual(events, ["sleep", "schedule", "refresh", "sleep", "schedule", "refresh", "sleep"])
+        self.assertEqual(
+            events,
+            ["sleep", "schedule", "refresh", "sleep", "schedule", "refresh", "sleep"],
+        )
         self.assertEqual(sleeper.calls, [300, 300, 300])
 
     def test_maintenance_error_skips_morning_refresh_and_continues(self):

@@ -5,19 +5,48 @@ This module has no application imports and performs no work at import time.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from backend.errors import AppError
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
-SETTINGS_SECRET_KEYS = ("OPENAI_API_KEY", "GEMINI_API_KEY", "INTERVALS_API_KEY", "GARMIN_PASSWORD")
+SETTINGS_SECRET_KEYS = ("OPENAI_API_KEY", "INTERVALS_API_KEY", "GARMIN_PASSWORD")
 SETTINGS_VALUE_KEYS = ("GARMIN_EMAIL", "GARMINTOKENS", "GARMIN_FIXTURE_PATH")
 SETTINGS_KEYS = SETTINGS_SECRET_KEYS + SETTINGS_VALUE_KEYS
+
+
+def validated_openai_base_url(value: str) -> str:
+    """Accept HTTPS endpoints and HTTP endpoints on loopback only."""
+    candidate = str(value or "").strip().rstrip("/")
+    try:
+        parsed = urlsplit(candidate)
+        host = parsed.hostname or ""
+        loopback_host = host.casefold() == "localhost"
+        if not loopback_host:
+            try:
+                loopback_host = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                loopback_host = False
+        if (
+            parsed.scheme != "https" and not (parsed.scheme == "http" and loopback_host)
+        ) or not host:
+            raise ValueError
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError
+        if any(part in {".", ".."} for part in parsed.path.split("/")):
+            raise ValueError
+    except ValueError as exc:
+        raise AppError(
+            500, "OPENAI_BASE_URL muss HTTPS oder HTTP auf Loopback verwenden."
+        ) from exc
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
 
 
 def _read_local_env(path: Path) -> list[str]:
@@ -43,7 +72,9 @@ def _parse_local_env_line(raw_line: str) -> tuple[str, str] | None:
     return key, value
 
 
-def load_local_env(root: Path, data_dir: Path, environ: MutableMapping[str, str] | None = None) -> None:
+def load_local_env(
+    root: Path, data_dir: Path, environ: MutableMapping[str, str] | None = None
+) -> None:
     """Load persisted settings without overriding non-empty process values."""
     target = environ if environ is not None else os.environ
     for env_path in (root / ".env", data_dir / ".env"):
@@ -56,7 +87,7 @@ def load_local_env(root: Path, data_dir: Path, environ: MutableMapping[str, str]
 def _env_int(environ: Mapping[str, str], name: str, default: int) -> int:
     try:
         return int(environ.get(name, str(default)))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 
@@ -71,9 +102,6 @@ class Config:
     openai_api_key: str
     openai_base_url: str
     openai_model: str
-    gemini_api_key: str
-    gemini_model: str
-    ai_provider: str
     intervals_api_key: str
     intervals_athlete_id: str
     garmin_email: str
@@ -86,7 +114,9 @@ class Config:
     data_retention_days: int
 
 
-def security_configuration_error(config: Config, *, sqlcipher_available: bool) -> str | None:
+def security_configuration_error(
+    config: Config, *, sqlcipher_available: bool
+) -> str | None:
     if not config.app_password:
         return "APP_PASSWORD ist nicht konfiguriert. Lege ein langes, zufälliges Passwort als Container-Umgebungsvariable fest."
     if len(config.app_password) < 12:
@@ -113,7 +143,11 @@ def _submitted_settings(values: Any) -> dict[str, str]:
 
 def _read_settings_file(env_path: Path) -> list[str]:
     try:
-        return env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+        return (
+            env_path.read_text(encoding="utf-8").splitlines()
+            if env_path.exists()
+            else []
+        )
     except OSError as exc:
         raise AppError(500, f".env konnte nicht gelesen werden: {exc}") from exc
 
@@ -152,7 +186,9 @@ def save_persistent_settings(
     target = environ if environ is not None else os.environ
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
-        rewritten = _rewrite_settings_lines(_read_settings_file(env_path), updates, target)
+        rewritten = _rewrite_settings_lines(
+            _read_settings_file(env_path), updates, target
+        )
         env_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
     except AppError:
         raise
@@ -161,7 +197,9 @@ def save_persistent_settings(
     return {"status": "ok", "updated": sorted(updates), "restart_required": True}
 
 
-def load_config(root: Path, data_dir: Path, environ: MutableMapping[str, str] | None = None) -> Config:
+def load_config(
+    root: Path, data_dir: Path, environ: MutableMapping[str, str] | None = None
+) -> Config:
     """Load one independent configuration snapshot from explicit paths."""
     target = environ if environ is not None else os.environ
     load_local_env(root, data_dir, target)
@@ -169,11 +207,10 @@ def load_config(root: Path, data_dir: Path, environ: MutableMapping[str, str] | 
     return Config(
         port=_env_int(target, "PORT", 8090),
         openai_api_key=value("OPENAI_API_KEY", ""),
-        openai_base_url=value("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL),
+        openai_base_url=validated_openai_base_url(
+            value("OPENAI_BASE_URL", "").strip() or DEFAULT_OPENAI_BASE_URL
+        ),
         openai_model=value("OPENAI_MODEL", "gpt-6-luna"),
-        gemini_api_key=value("GEMINI_API_KEY", ""),
-        gemini_model=value("GEMINI_MODEL", "gemini-3.8-flash"),
-        ai_provider=value("AI_PROVIDER", "").strip().casefold(),
         intervals_api_key=value("INTERVALS_API_KEY", ""),
         intervals_athlete_id=value("INTERVALS_ATHLETE_ID", "0"),
         garmin_email=value("GARMIN_EMAIL", ""),

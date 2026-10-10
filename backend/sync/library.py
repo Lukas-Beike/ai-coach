@@ -8,8 +8,10 @@ import threading
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.config import Config
 from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -100,7 +102,7 @@ class WorkoutLibraryRemoteReconciler:
     def _object_payload(raw_payload: Any) -> dict[str, Any]:
         try:
             payload = json.loads(raw_payload or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             payload = {}
         return payload if isinstance(payload, dict) else {}
 
@@ -116,7 +118,7 @@ class WorkoutLibraryRemoteReconciler:
             return None
         try:
             local_payload = json.loads(existing.get("payload") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             local_payload = {}
         if not isinstance(local_payload, dict):
             return None
@@ -482,7 +484,7 @@ class WorkoutLibrarySyncStateService:
     def _parse_payload(raw_payload: Any) -> Any:
         try:
             return json.loads(raw_payload or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return {}
 
     @classmethod
@@ -510,7 +512,7 @@ class WorkoutLibrarySyncStateService:
         raw_payload = str(row.get("payload") or "")
         payload_data = cls._parse_payload(raw_payload)
         planned_date = (
-            str(payload_data.get("date") or "").strip()[:10]
+            iso_date_prefix(str(payload_data.get("date") or "").strip())
             if isinstance(payload_data, dict)
             else ""
         )
@@ -574,10 +576,12 @@ class WorkoutLibrarySyncService:
         state_service: WorkoutLibrarySyncStateService,
         calendar_conflict_service: Any | None = None,
         *,
+        local_today: Callable[[], date] | None = None,
         _lock: Any | None = None,
     ):
         self._config = config
         self._provider_client_factory = provider_client_factory
+        self._local_today = local_today
         self._state_service = state_service
         self._calendar_conflict_service = calendar_conflict_service
         self._lock = _lock if _lock is not None else _WORKOUT_LIBRARY_SYNC_LOCK
@@ -585,14 +589,26 @@ class WorkoutLibrarySyncService:
     def plan_remote(
         self, workout_id: str, workout: dict[str, Any], plan_date: str
     ) -> dict[str, Any]:
-        return self._provider_client_factory().plan_library_workout(
-            workout_id, workout, plan_date
+        client = self._provider_client_factory()
+        today = (
+            self._local_today()
+            if self._local_today is not None
+            else client.local_today()
         )
+        payload = planning_workouts.library_workout_event_payload(
+            workout_id,
+            workout,
+            plan_date,
+            today=today,
+        )
+        event = client.plan_library_workout(payload)
+        planning_workouts.validate_intervals_workout_result(workout, event)
+        return event
 
     def sync_calendar_entry(
         self, local_id: str, synced: dict[str, Any]
     ) -> dict[str, Any] | None:
-        planned_date = str(synced.get("date") or "").strip()[:10]
+        planned_date = iso_date_prefix(str(synced.get("date") or "").strip())
         if not planned_date:
             return None
         if self._calendar_conflict_service is not None:
@@ -648,9 +664,10 @@ class WorkoutLibrarySyncService:
         self, row: dict[str, Any], local_workout: dict[str, Any]
     ) -> dict[str, Any] | None:
         external_id = str(row.get("external_id") or "")
+        payload = planning_workouts.library_workout_payload(local_workout)
         if external_id and row.get("sync_state") != "remote_missing":
             updated = self._provider_client_factory().update_library_workout(
-                external_id, local_workout
+                external_id, payload
             )
             return {**updated, "id": external_id}
         remote_workouts = self._provider_client_factory().get_workout_library()
@@ -664,7 +681,5 @@ class WorkoutLibrarySyncService:
         )
         if recovered is not None:
             return recovered
-        created = self._provider_client_factory().create_library_workouts(
-            [local_workout]
-        )
+        created = self._provider_client_factory().create_library_workouts([payload])
         return created[0] if created and isinstance(created[0], dict) else None

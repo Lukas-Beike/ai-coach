@@ -23,7 +23,11 @@ class ChatStreamRegistry:
         cancel_event = threading.Event()
         with self._lock:
             if session in self._streams:
-                raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
+                raise AppError(
+                    409,
+                    "Für diese Sitzung läuft bereits eine Coach-Anfrage.",
+                    reason="chat_already_running",
+                )
             self._streams[session] = {
                 "operation_id": operation_id,
                 "cancel_event": cancel_event,
@@ -35,8 +39,11 @@ class ChatStreamRegistry:
         """Forward a worker event to the currently attached finite SSE response."""
         with self._lock:
             stream = next(
-                (candidate for candidate in self._streams.values()
-                 if candidate["operation_id"] == operation_id),
+                (
+                    candidate
+                    for candidate in self._streams.values()
+                    if candidate["operation_id"] == operation_id
+                ),
                 None,
             )
             events = stream["events"] if stream else None
@@ -60,19 +67,26 @@ class ChatStreamRegistry:
                 return None
             return {"status": "running", "operation_id": stream["operation_id"]}
 
-    def cancel_attached(self, session: str, operation_id: Any) -> tuple[dict[str, Any] | None, Any]:
+    def cancel_attached(
+        self, session: str, operation_id: Any
+    ) -> tuple[dict[str, Any] | None, Any]:
         with self._lock:
             stream = self._streams.get(session)
             if not stream:
                 return None, None
             if operation_id and str(operation_id) != stream["operation_id"]:
-                raise AppError(409, "Die angegebene Coach-Anfrage ist nicht mehr aktiv.")
+                raise AppError(
+                    409, "Die angegebene Coach-Anfrage ist nicht mehr aktiv."
+                )
             cancel_event = stream["cancel_event"]
             cancel_event.set()
             response = getattr(cancel_event, "_provider_response", None) or getattr(
                 cancel_event, "_openai_response", None
             )
-            return {"status": "cancelling", "operation_id": stream["operation_id"]}, response
+            return {
+                "status": "cancelling",
+                "operation_id": stream["operation_id"],
+            }, response
 
     def unregister(self, session: str, operation_id: str) -> None:
         with self._lock:
@@ -105,7 +119,9 @@ class ChatStreamRegistry:
             )
             return event, response
 
-    def cancel_existing_background_event(self, operation_id: str) -> tuple[threading.Event | None, Any]:
+    def cancel_existing_background_event(
+        self, operation_id: str
+    ) -> tuple[threading.Event | None, Any]:
         """Cancel a registered event without recreating state lost on restart."""
         with self._lock:
             event = self._background_events.get(operation_id)

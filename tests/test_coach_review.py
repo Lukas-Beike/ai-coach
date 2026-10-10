@@ -16,7 +16,7 @@ import server_test_support as fixtures
 from support import reset_application_state
 
 from backend.coach.authorization import coach_session_key
-from backend.coach.proposals import (
+from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
     prune_expired_coach_proposals,
 )
@@ -459,7 +459,6 @@ class CoachReviewTests(unittest.TestCase):
                 conversation_id="review-conversation",
                 client_turn_id="foreign",
                 session_csrf_hash="intruder",
-                ai_provider=server.SETTINGS.selected_ai_provider(),
             )
         self.assertEqual(error.exception.status, 403)
         with server.database_manager().unit_of_work() as db:

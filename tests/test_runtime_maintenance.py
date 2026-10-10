@@ -16,14 +16,19 @@ class MaintenanceGateTests(unittest.TestCase):
         with gate.operation():
             self.assertEqual(gate.state(), {"active": False, "running_operations": 1})
             with gate.operation():
-                self.assertEqual(gate.state(), {"active": False, "running_operations": 1})
+                self.assertEqual(
+                    gate.state(), {"active": False, "running_operations": 1}
+                )
         self.assertEqual(gate.state(), {"active": False, "running_operations": 0})
 
     def test_operation_rejects_stale_generation(self):
         gate = maintenance.MaintenanceGate()
         with gate.restore():
             generation = gate.current_generation()
-        with self.assertRaisesRegex(AppError, "Datenlöschung") as caught, gate.operation(generation - 1):
+        with (
+            self.assertRaisesRegex(AppError, "Datenlöschung") as caught,
+            gate.operation(generation - 1),
+        ):
             pass
         self.assertEqual(caught.exception.status, 409)
         self.assertEqual(caught.exception.reason, "operation_invalidated")
@@ -41,7 +46,10 @@ class MaintenanceGateTests(unittest.TestCase):
         thread = threading.Thread(target=hold_restore)
         thread.start()
         self.assertTrue(entered.wait(1))
-        with self.assertRaisesRegex(AppError, "Wartungsmodus") as caught, gate.operation():
+        with (
+            self.assertRaisesRegex(AppError, "Wartungsmodus") as caught,
+            gate.operation(),
+        ):
             pass
         self.assertEqual(caught.exception.status, 503)
         self.assertEqual(caught.exception.reason, "maintenance")
@@ -158,14 +166,19 @@ class MaintenanceDecoratorTests(unittest.TestCase):
             self.assertEqual(claimed({"_maintenance_generation": 0}), "done")
             self.assertIsNone(claimed({"_maintenance_generation": -1}))
             with gate.restore():
-                self.assertIsNone(claimed({"_maintenance_generation": gate.current_generation()}))
+                self.assertIsNone(
+                    claimed({"_maintenance_generation": gate.current_generation()})
+                )
         self.assertEqual(calls, [{"_maintenance_generation": 0}])
 
         @maintenance.claimed_maintenance_operation
         def raises(_job):
             raise AppError(422, "other", reason="other")
 
-        with patch.object(maintenance, "MAINTENANCE_GATE", gate), self.assertRaises(AppError) as caught:
+        with (
+            patch.object(maintenance, "MAINTENANCE_GATE", gate),
+            self.assertRaises(AppError) as caught,
+        ):
             raises({"_maintenance_generation": gate.current_generation()})
         self.assertEqual(caught.exception.reason, "other")
 

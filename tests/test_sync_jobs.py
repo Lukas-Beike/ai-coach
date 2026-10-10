@@ -9,11 +9,13 @@ from unittest.mock import patch
 
 from backend.db.manager import DatabaseManager
 from backend.sync.jobs import (
+    ALLOWED_JOB_TRANSITIONS,
     JobValidationError,
     SyncJobInvalidOperationError,
     SyncJobInvalidStateError,
     SyncJobNotFoundError,
     SyncJobStore,
+    SyncJobTransitionError,
     aggregate_job_status,
     bounded_progress,
     has_active_job,
@@ -30,24 +32,47 @@ from backend.sync.jobs import (
 class SyncJobContractTests(unittest.TestCase):
     def test_nutrition_sync_job_payload_is_bounded_and_unambiguous(self):
         self.assertEqual(
-            normalize_sync_job_request("intervals", "nutrition_sync", {"date": "2026-09-24"}, all_sync_days=30),
-            {"provider": "intervals", "type": "nutrition_sync", "payload": {"date": "2026-09-24"}},
+            normalize_sync_job_request(
+                "intervals", "nutrition_sync", {"date": "2026-09-24"}, all_sync_days=30
+            ),
+            {
+                "provider": "intervals",
+                "type": "nutrition_sync",
+                "payload": {"date": "2026-09-24"},
+            },
         )
         self.assertEqual(
-            normalize_sync_job_request("intervals", "nutrition_sync", {"pending_limit": 31}, all_sync_days=30)["payload"],
+            normalize_sync_job_request(
+                "intervals", "nutrition_sync", {"pending_limit": 31}, all_sync_days=30
+            )["payload"],
             {"pending_limit": 31},
         )
-        manifest = [{
-            "date": "2026-09-24", "revision": 2, "total_kcal": 2000,
-            "total_carbs_g": 220.5, "total_protein_g": 120.0, "total_fat_g": 65.0,
-            "entry_count": 3,
-        }]
-        digest_values = {key: value for key, value in manifest[0].items() if key != "revision"}
+        manifest = [
+            {
+                "date": "2026-09-24",
+                "revision": 2,
+                "total_kcal": 2000,
+                "total_carbs_g": 220.5,
+                "total_protein_g": 120.0,
+                "total_fat_g": 65.0,
+                "entry_count": 3,
+            }
+        ]
+        digest_values = {
+            key: value for key, value in manifest[0].items() if key != "revision"
+        }
         manifest[0]["sha256"] = hashlib.sha256(
-            json.dumps(digest_values, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            json.dumps(
+                digest_values, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+            ).encode("utf-8")
         ).hexdigest()
         self.assertEqual(
-            normalize_sync_job_request("intervals", "nutrition_sync", {"approval_manifest": manifest}, all_sync_days=30)["payload"],
+            normalize_sync_job_request(
+                "intervals",
+                "nutrition_sync",
+                {"approval_manifest": manifest},
+                all_sync_days=30,
+            )["payload"],
             {"approval_manifest": manifest},
         )
         for provider, payload in (
@@ -59,8 +84,13 @@ class SyncJobContractTests(unittest.TestCase):
             ("intervals", {"unexpected": "value"}),
             ("intervals", {"approval_manifest": [{"date": "2026-09-24"}]}),
         ):
-            with self.subTest(provider=provider, payload=payload), self.assertRaises(JobValidationError):
-                normalize_sync_job_request(provider, "nutrition_sync", payload, all_sync_days=30)
+            with (
+                self.subTest(provider=provider, payload=payload),
+                self.assertRaises(JobValidationError),
+            ):
+                normalize_sync_job_request(
+                    provider, "nutrition_sync", payload, all_sync_days=30
+                )
 
     def test_request_contract_normalizes_provider_and_type(self):
         result = validate_job_request(" Garmin ", " REFRESH ", {"days": 30})
@@ -317,18 +347,22 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
         entry = {"type": "competition", "id": "race-1", "sha256": "a" * 64}
         self.assertEqual(
             self.normalize(
-                "intervals", "competition_push",
+                "intervals",
+                "competition_push",
                 {"reason": "approved", "approval_manifest": [entry]},
             )["payload"],
             {"reason": "approved", "approval_manifest": [entry]},
         )
         self.assert_invalid(
-            "intervals", "competition_push",
+            "intervals",
+            "competition_push",
             {"approval_manifest": [{**entry, "sha256": "invalid"}]},
             "Freigabevorschau ist ungültig",
         )
         self.assert_invalid(
-            "intervals", "competition_push", {"reason": "manual"},
+            "intervals",
+            "competition_push",
+            {"reason": "manual"},
             "benötigt eine bestätigte Vorschau",
         )
 
@@ -508,6 +542,46 @@ class SyncJobStoreTests(unittest.TestCase):
             operations,
             available_at,
         )
+
+    def test_job_status_transition_table_allows_only_declared_edges(self):
+        for source, targets in ALLOWED_JOB_TRANSITIONS.items():
+            for target in targets:
+                with self.subTest(source=source, target=target):
+                    job, _ = self.enqueue()
+                    with self.manager.unit_of_work() as db:
+                        db.execute(
+                            "UPDATE sync_jobs SET status=? WHERE id=?",
+                            (source, job["id"]),
+                        )
+                        self.store._transition(
+                            db,
+                            job["id"],
+                            source,
+                            target,
+                            {"updated_at": self.now},
+                        )
+                    self.assertEqual(self.store.state(job["id"])["status"], target)
+
+    def test_job_status_transition_rejects_undeclared_and_raced_edges(self):
+        job, _ = self.enqueue()
+        with self.assertLogs("backend.sync.jobs", level="WARNING") as captured:
+            with (
+                self.manager.unit_of_work() as db,
+                self.assertRaises(SyncJobTransitionError),
+            ):
+                self.store._transition(
+                    db, job["id"], "queued", "completed", {"updated_at": self.now}
+                )
+            with (
+                self.manager.unit_of_work() as db,
+                self.assertRaisesRegex(SyncJobTransitionError, "lost a race"),
+            ):
+                self.store._transition(
+                    db, job["id"], "running", "queued", {"updated_at": self.now}
+                )
+        self.assertEqual(len(captured.records), 2)
+        self.assertNotIn(job["id"], " ".join(captured.output))
+        self.assertEqual(self.store.state(job["id"])["status"], "queued")
 
     def test_read_list_active_and_pending_performance_job(self):
         performance, created = self.enqueue(
@@ -694,6 +768,7 @@ class SyncJobStoreTests(unittest.TestCase):
 
     def test_update_returns_event_snapshot_and_bounds_details(self):
         job, _ = self.enqueue()
+        self.store.claim()
         snapshot = self.store.update(job["id"], "failed", "provider_error", "x" * 700)
         self.assertEqual(
             snapshot,
@@ -724,6 +799,7 @@ class SyncJobStoreTests(unittest.TestCase):
                 {"item_key": "workout-c", "operation": "push"},
             ],
         )
+        self.store.claim()
         snapshot = self.store.update_from_result(
             job["id"],
             {
@@ -757,6 +833,7 @@ class SyncJobStoreTests(unittest.TestCase):
 
     def test_result_without_item_results_uses_fallback_status(self):
         job, _ = self.enqueue()
+        self.store.claim()
         snapshot = self.store.update_from_result(
             job["id"], {"status": "partial"}, "partial", str
         )
@@ -829,6 +906,7 @@ class SyncJobStoreTests(unittest.TestCase):
         queued, _ = self.enqueue()
         with self.assertRaises(SyncJobInvalidStateError):
             self.store.resolve(queued["id"])
+        self.store.claim()
         self.store.update(queued["id"], "completed")
         with self.assertRaises(SyncJobInvalidStateError):
             self.store.resolve(queued["id"])

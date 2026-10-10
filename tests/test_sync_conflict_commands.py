@@ -26,9 +26,7 @@ class SyncConflictCommandServiceTests(unittest.TestCase):
             db.execute(
                 "CREATE TABLE planned_units (local_id TEXT PRIMARY KEY NOT NULL)"
             )
-            db.execute(
-                "INSERT INTO planned_units(local_id) VALUES (?)", ("planned-1",)
-            )
+            db.execute("INSERT INTO planned_units(local_id) VALUES (?)", ("planned-1",))
 
         self.planned_units = Mock()
         self.competitions = Mock()
@@ -94,18 +92,14 @@ class SyncConflictCommandServiceTests(unittest.TestCase):
         self.assertIs(result, expected)
 
     def test_preserves_push_and_refresh_job_classification(self) -> None:
-        self.assertTrue(
-            SyncConflictCommandService.is_push_job({"type": "plan_push"})
-        )
+        self.assertTrue(SyncConflictCommandService.is_push_job({"type": "plan_push"}))
         self.assertTrue(
             SyncConflictCommandService.is_push_job({"type": "competition_push"})
         )
         self.assertTrue(
             SyncConflictCommandService.is_push_job({"type": "nutrition_sync"})
         )
-        self.assertFalse(
-            SyncConflictCommandService.is_push_job({"type": "refresh"})
-        )
+        self.assertFalse(SyncConflictCommandService.is_push_job({"type": "refresh"}))
 
     def test_retry_uses_explicit_queue_retry_action_and_preserves_result(self) -> None:
         queued = {"id": "job-1", "status": "queued"}
@@ -113,9 +107,7 @@ class SyncConflictCommandServiceTests(unittest.TestCase):
 
         result = self.service.retry_job(" job-1 ")
 
-        self.job_queue.resolve.assert_called_once_with(
-            "job-1", {"action": "retry"}
-        )
+        self.job_queue.resolve.assert_called_once_with("job-1", {"action": "retry"})
         self.assertEqual(
             result,
             {"ok": True, "status": "queued", "job": queued},

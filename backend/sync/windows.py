@@ -17,7 +17,9 @@ def split_date_windows(
     if chunk_days < 1:
         raise ValueError("chunk_days must be positive")
     newest = end_date
-    oldest = earliest_date if days == all_days else newest - timedelta(days=max(1, days) - 1)
+    oldest = (
+        earliest_date if days == all_days else newest - timedelta(days=max(1, days) - 1)
+    )
     windows: list[tuple[date, date]] = []
     cursor = oldest
     while cursor <= newest:

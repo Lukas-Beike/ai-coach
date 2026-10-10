@@ -30,7 +30,9 @@ class CoachPlanArtifactToolService:
             return None
 
         if name not in authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+            raise AppError(
+                403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
+            )
 
         if name == "stage_training_plan":
             require_coach_scope(intent, "local_plan")

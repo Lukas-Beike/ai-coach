@@ -7,7 +7,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from functools import partial
 from http.server import (
     BaseHTTPRequestHandler,  # noqa: F401 - compatibility export for tests
@@ -16,11 +16,6 @@ from pathlib import Path
 
 from backend import config as app_config
 from backend import observability
-from backend.athlete.assembly import (
-    AthleteDataAssembly,
-    AthleteRepositories,
-    AthleteRuntime,
-)
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -30,6 +25,7 @@ from backend.athlete.profile import (
     DEFAULT_PROFILE,
     normalize_profile,
 )
+from backend.athlete.sessions import AthleteSessionService
 from backend.backup.assembly import (
     BackupAssembly,
     BackupStorageDependencies,
@@ -117,7 +113,7 @@ from backend.coach.tool_dispatch_assembly import (
     CoachSyncToolOwners,
     CoachToolDispatchAssembly,
 )
-from backend.coach.tools import build_tool_contracts
+from backend.coach.tool_registry import build_tool_contracts
 from backend.coach.turn_assembly import (
     ChatEntryServices,
     CoachTurnAssembly,
@@ -164,7 +160,6 @@ from backend.diagnostics.assembly import (
 from backend.errors import (
     INTERNAL_SERVER_ERROR,
     AppError,  # noqa: F401 - compatibility export for tests
-    public_app_error_status,
 )
 from backend.history.assembly import (
     HistoryAssembly,
@@ -173,6 +168,7 @@ from backend.history.assembly import (
     HistoryPlanningServices,
 )
 from backend.http_api import server as http_server
+from backend.http_api.activity_assembly import ActivityReadAssembly
 from backend.http_api.assembly import (
     HttpApiAssembly,
     HttpAthleteServices,
@@ -199,6 +195,11 @@ from backend.http_api.assembly import (
     HttpRequestBodyLimits,
     HttpResponseServices,
     HttpSyncServices,
+)
+from backend.http_api.athlete_assembly import (
+    AthleteDataAssembly,
+    AthleteRepositories,
+    AthleteRuntime,
 )
 from backend.http_api.auth import (
     SessionAuthService,
@@ -276,6 +277,7 @@ from backend.providers.model_assembly import (
     ModelTransportAssembly,
     ModelTransportClock,
 )
+from backend.providers.openai_error_classifier import OpenAIErrorClassifier
 from backend.providers.transport_assembly import (
     IntervalsTransportSettings,
     ProviderHttpSettings,
@@ -386,6 +388,8 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutProviders,
     SelectedWorkoutSyncAssembly,
 )
+from backend.sync.snapshot_reader import SnapshotRepositoryReader
+from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
 from backend.weather.assembly import (
@@ -415,8 +419,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
-APP_VERSION = "1.12.26"
+APP_VERSION = "1.12.27"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -427,7 +430,6 @@ EXPORT_TIME_LIMIT_SECONDS = 120
 # max_output_tokens. Keep ordinary replies bounded, but leave enough room for
 # an explicitly requested multi-week training plan.
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
-GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
 INTERVALS_SYNC_WAIT_SECONDS = 120
@@ -443,6 +445,7 @@ REDACTOR = observability.Redactor(lambda: CONFIG)
 
 
 KEY_VALUE_REPOSITORY = KeyValueRepository(runtime_clock.utc_now)
+ATHLETE_SESSION_SERVICE = AthleteSessionService()
 PROFILE_REPOSITORY = ProfileRepository(KEY_VALUE_REPOSITORY)
 COMPETITION_REPOSITORY = CompetitionRepository()
 TRAINING_PLAN_REPOSITORY = TrainingPlanRepository()
@@ -490,7 +493,11 @@ def database_manager() -> DatabaseManager:
 def session_auth_service() -> SessionAuthService:
     """Compose the HTTP session owner from the active persistence and security configuration."""
     return get_session_auth_service(
-        database_manager(), DB_LOCK, CONFIG, SQLCIPHER_AVAILABLE
+        database_manager(),
+        DB_LOCK,
+        CONFIG,
+        SQLCIPHER_AVAILABLE,
+        ATHLETE_SESSION_SERVICE,
     )
 
 
@@ -517,7 +524,7 @@ PROVIDER_SYNC = ProviderSyncAssembly(
             config=lambda: CONFIG,
             maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
             logger=LOGGER,
-            now=lambda: datetime.now(timezone.utc),
+            now=lambda: datetime.now(UTC),
         ),
         retry_policy=ProviderRefreshRetryPolicy(
             uuid_factory=lambda: uuid.uuid4().hex,
@@ -554,7 +561,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
             GARMIN_RESYNC_GATE,
             GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
         ),
-        MorningBatteryClock(lambda: datetime.now(timezone.utc), ATHLETE_CLOCK.now),
+        MorningBatteryClock(lambda: datetime.now(UTC), ATHLETE_CLOCK.now),
         MorningBatteryEvents(runtime_events.STATE_EVENT_BUFFER.publish, LOGGER),
         MorningBatteryRetryPolicy(),
     )
@@ -569,6 +576,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             profile=PROFILE_REPOSITORY,
             key_values=KEY_VALUE_REPOSITORY,
             snapshot=SNAPSHOT_REPOSITORY,
+            snapshot_reader=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
             competition=COMPETITION_REPOSITORY,
         ),
         runtime=AthleteRuntime(
@@ -584,6 +592,12 @@ ATHLETE_DATA = AthleteDataAssembly(
 )
 ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
     database_manager_runtime.DATABASE_MANAGER_CACHE
+)
+ACTIVITY_READS = ActivityReadAssembly(
+    database_manager,
+    SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+    ATHLETE_DATA.activity_feedback,
+    lambda: ATHLETE_DATA.equipment().read(),
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
@@ -761,7 +775,7 @@ def initialise_database() -> None:
             db,
             key_values=KEY_VALUE_REPOSITORY,
             now=runtime_clock.utc_now(),
-            current_time=datetime.now(timezone.utc),
+            current_time=datetime.now(UTC),
             default_profile_json=json.dumps(DEFAULT_PROFILE),
             provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
             retention_days=int(getattr(CONFIG, "data_retention_days", -1)),
@@ -770,7 +784,7 @@ def initialise_database() -> None:
 
 
 def key_value_service() -> KeyValueService:
-    return KeyValueService(database_manager(), KEY_VALUE_REPOSITORY, DB_LOCK)
+    return KeyValueService(database_manager, KEY_VALUE_REPOSITORY, DB_LOCK)
 
 
 SYNC_PERIOD_DEFAULTS = {"intervals": 84, "garmin": 84}
@@ -828,7 +842,7 @@ GARMIN_ASSEMBLY = GarminAssembly(
         ),
         control=GarminSyncControl(
             utc_now=runtime_clock.utc_now,
-            datetime_now=lambda: datetime.now(timezone.utc),
+            datetime_now=lambda: datetime.now(UTC),
             resync_gate=GARMIN_RESYNC_GATE,
             operation_observer=PROVIDER_SYNC.operation_observer,
             lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
@@ -842,7 +856,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
         persistence=SyncQueuePersistence(
             database_manager=database_manager,
             now=runtime_clock.utc_now,
-            current_time=lambda: datetime.now(timezone.utc),
+            current_time=lambda: datetime.now(UTC),
             uuid_factory=lambda: uuid.uuid4().hex,
         ),
         worker=SyncQueueWorker(
@@ -950,22 +964,17 @@ PROVIDER_TRANSPORT = ProviderTransportAssembly(
                 observability.safe_response_headers, redact=REDACTOR.redact_text
             ),
             opener=lambda: provider_http.urlopen,
+            provider_error_details=OpenAIErrorClassifier(
+                provider_state_service, runtime_clock.utc_now
+            ),
         ),
         operation=ProviderOperationContext(
-            provider_state=lambda: provider_state.get_provider_state_service(
-                database_manager(),
-                KEY_VALUE_REPOSITORY,
-                DB_LOCK,
-                runtime_clock.utc_now,
-                lambda: ATHLETE_CLOCK.now().date(),
-                LOGGER,
-            ),
-            now=runtime_clock.utc_now,
             operation_context=sync_observation.operation_context,
         ),
         intervals=IntervalsTransportSettings(
             config=lambda: CONFIG,
             athlete_now=ATHLETE_CLOCK.now,
+            operation=INTERVALS_RESYNC_GATE.operation,
         ),
     ),
 )
@@ -982,17 +991,11 @@ NUTRITION_ASSEMBLY = NutritionAssembly(
             ),
             read_profile=lambda: ATHLETE_DATA.profile().get(),
             photo_extractor=lambda: NutritionPhotoExtractionService(
-                selected_provider=SETTINGS.selected_ai_provider,
                 selected_model=SETTINGS.selected_model,
                 openai_request=lambda path, payload: (
                     MODEL_TRANSPORT.openai_responses_client().request(path, payload)
                 ),
                 openai_path=OPENAI_RESPONSES_PATH,
-                gemini_generate=lambda model, payload: (
-                    MODEL_TRANSPORT.gemini_json_client().generate(
-                        model, payload, operation="nutrition_packaging_extraction"
-                    )
-                ),
             ),
         ),
     )
@@ -1006,7 +1009,6 @@ MODEL_TRANSPORT = ModelTransportAssembly(
             state_service=provider_state_service,
         ),
         endpoints=ModelEndpointSettings(
-            gemini_base_url=GEMINI_API_BASE_URL,
             default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
             openai_responses_path=OPENAI_RESPONSES_PATH,
             json_media_type=JSON_MEDIA_TYPE,
@@ -1048,14 +1050,10 @@ COACH_CONVERSATION = CoachConversationAssembly(
         profile_service=ATHLETE_DATA.profile,
     ),
     model=ConversationModelDependencies(
-        settings=SETTINGS,
         model_transport=MODEL_TRANSPORT,
         default_thinking_level=SETTINGS.selected_thinking_level,
         default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
         json_media_type=JSON_MEDIA_TYPE,
-        max_gemini_inline_image_bytes=lambda: (
-            coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES
-        ),
     ),
 )
 COACH_LOCAL = CoachLocalAssembly(
@@ -1122,6 +1120,7 @@ WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
             event_buffer=runtime_events.STATE_EVENT_BUFFER,
             redactor=REDACTOR,
             utc_now=runtime_clock.utc_now,
+            local_today=lambda: ATHLETE_CLOCK.now().date(),
         ),
         uuid_factory=uuid.uuid4,
     )
@@ -1151,18 +1150,20 @@ WEATHER_ASSEMBLY = WeatherAssembly(
             profile_service=ATHLETE_DATA.profile,
         ),
         provider=WeatherProviderRuntime(
-            client_factory=lambda: weather_provider.WeatherClient(
+            client_factory=lambda forecast_days: weather_provider.WeatherClient(
                 PROVIDER_TRANSPORT.json_http_client().request,
                 runtime_clock.utc_now,
                 LOGGER,
+                forecast_days=forecast_days,
             ),
             refresh_tracker=PROVIDER_SYNC.refresh_tracker,
             operation_context=sync_observation.OPERATION_CONTEXT,
             operation_id_factory=lambda: uuid.uuid4().hex,
         ),
         sync=WeatherSyncRuntime(
+            service_factory=WeatherSyncService,
             maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-            now=lambda: datetime.now(timezone.utc),
+            now=lambda: datetime.now(UTC),
             today=lambda: ATHLETE_CLOCK.now().date(),
             adaptive_preview_service=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
             observer=PROVIDER_SYNC.operation_observer,
@@ -1181,7 +1182,7 @@ COACH_CONTEXT = CoachContextAssembly(
             activity_feedback_service=ATHLETE_DATA.activity_feedback,
             today=lambda: ATHLETE_CLOCK.now().date(),
             local_date=lambda: ATHLETE_CLOCK.now().date(),
-            utc_now=lambda: datetime.now(timezone.utc),
+            utc_now=lambda: datetime.now(UTC),
         ),
         planning=CoachContextPlanningSources(
             checkin_service=ATHLETE_DATA.checkin,
@@ -1217,11 +1218,11 @@ COACH_CONTEXT = CoachContextAssembly(
 COACH_READ_TOOLS = CoachReadToolsAssembly(
     dependencies=CoachReadToolsAssembly.Inputs(
         activity=CoachActivityReadSources(
-            activity_read_service=ATHLETE_DATA.activity_read,
+            activity_read_service=ACTIVITY_READS.activity_read,
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             profile_service=ATHLETE_DATA.profile,
             today=lambda: ATHLETE_CLOCK.now().date(),
-            report_service=lambda: HTTP_API.training_reports(),
+            report_services=lambda: HTTP_API.training_reports(),
         ),
         planning=CoachPlanningReadSources(
             structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
@@ -1232,7 +1233,8 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
             training_plan_service=PLANNING_DATA.training_plan,
         ),
         policy=CoachReadToolPolicy(
-            nutrition_service=NUTRITION_ASSEMBLY.service,
+            nutrition_diary=NUTRITION_ASSEMBLY.diary_service,
+            nutrition_meal_library=NUTRITION_ASSEMBLY.meal_library_service,
             training_change_limit=lambda: coach_limits.COACH_TRAINING_CHANGE_LIMIT,
             context_service=COACH_CONTEXT.structured_context_service,
         ),
@@ -1243,7 +1245,8 @@ COACH_PROPOSALS = CoachProposalAssembly(
         persistence=ProposalPersistence(
             database_manager=database_manager,
             sync_state_repository=SYNC_PERSISTENCE.state_repository,
-            nutrition_service=NUTRITION_ASSEMBLY.service,
+            nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
+            nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         ),
         execution=ProposalExecutionOwners(
             duplicate_activity_service=ATHLETE_DATA.duplicate_activity,
@@ -1466,7 +1469,8 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
         checkin_service=lambda: ATHLETE_DATA.checkin(),
         activity_feedback_service=lambda: ATHLETE_DATA.activity_feedback(),
         competition_service=lambda: PLANNING_DATA.competition(),
-        nutrition_service=NUTRITION_ASSEMBLY.service,
+        nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
+        nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         equipment_service=ATHLETE_DATA.equipment,
     ),
     profile_tools=CoachProfileToolDependencies(
@@ -1584,9 +1588,6 @@ COACH_BACKGROUND_JOBS = CoachBackgroundJobsAssembly(
             max_attachment_storage_bytes=lambda: (
                 coach_attachments.MAX_ATTACHMENT_STORAGE_BYTES
             ),
-            max_gemini_inline_image_bytes=lambda: (
-                coach_attachments.MAX_GEMINI_INLINE_IMAGE_BYTES
-            ),
         ),
     )
 )
@@ -1644,6 +1645,7 @@ PUBLIC_STATE = PublicStateAssembly(
             app_name=APP_NAME,
             app_version=APP_VERSION,
             key_values=lambda: KEY_VALUE_REPOSITORY,
+            key_value_service=key_value_service,
         ),
         owners=PublicStateOwnerAssemblies(
             snapshot_repository=SNAPSHOT_REPOSITORY,
@@ -1755,7 +1757,6 @@ HTTP_API = HttpApiAssembly(
                         ),
                         errors=HttpHandlerErrors(
                             redact_text=REDACTOR.redact_text,
-                            public_app_error_status=public_app_error_status,
                             internal_server_error=INTERNAL_SERVER_ERROR,
                         ),
                         body_limits=HttpRequestBodyLimits(
@@ -1815,7 +1816,7 @@ HTTP_API = HttpApiAssembly(
             athlete=HttpAthleteServices(
                 profile=ATHLETE_DATA.profile,
                 competition=PLANNING_DATA.competition,
-                activity_read=ATHLETE_DATA.activity_read,
+                activity_read=ACTIVITY_READS.activity_read,
                 equipment=ATHLETE_DATA.equipment,
                 activity_feedback=ATHLETE_DATA.activity_feedback,
                 checkin=ATHLETE_DATA.checkin,
@@ -1832,6 +1833,7 @@ HTTP_API = HttpApiAssembly(
                 change_history=HISTORY.change_history_service,
                 undo=HISTORY.undo_service,
             ),
+            workout_library=PLANNING_DATA.workout_library,
         ),
         domains=HttpDomainRouteServices(
             privacy=HttpPrivacyServices(
@@ -1853,7 +1855,8 @@ HTTP_API = HttpApiAssembly(
                 uuid_factory=lambda: uuid.uuid4().hex,
             ),
             nutrition=HttpNutritionServices(
-                nutrition=NUTRITION_ASSEMBLY.service,
+                diary=NUTRITION_ASSEMBLY.diary_service,
+                meal_library=NUTRITION_ASSEMBLY.meal_library_service,
                 intervals_sync=NUTRITION_ASSEMBLY.intervals_sync_service,
                 audio_transcription=MODEL_TRANSPORT.audio_transcription_client,
             ),

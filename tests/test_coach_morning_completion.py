@@ -42,7 +42,9 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
         self.lock = threading.RLock()
         self.key_values = KeyValueRepository(lambda: "kv-updated")
         with self.manager.unit_of_work() as db:
-            db.execute("CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)")
+            db.execute(
+                "CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+            )
             db.execute(
                 "CREATE TABLE coach_commands(client_turn_id TEXT PRIMARY KEY, status TEXT, "
                 "receipt TEXT, updated_at TEXT)"
@@ -53,7 +55,9 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
         self.manager.close()
         self.temp_dir.cleanup()
 
-    def service(self, quick_actions: dict[str, Any]) -> MorningCoachJobCompletionService:
+    def service(
+        self, quick_actions: dict[str, Any]
+    ) -> MorningCoachJobCompletionService:
         return MorningCoachJobCompletionService(
             self.manager,
             self.lock,
@@ -63,7 +67,9 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
             lambda: "utc-updated",
         )
 
-    def test_completed_command_gets_compact_unicode_receipt_in_two_transactions(self) -> None:
+    def test_completed_command_gets_compact_unicode_receipt_in_two_transactions(
+        self,
+    ) -> None:
         with self.manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO coach_commands(client_turn_id, status, receipt, updated_at) "
@@ -134,7 +140,9 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(row, {"receipt": '{"status":"running"}', "updated_at": "old"})
 
-    def test_missing_command_keeps_existing_empty_receipt_return_semantics(self) -> None:
+    def test_missing_command_keeps_existing_empty_receipt_return_semantics(
+        self,
+    ) -> None:
         self.manager.uow_count = 0
 
         result = self.service({"morning_checkin": False}).complete("missing")
@@ -145,11 +153,11 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
             self.assertEqual(
                 self.key_values.get(db, "morning_checkin_date"), "2026-09-24"
             )
-            self.assertEqual(
-                self.key_values.get(db, "morning_checkin_status"), "ready"
-            )
+            self.assertEqual(self.key_values.get(db, "morning_checkin_status"), "ready")
 
-    def test_quick_actions_failure_keeps_first_commit_and_does_not_touch_receipt(self) -> None:
+    def test_quick_actions_failure_keeps_first_commit_and_does_not_touch_receipt(
+        self,
+    ) -> None:
         with self.manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO coach_commands(client_turn_id, status, receipt, updated_at) "
@@ -177,9 +185,7 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
             self.assertEqual(
                 self.key_values.get(db, "morning_checkin_date"), "2026-09-24"
             )
-            self.assertEqual(
-                self.key_values.get(db, "morning_checkin_status"), "ready"
-            )
+            self.assertEqual(self.key_values.get(db, "morning_checkin_status"), "ready")
             row = db.execute(
                 "SELECT receipt, updated_at FROM coach_commands WHERE client_turn_id=?",
                 ("turn-quick-actions-error",),

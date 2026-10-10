@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from backend.config import Config
 from backend.errors import AppError
-from backend.nutrition.service import (
-    NutritionService,
+from backend.nutrition.contracts import (
     nutrition_approval_item,
     nutrition_approval_item_matches,
 )
 from backend.providers.intervals import IntervalsApiClient
+
+if TYPE_CHECKING:
+    from backend.nutrition.diary import NutritionDiaryService
 
 logger = logging.getLogger("ai_coach.nutrition.sync")
 
@@ -25,11 +27,11 @@ class IntervalsNutritionSyncService:
         self,
         config: Config,
         api_client: IntervalsApiClient,
-        nutrition_service: NutritionService,
+        diary_service: NutritionDiaryService,
     ) -> None:
         self._config = config
         self._api_client = api_client
-        self._nutrition_service = nutrition_service
+        self._diary_service = diary_service
 
     @property
     def _athlete_id(self) -> str:
@@ -40,7 +42,7 @@ class IntervalsNutritionSyncService:
         self, meal_date: str, *, approval: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """Push daily calorie and macro aggregates for a specific date to Intervals.icu."""
-        summary = self._nutrition_service.get_sync_snapshot(meal_date)
+        summary = self._diary_service.get_sync_snapshot(meal_date)
         if approval is not None and not nutrition_approval_item_matches(
             approval, nutrition_approval_item(summary)
         ):
@@ -73,7 +75,7 @@ class IntervalsNutritionSyncService:
             current = (
                 False
                 if has_unknown_macros
-                else self._nutrition_service.mark_date_synced(meal_date, revision)
+                else self._diary_service.mark_date_synced(meal_date, revision)
             )
             return {
                 "ok": True,
@@ -106,7 +108,7 @@ class IntervalsNutritionSyncService:
         ):
             raise AppError(409, "The approved nutrition manifest is invalid.")
         dates: list[str] = [value for value in raw_dates if isinstance(value, str)]
-        current = self._nutrition_service.approval_manifest(dates=dates)
+        current = self._diary_service.approval_manifest(dates=dates)
         if len(current) != len(manifest) or any(
             not nutrition_approval_item_matches(expected, actual)
             for expected, actual in zip(manifest, current)
@@ -142,7 +144,7 @@ class IntervalsNutritionSyncService:
             raise AppError(400, "Ungültiges Sync-Limit.") from exc
         if not 1 <= limit <= 31:
             raise AppError(400, "Das Sync-Limit muss zwischen 1 und 31 Tagen liegen.")
-        unsynced_dates = self._nutrition_service.list_unsynced_dates(limit=limit)
+        unsynced_dates = self._diary_service.list_unsynced_dates(limit=limit)
         synced: list[str] = []
         pending: list[str] = []
         errors: dict[str, str] = {}

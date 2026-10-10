@@ -5,7 +5,7 @@ import threading
 import unittest
 import uuid
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from datetime import datetime as _local_datetime
 from unittest.mock import patch
 
@@ -696,7 +696,7 @@ class ServerPlanningTests(ServerTestCase):
         with patch.object(
             server.ATHLETE_CLOCK,
             "now",
-            return_value=datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc),
+            return_value=datetime(2026, 8, 26, 12, 0, tzinfo=UTC),
         ):
             enriched, weekly = activity_calendar_projection.planning_compliance_state(
                 events, activities, today
@@ -1125,13 +1125,16 @@ class ServerPlanningTests(ServerTestCase):
             ) as folder,
             patch.object(client, "put", return_value={"id": "remote-1"}) as put,
         ):
-            client.update_library_workout(
-                "remote-1",
+            payload = planning_workouts.library_workout_payload(
                 {
                     "name": "Easy",
                     "description": "- 30m Z2",
                     "type": "Ride",
-                },
+                }
+            )
+            client.update_library_workout(
+                "remote-1",
+                payload,
             )
         folder.assert_called_once_with()
         self.assertEqual(
@@ -1159,15 +1162,14 @@ class ServerPlanningTests(ServerTestCase):
                 client, "post", side_effect=[{"id": 12345}, {"id": "remote-1"}]
             ) as post,
         ):
-            client.create_library_workouts(
-                [
-                    {
-                        "name": "Regeneration",
-                        "description": "- 30m Z1 HR Locker bewegen",
-                        "sport": "Recovery Session",
-                    }
-                ]
+            payload = planning_workouts.library_workout_payload(
+                {
+                    "name": "Regeneration",
+                    "description": "- 30m Z1 HR Locker bewegen",
+                    "sport": "Recovery Session",
+                }
             )
+            client.create_library_workouts([payload])
         self.assertEqual(post.call_args_list[1].args[1]["type"], "Other")
 
     def test_workout_sport_aliases_are_normalized_before_storage(self):
@@ -1272,13 +1274,22 @@ class ServerPlanningTests(ServerTestCase):
             for operation in (
                 lambda: client.create_library_workouts(
                     [
-                        {"type": "Run", "description": "- 6km Z1 HR"},
-                        workout,
+                        planning_workouts.library_workout_payload(
+                            {"type": "Run", "description": "- 6km Z1 HR"}
+                        ),
+                        planning_workouts.library_workout_payload(workout),
                     ]
                 ),
-                lambda: client.update_library_workout("synthetic", workout),
+                lambda: client.update_library_workout(
+                    "synthetic", planning_workouts.library_workout_payload(workout)
+                ),
                 lambda: client.plan_library_workout(
-                    "synthetic", workout, workout["date"]
+                    planning_workouts.library_workout_event_payload(
+                        "synthetic",
+                        workout,
+                        workout["date"],
+                        today=server.ATHLETE_CLOCK.now().date(),
+                    )
                 ),
                 lambda: planning_workouts.workout_event_payload(
                     "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
@@ -1503,7 +1514,7 @@ class ServerPlanningTests(ServerTestCase):
         )
         self.assertEqual(result["status"], "local")
 
-    def test_outstanding_plan_drafts_remain_visible_across_provider_conversations(self):
+    def test_outstanding_plan_drafts_remain_visible_in_openai_conversation(self):
         draft = server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {
                 "payload": {
@@ -1520,13 +1531,13 @@ class ServerPlanningTests(ServerTestCase):
                     ],
                 }
             },
-            "gemini-conversation",
-            "gemini-draft",
+            conversation_id="openai-conversation",
+            client_turn_id="draft-turn",
         )
 
         with server.database_manager().unit_of_work() as db:
             server.CHAT_REPOSITORY.add(
-                db, "user", "Synthetic draft request", client_turn_id="gemini-draft"
+                db, "user", "Synthetic draft request", client_turn_id="draft-turn"
             )
         refs = server.COACH_CONVERSATION.dialogue_read_service().artifact_refs()
 

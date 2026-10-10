@@ -9,7 +9,7 @@ import threading
 import unittest
 import zipfile
 from dataclasses import replace
-from datetime import date, timedelta, timezone
+from datetime import UTC, date, timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.parse import urlencode
@@ -196,7 +196,6 @@ import os, sys
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, sys.argv[1])
-os.environ.update(GEMINI_API_KEY='synthetic-inherited', AI_PROVIDER='gemini')
 read = Path.read_text
 def deny(path, *args, **kwargs):
     if path.name == '.env':
@@ -204,8 +203,6 @@ def deny(path, *args, **kwargs):
     return read(path, *args, **kwargs)
 with patch.object(Path, 'read_text', deny):
     import server_test_support
-assert server_test_support.server.CONFIG.gemini_api_key == ''
-assert server_test_support.server.CONFIG.ai_provider == 'openai'
 """
         result = subprocess.run(
             [sys.executable, "-c", script, str(Path(__file__).parent)],
@@ -270,12 +267,15 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         feed = b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:synthetic\r\nDTSTART;VALUE=DATE:20260906\r\nDTEND;VALUE=DATE:20260909\r\nSUMMARY:Trip\r\nDESCRIPTION:[SHORT_ONLY]\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         events = calendar_provider.parse_ical_calendar(
             feed,
-            local_zone=timezone.utc,
+            local_zone=UTC,
             today=date(2026, 9, 7),
             window_start=date(2026, 9, 7),
             window_end=date(2026, 9, 10),
         )
         self.assertEqual(len(events), 1)
+        from backend.calendar.ical_mapping import calendar_event_constraints
+
+        events = [calendar_event_constraints(event) for event in events]
         self.assertTrue(events[0]["short_only"])
         self.assertEqual(
             planning_context.external_calendar_event_dates(
@@ -286,7 +286,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
         self.assertEqual(
             calendar_provider.parse_ical_calendar(
                 feed,
-                local_zone=timezone.utc,
+                local_zone=UTC,
                 today=date(2026, 9, 9),
                 window_start=date(2026, 9, 9),
                 window_end=date(2026, 9, 10),
@@ -442,6 +442,7 @@ assert server_test_support.server.CONFIG.ai_provider == 'openai'
 
     def test_completed_async_job_refreshes_model_context(self):
         job = server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 1})
+        server.SYNC_JOB_QUEUE.store().claim()
         server.SYNC_JOB_QUEUE.outcome_service().update(job["id"], "completed")
         steps = iter(
             [

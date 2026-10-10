@@ -19,7 +19,9 @@ class ChatPostRoutesTests(unittest.TestCase):
             self.submission_factory, self.reset_factory, max_request_bytes=12345
         )
 
-    def test_chat_submission_uses_bounded_body_and_expected_service_arguments(self) -> None:
+    def test_chat_submission_uses_bounded_body_and_expected_service_arguments(
+        self,
+    ) -> None:
         result = {"job_id": "synthetic-job", "status": "queued"}
         self.handler.read_json.return_value = {
             "client_turn_id": "  synthetic-turn-id  ",
@@ -36,7 +38,9 @@ class ChatPostRoutesTests(unittest.TestCase):
         self.submission_factory.assert_called_once_with()
         self.reset_factory.assert_not_called()
         self.submission_service.enqueue.assert_called_once_with(
-            "123", "synthetic-turn-id", "synthetic-session-hash",
+            "123",
+            "synthetic-turn-id",
+            "synthetic-session-hash",
             request_kind="synthetic-kind",
             attachments=[{"id": "synthetic-attachment"}],
         )
@@ -129,12 +133,18 @@ class ChatPostRoutesTests(unittest.TestCase):
 
         self.submission_factory.assert_has_calls([call(), call()])
         first.enqueue.assert_called_once_with(
-            "", "first-turn", "synthetic-session-hash",
-            request_kind=None, attachments=None,
+            "",
+            "first-turn",
+            "synthetic-session-hash",
+            request_kind=None,
+            attachments=None,
         )
         second.enqueue.assert_called_once_with(
-            "", "second-turn", "synthetic-session-hash",
-            request_kind=None, attachments=None,
+            "",
+            "second-turn",
+            "synthetic-session-hash",
+            request_kind=None,
+            attachments=None,
         )
         self.reset_factory.assert_has_calls([call(), call()])
         first_reset.reset.assert_called_once_with()

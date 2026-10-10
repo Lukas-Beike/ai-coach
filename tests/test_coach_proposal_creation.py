@@ -11,9 +11,9 @@ from pathlib import Path
 from unittest.mock import Mock
 from uuid import UUID
 
-from backend.coach.proposals import (
+from backend.coach.proposal_creation import CoachProposalCreationService
+from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
-    CoachProposalCreationService,
     coach_action_hash,
 )
 from backend.db import DatabaseManager, row_factory
@@ -145,17 +145,30 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.assertNotIn("private", repr(result))
         self.sync_state_repository.latest_snapshot.assert_not_called()
 
-    def test_local_nutrition_write_requires_bound_request_and_shows_safe_values(self) -> None:
+    def test_local_nutrition_write_requires_bound_request_and_shows_safe_values(
+        self,
+    ) -> None:
         service = self._service()
         intent = {
-            "operation": "save_nutrition_template", "target_system": "local",
+            "operation": "save_nutrition_template",
+            "target_system": "local",
             "authorization_scope": ["local_nutrition"],
             "request": {"source_message_ids": [7]},
         }
-        args = {"payload": {"name": "Recovery bowl", "description": "Oats and yogurt", "kcal": 420}}
+        args = {
+            "payload": {
+                "name": "Recovery bowl",
+                "description": "Oats and yogurt",
+                "kcal": 420,
+            }
+        }
         result = service.create_local_write(
-            "save_nutrition_template", args, intent, conversation_id="conversation-1",
-            client_turn_id="turn-1", session_csrf_hash="session-1",
+            "save_nutrition_template",
+            args,
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
+            session_csrf_hash="session-1",
         )
         action = result["proposed_action"]
         self.assertEqual(action["action_type"], "local_coach_write")
@@ -164,115 +177,235 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.assertNotIn("payload", action)
         with self.assertRaises(AppError):
             service.create_local_write(
-                "save_nutrition_template", args,
+                "save_nutrition_template",
+                args,
                 {**intent, "request": {"source_message_ids": []}},
-                conversation_id="conversation-1", client_turn_id="turn-1",
+                conversation_id="conversation-1",
+                client_turn_id="turn-1",
                 session_csrf_hash="session-1",
             )
         self.assertEqual(len(self._rows()), 1)
 
     def test_local_nutrition_update_preview_shows_retained_macros(self) -> None:
         nutrition = Mock()
-        nutrition.list_templates.return_value = [{
-            "id": "template-1", "name": "Recovery bowl", "description": "Oats",
-            "kcal": 420, "carbs_g": 64, "protein_g": 22, "fat_g": 8,
-        }]
-        nutrition._prepare_values.side_effect = lambda values: {
-            **values, "nutrition_basis": {"kind": "manual"}
+        nutrition.list_templates.return_value = [
+            {
+                "id": "template-1",
+                "name": "Recovery bowl",
+                "description": "Oats",
+                "kcal": 420,
+                "carbs_g": 64,
+                "protein_g": 22,
+                "fat_g": 8,
+            }
+        ]
+        nutrition.prepare_values.side_effect = lambda values: {
+            **values,
+            "nutrition_basis": {"kind": "manual"},
         }
         intent = {
-            "operation": "save_nutrition_template", "target_system": "local",
+            "operation": "save_nutrition_template",
+            "target_system": "local",
             "authorization_scope": ["local_nutrition"],
             "request": {"source_message_ids": [7]},
         }
-        result = self._service(nutrition_service=lambda: nutrition).create_local_write(
+        result = self._service(
+            nutrition_meal_library_service=lambda: nutrition
+        ).create_local_write(
             "save_nutrition_template",
-            {"payload": {"id": "template-1", "name": "Recovery bowl", "description": "Oats with berries", "kcal": 450}},
-            intent, conversation_id="conversation-1", client_turn_id="turn-1",
+            {
+                "payload": {
+                    "id": "template-1",
+                    "name": "Recovery bowl",
+                    "description": "Oats with berries",
+                    "kcal": 450,
+                }
+            },
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
             session_csrf_hash="session-1",
         )
         self.assertEqual(
             result["proposed_action"]["diff"][0],
-            {"name": "Recovery bowl", "description": "Oats with berries", "kcal": "450", "carbs": "64", "protein": "22", "fat": "8"},
+            {
+                "name": "Recovery bowl",
+                "description": "Oats with berries",
+                "kcal": "450",
+                "carbs": "64",
+                "protein": "22",
+                "fat": "8",
+            },
         )
 
     def test_template_update_preview_drops_stale_database_provenance(self) -> None:
         nutrition = Mock()
-        nutrition.list_templates.return_value = [{
-            "id": "template-1", "name": "Oats", "description": "Oats",
-            "kcal": 174, "carbs_g": 30, "protein_g": 6, "fat_g": 3,
-            "source": "coach", "nutrition_basis": {
-                "kind": "database", "ingredients": [{
-                    "source": "BLS", "name": "Oats", "amount": 50,
-                    "unit": "g", "basis_unit": "g",
-                }],
-            },
-        }]
-        nutrition._prepare_values.side_effect = lambda values: {
-            **values, "nutrition_basis": {"kind": "estimate"}
+        nutrition.list_templates.return_value = [
+            {
+                "id": "template-1",
+                "name": "Oats",
+                "description": "Oats",
+                "kcal": 174,
+                "carbs_g": 30,
+                "protein_g": 6,
+                "fat_g": 3,
+                "source": "coach",
+                "nutrition_basis": {
+                    "kind": "database",
+                    "ingredients": [
+                        {
+                            "source": "BLS",
+                            "name": "Oats",
+                            "amount": 50,
+                            "unit": "g",
+                            "basis_unit": "g",
+                        }
+                    ],
+                },
+            }
+        ]
+        nutrition.prepare_values.side_effect = lambda values: {
+            **values,
+            "nutrition_basis": {"kind": "estimate"},
         }
         intent = {
-            "operation": "save_nutrition_template", "target_system": "local",
+            "operation": "save_nutrition_template",
+            "target_system": "local",
             "authorization_scope": ["local_nutrition"],
             "request": {"source_message_ids": [7]},
         }
-        result = self._service(nutrition_service=lambda: nutrition).create_local_write(
+        result = self._service(
+            nutrition_meal_library_service=lambda: nutrition
+        ).create_local_write(
             "save_nutrition_template",
-            {"payload": {
-                "id": "template-1", "name": "Oats", "description": "Oats",
-                "kcal": 200,
-            }}, intent, conversation_id="conversation-1", client_turn_id="turn-1",
+            {
+                "payload": {
+                    "id": "template-1",
+                    "name": "Oats",
+                    "description": "Oats",
+                    "kcal": 200,
+                }
+            },
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
             session_csrf_hash="session-1",
         )
         diff = result["proposed_action"]["diff"][0]
         self.assertEqual(diff["kcal"], "200")
         self.assertNotIn("source", diff)
 
-    def test_database_preview_uses_server_values_and_freezes_the_calculation(self) -> None:
+    def test_database_preview_uses_server_values_and_freezes_the_calculation(
+        self,
+    ) -> None:
         nutrition = Mock()
         nutrition.food_database = FoodDatabaseService()
-        args = {"payload": {"name": "Oats", "description": "50 g oats", "kcal": 999,
-                            "food_ingredients": [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]}}
-        intent = {"operation": "save_nutrition_template", "target_system": "local", "authorization_scope": ["local_nutrition"], "request": {"source_message_ids": [7]}}
-        result = self._service(nutrition_service=lambda: nutrition).create_local_write(
-            "save_nutrition_template", args, intent, conversation_id="conversation-1",
-            client_turn_id="turn-1", session_csrf_hash="session-1",
+        args = {
+            "payload": {
+                "name": "Oats",
+                "description": "50 g oats",
+                "kcal": 999,
+                "food_ingredients": [
+                    {"food_id": "bls:C133000", "amount": 50, "unit": "g"}
+                ],
+            }
+        }
+        intent = {
+            "operation": "save_nutrition_template",
+            "target_system": "local",
+            "authorization_scope": ["local_nutrition"],
+            "request": {"source_message_ids": [7]},
+        }
+        result = self._service(
+            nutrition_meal_library_service=lambda: nutrition
+        ).create_local_write(
+            "save_nutrition_template",
+            args,
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
+            session_csrf_hash="session-1",
         )
         diff = result["proposed_action"]["diff"][0]
         self.assertEqual(diff["kcal"], "174")
         self.assertIn("Max Rubner-Institut", diff["source"])
         self.assertIn("50 g (Basis 100 g)", diff["source"])
-        stored = json.loads(self._rows()[0]["payload"])
+        stored = json.loads(str(self._rows()[0]["payload"]))
         self.assertEqual(stored["arguments"]["_food_calculation"]["kcal"], 174)
 
     def test_composite_preview_freezes_complete_totals_and_provenance(self) -> None:
         nutrition = Mock()
-        components = [{"kind": "estimate", "name": "Synthetic topping", "amount": 1,
-                       "unit": "portion", "kcal": 25, "carbs_g": 4,
-                       "protein_g": 1, "fat_g": 0.5}]
-        calculation = {"kcal": 25, "carbs_g": 4, "protein_g": 1, "fat_g": 0.5,
-                       "nutrition_basis": {"kind": "composite", "version": 1,
-                           "components": [{"kind": "estimate", "name": "Synthetic topping",
-                               "amount": 1, "unit": "portion", "kcal": 25,
-                               "carbs_g": 4, "protein_g": 1, "fat_g": 0.5,
-                               "nutrition_basis": {"kind": "estimate"}}]}}
+        components = [
+            {
+                "kind": "estimate",
+                "name": "Synthetic topping",
+                "amount": 1,
+                "unit": "portion",
+                "kcal": 25,
+                "carbs_g": 4,
+                "protein_g": 1,
+                "fat_g": 0.5,
+            }
+        ]
+        calculation = {
+            "kcal": 25,
+            "carbs_g": 4,
+            "protein_g": 1,
+            "fat_g": 0.5,
+            "nutrition_basis": {
+                "kind": "composite",
+                "version": 1,
+                "components": [
+                    {
+                        "kind": "estimate",
+                        "name": "Synthetic topping",
+                        "amount": 1,
+                        "unit": "portion",
+                        "kcal": 25,
+                        "carbs_g": 4,
+                        "protein_g": 1,
+                        "fat_g": 0.5,
+                        "nutrition_basis": {"kind": "estimate"},
+                    }
+                ],
+            },
+        }
         nutrition.calculate_components.return_value = calculation
-        arguments = {"payload": {"name": "Synthetic bowl", "description": "Mixed recipe",
-                                  "components": components}}
-        intent = {"operation": "save_nutrition_template", "target_system": "local",
-                  "authorization_scope": ["local_nutrition"], "request": {"source_message_ids": [7]}}
-        result = self._service(nutrition_service=lambda: nutrition).create_local_write(
-            "save_nutrition_template", arguments, intent,
-            conversation_id="conversation-1", client_turn_id="turn-1",
+        arguments = {
+            "payload": {
+                "name": "Synthetic bowl",
+                "description": "Mixed recipe",
+                "components": components,
+            }
+        }
+        intent = {
+            "operation": "save_nutrition_template",
+            "target_system": "local",
+            "authorization_scope": ["local_nutrition"],
+            "request": {"source_message_ids": [7]},
+        }
+        result = self._service(
+            nutrition_meal_library_service=lambda: nutrition
+        ).create_local_write(
+            "save_nutrition_template",
+            arguments,
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
             session_csrf_hash="session-1",
         )
         self.assertEqual(result["proposed_action"]["diff"][0]["kcal"], "25")
-        self.assertIn("estimate: Synthetic topping", result["proposed_action"]["diff"][0]["source"])
-        stored = json.loads(self._rows()[0]["payload"])
+        self.assertIn(
+            "estimate: Synthetic topping",
+            result["proposed_action"]["diff"][0]["source"],
+        )
+        stored = json.loads(str(self._rows()[0]["payload"]))
         self.assertEqual(stored["arguments"]["_food_calculation"], calculation)
         nutrition.calculate_components.assert_called_once_with(components)
 
-    def test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval(self) -> None:
+    def test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval(
+        self,
+    ) -> None:
         with self.database_manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO competitions (id, name, event_date, sport, priority, distance, target, "
@@ -300,7 +433,7 @@ class CoachProposalCreationTests(unittest.TestCase):
             session_csrf_hash="session-1",
         )
 
-        payload = json.loads(self._rows()[0]["payload"])
+        payload = json.loads(str(self._rows()[0]["payload"]))
         manifest = payload["arguments"]["_approval_manifest"]
         self.assertEqual(
             {(item["type"], item["id"]) for item in manifest},
@@ -311,7 +444,11 @@ class CoachProposalCreationTests(unittest.TestCase):
             result["proposed_action"]["diff"],
             [
                 {"name": "Race", "date": "2026-10-01", "sport": "Run", "id": "race-1"},
-                {"name": "Remote-Wettkampfeintrag löschen", "date": "Freigegebene Löschmarkierung", "id": "remote-1"},
+                {
+                    "name": "Remote-Wettkampfeintrag löschen",
+                    "date": "Freigegebene Löschmarkierung",
+                    "id": "remote-1",
+                },
             ],
         )
 
@@ -326,22 +463,48 @@ class CoachProposalCreationTests(unittest.TestCase):
                 (raw_payload,),
             )
         intent = {
-            "operation": "start_intervals_plan_sync", "intent": "remote_sync",
-            "target_system": "intervals", "authorization_scope": ["intervals_sync"],
-            "request": {"remote_write": True, "source_message_ids": [7], "sync_scope": "selected"},
+            "operation": "start_intervals_plan_sync",
+            "intent": "remote_sync",
+            "target_system": "intervals",
+            "authorization_scope": ["intervals_sync"],
+            "request": {
+                "remote_write": True,
+                "source_message_ids": [7],
+                "sync_scope": "selected",
+            },
         }
         result = self._service().create_remote_write(
             "start_intervals_plan_sync",
-            {"entries": [{"library_workout_id": "unit-1", "expected_payload_hash": hashlib.sha256(raw_payload.encode()).hexdigest()}]},
-            intent, conversation_id="conversation-1", client_turn_id="turn-1",
+            {
+                "entries": [
+                    {
+                        "library_workout_id": "unit-1",
+                        "expected_payload_hash": hashlib.sha256(
+                            raw_payload.encode()
+                        ).hexdigest(),
+                    }
+                ]
+            },
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
             session_csrf_hash="session-1",
         )
         self.assertEqual(
             result["proposed_action"]["diff"],
-            [{"name": "Tempo ride", "date": "2026-10-02", "sport": "Ride", "id": "unit-1"}],
+            [
+                {
+                    "name": "Tempo ride",
+                    "date": "2026-10-02",
+                    "sport": "Ride",
+                    "id": "unit-1",
+                }
+            ],
         )
 
-    def test_all_pending_plan_approval_freezes_and_displays_pending_entries(self) -> None:
+    def test_all_pending_plan_approval_freezes_and_displays_pending_entries(
+        self,
+    ) -> None:
         raw_payload = json.dumps(
             {"name": "Recovery run", "date": "2026-10-03", "sport": "Run"}
         )
@@ -352,49 +515,93 @@ class CoachProposalCreationTests(unittest.TestCase):
                 (raw_payload,),
             )
         intent = {
-            "operation": "start_intervals_plan_sync", "intent": "remote_sync",
-            "target_system": "intervals", "authorization_scope": ["intervals_sync"],
-            "request": {"remote_write": True, "source_message_ids": [8], "sync_scope": "all_pending"},
+            "operation": "start_intervals_plan_sync",
+            "intent": "remote_sync",
+            "target_system": "intervals",
+            "authorization_scope": ["intervals_sync"],
+            "request": {
+                "remote_write": True,
+                "source_message_ids": [8],
+                "sync_scope": "all_pending",
+            },
             "_sync_all_pending": True,
         }
         result = self._service().create_remote_write(
-            "start_intervals_plan_sync", {}, intent,
-            conversation_id="conversation-1", client_turn_id="turn-2",
+            "start_intervals_plan_sync",
+            {},
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-2",
             session_csrf_hash="session-2",
         )
-        payload = json.loads(self._rows()[0]["payload"])
-        self.assertEqual(payload["arguments"]["entries"], [
-            {"library_workout_id": "unit-2", "expected_payload_hash": hashlib.sha256(raw_payload.encode()).hexdigest()},
-        ])
-        self.assertEqual(result["proposed_action"]["diff"], [
-            {"name": "Recovery run", "date": "2026-10-03", "sport": "Run", "id": "unit-2"},
-        ])
+        payload = json.loads(str(self._rows()[0]["payload"]))
+        self.assertEqual(
+            payload["arguments"]["entries"],
+            [
+                {
+                    "library_workout_id": "unit-2",
+                    "expected_payload_hash": hashlib.sha256(
+                        raw_payload.encode()
+                    ).hexdigest(),
+                },
+            ],
+        )
+        self.assertEqual(
+            result["proposed_action"]["diff"],
+            [
+                {
+                    "name": "Recovery run",
+                    "date": "2026-10-03",
+                    "sport": "Run",
+                    "id": "unit-2",
+                },
+            ],
+        )
 
-    def test_nutrition_remote_write_freezes_dates_revisions_and_aggregates(self) -> None:
+    def test_nutrition_remote_write_freezes_dates_revisions_and_aggregates(
+        self,
+    ) -> None:
         nutrition = Mock()
-        manifest = [{
-            "date": "2026-09-24", "revision": 4, "total_kcal": 2200,
-            "total_carbs_g": 250.0, "total_protein_g": 130.0, "total_fat_g": 65.0,
-            "entry_count": 3, "sha256": "a" * 64,
-        }]
+        manifest = [
+            {
+                "date": "2026-09-24",
+                "revision": 4,
+                "total_kcal": 2200,
+                "total_carbs_g": 250.0,
+                "total_protein_g": 130.0,
+                "total_fat_g": 65.0,
+                "entry_count": 3,
+                "sha256": "a" * 64,
+            }
+        ]
         nutrition.approval_manifest.return_value = manifest
         intent = {
-            "operation": "sync_nutrition", "intent": "remote_sync",
+            "operation": "sync_nutrition",
+            "intent": "remote_sync",
             "target_system": "intervals",
             "authorization_scope": ["local_nutrition", "intervals_sync"],
             "request": {"remote_write": True, "source_message_ids": [7]},
         }
-        self._service(nutrition_service=lambda: nutrition).create_remote_write(
-            "sync_nutrition", {"pending_limit": 3}, intent,
-            conversation_id="conversation-1", client_turn_id="turn-1",
+        self._service(nutrition_diary_service=lambda: nutrition).create_remote_write(
+            "sync_nutrition",
+            {"pending_limit": 3},
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
             session_csrf_hash="session-1",
         )
-        payload = json.loads(self._rows()[0]["payload"])
+        payload = json.loads(str(self._rows()[0]["payload"]))
         self.assertEqual(payload["arguments"]["_approval_manifest"], manifest)
-        self.assertEqual(payload["arguments"], {
-            "pending_limit": 3, "_approval_manifest": manifest,
-        })
-        self.assertEqual(nutrition.approval_manifest.call_args.kwargs, {"pending_limit": 3})
+        self.assertEqual(
+            payload["arguments"],
+            {
+                "pending_limit": 3,
+                "_approval_manifest": manifest,
+            },
+        )
+        self.assertEqual(
+            nutrition.approval_manifest.call_args.kwargs, {"pending_limit": 3}
+        )
 
     def test_distinct_session_keys_own_distinct_proposals(self) -> None:
         self._service().create(self._undo(), "session-a")
@@ -402,13 +609,16 @@ class CoachProposalCreationTests(unittest.TestCase):
         self._service(uuid_factory=lambda: other_id).create(self._undo(), "session-b")
 
         self.assertEqual(
-            {row["session_csrf_hash"] for row in self._rows()}, {"session-a", "session-b"}
+            {row["session_csrf_hash"] for row in self._rows()},
+            {"session-a", "session-b"},
         )
 
-    def test_duplicate_delete_validates_against_fresh_snapshot_before_persisting(self) -> None:
+    def test_duplicate_delete_validates_against_fresh_snapshot_before_persisting(
+        self,
+    ) -> None:
         current_time = "2026-08-29T10:00:00+00:00"
-        self.sync_state_repository.latest_snapshot.return_value = self._duplicate_snapshot(
-            current_time
+        self.sync_state_repository.latest_snapshot.return_value = (
+            self._duplicate_snapshot(current_time)
         )
         result = self._service().create(self._delete_duplicate(current_time), "session")
 
@@ -420,8 +630,8 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.sync_state_repository.latest_snapshot.assert_called_once_with()
 
     def test_stale_duplicate_snapshot_rejects_before_id_clock_or_insert(self) -> None:
-        self.sync_state_repository.latest_snapshot.return_value = self._duplicate_snapshot(
-            "2026-08-29T10:01:00+00:00"
+        self.sync_state_repository.latest_snapshot.return_value = (
+            self._duplicate_snapshot("2026-08-29T10:01:00+00:00")
         )
         uuid_factory = Mock(return_value=UUID("abc12345-6789-4abc-8def-0123456789ab"))
         now = Mock(return_value=100.0)

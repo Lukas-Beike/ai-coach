@@ -4,64 +4,80 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock
 
+from nutrition_service_support import build_nutrition_services
+
 from backend.coach.read_tools import CoachReadToolService
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import NutritionRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
-from backend.nutrition.service import NutritionService
 
 
 class NutritionReviewRegressionTests(unittest.TestCase):
     def test_explicit_text_source_bypasses_local_products(self) -> None:
-        nutrition = Mock()
-        nutrition.food_database.lookup.return_value = {
+        meal_library = Mock()
+        meal_library.food_database.lookup.return_value = {
             "ok": True,
             "foods": [{"id": "bls:123"}],
             "source": "bls",
         }
         service = CoachReadToolService(
-            *[Mock() for _ in range(8)],
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
             training_change_limit=366,
-            nutrition_service=Mock(return_value=nutrition),
+            nutrition_meal_library=Mock(return_value=meal_library),
         )
 
         result = service.execute(
             "lookup_food", {"query": "Haferflocken", "source": "bls"}
         )
 
+        assert isinstance(result, dict)
         self.assertEqual(result["source"], "bls")
-        nutrition.food_database.lookup.assert_called_once_with(
+        meal_library.food_database.lookup.assert_called_once_with(
             {"query": "Haferflocken", "source": "bls"}
         )
-        nutrition.lookup_product.assert_not_called()
+        meal_library.lookup_product.assert_not_called()
 
     def test_barcode_source_keeps_local_first_lookup(self) -> None:
-        nutrition = Mock()
-        nutrition.lookup_product.return_value = {
+        meal_library = Mock()
+        meal_library.lookup_product.return_value = {
             "ok": True,
             "product": {"id": "local-product"},
             "source": "local",
         }
         service = CoachReadToolService(
-            *[Mock() for _ in range(8)],
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
             training_change_limit=366,
-            nutrition_service=Mock(return_value=nutrition),
+            nutrition_meal_library=Mock(return_value=meal_library),
         )
 
         result = service.execute(
             "lookup_food", {"barcode": "4006381333931", "source": "off"}
         )
 
+        assert isinstance(result, dict)
         self.assertEqual(result["source"], "local")
-        nutrition.lookup_product.assert_called_once_with(
+        meal_library.lookup_product.assert_called_once_with(
             {"barcode": "4006381333931", "source": "off"}
         )
-        nutrition.food_database.lookup.assert_not_called()
+        meal_library.food_database.lookup.assert_not_called()
 
     def test_archived_products_cannot_be_calculated_or_logged(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -71,16 +87,13 @@ class NutritionReviewRegressionTests(unittest.TestCase):
             try:
                 with manager.unit_of_work() as db:
                     initialize_schema(db)
-                service = NutritionService(
-                    database_manager=manager,
-                    db_lock=threading.Lock(),
-                    nutrition_repository=NutritionRepository(
-                        now=lambda: "2026-10-05T12:00:00+00:00"
-                    ),
-                    utc_now=lambda: "2026-10-05T12:00:00+00:00",
-                    local_now=lambda: datetime(2026, 10, 5, tzinfo=timezone.utc),
+                diary, meal_library = build_nutrition_services(
+                    manager,
+                    threading.Lock(),
+                    lambda: "2026-10-05T12:00:00+00:00",
+                    lambda: datetime(2026, 10, 5, tzinfo=UTC),
                 )
-                product = service.save_product(
+                product = meal_library.save_product(
                     {
                         "name": "Synthetic whey",
                         "brand": "Synthetic",
@@ -94,11 +107,11 @@ class NutritionReviewRegressionTests(unittest.TestCase):
                         "source": "packaging_label",
                     }
                 )
-                service.archive_product(product["id"])
+                meal_library.archive_product(product["id"])
 
                 for operation in (
-                    lambda: service.calculate_product(product["id"], 50, "g"),
-                    lambda: service.log_product(product["id"], 50, "g"),
+                    lambda: meal_library.calculate_product(product["id"], 50, "g"),
+                    lambda: diary.log_product(product["id"], 50, "g"),
                 ):
                     with (
                         self.subTest(operation=operation),

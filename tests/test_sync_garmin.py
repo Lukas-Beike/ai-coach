@@ -5,7 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -34,9 +34,6 @@ BASE_CONFIG = Config(
     openai_api_key="",
     openai_base_url="https://api.openai.com/v1",
     openai_model="gpt-6-luna",
-    gemini_api_key="",
-    gemini_model="gemini-3.8-flash",
-    ai_provider="",
     intervals_api_key="",
     intervals_athlete_id="0",
     garmin_email="",
@@ -54,7 +51,7 @@ def _loader(root: Path, fixture_path: str = "") -> GarminFixtureLoader:
     return GarminFixtureLoader(
         replace(BASE_CONFIG, garmin_fixture_path=fixture_path),
         root,
-        lambda: datetime(2026, 9, 20, 12, tzinfo=timezone.utc),
+        lambda: datetime(2026, 9, 20, 12, tzinfo=UTC),
         lambda: UTC_NOW,
         EARLIEST_DATE,
         ALL_SYNC_DAYS,
@@ -329,7 +326,7 @@ class GarminSyncStateServiceTests(unittest.TestCase):
         self.addCleanup(self.manager.close)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-        self.now = datetime(2026, 9, 20, 10, 30, tzinfo=timezone.utc)
+        self.now = datetime(2026, 9, 20, 10, 30, tzinfo=UTC)
         self.local_now = datetime(
             2026, 9, 20, 12, 30, tzinfo=timezone(timedelta(hours=2))
         )
@@ -547,7 +544,9 @@ class GarminSyncStateServiceTests(unittest.TestCase):
 
         self.service.persist_payload(payload, None, date(2026, 9, 20))
 
-        self.assertEqual(self._get("sync_garmin_last_success_at"), self.local_now.isoformat())
+        self.assertEqual(
+            self._get("sync_garmin_last_success_at"), self.local_now.isoformat()
+        )
 
     def test_payload_failure_keeps_prior_writes_and_stops_before_cursors(self):
         class FailingKeyValueRepository(KeyValueRepository):

@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
-from backend.coach.proposals import coach_action_hash
+from backend.coach.proposal_models import coach_action_hash
 
 
 def dialogue_scope_repair_key(name: str, arguments: dict[str, Any]) -> str:
@@ -138,7 +138,7 @@ def command_receipt(value: Any) -> dict[str, Any]:
         receipt = (
             json.loads(value or "{}") if not isinstance(value, dict) else dict(value)
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         receipt = {}
     return receipt if isinstance(receipt, dict) else {}
 

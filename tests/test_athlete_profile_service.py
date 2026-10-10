@@ -41,7 +41,10 @@ class ProfileServiceTests(unittest.TestCase):
         )
         self.key_values = KeyValueRepository(lambda: "2026-09-20T00:00:00+00:00")
         self.service = ProfileService(
-            _Manager(self.db), ProfileRepository(self.key_values), self.key_values
+            _Manager(self.db),
+            ProfileRepository(self.key_values),
+            self.key_values,
+            on_location_changed=weather_cache.invalidate_for_location_change,
         )
 
     def tearDown(self):

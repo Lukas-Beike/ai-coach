@@ -3,12 +3,12 @@
 import json
 import math
 import os
+from collections.abc import Callable
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend import change_history
 from backend.errors import AppError
-from backend.weather import cache as weather_cache
 
 DEFAULT_TIMEZONE = "Europe/Berlin"
 
@@ -39,7 +39,7 @@ def timezone_name(value: Any, *, strict: bool = False) -> str:
     candidate = str(value or DEFAULT_TIMEZONE).strip()[:120] or DEFAULT_TIMEZONE
     try:
         ZoneInfo(candidate)
-    except (ZoneInfoNotFoundError, ValueError):
+    except ZoneInfoNotFoundError, ValueError:
         if strict:
             raise AppError(400, "Die Zeitzone muss eine gültige IANA-Zeitzone sein.")
         return DEFAULT_TIMEZONE
@@ -71,17 +71,23 @@ class ProfileService:
     """Own profile reads, writes, audit history, and cache invalidation."""
 
     def __init__(
-        self, manager: Any, profile_repository: Any, key_value_repository: Any
+        self,
+        manager: Any,
+        profile_repository: Any,
+        key_value_repository: Any,
+        *,
+        on_location_changed: Callable[..., Any],
     ):
         self._manager = manager
         self._profile_repository = profile_repository
         self._key_value_repository = key_value_repository
+        self._on_location_changed = on_location_changed
 
     def get_from_db(self, db: Any) -> dict[str, str]:
         payload = self._profile_repository.get(db)
         try:
             return normalize_profile(json.loads(payload or "{}"))
-        except (TypeError, json.JSONDecodeError):
+        except TypeError, json.JSONDecodeError:
             return dict(DEFAULT_PROFILE)
 
     def get(self) -> dict[str, str]:
@@ -102,7 +108,7 @@ class ProfileService:
         )
         previous = self.get_from_db(db)
         self._profile_repository.set(db, json.dumps(normalized, ensure_ascii=False))
-        weather_cache.invalidate_for_location_change(
+        self._on_location_changed(
             previous,
             normalized,
             repository=self._key_value_repository,

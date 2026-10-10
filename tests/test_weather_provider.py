@@ -36,7 +36,15 @@ class WeatherProviderTests(unittest.TestCase):
             },
         }
 
-    def make_client(self, location, forecast, *, icon_forecast=None, icon_error=None):
+    def make_client(
+        self,
+        location,
+        forecast,
+        *,
+        icon_forecast=None,
+        icon_error=None,
+        forecast_days=14,
+    ):
         requests = []
 
         def request(method, url, **kwargs):
@@ -49,7 +57,19 @@ class WeatherProviderTests(unittest.TestCase):
                 raise icon_error
             return icon_forecast
 
-        return WeatherClient(request, self.now, self.logger), requests
+        return WeatherClient(
+            request, self.now, self.logger, forecast_days=forecast_days
+        ), requests
+
+    def test_explicit_forecast_days_reach_provider_request(self):
+        client, requests = self.make_client(
+            self.location(country_code="NL"), self.forecast(), forecast_days=7
+        )
+
+        client.fetch("Amsterdam")
+
+        params = parse_qs(urlsplit(requests[1][1]).query)
+        self.assertEqual(params["forecast_days"], ["7"])
 
     def test_non_german_and_outside_nrw_skip_icon_d2(self):
         for location in (
@@ -142,7 +162,7 @@ class WeatherProviderTests(unittest.TestCase):
             requests.append((method, url, kwargs))
             return {"results": []}
 
-        client = WeatherClient(request, self.now, self.logger)
+        client = WeatherClient(request, self.now, self.logger, forecast_days=14)
 
         with self.assertRaises(AppError) as raised:
             client.fetch("Atlantis")

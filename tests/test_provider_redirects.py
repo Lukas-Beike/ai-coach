@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request
 
-from backend.providers import gemini, http, openai
+from backend.providers import http, openai
 
 
 class ProviderRedirectTests(unittest.TestCase):
@@ -74,21 +74,20 @@ class ProviderRedirectTests(unittest.TestCase):
                         self.assertEqual(self.received, [])
 
     def test_streaming_openers_reject_redirects(self):
-        for opener in (openai.urlopen, gemini.urlopen):
-            with self.subTest(opener=opener):
-                self.assertIs(opener, http.urlopen)
-                with (
-                    self.assertRaises(HTTPError) as caught,
-                    http.open_interruptibly(
-                        self.request("/redirect/302/localhost", "POST"),
-                        timeout=2,
-                        cancel_event=threading.Event(),
-                        opener=opener,
-                    ),
-                ):
-                    self.fail("A redirected response must not be opened")
-                caught.exception.close()
-                self.assertEqual(self.received, [])
+        opener = openai.urlopen
+        self.assertIs(opener, http.urlopen)
+        with (
+            self.assertRaises(HTTPError) as caught,
+            http.open_interruptibly(
+                self.request("/redirect/302/localhost", "POST"),
+                timeout=2,
+                cancel_event=threading.Event(),
+                opener=opener,
+            ),
+        ):
+            self.fail("A redirected response must not be opened")
+        caught.exception.close()
+        self.assertEqual(self.received, [])
 
     def test_direct_request_preserves_headers_and_json(self):
         result = http.request_json(

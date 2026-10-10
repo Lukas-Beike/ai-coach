@@ -10,6 +10,7 @@ class NutritionFrontendContractTests(unittest.TestCase):
     def test_camera_processing_is_bounded_and_rejects_before_state_mutation(self):
         nutrition = (ROOT / "public" / "nutrition.js").read_text(encoding="utf-8")
         app = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        coach = (ROOT / "public" / "coach.js").read_text(encoding="utf-8")
 
         self.assertIn("async function prepareNutritionImage(file", nutrition)
         self.assertIn("MAX_NUTRITION_IMAGE_EDGE = 1600", nutrition)
@@ -31,12 +32,13 @@ class NutritionFrontendContractTests(unittest.TestCase):
         # replacing state.chatAttachments, otherwise a Chromium decode failure
         # can discard the draft or leave a half-attached image. Image files go
         # through the shared helper, which owns the nutrition image processing.
-        helper = app[
-            app.index("async function prepareChatAttachment(file)") : app.index(
+        helper = coach[
+            coach.index("async function prepareChatAttachment(file)") : coach.index(
                 '$("#attachmentInput").addEventListener'
             )
         ]
-        handler = app[app.index('$("#attachmentInput").addEventListener') :]
+        handler = coach[coach.index('$("#attachmentInput").addEventListener') :]
+        self.assertNotIn("async function prepareChatAttachment(file)", app)
         self.assertIn("prepareNutritionImage(file)", helper)
         self.assertIn("prepareChatAttachment", handler)
         self.assertIn("state.chatAttachments =", handler)

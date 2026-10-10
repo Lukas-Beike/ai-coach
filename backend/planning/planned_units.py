@@ -7,6 +7,8 @@ import uuid
 from datetime import date
 from typing import Any
 
+from backend.activities.workout_text import canonical_workout_zones
+from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
     INVALID_PLANNING_DATE_ERROR,
@@ -15,7 +17,6 @@ from backend.errors import (
 )
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
-from backend.providers.workout_text import canonical_workout_zones
 
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 
@@ -29,7 +30,7 @@ def adopt_normalized_remote_planned_unit(
     remote_id = str(remote.get("remote_event_id") or "").strip()
     event_date = str(remote.get("date") or "").strip()
     try:
-        if not remote_id or date.fromisoformat(event_date).isoformat() != event_date:
+        if not remote_id or LocalDate.parse(event_date).isoformat() != event_date:
             return None
     except ValueError:
         return None
@@ -108,9 +109,9 @@ def normalize_planned_unit(
         {
             **workout,
             "type": planning_workouts.intervals_workout_sport(workout["sport"]),
-            "date": str(workout.get("date") or workout.get("start_date_local") or "")[
-                :10
-            ],
+            "date": iso_date_prefix(
+                str(workout.get("date") or workout.get("start_date_local") or "")
+            ),
         },
         local_id=local_id,
         external_id=external_id,
@@ -178,10 +179,16 @@ def prepare_planned_workout_date(
 ) -> bool:
     candidate["date"] = str(candidate.get("date") or "").strip()
     try:
-        date.fromisoformat(candidate["date"])
+        candidate["date"] = LocalDate.parse(
+            candidate["date"], allow_datetime=False
+        ).isoformat()
     except (TypeError, ValueError) as exc:
         raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
-    date_changed = candidate["date"][:10] != str(current.get("date") or "")[:10]
+    try:
+        current_date = LocalDate.parse(current.get("date")).isoformat()
+    except TypeError, ValueError:
+        current_date = str(current.get("date") or "")
+    date_changed = candidate["date"] != current_date
     if date_changed and candidate.get("start_date_local") in (
         None,
         current.get("start_date_local"),
@@ -193,7 +200,7 @@ def prepare_planned_workout_date(
                 if len(old_start) > 10 and old_start[10] == "T"
                 else _ISO_MIDNIGHT_SUFFIX
             )
-            candidate["start_date_local"] = candidate["date"][:10] + time_suffix
+            candidate["start_date_local"] = candidate["date"] + time_suffix
     return date_changed
 
 
@@ -223,7 +230,7 @@ def planned_conflict_payload(row: dict[str, Any]) -> dict[str, Any]:
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -297,7 +304,12 @@ def _remote_planned_unit_id(event: dict[str, Any]) -> str | None:
 
 
 def _remote_planned_unit_date(event: dict[str, Any], *, today: date) -> str | None:
-    event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+    try:
+        event_date = LocalDate.parse(
+            event.get("start_date_local") or event.get("date")
+        ).isoformat()
+    except TypeError, ValueError:
+        return None
     try:
         if date.fromisoformat(event_date) < today:
             return None
@@ -314,7 +326,7 @@ def _remote_planned_unit_duration(event: dict[str, Any]) -> int:
             if moving_time not in (None, "")
             else 30
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 30
 
 
@@ -360,7 +372,7 @@ def remote_planned_unit_existing_state(
 ) -> tuple[dict[str, Any], str]:
     try:
         current = json.loads(current_row.get("payload") or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         current = {}
     if not isinstance(current, dict):
         current = {}

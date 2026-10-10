@@ -1,12 +1,16 @@
+import ast
 import threading
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.error import HTTPError
 
+import backend.providers.http as http_module
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.providers.http import (
     JsonHttpClient,
+    JsonHttpClientCache,
     JsonResponse,
     ProviderInvalidResponse,
     ProviderRequestCancelled,
@@ -22,6 +26,7 @@ from backend.providers.http import (
     request_body,
     request_json,
 )
+from backend.providers.openai_error_classifier import OpenAIErrorClassifier
 
 
 class _CallLogger:
@@ -88,21 +93,25 @@ class _JSONResponse:
 
 
 class ProviderHTTPTests(unittest.TestCase):
-    def _client(self, opener, *, state=None, max_bytes=100, redact=None, operation_context=None):
+    def _client(
+        self, opener, *, state=None, max_bytes=100, redact=None, operation_context=None
+    ):
+        active_state = state or _ProviderState()
         return JsonHttpClient(
             "1.2.3",
             max_bytes,
             self.logger,
             self.capture,
-            state or _ProviderState(),
             redact or (lambda value: str(value).replace("secret", "[REDACTED]")),
             lambda headers: {
                 str(key).casefold(): str(value)
                 for key, value in (headers or {}).items()
                 if str(key).casefold() in {"content-type", "retry-after"}
             },
-            lambda: "2026-09-19T00:00:00+00:00",
             operation_context or (lambda: {"operation_id": "op-1", "trigger": "test"}),
+            provider_error_details=OpenAIErrorClassifier(
+                lambda: active_state, lambda: "2026-09-19T00:00:00+00:00"
+            ),
             opener=opener,
             monotonic=lambda: 1.0,
         )
@@ -113,22 +122,60 @@ class ProviderHTTPTests(unittest.TestCase):
 
     def test_json_http_client_success_empty_body_and_observation(self):
         state = _ProviderState()
-        response = _JSONResponse(b"", status=204, headers={"Content-Type": "application/json"})
+        response = _JSONResponse(
+            b"", status=204, headers={"Content-Type": "application/json"}
+        )
         client = self._client(lambda _request, *, timeout: response, state=state)
 
-        self.assertIsNone(client.request("GET", "https://example.test/api/v1/resource", service="openai"))
+        self.assertIsNone(
+            client.request(
+                "GET", "https://example.test/api/v1/resource", service="openai"
+            )
+        )
         self.assertTrue(response.closed)
-        self.assertEqual(state.calls, [
-            ("rate_limits", response.headers),
-            ("success", "openai", 204),
-        ])
-        self.assertEqual([entry[0] for entry in self.capture.entries], [
-            "external_http_started", "external_http_completed",
-        ])
+        self.assertEqual(
+            state.calls,
+            [
+                ("rate_limits", response.headers),
+                ("success", "openai", 204),
+            ],
+        )
+        self.assertEqual(
+            [entry[0] for entry in self.capture.entries],
+            [
+                "external_http_started",
+                "external_http_completed",
+            ],
+        )
         self.assertEqual(
             [record[2]["extra"]["event"] for record in self.logger.records],
             ["external_request_started", "external_request_completed"],
         )
+
+    def test_json_http_client_cache_uses_null_classifier_by_default(self):
+        cache = JsonHttpClientCache()
+        first = cache.get(
+            "1.2.3",
+            100,
+            self.logger,
+            self.capture,
+            str,
+            lambda headers: headers,
+            lambda: {"operation_id": "op-1", "trigger": "test"},
+            opener=lambda _request, *, timeout: _JSONResponse(b"{}"),
+        )
+        second = cache.get(
+            "1.2.3",
+            100,
+            self.logger,
+            self.capture,
+            str,
+            lambda headers: headers,
+            lambda: {"operation_id": "op-1", "trigger": "test"},
+            opener=lambda _request, *, timeout: _JSONResponse(b"{}"),
+        )
+
+        self.assertIs(first, second)
 
     def test_json_http_client_reads_current_operation_context_for_each_request(self):
         context = {"operation_id": "op-1", "trigger": "first"}
@@ -141,7 +188,11 @@ class ProviderHTTPTests(unittest.TestCase):
         context.update(operation_id="op-2", trigger="second")
         client.request("GET", "https://example.test/api/v1/second")
 
-        started = [record[2]["extra"]["context"] for record in self.logger.records if record[2]["extra"]["event"] == "external_request_started"]
+        started = [
+            record[2]["extra"]["context"]
+            for record in self.logger.records
+            if record[2]["extra"]["event"] == "external_request_started"
+        ]
         self.assertEqual(
             [(entry["operation_id"], entry["trigger"]) for entry in started],
             [("op-1", "first"), ("op-2", "second")],
@@ -150,12 +201,28 @@ class ProviderHTTPTests(unittest.TestCase):
     def test_json_http_client_classifies_openai_http_error_and_retry_after(self):
         state = _ProviderState()
         body = _JSONResponse(b'{"error":{"code":"rate_limit_exceeded"}}')
-        error = HTTPError("https://api.openai.com/v1/responses", 429, "secret provider text", {"retry-after": "7"}, body)
-        client = self._client(lambda _request, *, timeout: (_ for _ in ()).throw(error), state=state)
+        error = HTTPError(
+            "https://api.openai.com/v1/responses",
+            429,
+            "secret provider text",
+            {"retry-after": "7"},
+            body,
+        )
+        client = self._client(
+            lambda _request, *, timeout: (_ for _ in ()).throw(error), state=state
+        )
 
         with self.assertRaises(AppError) as raised:
-            client.request("POST", "https://api.openai.com/v1/responses", payload={"secret": "payload"}, service="openai")
-        self.assertEqual((raised.exception.status, raised.exception.reason), (429, "rate_limit_exceeded"))
+            client.request(
+                "POST",
+                "https://api.openai.com/v1/responses",
+                payload={"secret": "payload"},
+                service="openai",
+            )
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (429, "rate_limit_exceeded"),
+        )
         self.assertEqual(raised.exception.retry_after_seconds, 7)
         self.assertIs(raised.exception.__cause__, error)
         self.assertTrue(body.closed)
@@ -163,39 +230,60 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertNotIn("secret provider text", repr(self.logger.records))
         self.assertNotIn("payload", repr(self.capture.entries))
 
-    def test_json_http_client_classifies_gemini_and_intervals_http_errors(self):
-        gemini_body = _JSONResponse(b'{"error":{"status":"INTERNAL"}}')
-        gemini_error = HTTPError("https://generativelanguage.googleapis.com", 500, "failure", {}, gemini_body)
-        gemini_state = _ProviderState()
-        with self.assertRaises(AppError) as gemini_raised:
-            self._client(lambda _request, *, timeout: (_ for _ in ()).throw(gemini_error), state=gemini_state).request(
-                "POST", "https://generativelanguage.googleapis.com/v1beta/models/test", service="gemini"
-            )
-        self.assertEqual((gemini_raised.exception.status, gemini_raised.exception.reason), (500, "provider_unavailable"))
-        self.assertTrue(gemini_body.closed)
-        self.assertTrue(any(call[0:2] == ("status", "gemini") for call in gemini_state.calls))
+    def test_shared_transport_does_not_import_a_concrete_provider(self):
+        transport_path = Path(http_module.__file__).resolve()
+        tree = ast.parse(transport_path.read_text(encoding="utf-8"))
+        imported_modules = {
+            node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+        }
+        imported_modules.update(
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        )
+        self.assertFalse(any("providers.openai" in name for name in imported_modules))
 
-        intervals_body = _JSONResponse(b'{"error":{"message":"secret validation detail"}}')
-        intervals_error = HTTPError("https://intervals.icu", 400, "failure", {}, intervals_body)
+    def test_json_http_client_classifies_intervals_http_errors(self):
+        intervals_body = _JSONResponse(
+            b'{"error":{"message":"secret validation detail"}}'
+        )
+        intervals_error = HTTPError(
+            "https://intervals.icu", 400, "failure", {}, intervals_body
+        )
         with self.assertRaises(AppError) as intervals_raised:
-            self._client(lambda _request, *, timeout: (_ for _ in ()).throw(intervals_error)).request(
+            self._client(
+                lambda _request, *, timeout: (_ for _ in ()).throw(intervals_error)
+            ).request(
                 "POST", "https://intervals.icu/api/v1/workouts", service="intervals"
             )
         self.assertEqual(intervals_raised.exception.status, 502)
-        self.assertIn("Intervals.icu weist die Anfrage zurück (400)", intervals_raised.exception.message)
+        self.assertIn(
+            "Intervals.icu weist die Anfrage zurück (400)",
+            intervals_raised.exception.message,
+        )
+        self.assertIn("validation detail", intervals_raised.exception.message)
         self.assertNotIn("secret validation detail", intervals_raised.exception.message)
+        self.assertEqual(intervals_raised.exception.upstream_status, 400)
         self.assertTrue(intervals_body.closed)
 
     def test_json_http_client_cancellation_and_cleanup(self):
         cancel_event = threading.Event()
-        client = self._client(lambda *_args, **_kwargs: self.fail("opener must not run"))
+        client = self._client(
+            lambda *_args, **_kwargs: self.fail("opener must not run")
+        )
         cancel_event.set()
-        with self.assertRaisesRegex(AppError, "Coach-Anfrage wurde abgebrochen") as raised:
-            client.request("GET", "https://example.test/api/v1/resource", cancel_event=cancel_event)
+        with self.assertRaisesRegex(
+            AppError, "Coach-Anfrage wurde abgebrochen"
+        ) as raised:
+            client.request(
+                "GET", "https://example.test/api/v1/resource", cancel_event=cancel_event
+            )
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         self.assertEqual(self.capture.entries[-1][0], "external_http_failed")
 
         cancel_event = threading.Event()
+
         class CancellingResponse(_JSONResponse):
             def read(self, size):
                 cancel_event.set()
@@ -234,8 +322,13 @@ class ProviderHTTPTests(unittest.TestCase):
         error_body = CancellingErrorBody(b'{"error":"failure"}')
         error = HTTPError("https://example.test", 400, "failure", {}, error_body)
         with self.assertRaises(AppError) as error_raised:
-            self._client(lambda _request, *, timeout: (_ for _ in ()).throw(error)).request(
-                "GET", "https://example.test/api/v1/resource", service="intervals", cancel_event=cancel_event
+            self._client(
+                lambda _request, *, timeout: (_ for _ in ()).throw(error)
+            ).request(
+                "GET",
+                "https://example.test/api/v1/resource",
+                service="intervals",
+                cancel_event=cancel_event,
             )
         self.assertEqual(error_raised.exception.reason, "chat_cancelled")
         self.assertTrue(error_body.closed)
@@ -256,7 +349,9 @@ class ProviderHTTPTests(unittest.TestCase):
                 "GET", "https://example.test/api/v1/resource"
             )
         self.assertEqual(invalid_raised.exception.reason, "provider_client_error")
-        self.assertIsInstance(invalid_raised.exception.__cause__, ProviderInvalidResponse)
+        self.assertIsInstance(
+            invalid_raised.exception.__cause__, ProviderInvalidResponse
+        )
         self.assertTrue(invalid.closed)
 
         network = OSError("secret network detail" + "x" * 600)
@@ -264,12 +359,14 @@ class ProviderHTTPTests(unittest.TestCase):
             self._client(
                 lambda _request, *, timeout: (_ for _ in ()).throw(network),
                 redact=lambda value: value.replace("secret", "[REDACTED]"),
-            ).request(
-                "GET", "https://example.test/api/v1/resource"
-            )
+            ).request("GET", "https://example.test/api/v1/resource")
         self.assertEqual(network_raised.exception.reason, "provider_network_error")
         self.assertIs(network_raised.exception.__cause__, network)
-        network_log = next(record for record in self.logger.records if record[2]["extra"]["event"] == "upstream_network_error")
+        network_log = next(
+            record
+            for record in self.logger.records
+            if record[2]["extra"]["event"] == "upstream_network_error"
+        )
         network_detail = network_log[2]["extra"]["context"]["error"]
         self.assertIn("[REDACTED]", network_detail)
         self.assertNotIn("secret", network_detail)
@@ -281,12 +378,14 @@ class ProviderHTTPTests(unittest.TestCase):
             self._client(
                 lambda _request, *, timeout: (_ for _ in ()).throw(client_error),
                 redact=lambda value: value.replace("secret", "[REDACTED]"),
-            ).request(
-                "GET", "https://example.test/api/v1/resource"
-            )
+            ).request("GET", "https://example.test/api/v1/resource")
         self.assertEqual(client_raised.exception.reason, "provider_client_error")
         self.assertIs(client_raised.exception.__cause__, client_error)
-        client_log = [record for record in self.logger.records if record[2]["extra"]["event"] == "external_request_failed"][-1]
+        client_log = [
+            record
+            for record in self.logger.records
+            if record[2]["extra"]["event"] == "external_request_failed"
+        ][-1]
         client_detail = client_log[2]["extra"]["context"]["error"]
         self.assertIn("[REDACTED]", client_detail)
         self.assertNotIn("secret", client_detail)
@@ -294,7 +393,9 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertNotIn("exc_info", client_log[2])
 
     def test_json_http_client_does_not_log_url_userinfo_or_payload(self):
-        client = self._client(lambda _request, *, timeout: _JSONResponse(b'{"ok":true}'))
+        client = self._client(
+            lambda _request, *, timeout: _JSONResponse(b'{"ok":true}')
+        )
         client.request(
             "POST",
             "https://user:secret@example.test/api/v1/resource?token=secret",
@@ -304,12 +405,13 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertNotIn("user:secret", rendered)
         self.assertNotIn('"credential": "secret"', rendered)
         self.assertNotIn("?token=secret", rendered)
+
     def test_request_json_decodes_object_array_scalar_and_empty_body(self):
         cases = (
             (b'{"answer": 42}', {"answer": 42}),
             (b'[1, "two"]', [1, "two"]),
-            (b'false', False),
-            (b'', {}),
+            (b"false", False),
+            (b"", {}),
         )
         for body, expected in cases:
             with self.subTest(body=body):
@@ -354,9 +456,13 @@ class ProviderHTTPTests(unittest.TestCase):
                         max_bytes=100,
                         opener=lambda _request, *, timeout, response=response: response,
                     )
-                self.assertEqual(str(context.exception), "provider response is not valid UTF-8 JSON")
+                self.assertEqual(
+                    str(context.exception), "provider response is not valid UTF-8 JSON"
+                )
                 self.assertNotIn("do-not-leak", str(context.exception))
-                self.assertNotIn(body.decode("utf-8", errors="replace"), str(context.exception))
+                self.assertNotIn(
+                    body.decode("utf-8", errors="replace"), str(context.exception)
+                )
                 self.assertTrue(response.closed)
                 self.assertEqual(response.close_count, 1)
 
@@ -368,6 +474,7 @@ class ProviderHTTPTests(unittest.TestCase):
             ProviderRequestCancelled(),
         ):
             with self.subTest(error=type(expected).__name__):
+
                 def opener(_request, *, timeout, error=expected):
                     raise error
 
@@ -384,7 +491,9 @@ class ProviderHTTPTests(unittest.TestCase):
                 max_bytes=3,
                 opener=lambda _request, *, timeout: response,
             )
-        self.assertEqual(str(context.exception), "provider response exceeds configured size limit")
+        self.assertEqual(
+            str(context.exception), "provider response exceeds configured size limit"
+        )
         self.assertTrue(response.closed)
         self.assertEqual(response.close_count, 1)
 
@@ -451,8 +560,15 @@ class ProviderHTTPTests(unittest.TestCase):
             release.wait(1)
             return response
 
-        threading.Thread(target=lambda: (entered.wait(1), release.set()), daemon=True).start()
-        self.assertIs(open_interruptibly("request", 12, threading.Event(), opener=opener, poll_seconds=0.01), response)
+        threading.Thread(
+            target=lambda: (entered.wait(1), release.set()), daemon=True
+        ).start()
+        self.assertIs(
+            open_interruptibly(
+                "request", 12, threading.Event(), opener=opener, poll_seconds=0.01
+            ),
+            response,
+        )
 
     def test_open_interruptibly_cancels_header_wait_and_closes_late_response(self):
         entered = threading.Event()
@@ -473,7 +589,15 @@ class ProviderHTTPTests(unittest.TestCase):
 
         result = []
         thread = threading.Thread(
-            target=lambda: self._capture(result, open_interruptibly, "request", 12, cancel_event, opener=opener, poll_seconds=0.01),
+            target=lambda: self._capture(
+                result,
+                open_interruptibly,
+                "request",
+                12,
+                cancel_event,
+                opener=opener,
+                poll_seconds=0.01,
+            ),
             daemon=True,
         )
         thread.start()
@@ -492,7 +616,9 @@ class ProviderHTTPTests(unittest.TestCase):
             raise expected
 
         with self.assertRaises(RuntimeError) as context:
-            open_interruptibly("request", 12, threading.Event(), opener=opener, poll_seconds=0.01)
+            open_interruptibly(
+                "request", 12, threading.Event(), opener=opener, poll_seconds=0.01
+            )
         self.assertIs(context.exception, expected)
 
     def test_read_response_registers_and_cleans_response_on_success(self):
@@ -508,7 +634,12 @@ class ProviderHTTPTests(unittest.TestCase):
 
         response = Response()
         result = []
-        thread = threading.Thread(target=lambda: self._capture(result, read_response, response, 10, cancel_event), daemon=True)
+        thread = threading.Thread(
+            target=lambda: self._capture(
+                result, read_response, response, 10, cancel_event
+            ),
+            daemon=True,
+        )
         thread.start()
         self.assertTrue(started.wait(1))
         self.assertIs(cancel_event._provider_response, response)
@@ -523,7 +654,9 @@ class ProviderHTTPTests(unittest.TestCase):
 
         class Response:
             def read(self, _size):
-                self.assert_registered = getattr(cancel_event, "_provider_response", None)
+                self.assert_registered = getattr(
+                    cancel_event, "_provider_response", None
+                )
                 raise OSError("read failed")
 
         response = Response()
@@ -574,7 +707,9 @@ class ProviderHTTPTests(unittest.TestCase):
             def read(self, _size):
                 return b"1234"
 
-        with self.assertRaisesRegex(ProviderResponseTooLarge, "provider response exceeds configured size limit"):
+        with self.assertRaisesRegex(
+            ProviderResponseTooLarge, "provider response exceeds configured size limit"
+        ):
             read_response(Response(), 3, cancel_event)
         self.assertFalse(hasattr(cancel_event, "_provider_response"))
 
@@ -602,7 +737,11 @@ class ProviderHTTPTests(unittest.TestCase):
             service="synthetic",
             content_type="application/custom+json",
             app_version="1.2.3",
-            operation_context={"operation_id": "op-1", "trigger": "test", "phase": "wire"},
+            operation_context={
+                "operation_id": "op-1",
+                "trigger": "test",
+                "phase": "wire",
+            },
         )
         self.assertEqual(request.data, b'{"name": "synthetic"}')
         self.assertEqual(parsed_url.netloc, "example.test")
@@ -696,11 +835,21 @@ class ProviderHTTPTests(unittest.TestCase):
             b"\r\n--" + boundary + b"--\r\n"
         )
         self.assertEqual(body, expected)
-        self.assertEqual(content_type, "multipart/form-data; boundary=----IntervalsCoachtest-boundary")
+        self.assertEqual(
+            content_type,
+            "multipart/form-data; boundary=----IntervalsCoachtest-boundary",
+        )
 
-    def test_multipart_form_data_default_boundary_has_expected_prefix_and_hex_token(self):
-        body, content_type = multipart_form_data([], "file", "voice.mp3", "audio/mpeg", b"audio")
-        self.assertRegex(content_type, r"^multipart/form-data; boundary=----IntervalsCoach[0-9a-f]{32}$")
+    def test_multipart_form_data_default_boundary_has_expected_prefix_and_hex_token(
+        self,
+    ):
+        body, content_type = multipart_form_data(
+            [], "file", "voice.mp3", "audio/mpeg", b"audio"
+        )
+        self.assertRegex(
+            content_type,
+            r"^multipart/form-data; boundary=----IntervalsCoach[0-9a-f]{32}$",
+        )
         boundary = content_type.split("=", 1)[1].encode("ascii")
         self.assertTrue(body.startswith(b"--" + boundary + b"\r\n"))
         self.assertTrue(body.endswith(b"\r\n--" + boundary + b"--\r\n"))
@@ -716,9 +865,17 @@ class ProviderHTTPTests(unittest.TestCase):
     def test_error_detail_is_redacted_and_bounded(self):
         raw = b'{"error":{"message":"authorization: bearer secret-token"}}'
         self.assertEqual(error_detail(raw), "authorization: [REDACTED]")
-        self.assertEqual(error_detail(b'{"error":"Invalid workout type"}'), "Invalid workout type")
-        self.assertEqual(error_detail(b'{"error":{},"message":"top-level detail"}'), "top-level detail")
-        self.assertEqual(error_detail(b'{"error":"","message":"top-level detail"}'), "top-level detail")
+        self.assertEqual(
+            error_detail(b'{"error":"Invalid workout type"}'), "Invalid workout type"
+        )
+        self.assertEqual(
+            error_detail(b'{"error":{},"message":"top-level detail"}'),
+            "top-level detail",
+        )
+        self.assertEqual(
+            error_detail(b'{"error":"","message":"top-level detail"}'),
+            "top-level detail",
+        )
 
     def test_external_call_logs_and_captures_safe_success_metadata_once(self):
         logger = _CallLogger()
@@ -727,18 +884,29 @@ class ProviderHTTPTests(unittest.TestCase):
         result = external_call(
             "synthetic",
             "fetch",
-            lambda: calls.append(True) or {"secret": "provider payload", "items": [1, 2]},
+            lambda: (
+                calls.append(True) or {"secret": "provider payload", "items": [1, 2]}
+            ),
             {"date": "2026-09-19", "secret": "must not appear"},
             logger=logger,
             diagnostic_capture=capture,
-            operation_context={"operation_id": "op-1", "trigger": "manual", "phase": "sync", "ignored": "nope"},
+            operation_context={
+                "operation_id": "op-1",
+                "trigger": "manual",
+                "phase": "sync",
+                "ignored": "nope",
+            },
         )
 
         self.assertEqual(result, {"secret": "provider payload", "items": [1, 2]})
         self.assertEqual(calls, [True])
-        self.assertEqual([record[2]["extra"]["event"] for record in logger.records], [
-            "external_call_started", "external_call_completed",
-        ])
+        self.assertEqual(
+            [record[2]["extra"]["event"] for record in logger.records],
+            [
+                "external_call_started",
+                "external_call_completed",
+            ],
+        )
         start_context = logger.records[0][2]["extra"]["context"]
         self.assertEqual(
             {key: start_context[key] for key in ("operation_id", "trigger", "phase")},
@@ -747,13 +915,24 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertEqual(start_context["date"], "2026-09-19")
         self.assertNotIn("must not appear", repr(logger.records))
         self.assertNotIn("provider payload", repr(logger.records))
-        self.assertEqual([event for event, _details in capture.entries], [
-            "external_call_started", "external_call_completed",
-        ])
-        self.assertEqual(capture.entries[1][1]["response"], {
-            "shape": {"type": "object", "field_count": 2, "fields": ["secret", "items"],
-                      "sample": {"type": "string", "length": 16}},
-        })
+        self.assertEqual(
+            [event for event, _details in capture.entries],
+            [
+                "external_call_started",
+                "external_call_completed",
+            ],
+        )
+        self.assertEqual(
+            capture.entries[1][1]["response"],
+            {
+                "shape": {
+                    "type": "object",
+                    "field_count": 2,
+                    "fields": ["secret", "items"],
+                    "sample": {"type": "string", "length": 16},
+                },
+            },
+        )
         self.assertNotIn("provider payload", repr(capture.entries))
 
     def test_external_call_reraises_app_error_unchanged_and_captures_failure(self):
@@ -767,16 +946,28 @@ class ProviderHTTPTests(unittest.TestCase):
             raise expected
 
         with self.assertRaises(AppError) as raised:
-            external_call("synthetic", "create", call, logger=logger, diagnostic_capture=capture)
+            external_call(
+                "synthetic", "create", call, logger=logger, diagnostic_capture=capture
+            )
 
         self.assertIs(raised.exception, expected)
         self.assertEqual(calls, [True])
-        self.assertEqual([record[2]["extra"]["event"] for record in logger.records], ["external_call_started"])
-        self.assertEqual([event for event, _details in capture.entries], [
-            "external_call_started", "external_call_failed",
-        ])
+        self.assertEqual(
+            [record[2]["extra"]["event"] for record in logger.records],
+            ["external_call_started"],
+        )
+        self.assertEqual(
+            [event for event, _details in capture.entries],
+            [
+                "external_call_started",
+                "external_call_failed",
+            ],
+        )
         failure = capture.entries[1][1]
-        self.assertEqual(failure["error"], {"type": "AppError", "status": 409, "reason": "already_exists"})
+        self.assertEqual(
+            failure["error"],
+            {"type": "AppError", "status": 409, "reason": "already_exists"},
+        )
         self.assertEqual(failure["exception_message"], "synthetic message")
 
     def test_external_call_translates_unexpected_exception_with_cause_and_no_leak(self):
@@ -790,16 +981,24 @@ class ProviderHTTPTests(unittest.TestCase):
             raise expected
 
         with self.assertRaises(AppError) as raised:
-            external_call("synthetic", "fetch", call, logger=logger, diagnostic_capture=capture)
+            external_call(
+                "synthetic", "fetch", call, logger=logger, diagnostic_capture=capture
+            )
 
         self.assertEqual(calls, [True])
         self.assertIs(raised.exception.__cause__, expected)
         self.assertEqual(raised.exception.reason, "provider_client_error")
         self.assertEqual(logger.records[1][0], "exception")
-        self.assertEqual(logger.records[1][2]["extra"]["context"]["error_code"], "internal_error")
-        self.assertNotIn("provider payload must not leak", repr(logger.records[1][2]["extra"]))
+        self.assertEqual(
+            logger.records[1][2]["extra"]["context"]["error_code"], "internal_error"
+        )
+        self.assertNotIn(
+            "provider payload must not leak", repr(logger.records[1][2]["extra"])
+        )
         self.assertEqual(capture.entries[1][1]["error"], {"type": "RuntimeError"})
-        self.assertEqual(capture.entries[1][1]["exception_message"], "provider payload must not leak")
+        self.assertEqual(
+            capture.entries[1][1]["exception_message"], "provider payload must not leak"
+        )
 
     def test_external_call_classifies_timeout_without_exposing_error_text(self):
         logger = _CallLogger()
@@ -813,7 +1012,9 @@ class ProviderHTTPTests(unittest.TestCase):
                 diagnostic_capture=capture,
             )
 
-        self.assertEqual(logger.records[1][2]["extra"]["context"]["error_code"], "timeout")
+        self.assertEqual(
+            logger.records[1][2]["extra"]["context"]["error_code"], "timeout"
+        )
         self.assertEqual(capture.entries[1][1]["error"], {"type": "TimeoutError"})
 
 

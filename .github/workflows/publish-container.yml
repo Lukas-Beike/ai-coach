@@ -37,6 +37,7 @@ jobs:
       - name: Check out workflow source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           # Release validation must come from protected main, never the requested tag.
           ref: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish_container == true)) && 'refs/heads/main' || github.sha }}
           fetch-depth: 0
@@ -62,15 +63,24 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.14'
       - name: Install dependencies
-        run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements.txt
+        run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements.txt -r requirements-dev.txt
       - name: Run unit tests
-        run: python tests/run_tests.py --shard "${{ matrix.shard }}" --total 4
+        run: coverage run tests/run_tests.py --shard "${{ matrix.shard }}" --total 4
+      - name: Upload shard coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-coverage-${{ matrix.shard }}
+          path: .coverage.*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   syntax:
     needs: source
@@ -79,6 +89,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -95,6 +106,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
       - name: Build isolated SQLCipher test image
         run: docker build --tag ai-coach:test .
@@ -108,6 +120,9 @@ jobs:
           --volume "${GITHUB_WORKSPACE}/requirements.txt:/review/requirements.txt:ro"
           --volume "${GITHUB_WORKSPACE}/requirements-dev.in:/review/requirements-dev.in:ro"
           --volume "${GITHUB_WORKSPACE}/requirements-dev.txt:/review/requirements-dev.txt:ro"
+          --volume "${GITHUB_WORKSPACE}/pyproject.toml:/review/pyproject.toml:ro"
+          --volume "${GITHUB_WORKSPACE}/tools:/review/tools:ro"
+          --volume "${GITHUB_WORKSPACE}/tools:/app/tools:ro"
           --volume "${GITHUB_WORKSPACE}/docs:/review/docs:ro"
           --volume "${GITHUB_WORKSPACE}/public:/review/public:ro"
           --volume "${GITHUB_WORKSPACE}/server.py:/review/server.py:ro"
@@ -147,6 +162,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Set up Python
@@ -155,56 +171,23 @@ jobs:
           python-version: '3.14'
       - name: Install application and quality dependencies
         run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements-dev.txt
-      - name: Collect coverage baseline
-        run: |
-          coverage run --branch --source=server.py,backend tests/run_tests.py --shard 1 --total 4
-          coverage report --fail-under=0
-      # Keep a checked baseline for each ownership boundary. Unchanged backend modules stay excluded
-      # until touched; every changed backend module is automatically added below and checked strictly.
-      - name: Run lint baseline
-        run: >-
-          ruff check tests/run_tests.py backend/coach/proposals.py
-          backend/coach/read_tools.py backend/coach/tool_execution_service.py
-          backend/coach/tool_preparation.py backend/db/manager.py
-          backend/errors.py backend/http_api/handler.py backend/providers/weather.py
-          backend/planning/calendar_service.py backend/backup/export.py
-          backend/sync/worker.py backend/coach/local_assembly.py
-      - name: Run formatter baseline
-        run: >-
-          ruff format --check tests/run_tests.py backend/coach/proposals.py
-          backend/coach/read_tools.py backend/coach/tool_execution_service.py
-          backend/coach/tool_preparation.py backend/db/manager.py
-          backend/errors.py backend/http_api/handler.py backend/providers/weather.py
-          backend/planning/calendar_service.py backend/backup/export.py
-          backend/sync/worker.py backend/coach/local_assembly.py
-      - name: Run lightweight type baseline
-        run: >-
-          mypy --ignore-missing-imports --follow-imports=skip tests/run_tests.py
-          backend/coach/proposals.py backend/coach/read_tools.py
-          backend/coach/tool_execution_service.py backend/coach/tool_preparation.py
-          backend/db/manager.py backend/errors.py backend/http_api/handler.py
-          backend/providers/weather.py backend/planning/calendar_service.py
-          backend/backup/export.py backend/sync/worker.py
-          backend/coach/local_assembly.py
-      - name: Check changed backend modules
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
+      - name: Download shard coverage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: python-coverage-*
+          path: coverage-data
+          merge-multiple: true
+      - name: Enforce merged coverage ratchet
         run: |
           set -euo pipefail
-          base_sha="$BASE_SHA"
-          if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
-            base_sha="${HEAD_SHA}^"
+          if [[ "$(find coverage-data -name '.coverage.*' -type f | wc -l)" -ne 4 ]]; then
+            echo "Expected coverage data from all four test shards."
+            exit 1
           fi
-          mapfile -t files < <(git diff --diff-filter=ACMRT --name-only "$base_sha" "$HEAD_SHA" -- backend/ | grep -E '^backend/.*\.py$' || true)
-          if ((${#files[@]} == 0)); then
-            echo "No changed backend Python modules; incremental static checks skipped."
-            exit 0
-          fi
-          printf 'Checking changed backend modules:\n%s\n' "${files[@]}"
-          ruff check "${files[@]}"
-          ruff format --check "${files[@]}"
-          mypy --ignore-missing-imports --follow-imports=skip "${files[@]}"
+          coverage combine coverage-data
+          coverage report
+      - name: Enforce repository quality ratchet
+        run: python tools/quality_baseline.py
 
   image_sbom:
     needs: source
@@ -217,11 +200,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
       - name: Build isolated image for scanning
         run: docker build --tag ai-coach:security .
       - name: Generate SPDX SBOM
-        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: ai-coach:security
           format: spdx-json
@@ -250,6 +234,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6.0.0
@@ -364,6 +349,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Verify build uses tested source and release version

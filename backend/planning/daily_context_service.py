@@ -19,7 +19,7 @@ _MORNING_BATTERY_HISTORY_KEY = "morning_body_battery_history"
 def _decode_garmin_snapshot(value: Any) -> dict[str, Any]:
     try:
         decoded = json.loads(value or "{}")
-    except (TypeError, ValueError, RecursionError):
+    except TypeError, ValueError, RecursionError:
         return {}
     return decoded if isinstance(decoded, dict) else {}
 

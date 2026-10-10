@@ -1,54 +1,35 @@
-"""Local report reads and explicit immutable report archival."""
+"""Cohesive local training analysis read use cases."""
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 import uuid
 from collections.abc import Callable
-from datetime import UTC, date, datetime, timedelta
+from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Any
 
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.identity import intervals_activity_device_source
+from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
 from backend.performance.comparisons import recurring_training_comparisons
-from backend.performance.season_preparation import load_scenarios, season_preparation
 from backend.performance.tag_impact import tag_impact
 from backend.performance.training_report import canonical_rows, training_report
 
 
-class TrainingReportService:
+class TrainingRecordsService:
     def __init__(
         self,
         *,
-        read_snapshot: Callable[[], Any],
-        read_plan: Callable[[], Any],
-        read_checkins: Callable[[], Any],
         database_manager: Any,
-        today: Callable[[], date],
-        timezone: Callable[[], str] = lambda: "UTC",
-        utc_now: Callable[[], str] = lambda: datetime.now(UTC).isoformat(),
-        read_competitions: Callable[[], list[dict[str, Any]]] = list,
-        read_recovery: Callable[[], dict[str, Any]] = dict,
-        read_performance: Callable[[], dict[str, Any]] = dict,
-        read_equipment: Callable[[], dict[str, Any]] = dict,
-        read_feedback: Callable[[], list[dict[str, Any]]] = list,
-        read_record: Callable[[str, str], dict[str, Any]] | None = None,
-    ):
-        self._read_snapshot = read_snapshot
-        self._read_plan = read_plan
-        self._read_checkins = read_checkins
+        read_snapshot: Callable[[], Any],
+        read_equipment: Callable[[], dict[str, Any]],
+        read_record: Callable[[str, str], dict[str, Any]] | None,
+    ) -> None:
         self._database_manager = database_manager
-        self._today = today
-        self._timezone = timezone
-        self._utc_now = utc_now
-        self._read_competitions = read_competitions
-        self._read_recovery = read_recovery
-        self._read_performance = read_performance
+        self._read_snapshot = read_snapshot
         self._read_equipment = read_equipment
-        self._read_feedback = read_feedback
         self._read_record = read_record
 
     def training_records(self, values: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -72,80 +53,9 @@ class TrainingReportService:
         return {"equipment": self._read_equipment()}
 
     def comparisons(self) -> dict[str, Any]:
-        return recurring_training_comparisons(self._observations())
+        return recurring_training_comparisons(self.observations())
 
-    def impact(self) -> dict[str, Any]:
-        return tag_impact(
-            self._read_checkins(),
-            self._read_recovery(),
-            self._read_snapshot() or {},
-            self._today(),
-            self._timezone(),
-        )
-
-    def body_history(self) -> dict[str, Any]:
-        history = self._read_performance().get("history")
-        body = history.get("body") if isinstance(history, dict) else None
-        return body if isinstance(body, dict) else {"status": "insufficient_data"}
-
-    def sleep_regularity(self) -> dict[str, Any]:
-        regularity = self._read_recovery().get("regularity")
-        if isinstance(regularity, dict):
-            return regularity
-        return {"status": "insufficient_data"}
-
-    def season(self) -> dict[str, Any]:
-        return season_preparation(
-            self._read_snapshot() or {},
-            self._read_competitions(),
-            self._today(),
-            self._timezone(),
-            self._observations(),
-        )
-
-    def scenarios(self, values: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(values, dict):
-            raise AppError(400, "Das Szenario muss ein Objekt sein.")
-        return load_scenarios(
-            self._read_snapshot() or {},
-            self._read_plan() or {},
-            self._today(),
-            values,
-            self._timezone(),
-        )
-
-    def read(self, values: dict[str, Any]) -> dict[str, Any]:
-        today = self._today()
-        try:
-            start = date.fromisoformat(
-                str(
-                    values.get("start")
-                    or (today - timedelta(days=today.weekday())).isoformat()
-                )
-            )
-            days = int(values.get("days", 7))
-        except (TypeError, ValueError) as exc:
-            raise AppError(400, "Ungültiger Berichtszeitraum.") from exc
-        sport = str(values.get("sport") or "all")
-        if (
-            days not in {7, 28}
-            or not date(2010, 1, 1) <= start <= today
-            or not re.fullmatch(r"[A-Za-z]{1,40}", sport)
-        ):
-            raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
-        return training_report(
-            self._read_snapshot(),
-            start=start,
-            days=days,
-            today=today,
-            sport=sport,
-            plan=self._read_plan(),
-            checkins=self._read_checkins(),
-            activity_feedback=self._read_feedback(),
-            timezone=self._timezone(),
-        )
-
-    def _observations(self) -> list[dict[str, Any]]:
+    def observations(self) -> list[dict[str, Any]]:
         rows, _ = canonical_rows(self._read_snapshot() or {})
         known = {str(row.get("id")): row for row in rows}
         records = []
@@ -156,7 +66,7 @@ class TrainingReportService:
             records.append(
                 {
                     **stored,
-                    "date": str(row.get("start_date_local") or "")[:10],
+                    "date": iso_date_prefix(str(row.get("start_date_local") or "")),
                     "sport": row.get("type") or row.get("sport"),
                     "activity_type": row.get("type") or row.get("sport"),
                     "source": row.get("source") or "Intervals.icu",
@@ -175,7 +85,7 @@ class TrainingReportService:
 
     def endurance(self) -> dict[str, Any]:
         records = [
-            row for row in self._observations() if row["aerobic"].get("status") == "ok"
+            row for row in self.observations() if row["aerobic"].get("status") == "ok"
         ]
         return {
             "status": "ok" if records else "insufficient_data",
@@ -184,8 +94,12 @@ class TrainingReportService:
             "comparison": "Individual observations, no inferred fitness trend. Compare sport, duration, intensity, terrain, temperature and indoor/outdoor conditions.",
         }
 
-    def power_profiles(self) -> dict[str, Any]:
-        records = self._observations()
+
+class TrainingProfileSelectionService:
+    def __init__(self, today: Callable[[], date]) -> None:
+        self._today = today
+
+    def power_profiles(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         today = self._today()
         eligible_records = [
             row for row in records if str(row.get("date") or "") <= today.isoformat()
@@ -289,7 +203,7 @@ class TrainingReportService:
             for duration in (5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600):
                 candidates = _power_candidates(eligible, sport, duration)
                 result["power"].append(
-                    TrainingReportService._winner(
+                    TrainingProfileSelectionService._winner(
                         candidates, sport, duration, "watts", "duration_seconds"
                     )
                 )
@@ -300,7 +214,7 @@ class TrainingReportService:
             for value in values:
                 candidates = _running_candidates(eligible, key, field, value)
                 result["running"][key].append(
-                    TrainingReportService._winner(
+                    TrainingProfileSelectionService._winner(
                         candidates,
                         "Run",
                         value,
@@ -353,45 +267,152 @@ class TrainingReportService:
             "device": row.get("device") or "unknown",
         }
 
-    def archive(self, values: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(values, dict):
-            raise AppError(400, "Der Berichtsauftrag muss ein Objekt sein.")
-        if set(values) - {"start", "days", "sport"}:
-            raise AppError(400, "Der Berichtsauftrag enthält unbekannte Felder.")
-        report = self.read(values)
-        serialized = json.dumps(
-            report, sort_keys=True, ensure_ascii=False, allow_nan=False
-        )
-        report_id = hashlib.sha256(serialized.encode()).hexdigest()
-        with self._database_manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO NOTHING",
-                (f"training_report:{report_id}", serialized, self._utc_now()),
-            )
-        return {"ok": True, "report_id": report_id, "report": report}
 
-    def archives(self) -> dict[str, Any]:
-        with self._database_manager.unit_of_work() as db:
-            rows = db.execute(
-                "SELECT key, value FROM kv WHERE key LIKE 'training_report:%' ORDER BY updated_at DESC, key LIMIT 50"
-            ).fetchall()
-        return {
-            "reports": [
-                {"id": row["key"].split(":", 1)[1], "report": json.loads(row["value"])}
-                for row in rows
-            ]
-        }
+class TrainingReportReadService:
+    def __init__(
+        self,
+        *,
+        read_snapshot: Callable[[], Any],
+        read_plan: Callable[[], Any],
+        read_checkins: Callable[[], Any],
+        read_feedback: Callable[[], list[dict[str, Any]]],
+        today: Callable[[], date],
+        load_scenarios: Callable[..., dict[str, Any]],
+    ) -> None:
+        self._read_snapshot = read_snapshot
+        self._read_plan = read_plan
+        self._read_checkins = read_checkins
+        self._read_feedback = read_feedback
+        self._today = today
+        self._load_scenarios = load_scenarios
+
+    def scenarios(
+        self, values: dict[str, Any], timezone: str = "UTC"
+    ) -> dict[str, Any]:
+        if not isinstance(values, dict):
+            raise AppError(400, "Das Szenario muss ein Objekt sein.")
+        return self._load_scenarios(
+            self._read_snapshot() or {},
+            self._read_plan() or {},
+            self._today(),
+            values,
+            timezone,
+        )
+
+    def read(self, values: dict[str, Any], timezone: str = "UTC") -> dict[str, Any]:
+        today = self._today()
+        try:
+            start = date.fromisoformat(
+                str(
+                    values.get("start")
+                    or (today - timedelta(days=today.weekday())).isoformat()
+                )
+            )
+            days = int(values.get("days", 7))
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Ungültiger Berichtszeitraum.") from exc
+        sport = str(values.get("sport") or "all")
+        if (
+            days not in {7, 28}
+            or not date(2010, 1, 1) <= start <= today
+            or not re.fullmatch(r"[A-Za-z]{1,40}", sport)
+        ):
+            raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
+        return training_report(
+            self._read_snapshot(),
+            start=start,
+            days=days,
+            today=today,
+            sport=sport,
+            plan=self._read_plan(),
+            checkins=self._read_checkins(),
+            activity_feedback=self._read_feedback(),
+            timezone=timezone,
+        )
+
+
+class TrainingDerivedReadService:
+    def __init__(
+        self,
+        *,
+        read_snapshot: Callable[[], Any],
+        read_checkins: Callable[[], Any],
+        read_recovery: Callable[[], dict[str, Any]],
+        read_performance: Callable[[], dict[str, Any]],
+        today: Callable[[], date],
+    ) -> None:
+        self._read_snapshot = read_snapshot
+        self._read_checkins = read_checkins
+        self._read_recovery = read_recovery
+        self._read_performance = read_performance
+        self._today = today
+
+    def impact(self, timezone: str = "UTC") -> dict[str, Any]:
+        return tag_impact(
+            self._read_checkins(),
+            self._read_recovery(),
+            self._read_snapshot() or {},
+            self._today(),
+            timezone,
+        )
+
+    def body_history(self) -> dict[str, Any]:
+        history = self._read_performance().get("history")
+        body = history.get("body") if isinstance(history, dict) else None
+        return body if isinstance(body, dict) else {"status": "insufficient_data"}
+
+    def sleep_regularity(self) -> dict[str, Any]:
+        regularity = self._read_recovery().get("regularity")
+        if isinstance(regularity, dict):
+            return regularity
+        return {"status": "insufficient_data"}
+
+
+class TrainingSeasonReadService:
+    def __init__(
+        self,
+        *,
+        read_snapshot: Callable[[], Any],
+        read_competitions: Callable[[], list[dict[str, Any]]],
+        read_observations: Callable[[], list[dict[str, Any]]],
+        today: Callable[[], date],
+        season_preparation: Callable[..., dict[str, Any]],
+    ) -> None:
+        self._read_snapshot = read_snapshot
+        self._read_competitions = read_competitions
+        self._read_observations = read_observations
+        self._today = today
+        self._season_preparation = season_preparation
+
+    def season(self, timezone: str = "UTC") -> dict[str, Any]:
+        return self._season_preparation(
+            self._read_snapshot() or {},
+            self._read_competitions(),
+            self._today(),
+            timezone,
+            self._read_observations(),
+        )
+
+
+@dataclass(frozen=True)
+class TrainingReportServices:
+    records: TrainingRecordsService
+    profiles: TrainingProfileSelectionService
+    report: TrainingReportReadService
+    derived: TrainingDerivedReadService
+    season: TrainingSeasonReadService
+    timezone: Callable[[], str]
 
 
 def _power_candidates(
     eligible: list[dict[str, Any]], sport: str, duration: int
 ) -> list:
     return [
-        (p, row)
+        (point, row)
         for row in eligible
         if row.get("sport") == sport
-        for p in (row.get("power_profile") or {}).get("duration_curve", [])
-        if p.get("duration_seconds") == duration and p.get("watts") is not None
+        for point in (row.get("power_profile") or {}).get("duration_curve", [])
+        if point.get("duration_seconds") == duration and point.get("watts") is not None
     ]
 
 
@@ -399,10 +420,10 @@ def _running_candidates(
     eligible: list[dict[str, Any]], key: str, field: str, value: int
 ) -> list:
     return [
-        (p, row)
+        (point, row)
         for row in eligible
         if row.get("sport") in {"Run", "VirtualRun", "TrailRun"}
-        for p in (row.get("running_profile") or {}).get(key, [])
-        if p.get(field) is not None
-        and p.get("duration_seconds", p.get("distance_meters")) == value
+        for point in (row.get("running_profile") or {}).get(key, [])
+        if point.get(field) is not None
+        and point.get("duration_seconds", point.get("distance_meters")) == value
     ]

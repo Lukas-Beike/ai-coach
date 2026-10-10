@@ -5,6 +5,8 @@ from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+
 UTC_OFFSET_SUFFIX = "+00:00"
 
 
@@ -27,7 +29,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -52,7 +54,7 @@ def _garmin_numeric(value: Any) -> float | int | None:
 
 
 def _planning_context_date(value: Any) -> str:
-    raw = str(value or "").replace("Z", UTC_OFFSET_SUFFIX)[:10]
+    raw = iso_date_prefix(str(value or "").replace("Z", UTC_OFFSET_SUFFIX))
     try:
         return date.fromisoformat(raw).isoformat()
     except ValueError:
@@ -141,7 +143,7 @@ def garmin_recovery_average(
     values: list[float] = []
     for record_date, record in dated_garmin_recovery_records(snapshot.get(section)):
         try:
-            current = date.fromisoformat(record_date[:10])
+            current = date.fromisoformat(iso_date_prefix(record_date))
         except ValueError:
             continue
         if not cutoff <= current <= end_date:

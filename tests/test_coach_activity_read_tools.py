@@ -2,20 +2,32 @@
 
 from __future__ import annotations
 
-import json
 import unittest
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
-from backend.activities.read_service import ActivityReadService
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.errors import AppError
+from backend.performance.activity_read_service import ActivityAnalysisReadService
 
 
 class CoachActivityReadToolServiceTests(unittest.TestCase):
     def test_report_defaults_to_requested_period_without_unrelated_analysis_reads(self):
-        reports = Mock()
-        reports.read.return_value = {"start": "2026-09-01", "totals": {"sessions": 2}}
+        report = Mock()
+        report.read.return_value = {"start": "2026-09-01", "totals": {"sessions": 2}}
+        records = SimpleNamespace(endurance=Mock(), comparisons=Mock())
+        derived = SimpleNamespace(
+            impact=Mock(), body_history=Mock(), sleep_regularity=Mock()
+        )
+        reports = SimpleNamespace(
+            report=report,
+            records=records,
+            derived=derived,
+            profiles=SimpleNamespace(power_profiles=Mock()),
+            season=SimpleNamespace(season=Mock()),
+            timezone=lambda: "UTC",
+        )
         service = CoachActivityReadToolService(
             Mock(), Mock(), Mock(), date.today, reports
         )
@@ -23,26 +35,47 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             "get_training_report", {"start": "2026-09-01", "days": 7}
         )
         self.assertEqual(result["report"]["totals"]["sessions"], 2)
-        reports.endurance.assert_not_called()
-        reports.impact.assert_not_called()
+        records.endurance.assert_not_called()
+        derived.impact.assert_not_called()
+        report.read.assert_called_once_with({"start": "2026-09-01", "days": 7}, "UTC")
         self.assertEqual(result["projection"]["requested_sections"], ["report"])
 
     def test_report_can_select_comparisons_and_rejects_unknown_section(self):
-        reports = Mock()
-        reports.comparisons.return_value = {"status": "insufficient_data", "groups": []}
+        report = Mock()
+        records = SimpleNamespace(comparisons=Mock(), endurance=Mock())
+        records.comparisons.return_value = {"status": "insufficient_data", "groups": []}
+        reports = SimpleNamespace(
+            report=report,
+            records=records,
+            derived=SimpleNamespace(
+                impact=Mock(), body_history=Mock(), sleep_regularity=Mock()
+            ),
+            profiles=SimpleNamespace(power_profiles=Mock()),
+            season=SimpleNamespace(season=Mock()),
+            timezone=lambda: "UTC",
+        )
         service = CoachActivityReadToolService(
             Mock(), Mock(), Mock(), date.today, reports
         )
         result = service.execute("get_training_report", {"sections": ["comparisons"]})
         self.assertEqual(result["comparisons"]["status"], "insufficient_data")
-        reports.read.assert_not_called()
+        report.read.assert_not_called()
         with self.assertRaises(AppError):
             service.execute("get_training_report", {"sections": ["unknown"]})
 
     def test_report_can_select_body_history_and_sleep_regularity(self):
-        reports = Mock()
-        reports.body_history.return_value = {"weight": []}
-        reports.sleep_regularity.return_value = {"status": "ok"}
+        report = Mock()
+        derived = SimpleNamespace(body_history=Mock(), sleep_regularity=Mock())
+        derived.body_history.return_value = {"weight": []}
+        derived.sleep_regularity.return_value = {"status": "ok"}
+        reports = SimpleNamespace(
+            report=report,
+            records=SimpleNamespace(endurance=Mock(), comparisons=Mock()),
+            derived=derived,
+            profiles=SimpleNamespace(power_profiles=Mock()),
+            season=SimpleNamespace(season=Mock()),
+            timezone=lambda: "UTC",
+        )
         service = CoachActivityReadToolService(
             Mock(), Mock(), Mock(), date.today, reports
         )
@@ -51,7 +84,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         )
         self.assertEqual(result["body_history"], {"weight": []})
         self.assertEqual(result["sleep_regularity"]["status"], "ok")
-        reports.read.assert_not_called()
+        report.read.assert_not_called()
 
     def test_recent_activities_applies_defaults_bounds_and_today(self):
         activity_read = Mock()
@@ -100,16 +133,18 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         manager = MagicMock()
         manager.unit_of_work.return_value.__enter__.return_value = object()
         snapshot_repository = Mock()
-        snapshot_repository.latest_payload.return_value = json.dumps(
-            {
-                "synced_at": "synthetic-sync",
-                "recent_activities": [{"id": "synthetic-1", "type": "Run"}],
-                "raw_provider_data": {"activities": [raw_activity]},
-            }
-        )
+        snapshot_repository.latest_snapshot.return_value = {
+            "synced_at": "synthetic-sync",
+            "recent_activities": [{"id": "synthetic-1", "type": "Run"}],
+            "raw_provider_data": {"activities": [raw_activity]},
+        }
         feedback = Mock()
         feedback.list.return_value = []
-        activity_read = ActivityReadService(manager, snapshot_repository, feedback)
+        activity_read = ActivityAnalysisReadService(
+            manager,
+            snapshot_repository,
+            feedback,
+        )
         garmin_snapshot = {"recent_wellness": []}
         profile_value = {"weight_kg": "70"}
         garmin = Mock(snapshot=Mock(return_value=garmin_snapshot))

@@ -6,6 +6,7 @@ import math
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.weather import projection as weather_projection
 from backend.weather import recommendations as weather_recommendations
 
@@ -16,7 +17,7 @@ WEATHER_ADAPTIVE_LONG_RIDE_MINUTES = 180
 def _as_number(value: Any) -> float | int | None:
     try:
         number = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(number):
         return None
@@ -45,10 +46,12 @@ def _weather_adaptive_forecast(
         or not isinstance(today, date)
     ):
         return None
-    event_date = str(event.get("date") or event.get("start_date_local") or "")[:10]
+    event_date = iso_date_prefix(
+        str(event.get("date") or event.get("start_date_local") or "")
+    )
     try:
         target_date = date.fromisoformat(event_date)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not today <= target_date <= today + timedelta(days=WEATHER_ADAPTIVE_DAYS - 1):
         return None
@@ -66,7 +69,7 @@ def _weather_adaptive_precipitation(
     code = forecast.get("weather_code")
     try:
         code = int(code) if code is not None else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         code = None
     probability = weather_projection.weather_number(
         forecast.get("precipitation_probability_max")

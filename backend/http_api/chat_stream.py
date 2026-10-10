@@ -64,8 +64,16 @@ class CoachChatStreamTransport:
 
         try:
             self._stream_job(
-                handler, payload, message, client_turn_id, request_kind,
-                session_hash, operation_id, cancel_event, send_event, disconnect,
+                handler,
+                payload,
+                message,
+                client_turn_id,
+                request_kind,
+                session_hash,
+                operation_id,
+                cancel_event,
+                send_event,
+                disconnect,
             )
         except AppError as exc:
             send_event("error", self._app_error(exc))
@@ -77,7 +85,9 @@ class CoachChatStreamTransport:
                     "context": {"request_id": handler.request_id},
                 },
             )
-            send_event("error", {"reason": "internal_error", "message": INTERNAL_SERVER_ERROR})
+            send_event(
+                "error", {"reason": "internal_error", "message": INTERNAL_SERVER_ERROR}
+            )
         finally:
             self._registry.unregister(session_hash, operation_id)
             handler.close_connection = True
@@ -119,7 +129,9 @@ class CoachChatStreamTransport:
         if events is None:
             send_event("background", job)
             return
-        self._relay_events(events, client_turn_id, session_hash, operation_id, send_event)
+        self._relay_events(
+            events, client_turn_id, session_hash, operation_id, send_event
+        )
 
     def _relay_events(
         self,

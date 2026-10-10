@@ -8,7 +8,7 @@ import unittest
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -140,9 +140,6 @@ def _config(**changes) -> Config:
         openai_api_key="",
         openai_base_url="",
         openai_model="",
-        gemini_api_key="",
-        gemini_model="",
-        ai_provider="openai",
         intervals_api_key="",
         intervals_athlete_id="",
         garmin_email="",
@@ -507,7 +504,7 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
         self.profile = Mock()
         self.profile.get.return_value = {"timezone": "Europe/Berlin"}
         self.clock = Mock()
-        self.clock.now.return_value = datetime(2026, 9, 4, 6, 0, tzinfo=timezone.utc)
+        self.clock.now.return_value = datetime(2026, 9, 4, 6, 0, tzinfo=UTC)
         self.diagnostic_capture = object()
         self.logger = Mock()
         return GarminMorningRemoteReader(
@@ -571,7 +568,7 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
             self.assertEqual(
                 fetch.call_args.kwargs["profile_timezone"], "Europe/Berlin"
             )
-            self.assertEqual(fetch.call_args.kwargs["fallback_zone"], timezone.utc)
+            self.assertEqual(fetch.call_args.kwargs["fallback_zone"], UTC)
             self.assertIs(fetch.call_args.kwargs["external_call"].__self__, reader)
             self.assertEqual(
                 fetch.call_args.kwargs["sleep_bounds"].__module__,

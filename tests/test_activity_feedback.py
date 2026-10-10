@@ -14,6 +14,7 @@ from backend.activities.feedback import (
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ActivityFeedbackRepository, SnapshotRepository
 from backend.errors import AppError
+from backend.sync.snapshot_reader import SnapshotRepositoryReader
 
 
 class ActivityFeedbackNormalizationTests(unittest.TestCase):
@@ -154,7 +155,9 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         )
         self.snapshot_repository = SnapshotRepository()
         self.service = ActivityFeedbackService(
-            self.manager, self.feedback_repository, self.snapshot_repository
+            self.manager,
+            self.feedback_repository,
+            SnapshotRepositoryReader(self.snapshot_repository),
         )
 
     def save_snapshot(self, payload: dict) -> None:
@@ -260,7 +263,7 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
 
         repository = FailingListRepository()
         service = ActivityFeedbackService(
-            self.manager, repository, self.snapshot_repository
+            self.manager, repository, SnapshotRepositoryReader(self.snapshot_repository)
         )
         with self.assertRaisesRegex(RuntimeError, "read failure"):
             service.save("activity-1", {"notes": "must persist"})
@@ -276,7 +279,7 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         service = ActivityFeedbackService(
             self.manager,
             FailingUpsertRepository(lambda: "2026-09-20T12:00:00+00:00"),
-            self.snapshot_repository,
+            SnapshotRepositoryReader(self.snapshot_repository),
         )
         with self.assertRaisesRegex(RuntimeError, "write failure"):
             service.save("activity-1", {"notes": "must roll back"})

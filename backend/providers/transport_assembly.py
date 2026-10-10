@@ -9,6 +9,7 @@ from typing import Any
 from backend.config import Config
 from backend.providers import http as provider_http
 from backend.providers import intervals_client as intervals_client_module
+from backend.runtime.ports import ProviderOperation
 
 
 @dataclass(frozen=True)
@@ -20,12 +21,11 @@ class ProviderHttpSettings:
     redact_text: Callable[[str], str]
     safe_response_headers: Callable[[Mapping[str, Any]], Mapping[str, str]]
     opener: Callable[[], Any]
+    provider_error_details: provider_http.ProviderErrorDetails | None = None
 
 
 @dataclass(frozen=True)
 class ProviderOperationContext:
-    provider_state: Callable[[], Any]
-    now: Callable[[], str]
     operation_context: Callable[[], Mapping[str, Any] | None]
 
 
@@ -33,6 +33,7 @@ class ProviderOperationContext:
 class IntervalsTransportSettings:
     config: Callable[[], Config]
     athlete_now: Callable[[], Any]
+    operation: ProviderOperation
 
 
 class ProviderTransportAssembly:
@@ -56,14 +57,14 @@ class ProviderTransportAssembly:
         self._max_response_bytes = http.max_response_bytes
         self._logger = http.logger
         self._diagnostic_capture = http.diagnostic_capture
-        self._provider_state = operation.provider_state
         self._redact_text = http.redact_text
         self._safe_response_headers = http.safe_response_headers
-        self._now = operation.now
         self._operation_context = operation.operation_context
         self._opener = http.opener
+        self._provider_error_details = http.provider_error_details
         self._config = intervals.config
         self._athlete_now = intervals.athlete_now
+        self._intervals_operation = intervals.operation
 
     def json_http_client(self) -> provider_http.JsonHttpClient:
         """Return the cache-owned JSON transport for the current provider state."""
@@ -72,11 +73,10 @@ class ProviderTransportAssembly:
             self._max_response_bytes,
             self._logger,
             self._diagnostic_capture,
-            self._provider_state(),
             self._redact_text,
             self._safe_response_headers,
-            self._now,
             self._operation_context,
+            provider_error_details=self._provider_error_details,
             opener=self._opener(),
         )
 
@@ -89,4 +89,5 @@ class ProviderTransportAssembly:
             active_config,
             request=self.json_http_client().request,
             now=self._athlete_now,
+            operation=self._intervals_operation,
         )

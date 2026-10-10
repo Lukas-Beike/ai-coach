@@ -14,7 +14,7 @@ def season_plan_summary(
     for competition in competitions:
         try:
             event_date = date.fromisoformat(competition["event_date"])
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             continue
 
         days = (event_date - today).days

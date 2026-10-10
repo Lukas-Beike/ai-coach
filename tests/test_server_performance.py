@@ -80,8 +80,10 @@ class ServerPerformanceTests(ServerTestCase):
         enqueue.assert_not_called()
 
     def test_performance_refresh_timestamp_and_initial_loading_state_are_rendered(self):
-        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(
-            encoding="utf-8"
+        root = Path(__file__).resolve().parents[1] / "public"
+        app = "\n".join(
+            (root / name).read_text(encoding="utf-8")
+            for name in ("shared.js", "performance-view.js", "state-loader.js")
         )
         self.assertIn("performance_refresh", app)
         self.assertIn("state.loadPromise", app)

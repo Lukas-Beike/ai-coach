@@ -149,7 +149,7 @@ class SelectedWorkoutSyncService:
         local_id = item["library_workout_id"]
         try:
             synced = json.loads(row["payload"] or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             synced = {}
         if (
             not isinstance(synced, dict)

@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.coach.authorization import require_coach_scope
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -130,7 +131,7 @@ class CoachTrainingPatchService:
     ) -> None:
         self._change_validator.validate_batch(changes, db)
         for workout in normalized:
-            day = workout["date"][:10]
+            day = iso_date_prefix(workout["date"])
             if self._calendar_conflicts.conflicts(workout, set(ids)):
                 raise AppError(
                     409,

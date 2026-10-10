@@ -16,9 +16,19 @@ from backend.coach.background_jobs_assembly import (
 class CoachBackgroundJobsAssemblyTests(unittest.TestCase):
     def make_assembly(self):
         names = (
-            "database_manager", "worker", "maintenance", "settings", "streams",
-            "sessions", "chat_turn", "morning", "quick_actions", "clock",
-            "horizon", "storage_limit", "gemini_limit", "read_only_tools",
+            "database_manager",
+            "worker",
+            "maintenance",
+            "settings",
+            "streams",
+            "sessions",
+            "chat_turn",
+            "morning",
+            "quick_actions",
+            "clock",
+            "horizon",
+            "storage_limit",
+            "read_only_tools",
         )
         deps = {name: Mock(name=name) for name in names}
         manager = Mock(name="manager")
@@ -41,48 +51,57 @@ class CoachBackgroundJobsAssemblyTests(unittest.TestCase):
         deps["clock"].return_value = athlete_clock
         deps["horizon"].return_value = 30
         deps["storage_limit"].return_value = 1024
-        deps["gemini_limit"].return_value = 512
-        assembly = CoachBackgroundJobsAssembly(dependencies=CoachBackgroundJobsAssembly.Inputs(
-            persistence=CoachJobPersistence(
-                database_manager=deps["database_manager"],
-                database_lock=lock,
-                chat_repository=chat_repository,
-                key_value_repository=key_values,
-                event_buffer=events,
-            ),
-            worker=CoachJobWorkerRuntime(
-                worker_wake_event=deps["worker"],
-                maintenance_gate=deps["maintenance"],
-                utc_now=Mock(name="utc_now"),
-                redactor=redactor,
-                repository_root=root,
-                logger=logger,
-            ),
-            turn=CoachJobTurnServices(
-                read_only_tools=deps["read_only_tools"],
-                settings=deps["settings"],
-                stream_registry=deps["streams"],
-                session_auth_service=deps["sessions"],
-                chat_turn_service=deps["chat_turn"],
-            ),
-            athlete=CoachJobAthleteServices(
-                manual_morning_checkin_service=deps["morning"],
-                quick_actions_service=deps["quick_actions"],
-                athlete_clock=deps["clock"],
-            ),
-            limits=CoachJobLimits(
-                background_horizon_days=deps["horizon"],
-                max_attachment_storage_bytes=deps["storage_limit"],
-                max_gemini_inline_image_bytes=deps["gemini_limit"],
-            ),
-        ))
-        deps.update({
-            "manager": manager, "lock": lock, "chat_repository": chat_repository,
-            "key_values": key_values, "events": events, "redactor": redactor,
-            "root": root, "logger": logger, "stream_registry": stream_registry,
-            "worker_value": worker, "maintenance_value": maintenance,
-            "athlete_clock_value": athlete_clock,
-        })
+        assembly = CoachBackgroundJobsAssembly(
+            dependencies=CoachBackgroundJobsAssembly.Inputs(
+                persistence=CoachJobPersistence(
+                    database_manager=deps["database_manager"],
+                    database_lock=lock,
+                    chat_repository=chat_repository,
+                    key_value_repository=key_values,
+                    event_buffer=events,
+                ),
+                worker=CoachJobWorkerRuntime(
+                    worker_wake_event=deps["worker"],
+                    maintenance_gate=deps["maintenance"],
+                    utc_now=Mock(name="utc_now"),
+                    redactor=redactor,
+                    repository_root=root,
+                    logger=logger,
+                ),
+                turn=CoachJobTurnServices(
+                    read_only_tools=deps["read_only_tools"],
+                    settings=deps["settings"],
+                    stream_registry=deps["streams"],
+                    session_auth_service=deps["sessions"],
+                    chat_turn_service=deps["chat_turn"],
+                ),
+                athlete=CoachJobAthleteServices(
+                    manual_morning_checkin_service=deps["morning"],
+                    quick_actions_service=deps["quick_actions"],
+                    athlete_clock=deps["clock"],
+                ),
+                limits=CoachJobLimits(
+                    background_horizon_days=deps["horizon"],
+                    max_attachment_storage_bytes=deps["storage_limit"],
+                ),
+            )
+        )
+        deps.update(
+            {
+                "manager": manager,
+                "lock": lock,
+                "chat_repository": chat_repository,
+                "key_values": key_values,
+                "events": events,
+                "redactor": redactor,
+                "root": root,
+                "logger": logger,
+                "stream_registry": stream_registry,
+                "worker_value": worker,
+                "maintenance_value": maintenance,
+                "athlete_clock_value": athlete_clock,
+            }
+        )
         return assembly, deps
 
     def test_job_services_resolve_current_worker_limits_and_stream_owner(self):
@@ -100,7 +119,6 @@ class CoachBackgroundJobsAssemblyTests(unittest.TestCase):
         self.assertIs(submission._wake_event, deps["worker_value"])
         self.assertEqual(submission._background_horizon_days, 30)
         self.assertEqual(submission._max_attachment_storage_bytes, 1024)
-        self.assertEqual(submission._max_gemini_inline_image_bytes, 512)
         self.assertIs(cancellation._streams, deps["stream_registry"])
 
     def test_runner_keeps_chat_and_recovery_factories_lazy(self):

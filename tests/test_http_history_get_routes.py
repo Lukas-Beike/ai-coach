@@ -36,7 +36,10 @@ class HistoryGetRoutesTests(unittest.TestCase):
         cases = (
             ("/api/change-history", 100),
             ("/api/change-history?limit=0", 1),
-            (f"/api/change-history?limit={change_history.MAX_ROWS + 5}", change_history.MAX_ROWS),
+            (
+                f"/api/change-history?limit={change_history.MAX_ROWS + 5}",
+                change_history.MAX_ROWS,
+            ),
             ("/api/change-history?limit=7&limit=19", 7),
             ("/api/change-history?limit=invalid", 100),
         )

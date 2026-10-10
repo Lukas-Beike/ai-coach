@@ -12,27 +12,22 @@ from backend.http_api.transcribe_post import TranscribePostRoutes
 
 class TranscribePostRoutesTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.settings = Mock()
-        self.settings.selected_ai_provider.return_value = "gemini"
-        self.settings.selected_model.return_value = "gemini-test-model"
         self.client = Mock()
         self.client.transcribe.return_value = {"transcript": "synthetic transcript"}
-        self.routes = TranscribePostRoutes(self.settings, lambda: self.client)
+        self.routes = TranscribePostRoutes(lambda: self.client)
         self.handler = SimpleNamespace(
             headers={"Content-Type": "audio/webm;codecs=opus"},
             read_audio_body=Mock(return_value=b"synthetic audio"),
             send_json=Mock(),
         )
 
-    def test_success_dispatches_audio_and_selected_provider_and_model(self) -> None:
+    def test_success_dispatches_audio_to_transcription_client(self) -> None:
         self.assertTrue(self.routes.handle(self.handler, "/api/transcribe"))
 
         self.handler.read_audio_body.assert_called_once_with()
         self.client.transcribe.assert_called_once_with(
             b"synthetic audio",
             "audio/webm;codecs=opus",
-            provider="gemini",
-            model="gemini-test-model",
         )
         self.handler.send_json.assert_called_once_with(
             200, {"transcript": "synthetic transcript"}

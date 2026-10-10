@@ -253,6 +253,26 @@ class WorkoutLibraryService:
             return self._list_in_db(own_db, limit, include_archived)
 
     @staticmethod
+    def page_in_transaction(
+        db: Any, cursor: builtins.list[str] | None, limit: int
+    ) -> builtins.list[Any]:
+        after_clause = ""
+        params: builtins.list[Any] = []
+        if cursor is not None:
+            after_clause = "WHERE (sport_key, name_key, id) > (?, ?, ?)"
+            params.extend(cursor)
+        return db.execute(
+            "WITH templates AS ("
+            "SELECT id, payload, lower(COALESCE(json_extract(payload, '$.type'), '')) AS sport_key, "
+            "lower(COALESCE(json_extract(payload, '$.name'), '')) AS name_key "
+            "FROM workout_library WHERE json_valid(payload) AND json_type(payload)='object' "
+            "AND json_extract(payload, '$.date') IS NULL AND COALESCE(json_extract(payload, '$.archived'), 0)=0) "
+            f"SELECT id, payload, sport_key, name_key FROM templates {after_clause} "
+            "ORDER BY sport_key, name_key, id LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+
+    @staticmethod
     def _list_in_db(
         db: Any, limit: int, include_archived: bool
     ) -> builtins.list[dict[str, Any]]:
@@ -273,6 +293,6 @@ class WorkoutLibraryService:
                 payload = json.loads(row["payload"])
                 if isinstance(payload, dict):
                     result.append(payload)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
         return result

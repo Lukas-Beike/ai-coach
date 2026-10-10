@@ -27,6 +27,9 @@ class _Snapshots:
     def latest_payload(self, db):
         return self.payload
 
+    def latest_snapshot(self, db):
+        return json.loads(self.payload)
+
     def save(self, db, snapshot, created_at):
         self.saved.append((snapshot, created_at))
         self.payload = json.dumps(snapshot)
@@ -82,6 +85,7 @@ class DuplicateActivityServiceTests(unittest.TestCase):
         self.events = _Events()
         self.service = DuplicateActivityService(
             self.manager,
+            self.snapshots,
             self.snapshots,
             lambda: "2026-09-20T11:00:00+00:00",
             self.events,

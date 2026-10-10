@@ -17,7 +17,7 @@ from backend.coach.service import (
 )
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.providers.openai import response_text
+from backend.providers.openai_responses import response_text
 
 
 class ObservedSyncJob(TypedDict):

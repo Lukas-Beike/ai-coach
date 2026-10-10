@@ -22,10 +22,12 @@ class SelectedWorkoutSyncAssemblyTests(unittest.TestCase):
         }
 
     def _assembly(self, callbacks):
-        return SelectedWorkoutSyncAssembly(dependencies=SelectedWorkoutSyncAssembly.Inputs(
-            providers=SelectedWorkoutProviders(**callbacks),
-            controls=SelectedWorkoutControls(Mock(), Mock(), 120, Mock()),
-        ))
+        return SelectedWorkoutSyncAssembly(
+            dependencies=SelectedWorkoutSyncAssembly.Inputs(
+                providers=SelectedWorkoutProviders(**callbacks),
+                controls=SelectedWorkoutControls(Mock(), Mock(), 120, Mock()),
+            )
+        )
 
     def test_construction_does_not_resolve_subordinate_owners(self):
         callbacks = self._callbacks()
@@ -41,28 +43,38 @@ class SelectedWorkoutSyncAssemblyTests(unittest.TestCase):
         redactor = Mock()
         lock = Mock()
         gate = Mock()
-        assembly = SelectedWorkoutSyncAssembly(dependencies=SelectedWorkoutSyncAssembly.Inputs(
-            providers=SelectedWorkoutProviders(**callbacks),
-            controls=SelectedWorkoutControls(redactor, lock, 90, gate),
-        ))
+        assembly = SelectedWorkoutSyncAssembly(
+            dependencies=SelectedWorkoutSyncAssembly.Inputs(
+                providers=SelectedWorkoutProviders(**callbacks),
+                controls=SelectedWorkoutControls(redactor, lock, 90, gate),
+            )
+        )
 
-        with patch.object(assembly_module, "SelectedWorkoutSyncService") as service_type:
+        with patch.object(
+            assembly_module, "SelectedWorkoutSyncService"
+        ) as service_type:
             service = assembly.service()
 
         self.assertIsNotNone(service)
-        self.assertEqual(service_type.call_args.args, (
-            "current config",
-            "current manager",
-            "library sync",
-            "calendar sync",
-            "calendar repair",
-            redactor,
-        ))
-        self.assertEqual(service_type.call_args.kwargs, {
-            "lock": lock,
-            "wait_seconds": 90,
-            "provider_resync_gate": gate,
-        })
+        self.assertEqual(
+            service_type.call_args.args,
+            (
+                "current config",
+                "current manager",
+                "library sync",
+                "calendar sync",
+                "calendar repair",
+                redactor,
+            ),
+        )
+        self.assertEqual(
+            service_type.call_args.kwargs,
+            {
+                "lock": lock,
+                "wait_seconds": 90,
+                "provider_resync_gate": gate,
+            },
+        )
 
 
 if __name__ == "__main__":

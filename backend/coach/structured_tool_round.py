@@ -13,7 +13,7 @@ from backend.coach.context import CoachTrainingContextService
 from backend.coach.context_selection import select_coach_context
 from backend.coach.dialogue import INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS
 from backend.coach.job_store import CoachJobStore
-from backend.coach.proposals import coach_action_hash
+from backend.coach.proposal_models import coach_action_hash
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.tool_call_metadata import structured_tool_call_metadata
@@ -42,7 +42,6 @@ class StructuredCoachRoundState:
     client_turn_id: str
     session_csrf_hash: str
     cancel_event: threading.Event | None
-    ai_provider: str
     request_payload: dict[str, Any]
     model_instructions: str
     message: str
@@ -205,11 +204,7 @@ class CoachStructuredToolRoundService:
                     state.message,
                     state.context,
                     attachments=bool(
-                        state.attachments
-                        or (
-                            state.ai_provider == "openai"
-                            and state.request_payload.get("conversation")
-                        )
+                        state.attachments or state.request_payload.get("conversation")
                     ),
                     has_receipts=True,
                 ),
@@ -259,11 +254,7 @@ class CoachStructuredToolRoundService:
             for step in state.command_receipts
         ):
             followup["tools"] = state.tools
-        if (
-            state.ai_provider == "openai"
-            and response.get("id")
-            and not followup.get("conversation")
-        ):
+        if response.get("id") and not followup.get("conversation"):
             followup["previous_response_id"] = response["id"]
         return self._response.respond(
             followup,
@@ -273,7 +264,6 @@ class CoachStructuredToolRoundService:
             command_receipts=state.command_receipts,
             attachments=state.attachments,
             client_turn_id=state.client_turn_id,
-            ai_provider=state.ai_provider,
             background_owned=state.background_owned,
             on_text_delta=state.on_text_delta,
             cancel_event=state.cancel_event,

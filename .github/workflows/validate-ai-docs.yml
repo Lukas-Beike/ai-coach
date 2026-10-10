@@ -19,3 +19,4 @@ jobs:
         with:
           python-version: '3.14'
       - run: python -m unittest discover -s tests -p test_ai_docs_contract.py -v
+      - run: node --test tests/codex-review-watchdog.test.cjs

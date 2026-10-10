@@ -51,7 +51,7 @@ def _as_nonnegative_number(
         return None
     try:
         num = float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise AppError(400, f"Ungültiger Wert für {name}: {value}")
     if not math.isfinite(num):
         raise AppError(400, f"{name} darf nicht unendlich oder NaN sein.")
@@ -174,7 +174,7 @@ def _normalize_logged_at(meal_date: str, value: Any) -> str:
             timestamp = f"{meal_date}T{timestamp}"
         datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         return timestamp
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return f"{meal_date}T12:00:00"
 
 

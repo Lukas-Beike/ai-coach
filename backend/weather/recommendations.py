@@ -7,6 +7,7 @@ import re
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.weather import projection as weather_projection
 
 WEATHER_RECOMMENDATION_DAYS = 5
@@ -186,7 +187,9 @@ def _weather_candidate_windows(
 def weather_recommendation(
     event: dict[str, Any], forecast: dict[str, Any]
 ) -> dict[str, Any] | None:
-    event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+    event_date = iso_date_prefix(
+        str(event.get("start_date_local") or event.get("date") or "")
+    )
     if not re.fullmatch(DATE_ONLY_PATTERN, event_date):
         return None
     try:
@@ -259,7 +262,9 @@ def weather_recommendations(
     for event in planned or []:
         if not is_outdoor_activity(event):
             continue
-        event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+        event_date = iso_date_prefix(
+            str(event.get("start_date_local") or event.get("date") or "")
+        )
         try:
             event_day = date.fromisoformat(event_date)
         except ValueError:

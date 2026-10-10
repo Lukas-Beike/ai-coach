@@ -1,6 +1,6 @@
 # Intervals Coach
 
-Intervals Coach is a private, mobile-first Progressive Web App (PWA) designed for a single athlete. Built on Python's standard-library HTTP server and an encrypted SQLCipher SQLite database, it bridges athlete training history and daily health metrics from Intervals.icu and Garmin Connect with state-of-the-art conversational AI models from OpenAI and Google Gemini.
+Intervals Coach is a private, mobile-first Progressive Web App (PWA) designed for a single athlete. Built on Python's standard-library HTTP server and an encrypted SQLCipher SQLite database, it bridges athlete training history and daily health metrics from Intervals.icu and Garmin Connect with OpenAI Responses-compatible conversational AI APIs.
 
 The application serves as an autonomous, conversational training companion. It understands athlete fatigue, manages a structured workout library, schedules future training sessions, analyzes past workouts, tracks environmental weather constraints, and interprets read-only calendar events—all while keeping sensitive biometric data, credentials, and workout plans strictly local and under the athlete's direct control.
 
@@ -17,6 +17,13 @@ Intervals Coach is intentionally standalone and designed for operation on a trus
 - **Untrusted External Content**: Data received from Intervals.icu, Garmin Connect, Open-Meteo, and external iCalendar feeds is strictly treated as untrusted data, never as system instructions.
 - **Zero Cloud Telemetry**: Biometric data, activity recordings, API keys, database keys, and athlete conversations never leave the host server, except when sending sanitized coaching prompts to the user's selected AI provider.
 - **Standard-Library Foundation**: The backend runs on Python's native `http.server` without heavyweight web frameworks. Application logic is modularized under `backend/`, keeping `server.py` strictly as a composition root.
+
+The backend import contract is layered: `athlete` is below `weather`, and
+`calendar` is below `activities`, which is below `performance`, which is below
+`planning`. `http_api` owns HTTP transport and route assembly, `coach` owns
+Coach workflows, `sync` owns synchronization and scheduling, `providers` owns
+external adapters, and `db` owns persistence. The AST layer tests enforce this
+order and the package-cycle fixture is empty.
 
 ---
 
@@ -41,7 +48,7 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 
 ### AI Coach & Conversational Intelligence
 - **Natural Language Coaching**: Conversational coaching without rigid trigger words, supporting natural phrasing, corrections, follow-up questions, and pronoun resolution across turns.
-- **Dual AI Provider Support**: Native integration with the OpenAI Responses API (GPT-6 Luna) and Google Gemini (Gemini 3.8 Flash) with real-time SSE token streaming.
+- **Responses API Support**: Uses OpenAI Responses-compatible APIs with real-time SSE token streaming. Chat Completions and provider fallback are unsupported.
 - **Durable Turn Queueing**: Every chat request is persisted in a durable SQLite background queue before processing, enabling seamless answer recovery across network drops or browser reloads.
 - **Permanent Fact Memorization**: Conversational profile updates that save athlete preferences, equipment notes, and constraints to the durable profile only upon explicit confirmation.
 - **Request-Specific Context Projection**: Compact daily, activity and dialogue windows for routine turns; detailed local context and additional tools are available on demand, with conservative fallback for continuations.
@@ -177,14 +184,22 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 |                                              v                                            |
 |  +-------------------------------------------------------------------------------------+  |
 |  | backend/ Domain Layer                                                               |  |
-|  |   - backend.http_api  : Request routing, JSON/multipart parsing, session cookies     |  |
-|  |   - backend.coach     : AI turn queue, context builder, 39 Coach tools, SSE          |  |
-|  |   - backend.sync      : Background scheduler, Intervals.icu, Garmin, Weather, ICS   |  |
-|  |   - backend.activities: Activity matching, duplicate detection, feedback tracking   |  |
-|  |   - backend.planning  : Workout units, templates, atomic changesets, revision locks |  |
-|  |   - backend.weather   : Open-Meteo client, ICON-D2/ECMWF forecast models, windows   |  |
-|  |   - backend.backup    : Export, validation, pre-restore snapshots, maintenance gate |  |
-|  |   - backend.db        : Repositories, transaction locks, SQLCipher connection pool   |  |
+|  |   - backend.http_api  : HTTP routing and request/response transport                 |  |
+|  |   - backend.coach     : Coach conversations, context, tools, jobs and SSE           |  |
+|  |   - backend.sync      : Provider synchronization, scheduling and durable jobs       |  |
+|  |   - backend.providers : External provider adapters and response handling            |  |
+|  |   - backend.athlete   : Profile, check-ins and athlete-local time                  |  |
+|  |   - backend.activities: Activity reads, matching, feedback and workout projections  |  |
+|  |   - backend.performance: Derived/readiness context and chart history                |  |
+|  |   - backend.planning  : Plans, library, workouts, conflicts and season preparation  |  |
+|  |   - backend.weather   : Weather projections and caching                              |  |
+|  |   - backend.calendar  : Public/external calendar data                                |  |
+|  |   - backend.nutrition : Nutrition entries, templates and product workflows          |  |
+|  |   - backend.backup    : Export, validation and restore workflows                    |  |
+|  |   - backend.diagnostics: Safe diagnostics and logging views                         |  |
+|  |   - backend.history   : Change history and undo                                      |  |
+|  |   - backend.runtime   : Lifecycle and maintenance state                              |  |
+|  |   - backend.db        : Repositories, schema and SQLCipher persistence              |  |
 |  +-------------------------------------------+-----------------------------------------+  |
 |                                              |                                            |
 |                                              v                                            |
@@ -206,6 +221,21 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 +------------------+         +--------------------+         +--------------------+
 ```
 
+The browser client is a plain JavaScript PWA. `app.js` bootstraps the client;
+`auth.js` owns login, session, confirmation, and app-shell loading; `shared.js`
+owns generic helpers and cross-view UI state; `sync-status.js` owns sync,
+connectivity, provider freshness, and progress state; and `sync-actions.js`
+owns refresh actions. `notifications.js` owns notification permission,
+notifications, and service-worker registration. `performance-view.js` owns
+performance, Garmin, and editable metrics; `diagnostics.js` owns change
+history, logs, and diagnostic capture; and `settings.js` owns profile,
+check-ins, model and calendar settings, backups, and privacy actions. The
+remaining modules own their named domains: `api.js`, `navigation.js`,
+`state.js`, `state-loader.js`, `views.js`, `plan-views.js`, `coach.js`,
+`analysis.js`, `activity-details.js`, `nutrition.js`, `forms.js`,
+`components.js`, and `appearance.js`. The service worker owns the offline
+asset cache.
+
 ---
 
 ## Configuration & Environment Variables
@@ -217,12 +247,9 @@ All configuration is loaded from container environment variables or a local `.en
 | Variable | Default Value | Required? | Description |
 | :--- | :--- | :--- | :--- |
 | `APP_PASSWORD` | *None* | **Yes** | Master password (minimum 12 characters). Secures web UI authentication and acts as the encryption key for the SQLCipher database. |
-| `OPENAI_API_KEY` | *None* | **Conditional** | API key for OpenAI. Required if using OpenAI as the AI provider. |
-| `GEMINI_API_KEY` | *None* | **Conditional** | API key for Google Gemini. Required if using Gemini as the AI provider. |
-| `AI_PROVIDER` | `openai` | No | Active AI provider (`openai` or `gemini`). Determines which model powers Coach Chat. |
+| `OPENAI_API_KEY` | *None* | **Yes** | Server-side API key for the OpenAI Responses API or compatible endpoint. |
 | `OPENAI_MODEL` | `gpt-6-luna` | No | OpenAI model deployment name (GPT-6 Luna). |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | No | Google Gemini model name. Default: `gemini-3.8-flash`. |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | No | Custom base URL for OpenAI-compatible APIs (e.g., Azure OpenAI / Microsoft Foundry endpoints ending in `/openai/v1`). |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | No | Optional Responses-compatible API base URL. HTTPS is required; HTTP is allowed only for loopback addresses. |
 | `INTERVALS_API_KEY` | *None* | **Yes** | Personal API key obtained from Intervals.icu account settings. |
 | `INTERVALS_ATHLETE_ID` | `0` | No | Athlete ID for Intervals.icu (`0` targets the athlete account associated with the API key). |
 | `GARMIN_EMAIL` | *None* | No | Garmin Connect account email. Used only during initial interactive login. |
@@ -375,12 +402,12 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). Complete the initial 
 ## Loading, Synchronization & Job Architecture
 
 ### Background Scheduling Engine
-- **Startup Sync**: On container launch, the backend initializes the database, spins up background worker threads, and triggers an initial synchronization across all configured providers.
-- **Hourly Provider Cycle**: Checks for updated calendar events, refreshed weather forecasts, and new Intervals.icu completed activities.
+- **Startup**: On launch, `server.py` composes configuration, persistence, providers, HTTP routes and workers; startup initializes the database and enqueues configured refreshes.
+- **Hourly Provider Cycle**: The scheduler loop wakes every 300 seconds. Calendar, Garmin and Intervals refreshes become eligible once their latest attempt or success is at least 3,600 seconds old; weather refreshes are queued on a pass when a location is configured and no weather job is active.
 - **Garmin Recent History**: Manual activity synchronization defaults to 84 days for both providers. Automatic Garmin synchronization first loads 84 days of activities, sleep, HRV, daily statistics and resting heart rate where supported. Subsequent hourly refreshes normally read today and yesterday. Successfully read continuous date windows are retained per collection; failed collections do not advance their coverage. After an outage, refreshes catch up from the oldest collection endpoint with overlap, bounded to 90 days per request. Historical activity backfills do not advance recovery coverage.
 - **Analysis Coverage**: Charts expose the number of available dated values; recovery charts show measured days and prior nights in the 42-day personal baseline. Training focus shows locally known Garmin sessions and their observation dates. Missing measurements and recordings remain unknown, never confirmed zeros or rest days.
-- **Daily Synchronization Loop**: Runs daily at 03:00 UTC (or configured local time) to pull comprehensive activity files, update rolling fitness metrics, and schedule the day's training agenda.
-- **On-Demand Refreshes**: Triggered immediately whenever the athlete clicks **Synchronisieren** in the More tab or when requested by the Coach.
+- **Periodic Synchronization Loop**: Each loop pass enqueues eligible calendar, Garmin and Intervals refresh jobs and runs the morning Body Battery refresh. The loop uses the athlete's local clock for provider freshness markers; there is no fixed 03:00 daily run.
+- **On-Demand Refreshes**: The UI and Coach can enqueue provider, calendar, weather and performance refresh work through the documented API routes.
 
 ### Priority Queue & Durable Job Processing
 Conversational turns are persisted in `coach_commands`; provider synchronization and background work use durable jobs in `sync_jobs`.
@@ -421,7 +448,7 @@ The Coach interacts with the athlete's data via structured tools covering plan i
 - **Receipt Verification**: Tool invocations produce structured receipts in the chat UI, distinguishing saved local modifications, pending approval, queued sync jobs, and rejected parameters.
 
 ### Multimodal Capabilities
-- **Voice Transcription**: Push-to-talk voice recording captures audio directly in the PWA. Audio is streamed to `/audio/transcriptions` (OpenAI Whisper or Gemini) in memory and inserted into the message box. Raw audio is never persisted.
+- **Voice Transcription**: Push-to-talk voice recording captures audio directly in the PWA. Audio is streamed to `/audio/transcriptions` in memory and inserted into the message box. Raw audio is never persisted.
 - **File Attachments**: Athletes can attach up to 4 GPX, FIT, or image files (max 5 MB each) per turn. GPX tracks are summarized locally (distance, elevation, GPS bounds); FIT files are parsed for power and cardiac data; images are sent for vision-based AI coaching.
 
 ---
@@ -530,6 +557,8 @@ Because native Windows environments often lack compatible pre-compiled wheels fo
 
 The [Coach dialogue evaluation rubric](docs/coach-dialogue-evaluation.md) and [executable tool coverage matrix](docs/coach-tool-coverage.md) describe the current conversation and tool checks.
 
+The current HTTP route inventory is in [docs/api-routes.md](docs/api-routes.md).
+
 #### Native Python Unit Tests
 Run standard unit tests with temporary in-memory fixtures (mocking external providers):
 ```powershell
@@ -605,10 +634,11 @@ pip-compile --allow-unsafe --generate-hashes --output-file=requirements.txt requ
 pip-compile --allow-unsafe --generate-hashes --output-file=requirements-dev.txt requirements-dev.in
 ```
 
-### Continuous Integration & Codex Review Gate
-- **Conventional Commits**: All commit messages and pull request titles must follow the Conventional Commits specification (e.g., `feat(coach): add Gemini 3.8 Flash support` or `fix(sync): resolve Garmin sleep retry backoff`).
+### Continuous Integration & Native Codex Reviews
+- **Conventional Commits**: All commit messages and pull request titles must follow the Conventional Commits specification (e.g., `feat(coach): add structured response support` or `fix(sync): resolve Garmin sleep retry backoff`).
 
-- **Codex PR Review Gate**: Pull requests targeting `develop` or `main` require a subscription-backed Codex review gate. Request review by commenting `@codex review` on the pull request. All review findings must be resolved before merging.
+- **Native Codex Reviews**: In [Codex Settings](https://chatgpt.com/codex/settings/code-review), enable automatic code review for this repository and select the trigger for new PRs and subsequent pushes. The watchdog waits at most three minutes for a native Codex comment. If none appears, it posts one `@codex review` fallback for that PR commit, then waits up to three minutes for the regular review or explicit exhausted-usage response. The latter grants an availability exception; continued silence fails the check. A later Codex comment or submitted review automatically reruns the check and recovers a late response. Inspect the reviewed commit and resolve all findings before merging. Local `codex review --base origin/develop` is an optional preflight. After adopting the watchdog on each protected branch, require its `Codex review availability` context in the ruleset. Account-level activation must be verified in Codex Settings. Copilot automatic review is disabled in repository rulesets.
+- **Dependency Updates**: Dependabot updates pip, npm, Docker and GitHub Actions on `develop`. Squash auto-merge is enabled for patch, minor and major updates; protected-branch checks and review-thread resolution still apply. The privileged auto-merge workflow never checks out or executes PR code.
 - **Automated Daily Releases**: At 03:00 UTC, an automated workflow inspects `develop`. If new commits exist, it creates a version-bump PR and a promotion PR to protected `main`. Both branches require native, SQLCipher container, quality and browser checks without bypass actors. After successful main tests, the workflow creates an immutable GitHub release and publishes the container. The container digest is signed and verified before promoting `latest`; the version tag and `latest` must resolve to that same digest. A read-only release preflight also verifies `APP_VERSION` before its tag exists. Actions use read-only default permissions, with explicit job-level write permissions where needed.
 
 ---
@@ -686,8 +716,8 @@ MongoDB/InfluxDB und ist keine produktbezogene Lookup-API. Die Nährwerte werden
 Bezugsmenge und Einheit gespeichert. Gramm und Milliliter werden ohne bekannte
 Dichte nicht ineinander umgerechnet.
 
-Ein Foto der Nährwerttabelle wird begrenzt und nur vorübergehend an den aktuell
-ausgewählten KI-Provider übertragen. OpenAI Responses und Gemini liefern einen
+Ein Foto der Nährwerttabelle wird begrenzt und nur vorübergehend an die
+konfigurierte OpenAI Responses-kompatible API übertragen. Die API liefert einen
 strukturierten, editierbaren Vorschlag; Bilddaten, Providerantworten und
 unbestätigte Werte werden nicht in der Produktbibliothek abgelegt. Name,
 Bezugsmenge und erkannte Nährwerte müssen vor dem Speichern geprüft werden.

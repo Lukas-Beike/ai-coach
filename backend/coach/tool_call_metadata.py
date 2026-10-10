@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from backend.coach.proposals import coach_action_hash
+from backend.coach.proposal_models import coach_action_hash
 from backend.coach.service import (
     coach_repair_key,
     dialogue_effect_key,
@@ -25,11 +25,23 @@ def structured_tool_call_metadata(
     name = str(item.get("name") or "")
     call_id = str(item.get("call_id") or "")
     if not call_id or len(call_id) > 200:
-        raise AppError(400, "Ein Werkzeugaufruf konnte nicht zugeordnet werden.", reason="invalid_tool_call")
-    if len(command_receipts) >= 40 and not any(entry.get("call_id") == call_id for entry in command_receipts):
-        raise AppError(400, "Der Coach-Auftrag enthält zu viele Schritte.", reason="command_limit")
+        raise AppError(
+            400,
+            "Ein Werkzeugaufruf konnte nicht zugeordnet werden.",
+            reason="invalid_tool_call",
+        )
+    if len(command_receipts) >= 40 and not any(
+        entry.get("call_id") == call_id for entry in command_receipts
+    ):
+        raise AppError(
+            400, "Der Coach-Auftrag enthält zu viele Schritte.", reason="command_limit"
+        )
     if name not in {tool["name"] for tool in tools}:
-        raise AppError(403, "Dieses Werkzeug steht in diesem Auftrag nicht zur Verfügung.", reason="tool_scope_denied")
+        raise AppError(
+            403,
+            "Dieses Werkzeug steht in diesem Auftrag nicht zur Verfügung.",
+            reason="tool_scope_denied",
+        )
     arguments = json.loads(item.get("arguments") or "{}")
     if not isinstance(arguments, dict):
         raise ValueError("arguments_object")  # noqa: TRY004 - preserve the existing exception contract
@@ -37,12 +49,14 @@ def structured_tool_call_metadata(
     scope_repair_key = dialogue_scope_repair_key(name, arguments)
     request_binding_key = dialogue_request_binding_key(arguments)
     plan_effect_key = dialogue_plan_effect_key(name, arguments)
-    step_key = coach_action_hash({
-        "name": name,
-        "scope": sorted((arguments.get("_request") or {}).get("scope") or []),
-        "period": (arguments.get("_request") or {}).get("period"),
-        "repair_key": repair_key,
-    })
+    step_key = coach_action_hash(
+        {
+            "name": name,
+            "scope": sorted((arguments.get("_request") or {}).get("scope") or []),
+            "period": (arguments.get("_request") or {}).get("period"),
+            "repair_key": repair_key,
+        }
+    )
     return {
         "name": name,
         "call_id": call_id,

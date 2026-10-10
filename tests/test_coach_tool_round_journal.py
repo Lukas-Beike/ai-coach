@@ -123,7 +123,10 @@ class StructuredToolRoundJournalTests(unittest.TestCase):
         }
 
         failed_question = self.journal.record_output(
-            name="clarify_coach_request", call_id="clarify", result={"ok": False}, **base
+            name="clarify_coach_request",
+            call_id="clarify",
+            result={"ok": False},
+            **base,
         )
         self.assertEqual(failed_question[:2], ("existing question", False))
 

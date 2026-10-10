@@ -6,10 +6,10 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from backend.activities.read_service import ActivityReadService
 from backend.athlete.profile import ProfileService
 from backend.coach.context import bounded_coach_context_value, coach_context_json_size
 from backend.errors import AppError
+from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.sync.garmin import GarminPayloadService
 
 
@@ -18,31 +18,31 @@ class CoachActivityReadToolService:
 
     def __init__(
         self,
-        activity_read: ActivityReadService,
+        activity_read: ActivityAnalysisReadService,
         garmin_payload: GarminPayloadService,
         profile: ProfileService,
         today: Callable[[], date],
-        report_service: Any = None,
+        report_services: Any = None,
     ) -> None:
         self._activity_read = activity_read
         self._garmin_payload = garmin_payload
         self._profile = profile
         self._today = today
-        self._report_service = report_service
+        self._report_services = report_services
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
         if name == "read_training_records":
-            if self._report_service is None:
+            if self._report_services is None:
                 raise AppError(503, "Trainingsprotokolle sind nicht verfügbar.")
             return {
                 "ok": True,
                 "records": bounded_coach_context_value(
-                    self._report_service.training_records(arguments), 30000
+                    self._report_services.records.training_records(arguments), 30000
                 ),
                 "scope": "Bounded projection of local equipment. Read exact current revisions before corrections.",
             }
         if name == "get_training_report":
-            if self._report_service is None:
+            if self._report_services is None:
                 raise AppError(503, "Trainingsberichte sind nicht verfügbar.")
             sections = arguments.get("sections", ["report"])
             allowed = {
@@ -65,14 +65,22 @@ class CoachActivityReadToolService:
             ):
                 raise AppError(400, "Unbekannter Analysebereich.")
             readers = {
-                "report": lambda: self._report_service.read(arguments),
-                "endurance": self._report_service.endurance,
-                "power_profiles": self._report_service.power_profiles,
-                "tag_impact": self._report_service.impact,
-                "season": self._report_service.season,
-                "comparisons": self._report_service.comparisons,
-                "body_history": self._report_service.body_history,
-                "sleep_regularity": self._report_service.sleep_regularity,
+                "report": lambda: self._report_services.report.read(
+                    arguments, self._report_services.timezone()
+                ),
+                "endurance": self._report_services.records.endurance,
+                "power_profiles": lambda: self._report_services.profiles.power_profiles(
+                    self._report_services.records.observations()
+                ),
+                "tag_impact": lambda: self._report_services.derived.impact(
+                    self._report_services.timezone()
+                ),
+                "season": lambda: self._report_services.season.season(
+                    self._report_services.timezone()
+                ),
+                "comparisons": self._report_services.records.comparisons,
+                "body_history": self._report_services.derived.body_history,
+                "sleep_regularity": self._report_services.derived.sleep_regularity,
             }
             payload = {
                 section: readers[section]() for section in dict.fromkeys(sections)

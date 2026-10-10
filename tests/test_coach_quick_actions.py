@@ -32,38 +32,51 @@ class CoachQuickActionsProjectionTests(unittest.TestCase):
         self.assertTrue(self.project("error", "2026-09-20")["morning_checkin"])
 
     def test_blockers_include_today_through_two_days_but_not_day_three(self):
-        result = self.project(preview={
-            "status": "preview",
-            "changes": [
-                {"date": "2026-09-22", "blocking_triggers": ["illness"]},
-                {"date": "2026-09-23", "blocking_triggers": ["calendar"]},
-            ],
-        })
+        result = self.project(
+            preview={
+                "status": "preview",
+                "changes": [
+                    {"date": "2026-09-22", "blocking_triggers": ["illness"]},
+                    {"date": "2026-09-23", "blocking_triggers": ["calendar"]},
+                ],
+            }
+        )
 
-        self.assertEqual(result["plan_blockers"], [{
-            "date": "2026-09-22",
-            "name": self.LABEL,
-            "triggers": ["illness"],
-        }])
+        self.assertEqual(
+            result["plan_blockers"],
+            [
+                {
+                    "date": "2026-09-22",
+                    "name": self.LABEL,
+                    "triggers": ["illness"],
+                }
+            ],
+        )
         self.assertTrue(result["adjust_plan"])
 
     def test_empty_preview_has_no_blockers_and_exact_public_shape(self):
         result = self.project(preview={"status": "preview", "changes": []})
 
-        self.assertEqual(set(result), {
-            "morning_checkin",
-            "analyze_latest_activity",
-            "adjust_plan",
-            "plan_blockers",
-            "horizon_days",
-        })
-        self.assertEqual(result, {
-            "morning_checkin": True,
-            "analyze_latest_activity": True,
-            "adjust_plan": False,
-            "plan_blockers": [],
-            "horizon_days": 3,
-        })
+        self.assertEqual(
+            set(result),
+            {
+                "morning_checkin",
+                "analyze_latest_activity",
+                "adjust_plan",
+                "plan_blockers",
+                "horizon_days",
+            },
+        )
+        self.assertEqual(
+            result,
+            {
+                "morning_checkin": True,
+                "analyze_latest_activity": True,
+                "adjust_plan": False,
+                "plan_blockers": [],
+                "horizon_days": 3,
+            },
+        )
 
 
 class FakeAdaptivePreviewService:
@@ -95,9 +108,7 @@ class CoachQuickActionsServiceTests(unittest.TestCase):
             connection.commit()
             connection.close()
 
-            manager = DatabaseManager(
-                database_path, sqlite3, row_factory=sqlite3.Row
-            )
+            manager = DatabaseManager(database_path, sqlite3, row_factory=sqlite3.Row)
             service = CoachQuickActionsService(
                 manager,
                 KeyValueRepository(lambda: "2026-09-20T08:00:00"),
@@ -118,29 +129,43 @@ class CoachQuickActionsServiceTests(unittest.TestCase):
         self.assertTrue(yesterday["morning_checkin"])
 
     def test_state_projects_preview_blockers_without_provider_status(self):
-        result = self.project("pending", "2026-09-19", {
-            "status": "preview",
-            "provider_status": {"garmin": "connected", "intervals": "ready"},
-            "changes": [{
-                "date": "2026-09-22",
-                "blocking_triggers": ["calendar"],
-            }],
-        })
+        result = self.project(
+            "pending",
+            "2026-09-19",
+            {
+                "status": "preview",
+                "provider_status": {"garmin": "connected", "intervals": "ready"},
+                "changes": [
+                    {
+                        "date": "2026-09-22",
+                        "blocking_triggers": ["calendar"],
+                    }
+                ],
+            },
+        )
 
-        self.assertEqual(result["plan_blockers"], [{
-            "date": "2026-09-22",
-            "name": self.LABEL,
-            "triggers": ["calendar"],
-        }])
+        self.assertEqual(
+            result["plan_blockers"],
+            [
+                {
+                    "date": "2026-09-22",
+                    "name": self.LABEL,
+                    "triggers": ["calendar"],
+                }
+            ],
+        )
         self.assertTrue(result["adjust_plan"])
         self.assertNotIn("provider_status", result)
-        self.assertEqual(set(result), {
-            "morning_checkin",
-            "analyze_latest_activity",
-            "adjust_plan",
-            "plan_blockers",
-            "horizon_days",
-        })
+        self.assertEqual(
+            set(result),
+            {
+                "morning_checkin",
+                "analyze_latest_activity",
+                "adjust_plan",
+                "plan_blockers",
+                "horizon_days",
+            },
+        )
 
 
 if __name__ == "__main__":

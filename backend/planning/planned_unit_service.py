@@ -8,6 +8,7 @@ from datetime import date
 from typing import Any
 
 from backend import change_history
+from backend.athlete.local_date import LocalDate
 from backend.calendar.canonical import canonical_planned_workouts
 from backend.errors import CORRUPT_PLANNING_ERROR, AppError
 from backend.planning import planned_units, workouts
@@ -119,8 +120,10 @@ class PlannedUnitService:
                 409, "Die lokale Planung kann nicht wiederhergestellt werden."
             )
 
-        restore_date = str(target.get("date") or current_payload.get("date") or "")[:10]
-        current_date = str(current_payload.get("date") or "")[:10]
+        restore_date = LocalDate.parse(
+            target.get("date") or current_payload.get("date")
+        ).isoformat()
+        current_date = LocalDate.parse(current_payload.get("date")).isoformat()
         archived, local_deleted, restored_from_hidden = self._restore_visibility_state(
             current_payload, target, history_action
         )
@@ -188,9 +191,12 @@ class PlannedUnitService:
         workout = (
             workout_or_date
             if isinstance(workout_or_date, dict)
-            else {"date": str(workout_or_date or "")[:10]}
+            else {"date": str(workout_or_date or "")}
         )
-        restore_date = str(workout.get("date") or "")[:10]
+        try:
+            restore_date = LocalDate.parse(workout.get("date")).isoformat()
+        except TypeError, ValueError:
+            restore_date = ""
         if (
             restore_date
             and not workout.get("archived")

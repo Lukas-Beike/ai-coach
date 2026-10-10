@@ -13,6 +13,7 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import quote
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.config import Config
 from backend.db import DatabaseManager
 from backend.errors import (
@@ -137,7 +138,8 @@ class PlannedCalendarSyncService:
             not isinstance(event, dict)
             or str(event.get("id") or "") != remote_id
             or event.get("category") != "WORKOUT"
-            or str(event.get("start_date_local") or "")[:10] < self._today().isoformat()
+            or iso_date_prefix(str(event.get("start_date_local") or ""))
+            < self._today().isoformat()
             or event.get("paired_activity_id")
             or event.get("paired_event_id")
         )
@@ -536,7 +538,8 @@ class PlannedCalendarRepairService:
         return (
             belongs_elsewhere
             or event.get("category") != "WORKOUT"
-            or str(event.get("start_date_local") or "")[:10] < context.today.isoformat()
+            or iso_date_prefix(str(event.get("start_date_local") or ""))
+            < context.today.isoformat()
             or event.get("paired_activity_id")
             or event.get("paired_event_id")
         )

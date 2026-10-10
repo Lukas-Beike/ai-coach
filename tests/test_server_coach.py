@@ -11,18 +11,16 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from server_test_support import ServerTestCase, server
-from support import build_gemini_request_payload
 
 from backend.coach import context as coach_context
 from backend.coach import limits as coach_limits
 from backend.coach import streams as coach_streams
-from backend.coach.attachments import gemini_history_parts
 from backend.coach.context import (
     CoachIntervalsContextService,
     future_coach_planned_workouts,
 )
 from backend.coach.morning import ManualMorningCheckinService
-from backend.coach.proposals import validated_coach_action_preview_input
+from backend.coach.proposal_validation import validated_coach_action_preview_input
 from backend.http_api import server as http_server_module
 from backend.planning import competitions as planning_competitions
 from backend.providers import openai as openai_provider
@@ -291,7 +289,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(result["activity_validation"]["activity"]["sport"], "Laufen")
 
         with self.assertRaises(server.AppError) as missing:
-            server.ATHLETE_DATA.activity_read().detail(
+            server.ACTIVITY_READS.activity_read().detail(
                 "activity-3",
                 garmin_snapshot=server.GARMIN_ASSEMBLY.payload_service().snapshot(),
                 profile=server.ATHLETE_DATA.profile().get(),
@@ -694,7 +692,7 @@ class ServerCoachTests(ServerTestCase):
 
     def test_activity_feedback_remains_coach_managed_without_history_tab(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
-        app = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+        app = (server.PUBLIC_DIR / "sync-status.js").read_text(encoding="utf-8")
         backend = Path(server.__file__).read_text(encoding="utf-8")
         self.assertNotIn('id="feedbackForm"', markup)
         self.assertNotIn("Lokales Athleten-Feedback", markup)
@@ -882,139 +880,6 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(question, "Wie fühlst du dich?")
         self.assertTrue(cancelled)
 
-    def test_gemini_history_trimming_keeps_complete_tool_exchanges(self):
-        history = [
-            {"role": "user", "parts": [{"text": "Starte die Planung."}]},
-            {
-                "role": "model",
-                "parts": [{"functionCall": {"name": "save_checkin", "args": {}}}],
-            },
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "functionResponse": {
-                            "name": "save_checkin",
-                            "response": {"ok": True},
-                        }
-                    }
-                ],
-            },
-            {"role": "model", "parts": [{"text": "Gespeichert."}]},
-        ]
-        for index in range(29):
-            history.extend(
-                [
-                    {"role": "user", "parts": [{"text": f"Frage {index}"}]},
-                    {"role": "model", "parts": [{"text": f"Antwort {index}"}]},
-                ]
-            )
-
-        # Reproduce a legacy raw slice that starts with a tool response.
-        server.key_value_service().set(
-            "gemini_conversation_history", json.dumps(history[-60:])
-        )
-        trimmed = server.COACH_CONVERSATION.gemini_history_service().load()
-
-        self.assertEqual(len(trimmed), 58)
-        self.assertEqual(trimmed[0]["parts"][0]["text"], "Frage 0")
-        self.assertFalse(
-            any(
-                "functionResponse" in part
-                for content in trimmed
-                for part in content["parts"]
-            )
-        )
-
-    def test_gemini_history_parts_preserve_safe_attachment_boundary(self):
-        attachments = [
-            {
-                "type": "image",
-                "name": "photo.jpg",
-                "data": "raw-image",
-                "mime": "image/jpeg",
-            },
-            {
-                "type": "gpx",
-                "name": "route.gpx",
-                "data": "raw-file",
-                "summary": {"distance": 12},
-            },
-        ]
-        omitted = gemini_history_parts(
-            {"content": "Review this"}, attachments, 0, set()
-        )
-        self.assertEqual(omitted[0], {"text": "Review this"})
-        self.assertIn("raw_image_omitted", omitted[1]["text"])
-        self.assertIn("untrusted_gpx", omitted[2]["text"])
-        self.assertIn("raw_file_omitted", omitted[3]["text"])
-        selected = gemini_history_parts(
-            {"content": "Review this"}, attachments, 0, {(0, 0)}
-        )
-        self.assertEqual(
-            selected[1]["inlineData"], {"mimeType": "image/jpeg", "data": "raw-image"}
-        )
-
-    def test_gemini_rebuilds_history_from_the_shared_local_dialogue(self):
-        server.COACH_CONVERSATION.message_service().add(
-            "user", "Was war mein letzter Schwerpunkt?"
-        )
-        server.COACH_CONVERSATION.message_service().add(
-            "assistant", "Der Schwerpunkt war die Schwelle."
-        )
-        server.COACH_CONVERSATION.message_service().add(
-            "user", "Und wie geht es weiter?"
-        )
-        server.key_value_service().set(
-            "gemini_conversation_history",
-            json.dumps(
-                [
-                    {"role": "user", "parts": [{"text": "Veraltete Gemini-Frage"}]},
-                    {"role": "model", "parts": [{"text": "Veraltete Gemini-Antwort"}]},
-                ]
-            ),
-        )
-
-        request, history, _ = build_gemini_request_payload(
-            server,
-            {
-                "conversation": "gemini-shared-dialogue",
-                "input": "Und wie geht es weiter?",
-            },
-            "gemini-3.8-flash",
-        )
-
-        self.assertEqual(history, request["contents"])
-        self.assertEqual(
-            [content["parts"][0]["text"] for content in history],
-            [
-                "Was war mein letzter Schwerpunkt?",
-                "Der Schwerpunkt war die Schwelle.",
-                "Und wie geht es weiter?",
-            ],
-        )
-
-    def test_gemini_keeps_repeated_text_after_a_model_turn(self):
-        server.key_value_service().set(
-            "gemini_conversation_history",
-            json.dumps(
-                [
-                    {"role": "user", "parts": [{"text": "Ja"}]},
-                    {"role": "model", "parts": [{"text": "Ja"}]},
-                ]
-            ),
-        )
-
-        request, _, _ = build_gemini_request_payload(
-            server,
-            {"conversation": "gemini-repeated-text", "input": "Ja"},
-            "gemini-3.8-flash",
-        )
-
-        self.assertEqual(
-            request["contents"][-1], {"role": "user", "parts": [{"text": "Ja"}]}
-        )
-
     def test_structured_coach_exposes_checkin_and_activity_feedback_tools(self):
         names = {tool["name"] for tool in server.COACH_STRUCTURED_TOOLS}
         self.assertIn("save_checkin", names)
@@ -1034,9 +899,7 @@ class ServerCoachTests(ServerTestCase):
         server.COACH_CONVERSATION.message_service().add(
             "user", "Wie soll ich morgen trainieren?"
         )
-        preview = server.COACH_CONTEXT.preview_service().preview(
-            server.SETTINGS.selected_ai_provider()
-        )
+        preview = server.COACH_CONTEXT.preview_service().preview()
         self.assertIn(
             "You are the athlete's long-term endurance coach.", preview["context_text"]
         )

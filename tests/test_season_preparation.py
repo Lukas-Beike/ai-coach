@@ -3,7 +3,7 @@ from copy import deepcopy
 from datetime import date
 
 from backend.errors import AppError
-from backend.performance.season_preparation import load_scenarios, season_preparation
+from backend.planning.season_preparation import load_scenarios, season_preparation
 
 
 class SeasonPreparationTests(unittest.TestCase):

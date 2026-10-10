@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from backend.errors import AppError, public_error_payload
+from backend.errors import AppError, public_error_contract, public_error_payload
 from backend.http_api.requests import (
     read_audio_body as read_request_audio_body,
 )
@@ -35,7 +35,6 @@ class HttpRequestHandlerDependencies:
     response_transport: Any
     maintenance_gate: Any
     redact_text: Callable[[str], str]
-    public_app_error_status: Callable[[AppError], int]
     internal_server_error: str
     max_body_bytes: int
     max_audio_body_bytes: int
@@ -130,23 +129,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             path = urlparse(self.path).path
             self.dependencies.route_dispatcher.handle_get(self, path)
         except AppError as exc:
-            if exc.status >= 500:
-                self.dependencies.logger.exception(
-                    exc.message,
-                    extra={
-                        "event": "http_app_error",
-                        "context": {
-                            "method": "GET",
-                            "path": self.path,
-                            "status": exc.status,
-                            "request_id": self.request_id,
-                        },
-                    },
-                )
-            self.send_json(
-                self.dependencies.public_app_error_status(exc),
-                public_error_payload(exc, self.dependencies.redact_text),
-            )
+            self._send_app_error(exc, "GET")
         except Exception:
             self.dependencies.logger.exception(
                 "Unhandled GET error",
@@ -178,28 +161,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self, path, session
                 )
         except AppError as exc:
-            if exc.status >= 500:
-                self.dependencies.logger.exception(
-                    exc.message,
-                    extra={
-                        "event": "http_app_error",
-                        "context": {
-                            "method": "POST",
-                            "path": self.path,
-                            "status": exc.status,
-                            "request_id": self.request_id,
-                        },
-                    },
-                )
-            status = self.dependencies.public_app_error_status(exc)
-            headers: dict[str, str | list[str]] | None = (
-                {"WWW-Authenticate": "Session"} if status == 401 else None
-            )
-            self.send_json(
-                status,
-                public_error_payload(exc, self.dependencies.redact_text),
-                headers,
-            )
+            self._send_app_error(exc, "POST")
         except Exception:
             self.dependencies.logger.exception(
                 "Unhandled POST error",
@@ -227,40 +189,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         )
 
     def do_PUT(self) -> None:
+        self.request_id = uuid.uuid4().hex[:12]
         try:
             with self.dependencies.maintenance_gate.operation():
                 self._do_PUT()
         except AppError as exc:
-            self.send_json(
-                self.dependencies.public_app_error_status(exc),
-                public_error_payload(exc, self.dependencies.redact_text),
-            )
+            self._send_app_error(exc, "PUT")
 
     def _do_PUT(self) -> None:
-        self.request_id = uuid.uuid4().hex[:12]
         try:
             path = urlparse(self.path).path
             session = self.auth_service.require_auth(self)
             self.auth_service.require_csrf(self, session)
             self.dependencies.route_dispatcher.handle_put(self, path)
         except AppError as exc:
-            if exc.status >= 500:
-                self.dependencies.logger.exception(
-                    exc.message,
-                    extra={
-                        "event": "http_app_error",
-                        "context": {
-                            "method": "PUT",
-                            "path": self.path,
-                            "status": exc.status,
-                            "request_id": self.request_id,
-                        },
-                    },
-                )
-            self.send_json(
-                self.dependencies.public_app_error_status(exc),
-                public_error_payload(exc, self.dependencies.redact_text),
-            )
+            self._send_app_error(exc, "PUT")
         except Exception:
             self.dependencies.logger.exception(
                 "Unhandled PUT error",
@@ -314,6 +257,35 @@ class RequestHandler(BaseHTTPRequestHandler):
         headers: dict[str, str | list[str]] | None = None,
     ) -> None:
         self.dependencies.response_transport.send_json(self, status, payload, headers)
+
+    def _send_app_error(self, error: AppError, method: str) -> None:
+        status, _ = public_error_contract(error)
+        context: dict[str, Any] = {
+            "method": method,
+            "status": status,
+        }
+        request_id = getattr(self, "request_id", None)
+        if request_id is not None:
+            context["request_id"] = request_id
+        if status >= 500:
+            self.dependencies.logger.error(
+                "HTTP application error",
+                extra={"event": "http_app_error", "context": context},
+            )
+        headers = (
+            {"WWW-Authenticate": "Session"}
+            if status == 401 and error.upstream_status is None
+            else None
+        )
+        self.send_json(
+            status,
+            public_error_payload(
+                error,
+                self.dependencies.redact_text,
+                request_id=request_id,
+            ),
+            headers,
+        )
 
     def send_file_stream(
         self,

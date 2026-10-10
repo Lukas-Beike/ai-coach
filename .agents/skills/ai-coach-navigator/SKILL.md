@@ -10,4 +10,4 @@ Use for unfamiliar ai-coach tasks that span Coach, providers, sync, planning, HT
 - Include `backend/config.py`, `backend/privacy.py`, `backend/settings.py`, `backend/change_history.py`, `backend/observability.py`, `public/`, `tests/`, `e2e/`, `.github/`, and `Dockerfile` when tracing cross-cutting flows.
 - Trace callers and the immediate data flow before reading whole files.
 - Return a compact map of `path:line`, request flow, relevant tests, and one next action.
-- Read raw provider and athlete data only when the task requires it; never print secrets or live data.
+- Trace provider shapes through sanitized fixtures and tests; never read live athlete data, credentials, token stores or backups.

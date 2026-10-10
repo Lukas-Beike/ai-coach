@@ -14,7 +14,7 @@ import re
 import sys
 import threading
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, TextIO
@@ -179,7 +179,7 @@ def safe_response_headers(
             name = str(key).strip().casefold()
             if name in allowed or name.startswith("x-ratelimit-"):
                 result[name] = redact(str(value))[:160]
-    except (AttributeError, TypeError, ValueError, RuntimeError):
+    except AttributeError, TypeError, ValueError, RuntimeError:
         return {}
     return result
 
@@ -263,7 +263,7 @@ def _redact_url(match: re.Match[str]) -> str:
             )
         )
         return safe + trailing
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return "[REDACTED_URL]" + trailing
 
 
@@ -292,7 +292,7 @@ class Redactor:
                         "",
                     )
                 )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
         return "[REDACTED_CALENDAR_URL]"
 
@@ -309,7 +309,6 @@ class Redactor:
         redacted = URL_VALUE_RE.sub(_redact_url, redacted)
         secret_values = (
             getattr(config, "openai_api_key", ""),
-            getattr(config, "gemini_api_key", ""),
             getattr(config, "intervals_api_key", ""),
             getattr(config, "garmin_email", ""),
             getattr(config, "garmin_password", ""),
@@ -327,6 +326,8 @@ class Redactor:
         redacted = re.sub(
             r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted
         )
+        # Legacy Gemini keys can still sit in a preserved .env; keep the
+        # provider-independent signature redacted after the adapter is gone.
         redacted = re.sub(
             r"\bAIza[A-Za-z0-9_-]{20,}\b", "[REDACTED_GEMINI_KEY]", redacted
         )
@@ -360,7 +361,6 @@ class Redactor:
 def _encoded_diagnostic_secrets(config: Config) -> tuple[str, ...]:
     attributes = (
         "openai_api_key",
-        "gemini_api_key",
         "intervals_api_key",
         "garmin_email",
         "garmin_password",
@@ -444,7 +444,7 @@ def _clean_diagnostic_string(
     if value.lstrip().startswith(("{", "[")):
         try:
             decoded = json.loads(value)
-        except (ValueError, RecursionError):
+        except ValueError, RecursionError:
             pass
         else:
             return json.dumps(
@@ -492,9 +492,7 @@ class JsonLogFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         entry: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(
-                record.created, timezone.utc
-            ).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
             "level": record.levelname,
             "event": getattr(record, "event", "log"),
             "message": record.getMessage(),
@@ -690,7 +688,7 @@ class DiagnosticCapture:
                 return self._entries_cache
         try:
             raw = json.loads(self._get_kv(self._entries_key) or "[]")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raw = []
         if not isinstance(raw, list):
             raw = []
@@ -843,7 +841,7 @@ class DiagnosticCapture:
         self._load_entries()
         entry = self._bounded_entry(
             {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "event": str(event)[:80],
                 "details": details,
             }

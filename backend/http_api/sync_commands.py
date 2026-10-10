@@ -18,16 +18,27 @@ SYNC_PATH = "/api/sync"
 INTERVALS_FULL_RESYNC_PATH = "/api/intervals/full-resync"
 GARMIN_SYNC_PATH = "/api/garmin/sync"
 GARMIN_FULL_RESYNC_PATH = "/api/garmin/full-resync"
-SYNC_POST_PATHS = frozenset({
-    SYNC_JOBS_PATH, SYNC_PATH, INTERVALS_FULL_RESYNC_PATH,
-    "/api/performance/refresh", GARMIN_SYNC_PATH,
-    "/api/external-calendar/sync", "/api/weather/sync",
-    GARMIN_FULL_RESYNC_PATH,
-})
-SYNC_BODY_PATHS = frozenset({
-    SYNC_JOBS_PATH, SYNC_PATH, GARMIN_SYNC_PATH,
-    INTERVALS_FULL_RESYNC_PATH, GARMIN_FULL_RESYNC_PATH,
-})
+SYNC_POST_PATHS = frozenset(
+    {
+        SYNC_JOBS_PATH,
+        SYNC_PATH,
+        INTERVALS_FULL_RESYNC_PATH,
+        "/api/performance/refresh",
+        GARMIN_SYNC_PATH,
+        "/api/external-calendar/sync",
+        "/api/weather/sync",
+        GARMIN_FULL_RESYNC_PATH,
+    }
+)
+SYNC_BODY_PATHS = frozenset(
+    {
+        SYNC_JOBS_PATH,
+        SYNC_PATH,
+        GARMIN_SYNC_PATH,
+        INTERVALS_FULL_RESYNC_PATH,
+        GARMIN_FULL_RESYNC_PATH,
+    }
+)
 
 
 class SyncCommandEndpoint:
@@ -62,12 +73,22 @@ class SyncCommandEndpoint:
     def execute(self, path: str, payload: Any = None) -> tuple[int, dict[str, Any]]:
         if path == SYNC_JOBS_PATH:
             if not isinstance(payload, dict):
-                raise AppError(400, "Ein Synchronisationsjob muss als Objekt gesendet werden.", reason="invalid_job_request")
+                raise AppError(
+                    400,
+                    "Ein Synchronisationsjob muss als Objekt gesendet werden.",
+                    reason="invalid_job_request",
+                )
             envelope = payload.get("payload")
             if envelope is None:
-                envelope = {key: payload[key] for key in ("days", "force", "reason") if key in payload}
+                envelope = {
+                    key: payload[key]
+                    for key in ("days", "force", "reason")
+                    if key in payload
+                }
             return 202, self._queue.enqueue(
-                payload.get("provider"), payload.get("type", "refresh"), envelope,
+                payload.get("provider"),
+                payload.get("type", "refresh"),
+                envelope,
                 requested_by="user",
             )
         if match := SYNC_JOB_RESOLVE_RE.match(path):
@@ -88,22 +109,30 @@ class SyncCommandEndpoint:
             )
         if path == "/api/weather/sync":
             return 202, self._queue.enqueue(
-                "weather", "refresh", {"reason": "manuell", "force": True},
+                "weather",
+                "refresh",
+                {"reason": "manuell", "force": True},
                 requested_by="user",
             )
         raise ValueError(f"Unsupported sync path: {path}")
 
-    def _enqueue_manual_refresh(self, provider: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    def _enqueue_manual_refresh(
+        self, provider: str, payload: dict[str, Any]
+    ) -> tuple[int, dict[str, Any]]:
         requested_days = payload.get(
             "days",
-            self._state.sync_period(provider, self._period_defaults, self._all_sync_days),
+            self._state.sync_period(
+                provider, self._period_defaults, self._all_sync_days
+            ),
         )
         try:
-            days = self._state.set_sync_period(provider, requested_days, self._all_sync_days)
+            days = self._state.set_sync_period(
+                provider, requested_days, self._all_sync_days
+            )
         except ValueError as exc:
             try:
                 int(requested_days)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 message = "Der Synchronisationszeitraum muss eine ganze Zahl sein."
             else:
                 message = (
@@ -116,9 +145,13 @@ class SyncCommandEndpoint:
             provider, "refresh", {"days": days, "reason": "manual"}, requested_by="user"
         )
 
-    def _full_resync_command(self, provider: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    def _full_resync_command(
+        self, provider: str, payload: dict[str, Any]
+    ) -> tuple[int, dict[str, Any]]:
         if payload.get("confirm") != "FULL_RESYNC":
-            raise AppError(400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden.")
+            raise AppError(
+                400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden."
+            )
         return 200, self._full_resync.resync(
             provider, operation_id=self._operation_id_factory()
         )

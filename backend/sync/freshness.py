@@ -40,7 +40,7 @@ def _parse_utc(value: Any) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(value.strip().replace("Z", UTC_OFFSET_SUFFIX))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if parsed.tzinfo is None:
         return None
@@ -94,7 +94,7 @@ def _provider_freshness_inputs(
         cached_weather = json.loads(get_value(WEATHER_CACHE_KEY) or "{}")
         if isinstance(cached_weather, dict):
             fallbacks[("weather", "forecast")] = cached_weather.get("fetched_at")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         pass
     configured = {
         ("intervals", "activities"): bool(config.intervals_api_key),

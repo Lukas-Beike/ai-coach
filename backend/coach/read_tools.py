@@ -12,8 +12,9 @@ from backend.coach.context import bounded_coach_context_value, coach_context_jso
 from backend.coach.context_selection import CONTEXT_SECTIONS, CoachContextSelection
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
+from backend.nutrition.diary import NutritionDiaryService
+from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.models import validate_iso_date
-from backend.nutrition.service import NutritionService
 from backend.planning.competition_service import CompetitionService
 from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.planned_unit_service import PlannedUnitService
@@ -35,7 +36,8 @@ class CoachReadToolService:
         competition_service: Callable[[], CompetitionService],
         training_plan_service: Callable[[], TrainingPlanService],
         training_change_limit: int,
-        nutrition_service: Callable[[], NutritionService] | None = None,
+        nutrition_diary: Callable[[], NutritionDiaryService] | None = None,
+        nutrition_meal_library: Callable[[], NutritionMealLibraryService] | None = None,
         context_service: Callable[[], Any] | None = None,
     ) -> None:
         self._profile_service = profile_service
@@ -47,7 +49,8 @@ class CoachReadToolService:
         self._competition_service = competition_service
         self._training_plan_service = training_plan_service
         self._training_change_limit = training_change_limit
-        self._nutrition_service = nutrition_service
+        self._nutrition_diary = nutrition_diary
+        self._nutrition_meal_library = nutrition_meal_library
         self._context_service = context_service
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
@@ -151,16 +154,16 @@ class CoachReadToolService:
     def _food_database_read(
         self, name: str, arguments: dict[str, Any]
     ) -> dict[str, Any]:
-        if self._nutrition_service is None:
+        if self._nutrition_meal_library is None:
             raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
-        nutrition = self._nutrition_service()
+        nutrition = self._nutrition_meal_library()
         if name == "lookup_food":
             return self._lookup_food(nutrition, arguments)
         return self._calculate_food(nutrition, arguments)
 
     @staticmethod
     def _lookup_food(
-        nutrition: NutritionService, arguments: dict[str, Any]
+        nutrition: NutritionMealLibraryService, arguments: dict[str, Any]
     ) -> dict[str, Any]:
         source = str(arguments.get("source") or "").strip().lower()
         query = str(arguments.get("query") or arguments.get("q") or "").strip()
@@ -172,7 +175,7 @@ class CoachReadToolService:
 
     @staticmethod
     def _calculate_food(
-        nutrition: NutritionService, arguments: dict[str, Any]
+        nutrition: NutritionMealLibraryService, arguments: dict[str, Any]
     ) -> dict[str, Any]:
         if "components" in arguments and (
             "ingredients" in arguments or "product_id" in arguments
@@ -198,16 +201,17 @@ class CoachReadToolService:
         }
 
     def _read_nutrition(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        if not self._nutrition_service:
+        if not self._nutrition_diary or not self._nutrition_meal_library:
             return {"ok": False, "error": "NutritionService ist nicht verfügbar."}
-        service = self._nutrition_service()
+        service = self._nutrition_diary()
+        meal_library = self._nutrition_meal_library()
         if arguments.get("planned_unit_id"):
             return {
                 "ok": True,
                 "fueling": service.fueling().read(arguments["planned_unit_id"]),
             }
-        templates = service.list_templates()
-        products = service.list_products()
+        templates = meal_library.list_templates()
+        products = meal_library.list_products()
         product_projection = (
             {"products": products} if isinstance(products, list) else {}
         )

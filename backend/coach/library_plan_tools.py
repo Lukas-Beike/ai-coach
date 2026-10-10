@@ -15,9 +15,13 @@ class CoachLibraryPlanToolService:
     def __init__(self, library_plan_service: WorkoutLibraryPlanService) -> None:
         self._library_plan_service = library_plan_service
 
-    def execute(self, arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
+    def execute(
+        self, arguments: dict[str, Any], intent: dict[str, Any]
+    ) -> dict[str, Any]:
         if "apply_workout_library_plan" not in authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+            raise AppError(
+                403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
+            )
         entries = arguments.get("entries")
         if not isinstance(entries, list):
             raise AppError(
