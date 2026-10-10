@@ -841,6 +841,44 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(".planned-entry.is-skipped .planned-entry-status", styles)
         self.assertIn(".planned-badges { display: flex; flex-wrap: wrap;", styles)
 
+    def test_calendar_polish_texts_and_wrapping(self):
+        public = server.PUBLIC_DIR
+        plan_views = (public / "plan-views.js").read_text(encoding="utf-8")
+        styles = (public / "styles.css").read_text(encoding="utf-8")
+        index = (public / "index.html").read_text(encoding="utf-8")
+
+        def css_rule(selector):
+            start = styles.index(selector + " {")
+            return styles[start : styles.index("}", start)]
+
+        self.assertIn('<html lang="de">', index)
+        # Date-only planned units are stored as midnight and must not show "00:00".
+        self.assertIn('match && match[1] !== "00:00"', plan_views)
+        self.assertIn('time && time[1] !== "00:00"', plan_views)
+        # Extra activities and completed planned units have distinct labels.
+        self.assertIn('"✓ Zusätzlich" : "✓ Absolviert"', plan_views)
+        self.assertNotIn("Zusätzlich absolviert", plan_views)
+        self.assertNotIn("Abgeschlossen", plan_views)
+        # Missing weather is one hint for the visible range, not one per day.
+        self.assertIn("function plannedWeatherHint(", plan_views)
+        self.assertIn("upcomingDays", plan_views)
+        self.assertNotIn("is-missing", plan_views)
+        self.assertNotIn("weatherMissing", plan_views)
+        self.assertIn(".planned-weather-hint {", styles)
+        # Calendar titles wrap at word boundaries and may hyphenate German compounds.
+        for selector in (
+            ".planned-entry > summary > strong",
+            ".planned-session-header > :first-child",
+        ):
+            rule = css_rule(selector)
+            self.assertIn("overflow-wrap: break-word; hyphens: auto;", rule)
+            self.assertNotIn("overflow-wrap: anywhere", rule)
+        # Empty workout library explains where entries come from.
+        self.assertIn(
+            "Noch keine Einheiten in der Bibliothek. Der Coach legt hier Einheiten ab, wenn du sie planst.",
+            plan_views,
+        )
+
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
         app = frontend_source()
         views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(

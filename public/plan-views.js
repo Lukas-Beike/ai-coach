@@ -62,7 +62,7 @@ function plannedAppointmentLabel(event) {
   const name = stripCalendarMarkers(event.name) || "Trainingstermin";
   if (event.all_day) return `${name} · ganztägig`;
   const time = /(?:T|\s)(\d{2}:\d{2})/.exec(String(event.start_local || ""));
-  return time ? `${name} · ${time[1]}` : name;
+  return time && time[1] !== "00:00" ? `${name} · ${time[1]}` : name;
 }
 
 function calendarActualActivity(entry) {
@@ -108,7 +108,8 @@ function calendarIntensityLabel(value) {
 
 function calendarStartTime(value) {
   const match = /(?:T|\s)(\d{2}:\d{2})/.exec(String(value || ""));
-  return match ? match[1] : null;
+  // Date-only planned units are stored as midnight; that is not a start time.
+  return match && match[1] !== "00:00" ? match[1] : null;
 }
 
 function appendCalendarFact(root, label, value) {
@@ -162,7 +163,7 @@ function calendarEntryStatus(entry, dateKey, todayKey) {
 
 function calendarStatusLabel(entry, dateKey, todayKey) {
   const status = calendarEntryStatus(entry, dateKey, todayKey);
-  if (status === "completed") return entry.is_completed_activity ? "✓ Zusätzlich absolviert" : "✓ Abgeschlossen";
+  if (status === "completed") return entry.is_completed_activity ? "✓ Zusätzlich" : "✓ Absolviert";
   if (status === "missed") return "Nicht absolviert";
   return status === "today" ? "Heute geplant" : "Geplant";
 }
@@ -434,6 +435,15 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return section;
   }
 
+  function plannedWeatherHint() {
+    const hint = document.createElement("p");
+    hint.className = "planned-weather-hint";
+    hint.textContent = state.data?.weather?.configured
+      ? "Für die kommenden Tage liegt noch keine Wettervorhersage vor."
+      : "Wetter fehlt: Im Profil ist kein Wetterort hinterlegt.";
+    return hint;
+  }
+
   function plannedWeekSummary(weekKey, weekEndKey, weekEntries, compliance, todayKey) {
     const plannedEntryCount = weekEntries.filter((entry) => !entry.is_completed_activity).length;
     const plannedUnits = Number.isFinite(Number(compliance?.planned_units))
@@ -678,14 +688,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       weatherText.title = [weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage", weather.condition, weatherLabel].filter(Boolean).join(": ");
       weatherText.setAttribute("aria-label", weatherText.title);
       heading.append(weatherText);
-    } else {
-      const weatherMissing = document.createElement("span");
-      weatherMissing.className = "planned-day-weather is-missing";
-      weatherMissing.textContent = "Wetter fehlt";
-      if (!state.data?.weather?.configured) weatherMissing.title = "Kein Wetterort im Profil hinterlegt";
-      else if (dateKey < todayKey) weatherMissing.title = "Für diesen Tag wurde keine Vorhersage gespeichert";
-      else weatherMissing.title = "Für diesen Tag ist keine Vorhersage verfügbar";
-      heading.append(weatherMissing);
     }
     day.append(heading);
   }
@@ -839,6 +841,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       eventsByDate.get(key).push(entry);
     });
 
+    const upcomingDays = Array.from({ length: (pastWeeks + futureWeeks + 1) * 7 }, (_, offset) => addDateKey(firstWeekKey, offset))
+      .filter((dateKey) => dateKey >= todayKey);
+    if (!upcomingDays.some((dateKey) => plannedWeatherLabel(plannedDayWeather(planningContextByDate.get(dateKey) || {}, dateKey)))) root.append(plannedWeatherHint());
     const view = {
       currentWeekKey,
       eventsByDate,
@@ -865,7 +870,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (!visible.length) {
       const empty = document.createElement("p");
       empty.className = "context-empty";
-      empty.textContent = "Noch keine Einheiten in der Bibliothek.";
+      empty.textContent = "Noch keine Einheiten in der Bibliothek. Der Coach legt hier Einheiten ab, wenn du sie planst.";
       root.append(empty);
       return;
     }
