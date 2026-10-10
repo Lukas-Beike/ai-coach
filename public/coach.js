@@ -1414,8 +1414,56 @@ function applyChatReceipt(receipt) {
   renderMessages(state.data?.messages || [], false);
 }
 
+let chatHistoryObserver = null;
+
+function chatHistoryScroller(root) {
+  return root.scrollHeight > root.clientHeight ? root : globalThis;
+}
+
+function chatHistoryAnchor(root) {
+  // Anchor the first message the reader can see, not merely the first one in the DOM.
+  const viewportTop = chatHistoryScroller(root) === root ? root.getBoundingClientRect().top : 0;
+  const nodes = [...root.querySelectorAll("[data-message-id]")];
+  const node = nodes.find((item) => item.getBoundingClientRect().bottom > viewportTop) || nodes[0];
+  return node ? { id: node.dataset.messageId, top: node.getBoundingClientRect().top } : null;
+}
+
+function restoreChatHistoryAnchor(root, anchor, added, moveFocus) {
+  const node = anchor && [...root.querySelectorAll("[data-message-id]")].find((item) => item.dataset.messageId === anchor.id);
+  if (!node) return;
+  chatHistoryScroller(root).scrollBy(0, node.getBoundingClientRect().top - anchor.top);
+  if (moveFocus) {
+    if (!node.hasAttribute("tabindex")) node.tabIndex = -1;
+    node.focus({ preventScroll: true });
+  }
+  if (added === 1) announceChatStatus("1 ältere Nachricht geladen");
+  else if (added > 1) announceChatStatus(`${added} ältere Nachrichten geladen`);
+}
+
+const chatFocusableSelector = "button, a[href], input, select, textarea, [tabindex]";
+
+function chatFocusSnapshot(root) {
+  // Automatic history loads replace every message node, which would drop focus from a message action to BODY.
+  const active = document.activeElement;
+  const message = active && root.contains(active) ? active.closest("[data-message-id]") : null;
+  if (!message) return null;
+  const index = active === message ? -1 : [...message.querySelectorAll(chatFocusableSelector)].indexOf(active);
+  return { messageId: message.dataset.messageId, index };
+}
+
+function restoreChatFocus(root, snapshot) {
+  if (!snapshot) return;
+  const message = [...root.querySelectorAll("[data-message-id]")].find((item) => item.dataset.messageId === snapshot.messageId);
+  if (!message) return;
+  const control = snapshot.index >= 0 ? [...message.querySelectorAll(chatFocusableSelector)][snapshot.index] : null;
+  const target = control || message;
+  if (!target.hasAttribute("tabindex") && target === message) message.tabIndex = -1;
+  target.focus({ preventScroll: true });
+}
+
 function appendHistoryPageButton(root, area) {
   const chat = area === "chat";
+  if (chat) chatHistoryObserver?.disconnect();
   const cursor = state.data?.[chat ? "messages_next_cursor" : "library_next_cursor"];
   if (!cursor) return;
   const button = document.createElement("button");
@@ -1423,7 +1471,11 @@ function appendHistoryPageButton(root, area) {
   button.className = "secondary-button";
   button.dataset.pageArea = area;
   button.textContent = chat ? "Weitere Nachrichten laden" : "Weitere Bibliothekseinheiten laden";
+  let autoLoad = false;
   button.addEventListener("click", async () => {
+    if (chat) chatHistoryObserver?.disconnect();
+    const moveFocus = !autoLoad;
+    autoLoad = false;
     const generation = state.sessionGeneration;
     const chatGeneration = state.chatGeneration;
     button.disabled = true;
@@ -1432,9 +1484,14 @@ function appendHistoryPageButton(root, area) {
       if (generation !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
       if (chat) {
         if (result.generation !== state.data.messages_generation) { await loadChatHistoryFresh(); return; }
+        const anchor = chatHistoryAnchor(root);
+        const focus = moveFocus ? null : chatFocusSnapshot(root);
+        const previousCount = (state.data.messages || []).length;
         state.data.messages = mergeChatMessages(result.messages || []);
         state.data.messages_next_cursor = result.next_cursor;
         renderMessages(state.data.messages, false, true);
+        restoreChatHistoryAnchor(root, anchor, state.data.messages.length - previousCount, moveFocus);
+        restoreChatFocus(root, focus);
       } else {
         const all = [...(state.data.library || []), ...(result.workouts || [])];
         state.data.library = [...new Map(all.map((entry) => [entry.id, entry])).values()];
@@ -1443,6 +1500,18 @@ function appendHistoryPageButton(root, area) {
       }
     } catch (error) { toast(error.message, true); button.disabled = false; }
   });
+  if (chat && "IntersectionObserver" in globalThis) {
+    const observer = new IntersectionObserver((entries) => {
+      // Wait until the initial jump to the latest message has settled; the next intersection re-arms loading.
+      if (!entries.some((entry) => entry.isIntersecting) || state.chatInitialScrollPending || state.chatScrollRestoring) return;
+      observer.disconnect();
+      if (button.disabled) return;
+      autoLoad = true;
+      button.click();
+    }, { rootMargin: "200px 0px 0px 0px" });
+    chatHistoryObserver = observer;
+    observer.observe(button);
+  }
   root.append(button);
 }
 
