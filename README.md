@@ -67,7 +67,7 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 - **Unmatched Activity Display**: Prominent display of completed, unscheduled sessions alongside planned workouts without fabricating missing target metrics.
 - **Full Workout Lifecycle Management**: Direct UI and conversational controls to schedule, move, edit, duplicate, archive, restore, and delete planned workouts.
 - **Target Period Scoping**: Conversational plan adjustments strictly scoped to requested date ranges, leaving surrounding weeks and existing training blocks untouched.
-- **Daily Athlete Check-ins**: Dedicated check-in tracking morning readiness, sleep quality, muscle soreness, perceived stress, and free-form athlete notes.
+- **Daily Athlete Check-ins**: Dedicated check-in tracking morning readiness, sleep quality, muscle soreness, perceived stress, and free-form athlete notes. Open it with the **Check-in** action on today's card in *Geplant* or with *Mehr › Profil › Tages-Check-in*. After saving, the card shows the check-in status and the action changes to *Check-in bearbeiten*. Selecting an earlier check-in from the history list asks before an unsaved draft is replaced.
 - **Post-Activity Feedback**: Dedicated local feedback logging for completed workouts, capturing perceived exertion (RPE), equipment details, and workout execution notes.
 - **Multi-Phase Season Periodization**: Long-term seasonal planning mapping base, build, peak, taper, and recovery phases anchored to primary competition dates.
 

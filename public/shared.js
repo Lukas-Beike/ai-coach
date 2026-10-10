@@ -247,8 +247,13 @@ function setDirtyIndicator(id, dirty) {
 }
 
 
+async function confirmDiscardDraft(isDirty) {
+  return !isDirty || Boolean(await requestConfirmation("Ungespeicherte Änderungen verwerfen?", { title: "Änderungen verwerfen?" }));
+}
+
+
 async function confirmDiscardChanges() {
-  return !hasUnsavedChanges({ includeChatDraft: false }) || Boolean(await requestConfirmation("Ungespeicherte Änderungen verwerfen?", { title: "Änderungen verwerfen?" }));
+  return confirmDiscardDraft(hasUnsavedChanges({ includeChatDraft: false }));
 }
 
 

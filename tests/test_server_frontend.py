@@ -738,7 +738,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("planned-day-health", plan_views)
         self.assertNotIn("function renderPlanned(", app)
         plan_markup = index[
-            index.index('id="workoutsPanel"') : index.index('id="checkinDialog"')
+            index.index('id="workoutsPanel"') : index.index('id="dataPanel"')
         ]
         self.assertNotIn("<button", plan_markup)
         self.assertNotIn("planningEditDirty", state)
