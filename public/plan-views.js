@@ -72,7 +72,8 @@ function calendarActualActivity(entry) {
   return actual && typeof actual === "object" ? actual : null;
 }
 
-const DISTANCE_SPORT_TYPES = new Set(["ride", "virtualride", "gravelride", "mountainbikeride", "ebikeride", "run", "virtualrun", "trailrun", "walk", "hike", "swim", "nordicski", "rowing", "canoeing", "kayaking"]);
+// Sports that normally record a distance; only these count as "ohne Distanz" when the distance is missing.
+const DISTANCE_SPORT_TYPES = new Set(["ride", "virtualride", "gravelride", "mountainbikeride", "emountainbikeride", "ebikeride", "run", "virtualrun", "trailrun", "walk", "hike", "swim", "openwaterswim", "nordicski", "rollerski", "rowing", "virtualrow", "canoeing", "kayaking", "standuppaddling", "snowshoe"]);
 
 function calendarMetricNumber(value, suffix = "") {
   if (value == null || value === "") return null;
@@ -81,12 +82,12 @@ function calendarMetricNumber(value, suffix = "") {
   return `${AppFormat.number(number, { digits: Number.isInteger(number) ? 0 : 1 })}${suffix}`;
 }
 
-// Only sports that normally have a distance count as missing; strength or yoga sessions are ignored.
+// Every activity with a positive distance adds to the total; only distance sports without one count as missing.
 function calendarWeekDistanceLabel(activities) {
-  const distanceActivities = activities.filter((entry) => DISTANCE_SPORT_TYPES.has(String(entry.type || "").toLowerCase()));
-  if (!distanceActivities.length) return "–";
-  const measured = distanceActivities.filter((entry) => Number(entry.distance) > 0);
-  const missing = distanceActivities.length - measured.length;
+  const measured = activities.filter((entry) => Number(entry.distance) > 0);
+  const unmeasured = activities.filter((entry) => !(Number(entry.distance) > 0));
+  const missing = unmeasured.filter((entry) => DISTANCE_SPORT_TYPES.has(String(entry.type || "").toLowerCase())).length;
+  if (!measured.length && !missing) return "–";
   const total = measured.length
     ? AppFormat.distance(measured.reduce((sum, entry) => sum + Number(entry.distance), 0))
     : "–";
