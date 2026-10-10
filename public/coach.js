@@ -1677,7 +1677,8 @@ function chatAttachmentKind(name) {
 
 function chatAttachmentSize(item) {
   const data = String(item.data || "");
-  const padding = data.length - data.replace(/=+$/, "").length;
+  let padding = 0;
+  while (padding < 2 && data[data.length - 1 - padding] === "=") padding += 1;
   const bytes = Math.max(0, Math.floor(data.length * 3 / 4) - padding);
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 }).format(Math.round(bytes / 1024))} KB`;
