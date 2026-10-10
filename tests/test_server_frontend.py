@@ -351,6 +351,31 @@ class ServerFrontendTests(ServerTestCase):
         )
         self.assertNotIn(".composer.is-busy", styles)
 
+    def test_chat_queue_offers_visible_controls_without_browser_persistence(self):
+        root = Path(__file__).resolve().parents[1] / "public"
+        coach = (root / "coach.js").read_text(encoding="utf-8")
+        shared = (root / "shared.js").read_text(encoding="utf-8")
+        index = (root / "index.html").read_text(encoding="utf-8")
+        styles = (root / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('"Als Nächstes"', coach)
+        self.assertIn('"Wird nach der aktuellen Antwort gesendet"', coach)
+        self.assertIn("`Bearbeiten: wartende Nachricht ${position}`", coach)
+        self.assertIn("`Entfernen: wartende Nachricht ${position}`", coach)
+        self.assertIn('"Folgefrage – wird danach gesendet"', coach)
+        self.assertIn(">Als Nächstes senden</button>", index)
+        self.assertIn('aria-describedby="steerButtonHint"', index)
+        self.assertIn('id="steerButtonHint" class="sr-only"', index)
+        self.assertIn('$("#steerButtonHint")', coach)
+        self.assertIn(
+            ".message.pending .pending-actions button { min-width: 44px; min-height: 44px; }",
+            styles,
+        )
+        # Queued text stays in memory only and is protected by the leave-page guard.
+        self.assertNotIn("coachQueuedMessages", coach + shared)
+        self.assertNotIn("localStorage", coach)
+        self.assertIn("state.chatQueue.length > 0", shared)
+
     def test_mobile_chat_layout_keeps_composer_clear_of_navigation_and_keyboard(self):
         coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
             encoding="utf-8"

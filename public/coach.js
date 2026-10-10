@@ -219,6 +219,26 @@ function queueChatMessage(message, mode, requestKind = null, attachments = []) {
   return true;
 }
 
+function removeQueuedChatMessage(id) {
+  state.chatQueue = state.chatQueue.filter((entry) => entry.id !== id);
+  renderMessages(state.data?.messages || [], false, true);
+  updateChatControls();
+}
+
+function editQueuedChatMessage(id) {
+  const entry = state.chatQueue.find((item) => item.id === id);
+  if (!entry) return;
+  removeQueuedChatMessage(id);
+  const input = $("#messageInput");
+  input.value = input.value.trim() ? `${input.value.trimEnd()}\n${entry.message}` : entry.message;
+  if (entry.attachments.length) {
+    state.chatAttachments = [...entry.attachments, ...(state.chatAttachments || [])];
+    renderChatAttachments();
+  }
+  input.dispatchEvent(new Event("input"));
+  input.focus({ preventScroll: true });
+}
+
 function chatRequestIsCurrent(sessionGeneration, chatGeneration) {
   return sessionGeneration === state.sessionGeneration && chatGeneration === state.chatGeneration;
 }
@@ -684,10 +704,21 @@ function updateChatSendButton(button, controls) {
   button.title = label;
 }
 
+function steerButtonHint(controls) {
+  if (controls.resuming || controls.reconciling) return "Der Coach lädt die Antwort noch.";
+  if (!controls.inputAvailable) return "Die Spracheingabe läuft noch.";
+  if (!controls.hasDraft) return "Schreibe zuerst eine Nachricht, um sie als Nächstes zu senden.";
+  return "Wird nach der aktuellen Antwort vor den übrigen wartenden Nachrichten gesendet.";
+}
+
 function updateChatSteerButton(button, controls) {
   if (!button) return;
   button.hidden = !state.busy || controls.resuming || controls.reconciling;
   button.disabled = !controls.hasDraft || !controls.inputAvailable || controls.resuming || controls.reconciling;
+  const hint = steerButtonHint(controls);
+  button.title = hint;
+  const hintNode = $("#steerButtonHint");
+  if (hintNode) hintNode.textContent = hint;
 }
 
 function updateChatCancelButton(button, controls) {
@@ -716,7 +747,7 @@ function updateChatControls() {
     if (!controls.aiConfigured) {
       input.placeholder = "OPENAI_API_KEY in den Server-Einstellungen konfigurieren…";
     } else if (controls.chatReady) {
-      input.placeholder = "Frage deinen Coach…";
+      input.placeholder = state.busy ? "Folgefrage – wird danach gesendet" : "Frage deinen Coach…";
     } else {
       input.placeholder = "Coach-Chat wird geladen…";
     }
@@ -1305,11 +1336,34 @@ async function executeCoachActionProposal(proposal, button) {
   }
 }
 
-function createPendingMessage(entry) {
+function createPendingMessage(entry, index = 0) {
   const node = document.createElement("div");
   node.className = "message user pending";
-  node.textContent = entry.message;
+  const text = document.createElement("div");
+  text.textContent = entry.message;
+  const label = document.createElement("span");
+  label.className = "pending-label";
+  label.textContent = index === 0 ? "Als Nächstes" : "Wird nach der aktuellen Antwort gesendet";
+  const actions = document.createElement("div");
+  actions.className = "pending-actions";
+  const position = index + 1;
+  actions.append(
+    pendingQueueButton("Bearbeiten", `Bearbeiten: wartende Nachricht ${position}`, () => editQueuedChatMessage(entry.id)),
+    pendingQueueButton("Entfernen", `Entfernen: wartende Nachricht ${position}`, () => removeQueuedChatMessage(entry.id)),
+  );
+  node.append(text, label, actions);
   return node;
+}
+
+function pendingQueueButton(text, name, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "message-action";
+  button.textContent = text;
+  button.setAttribute("aria-label", name);
+  button.title = name;
+  button.addEventListener("click", onClick);
+  return button;
 }
 
 function mergeChatMessages(incoming, existing = state.data?.messages || []) {
@@ -1502,7 +1556,7 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
     root.append(appShellLoading ? createSkeletonStack(4) : createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest oder starte mit einer Schnellaktion."));
   }
   visibleMessages.forEach((message) => root.append(renderMessageNode(message)));
-  state.chatQueue.forEach((entry) => root.append(createPendingMessage(entry)));
+  state.chatQueue.forEach((entry, index) => root.append(createPendingMessage(entry, index)));
   const persistedResponse = Boolean(
     state.chatRequest?.responseMessageReceived
     || (state.chatRequest?.responseMessageId != null

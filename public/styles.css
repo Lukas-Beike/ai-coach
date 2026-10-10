@@ -532,6 +532,8 @@ h2 {
 @keyframes working-dot { 0%, 60%, 100% { opacity: .35; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 .message.pending { border: 1px dashed var(--accent-border-strong); box-shadow: none; }
 .message.pending .pending-label { display: block; margin-top: 5px; color: var(--muted); font-size: .68rem; font-weight: 650; }
+.message.pending .pending-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.message.pending .pending-actions button { min-width: 44px; min-height: 44px; }
 .message-actions { display: flex; align-items: center; gap: 4px; margin: 8px 0 0 -8px; flex-wrap: wrap; }
 .message-action { min-height: 44px; border: 0; border-radius: 10px; padding: 8px; color: var(--subtle); background: var(--transparent); font-size: .7rem; }
 .message-action:hover { color: var(--ink); background: var(--surface-raised); }
