@@ -257,17 +257,19 @@ function appendPlannedCalendarComparison(details, entry, actual) {
 
 const SEASON_PHASE_LABELS = { base: "Basis", build: "Aufbau", peak: "Spezifische Vorbereitung", taper: "Taper", completed: "Vergangen" };
 
+function nextCompetitionSummary(next, dateLabel, todayKey) {
+  if (!next) return "Noch kein zukünftiger Wettkampf gespeichert.";
+  const when = AppFormat.relativeDay(next.event_date, todayKey) ?? `${next.days_until} Tage`;
+  const phase = SEASON_PHASE_LABELS[next.phase] || next.phase;
+  return `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${phase} · ${when}`;
+}
+
 function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue, openCheckinEditor, checkinSummary }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
     const next = planning.season?.next_event;
-    const nextWhen = next ? (AppFormat.relativeDay(next.event_date, todayIso()) ?? `${next.days_until} Tage`) : "";
     const summary = $("#planningSummary");
-    if (summary) {
-      summary.textContent = next
-        ? `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${SEASON_PHASE_LABELS[next.phase] || next.phase} · ${nextWhen}`
-        : "Noch kein zukünftiger Wettkampf gespeichert.";
-    }
+    if (summary) summary.textContent = nextCompetitionSummary(next, dateLabel, todayIso());
     const preview = planning.latest_replan;
     const changes = Array.isArray(preview?.changes) ? preview.changes : [];
     const illness = String(data.local_feedback?.today?.illness || "").trim();
