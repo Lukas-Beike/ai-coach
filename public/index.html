@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=298">
+  <link rel="stylesheet" href="/styles.css?v=299">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -267,9 +267,9 @@
           <div class="connection-cards">
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small><p id="intervalsSetupHint" class="provider-setup-hint" hidden>Intervals.icu ist nicht konfiguriert. Hinterlege <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code> in der Serverkonfiguration und starte die App neu.</p></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small><p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist optional und nicht konfiguriert. Hinterlege <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> in der Serverkonfiguration und führe einmalig <code>garmin-login.py</code> aus (siehe README).</p></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine erscheinen im Tab „Plan“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="84"><small>-1 lädt alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small><p id="intervalsSetupHint" class="provider-setup-hint" hidden>Intervals.icu ist nicht konfiguriert. Hinterlege <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code> in der Serverkonfiguration und starte die App neu.</p></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 lädt alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small><p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist optional und nicht konfiguriert. Hinterlege <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> in der Serverkonfiguration und führe einmalig <code>garmin-login.py</code> aus (siehe README).</p></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine erscheinen im Tab „Kalender“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
           </div>
           <section class="provider-freshness" aria-labelledby="providerFreshnessTitle">
             <div class="settings-section-heading"><div><h3 id="providerFreshnessTitle">Datenfrische &amp; Retry-Verlauf</h3><p>Nur technische Zeitpunkte, Phasen und sichere Fehlerklassen; Providerantworten und private URLs werden nicht gespeichert.</p></div></div>
@@ -278,7 +278,7 @@
           <p class="fine-print settings-message">Zugangsdaten und die Athlete ID müssen über Container-Umgebungsvariablen gesetzt werden (Unraid: Docker-Template &rarr; Environment variables). Für den Coach ist <code>OPENAI_API_KEY</code> nötig; optional kann <code>OPENAI_BASE_URL</code> auf eine Responses-kompatible API zeigen. Außerdem <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code>. Für Garmin zusätzlich <code>GARMIN_EMAIL</code>, <code>GARMIN_PASSWORD</code> und <code>GARMINTOKENS</code> (z. B. <code>/data/garmin_tokens</code>). Nach Änderungen den Container in Unraid neu erstellen.</p>
           <p id="garminDetail" class="fine-print settings-message"></p>
           <p class="fine-print settings-message">Wetterdaten: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a> · Lizenz: CC BY 4.0.</p>
-          <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend. Termine werden im Tab „Plan“ angezeigt.</p>
+          <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend. Termine werden im Tab „Kalender“ angezeigt.</p>
         </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="appearance">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Kalenderansicht</span><span id="calendarDisplaySummary" class="collapsible-summary-meta">Einstellungen werden geladen...</span></summary>
@@ -456,17 +456,17 @@
   <script src="/api.js?v=224" defer></script>
   <script src="/navigation.js?v=231" defer></script>
   <script src="/state.js?v=220" defer></script>
-  <script src="/views.js?v=223" defer></script>
+  <script src="/views.js?v=224" defer></script>
   <script src="/plan-views.js?v=6" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=17" defer></script>
+  <script src="/coach.js?v=18" defer></script>
   <script src="/shared.js?v=7" defer></script>
   <script src="/auth.js?v=4" defer></script>
-  <script src="/sync-status.js?v=4" defer></script>
-  <script src="/notifications.js?v=2" defer></script>
+  <script src="/sync-status.js?v=5" defer></script>
+  <script src="/notifications.js?v=3" defer></script>
   <script src="/nutrition.js?v=24" defer></script>
-  <script src="/analysis.js?v=101" defer></script>
+  <script src="/analysis.js?v=102" defer></script>
   <script src="/activity-details.js?v=12" defer></script>
   <script src="/performance-view.js?v=2" defer></script>
   <script src="/diagnostics.js?v=2" defer></script>

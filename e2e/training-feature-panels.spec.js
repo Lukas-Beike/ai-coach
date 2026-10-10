@@ -124,7 +124,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   const localGear = page.locator("#equipmentItems details");
   await localGear.locator("summary").click();
   await expect(localGear.getByRole("heading", { name: "Fixture road bike" }).first()).toBeVisible();
-  await expect(localGear).toContainText("1 zugeordnete Einheiten");
+  await expect(localGear).toContainText("1 zugeordnete Einheit");
   await expect(localGear).toContainText("Keine Wartung erfasst.");
 
   await page.evaluate(async () => { await AppRouter.navigate("more/profile", { historyMode: "replace" }); });

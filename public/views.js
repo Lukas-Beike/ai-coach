@@ -358,10 +358,17 @@ function populateProfileField(form, key, value) {
   field.value = value || "";
 }
 
+const PROFILE_SPORT_LABELS = { Cycling: "Radfahren", Running: "Laufen", Swimming: "Schwimmen", Strength: "Krafttraining", WeightTraining: "Krafttraining", Triathlon: "Triathlon", Other: "Andere" };
+
+function profileSportsLabel(sports) {
+  return String(sports || "").split(",").map((item) => item.trim()).filter(Boolean)
+    .map((item) => (Object.hasOwn(PROFILE_SPORT_LABELS, item) ? PROFILE_SPORT_LABELS[item] : item)).join(", ");
+}
+
 function renderProfileSummary(profile) {
   const summary = $("#profileSummary");
   if (!summary) return;
-  const values = [profile.name, profile.sports, profile.typical_weekly_volume].filter(Boolean);
+  const values = [profile.name, profileSportsLabel(profile.sports), profile.typical_weekly_volume].filter(Boolean);
   summary.textContent = values.length ? values.join(" · ") : "Noch nicht ausgefüllt";
 }
 
