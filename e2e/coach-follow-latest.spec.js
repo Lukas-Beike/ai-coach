@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { isFullyAbove } = require("./helpers/ui");
+const { rectOf } = require("./helpers/ui");
 
 const SLOW_STREAM_PROMPT = "E2E fixture: slow stream";
 
@@ -88,7 +88,12 @@ test("the jump button returns to the latest reply and moves focus only on deskto
   await jump.click();
   await expect(jump).toBeHidden();
   await expect(jump).toHaveAttribute("aria-label", "Zu den neuesten Nachrichten springen");
-  expect(await isFullyAbove(page.locator(".message.assistant").last(), page.locator("#chatForm"))).toBe(true);
+  // The button hides immediately; the scroll itself lands on the next frame. A reply taller than a small
+  // viewport cannot sit fully on screen, so only its end must clear the composer.
+  await expect.poll(async () => {
+    const [reply, composer] = await Promise.all([rectOf(page.locator(".message.assistant").last()), rectOf(page.locator("#chatForm"))]);
+    return reply.bottom <= composer.top + 0.5;
+  }).toBe(true);
   if (touchProject) expect(await page.evaluate(() => document.activeElement?.id)).not.toBe("messageInput");
   else await expect(page.locator("#messageInput")).toBeFocused();
 });
