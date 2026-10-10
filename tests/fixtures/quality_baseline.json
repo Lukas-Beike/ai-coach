@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "7fc4eb57d7edee49f0ce4093c0e697e29fa605d4",
+  "base": "0b7e6d22c98a5165c085764929935d9367b62a0a",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
@@ -201,7 +201,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 108,
+      "line": 109,
       "column": 33,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -329,7 +329,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 151,
+      "line": 152,
       "column": 41,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -345,7 +345,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 69,
+      "line": 70,
       "column": 41,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -441,7 +441,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 46,
+      "line": 47,
       "column": 45,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -449,7 +449,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 75,
+      "line": 76,
       "column": 45,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -457,7 +457,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 92,
+      "line": 93,
       "column": 45,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -513,7 +513,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 86,
+      "line": 87,
       "column": 51,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -529,7 +529,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 34,
+      "line": 35,
       "column": 52,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -657,7 +657,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 39,
+      "line": 40,
       "column": 60,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -729,7 +729,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_security_resource_limits.py",
-      "line": 130,
+      "line": 131,
       "column": 65,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -920,22 +920,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/http_api/handler.py",
-      "line": 225,
-      "column": 12,
-      "code": "arg-type",
-      "message_sha256": "f685cb5d563f596260359c7ec60fc7f872d16dfe84fb079fef2741fa26ae038d"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/http_api/handler.py",
-      "line": 234,
-      "column": 12,
-      "code": "arg-type",
-      "message_sha256": "6195198e495bd02c70500de218de463b7423c94c7b7371b88aae6a19d1792592"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_planning_change_service.py",
       "line": 240,
       "column": 12,
@@ -952,6 +936,14 @@
     },
     {
       "tool": "mypy",
+      "path": "backend/http_api/handler.py",
+      "line": 244,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "f685cb5d563f596260359c7ec60fc7f872d16dfe84fb079fef2741fa26ae038d"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_sync_worker.py",
       "line": 246,
       "column": 12,
@@ -961,7 +953,15 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 246,
+      "line": 253,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "6195198e495bd02c70500de218de463b7423c94c7b7371b88aae6a19d1792592"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/handler.py",
+      "line": 265,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "e96d723fc3eefce71127726ff03053febc050202cfdf394836d946e9e10b7309"
@@ -969,7 +969,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 287,
+      "line": 306,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "454abbaab0cc1828be65fbd1b78572b7e7e5ed8bc7cca575ab77dc69909bdeeb"
@@ -1297,7 +1297,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 55,
+      "line": 58,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
@@ -1305,7 +1305,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 55,
+      "line": 58,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
@@ -1313,7 +1313,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_observability.py",
-      "line": 55,
+      "line": 58,
       "column": 20,
       "code": "arg-type",
       "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
@@ -1393,7 +1393,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/handler.py",
-      "line": 236,
+      "line": 255,
       "column": 26,
       "code": "arg-type",
       "message_sha256": "202e95d88c01d1a85fa2f434c5a0096706c95cfdc41dcab4a22472c904bb44b0"

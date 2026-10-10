@@ -21,6 +21,19 @@ function scheduleChatStatusPoll(delay = 1_500) {
   }, delay);
 }
 
+function chatStatusJobActive() {
+  return Boolean(state.busy || state.chatRequest || state.chatServerOperationId || state.chatStream || pendingChatTurn());
+}
+
+function chatStatusPollWanted() {
+  return document.visibilityState === "visible" && chatStatusJobActive();
+}
+
+function stopChatStatusPoll() {
+  if (state.chatStatusTimer) clearTimeout(state.chatStatusTimer);
+  state.chatStatusTimer = null;
+}
+
 async function loadChatHistoryFresh() {
   await refreshChatHistoryState();
 }
@@ -146,15 +159,27 @@ async function finishRecoveredChatStatus() {
   scrollChatToResponseStart();
 }
 
+function rescheduleChatStatusPoll(delay) {
+  if (chatStatusPollWanted()) scheduleChatStatusPoll(delay);
+}
+
+function settleChatStatusPoll(pollRequest, authFailed, running) {
+  if (state.chatStatusPollInFlight !== pollRequest) return;
+  state.chatStatusPollInFlight = null;
+  if (!authFailed) rescheduleChatStatusPoll(running ? 1_500 : 5_000);
+}
+
 async function pollChatStatus() {
-  if (!state.data || document.visibilityState !== "visible" || !navigator.onLine) {
-    scheduleChatStatusPoll(5_000);
+  if (!state.data || document.visibilityState !== "visible") return;
+  if (!navigator.onLine) {
+    rescheduleChatStatusPoll(5_000);
     return;
   }
   if (state.chatStatusPollInFlight) return;
   const pollRequest = {};
   state.chatStatusPollInFlight = pollRequest;
   let running = false;
+  let authFailed = false;
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
   try {
@@ -166,12 +191,9 @@ async function pollChatStatus() {
     if (running) showRunningChatStatus(status);
     else await finishRecoveredChatStatus();
   } catch (error) {
-    if (state.chatStatusPollInFlight === pollRequest && !/Authentication/.test(error.message)) scheduleChatStatusPoll(5_000);
+    authFailed = /Authentication/.test(error.message);
   } finally {
-    if (state.chatStatusPollInFlight === pollRequest) {
-      state.chatStatusPollInFlight = null;
-      scheduleChatStatusPoll(running ? 1_500 : 5_000);
-    }
+    settleChatStatusPoll(pollRequest, authFailed, running);
   }
 }
 

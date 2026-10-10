@@ -8,10 +8,12 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import backend
 from backend.config import Config
+from backend.http_api.handler import RequestHandler
 from backend.observability import (
     DiagnosticCapture,
     JsonLogFormatter,
@@ -20,6 +22,7 @@ from backend.observability import (
     diagnostic_capture_response,
     diagnostic_response_shape,
     external_result_context,
+    http_access_log_level,
     safe_diagnostic_context,
     safe_diagnostic_error,
     safe_provider_path,
@@ -662,6 +665,79 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), "imported")
         self.assertEqual(result.stderr, "")
+
+
+class _RecordingLogger:
+    def __init__(self):
+        self.records = []
+
+    def log(self, level, message, *, extra):
+        self.records.append((level, message, extra))
+
+
+class HttpAccessLogLevelTests(unittest.TestCase):
+    def test_successful_routine_get_polls_log_at_debug(self):
+        self.assertEqual(
+            http_access_log_level("GET", "/api/chat/status", 200), logging.DEBUG
+        )
+        self.assertEqual(
+            http_access_log_level("GET", "/api/state/events", "200"), logging.DEBUG
+        )
+
+    def test_errors_and_other_requests_keep_info(self):
+        cases = [
+            ("GET", "/api/chat/status", 401),
+            ("GET", "/api/chat/status", 500),
+            ("GET", "/api/state/events", 404),
+            ("POST", "/api/chat/status", 200),
+            ("GET", "/api/bootstrap", 200),
+            ("GET", "/api/chat/status", None),
+        ]
+        for method, path, status in cases:
+            with self.subTest(method=method, path=path, status=status):
+                self.assertEqual(
+                    http_access_log_level(method, path, status), logging.INFO
+                )
+
+    def test_request_handler_access_log_uses_policy_level_without_secrets(self):
+        logger = _RecordingLogger()
+        handler = RequestHandler.__new__(RequestHandler)
+        handler.command = "GET"
+        handler.path = "/api/chat/status?probe=1"
+        handler.requestline = "GET /api/chat/status?probe=1 HTTP/1.1"
+        handler.dependencies = SimpleNamespace(logger=logger)
+
+        handler.log_request(200)
+        handler.log_request(401)
+
+        (ok_level, ok_message, ok_extra), (error_level, _, _) = logger.records
+        self.assertEqual(ok_level, logging.DEBUG)
+        self.assertEqual(error_level, logging.INFO)
+        self.assertEqual(ok_extra["event"], "http_access")
+        self.assertEqual(
+            ok_extra["context"],
+            {"method": "GET", "path": "/api/chat/status", "request_id": None},
+        )
+        self.assertNotIn("cookie", ok_message.lower())
+        self.assertNotIn("authorization", ok_message.lower())
+
+    def test_inherited_error_log_after_routine_200_keeps_info(self):
+        logger = _RecordingLogger()
+        handler = RequestHandler.__new__(RequestHandler)
+        handler.command = "GET"
+        handler.path = "/api/state/events"
+        handler.requestline = "GET /api/state/events HTTP/1.1"
+        handler.dependencies = SimpleNamespace(logger=logger)
+
+        handler.log_request(200)
+        handler.log_error("Streaming response failed: %s", "synthetic timeout")
+
+        (ok_level, _, _), (error_level, error_message, error_extra) = logger.records
+        self.assertEqual(ok_level, logging.DEBUG)
+        self.assertEqual(error_level, logging.INFO)
+        self.assertEqual(error_message, "Streaming response failed: synthetic timeout")
+        self.assertEqual(error_extra["event"], "http_access")
+        self.assertEqual(error_extra["context"]["path"], "/api/state/events")
 
 
 if __name__ == "__main__":

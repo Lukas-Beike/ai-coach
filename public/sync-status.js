@@ -24,8 +24,11 @@ function handleStateEvent(event) {
   if (payload.latest_event_id !== undefined) state.stateEventLastId = Number(payload.latest_event_id) || state.stateEventLastId;
   if (event.type === "reset") {
     scheduleStateEventRefresh(["chat", "plan", "library", "performance", "feedback", "profile"]);
+    scheduleChatStatusPoll(0);
     return;
   }
+  // A submitted Coach turn (possibly from another device) starts status polling once.
+  if (event.type === "coach" && payload.role === "user") scheduleChatStatusPoll(0);
   const areas = {
     coach: ["chat"],
     planning: ["plan", "library"],
