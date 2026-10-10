@@ -23,6 +23,7 @@ from backend.sync.garmin import (
     merge_sources,
     normalize_fixture_sleep_dates,
 )
+from backend.sync.refresh import ProviderRefreshTracker, retry_at, sync_job_error_class
 from backend.sync.state import SyncStateRepository
 
 TODAY = date(2026, 9, 20)
@@ -115,6 +116,40 @@ class GarminFixtureLoaderTests(unittest.TestCase):
                 non_object.exception.message,
                 "Die Garmin-Testdatei muss ein JSON-Objekt enthalten.",
             )
+
+    def test_broken_fixture_failures_are_non_retryable_configuration_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "malformed.json").write_text("{not json", encoding="utf-8")
+            (root / "undecodable.json").write_bytes(b"\xff\xfe\x00")
+            _write_fixture(root, root / "array.json", [1, 2])
+            cases = {
+                "missing": "missing.json",
+                "malformed": "malformed.json",
+                "undecodable": "undecodable.json",
+                "non_object": "array.json",
+            }
+            for label, name in cases.items():
+                with self.subTest(label):
+                    with self.assertRaises(AppError) as raised:
+                        _loader(root, name).load(2)
+                    error = raised.exception
+                    self.assertEqual(error.status, 503)
+                    self.assertEqual(error.reason, "not_configured")
+                    code = ProviderRefreshTracker.error_code(error)
+                    self.assertEqual(code, "invalid_configuration")
+                    self.assertEqual(
+                        sync_job_error_class(error), "invalid_configuration"
+                    )
+                    self.assertIsNone(
+                        retry_at(
+                            [],
+                            current_error_code=code,
+                            now=datetime(2026, 9, 20, 12, tzinfo=UTC),
+                            base_seconds=60,
+                            max_seconds=3600,
+                        )
+                    )
 
     def test_load_defaults_ranges_existing_values_and_source_copy(self):
         with tempfile.TemporaryDirectory() as directory:

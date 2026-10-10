@@ -69,7 +69,11 @@ class ExternalCalendarSyncService:
             "calendar", "events", reason, operation_id
         ) as scope:
             if not self._config.calendar_ical_url:
-                raise AppError(503, "CALENDAR_ICAL_URL ist nicht konfiguriert.")
+                raise AppError(
+                    503,
+                    "CALENDAR_ICAL_URL ist nicht konfiguriert.",
+                    reason="not_configured",
+                )
             if not self._lock.acquire(blocking=False):
                 result = {"status": "already_running"}
                 scope.result = result
