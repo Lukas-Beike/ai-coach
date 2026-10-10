@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import json
+import sys
 import unittest
 from collections import Counter
 from pathlib import Path
@@ -48,6 +49,7 @@ DOMAIN_ROOTS = frozenset(
 SHARED_ROOTS = frozenset(
     f"backend.{name}"
     for name in (
+        "canonical",
         "change_history",
         "config",
         "errors",
@@ -61,6 +63,7 @@ PERMITTED_IMPORTS_BY_LAYER = {
     "providers": frozenset(
         {
             "backend.providers",
+            "backend.canonical",
             "backend.config",
             "backend.errors",
             "backend.observability",
@@ -69,6 +72,7 @@ PERMITTED_IMPORTS_BY_LAYER = {
             "backend.runtime.socket_deadline",
         }
     ),
+    "canonical": frozenset({"backend.canonical"}),
     "http_api": DOMAIN_ROOTS | SHARED_ROOTS | {"backend.http_api", "backend.runtime"},
     "domain": DOMAIN_ROOTS
     | SHARED_ROOTS
@@ -175,7 +179,7 @@ def _imports(
 
 
 def _layer(source: str) -> str:
-    for layer in ("providers", "http_api", "db", "runtime"):
+    for layer in ("canonical", "providers", "http_api", "db", "runtime"):
         if source == f"backend.{layer}" or source.startswith(f"backend.{layer}."):
             return layer
     if any(source == root or source.startswith(root + ".") for root in DOMAIN_ROOTS):
@@ -335,6 +339,46 @@ def _http_sql_literals(root: Path) -> list[tuple[str, str]]:
                 ):
                     literals.append((relative, argument.value))
     return literals
+
+
+CANONICAL_PACKAGE = "backend.canonical"
+
+
+def _canonical_import_allowed(target: str) -> bool:
+    top = target.split(".", 1)[0]
+    return (
+        top in sys.stdlib_module_names
+        or target == CANONICAL_PACKAGE
+        or target.startswith(CANONICAL_PACKAGE + ".")
+    )
+
+
+def _import_targets(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    if isinstance(node, ast.ImportFrom):
+        if node.level == 0:
+            return [node.module or ""]
+        if node.level == 1:
+            # Package-relative imports stay inside backend.canonical.
+            return []
+        return ["." * node.level + (node.module or "")]
+    return []
+
+
+def _canonical_stdlib_violations(package_root: Path) -> list[str]:
+    """Return imports that leave the standard library and backend.canonical."""
+    violations: list[str] = []
+    for path in sorted(package_root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        relative = path.relative_to(package_root.parent).as_posix()
+        for node in ast.walk(tree):
+            violations.extend(
+                f"{relative}: {target}"
+                for target in _import_targets(node)
+                if not _canonical_import_allowed(target)
+            )
+    return sorted(violations)
 
 
 class BackendLayerContractTests(unittest.TestCase):
@@ -564,6 +608,69 @@ class BackendLayerContractTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text(ast.unparse(tree), encoding="utf-8")
             self.assertEqual(calls, _http_execute_calls(root))
+
+    def test_canonical_package_imports_only_stdlib_and_itself(self) -> None:
+        self.assertEqual(
+            [],
+            _canonical_stdlib_violations(BACKEND_ROOT / "canonical"),
+        )
+
+    def test_canonical_stdlib_guard_rejects_outside_imports(self) -> None:
+        with TemporaryDirectory() as temporary:
+            package_root = Path(temporary) / "backend" / "canonical"
+            package_root.mkdir(parents=True)
+            (package_root / "ok.py").write_text(
+                "import json\n"
+                "from . import vocabulary\n"
+                "from .vocabulary import Sport\n"
+                "from backend.canonical.vocabulary import Sport\n",
+                encoding="utf-8",
+            )
+            (package_root / "bad.py").write_text(
+                "from backend.coach import service\n"
+                "from ..coach import service2\n"
+                "import requests\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                [
+                    "canonical/bad.py: ..coach",
+                    "canonical/bad.py: backend.coach",
+                    "canonical/bad.py: requests",
+                ],
+                _canonical_stdlib_violations(package_root),
+            )
+
+    def test_canonical_layer_is_leaf_and_permitted_by_every_layer_key(self) -> None:
+        self.assertEqual("canonical", _layer("backend.canonical.records"))
+        self.assertEqual({CANONICAL_PACKAGE}, PERMITTED_IMPORTS_BY_LAYER["canonical"])
+        for layer, permitted in PERMITTED_IMPORTS_BY_LAYER.items():
+            with self.subTest(layer=layer):
+                self.assertIn(CANONICAL_PACKAGE, permitted)
+
+    def test_canonical_import_direction_is_enforced_for_sample_layers(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sources = {
+                "backend/canonical/records.py": (
+                    "import json\n"
+                    "from backend.canonical.vocabulary import Sport\n"
+                    "from backend.db import manager\n"
+                ),
+                "backend/canonical/vocabulary.py": "from enum import StrEnum\n",
+                "backend/providers/adapter.py": (
+                    "from backend.canonical.records import Observation\n"
+                ),
+                "backend/coach/service.py": "from backend.canonical import records\n",
+            }
+            for relative, text in sources.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            self.assertEqual(
+                {("backend/canonical/records.py", "backend.db")},
+                _import_violations(root),
+            )
 
     def test_http_sql_execute_sites_match_pending_baseline(self) -> None:
         calls = _http_execute_calls(REPOSITORY_ROOT)

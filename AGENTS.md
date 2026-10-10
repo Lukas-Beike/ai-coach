@@ -75,7 +75,9 @@ private VPN; it must not be exposed directly to the public internet.
   diagnostics, `history/` for change history and undo, `nutrition/` for
   nutrition workflows, `performance/` for derived/readiness context,
   `runtime/` for lifecycle and maintenance state, and `weather/` for weather
-  projections and caching. Cross-cutting owners remain in `config.py`,
+  projections and caching, and `canonical/` for provider-neutral vocabulary and
+  record types (a stdlib-only leaf that every layer may import).
+  Cross-cutting owners remain in `config.py`,
   `privacy.py`, `settings.py`, `change_history.py`, and `observability.py`.
   Extend an existing cohesive module first; add a focused module only when the
   responsibility needs its own home.
