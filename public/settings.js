@@ -90,10 +90,11 @@ async function downloadDatabaseBackup() {
       130_000,
     );
     const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    link.href = url;
     link.download = `intervals-coach-database-${todayIso()}.backup`;
     link.click();
-    URL.revokeObjectURL(link.href);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Verschlüsseltes Backup heruntergeladen");
   } finally { if (button) button.disabled = false; }
 }
@@ -185,10 +186,11 @@ async function downloadPrivacyExport() {
       130_000,
     );
     const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    link.href = url;
     link.download = `intervals-coach-export-${todayIso()}.zip`;
     link.click();
-    URL.revokeObjectURL(link.href);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Datenexport erstellt");
   } catch (error) { toast(error.message, true); }
 }

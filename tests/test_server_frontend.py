@@ -1283,6 +1283,39 @@ class ServerFrontendTests(ServerTestCase):
         ]
         self.assertEqual(offenders, [])
 
+    def test_touch_targets_downloads_and_notification_retries_are_hardened(self):
+        styles = (server.PUBLIC_DIR / "styles.css").read_text(encoding="utf-8")
+        settings = (server.PUBLIC_DIR / "settings.js").read_text(encoding="utf-8")
+        notifications = (server.PUBLIC_DIR / "notifications.js").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            ".segmented-control > * { flex: 1 1 120px; min-height: 44px;", styles
+        )
+        self.assertNotIn("min-height: 40px; border: 0;", styles)
+
+        self.assertIsNone(
+            re.search(
+                r"link\.click\(\);\s*URL\.revokeObjectURL\(link\.href\)", settings
+            )
+        )
+        self.assertEqual(
+            settings.count("setTimeout(() => URL.revokeObjectURL(url), 1000);"), 2
+        )
+
+        self.assertIsNotNone(
+            re.search(
+                r"\} catch \{\s*state\.notificationKeys\.delete\(key\);\s*\}",
+                notifications,
+            )
+        )
+        self.assertNotIn("Tag(en)", notifications)
+        self.assertIn("function competitionCountdownText(name, days)", notifications)
+        self.assertIn("ist heute.", notifications)
+        self.assertIn("ist morgen.", notifications)
+        self.assertIn("ist in ${days} Tagen.", notifications)
+
     def test_error_toasts_are_readable_dismissible_and_above_composer(self):
         styles = (
             Path(__file__).resolve().parents[1] / "public" / "styles.css"

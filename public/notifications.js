@@ -28,12 +28,20 @@ async function showPwaNotification(title, options, key) {
   try {
     const registration = await navigator.serviceWorker.ready;
     await registration.showNotification(title, { icon: "/icon.svg", badge: "/icon.svg", ...options });
-  } catch { }
+  } catch {
+    state.notificationKeys.delete(key);
+  }
+}
+
+function competitionCountdownText(name, days) {
+  if (days === 0) return `${name} ist heute.`;
+  if (days === 1) return `${name} ist morgen.`;
+  return `${name} ist in ${days} Tagen.`;
 }
 
 function notifyState(data) {
   const next = data.planning?.season?.next_event;
-  if (next && next.days_until >= 0 && next.days_until <= 3) void showPwaNotification("Wettkampf steht bevor", { body: `${next.name} ist in ${next.days_until} Tag(en).`, tag: `competition:${next.id}` }, `competition:${next.id}:${next.event_date}`);
+  if (next && next.days_until >= 0 && next.days_until <= 3) void showPwaNotification("Wettkampf steht bevor", { body: competitionCountdownText(next.name, next.days_until), tag: `competition:${next.id}` }, `competition:${next.id}:${next.event_date}`);
   const error = data.sync?.last_error || data.garmin_sync?.status?.includes("Fehler") && data.garmin_sync.status;
   if (error) void showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: String(error), tag: "sync-error" }, `error:${error}`);
 }
