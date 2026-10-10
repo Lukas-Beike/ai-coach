@@ -721,6 +721,24 @@ class HttpAccessLogLevelTests(unittest.TestCase):
         self.assertNotIn("cookie", ok_message.lower())
         self.assertNotIn("authorization", ok_message.lower())
 
+    def test_inherited_error_log_after_routine_200_keeps_info(self):
+        logger = _RecordingLogger()
+        handler = RequestHandler.__new__(RequestHandler)
+        handler.command = "GET"
+        handler.path = "/api/state/events"
+        handler.requestline = "GET /api/state/events HTTP/1.1"
+        handler.dependencies = SimpleNamespace(logger=logger)
+
+        handler.log_request(200)
+        handler.log_error("Streaming response failed: %s", "synthetic timeout")
+
+        (ok_level, _, _), (error_level, error_message, error_extra) = logger.records
+        self.assertEqual(ok_level, logging.DEBUG)
+        self.assertEqual(error_level, logging.INFO)
+        self.assertEqual(error_message, "Streaming response failed: synthetic timeout")
+        self.assertEqual(error_extra["event"], "http_access")
+        self.assertEqual(error_extra["context"]["path"], "/api/state/events")
+
 
 if __name__ == "__main__":
     unittest.main()

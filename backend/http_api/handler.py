@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -61,14 +63,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         return self.dependencies.session_auth_service()
 
     def log_request(self, code: Any = "-", size: Any = "-") -> None:
-        self._access_log_status = code
-        super().log_request(code, size)
+        # The response status is known only here, so the routine-poll DEBUG
+        # policy is applied per request and never to inherited error messages.
+        if isinstance(code, HTTPStatus):
+            code = code.value
+        level = http_access_log_level(self.command, urlparse(self.path).path, code)
+        self._write_access_log(
+            level, '"%s" %s %s', self.requestline, str(code), str(size)
+        )
 
     def log_message(self, fmt: str, *args: Any) -> None:
+        # log_error() and other inherited message paths always stay at INFO.
+        self._write_access_log(logging.INFO, fmt, *args)
+
+    def _write_access_log(self, level: int, fmt: str, *args: Any) -> None:
         path = urlparse(self.path).path
-        level = http_access_log_level(
-            self.command, path, getattr(self, "_access_log_status", None)
-        )
         self.dependencies.logger.log(
             level,
             fmt % args,
@@ -97,7 +106,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def parse_request(self) -> bool:
-        self._access_log_status = None
         try:
             return super().parse_request()
         finally:
