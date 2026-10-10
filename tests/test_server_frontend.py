@@ -1280,6 +1280,21 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("ältere Nachrichten geladen", coach)
         self.assertIn("IntersectionObserver", coach)
 
+    def test_season_preparation_uses_relative_labels_archive_and_comma_factor(self):
+        public = Path(__file__).resolve().parents[1] / "public"
+        analysis = (public / "analysis.js").read_text(encoding="utf-8")
+        card_start = analysis.index("function seasonEventCard(")
+        card_end = analysis.index("\nfunction seasonStatusLabel(", card_start)
+        card = analysis[card_start:card_end]
+        self.assertIn("AppFormat.relativeDay(", card)
+        self.assertNotIn("${event.days_until} Tage · kalendarische", analysis)
+        self.assertIn("season-archive", analysis)
+        self.assertIn("parseSeasonLoadFactor", analysis)
+        self.assertIn('scale.inputMode="decimal"', analysis)
+        self.assertNotIn("scale.pattern", analysis)
+        plan_views = (public / "plan-views.js").read_text(encoding="utf-8")
+        self.assertIn("SEASON_PHASE_LABELS[next.phase]", plan_views)
+
 
 if __name__ == "__main__":
     unittest.main()
