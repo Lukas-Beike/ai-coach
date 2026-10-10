@@ -22,8 +22,24 @@ async function enableNotifications() {
   if (permission === "granted") toast("PWA-Benachrichtigungen aktiviert");
 }
 
+const NOTIFICATION_MAX_ATTEMPTS = 3;
+const NOTIFICATION_RETRY_DELAY_MS = 30000;
+
+function reserveNotificationAttempt(key) {
+  state.notificationAttempts ??= new Map();
+  const previous = state.notificationAttempts.get(key) ?? { count: 0, at: 0 };
+  if (previous.count >= NOTIFICATION_MAX_ATTEMPTS) {
+    state.notificationKeys.add(key);
+    return false;
+  }
+  if (previous.count > 0 && Date.now() - previous.at < NOTIFICATION_RETRY_DELAY_MS) return false;
+  state.notificationAttempts.set(key, { count: previous.count + 1, at: Date.now() });
+  return true;
+}
+
 async function showPwaNotification(title, options, key) {
   if (notificationPermission() !== "granted" || state.notificationKeys.has(key)) return;
+  if (!reserveNotificationAttempt(key)) return;
   state.notificationKeys.add(key);
   try {
     const registration = await navigator.serviceWorker.ready;
