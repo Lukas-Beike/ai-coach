@@ -409,10 +409,12 @@ h2 {
 .analysis-chart-stack .analysis-chart-note { margin: 0; }
 .analysis-chart-note { margin: 10px 0; color: var(--muted); font-size: .75rem; line-height: 1.5; }
 .analysis-chart-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0; padding: 0; list-style: none; color: var(--ink); font-size: .75rem; }
-.analysis-legend-info { position: relative; display: inline; min-height: 0; width: auto; padding: 4px 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+.analysis-legend-info { display: inline; min-height: 0; width: auto; padding: 4px 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 .analysis-chart-stack > h3 > .analysis-legend-info { display: inline-block; margin-left: .45em; vertical-align: .08em; }
 .analysis-legend-info:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 3px; }
-.analysis-legend-info::before { content: ""; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: 44px; transform: translate(-50%, -50%); }
+.analysis-chart-legend .analysis-legend-info { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
+h3 > .analysis-legend-info, h4 > .analysis-legend-info { position: relative; }
+h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content: ""; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: 44px; transform: translate(-50%, -50%); }
 .analysis-info-tooltip { position: fixed; inset: auto; margin: 0; width: min(340px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--ink); box-shadow: 0 8px 24px var(--tooltip-shadow); font-size: .8rem; line-height: 1.5; }
 .analysis-chart-legend li::before { content: ""; display: inline-block; width: 16px; height: 3px; margin: 0 8px 3px 0; background: var(--accent-bright); }
 .analysis-chart-legend [data-color="1"]::before { background: var(--chart-series-1); }

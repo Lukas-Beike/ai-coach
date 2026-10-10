@@ -356,7 +356,7 @@ test("@responsive missing race predictions explain the reason instead of an empt
   await expect(predictions).not.toContainText("Gewicht");
 });
 
-test("@responsive legend info buttons have a 44px hit area, a German name and popovers inside the viewport", async ({ page }) => {
+test("@responsive legend info buttons have a 44px layout box, a German name and popovers inside the viewport", async ({ page }) => {
   await performanceFixture(page, { history: {
     start: "2026-09-01", end: "2026-09-08", load: { points: [] },
     metrics: { cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }] },
@@ -364,14 +364,10 @@ test("@responsive legend info buttons have a 44px hit area, a German name and po
   const root = page.locator("#analysisHistoryCharts");
   const button = root.getByRole("button", { name: "Erklärung zu FTP", exact: true });
   await expect(button).toHaveAttribute("aria-expanded", "false");
-  const hitArea = await button.evaluate((element) => {
-    const hit = getComputedStyle(element, "::before");
-    return { width: parseFloat(hit.width), height: parseFloat(hit.height) };
-  });
-  expect(hitArea.width).toBeGreaterThanOrEqual(44);
-  expect(hitArea.height).toBeGreaterThanOrEqual(44);
   await button.evaluate((element) => element.scrollIntoView({ block: "center", inline: "center" }));
   const box = await button.boundingBox();
+  expect(box.width).toBeGreaterThanOrEqual(44);
+  expect(box.height).toBeGreaterThanOrEqual(44);
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   const hits = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest(".analysis-legend-info")?.getAttribute("aria-label") ?? null, { x: center.x + 20, y: center.y });
   expect(hits).toBe("Erklärung zu FTP");
@@ -386,6 +382,34 @@ test("@responsive legend info buttons have a 44px hit area, a German name and po
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
   expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("@responsive legend info buttons are at least 44x44 and never overlap each other", async ({ page }) => {
+  await performanceFixture(page, { history: {
+    start: "2026-09-01", end: "2026-09-08", load: { points: [] },
+    metrics: {
+      cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }],
+      // The FTP chart shows its legend; FTP and eFTP give two neighbouring info buttons.
+      cycling_eftp_watts: [{ source: "Intervals.icu", points: [{ date: "2026-09-01", value: 205 }, { date: "2026-09-08", value: 212 }] }],
+    },
+  } });
+  const buttons = page.locator("#analysisHistoryCharts .analysis-chart-legend .analysis-legend-info");
+  const count = await buttons.count();
+  expect(count).toBeGreaterThanOrEqual(2);
+  const boxes = [];
+  for (let index = 0; index < count; index += 1) {
+    const box = await buttons.nth(index).boundingBox();
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    boxes.push(box);
+  }
+  for (let first = 0; first < boxes.length; first += 1) {
+    for (let second = first + 1; second < boxes.length; second += 1) {
+      const a = boxes[first], b = boxes[second];
+      const overlaps = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+      expect(overlaps, `legend buttons ${first} and ${second} overlap`).toBe(false);
+    }
+  }
 });
 
 test("@responsive endurance efficiency keeps small ratios readable instead of rounding them to zero", async ({ page }) => {
