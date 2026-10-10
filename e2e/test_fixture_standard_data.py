@@ -624,6 +624,61 @@ class StandardFixtureDataTests(unittest.TestCase):
             snapshot = json.loads(server.SNAPSHOT_REPOSITORY.latest_payload(db))
         return sorted(str(item["id"]) for item in snapshot["recent_activities"])
 
+    def test_staged_plan_never_collides_with_seeded_units_on_any_weekday(self):
+        server = fixture_runtime.server
+        original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)
+        # Seven consecutive athlete-local "today" values cover every weekday.
+        first_today = date(2026, 10, 5)
+        for offset in range(7):
+            today = first_today + timedelta(days=offset)
+            with self.subTest(today=today.isoformat()):
+                with TemporaryDirectory(prefix="fixture-stage-test-") as directory:
+                    root = Path(directory)
+                    try:
+                        DATABASE_MANAGER_CACHE.reset()
+                        server.CONFIG = replace(server.CONFIG, app_password="")
+                        server.DATA_DIR = root
+                        server.DB_PATH = root / "fixture.db"
+                        server.LOG_PATH = root / "fixture.log"
+                        with patch.object(
+                            server.ATHLETE_CLOCK,
+                            "now",
+                            return_value=datetime.combine(today, time(10, 0)),
+                        ):
+                            fixture_runtime.initialise_fixture()
+                            fixture_runtime.seed_preview_demo()
+                            with server.database_manager().unit_of_work() as db:
+                                seeded_dates = {
+                                    row["date"]
+                                    for row in db.execute(
+                                        "SELECT json_extract(payload, '$.date') AS date "
+                                        "FROM planned_units "
+                                        "WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0"
+                                    ).fetchall()
+                                }
+                            # Staging raises a 409 on any calendar collision.
+                            fixture_runtime.stage_fixture_artifact()
+                            artifact_id = fixture_runtime.artifact["artifact_id"]
+                            with server.database_manager().unit_of_work() as db:
+                                staged_payload = json.loads(
+                                    db.execute(
+                                        "SELECT payload FROM coach_plan_artifacts WHERE id=?",
+                                        (artifact_id,),
+                                    ).fetchone()["payload"]
+                                )
+                    finally:
+                        DATABASE_MANAGER_CACHE.reset()
+                        (
+                            server.CONFIG,
+                            server.DATA_DIR,
+                            server.DB_PATH,
+                            server.LOG_PATH,
+                        ) = original
+                staged_dates = {item["date"] for item in staged_payload["workouts"]}
+                self.assertEqual(len(staged_dates), 4)
+                self.assertTrue(seeded_dates)
+                self.assertEqual(staged_dates & seeded_dates, set())
+
 
 if __name__ == "__main__":
     unittest.main()

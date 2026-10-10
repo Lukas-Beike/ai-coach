@@ -369,7 +369,7 @@ def stage_fixture_artifact():
             ("fixture-stage",),
         )
 
-    today = server.ATHLETE_CLOCK.now().date()
+    today = server.ATHLETE_CLOCK.now().date() + timedelta(days=STAGED_OFFSET_DAYS)
     artifact.update(
         server.COACH_PLANNING_TOOLS.training_plan_artifact_service().stage(
             {
@@ -1702,5 +1702,10 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
 
 server.initialise_database = initialise_fixture
 server.HTTP_API.request_handler_class = lambda: FixtureHandler
+# Staged plan block starts this many days after the athlete's today. The standard
+# seed places planned units on +2, +3 and +5 and calendar events on +2..+9 and
+# later, so the block must stay clear of both for every simulated today; see
+# test_staged_plan_never_collides_with_seeded_units_on_any_weekday.
+STAGED_OFFSET_DAYS = 10
 if __name__ == "__main__":
     server.main()
