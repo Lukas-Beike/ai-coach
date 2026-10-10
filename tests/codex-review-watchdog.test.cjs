@@ -23,9 +23,9 @@ async function scenario(options = {}) {
   }
   const pull = {
     state: 'open', draft: false, updated_at: new Clock().toISOString(),
-    user: { login: options.dependabot ? 'dependabot[bot]' : 'human' },
-    head: { sha: head, repo: { full_name: 'owner/repo' } },
-    base: { ref: 'develop', sha: 'b'.repeat(40) },
+    user: { login: options.author || (options.dependabot ? 'dependabot[bot]' : 'human') },
+    head: { sha: head, ref: options.branch || 'task', repo: { full_name: options.repository || 'owner/repo' } },
+    base: { ref: options.base || 'develop', sha: 'b'.repeat(40) },
   };
   const comments = options.existing ? [{
     user: { login: 'github-actions[bot]' }, created_at: new Clock().toISOString(),
@@ -52,7 +52,8 @@ async function scenario(options = {}) {
     reviews: () => options.review || options.reviewLimit ? [{
       user: { login: bot }, commit_id: options.wrongHead ? 'c'.repeat(40) : head,
       submitted_at: new Clock().toISOString(),
-      body: options.reviewLimit ? 'Codex review quota exhausted' : undefined,
+      body: options.reviewLimit ? 'Codex review quota exhausted' :
+        options.blocked ? 'Review unavailable: unable to inspect repository' : undefined,
     }] : [],
     inline: () => [],
   };
@@ -102,17 +103,20 @@ test('three minutes of silence trigger one fallback and an explicit usage exempt
   assert.match(result.results[0].output.title, /explicit usage limit/);
 });
 
-test('continued silence fails after bounded fallback wait', async () => {
+test('continued silence is unavailable after bounded fallback wait', async () => {
   const result = await scenario();
   assert.equal(result.writes.length, 1);
   assert.equal(result.elapsed, 360000);
-  assert.equal(result.results[0].conclusion, 'failure');
+  assert.equal(result.results[0].conclusion, 'success');
+  assert.match(result.results[0].output.title, /response timeout/);
+  assert.match(result.results[0].output.summary, /unavailable, not completed/);
 });
 
 test('rerun never posts a second request for the same PR head', async () => {
   const result = await scenario({ existing: true });
   assert.equal(result.writes.length, 0);
-  assert.equal(result.results[0].conclusion, 'failure');
+  assert.equal(result.results[0].conclusion, 'success');
+  assert.match(result.results[0].output.title, /response timeout/);
 });
 
 test('watchdog resumes when Codex posts a late comment or review', () => {
@@ -128,10 +132,11 @@ test('watchdog resumes when Codex posts a late comment or review', () => {
   assert.doesNotMatch(workflow, /current\.base\.sha !== base/);
 });
 
-test('untrusted and old bot comments cannot prove activity', async () => {
+test('untrusted and old bot comments cannot prove activity or exhausted usage', async () => {
   for (const options of [{ active: true, impostor: true }, { active: true, old: true }]) {
     const result = await scenario(options);
-    assert.equal(result.results[0].conclusion, 'failure');
+    assert.equal(result.results[0].conclusion, 'success');
+    assert.match(result.results[0].output.title, /response timeout/);
   }
 });
 
@@ -146,6 +151,7 @@ test('integration-blocked comments fail and are not treated as usage exhaustion'
   assert.equal(result.writes.length, 0);
   assert.equal(result.results[0].conclusion, 'failure');
   assert.match(result.results[0].output.title, /blocked/i);
+  assert.equal((await scenario({ review: true, blocked: true })).results[0].conclusion, 'failure');
 });
 
 test('usage-limit wording wins over a generic blocked match', async () => {
@@ -159,6 +165,9 @@ test('singular code-review limits and quota wording are explicit exemptions', as
   for (const limitText of [
     'You have reached your Codex usage limit for code reviews',
     'Codex review quota exhausted',
+    "You've reached your limit for code reviews",
+    'Review unavailable: insufficient Codex credits',
+    'Codex review credits are exhausted',
   ]) {
     const result = await scenario({ active: true, limitText });
     assert.equal(result.writes.length, 0);
@@ -172,11 +181,12 @@ test('usage exhaustion in a native review takes precedence over review activity'
   assert.equal(result.writes.length, 0);
   assert.equal(result.results[0].conclusion, 'success');
   assert.match(result.results[0].output.title, /usage limit/);
+  assert.match((await scenario({ reviewLimit: true, wrongHead: true })).results[0].output.title, /response timeout/);
 });
 
 test('only a review of the current head proves activity', async () => {
   assert.equal((await scenario({ review: true })).writes.length, 0);
-  assert.equal((await scenario({ review: true, wrongHead: true })).results[0].conclusion, 'failure');
+  assert.match((await scenario({ review: true, wrongHead: true })).results[0].output.title, /response timeout/);
 });
 
 test('changed head cancels without issuing a stale fallback', async () => {
@@ -190,6 +200,25 @@ test('same-repository Dependabot retains the explicit exception', async () => {
   assert.equal(result.writes.length, 0);
   assert.equal(result.results[0].conclusion, 'success');
   assert.match(result.results[0].output.title, /Dependabot/);
+});
+
+test('release-bot version and promotion exceptions require all identity guards', async () => {
+  for (const [base, branch] of [
+    ['develop', 'chore/release-version-1.12.28'],
+    ['main', 'chore/release-promotion-1.12.28'],
+  ]) {
+    const options = { author: 'ai-coach-release-bot[bot]', base, branch };
+    const result = await scenario(options);
+    assert.equal(result.writes.length, 0);
+    assert.equal(result.results[0].conclusion, 'success');
+    assert.match(result.results[0].output.title, /Release automation/);
+    for (const changed of [
+      { author: 'human' }, { repository: 'fork/repo' }, { branch: 'task' },
+      { base: base === 'main' ? 'develop' : 'main' },
+    ]) {
+      assert.match((await scenario({ ...options, ...changed })).results[0].output.title, /response timeout/);
+    }
+  }
 });
 
 test('privileged workflow never checks out or runs PR source', () => {

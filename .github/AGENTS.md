@@ -14,6 +14,13 @@ Native Codex review availability is checked by
 `.github/workflows/codex-review-watchdog.yml`: wait at most 180 seconds for a
 current Codex comment, post one `@codex review` fallback for a silent current
 head, then accept either the regular Codex review or an explicit exhausted
-usage response. Silence after the fallback fails the check. This check proves
+usage response. Silence after the bounded fallback wait completes the check
+with a non-blocking review-unavailable result, never a completed review or an
+inferred usage-limit response. This check proves
 availability only; it never converts an incomplete review into a completed
 review.
+
+Explicit integration and GitHub API failures remain blocking.
+Same-repository `ai-coach-release-bot[bot]` version PRs into `develop`
+and promotion PRs into `main` receive a narrowly guarded automation exception;
+all required CI checks and review-thread protections still apply.
