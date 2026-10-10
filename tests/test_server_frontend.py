@@ -980,10 +980,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("Tage mit Messung", analysis)
         self.assertNotIn("${readings.length}/${item.points.length}", analysis)
         self.assertIn("function analysisIsoWeek(dateKey)", analysis)
-        self.assertIn("analysisTickLabel(date, calendarWeeks)", analysis)
-        self.assertIn(
-            "function analysisTickLabel(dateKey, calendarWeeks = false)", analysis
-        )
+        self.assertIn("weekTicks ? analysisWeekTickLabel : analysisDayTickLabel", analysis)
+        self.assertIn("function analysisWeekTickLabel(dateKey)", analysis)
+        self.assertIn("function analysisDayTickLabel(dateKey)", analysis)
         self.assertIn("calendarWeeks: true", analysis)
         self.assertIn("calendarWeeks = false", analysis)
 
