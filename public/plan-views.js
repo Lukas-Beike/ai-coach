@@ -585,6 +585,23 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return svg;
   }
 
+  function appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey) {
+    if (status !== "completed" && status !== "missed" && status !== "skipped") return;
+    const statusText = document.createElement("span");
+    statusText.className = "planned-entry-status";
+    statusText.textContent = status === "skipped" ? `Entfallen (${restDayLabel})` : calendarStatusLabel(entry, dateKey, todayKey);
+    cardSummary.append(statusText);
+  }
+
+  function appendPlannedTarget(cardSummary, entry) {
+    const target = document.createElement("span");
+    target.className = "planned-session-target";
+    const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
+    if (entry.icu_training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.icu_training_load)}`);
+    target.textContent = `Plan: ${targetParts.join(" · ")}`;
+    cardSummary.append(target);
+  }
+
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}) {
     const actual = calendarActualActivity(entry);
     const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
@@ -607,26 +624,14 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     ].filter(Boolean).join(" · ");
     appendPlannedSessionHeader(cardSummary, entry, actual);
     cardSummary.append(meta);
-    if (status === "completed" || status === "missed" || status === "skipped") {
-      const statusText = document.createElement("span");
-      statusText.className = "planned-entry-status";
-      statusText.textContent = status === "skipped" ? `Entfallen (${restDayLabel})` : calendarStatusLabel(entry, dateKey, todayKey);
-      cardSummary.append(statusText);
-    }
+    appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey);
     appendPlannedExecution(cardSummary, entry, status);
     const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
     if (profile) cardSummary.append(profile);
     cardSummary.append(cardTitle);
     const conflictSpecs = plannedConflictBadgeSpecs(entry.conflicts);
     if (conflictSpecs.length) cardSummary.append(calendarBadgeRow(conflictSpecs));
-    if (actual && !entry.is_completed_activity) {
-      const target = document.createElement("span");
-      target.className = "planned-session-target";
-      const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
-      if (entry.icu_training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.icu_training_load)}`);
-      target.textContent = `Plan: ${targetParts.join(" · ")}`;
-      cardSummary.append(target);
-    }
+    if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
     appendActualCalendarDetails(details, actual);
