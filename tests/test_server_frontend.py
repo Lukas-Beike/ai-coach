@@ -363,7 +363,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("`Bearbeiten: wartende Nachricht ${position}`", coach)
         self.assertIn("`Entfernen: wartende Nachricht ${position}`", coach)
         self.assertIn('"Folgefrage – wird danach gesendet"', coach)
-        self.assertIn(">Als Nächstes senden</button>", index)
+        self.assertIn('aria-label="Als Nächstes senden"', index)
         self.assertIn('aria-describedby="steerButtonHint"', index)
         self.assertIn('id="steerButtonHint" class="sr-only"', index)
         self.assertIn('$("#steerButtonHint")', coach)
