@@ -27,7 +27,9 @@ const restoreCheckin = (page, original) => {
 // The fixture runtime is shared across specs, so today's seeded check-in is captured before each test and restored after it.
 let originalTodayCheckin = null;
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, request }) => {
+  // CI starts the fixture without automatic demo seeding.
+  expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
   await openPlanOverview(page);
   await waitForFeedbackLoaded(page);
   const dateKey = await todayCardFor(page).getAttribute("data-date");
