@@ -199,6 +199,7 @@ WELLNESS_FIELDS = (
     "body_fat",
     "restingHR",
     "hrv",
+    "hrvSDNN",
     "sleepSecs",
     "sleepScore",
     "fatigue",

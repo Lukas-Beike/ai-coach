@@ -41,9 +41,10 @@ def personal_recovery(
         day = iso_date_prefix(str(row.get("id") or row.get("date") or ""))
         add((INTERVALS_SOURCE, "sleep", "sleepSecs"), day, row.get("sleepSecs"), 3600)
         add((INTERVALS_SOURCE, "resting_hr", "restingHR"), day, row.get("restingHR"))
-        # Unknown HRV measurement methods cannot support a homogeneous baseline.
-        if row.get("hrv_method") in {"RMSSD", "SDNN"}:
-            add((INTERVALS_SOURCE, "hrv", str(row["hrv_method"])), day, row.get("hrv"))
+        # The measurement method is fixed by the Intervals.icu field name, so rMSSD
+        # (`hrv`) and SDNN (`hrvSDNN`) form separate, never mixed, baselines.
+        add((INTERVALS_SOURCE, "hrv", "RMSSD"), day, row.get("hrv"))
+        add((INTERVALS_SOURCE, "hrv", "SDNN"), day, row.get("hrvSDNN"))
     _add_garmin_records(garmin, history_start, current_day, add)
     baselines = [
         _baseline(key, records, cutoff, today)
