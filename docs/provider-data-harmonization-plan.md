@@ -739,6 +739,33 @@ Vorschlag: ein Folge-PR schließt die Lücken 1 und 2 (Verhaltensänderung,
 getrennt von der verhaltensgleichen Komposition) und prüft Punkt 9; Lücken 3 bis
 5 und 7 bis 8 sind Aufräumarbeiten ohne Dringlichkeit.
 
+**Stand nach #1091:** Lücken 1, 2 und 9 sind geschlossen. Die Queue erzwingt
+`max_sync_days` je Provider (Zeitraumfehler 400), der
+`performance_refresh`-Single-Flight gilt je Provider
+(`pending_performance_job_id(provider)`), `build_provider_runtime` weist
+Deskriptoren ohne Binding ab und `_runtime_executor` reicht das Register der
+Runtime durch. Lücken 4, 5, 7 und 8 laufen in Welle 5; Lücke 3 bleibt
+verhaltensgleich offen, Lücke 6 folgt mit Phase 5 (PWA).
+
+### 5.7 Reihenfolge ab Welle 5
+
+Entscheidung: Phase 3 (Schema v6) wird vor den ersten Verbrauchern (5.5 Punkt 4)
+umgesetzt, weil die Verbraucher sonst zweimal umgestellt würden (erst auf die
+Snapshot-Projektion, dann auf die Tabellen). Welle 5 bereitet Phase 3 parallel
+vor:
+
+| Einheit | Inhalt |
+|---|---|
+| W5-1 | v5 aus Release 1.12.31 als Fixture eingefroren, befülltes Upgrade und Same-Build-Restart |
+| W5-2 | Intervals-Paritätslücken (`lthr`/`max_hr`-Fallback, `cycling_ftp_history`, Gewicht, VO2max) |
+| W5-3 | Garmin-Paritätslücken (Schlafscore 0, Max-HF aus Zonen), gemeinsamer Gewichts-Walker |
+| W5-4 | Fenstersuche in `canonical_sessions.py` mit Referenzparität |
+| W5-5 | `CanonicalSnapshotProjection` verdrahtet, Coverage in der Diagnose, `registry=` in `server.py` |
+| W5-6 | Aufräumlücken 4, 5 und 8 |
+
+Danach sequenziell Phase 3 (Migration, Dual-Write, Backfill, Resolver,
+tabellenbasierter Port), Phase 5 je Domäne, Phase 6.1/6.2, Phase 7 und Phase 8.
+
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
 - Eingefrorenes Fixture des zuletzt veröffentlichten Schemas mit Daten; direkte
@@ -820,20 +847,29 @@ Fixtures und Tests. In `performance/`, `activities/`, `planning/`, `coach/`,
 | Zwei Schreiber auf `garmin_snapshot` | Geprüft: beide Pfade teilen `GARMIN_SYNC_LOCK`; ein Identitätstest (Phase 0.5) sichert das bis zum einzigen Schreibpfad über Ingest (Phase 3) |
 | Wahoo-Zugang und Nutzungsbedingungen | Vor Phase 8 klären; ohne Freigabe endet das Vorhaben nach Phase 7 trotzdem mit providerneutraler Architektur |
 
-## 9. Offene Entscheidungen
+## 9. Entscheidungen
 
-1. **Aufbewahrung von Rohdaten.** Empfehlung: Zusammenfassungen unbegrenzt (klein,
-   ermöglichen Neuprojektion), Streams weiterhin nur bei Bedarf und begrenzt.
-2. **Wahoo-Zielbild:** Inbound, Outbound oder beides. Empfehlung: Outbound zuerst
-   prüfen, weil es bestimmt, ob Phase 6.3 vor Phase 8 nötig ist.
-3. **Konfigurierbare Präzedenz.** Empfehlung: fest im Code; eine
-   Athleteneinstellung erst bei konkretem Bedarf.
-4. **Coach-Kontext nach Fachbereichen statt nach Providern.** Empfehlung: ja, als
-   eigener PR mit Evaluation.
-5. **Basisversion für v6.** v6 setzt auf v5 (`logged_time_known`) auf, das
-   `develop` bereits enthält. Vor dem v6-PR sollte v5 veröffentlicht und als
-   Fixture eingefroren sein; sonst bündelt der v6-PR beide Schritte und weist
-   direkte Upgrades von v4 nach.
+Die ursprünglich offenen Punkte sind entschieden (Oktober 2026):
+
+1. **Aufbewahrung von Rohdaten:** Zusammenfassungen unbegrenzt (klein,
+   ermöglichen Neuprojektion); Streams weiterhin nur bei Bedarf und begrenzt.
+2. **Wahoo-Zielbild:** zuerst inbound (Workouts und Leistungszonen, Bündelung
+   mit Kopien in Intervals.icu). Outbound und Phase 6.3 bleiben aufgeschoben,
+   bis ein zweites Exportziel beauftragt ist.
+3. **Präzedenz:** fest im Code (`SourcePolicy`); eine Athleteneinstellung erst
+   bei konkretem Bedarf.
+4. **Coach-Kontext:** nach Fachbereichen statt nach Providern, als eigener PR
+   mit Evaluation.
+5. **Basisversion für v6:** v5 ist seit 1.12.29 veröffentlicht (auch 1.12.30
+   und 1.12.31). W5-1 friert es aus 1.12.31 als Fixture ein; v6 setzt darauf auf.
+6. **Entfernen eines Providers:** deaktivieren statt löschen. Die gespeicherten
+   Aufzeichnungen und Observations bleiben erhalten und lesbar; die Präzedenz
+   überspringt den Provider für neue Werte, und das Höchstalter je Kennzahl
+   markiert verbliebene Werte als veraltet. Zusammengeführte Sitzungen behalten
+   ihre Primäraufzeichnung. Endgültiges Löschen nur über den
+   Datenschutz-Löschpfad (eigene Kategorie Providerdaten). Die Provider-ID
+   bleibt reserviert, damit eine Wiederverbindung dieselben Datensätze
+   fortschreibt.
 
 ## 10. Definition of Done
 
