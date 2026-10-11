@@ -9,6 +9,12 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
 from backend.performance.morning_battery_service import MorningBodyBatteryService
+from backend.providers.descriptors import (
+    CALENDAR_ID,
+    GARMIN_ID,
+    INTERVALS_ID,
+    WEATHER_ID,
+)
 from backend.sync.competitions import CompetitionSyncService
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.garmin import GarminFixtureLoader
@@ -23,6 +29,7 @@ from backend.sync.jobs import (
 )
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.performance import PerformanceRefreshService
+from backend.sync.provider_runtime import ProviderJobOwner
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync.state import SyncStateRepository
@@ -51,16 +58,25 @@ class HistoricalSyncJobOwner:
         self._sync_chunk_days = sync_chunk_days
         self._sync_earliest_date = sync_earliest_date
 
+    def sync_period(self, provider: str) -> int:
+        return self._sync_state_repository.sync_period(
+            provider, self._sync_period_defaults, self._all_sync_days
+        )
+
     def window(
-        self, payload: dict[str, Any], job_type: str, provider: str
+        self,
+        payload: dict[str, Any],
+        job_type: str,
+        sync_days: Callable[[], int],
     ) -> tuple[int, date | None]:
+        """Return the job's (days, end_date) window.
+
+        ``sync_days`` is the provider's default window for this job type. It is
+        resolved only when the payload does not carry its own value, so the
+        state read happens exactly when it did before the provider was injected.
+        """
         if job_type != "historical_backfill":
-            days = int(
-                payload.get("days")
-                or self._sync_state_repository.sync_period(
-                    provider, self._sync_period_defaults, self._all_sync_days
-                )
-            )
+            days = int(payload.get("days") or sync_days())
             end_date = payload.get("end_date")
             return days, date.fromisoformat(
                 iso_date_prefix(str(end_date))
@@ -72,13 +88,7 @@ class HistoricalSyncJobOwner:
                 self._sync_chunk_days,
             ),
         )
-        refresh_days = (
-            GARMIN_AUTOMATIC_SYNC_DAYS
-            if provider == "garmin"
-            else self._sync_state_repository.sync_period(
-                provider, self._sync_period_defaults, self._all_sync_days
-            )
-        )
+        refresh_days = sync_days()
         default_end = self._local_now().date() - timedelta(days=refresh_days)
         end_date = date.fromisoformat(
             iso_date_prefix(str(payload.get("end_date") or default_end.isoformat()))
@@ -143,7 +153,7 @@ class IntervalsSyncJobOwner:
 
     def execute_specific(
         self,
-        job: dict[str, Any],
+        job: Mapping[str, Any],
         payload: dict[str, Any],
         reason: str,
         job_type: str,
@@ -170,10 +180,12 @@ class IntervalsSyncJobOwner:
         return None
 
     def execute_sync(
-        self, job: dict[str, Any], payload: dict[str, Any], reason: str
+        self, job: Mapping[str, Any], payload: dict[str, Any], reason: str
     ) -> dict[str, Any]:
         days, historical_end = self._historical_sync.window(
-            payload, str(job.get("type") or ""), "intervals"
+            payload,
+            str(job.get("type") or ""),
+            lambda: self._historical_sync.sync_period(INTERVALS_ID),
         )
         sync_kwargs: dict[str, Any] = {
             "reason": reason,
@@ -206,7 +218,7 @@ class IntervalsSyncJobOwner:
     ) -> dict[str, Any]:
         with (
             self._sync_operation_observer.observe(
-                "intervals", "competitions", reason, operation_id
+                INTERVALS_ID, "competitions", reason, operation_id
             ) as scope,
             self._intervals_resync_gate.operation(),
         ):
@@ -237,18 +249,18 @@ class GarminSyncJobOwner:
         self._all_sync_days = all_sync_days
 
     def execute(
-        self, job: dict[str, Any], payload: dict[str, Any], reason: str
+        self, job: Mapping[str, Any], payload: dict[str, Any], reason: str
     ) -> dict[str, Any]:
+        job_type = str(job.get("type") or "")
         days, historical_end = self._historical_sync.window(
-            payload, str(job.get("type") or ""), "garmin"
+            payload, job_type, lambda: self._sync_days(job_type)
         )
         sync_kwargs: dict[str, Any] = {
             "days": days,
             "operation_id": job["id"],
             "reason": reason,
             "include_recovery": (
-                str(job.get("type") or "") != "historical_backfill"
-                and days != self._all_sync_days
+                job_type != "historical_backfill" and days != self._all_sync_days
             ),
         }
         if historical_end is not None and self._garmin_fixture_loader.path() is None:
@@ -260,9 +272,15 @@ class GarminSyncJobOwner:
             and result.get("status") in {"ok", "partial"}
         ):
             self._morning_body_battery_service.refresh()
-        if str(job.get("type") or "") == "historical_backfill":
+        if job_type == "historical_backfill":
             self._historical_sync.add_next_end(result, historical_end, days)
         return result
+
+    def _sync_days(self, job_type: str) -> int:
+        """Return the default window: backfills use the automatic refresh span."""
+        if job_type == "historical_backfill":
+            return GARMIN_AUTOMATIC_SYNC_DAYS
+        return self._historical_sync.sync_period(GARMIN_ID)
 
 
 class CalendarWeatherSyncJobOwner:
@@ -278,61 +296,59 @@ class CalendarWeatherSyncJobOwner:
         self._weather_sync_service = weather_sync_service
 
     def execute(
-        self, provider: str, job: dict[str, Any], payload: dict[str, Any], reason: str
+        self,
+        provider: str,
+        job: Mapping[str, Any],
+        payload: dict[str, Any],
+        reason: str,
     ) -> dict[str, Any]:
-        if provider == "calendar":
+        if provider == CALENDAR_ID:
             return self._external_calendar_sync_service.sync(
                 reason=reason, operation_id=job["id"]
             )
-        return self._weather_sync_service.sync(
-            reason=reason,
-            force=bool(payload.get("force", True)),
-            operation_id=job["id"],
+        if provider == WEATHER_ID:
+            return self._weather_sync_service.sync(
+                reason=reason,
+                force=bool(payload.get("force", True)),
+                operation_id=job["id"],
+            )
+        raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
+
+
+def _reject_plan_push(job_type: str) -> None:
+    """Refuse plan pushes outside the authorized planning workflow."""
+    if job_type == "plan_push":
+        raise AppError(
+            409,
+            "Plan-Push-Jobs werden erst durch den autorisierten Planungsworkflow ausgeführt.",
+            reason="unsupported_job",
         )
 
 
-class SyncJobProviderDispatcher:
-    """Dispatch normalized jobs to their provider-owned sync workflows."""
+class IntervalsJobAdapter:
+    """Route Intervals jobs: nutrition inline, specific job types, then the sync."""
 
     def __init__(
-        self,
-        *,
-        intervals_jobs: IntervalsSyncJobOwner,
-        nutrition_sync_service: Any,
-        garmin_jobs: GarminSyncJobOwner,
-        calendar_weather_jobs: CalendarWeatherSyncJobOwner,
+        self, *, jobs: IntervalsSyncJobOwner, nutrition_sync_service: Any
     ) -> None:
-        self._intervals_jobs = intervals_jobs
+        self._jobs = jobs
         self._nutrition_sync_service = nutrition_sync_service
-        self._garmin_jobs = garmin_jobs
-        self._calendar_weather_jobs = calendar_weather_jobs
 
-    def execute(self, job: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
-        payload = envelope["payload"]
-        provider = envelope["provider"]
-        job_type = envelope["type"]
-        reason = str(payload.get("reason") or "Persistenter Providerjob")
-        if provider == "intervals" and job_type == "nutrition_sync":
+    def execute(
+        self,
+        job: Mapping[str, Any],
+        payload: dict[str, Any],
+        reason: str,
+        *,
+        job_type: str,
+    ) -> dict[str, Any]:
+        if job_type == "nutrition_sync":
             return self._nutrition_sync(payload)
-        if provider == "intervals":
-            specific = self._intervals_jobs.execute_specific(
-                job, payload, reason, job_type
-            )
-            if specific is not None:
-                return specific
-        if job_type == "plan_push":
-            raise AppError(
-                409,
-                "Plan-Push-Jobs werden erst durch den autorisierten Planungsworkflow ausgeführt.",
-                reason="unsupported_job",
-            )
-        if provider == "intervals":
-            return self._intervals_jobs.execute_sync(job, payload, reason)
-        if provider == "garmin":
-            return self._garmin_jobs.execute(job, payload, reason)
-        if provider in {"calendar", "weather"}:
-            return self._calendar_weather_jobs.execute(provider, job, payload, reason)
-        raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
+        specific = self._jobs.execute_specific(job, payload, reason, job_type)
+        if specific is not None:
+            return specific
+        _reject_plan_push(job_type)
+        return self._jobs.execute_sync(job, payload, reason)
 
     def _nutrition_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
         if "approval_manifest" in payload:
@@ -363,18 +379,94 @@ class SyncJobProviderDispatcher:
         }
 
 
+class GarminJobAdapter:
+    """Refuse plan pushes, then run the Garmin sync owner."""
+
+    def __init__(self, *, jobs: GarminSyncJobOwner) -> None:
+        self._jobs = jobs
+
+    def execute(
+        self,
+        job: Mapping[str, Any],
+        payload: dict[str, Any],
+        reason: str,
+        *,
+        job_type: str,
+    ) -> dict[str, Any]:
+        _reject_plan_push(job_type)
+        return self._jobs.execute(job, payload, reason)
+
+
+class CalendarWeatherJobAdapter:
+    """Refuse plan pushes, then run the calendar or weather sync for one provider."""
+
+    def __init__(self, *, jobs: CalendarWeatherSyncJobOwner, provider_id: str) -> None:
+        self._jobs = jobs
+        self._provider_id = provider_id
+
+    def execute(
+        self,
+        job: Mapping[str, Any],
+        payload: dict[str, Any],
+        reason: str,
+        *,
+        job_type: str,
+    ) -> dict[str, Any]:
+        _reject_plan_push(job_type)
+        return self._jobs.execute(self._provider_id, job, payload, reason)
+
+
+def dispatch_provider_job(
+    job_owners: Mapping[str, ProviderJobOwner],
+    job: Mapping[str, Any],
+    envelope: dict[str, Any],
+) -> dict[str, Any]:
+    """Run a normalized job through the owner registered for its provider."""
+    payload = envelope["payload"]
+    provider = envelope["provider"]
+    job_type = envelope["type"]
+    reason = str(payload.get("reason") or "Persistenter Providerjob")
+    owner = job_owners.get(provider)
+    if owner is None:
+        _reject_plan_push(job_type)
+        raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
+    return owner.execute(job, payload, reason, job_type=job_type)
+
+
+def build_job_owners(
+    *,
+    intervals_jobs: IntervalsSyncJobOwner,
+    nutrition_sync_service: Any,
+    garmin_jobs: GarminSyncJobOwner,
+    calendar_weather_jobs: CalendarWeatherSyncJobOwner,
+) -> dict[str, ProviderJobOwner]:
+    """Return the provider-to-owner mapping for the built-in providers."""
+    return {
+        INTERVALS_ID: IntervalsJobAdapter(
+            jobs=intervals_jobs, nutrition_sync_service=nutrition_sync_service
+        ),
+        GARMIN_ID: GarminJobAdapter(jobs=garmin_jobs),
+        CALENDAR_ID: CalendarWeatherJobAdapter(
+            jobs=calendar_weather_jobs, provider_id=CALENDAR_ID
+        ),
+        WEATHER_ID: CalendarWeatherJobAdapter(
+            jobs=calendar_weather_jobs, provider_id=WEATHER_ID
+        ),
+    }
+
+
 class SyncJobExecutor:
     """Run one claimed job and persist its outcome and any backfill follow-up."""
 
     def __init__(
         self,
         *,
-        provider_dispatcher: SyncJobProviderDispatcher,
         historical_sync: HistoricalSyncJobOwner,
         outcome_service: SyncJobOutcomeService,
         all_sync_days: int,
+        job_owners: Mapping[str, ProviderJobOwner],
     ) -> None:
-        self._provider_dispatcher = provider_dispatcher
+        self._job_owners = job_owners
         self._historical_sync = historical_sync
         self._outcome_service = outcome_service
         self._all_sync_days = all_sync_days
@@ -402,4 +494,4 @@ class SyncJobExecutor:
             )
         except JobValidationError as exc:
             raise AppError(400, str(exc), reason="invalid_job_request") from exc
-        return self._provider_dispatcher.execute(job, envelope)
+        return dispatch_provider_job(self._job_owners, job, envelope)

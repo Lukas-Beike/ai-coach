@@ -6,20 +6,28 @@ import hashlib
 import json
 import unittest
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from inspect import signature
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
+from unittest.mock import Mock, patch
+
+from provider_runtime_fakes import ACME_ID, FakeJobOwner
 
 from backend.errors import AppError
+from backend.providers.descriptors import CALENDAR_ID, WEATHER_ID
 from backend.sync.executor import (
+    CalendarWeatherJobAdapter,
     CalendarWeatherSyncJobOwner,
+    GarminJobAdapter,
     GarminSyncJobOwner,
     HistoricalSyncJobOwner,
+    IntervalsJobAdapter,
     IntervalsSyncJobOwner,
     SyncJobExecutor,
-    SyncJobProviderDispatcher,
+    build_job_owners,
+    dispatch_provider_job,
 )
 
 
@@ -138,6 +146,18 @@ class RecordingQueue:
         self.calls.append((args, kwargs))
 
 
+def build_historical_sync(state: Any, queue: Any) -> HistoricalSyncJobOwner:
+    return HistoricalSyncJobOwner(
+        sync_state_repository=state,
+        queue_service=queue,
+        local_now=lambda: datetime(2026, 9, 20, 12, tzinfo=UTC),
+        sync_period_defaults={"intervals": 90, "garmin": 30},
+        all_sync_days=-1,
+        sync_chunk_days=90,
+        sync_earliest_date=date(2000, 1, 1),
+    )
+
+
 class SyncJobExecutorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.intervals = RecordingService()
@@ -158,17 +178,9 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.executor = self.make_executor()
 
     def make_executor(self) -> SyncJobExecutor:
-        historical_sync = HistoricalSyncJobOwner(
-            sync_state_repository=self.state,
-            queue_service=self.queue,
-            local_now=lambda: datetime(2026, 9, 20, 12, tzinfo=timezone.utc),
-            sync_period_defaults={"intervals": 90, "garmin": 30},
-            all_sync_days=-1,
-            sync_chunk_days=90,
-            sync_earliest_date=date(2000, 1, 1),
-        )
+        historical_sync = build_historical_sync(self.state, self.queue)
         return SyncJobExecutor(
-            provider_dispatcher=SyncJobProviderDispatcher(
+            job_owners=build_job_owners(
                 nutrition_sync_service=self.nutrition,
                 intervals_jobs=IntervalsSyncJobOwner(
                     historical_sync=historical_sync,
@@ -202,7 +214,7 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertEqual(
             set(parameters),
             {
-                "provider_dispatcher",
+                "job_owners",
                 "historical_sync",
                 "outcome_service",
                 "all_sync_days",
@@ -381,6 +393,12 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertTrue(self.garmin.calls[-1][1]["include_recovery"])
         self.assertNotIn("historical_next_end", self.garmin.result)
 
+    def test_garmin_refresh_without_days_resolves_the_garmin_sync_period(self) -> None:
+        self.executor.execute(self.job("garmin"))
+
+        self.assertEqual(self.garmin.calls[-1][1]["days"], 30)
+        self.assertEqual(self.state.calls[-1][0], "garmin")
+
     def test_garmin_historical_fixture_omits_end_date_and_never_refreshes_morning(
         self,
     ) -> None:
@@ -515,6 +533,248 @@ class SyncJobExecutorTests(unittest.TestCase):
             self.executor.execute(self.job("intervals", "refresh", {"unknown": True}))
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(raised.exception.reason, "invalid_job_request")
+
+
+class HistoricalWindowTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.historical = build_historical_sync(
+            RecordingStateRepository(), RecordingQueue()
+        )
+
+    def test_explicit_days_do_not_resolve_the_provider_default(self) -> None:
+        resolved: list[bool] = []
+
+        def sync_days() -> int:
+            resolved.append(True)
+            return 30
+
+        self.assertEqual(
+            self.historical.window({"days": 12}, "refresh", sync_days), (12, None)
+        )
+        self.assertEqual(resolved, [])
+        self.assertEqual(self.historical.window({}, "refresh", sync_days), (30, None))
+        self.assertEqual(resolved, [True])
+
+    def test_backfill_uses_the_provider_refresh_span_as_its_end_boundary(self) -> None:
+        self.assertEqual(
+            self.historical.window({"days": 500}, "historical_backfill", lambda: 2),
+            (90, date(2026, 9, 18)),
+        )
+
+
+class ProviderJobAdapterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.job = {"id": "job-123", "provider": "intervals", "type": "refresh"}
+
+    def test_intervals_nutrition_runs_inline_without_provider_jobs(self) -> None:
+        jobs = Mock()
+        nutrition = MockNutritionSync()
+        adapter = IntervalsJobAdapter(jobs=jobs, nutrition_sync_service=nutrition)
+
+        result = adapter.execute(
+            self.job, {"date": "2026-09-24"}, "manual", job_type="nutrition_sync"
+        )
+
+        self.assertEqual(
+            result, {"status": "completed", "date": "2026-09-24", "pending": False}
+        )
+        self.assertEqual(nutrition.calls, [("day", "2026-09-24")])
+        jobs.execute_specific.assert_not_called()
+        jobs.execute_sync.assert_not_called()
+
+    def test_intervals_specific_result_short_circuits_the_sync(self) -> None:
+        jobs = Mock()
+        jobs.execute_specific.return_value = {"status": "ok"}
+        adapter = IntervalsJobAdapter(jobs=jobs, nutrition_sync_service=Mock())
+
+        result = adapter.execute(self.job, {}, "manual", job_type="performance_refresh")
+
+        self.assertEqual(result, {"status": "ok"})
+        jobs.execute_sync.assert_not_called()
+
+    def test_intervals_plan_push_is_rejected_before_the_sync(self) -> None:
+        jobs = Mock()
+        jobs.execute_specific.return_value = None
+        adapter = IntervalsJobAdapter(jobs=jobs, nutrition_sync_service=Mock())
+
+        with self.assertRaises(AppError) as raised:
+            adapter.execute(self.job, {}, "manual", job_type="plan_push")
+
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(raised.exception.reason, "unsupported_job")
+        jobs.execute_sync.assert_not_called()
+
+    def test_intervals_other_types_fall_through_to_the_sync(self) -> None:
+        jobs = Mock()
+        jobs.execute_specific.return_value = None
+        jobs.execute_sync.return_value = {"status": "ok"}
+        adapter = IntervalsJobAdapter(jobs=jobs, nutrition_sync_service=Mock())
+
+        result = adapter.execute(self.job, {}, "manual", job_type="refresh")
+
+        self.assertEqual(result, {"status": "ok"})
+        jobs.execute_sync.assert_called_once_with(self.job, {}, "manual")
+
+    def test_garmin_plan_push_is_rejected_and_other_types_delegate(self) -> None:
+        jobs = Mock()
+        jobs.execute.return_value = {"status": "ok"}
+        adapter = GarminJobAdapter(jobs=jobs)
+
+        with self.assertRaises(AppError) as raised:
+            adapter.execute(self.job, {}, "manual", job_type="plan_push")
+        self.assertEqual(raised.exception.status, 409)
+        jobs.execute.assert_not_called()
+
+        self.assertEqual(
+            adapter.execute(self.job, {"days": 3}, "manual", job_type="refresh"),
+            {"status": "ok"},
+        )
+        jobs.execute.assert_called_once_with(self.job, {"days": 3}, "manual")
+
+    def test_calendar_and_weather_adapters_reject_plan_push_and_pass_their_id(
+        self,
+    ) -> None:
+        jobs = Mock()
+        jobs.execute.return_value = {"status": "ok"}
+        for provider_id in (CALENDAR_ID, WEATHER_ID):
+            adapter = CalendarWeatherJobAdapter(jobs=jobs, provider_id=provider_id)
+            with self.assertRaises(AppError) as raised:
+                adapter.execute(self.job, {}, "manual", job_type="plan_push")
+            self.assertEqual(raised.exception.status, 409)
+            adapter.execute(self.job, {"force": False}, "manual", job_type="refresh")
+            jobs.execute.assert_called_with(
+                provider_id, self.job, {"force": False}, "manual"
+            )
+        self.assertEqual(jobs.execute.call_count, 2)
+
+
+class DispatchProviderJobTests(unittest.TestCase):
+    def test_unknown_provider_keeps_the_existing_rejection(self) -> None:
+        envelope = {"provider": "unknown", "type": "refresh", "payload": {}}
+
+        with self.assertRaises(AppError) as raised:
+            dispatch_provider_job({}, {"id": "job-1"}, envelope)
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(str(raised.exception), "Unbekannter Providerjob.")
+        self.assertEqual(raised.exception.reason, "invalid_job_request")
+
+    def test_unknown_provider_plan_push_keeps_the_planning_rejection(self) -> None:
+        envelope = {"provider": "unknown", "type": "plan_push", "payload": {}}
+
+        with self.assertRaises(AppError) as raised:
+            dispatch_provider_job({}, {"id": "job-1"}, envelope)
+
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(raised.exception.reason, "unsupported_job")
+
+    def test_calendar_weather_owner_rejects_an_unknown_provider_id(self) -> None:
+        calendar = Mock()
+        weather = Mock()
+        owner = CalendarWeatherSyncJobOwner(
+            external_calendar_sync_service=calendar,
+            weather_sync_service=weather,
+        )
+
+        with self.assertRaises(AppError) as raised:
+            owner.execute("weathr", {"id": "job-1"}, {}, "manual")
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(raised.exception.reason, "invalid_job_request")
+        calendar.sync.assert_not_called()
+        weather.sync.assert_not_called()
+
+
+class AcmeMockProviderJobTests(unittest.TestCase):
+    """Drive orchestration with a test-only provider that no production code names."""
+
+    def setUp(self) -> None:
+        self.owner = FakeJobOwner({"status": "completed", "rows": 3})
+        self.job = {"id": "job-acme", "provider": ACME_ID, "type": "refresh"}
+        self.envelope = {
+            "provider": ACME_ID,
+            "type": "refresh",
+            "payload": {"reason": "acme sync"},
+        }
+
+    def test_dispatch_routes_the_acme_owner_by_provider_id(self) -> None:
+        result = dispatch_provider_job({ACME_ID: self.owner}, self.job, self.envelope)
+
+        self.assertEqual(result, {"status": "completed", "rows": 3})
+        self.assertEqual(
+            self.owner.calls,
+            [
+                {
+                    "job": self.job,
+                    "payload": {"reason": "acme sync"},
+                    "reason": "acme sync",
+                    "job_type": "refresh",
+                }
+            ],
+        )
+
+    def test_executor_accepts_job_owners_by_keyword_and_runs_the_acme_owner(
+        self,
+    ) -> None:
+        executor = SyncJobExecutor(
+            job_owners={ACME_ID: self.owner},
+            historical_sync=Mock(),
+            outcome_service=cast(Any, RecordingOutcomes()),
+            all_sync_days=-1,
+        )
+
+        with patch(
+            "backend.sync.executor.normalize_sync_job_request",
+            return_value=self.envelope,
+        ) as normalize:
+            result = executor.execute(self.job)
+
+        self.assertEqual(result, {"status": "completed", "rows": 3})
+        normalize.assert_called_once_with(ACME_ID, "refresh", {}, all_sync_days=-1)
+        self.assertEqual(self.owner.calls[0]["job_type"], "refresh")
+
+    def test_run_completes_the_acme_job_and_queues_its_declared_follow_up(
+        self,
+    ) -> None:
+        owner = FakeJobOwner(
+            {"status": "completed", "historical_next_end": "2026-01-01"}
+        )
+        outcomes = RecordingOutcomes()
+        historical = Mock()
+        executor = SyncJobExecutor(
+            job_owners={ACME_ID: owner},
+            historical_sync=historical,
+            outcome_service=cast(Any, outcomes),
+            all_sync_days=-1,
+        )
+
+        with patch(
+            "backend.sync.executor.normalize_sync_job_request",
+            return_value=self.envelope,
+        ):
+            executor.run(self.job)
+
+        expected = {"status": "completed", "historical_next_end": "2026-01-01"}
+        self.assertEqual(outcomes.complete_calls, [("job-acme", expected)])
+        historical.queue_next.assert_called_once_with(self.job, expected, "completed")
+        self.assertEqual(outcomes.failure_calls, [])
+
+    def test_unknown_provider_is_rejected_by_normalization_before_dispatch(
+        self,
+    ) -> None:
+        executor = SyncJobExecutor(
+            job_owners={ACME_ID: self.owner},
+            historical_sync=Mock(),
+            outcome_service=cast(Any, RecordingOutcomes()),
+            all_sync_days=-1,
+        )
+
+        with self.assertRaises(AppError) as raised:
+            executor.execute(self.job)
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(raised.exception.reason, "invalid_job_request")
+        self.assertEqual(self.owner.calls, [])
 
 
 if __name__ == "__main__":
