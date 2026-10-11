@@ -1,6 +1,7 @@
 """Garmin body-weight normalization and projections."""
 
 import math
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -12,9 +13,18 @@ from backend.providers.garmin_fields import (
 from backend.providers.garmin_fields import (
     first_present as _first_present,
 )
+from backend.providers.garmin_weight_walk import (
+    BODY_FAT_SKIP_KEYS,
+    WALK_DATE_KEYS,
+    WEIGHT_SKIP_KEYS,
+    walk_records,
+    weight_payload,
+)
 
 UTC_OFFSET_SUFFIX = "+00:00"
 GARMIN_PERFORMANCE_SOURCE = "Garmin Connect"
+# (day, value, timestamp, traversal ordinal) of one accepted weight or body-fat value.
+_Accepted = tuple[str | None, float, float | None, int]
 
 
 def _garmin_key(value: Any) -> str:
@@ -76,7 +86,7 @@ def _garmin_record_date(value: Any) -> str | None:
         return None
 
 
-def _garmin_record_timestamp(item: dict[str, Any]) -> float | None:
+def _garmin_record_timestamp(item: Mapping[str, Any]) -> float | None:
     value = _first_present(
         item, ("timestampGMT", "timestamp", "measurementDate", "date")
     )
@@ -99,61 +109,45 @@ def _garmin_record_timestamp(item: dict[str, Any]) -> float | None:
     return None
 
 
-def _collect_garmin_weight_records(
-    value: Any,
-    records: list[tuple[str | None, float]],
-    inherited_date: str | None = None,
-    daily: list[tuple[str | None, float, float | None, int]] | None = None,
-    sequence: list[int] | None = None,
-    depth: int = 0,
-    visits: list[int] | None = None,
-) -> None:
-    visits = visits if visits is not None else [0]
-    if depth > 20 or visits[0] >= 2000:
-        return
-    visits[0] += 1
-    if isinstance(value, dict):
-        record_date = (
-            _garmin_record_date(
-                _first_present(
-                    value,
-                    (
-                        "calendarDate",
-                        "summaryDate",
-                        "date",
-                        "timestampGMT",
-                        "timestamp",
-                    ),
-                )
-            )
-            or inherited_date
-        )
-        _append_weight_record(value, record_date, records, daily, sequence)
-        for key, item in value.items():
-            if _garmin_key(key) not in {"minweight", "maxweight", "weightdelta"}:
-                _collect_garmin_weight_records(
-                    item, records, record_date, daily, sequence, depth + 1, visits
-                )
-    elif isinstance(value, list):
-        for item in value[:500]:
-            _collect_garmin_weight_records(
-                item, records, inherited_date, daily, sequence, depth + 1, visits
-            )
+def _legacy_record_day(record: Mapping[str, Any]) -> str | None:
+    """Text day of a record's own date field, or None so the record inherits one."""
+    return _garmin_record_date(_first_present(record, WALK_DATE_KEYS)) or None
 
 
-def garmin_weight_records(snapshot: dict[str, Any]) -> list[tuple[str | None, float]]:
-    records: list[tuple[str | None, float]] = []
-    _collect_garmin_weight_records(
-        snapshot.get("weight") or snapshot.get("weigh_ins") or snapshot.get("weighIns"),
-        records,
+def _weight_reading(record: Mapping[str, Any]) -> float | None:
+    direct = _first_present(record, ("weightKg", "weight_kg", "weight"))
+    if direct in (None, ""):
+        return None
+    weight = _garmin_weight_kg(
+        direct, _first_present(record, GARMIN_WEIGHT_UNIT_ALIASES)
     )
-    return list(dict.fromkeys(records))
+    return None if weight is None else float(weight)
 
 
-def _daily_records(
-    records: list[tuple[str | None, float, float | None, int]],
-) -> list[tuple[str | None, float]]:
-    latest: dict[str, tuple[str | None, float, float | None, int]] = {}
+def _accepted_readings(
+    snapshot: Mapping[str, Any],
+    skip_keys: frozenset[str],
+    read: Callable[[Mapping[str, Any]], float | None],
+) -> list[_Accepted]:
+    accepted: list[_Accepted] = []
+    for walked in walk_records(
+        weight_payload(snapshot), skip_keys=skip_keys, resolve_day=_legacy_record_day
+    ):
+        value = read(walked.record)
+        if value is not None:
+            accepted.append(
+                (
+                    walked.day,
+                    value,
+                    _garmin_record_timestamp(walked.record),
+                    walked.ordinal,
+                )
+            )
+    return accepted
+
+
+def _daily_records(records: list[_Accepted]) -> list[tuple[str | None, float]]:
+    latest: dict[str, _Accepted] = {}
     for record in records:
         observed = record[0]
         if observed is None:
@@ -168,18 +162,17 @@ def _daily_records(
     return [(day, record[1]) for day, record in sorted(latest.items())]
 
 
+def garmin_weight_records(snapshot: dict[str, Any]) -> list[tuple[str | None, float]]:
+    accepted = _accepted_readings(snapshot, WEIGHT_SKIP_KEYS, _weight_reading)
+    return list(dict.fromkeys((day, value) for day, value, _, _ in accepted))
+
+
 def garmin_weight_daily_records(
     snapshot: dict[str, Any],
 ) -> list[tuple[str | None, float]]:
-    detailed: list[tuple[str | None, float, float | None, int]] = []
-    _collect_garmin_weight_records(
-        snapshot.get("weight") or snapshot.get("weigh_ins") or snapshot.get("weighIns"),
-        [],
-        daily=detailed,
-        sequence=[0],
-        visits=[0],
+    return _daily_records(
+        _accepted_readings(snapshot, WEIGHT_SKIP_KEYS, _weight_reading)
     )
-    return _daily_records(detailed)
 
 
 def _garmin_body_fat_pct(value: Any, unit: Any = None) -> float | None:
@@ -201,69 +194,30 @@ def _garmin_body_fat_pct(value: Any, unit: Any = None) -> float | None:
     return None
 
 
-def _collect_garmin_body_fat_records(
-    value: Any,
-    records: list[tuple[str | None, float]],
-    inherited_date: str | None = None,
-    daily: list[tuple[str | None, float, float | None, int]] | None = None,
-    sequence: list[int] | None = None,
-    depth: int = 0,
-    visits: list[int] | None = None,
-) -> None:
-    visits = visits if visits is not None else [0]
-    if depth > 20 or visits[0] >= 2000:
-        return
-    visits[0] += 1
-    if isinstance(value, dict):
-        record_date = (
-            _garmin_record_date(
-                _first_present(
-                    value,
-                    (
-                        "calendarDate",
-                        "summaryDate",
-                        "date",
-                        "timestampGMT",
-                        "timestamp",
-                    ),
-                )
-            )
-            or inherited_date
-        )
-        _append_body_fat_record(value, record_date, records, daily, sequence)
-        for key, item in value.items():
-            if _garmin_key(key) not in {"minbodyfat", "maxbodyfat", "bodyfatdelta"}:
-                _collect_garmin_body_fat_records(
-                    item, records, record_date, daily, sequence, depth + 1, visits
-                )
-    elif isinstance(value, list):
-        for item in value[:500]:
-            _collect_garmin_body_fat_records(
-                item, records, inherited_date, daily, sequence, depth + 1, visits
-            )
+def _body_fat_reading(record: Mapping[str, Any]) -> float | None:
+    direct = _first_present(record, GARMIN_BODY_FAT_ALIASES)
+    if direct in (None, ""):
+        return None
+    raw_value = direct
+    unit = _first_present(record, ("bodyFatUnit", "bodyFatUnitKey"))
+    if isinstance(direct, dict):
+        unit = _first_present(direct, ("unitKey", "unit", "bodyFatUnit")) or unit
+        raw_value = _first_present(direct, ("value", "val", "amount"))
+    pct = _garmin_body_fat_pct(raw_value, unit)
+    return None if pct is None else float(pct)
 
 
 def garmin_body_fat_records(snapshot: dict[str, Any]) -> list[tuple[str | None, float]]:
-    records: list[tuple[str | None, float]] = []
-    _collect_garmin_body_fat_records(
-        snapshot.get("weight") or snapshot.get("weigh_ins") or snapshot.get("weighIns"),
-        records,
-    )
-    return list(dict.fromkeys(records))
+    accepted = _accepted_readings(snapshot, BODY_FAT_SKIP_KEYS, _body_fat_reading)
+    return list(dict.fromkeys((day, value) for day, value, _, _ in accepted))
 
 
 def garmin_body_fat_daily_records(
     snapshot: dict[str, Any],
 ) -> list[tuple[str | None, float]]:
-    detailed: list[tuple[str | None, float, float | None, int]] = []
-    _collect_garmin_body_fat_records(
-        snapshot.get("weight") or snapshot.get("weigh_ins") or snapshot.get("weighIns"),
-        [],
-        daily=detailed,
-        sequence=[0],
-        visits=[0],
+    return _daily_records(
+        _accepted_readings(snapshot, BODY_FAT_SKIP_KEYS, _body_fat_reading)
     )
-    return _daily_records(detailed)
 
 
 def garmin_weight_metric(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -296,61 +250,3 @@ def garmin_weight_average(
         if record_day and cutoff <= record_day <= end_date:
             values.append(weight)
     return round(sum(values) / len(values), 2) if values else None
-
-
-def _append_weight_record(
-    value: dict[str, Any],
-    record_date: str | None,
-    records: list,
-    daily: list | None,
-    sequence: list[int] | None,
-) -> None:
-    direct = _first_present(value, ("weightKg", "weight_kg", "weight"))
-    if direct not in (None, ""):
-        weight = _garmin_weight_kg(
-            direct, _first_present(value, GARMIN_WEIGHT_UNIT_ALIASES)
-        )
-        if weight is not None:
-            records.append((record_date, float(weight)))
-            if daily is not None and sequence is not None:
-                daily.append(
-                    (
-                        record_date,
-                        float(weight),
-                        _garmin_record_timestamp(value),
-                        sequence[0],
-                    )
-                )
-                sequence[0] += 1
-
-
-def _append_body_fat_record(
-    value: dict[str, Any],
-    record_date: str | None,
-    records: list,
-    daily: list | None,
-    sequence: list[int] | None,
-) -> None:
-    direct = _first_present(
-        value,
-        GARMIN_BODY_FAT_ALIASES,
-    )
-    if direct not in (None, ""):
-        raw_value = direct
-        unit = _first_present(value, ("bodyFatUnit", "bodyFatUnitKey"))
-        if isinstance(direct, dict):
-            unit = _first_present(direct, ("unitKey", "unit", "bodyFatUnit")) or unit
-            raw_value = _first_present(direct, ("value", "val", "amount"))
-        pct = _garmin_body_fat_pct(raw_value, unit)
-        if pct is not None:
-            records.append((record_date, pct))
-            if daily is not None and sequence is not None:
-                daily.append(
-                    (
-                        record_date,
-                        pct,
-                        _garmin_record_timestamp(value),
-                        sequence[0],
-                    )
-                )
-                sequence[0] += 1

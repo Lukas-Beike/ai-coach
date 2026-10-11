@@ -173,20 +173,8 @@
     {
       "rule": "garmin_wire_key",
       "path": "backend/performance/garmin_weight.py",
-      "token": "calendarDate",
-      "count": 2
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_weight.py",
-      "token": "summaryDate",
-      "count": 2
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_weight.py",
       "token": "timestampGMT",
-      "count": 3
+      "count": 1
     },
     {
       "rule": "garmin_wire_key",
