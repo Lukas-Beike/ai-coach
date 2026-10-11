@@ -9,7 +9,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/jobs.py",
-      "line": 1025,
+      "line": 1026,
       "column": 40,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -97,7 +97,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/jobs.py",
-      "line": 1026,
+      "line": 1027,
       "column": 29,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -3321,7 +3321,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/performance.py",
-      "line": 208,
+      "line": 209,
       "column": 23,
       "code": "return-value",
       "message_sha256": "a0e5eaad7dba0a912f8407d1698bf050624d54d66a17c5a26fe0074def6714fb"

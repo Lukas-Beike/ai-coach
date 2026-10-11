@@ -673,7 +673,10 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual([job["id"] for job in self.store.list(1)], [weather["id"]])
         self.assertTrue(self.store.active("weather", "refresh"))
         self.assertFalse(self.store.active("calendar", "refresh"))
-        self.assertEqual(self.store.pending_performance_job_id(), performance["id"])
+        self.assertEqual(
+            self.store.pending_performance_job_id("intervals"), performance["id"]
+        )
+        self.assertIsNone(self.store.pending_performance_job_id("garmin"))
 
     def test_all_read_methods_reuse_an_outer_unit_of_work_connection(self):
         manager = DatabaseManager(
@@ -691,7 +694,7 @@ class SyncJobStoreTests(unittest.TestCase):
             self.assertIsNone(store.state("missing"))
             self.assertEqual(store.list(10), [])
             self.assertFalse(store.active("garmin", "refresh"))
-            self.assertIsNone(store.pending_performance_job_id())
+            self.assertIsNone(store.pending_performance_job_id("intervals"))
             self.assertEqual(connect.call_count, 1)
 
     def test_enqueue_persists_compact_utf8_payload_and_server_hash_contract(self):

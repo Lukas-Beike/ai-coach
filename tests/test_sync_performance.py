@@ -632,7 +632,7 @@ class PerformanceRefreshFollowupServiceTests(unittest.TestCase):
 
         self.assertEqual(self.service.wait(), completed)
 
-        self.queue.pending_performance_job_id.assert_called_once_with()
+        self.queue.pending_performance_job_id.assert_called_once_with("intervals")
         self.queue.state.assert_called_once_with("pending-1")
 
     def test_wait_maps_failed_and_partial_jobs_to_provider_refresh_error(self):
@@ -649,7 +649,7 @@ class PerformanceRefreshFollowupServiceTests(unittest.TestCase):
 
     def test_wait_returns_idle_when_no_job_or_markers_exist(self):
         self.assertIsNone(self.service.wait())
-        self.queue.pending_performance_job_id.assert_called_once_with()
+        self.queue.pending_performance_job_id.assert_called_once_with("intervals")
         self.assertEqual(self.clock.sleeps, [])
 
     def test_wait_respects_running_marker_then_returns_idle(self):
@@ -713,7 +713,7 @@ class PerformanceRefreshFollowupServiceTests(unittest.TestCase):
 
         self.assertEqual(error.status, 499)
         self.assertEqual(error.reason, "chat_cancelled")
-        self.queue.pending_performance_job_id.assert_called_once_with()
+        self.queue.pending_performance_job_id.assert_called_once_with("intervals")
         self.assertEqual(self.clock.sleeps, [1.0])
 
 

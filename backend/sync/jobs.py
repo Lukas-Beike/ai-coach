@@ -593,11 +593,12 @@ class SyncJobStore:
         with self._database_manager.unit_of_work() as db:
             return has_active_job(db, provider, job_type)
 
-    def pending_performance_job_id(self) -> str | None:
+    def pending_performance_job_id(self, provider: str) -> str | None:
         with self._database_manager.unit_of_work() as db:
             row = db.execute(
-                "SELECT id FROM sync_jobs WHERE type='performance_refresh' "
-                "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1"
+                "SELECT id FROM sync_jobs WHERE provider=? AND type='performance_refresh' "
+                "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1",
+                (provider,),
             ).fetchone()
             return row["id"] if row else None
 
