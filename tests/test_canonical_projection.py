@@ -6,20 +6,23 @@ Garmin payload. The wire fixtures under tests/fixtures/providers are read only.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 import unittest
 from datetime import UTC, date, datetime, timedelta, tzinfo
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+from support import (
+    PROVIDER_SYNCED_TEXT,
+    garmin_payload_fixture,
+    intervals_snapshot_fixture,
+)
 
 from backend.canonical.coverage import ProviderCoverage
 from backend.canonical.mapping import IssueReason
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
-from backend.planning.context import compact_snapshot
 from backend.runtime.ports import (
     ActivityReader,
     ObservationReader,
@@ -27,57 +30,19 @@ from backend.runtime.ports import (
 )
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
 
-FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "providers"
 BERLIN = ZoneInfo("Europe/Berlin")
-SYNCED_TEXT = "2026-10-10T06:00:00+00:00"
 SYNCED_AT = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
 CLOCK_AT = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)
 FAKE_DB: Any = object()
-GARMIN_SECTIONS = (
-    "activities",
-    "sleep",
-    "hrv",
-    "resting_hr",
-    "readiness",
-    "max_metrics",
-    "cycling_ftp",
-    "running_threshold",
-    "weight",
-    "cycling_ftp_history",
-    "daily_training_status",
-    "training_load_balance",
-)
-
-
-def load_fixture(path: str) -> Any:
-    return json.loads((FIXTURE_ROOT / path).read_text(encoding="utf-8"))
-
-
-def intervals_fixture() -> dict[str, Any]:
-    return compact_snapshot(
-        load_fixture("intervals/athlete.json"),
-        load_fixture("intervals/activities.json"),
-        load_fixture("intervals/wellness.json"),
-        load_fixture("intervals/events.json"),
-        all_sync_days=42,
-        synced_at=SYNCED_TEXT,
-    )
-
-
-def garmin_fixture() -> dict[str, Any]:
-    payload: dict[str, Any] = {"synced_at": SYNCED_TEXT}
-    for name in GARMIN_SECTIONS:
-        payload[name] = load_fixture(f"garmin/{name}.json")
-    return payload
 
 
 class FakeStore:
     """Mutable in-memory stand-in for the stored snapshot, payload and settings."""
 
     def __init__(self) -> None:
-        self.snapshot: Any = intervals_fixture()
+        self.snapshot: Any = intervals_snapshot_fixture()
         self.version = "2026-10-10T06:00:00+00:00:42"
-        self.payload: Any = garmin_fixture()
+        self.payload: Any = garmin_payload_fixture()
         self.zone: tzinfo = BERLIN
         self.clock_at = CLOCK_AT
         self.snapshot_reads = 0
@@ -531,7 +496,7 @@ class MalformedDocumentTests(unittest.TestCase):
                     "athlete": garbage,
                 }
                 store.payload = {
-                    "synced_at": SYNCED_TEXT,
+                    "synced_at": PROVIDER_SYNCED_TEXT,
                     "activities": garbage,
                     "weight": garbage,
                     "sleep": garbage,

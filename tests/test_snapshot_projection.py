@@ -2,24 +2,25 @@
 
 from __future__ import annotations
 
-import json
 import unittest
 from datetime import UTC, date, datetime
-from pathlib import Path
-from typing import Any
 from zoneinfo import ZoneInfo
 
+from support import (
+    PROVIDER_SYNCED_TEXT,
+    garmin_payload_fixture,
+    intervals_snapshot_fixture,
+    load_provider_fixture,
+)
+
 from backend.canonical.mapping import IssueReason, MappingResult
-from backend.planning.context import compact_snapshot
 from backend.providers.snapshot_projection import (
     project_garmin_snapshot,
     project_intervals_snapshot,
     stored_retrieved_at,
 )
 
-FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "providers"
 BERLIN = ZoneInfo("Europe/Berlin")
-SYNCED_TEXT = "2026-10-10T06:00:00+00:00"
 SYNCED_AT = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
 GARBAGE_VALUES: tuple[object, ...] = (
     None,
@@ -34,43 +35,11 @@ GARBAGE_VALUES: tuple[object, ...] = (
 )
 
 
-def load_fixture(path: str) -> Any:
-    return json.loads((FIXTURE_ROOT / path).read_text(encoding="utf-8"))
-
-
-def intervals_fixture() -> dict[str, Any]:
-    return compact_snapshot(
-        load_fixture("intervals/athlete.json"),
-        load_fixture("intervals/activities.json"),
-        load_fixture("intervals/wellness.json"),
-        load_fixture("intervals/events.json"),
-        all_sync_days=42,
-        synced_at=SYNCED_TEXT,
-    )
-
-
-def garmin_fixture() -> dict[str, Any]:
-    payload: dict[str, Any] = {"synced_at": SYNCED_TEXT}
-    for name in (
-        "activities",
-        "sleep",
-        "hrv",
-        "resting_hr",
-        "readiness",
-        "max_metrics",
-        "cycling_ftp",
-        "running_threshold",
-        "weight",
-        "cycling_ftp_history",
-    ):
-        payload[name] = load_fixture(f"garmin/{name}.json")
-    return payload
-
-
 class StoredRetrievedAtTests(unittest.TestCase):
     def test_reads_aware_stored_time(self) -> None:
         self.assertEqual(
-            stored_retrieved_at({"synced_at": SYNCED_TEXT}, zone=BERLIN), SYNCED_AT
+            stored_retrieved_at({"synced_at": PROVIDER_SYNCED_TEXT}, zone=BERLIN),
+            SYNCED_AT,
         )
 
     def test_reads_naive_stored_time_as_athlete_wall_time(self) -> None:
@@ -128,7 +97,7 @@ class IntervalsProjectionTests(unittest.TestCase):
         retrieved_at = datetime(2026, 10, 9, 22, 30, tzinfo=UTC)
 
         _, observations = project_intervals_snapshot(
-            {"athlete": load_fixture("intervals/athlete.json")},
+            {"athlete": load_provider_fixture("intervals/athlete.json")},
             zone=BERLIN,
             retrieved_at=retrieved_at,
         )
@@ -140,7 +109,7 @@ class IntervalsProjectionTests(unittest.TestCase):
         )
 
     def test_wellness_and_athlete_observations_are_merged_in_order(self) -> None:
-        snapshot = intervals_fixture()
+        snapshot = intervals_snapshot_fixture()
         wellness_only = {"recent_wellness": snapshot["recent_wellness"]}
         athlete_only = {"athlete": snapshot["athlete"]}
 
@@ -181,7 +150,7 @@ class GarminProjectionTests(unittest.TestCase):
 
     def test_fixture_payload_maps_activities_and_health_observations(self) -> None:
         activities, observations = project_garmin_snapshot(
-            garmin_fixture(), zone=BERLIN, retrieved_at=SYNCED_AT
+            garmin_payload_fixture(), zone=BERLIN, retrieved_at=SYNCED_AT
         )
 
         self.assertEqual(len(activities.records), 2)
