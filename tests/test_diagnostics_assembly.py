@@ -40,6 +40,7 @@ class DiagnosticsAssemblyTests(unittest.TestCase):
             "external_calendar_reader": Mock(),
             "morning_checkin": Mock(),
             "workout_library_sync_state": Mock(),
+            "canonical_coverage": Mock(return_value=Mock()),
             "diagnostic_capture": Mock(),
             "log_path": Mock(return_value=Path("temporary-test.log")),
             "receipt_parser": Mock(return_value={}),
@@ -74,6 +75,7 @@ class DiagnosticsAssemblyTests(unittest.TestCase):
                     external_calendar_reader=self.deps["external_calendar_reader"],
                     morning_checkin=self.deps["morning_checkin"],
                     workout_library_sync_state=self.deps["workout_library_sync_state"],
+                    canonical_coverage=self.deps["canonical_coverage"],
                 ),
                 report=DiagnosticReportSettings(
                     utc_now=self.deps["utc_now"],
@@ -96,6 +98,10 @@ class DiagnosticsAssemblyTests(unittest.TestCase):
         self.assertIs(dependencies.key_values, self.deps["key_values"])
         self.assertIs(dependencies.redactor, self.deps["redactor"])
         self.assertIs(dependencies.diagnostic_capture, self.deps["diagnostic_capture"])
+        self.assertIs(
+            dependencies.canonical_coverage,
+            self.deps["canonical_coverage"].return_value,
+        )
         self.assertEqual(
             dependencies.coach_history._allowed_tools, frozenset({"read_profile"})
         )
