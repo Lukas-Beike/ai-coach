@@ -450,6 +450,8 @@ Abnahme: Ein nur in Tests registrierter, gemockter Provider durchläuft
 Zeitplanung, Queue, Ausführung, Freshness, Status, HTTP-Status und Coach-Refresh
 ohne Änderungen außerhalb seiner Registrierung. Größe: mittel bis groß.
 
+Status: umgesetzt (#1076 bis #1090); Ergebnis und offene Punkte in Abschnitt 5.6.
+
 ### Phase 5 – Verbraucher umstellen (je Domäne ein PR)
 
 1. `performance/`: Kennzahlen, Last/Form, Erholung, Body, Diagramme,
@@ -667,6 +669,75 @@ abgedeckt.
 5. **Schema v6 (sequenziell, nach Einfrieren des veröffentlichten v5):**
    additive Tabellen, Ingest-Dual-Write, Backfill-Job und Aktivitätsidentität
    mit den Pflichtnachweisen aus Abschnitt 6.
+
+### 5.6 Ergebnis Phase 4: Provider-Register und Orchestrierung
+
+Die Orchestrierung ist für Intervals.icu, Garmin, Wetter und Kalender
+registergesteuert und verhaltensgleich: Jobs, Zeitplanung, Ausführung,
+Freshness, Status, Vollresync, HTTP-Befehle und Coach-Refresh lesen aus dem
+Register; `server.py` bleibt reine Komposition. Der Bootstrap-JSON ist
+unverändert. Ausgenommen ist das Frontend (siehe unten).
+
+| Einheit | PR | Inhalt |
+|---|---|---|
+| U1 | #1076 | Deskriptor um Orchestrierungspolitik erweitert, Laufzeit-Typen (`provider_runtime.py`) |
+| U3 | #1084 | Jobtypen, Refresh-Felder und Tagesmarker aus dem Register |
+| U4 | #1083 | Dispatch über `ProviderJobOwner` |
+| U5 | #1079 | Tages- und Startreihenfolge nach Deskriptor-Rang, Policies je Provider |
+| U6 | #1082 | Freshness und Status aus Quellen je Provider und Bereich |
+| U7 | #1086 | Vollresync über registrierte Handler |
+| U8 | #1085 | Coach-Ziel-Enum, Refresh-Ziele und Warte-Flag aus dem Register |
+| U9 | #1078 | HTTP-Pfade und Texte für Sync-Befehle über das Register |
+| U9b | #1088 | Register durch die restlichen Sync-Gates (Executor, Persistenz) |
+| U10 | #1087 | `provider_runtime_assembly.py`, Runtime-Registry in alle Assemblies |
+| U11 | #1090 | `server.py`: eine lazy Runtime-Fabrik, `SYNC_PERIOD_DEFAULTS` abgeleitet |
+| U12 | #1089 | Abnahmetest mit Mock-Provider `acme` |
+
+- **Abnahme (#1089):** `tests/test_provider_runtime_acceptance.py` registriert
+  `acme` nur im Test. 21 Tests laufen durch Zeitplanung (Start und täglich),
+  Queue und Normalisierung, Executor, Freshness und Status, die HTTP-Route
+  (202/400/409) und den Coach-Refresh (Enum, asynchron oder wartend). Ein
+  Negativtest stellt sicher, dass `DEFAULT_PROVIDER_REGISTRY` unverändert
+  bleibt. Die vollständige Suite lief mit 4575 Tests ohne Fehler.
+- **Nachweise #1090:** vollständige Suite (4558 Tests, 18 nativ übersprungen),
+  `docker build -t ai-coach:local .` und die vier Wiring-Tests im gebauten Image
+  (darunter die zwei SQLCipher-Tests, die nativ unter Windows überspringen).
+- **Guards:** Kopplungs-Baseline sank durch die entfernten Literale
+  (jeweils per `--snapshot` festgehalten); die Registrierung bleibt literalfrei.
+
+Bekannte Lücken (die ersten beiden sind im Abnahmetest als
+`expectedFailure` gepinnt, also noch nicht behoben):
+
+1. **`performance_refresh`-Single-Flight:** `SyncJobStore.enqueue` und
+   `pending_performance_job_id` in `backend/sync/jobs.py` sind fest auf Intervals
+   verdrahtet; ein zweiter Provider mit diesem Jobtyp wird nicht entdoppelt.
+2. **Zeitraumgrenze in der Queue:** `_normalize_refresh_days` nutzt die feste
+   Grenze 3660 und ignoriert `max_sync_days`; nur `set_sync_period` erzwingt sie.
+   Über die Queue wird `days=61` für `acme` (Grenze 60) angenommen. Die Korrektur
+   ändert das Verhalten aller Provider und gehört in einen eigenen PR.
+3. **Startplaner und `blocked()`:** Der Startplaner fragt `blocked()` nicht ab,
+   weil das Protokoll keinen Auslöser kennt; gleiches Verhalten wie zuvor.
+4. **Duplizierte Laufprüfung:** Das Intervals-Laufprädikat steht zusätzlich in
+   `intervals.py` (um Zeile 623); der Running-Probe in `freshness_sources.py`
+   dupliziert es.
+5. **Ablehnungstext:** Die Meldung „Intervals.icu“ bei nicht konfigurierten
+   Providern wird providerübergreifend geteilt.
+6. **Frontend:** `PROVIDER_LABELS` in `public/sync-status.js` bleibt bewusst
+   außen vor und wird in einer späteren Welle aus dem Bootstrap gespeist.
+7. **Persistenz in `server.py`:** `registry=` für `state_repository` und
+   `daily_markers` ist nicht verdrahtet (rund zwölf Aufrufstellen); die Defaults
+   sind identisch mit dem Register, es besteht also kein Verhaltensunterschied.
+8. **`sync_commands.py`:** vier parallele Akzeptanzflächen; die Mengen werden je
+   POST neu gebaut.
+9. **Hinweise aus dem Review von #1090 (nicht eigenständig verifiziert):**
+   `build_provider_runtime` prüft Bindings nicht gegen
+   `DEFAULT_PROVIDER_DESCRIPTORS` (P2); `_runtime_executor` reicht das Register
+   der Runtime nicht durch und teilt den Historical-Owner (P3); ein Kommentar zu
+   `SYNC_PERIOD_DEFAULTS` in `descriptors.py` könnte veraltet sein (P3).
+
+Vorschlag: ein Folge-PR schließt die Lücken 1 und 2 (Verhaltensänderung,
+getrennt von der verhaltensgleichen Komposition) und prüft Punkt 9; Lücken 3 bis
+5 und 7 bis 8 sind Aufräumarbeiten ohne Dringlichkeit.
 
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
