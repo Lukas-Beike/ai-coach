@@ -1102,18 +1102,6 @@
     },
     {
       "rule": "provider_literal",
-      "path": "backend/sync/scheduler.py",
-      "token": "garmin",
-      "count": 6
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/scheduler.py",
-      "token": "intervals",
-      "count": 8
-    },
-    {
-      "rule": "provider_literal",
       "path": "public/activity-details.js",
       "token": "intervals",
       "count": 3

@@ -736,15 +736,19 @@ class ServerSyncTests(ServerTestCase):
     def test_daily_sync_scheduler_uses_local_provider_markers(self):
         import inspect
 
+        from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
         from backend.sync.scheduler import DailySyncScheduler
 
         self.assertEqual(DailySyncScheduler.__module__, "backend.sync.scheduler")
         source = Path(sys.modules[DailySyncScheduler.__module__].__file__).resolve()
         module_source = source.read_text(encoding="utf-8")
         daily_scheduler = inspect.getsource(DailySyncScheduler)
-        self.assertIn('self._markers.is_due("calendar")', daily_scheduler)
-        self.assertIn('self._markers.is_due("garmin")', daily_scheduler)
-        self.assertIn('self._markers.is_due("intervals")', daily_scheduler)
+        # Marker ids come from the descriptor ranks; behaviour is covered by
+        # tests/test_daily_sync_scheduler.py.
+        self.assertEqual(
+            DEFAULT_PROVIDER_REGISTRY.daily_marker_ids(),
+            frozenset({"calendar", "garmin", "intervals"}),
+        )
         self.assertNotIn("import server", module_source)
         self.assertNotIn("from server", module_source)
         self.assertNotIn("[:10]", daily_scheduler)
