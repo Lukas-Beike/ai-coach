@@ -38,6 +38,7 @@ FIXTURE_NAMES = (
     "cycling_ftp",
     "cycling_ftp_history",
     "running_threshold",
+    "heart_rate_zones",
 )
 
 
@@ -85,6 +86,22 @@ def _latest_value(
     daily = _latest_by_day(result, kind, sport)
     day = max(daily)
     return day, daily[day]
+
+
+def _max_hr_by_category(result: MappingResult[Observation]) -> dict[str, float]:
+    """Highest mapped max heart rate per legacy category, as the legacy reader keys it."""
+    categories: dict[Sport | None, str] = {
+        Sport.RIDE: "cycling",
+        Sport.RUN: "running",
+        None: "generic",
+    }
+    values: dict[str, float] = {}
+    for obs in result.records:
+        if obs.kind is not MetricKind.MAX_HR:
+            continue
+        category = categories[obs.sport]
+        values[category] = max(values.get(category, obs.value.value), obs.value.value)
+    return values
 
 
 class WeightParityTests(unittest.TestCase):
@@ -182,6 +199,19 @@ class WeightParityTests(unittest.TestCase):
         self.assertEqual(mapped, legacy)
         self.assertEqual(mapped, {DAY: 72.0})
 
+    def test_undated_weigh_in_is_not_a_daily_record_like_legacy(self) -> None:
+        snapshot: dict[str, Any] = {"weight": [{"weight": 72.0, "unitKey": "kg"}]}
+
+        legacy = garmin_weight.garmin_weight_daily_records(snapshot)
+        result = _map(snapshot)
+
+        self.assertEqual(legacy, [])
+        self.assertEqual(_latest_by_day(result, MetricKind.WEIGHT), {})
+        self.assertEqual(
+            [(i.record_ref, i.field, i.reason) for i in result.issues],
+            [("weight[0]", "calendarDate", IssueReason.MISSING)],
+        )
+
     def test_records_beyond_the_depth_limit_are_ignored_like_legacy(self) -> None:
         deep: dict[str, Any] = {"calendarDate": DAY, "weight": 72.0, "unitKey": "kg"}
         for _ in range(25):
@@ -277,10 +307,43 @@ class RecoveryAndPerformanceParityTests(unittest.TestCase):
         self.assertEqual(score, self.context["sleep_score"])
         self.assertEqual(day, DAY)
 
+    def test_zero_sleep_score_matches_legacy(self) -> None:
+        snapshot: dict[str, Any] = {
+            "sleep": [{"calendarDate": DAY, "sleepScore": 0, "sleepTimeSeconds": 25200}]
+        }
+
+        context = recovery_context.performance_recovery_context(snapshot, {}, [], TODAY)
+        result = _map(snapshot)
+
+        self.assertEqual(context["sleep_score"], 0)
+        self.assertEqual(_latest_value(result, MetricKind.SLEEP_SCORE), (DAY, 0.0))
+
     def test_readiness_matches_legacy(self) -> None:
         _, value = _latest_value(self.result, MetricKind.READINESS)
 
         self.assertEqual(value, self.context["readiness"])
+
+    def test_fixture_max_hr_matches_legacy_category(self) -> None:
+        mapped = _max_hr_by_category(self.result)
+
+        self.assertEqual(mapped, {"generic": 190.0})
+        self.assertEqual(mapped, garmin_metrics.garmin_profile_max_hr(self.snapshot))
+
+    def test_max_hr_per_category_matches_legacy(self) -> None:
+        snapshot: dict[str, Any] = {
+            "heart_rate_zones": [
+                {"calendarDate": DAY, "sport": "CYCLING", "maxHeartRateUsed": 181},
+                {"sport": "RUNNING", "maxHeartRate": 194},
+                {"activityType": "DEFAULT", "maxHR": 186},
+                {"nested": [{"sport": "cycling", "maxHeartRateUsed": 188}]},
+            ]
+        }
+
+        legacy = garmin_metrics.garmin_profile_max_hr(snapshot)
+        mapped = _max_hr_by_category(_map(snapshot))
+
+        self.assertEqual(legacy, {"cycling": 188, "running": 194, "generic": 186})
+        self.assertEqual(mapped, legacy)
 
     def test_vo2max_matches_legacy_per_sport(self) -> None:
         _, cycling = _latest_value(self.result, MetricKind.VO2MAX, Sport.RIDE)
@@ -361,6 +424,23 @@ class NamedDeviationTests(unittest.TestCase):
         self.assertEqual(
             [(i.record_ref, i.field, i.reason) for i in result.issues],
             [("weight[0]", "calendarDate", IssueReason.INVALID_TYPE)],
+        )
+
+    def test_max_hr_above_the_canonical_bound_is_legacy_only(self) -> None:
+        snapshot: dict[str, Any] = {
+            "heart_rate_zones": [
+                {"calendarDate": DAY, "sport": "CYCLING", "maxHeartRateUsed": 255}
+            ]
+        }
+
+        legacy = garmin_metrics.garmin_profile_max_hr(snapshot)
+        result = _map(snapshot)
+
+        self.assertEqual(legacy, {"cycling": 255})
+        self.assertEqual(_max_hr_by_category(result), {})
+        self.assertEqual(
+            [(i.record_ref, i.field, i.reason) for i in result.issues],
+            [("heart_rate_zones[0]", "maxHeartRateUsed", IssueReason.OUT_OF_RANGE)],
         )
 
     def test_weekly_hrv_average_is_used_by_legacy_but_not_mapped(self) -> None:

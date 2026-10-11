@@ -637,6 +637,46 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
             )
         )
 
+    def test_zero_garmin_sleep_score_is_kept_like_legacy(self) -> None:
+        garmin = {
+            "sleep": [
+                _garmin_record("2026-05-04", sleepTimeSeconds=28_800, sleepScore=0)
+            ]
+        }
+        observations = _mapped(WELLNESS_ROWS, None, garmin)
+
+        legacy = performance_recovery_context(
+            garmin, _latest_row(WELLNESS_ROWS), WELLNESS_ROWS, TODAY
+        )
+        self.assertEqual(legacy["sleep_score"], 0)
+        self.assertEqual(
+            _values(
+                select_current(
+                    observations,
+                    MetricKind.SLEEP_SCORE,
+                    latest_wellness_day=LATEST_DAY,
+                )
+            ),
+            0.0,
+        )
+
+    def test_garmin_heart_rate_zone_max_hr_matches_legacy_observation(self) -> None:
+        garmin = {
+            "heart_rate_zones": [
+                _garmin_record("2026-05-04", sport="CYCLING", maxHeartRateUsed=188)
+            ]
+        }
+        observations = _mapped(WELLNESS_ROWS, ATHLETE, garmin)
+
+        legacy = current_performance_metrics(
+            self.snapshot, {}, garmin_performance_metrics(garmin, TODAY)
+        )
+        self.assertEqual(legacy["cycling_max_hr_bpm"]["value"], 188)
+        self.assertEqual(
+            _values(select_current(observations, MetricKind.MAX_HR, sport=Sport.RIDE)),
+            188.0,
+        )
+
     def test_weight_is_garmin_newest_over_latest_wellness(self) -> None:
         self.assertEqual(self.legacy["weight_kg"]["value"], 80.5)
         self.assertEqual(self.legacy["weight_kg"]["source"], "Garmin Connect")
@@ -946,32 +986,6 @@ class IntentionalDeviationTests(unittest.TestCase):
             290,
         )
 
-    def test_garmin_sleep_score_zero_is_kept_by_legacy_but_not_the_mapper(self) -> None:
-        # Gap: legacy accepts a Garmin sleep score of 0 (bounds 0-100). The Garmin
-        # mapper rejects 0, so the policy falls back to Intervals. A duration is
-        # included because legacy ignores a sleep block without one.
-        garmin = {
-            "sleep": [
-                _garmin_record("2026-05-04", sleepTimeSeconds=28_800, sleepScore=0)
-            ]
-        }
-        observations = _mapped(WELLNESS_ROWS, None, garmin)
-
-        legacy = performance_recovery_context(
-            garmin, _latest_row(WELLNESS_ROWS), WELLNESS_ROWS, TODAY
-        )
-        self.assertEqual(legacy["sleep_score"], 0)
-        self.assertEqual(
-            _values(
-                select_current(
-                    observations,
-                    MetricKind.SLEEP_SCORE,
-                    latest_wellness_day=LATEST_DAY,
-                )
-            ),
-            78.0,
-        )
-
     def test_athlete_level_weight_is_not_observed(self) -> None:
         # Gap: the legacy weight chain falls back to the Intervals athlete record.
         # Athlete-level values carry no row date, and the mapper does not observe
@@ -986,23 +1000,6 @@ class IntentionalDeviationTests(unittest.TestCase):
         )
         self.assertEqual(legacy["weight_kg"]["value"], 81.0)
         self.assertIsNone(select_current(observations, MetricKind.WEIGHT))
-
-    def test_garmin_heart_rate_zone_max_hr_is_not_observed(self) -> None:
-        # Gap: legacy max HR uses Garmin heart-rate-zone values first; the Garmin
-        # mapper does not emit MAX_HR, so the policy returns the Intervals value.
-        garmin = {"heart_rate_zones": {"cycling": {"maxHeartRateUsed": 188}}}
-        observations = _mapped([], ATHLETE, garmin)
-
-        legacy = current_performance_metrics(
-            self.snapshot_without_wellness(),
-            {},
-            garmin_performance_metrics(garmin, TODAY),
-        )
-        self.assertEqual(legacy["cycling_max_hr_bpm"]["value"], 188)
-        self.assertEqual(
-            _values(select_current(observations, MetricKind.MAX_HR, sport=Sport.RIDE)),
-            185,
-        )
 
     def test_sport_setting_vo2max_is_not_observed_by_the_mapper(self) -> None:
         # Gap: sportSettings VO2max is not in the Intervals threshold mapper's

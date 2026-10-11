@@ -884,9 +884,227 @@ class ProvenanceTests(unittest.TestCase):
         )
 
 
+class HeartRateZoneMaxHrTests(unittest.TestCase):
+    def test_max_hr_is_mapped_per_sport_category(self) -> None:
+        result = _map(
+            {
+                "heart_rate_zones": [
+                    {"calendarDate": DAY, "sport": "CYCLING", "maxHeartRateUsed": 181},
+                    {"calendarDate": DAY, "sport": "RUNNING", "maxHeartRate": 194},
+                    {"calendarDate": DAY, "activityType": "DEFAULT", "maxHR": 186},
+                ]
+            }
+        )
+
+        self.assertEqual(
+            _find(result, MetricKind.MAX_HR, Sport.RIDE).value.value, 181.0
+        )
+        self.assertEqual(_find(result, MetricKind.MAX_HR, Sport.RUN).value.value, 194.0)
+        self.assertEqual(_find(result, MetricKind.MAX_HR).value.value, 186.0)
+        self.assertEqual(
+            sorted(obs.provenance.source_record_id for obs in result.records),
+            [
+                f"heart_rate_zones:{DAY}:0:0",
+                f"heart_rate_zones:{DAY}:1:0",
+                f"heart_rate_zones:{DAY}:2:0",
+            ],
+        )
+        self.assertEqual(_issues(result), [])
+
+    def test_max_hr_alias_order_prefers_max_heart_rate_used(self) -> None:
+        result = _map(
+            {
+                "heart_rate_zones": [
+                    {
+                        "calendarDate": DAY,
+                        "maxHR": 186,
+                        "maxHeartRate": 194,
+                        "maxHeartRateUsed": 181,
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(_find(result, MetricKind.MAX_HR).value.value, 181.0)
+
+    def test_single_zone_object_ids_omit_the_record_index(self) -> None:
+        result = _map(
+            {"heart_rate_zones": {"calendarDate": DAY, "maxHeartRateUsed": 190}}
+        )
+
+        obs = _find(result, MetricKind.MAX_HR)
+        self.assertEqual(obs.observed_on, date(2026, 10, 10))
+        self.assertEqual(obs.provenance.source_record_id, f"heart_rate_zones:{DAY}:0")
+        self.assertEqual(_issues(result), [])
+
+    def test_undated_zone_uses_the_sync_day(self) -> None:
+        result = _map({"heart_rate_zones": [{"maxHeartRateUsed": 190}]})
+
+        obs = _find(result, MetricKind.MAX_HR)
+        self.assertEqual(obs.observed_on, date(2026, 10, 11))
+        self.assertEqual(
+            obs.provenance.source_record_id, "heart_rate_zones:2026-10-11:0:0"
+        )
+        self.assertEqual(_issues(result), [])
+
+    def test_nested_zone_objects_are_read_in_legacy_order(self) -> None:
+        result = _map(
+            {
+                "heart_rate_zones": [
+                    {
+                        "calendarDate": DAY,
+                        "sport": "DEFAULT",
+                        "nested": [
+                            [{"sport": "cycling", "maxHeartRateUsed": 188}],
+                            "text",
+                            5,
+                        ],
+                    }
+                ]
+            }
+        )
+
+        obs = _find(result, MetricKind.MAX_HR, Sport.RIDE)
+        self.assertEqual(obs.value.value, 188.0)
+        self.assertEqual(obs.provenance.source_record_id, f"heart_rate_zones:{DAY}:0:1")
+        self.assertEqual(_issues(result), [])
+
+    def test_nested_zone_lists_are_capped_at_one_hundred_items(self) -> None:
+        nested = [{"maxHeartRateUsed": 150}] * 100 + [{"maxHeartRateUsed": 190}]
+        result = _map({"heart_rate_zones": [{"calendarDate": DAY, "nested": nested}]})
+
+        self.assertEqual(len(result.records), 100)
+        self.assertEqual({obs.value.value for obs in result.records}, {150.0})
+
+    def test_top_level_zone_list_is_capped_at_one_hundred_items(self) -> None:
+        records: list[dict[str, object]] = [
+            {"calendarDate": DAY, "maxHeartRateUsed": 150}
+        ] * 100
+        records.append({"calendarDate": DAY, "maxHeartRateUsed": 190})
+        result = _map({"heart_rate_zones": records})
+
+        self.assertEqual(len(result.records), 100)
+        self.assertEqual({obs.value.value for obs in result.records}, {150.0})
+
+    def test_max_hr_below_the_floor_is_an_issue(self) -> None:
+        result = _map(
+            {"heart_rate_zones": [{"calendarDate": DAY, "maxHeartRateUsed": 79}]}
+        )
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            _issues(result),
+            [("heart_rate_zones[0]", "maxHeartRateUsed", IssueReason.OUT_OF_RANGE)],
+        )
+
+    def test_max_hr_at_the_floor_is_kept(self) -> None:
+        result = _map(
+            {"heart_rate_zones": [{"calendarDate": DAY, "maxHeartRateUsed": 80}]}
+        )
+
+        self.assertEqual(_find(result, MetricKind.MAX_HR).value.value, 80.0)
+        self.assertEqual(_issues(result), [])
+
+    def test_max_hr_above_the_canonical_bound_is_out_of_range(self) -> None:
+        result = _map(
+            {"heart_rate_zones": [{"calendarDate": DAY, "maxHeartRateUsed": 255}]}
+        )
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            _issues(result),
+            [("heart_rate_zones[0]", "maxHeartRateUsed", IssueReason.OUT_OF_RANGE)],
+        )
+
+    def test_max_hr_at_the_canonical_bound_is_kept(self) -> None:
+        result = _map(
+            {"heart_rate_zones": [{"calendarDate": DAY, "maxHeartRateUsed": 250}]}
+        )
+
+        self.assertEqual(_find(result, MetricKind.MAX_HR).value.value, 250.0)
+        self.assertEqual(_issues(result), [])
+
+    def test_invalid_max_hr_number_is_reported(self) -> None:
+        result = _map(
+            {"heart_rate_zones": [{"calendarDate": DAY, "maxHeartRateUsed": "fast"}]}
+        )
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            _issues(result),
+            [("heart_rate_zones[0]", "maxHeartRateUsed", IssueReason.INVALID_NUMBER)],
+        )
+
+    def test_unreadable_zone_date_skips_the_record(self) -> None:
+        result = _map(
+            {
+                "heart_rate_zones": [
+                    {"calendarDate": "2026-02-30", "maxHeartRateUsed": 190}
+                ]
+            }
+        )
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            _issues(result),
+            [("heart_rate_zones[0]", "calendarDate", IssueReason.INVALID_TYPE)],
+        )
+
+    def test_non_list_zone_payload_is_one_issue(self) -> None:
+        result = _map({"heart_rate_zones": "190"})
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            _issues(result),
+            [(None, "heart_rate_zones", IssueReason.INVALID_TYPE)],
+        )
+
+    def test_scalar_zone_item_is_reported(self) -> None:
+        result = _map({"heart_rate_zones": [5]})
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            _issues(result),
+            [("heart_rate_zones[0]", "heart_rate_zones", IssueReason.INVALID_TYPE)],
+        )
+
+
+class SleepScoreZeroTests(unittest.TestCase):
+    def test_zero_sleep_score_is_kept(self) -> None:
+        result = _map({"sleep": [{"calendarDate": DAY, "sleepScore": 0}]})
+
+        self.assertEqual(_find(result, MetricKind.SLEEP_SCORE).value.value, 0.0)
+        self.assertEqual(_issues(result), [])
+
+    def test_negative_and_above_range_sleep_scores_stay_rejected(self) -> None:
+        for score in (-1, 101):
+            with self.subTest(score=score):
+                result = _map({"sleep": [{"calendarDate": DAY, "sleepScore": score}]})
+
+                self.assertFalse(
+                    [
+                        obs
+                        for obs in result.records
+                        if obs.kind is MetricKind.SLEEP_SCORE
+                    ]
+                )
+                self.assertEqual(
+                    [reason for _, _, reason in _issues(result)],
+                    [IssueReason.OUT_OF_RANGE],
+                )
+
+    def test_zero_stays_rejected_for_other_metrics(self) -> None:
+        result = _map({"resting_hr": [{"calendarDate": DAY, "restingHeartRate": 0}]})
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            [reason for _, _, reason in _issues(result)], [IssueReason.OUT_OF_RANGE]
+        )
+
+
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 2)
+        self.assertEqual(MAPPER_VERSION, 3)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):
@@ -919,7 +1137,6 @@ class ContractTests(unittest.TestCase):
                 "gear": {"id": 2},
                 "daily_stats": {"calendarDate": DAY, "totalSteps": 8421},
                 "training_status": {"acuteTrainingLoadDTO": {"acuteTrainingLoad": 480}},
-                "heart_rate_zones": [{"sport": "DEFAULT", "maxHeartRateUsed": 190}],
                 "race_predictions": {"5k": {"raceTime": 1320}},
                 "endurance_score": [{"calendarDate": DAY, "overallScore": 6850}],
                 "running_tolerance": [{"calendarDate": DAY, "toleranceScore": 72}],
