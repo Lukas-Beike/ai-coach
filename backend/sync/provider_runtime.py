@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal, Protocol, TypeVar
 
+from backend.providers.descriptors import ProviderDescriptor
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import ProviderRegistry
@@ -122,6 +123,69 @@ class ProviderRuntimeBinding:
     running_probe: Callable[[], bool] | None = None
 
 
+def _descriptor_for(
+    static: ProviderRegistry, binding: ProviderRuntimeBinding
+) -> ProviderDescriptor:
+    try:
+        return static.get(binding.provider_id)
+    except KeyError as exc:
+        raise ValueError("provider runtime binding has no descriptor") from exc
+
+
+def _check_not_duplicate(
+    by_id: Mapping[str, ProviderRuntimeBinding], binding: ProviderRuntimeBinding
+) -> None:
+    if binding.provider_id in by_id:
+        raise ValueError("duplicate provider runtime binding")
+
+
+def _check_freshness_keys(
+    descriptor: ProviderDescriptor, binding: ProviderRuntimeBinding
+) -> None:
+    if set(binding.freshness) != {area.area for area in descriptor.freshness_areas}:
+        raise ValueError("freshness sources must match descriptor freshness areas")
+
+
+def _check_resync(
+    descriptor: ProviderDescriptor, binding: ProviderRuntimeBinding
+) -> None:
+    if binding.full_resync is not None and not descriptor.resync_keys:
+        raise ValueError("full resync handler requires descriptor resync keys")
+    if binding.full_resync is None and descriptor.resync_keys:
+        raise ValueError("descriptor resync keys require a full resync handler")
+    if binding.full_resync is not None and binding.gate is None:
+        raise ValueError("full resync handler requires a provider gate")
+
+
+def _check_capabilities(
+    descriptor: ProviderDescriptor, binding: ProviderRuntimeBinding
+) -> None:
+    if binding.schedule is not None and not _has_schedule_rank(descriptor):
+        raise ValueError("schedule policy requires a descriptor schedule rank")
+    if binding.synchronous_refresh is not None and descriptor.coach_rank is None:
+        raise ValueError("synchronous refresh requires a descriptor coach rank")
+
+
+def _has_schedule_rank(descriptor: ProviderDescriptor) -> bool:
+    return (
+        descriptor.schedule.daily_rank is not None
+        or descriptor.schedule.startup_rank is not None
+    )
+
+
+def _validate_binding(
+    static: ProviderRegistry,
+    binding: ProviderRuntimeBinding,
+    by_id: Mapping[str, ProviderRuntimeBinding],
+) -> None:
+    """Check one binding against its descriptor, in a fixed order."""
+    descriptor = _descriptor_for(static, binding)
+    _check_not_duplicate(by_id, binding)
+    _check_freshness_keys(descriptor, binding)
+    _check_resync(descriptor, binding)
+    _check_capabilities(descriptor, binding)
+
+
 class ProviderRuntimeRegistry:
     """Validated, read-only view of provider runtime bindings.
 
@@ -136,34 +200,7 @@ class ProviderRuntimeRegistry:
     ) -> None:
         by_id: dict[str, ProviderRuntimeBinding] = {}
         for binding in bindings:
-            try:
-                descriptor = static.get(binding.provider_id)
-            except KeyError as exc:
-                raise ValueError("provider runtime binding has no descriptor") from exc
-            if binding.provider_id in by_id:
-                raise ValueError("duplicate provider runtime binding")
-            if set(binding.freshness) != {
-                area.area for area in descriptor.freshness_areas
-            }:
-                raise ValueError(
-                    "freshness sources must match descriptor freshness areas"
-                )
-            if binding.full_resync is not None and not descriptor.resync_keys:
-                raise ValueError("full resync handler requires descriptor resync keys")
-            if binding.full_resync is None and descriptor.resync_keys:
-                raise ValueError("descriptor resync keys require a full resync handler")
-            if binding.full_resync is not None and binding.gate is None:
-                raise ValueError("full resync handler requires a provider gate")
-            if binding.schedule is not None and (
-                descriptor.schedule.daily_rank is None
-                and descriptor.schedule.startup_rank is None
-            ):
-                raise ValueError("schedule policy requires a descriptor schedule rank")
-            if (
-                binding.synchronous_refresh is not None
-                and descriptor.coach_rank is None
-            ):
-                raise ValueError("synchronous refresh requires a descriptor coach rank")
+            _validate_binding(static, binding, by_id)
             by_id[binding.provider_id] = binding
         self._static = static
         self._by_id = by_id
