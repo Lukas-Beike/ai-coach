@@ -327,6 +327,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 "question": question,
                 "source_message_ids": list(range(1, 25)),
                 "status": "needs_clarification",
+                "domain": None,
             },
         )
 

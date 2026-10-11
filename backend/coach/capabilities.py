@@ -38,7 +38,6 @@ OWNER_TOOLS = {
         "save_nutrition_entry",
         "update_nutrition_entry",
         "delete_nutrition_entry",
-        "save_fueling_plan",
         "save_equipment",
         "assign_activity_equipment",
         "log_equipment_maintenance",

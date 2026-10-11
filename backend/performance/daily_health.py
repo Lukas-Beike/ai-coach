@@ -7,6 +7,7 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.performance import freshness as performance_freshness
 from backend.performance import recovery as performance_recovery
+from backend.providers.garmin_fields import first_present as _first_present
 
 GARMIN_PERFORMANCE_SOURCE = "Garmin Connect"
 
@@ -50,16 +51,6 @@ GARMIN_DAILY_EXPENDITURE_FIELDS = {
     ),
     "total_kcal": GARMIN_DAILY_HEALTH_FIELDS["calories"],
 }
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def _as_number(value: Any) -> float | int | None:

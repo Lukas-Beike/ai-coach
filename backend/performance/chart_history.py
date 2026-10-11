@@ -106,6 +106,15 @@ def _garmin_values(
         value = activity_validation.bounded_performance_metric(key, metrics.get(key))
         if value is not None:
             observations[day.isoformat()] = value
+    if key == "cycling_ftp_watts":
+        observations.update(
+            {
+                row["date"]: row["value"]
+                for row in garmin_metric_history.ftp_points(
+                    garmin.get("cycling_ftp_history"), start=start, end=today
+                )
+            }
+        )
     return observations
 
 
@@ -176,18 +185,41 @@ def analysis_history(
         # PublicPerformanceStateService exposes this as performance.history.body;
         # the UI can render it in the separate Body tab without another request.
         "body": body.body_history(snapshot, garmin, today),
-        "provider_metrics": garmin.get("provider_metrics")
-        if isinstance(garmin.get("provider_metrics"), dict)
-        else {
-            key: garmin_metric_history.projected_metric(
-                garmin.get(key),
-                start=start,
-                end=today,
-                aggregation="weekly",
-                metric=key,
-                synced_at=garmin.get("synced_at"),
-            )
-            for key in ("endurance_score", "running_tolerance")
+        "cycling_power_profile": {
+            **(snapshot.get("cycling_power_profile") or {}),
+            "points": [
+                point
+                for point in _rows(
+                    (snapshot.get("cycling_power_profile") or {}).get("points")
+                )
+                if (day := _day(point.get("date"))) is not None
+                and start <= day <= today
+            ],
         },
+        "provider_metrics": _provider_metrics(garmin, start, today),
         "metrics": series,
     }
+
+
+def _provider_metrics(
+    garmin: dict[str, Any], start: date, today: date
+) -> dict[str, Any]:
+    cached = garmin.get("provider_metrics") or {}
+    metrics = dict(cached) if isinstance(cached, dict) else {}
+    for key in ("endurance_score", "running_tolerance"):
+        data = garmin_metric_history.projected_metric(
+            garmin.get(key),
+            start=start,
+            end=today,
+            aggregation="weekly",
+            metric=key,
+            synced_at=garmin.get("synced_at"),
+        )
+        if data["points"] or (not cached and key not in metrics):
+            previous = metrics.get(key, {})
+            metrics[key] = {
+                **previous,
+                **data,
+                "status": previous.get("status", data["status"]),
+            }
+    return metrics

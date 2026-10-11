@@ -10,13 +10,17 @@ import dataclasses
 import sqlite3
 import unittest
 from datetime import UTC, datetime
+from typing import Any
 
 from backend.config import Config
+from backend.http_api.sync_commands import PROVIDER_NOT_CONFIGURED_MESSAGES
 from backend.providers.descriptors import (
     DEFAULT_PROVIDER_DESCRIPTORS,
     Capability,
     FreshnessArea,
+    ManualSyncRoute,
     ProviderDescriptor,
+    SchedulePolicy,
 )
 from backend.sync.freshness import (
     PROVIDER_REFRESH_LABELS,
@@ -24,6 +28,7 @@ from backend.sync.freshness import (
     provider_freshness_state,
 )
 from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
+from backend.sync.jobs import JOB_TYPES, PROVIDERS
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 NOW = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
@@ -355,6 +360,410 @@ class DescriptorValidationTests(unittest.TestCase):
         descriptor = _descriptor(resync_keys=("mock_running", "mock_status"))
         self.assertEqual("wahoo-mock", descriptor.provider_id)
         self.assertEqual(("mock_running", "mock_status"), descriptor.resync_keys)
+
+
+INTERVALS_JOB_TYPES = frozenset(
+    {
+        "refresh",
+        "performance_refresh",
+        "activity_details",
+        "plan_push",
+        "competition_push",
+        "nutrition_sync",
+        "historical_backfill",
+    }
+)
+PREVIOUS_JOB_SUPPORT: dict[str, frozenset[str]] = {
+    "intervals": INTERVALS_JOB_TYPES,
+    "garmin": frozenset({"refresh", "historical_backfill"}),
+    "calendar": frozenset({"refresh"}),
+    "weather": frozenset({"refresh"}),
+}
+PREVIOUS_REFRESH_FIELDS: dict[str, frozenset[str]] = {
+    "intervals": frozenset({"days", "reason", "end_date"}),
+    "garmin": frozenset({"days", "reason", "end_date"}),
+    "calendar": frozenset({"reason"}),
+    "weather": frozenset({"force", "reason"}),
+}
+PREVIOUS_MANUAL_ROUTES: tuple[tuple[str, str], ...] = (
+    ("/api/sync", "intervals"),
+    ("/api/garmin/sync", "garmin"),
+    ("/api/weather/sync", "weather"),
+    ("/api/external-calendar/sync", "calendar"),
+)
+PREVIOUS_FULL_RESYNC_ROUTES: tuple[tuple[str, str], ...] = (
+    ("/api/intervals/full-resync", "intervals"),
+    ("/api/garmin/full-resync", "garmin"),
+)
+PREVIOUS_PERIOD_MESSAGES = {
+    "intervals": (
+        "Der Zeitraum für intervals muss -1 oder zwischen 1 und 365 Tagen liegen."
+    ),
+    "garmin": "Der Zeitraum für garmin muss -1 oder zwischen 1 und 90 Tagen liegen.",
+}
+PREVIOUS_NOT_CONFIGURED_MESSAGES = {
+    "intervals": (
+        "Intervals.icu ist nicht konfiguriert. Bitte INTERVALS_API_KEY in der "
+        "Serverkonfiguration hinterlegen."
+    ),
+    "garmin": (
+        "Garmin ist nicht konfiguriert. Bitte GARMIN_EMAIL oder einen vorhandenen "
+        "Garmin-Tokenstore einrichten."
+    ),
+}
+
+
+class OrchestrationParityTests(unittest.TestCase):
+    def test_registry_provider_set_matches_job_provider_set(self) -> None:
+        self.assertEqual(PROVIDERS, frozenset(DEFAULT_PROVIDER_REGISTRY.ids()))
+
+    def test_job_types_match_previous_job_validation_per_provider(self) -> None:
+        self.assertEqual(JOB_TYPES, frozenset().union(*PREVIOUS_JOB_SUPPORT.values()))
+        for provider_id, expected in PREVIOUS_JOB_SUPPORT.items():
+            for job_type in sorted(JOB_TYPES):
+                with self.subTest(provider_id=provider_id, job_type=job_type):
+                    self.assertIs(
+                        job_type in expected,
+                        DEFAULT_PROVIDER_REGISTRY.supports_job(provider_id, job_type),
+                    )
+
+    def test_unknown_provider_or_job_type_is_not_supported(self) -> None:
+        self.assertFalse(DEFAULT_PROVIDER_REGISTRY.supports_job("unknown", "refresh"))
+        self.assertFalse(DEFAULT_PROVIDER_REGISTRY.supports_job("intervals", "nope"))
+        non_text_id: Any = ["intervals"]
+        self.assertFalse(DEFAULT_PROVIDER_REGISTRY.supports_job(non_text_id, "refresh"))
+        non_text_job: Any = ["refresh"]
+        self.assertFalse(
+            DEFAULT_PROVIDER_REGISTRY.supports_job("intervals", non_text_job)
+        )
+
+    def test_duplicate_manual_route_paths_are_rejected(self) -> None:
+        route = ManualSyncRoute(path="/api/dup", uses_sync_period=False)
+        first = dataclasses.replace(_descriptor("first-mock"), manual_sync=route)
+        second = dataclasses.replace(_descriptor("second-mock"), manual_sync=route)
+        with self.assertRaisesRegex(ValueError, "duplicate manual sync route"):
+            ProviderRegistry((first, second))
+
+    def test_duplicate_full_resync_paths_are_rejected(self) -> None:
+        first = dataclasses.replace(
+            _descriptor("first-mock"), full_resync_path="/api/dup/full"
+        )
+        second = dataclasses.replace(
+            _descriptor("second-mock"), full_resync_path="/api/dup/full"
+        )
+        with self.assertRaisesRegex(ValueError, "duplicate full resync route"):
+            ProviderRegistry((first, second))
+
+    def test_refresh_fields_match_previous_refresh_job_fields(self) -> None:
+        for provider_id, expected in PREVIOUS_REFRESH_FIELDS.items():
+            with self.subTest(provider_id=provider_id):
+                self.assertEqual(
+                    expected, DEFAULT_PROVIDER_REGISTRY.refresh_fields(provider_id)
+                )
+        with self.assertRaises(KeyError):
+            DEFAULT_PROVIDER_REGISTRY.refresh_fields("unknown")
+
+    def test_sync_period_defaults_match_server_table(self) -> None:
+        self.assertEqual(
+            {"intervals": 84, "garmin": 84},
+            DEFAULT_PROVIDER_REGISTRY.sync_period_defaults(),
+        )
+
+    def test_daily_order_matches_scheduler_ranks(self) -> None:
+        self.assertEqual(
+            ("weather", "calendar", "garmin", "intervals"),
+            DEFAULT_PROVIDER_REGISTRY.daily_order(),
+        )
+
+    def test_startup_order_matches_scheduler_ranks(self) -> None:
+        self.assertEqual(
+            ("calendar", "intervals", "garmin", "weather"),
+            DEFAULT_PROVIDER_REGISTRY.startup_order(),
+        )
+
+    def test_daily_marker_ids_match_daily_marker_providers(self) -> None:
+        self.assertEqual(
+            frozenset({"intervals", "garmin", "calendar"}),
+            DEFAULT_PROVIDER_REGISTRY.daily_marker_ids(),
+        )
+
+    def test_coach_refresh_targets_match_authorization_order(self) -> None:
+        self.assertEqual(
+            ("intervals", "garmin", "calendar", "weather"),
+            DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets(),
+        )
+
+    def test_only_intervals_waits_for_coach_completion(self) -> None:
+        waiting = [
+            descriptor.provider_id
+            for descriptor in DEFAULT_PROVIDER_REGISTRY.all()
+            if descriptor.coach_waits_for_completion
+        ]
+        self.assertEqual(["intervals"], waiting)
+
+    def test_resync_key_map_matches_full_resync_table_in_order(self) -> None:
+        mapping = DEFAULT_PROVIDER_REGISTRY.resync_key_map()
+        self.assertEqual(list(PROVIDER_RESYNC_KEYS), list(mapping))
+        for provider_id, keys in PROVIDER_RESYNC_KEYS.items():
+            with self.subTest(provider_id=provider_id):
+                self.assertEqual(
+                    (
+                        keys["running"],
+                        keys["status"],
+                        keys["last_at"],
+                        keys["error"],
+                    ),
+                    mapping[provider_id],
+                )
+
+    def test_manual_routes_match_sync_command_table(self) -> None:
+        self.assertEqual(
+            PREVIOUS_MANUAL_ROUTES, DEFAULT_PROVIDER_REGISTRY.manual_routes()
+        )
+
+    def test_manual_route_payloads_match_sync_command_builders(self) -> None:
+        expected = {
+            "intervals": (True, (("reason", "manual"),)),
+            "garmin": (True, (("reason", "manual"),)),
+            "calendar": (False, (("reason", "manuell"),)),
+            "weather": (False, (("reason", "manuell"), ("force", True))),
+        }
+        for provider_id, (uses_period, payload) in expected.items():
+            with self.subTest(provider_id=provider_id):
+                route = DEFAULT_PROVIDER_REGISTRY.get(provider_id).manual_sync
+                self.assertIsNotNone(route)
+                assert route is not None
+                self.assertEqual(uses_period, route.uses_sync_period)
+                self.assertEqual(payload, route.payload)
+
+    def test_full_resync_routes_match_sync_command_table(self) -> None:
+        self.assertEqual(
+            PREVIOUS_FULL_RESYNC_ROUTES, DEFAULT_PROVIDER_REGISTRY.full_resync_routes()
+        )
+
+    def test_not_configured_messages_match_previous_text(self) -> None:
+        for provider_id, expected in PREVIOUS_NOT_CONFIGURED_MESSAGES.items():
+            with self.subTest(provider_id=provider_id):
+                self.assertEqual(
+                    expected,
+                    DEFAULT_PROVIDER_REGISTRY.get(provider_id).not_configured_message,
+                )
+                self.assertEqual(
+                    expected, PROVIDER_NOT_CONFIGURED_MESSAGES[provider_id]
+                )
+        for provider_id in ("calendar", "weather"):
+            self.assertIsNone(
+                DEFAULT_PROVIDER_REGISTRY.get(provider_id).not_configured_message
+            )
+
+    def test_period_error_messages_match_previous_text(self) -> None:
+        for provider_id, expected in PREVIOUS_PERIOD_MESSAGES.items():
+            with self.subTest(provider_id=provider_id):
+                self.assertEqual(
+                    expected,
+                    DEFAULT_PROVIDER_REGISTRY.period_error_message(provider_id),
+                )
+
+
+class CustomOrchestrationDescriptorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.mock = _descriptor(
+            "wahoo-mock",
+            areas=(_area("activities", "Wahoo mock · Training"),),
+            max_sync_days=30,
+            resync_keys=(
+                "wahoo_full_resync_running",
+                "wahoo_full_resync_status",
+                "wahoo_full_resync_at",
+                "wahoo_full_resync_error",
+            ),
+        )
+        self.mock = dataclasses.replace(
+            self.mock,
+            job_types=frozenset({"refresh"}),
+            refresh_fields=frozenset({"days", "reason"}),
+            default_sync_days=30,
+            schedule=SchedulePolicy(daily_rank=5, startup_rank=0, daily_marker=True),
+            coach_rank=10,
+            manual_sync=ManualSyncRoute(
+                path="/api/wahoo/sync",
+                uses_sync_period=True,
+                payload=(("reason", "manual"),),
+            ),
+            full_resync_path="/api/wahoo/full-resync",
+        )
+        self.plain = _descriptor("plain-mock")
+        self.registry = ProviderRegistry(
+            (*DEFAULT_PROVIDER_DESCRIPTORS, self.mock, self.plain)
+        )
+
+    def test_custom_descriptor_flows_through_every_orchestration_helper(self) -> None:
+        registry = self.registry
+        self.assertTrue(registry.supports_job("wahoo-mock", "refresh"))
+        self.assertFalse(registry.supports_job("wahoo-mock", "historical_backfill"))
+        self.assertEqual(
+            frozenset({"days", "reason"}), registry.refresh_fields("wahoo-mock")
+        )
+        self.assertEqual(
+            {"intervals": 84, "garmin": 84, "wahoo-mock": 30},
+            registry.sync_period_defaults(),
+        )
+        self.assertEqual(
+            ("weather", "calendar", "garmin", "intervals", "wahoo-mock"),
+            registry.daily_order(),
+        )
+        self.assertEqual(
+            ("calendar", "wahoo-mock", "intervals", "garmin", "weather"),
+            registry.startup_order(),
+        )
+        self.assertIn("wahoo-mock", registry.daily_marker_ids())
+        self.assertEqual(
+            ("intervals", "garmin", "calendar", "weather", "wahoo-mock"),
+            registry.coach_refresh_targets(),
+        )
+        self.assertEqual(
+            (
+                "wahoo_full_resync_running",
+                "wahoo_full_resync_status",
+                "wahoo_full_resync_at",
+                "wahoo_full_resync_error",
+            ),
+            registry.resync_key_map()["wahoo-mock"],
+        )
+        self.assertEqual(
+            ("/api/wahoo/sync", "wahoo-mock"),
+            registry.manual_routes()[-1],
+        )
+        self.assertEqual(
+            ("/api/wahoo/full-resync", "wahoo-mock"),
+            registry.full_resync_routes()[-1],
+        )
+        self.assertEqual(
+            "Der Zeitraum für wahoo-mock muss -1 oder zwischen 1 und 30 Tagen liegen.",
+            registry.period_error_message("wahoo-mock"),
+        )
+
+    def test_unranked_descriptor_is_skipped_by_ordering_helpers(self) -> None:
+        self.assertNotIn("plain-mock", self.registry.daily_order())
+        self.assertNotIn("plain-mock", self.registry.startup_order())
+        self.assertNotIn("plain-mock", self.registry.coach_refresh_targets())
+        self.assertNotIn("plain-mock", self.registry.daily_marker_ids())
+        self.assertNotIn("plain-mock", self.registry.sync_period_defaults())
+        self.assertNotIn("plain-mock", self.registry.resync_key_map())
+        self.assertFalse(
+            self.registry.supports_job("plain-mock", "historical_backfill")
+        )
+        self.assertEqual(
+            frozenset({"reason"}), self.registry.refresh_fields("plain-mock")
+        )
+
+    def test_custom_descriptor_does_not_leak_into_default_registry(self) -> None:
+        self.assertFalse(
+            DEFAULT_PROVIDER_REGISTRY.supports_job("wahoo-mock", "refresh")
+        )
+        self.assertNotIn(
+            "wahoo-mock", DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets()
+        )
+        self.assertNotIn(
+            "/api/wahoo/sync",
+            [path for path, _ in DEFAULT_PROVIDER_REGISTRY.manual_routes()],
+        )
+
+    def test_period_message_for_unknown_provider_uses_default_window(self) -> None:
+        self.assertEqual(
+            "Der Zeitraum für unknown muss -1 oder zwischen 1 und 90 Tagen liegen.",
+            DEFAULT_PROVIDER_REGISTRY.period_error_message("unknown"),
+        )
+
+
+class OrchestrationDescriptorValidationTests(unittest.TestCase):
+    def test_default_sync_window_must_not_exceed_max(self) -> None:
+        base = _descriptor("window-mock", max_sync_days=30)
+        self.assertEqual(
+            30, dataclasses.replace(base, default_sync_days=30).default_sync_days
+        )
+        with self.assertRaisesRegex(ValueError, "must not exceed max_sync_days"):
+            dataclasses.replace(base, default_sync_days=31)
+
+    def test_default_orchestration_fields_are_generic(self) -> None:
+        descriptor = _descriptor()
+        self.assertEqual(frozenset({"refresh"}), descriptor.job_types)
+        self.assertEqual(frozenset({"reason"}), descriptor.refresh_fields)
+        self.assertIsNone(descriptor.default_sync_days)
+        self.assertEqual(SchedulePolicy(), descriptor.schedule)
+        self.assertIsNone(descriptor.coach_rank)
+        self.assertFalse(descriptor.coach_waits_for_completion)
+        self.assertIsNone(descriptor.not_configured_message)
+        self.assertIsNone(descriptor.manual_sync)
+        self.assertIsNone(descriptor.full_resync_path)
+
+    def test_schedule_policy_validates_ranks_and_marker(self) -> None:
+        self.assertIsNone(SchedulePolicy().daily_rank)
+        with self.assertRaisesRegex(ValueError, "daily_rank"):
+            SchedulePolicy(daily_rank=-1)
+        with self.assertRaisesRegex(ValueError, "startup_rank"):
+            SchedulePolicy(startup_rank=True)
+        with self.assertRaisesRegex(TypeError, "daily_marker"):
+            SchedulePolicy(daily_marker="yes")  # type: ignore[arg-type]
+
+    def test_manual_sync_route_validates_path_flags_and_payload(self) -> None:
+        with self.assertRaisesRegex(ValueError, "path"):
+            ManualSyncRoute(path="", uses_sync_period=False)
+        with self.assertRaisesRegex(ValueError, "absolute path"):
+            ManualSyncRoute(path="api/sync", uses_sync_period=False)
+        with self.assertRaisesRegex(TypeError, "uses_sync_period"):
+            ManualSyncRoute(path="/api/x", uses_sync_period="yes")  # type: ignore[arg-type]
+        for payload in (
+            [("reason", "manual")],
+            (("reason",),),
+            ((1, "manual"),),
+        ):
+            with (
+                self.subTest(payload=payload),
+                self.assertRaisesRegex(ValueError, "payload"),
+            ):
+                ManualSyncRoute(
+                    path="/api/x",
+                    uses_sync_period=False,
+                    payload=payload,  # type: ignore[arg-type]
+                )
+
+    def test_descriptor_rejects_invalid_orchestration_fields(self) -> None:
+        base = _descriptor()
+        cases: list[tuple[dict[str, object], type[Exception], str]] = [
+            ({"job_types": ["refresh"]}, TypeError, "job_types"),
+            ({"job_types": frozenset({""})}, ValueError, "job_types"),
+            ({"refresh_fields": {"reason"}}, TypeError, "refresh_fields"),
+            ({"default_sync_days": 0}, ValueError, "default_sync_days"),
+            ({"schedule": "daily"}, TypeError, "schedule"),
+            ({"coach_rank": -1}, ValueError, "coach_rank"),
+            ({"coach_waits_for_completion": "yes"}, TypeError, "coach_waits"),
+            ({"not_configured_message": ""}, ValueError, "not_configured_message"),
+            ({"manual_sync": ("/api/x", False)}, ValueError, "manual_sync"),
+            ({"full_resync_path": "api/x"}, ValueError, "absolute path"),
+            ({"full_resync_path": ""}, ValueError, "full_resync_path"),
+        ]
+        for overrides, error, pattern in cases:
+            with (
+                self.subTest(overrides=overrides),
+                self.assertRaisesRegex(error, pattern),
+            ):
+                dataclasses.replace(base, **overrides)  # type: ignore[arg-type]
+
+    def test_descriptor_accepts_valid_orchestration_fields(self) -> None:
+        descriptor = dataclasses.replace(
+            _descriptor(),
+            job_types=frozenset({"refresh"}),
+            default_sync_days=7,
+            schedule=SchedulePolicy(daily_rank=0, startup_rank=0, daily_marker=True),
+            coach_rank=0,
+            coach_waits_for_completion=True,
+            not_configured_message="Nicht konfiguriert.",
+            manual_sync=ManualSyncRoute(path="/api/x", uses_sync_period=False),
+            full_resync_path="/api/x/full-resync",
+        )
+        self.assertEqual(7, descriptor.default_sync_days)
+        self.assertEqual("/api/x/full-resync", descriptor.full_resync_path)
 
 
 if __name__ == "__main__":

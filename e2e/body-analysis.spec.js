@@ -31,7 +31,7 @@ function bodyHistory() {
   } } };
 }
 
-test("@responsive Body plots measurements and W/kg retains provenance inside cycling development", async ({ page }) => {
+test("@responsive Body plots measurements and W/kg appears only in the cycling table", async ({ page }) => {
   if (test.info().project.name === "mobile-small") expect(page.viewportSize().width).toBe(320);
   await page.route("**/api/performance", async (route) => {
     const response = await route.fetch();
@@ -77,14 +77,8 @@ test("@responsive Body plots measurements and W/kg retains provenance inside cyc
   const weightRoot = page.locator("#analysisHistoryCharts [data-analysis-section='development-Rad']");
   await expect(weightRoot).toBeVisible();
   await expect(root).toBeHidden();
-  const details = weightRoot.locator("[data-body-metric='cycling_w_per_kg']");
-  await details.locator(".analysis-day-marker[data-date='2026-10-06']").focus();
-  await page.keyboard.press("Enter");
-  await expect(details.locator(".analysis-info-tooltip:popover-open")).toContainText("FTP 06.10.2026");
-  await expect(details.locator(".analysis-info-tooltip:popover-open")).toContainText("eFTP 06.10.2026");
-  await expect(details.locator(".analysis-info-tooltip:popover-open")).toContainText("Gewicht 05.10.2026 (Garmin Connect)");
-  await page.keyboard.press("Escape");
-  await expect(details.locator("circle[data-series='0']")).toHaveCount(11);
+  await expect(weightRoot.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(0);
+  await expect(page.locator("#currentPerformance [data-metric='cycling_w_per_kg'] td")).toHaveText("5,2 W/kg");
   expect((await new AxeBuilder({ page }).include("#analysisHistoryCharts").analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

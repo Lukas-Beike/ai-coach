@@ -1,10 +1,12 @@
 """Declarative descriptors for external data providers.
 
 The descriptors hold provider data that synchronization used to keep in literal
-tables: freshness areas and labels, sync-window limits, and the durable keys of
-full-resync state. They name providers by design, so they live in the provider
-package, which the provider coupling ratchet exempts. The sync registry
-(backend/sync/provider_registry.py) reads them and names no provider.
+tables: freshness areas and labels, sync-window limits, the durable keys of
+full-resync state, and the orchestration policy (job types, scheduling order,
+Coach refresh targets, manual and full-resync HTTP routes). They name providers
+by design, so they live in the provider package, which the provider coupling
+ratchet exempts. The sync registry (backend/sync/provider_registry.py) reads
+them and names no provider.
 
 Migration is incomplete: the freshness projection still keeps its per-area
 fallback sources and configured predicates in backend/sync/freshness.py, and
@@ -22,10 +24,38 @@ from enum import StrEnum
 
 from backend.canonical.vocabulary import ProviderId
 
+INTERVALS_ID = ProviderId.INTERVALS.value
+GARMIN_ID = ProviderId.GARMIN.value
+WEATHER_ID = "weather"
+CALENDAR_ID = "calendar"
+
 _TWO_DAYS_SECONDS = 48 * 60 * 60
 _THREE_HOURS_SECONDS = 3 * 60 * 60
 _INTERVALS_MAX_SYNC_DAYS = 365
 DEFAULT_MAX_SYNC_DAYS = 90
+_INTERVALS_DEFAULT_SYNC_DAYS = 84
+_GARMIN_DEFAULT_SYNC_DAYS = 84
+
+_INTERVALS_NOT_CONFIGURED_MESSAGE = (
+    "Intervals.icu ist nicht konfiguriert. Bitte INTERVALS_API_KEY in der "
+    "Serverkonfiguration hinterlegen."
+)
+_GARMIN_NOT_CONFIGURED_MESSAGE = (
+    "Garmin ist nicht konfiguriert. Bitte GARMIN_EMAIL oder einen vorhandenen "
+    "Garmin-Tokenstore einrichten."
+)
+
+_ALL_INTERVALS_JOB_TYPES = frozenset(
+    {
+        "refresh",
+        "performance_refresh",
+        "activity_details",
+        "plan_push",
+        "competition_push",
+        "nutrition_sync",
+        "historical_backfill",
+    }
+)
 
 
 class Capability(StrEnum):
@@ -52,6 +82,36 @@ def _require_positive_int(value: object, name: str) -> None:
         raise ValueError(f"{name} must be a positive integer")
 
 
+def _require_optional_positive_int(value: object, name: str) -> None:
+    if value is not None:
+        _require_positive_int(value, name)
+
+
+def _require_optional_rank(value: object, name: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer or None")
+
+
+def _require_bool(value: object, name: str) -> None:
+    if not isinstance(value, bool):
+        raise TypeError(f"{name} must be a boolean")
+
+
+def _require_text_set(value: object, name: str) -> None:
+    if not isinstance(value, frozenset):
+        raise TypeError(f"{name} must be a frozenset of text")
+    for item in value:
+        _require_text(item, name)
+
+
+def _require_route_path(value: object, name: str) -> None:
+    _require_text(value, name)
+    if not str(value).startswith("/"):
+        raise ValueError(f"{name} must be an absolute path")
+
+
 @dataclass(frozen=True, slots=True)
 class FreshnessArea:
     """One freshness-tracked area of a provider and how it is presented."""
@@ -70,12 +130,55 @@ class FreshnessArea:
 
 
 @dataclass(frozen=True, slots=True)
+class SchedulePolicy:
+    """When a provider is scheduled and whether it keeps daily markers.
+
+    ``None`` for a rank means the provider is never scheduled in that run.
+    ``daily_marker`` enables the hourly due-check plus attempt and success
+    markers used by the daily refresh.
+    """
+
+    daily_rank: int | None = None
+    startup_rank: int | None = None
+    daily_marker: bool = False
+
+    def __post_init__(self) -> None:
+        _require_optional_rank(self.daily_rank, "daily_rank")
+        _require_optional_rank(self.startup_rank, "startup_rank")
+        _require_bool(self.daily_marker, "daily_marker")
+
+
+@dataclass(frozen=True, slots=True)
+class ManualSyncRoute:
+    """A user-facing POST route that enqueues a provider refresh.
+
+    ``payload`` holds the fixed job fields the route adds, as ordered pairs.
+    """
+
+    path: str
+    uses_sync_period: bool
+    payload: tuple[tuple[str, object], ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_route_path(self.path, "path")
+        _require_bool(self.uses_sync_period, "uses_sync_period")
+        if not isinstance(self.payload, tuple) or not all(
+            isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str)
+            for item in self.payload
+        ):
+            raise ValueError("payload must be a tuple of (name, value) pairs")
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderDescriptor:
     """Provider-neutral description of one configured data provider.
 
     ``resync_keys`` holds the durable full-resync state keys in the order
     running, status, last completion, error. Providers without a full resync
     leave it empty.
+
+    The orchestration fields default to the generic refresh-only behaviour.
+    ``coach_rank`` of ``None`` means the provider is not a Coach refresh target.
     """
 
     provider_id: str
@@ -84,6 +187,15 @@ class ProviderDescriptor:
     freshness_areas: tuple[FreshnessArea, ...]
     max_sync_days: int
     resync_keys: tuple[str, ...]
+    job_types: frozenset[str] = frozenset({"refresh"})
+    refresh_fields: frozenset[str] = frozenset({"reason"})
+    default_sync_days: int | None = None
+    schedule: SchedulePolicy = SchedulePolicy()
+    coach_rank: int | None = None
+    coach_waits_for_completion: bool = False
+    not_configured_message: str | None = None
+    manual_sync: ManualSyncRoute | None = None
+    full_resync_path: str | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.provider_id, "provider_id")
@@ -103,11 +215,31 @@ class ProviderDescriptor:
             _require_text(key, "resync key")
         if len(set(self.resync_keys)) != len(self.resync_keys):
             raise ValueError("resync_keys must be unique")
+        _require_text_set(self.job_types, "job_types")
+        _require_text_set(self.refresh_fields, "refresh_fields")
+        _require_optional_positive_int(self.default_sync_days, "default_sync_days")
+        if (
+            self.default_sync_days is not None
+            and self.default_sync_days > self.max_sync_days
+        ):
+            raise ValueError("default_sync_days must not exceed max_sync_days")
+        if not isinstance(self.schedule, SchedulePolicy):
+            raise TypeError("schedule must be a SchedulePolicy")
+        _require_optional_rank(self.coach_rank, "coach_rank")
+        _require_bool(self.coach_waits_for_completion, "coach_waits_for_completion")
+        if self.not_configured_message is not None:
+            _require_text(self.not_configured_message, "not_configured_message")
+        if self.manual_sync is not None and not isinstance(
+            self.manual_sync, ManualSyncRoute
+        ):
+            raise ValueError("manual_sync must be a ManualSyncRoute")
+        if self.full_resync_path is not None:
+            _require_route_path(self.full_resync_path, "full_resync_path")
 
 
 DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
     ProviderDescriptor(
-        provider_id=ProviderId.INTERVALS.value,
+        provider_id=INTERVALS_ID,
         label="Intervals.icu",
         capabilities=frozenset(
             {
@@ -149,9 +281,32 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             "intervals_full_resync_at",
             "intervals_full_resync_error",
         ),
+        # backend/sync/jobs.py: JOB_TYPES; every type is intervals-only or allowed.
+        job_types=_ALL_INTERVALS_JOB_TYPES,
+        # backend/sync/jobs.py: _refresh_job_fields["intervals"].
+        refresh_fields=frozenset({"days", "reason", "end_date"}),
+        # backend/sync/scheduler.py via server.py:790 SYNC_PERIOD_DEFAULTS.
+        default_sync_days=_INTERVALS_DEFAULT_SYNC_DAYS,
+        # scheduler.py:68-74 daily order rank 3; scheduler.py:229-234 startup rank 1;
+        # sync/daily.py:17,23 and sync/queue.py:92-97 daily marker.
+        schedule=SchedulePolicy(daily_rank=3, startup_rank=1, daily_marker=True),
+        # coach/authorization.py:41-44 enum order (local=0, intervals=1, ...).
+        coach_rank=1,
+        # coach/tool_preparation.py:70-78 waits for the intervals refresh.
+        coach_waits_for_completion=True,
+        # http_api/sync_commands.py:33-42.
+        not_configured_message=_INTERVALS_NOT_CONFIGURED_MESSAGE,
+        # http_api/sync_commands.py:15-32,108-127,150-172 (/api/sync, sync period).
+        manual_sync=ManualSyncRoute(
+            path="/api/sync",
+            uses_sync_period=True,
+            payload=(("reason", "manual"),),
+        ),
+        # http_api/sync_commands.py:15-32 (/api/intervals/full-resync).
+        full_resync_path="/api/intervals/full-resync",
     ),
     ProviderDescriptor(
-        provider_id=ProviderId.GARMIN.value,
+        provider_id=GARMIN_ID,
         label="Garmin",
         capabilities=frozenset(
             {
@@ -178,9 +333,23 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             "garmin_full_resync_at",
             "garmin_full_resync_error",
         ),
+        # backend/sync/jobs.py: historical_backfill is intervals/garmin only.
+        job_types=frozenset({"refresh", "historical_backfill"}),
+        # backend/sync/jobs.py: _refresh_job_fields["garmin"].
+        refresh_fields=frozenset({"days", "reason", "end_date"}),
+        default_sync_days=_GARMIN_DEFAULT_SYNC_DAYS,
+        schedule=SchedulePolicy(daily_rank=2, startup_rank=2, daily_marker=True),
+        coach_rank=2,
+        not_configured_message=_GARMIN_NOT_CONFIGURED_MESSAGE,
+        manual_sync=ManualSyncRoute(
+            path="/api/garmin/sync",
+            uses_sync_period=True,
+            payload=(("reason", "manual"),),
+        ),
+        full_resync_path="/api/garmin/full-resync",
     ),
     ProviderDescriptor(
-        provider_id="weather",
+        provider_id=WEATHER_ID,
         label="Open-Meteo",
         capabilities=frozenset({Capability.WEATHER_FORECAST}),
         freshness_areas=(
@@ -193,9 +362,19 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         ),
         max_sync_days=DEFAULT_MAX_SYNC_DAYS,
         resync_keys=(),
+        # backend/sync/jobs.py: _refresh_job_fields["weather"].
+        refresh_fields=frozenset({"force", "reason"}),
+        schedule=SchedulePolicy(daily_rank=0, startup_rank=3, daily_marker=False),
+        coach_rank=4,
+        # http_api/sync_commands.py:150-172 (manual weather refresh, forced).
+        manual_sync=ManualSyncRoute(
+            path="/api/weather/sync",
+            uses_sync_period=False,
+            payload=(("reason", "manuell"), ("force", True)),
+        ),
     ),
     ProviderDescriptor(
-        provider_id="calendar",
+        provider_id=CALENDAR_ID,
         label="Gemeinsamer Kalender",
         capabilities=frozenset({Capability.PUBLIC_CALENDAR}),
         freshness_areas=(
@@ -208,5 +387,12 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         ),
         max_sync_days=DEFAULT_MAX_SYNC_DAYS,
         resync_keys=(),
+        schedule=SchedulePolicy(daily_rank=1, startup_rank=0, daily_marker=True),
+        coach_rank=3,
+        manual_sync=ManualSyncRoute(
+            path="/api/external-calendar/sync",
+            uses_sync_period=False,
+            payload=(("reason", "manuell"),),
+        ),
     ),
 )

@@ -36,14 +36,19 @@ class NutritionGetRoutes:
         if path not in {
             "/api/nutrition/day",
             "/api/nutrition/range",
+            "/api/nutrition/week",
             "/api/nutrition/templates",
-            "/api/nutrition/fueling",
             NUTRITION_PRODUCTS_PATH,
         }:
             return False
 
         self._session_auth_service().require_auth(handler)
         query = parse_qs(urlparse(handler.path).query)
+        if path == "/api/nutrition/week":
+            handler.send_json(
+                200, {"ok": True, **self._diary_service().get_week_summary()}
+            )
+            return True
         if path == NUTRITION_PRODUCTS_PATH:
             meal_library = self._meal_library_service()
             barcode = query.get("barcode", [None])[0]
@@ -56,15 +61,6 @@ class NutritionGetRoutes:
                 products = meal_library.list_products(query=term)
                 handler.send_json(200, {"ok": True, "products": products})
             return True
-        if path == "/api/nutrition/fueling":
-            diary = self._diary_service()
-            unit_id = query.get("planned_unit_id", [None])[0]
-            handler.send_json(
-                200,
-                diary.fueling().read(unit_id) if unit_id else diary.fueling().choices(),
-            )
-            return True
-
         if path == "/api/nutrition/templates":
             meal_library = self._meal_library_service()
             handler.send_json(

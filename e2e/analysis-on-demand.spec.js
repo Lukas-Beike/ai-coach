@@ -47,8 +47,8 @@ test("@responsive cycling power profile loads only on performance and keeps unkn
   await expect(page.locator("#dataPanel")).toHaveClass(/active/);
   await expect(page.locator("#performancePredictions")).toBeVisible();
   await expect(page.locator("#cyclingPowerProfile tbody tr")).toHaveCount(5);
-  await expect(page.locator("#cyclingPowerProfile [data-power-duration='5'] td")).toHaveText(["250 W", "—"]);
-  await expect(page.locator("#cyclingPowerProfile [data-power-duration='3600'] td")).toHaveText(["—", "210 W"]);
+  await expect(page.locator("#cyclingPowerProfile [data-power-duration='5'] td")).toHaveText("250 W");
+  await expect(page.locator("#cyclingPowerProfile [data-power-duration='3600'] td")).toHaveText("210 W");
   await expect(page.locator("#cyclingPowerProfile")).toContainText("letzte 90 Tage");
   expect(await page.locator("#cyclingPowerProfile").evaluate((element) => element.closest("[data-analysis-section]").dataset.analysisSection)).toBe("development-Rad");
   expect(reportCounts()).toEqual({ [ENDURANCE]: 0, [POWER_PROFILES]: 1, [TRAINING_RECORDS]: 0 });
@@ -94,6 +94,18 @@ test("@responsive equipment records load only on the equipment route and stay ca
   await routeTo(page, "#more/equipment");
   await expect(page.locator("#equipmentItems").getByRole("heading", { name: "Ausrüstung und Wartung" })).toBeVisible();
   expect(reportCounts()[TRAINING_RECORDS]).toBe(1);
+
+  const layout = await page.evaluate(() => {
+    const nav = document.querySelector("#settingsPanel > .more-segment-nav").getBoundingClientRect();
+    const panel = document.querySelector('[data-more-segment-panel="equipment"]').getBoundingClientRect();
+    return { desktop: innerWidth >= 1100, nav: { right: nav.right, top: nav.top, width: nav.width }, panel: { left: panel.left, top: panel.top, width: panel.width }, overflow: document.documentElement.scrollWidth > innerWidth };
+  });
+  expect(layout.overflow).toBe(false);
+  if (layout.desktop) {
+    expect(layout.panel.left).toBeGreaterThan(layout.nav.right);
+    expect(layout.panel.width).toBeGreaterThan(layout.nav.width * 2);
+    expect(Math.abs(layout.panel.top - layout.nav.top)).toBeLessThan(2);
+  }
 
   await routeTo(page, "#coach");
   await expect(page.locator("#chatPanel")).toHaveClass(/active/);

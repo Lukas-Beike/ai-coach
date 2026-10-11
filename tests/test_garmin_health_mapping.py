@@ -665,6 +665,108 @@ class AliasAndUnitTests(unittest.TestCase):
                     SourceKind.DEVICE_MEASURED,
                 )
 
+    def test_weight_daily_weight_summaries_nested_without_unit_maps_grams(self) -> None:
+        result = _map(
+            {
+                "weight": {
+                    "dailyWeightSummaries": [
+                        {
+                            "summaryDate": "2026-09-07",
+                            "latestWeight": {
+                                "weight": 72800,
+                            },
+                        }
+                    ]
+                }
+            }
+        )
+        self.assertEqual(len(result.records), 1)
+        self.assertEqual(result.records[0].kind, MetricKind.WEIGHT)
+        self.assertEqual(result.records[0].value.value, 72.8)
+        self.assertEqual(result.records[0].observed_on, date(2026, 9, 7))
+        self.assertEqual(
+            result.records[0].provenance.source_record_id, "weight:2026-09-07:0"
+        )
+
+    def test_sleep_with_nested_daily_sleep_dto_maps_duration_and_score(self) -> None:
+        result = _map(
+            {
+                "sleep": {
+                    "dailySleepDTO": {
+                        "calendarDate": DAY,
+                        "sleepTimeSeconds": 28800,
+                        "sleepScore": 85,
+                    }
+                }
+            }
+        )
+        self.assertEqual(
+            _rows(result),
+            [
+                ("sleep_duration", 28800.0, DAY, "-"),
+                ("sleep_score", 85.0, DAY, "-"),
+            ],
+        )
+
+    def test_sleep_daily_dto_overall_score_maps_without_flat_fields(self) -> None:
+        result = _map(
+            {
+                "sleep": {
+                    "dailySleepDTO": {
+                        "calendarDate": DAY,
+                        "sleepTimeSeconds": 28800,
+                        "sleepScores": {"overall": {"value": 85}},
+                    }
+                }
+            }
+        )
+        self.assertEqual(
+            _rows(result),
+            [
+                ("sleep_duration", 28800.0, DAY, "-"),
+                ("sleep_score", 85.0, DAY, "-"),
+            ],
+        )
+        self.assertEqual(result.issues, ())
+
+    def test_nested_weight_unit_and_body_fat_are_preserved(self) -> None:
+        result = _map(
+            {
+                "weight": {
+                    "dailyWeightSummaries": [
+                        {
+                            "summaryDate": DAY,
+                            "latestWeight": {
+                                "weight": 160,
+                                "unit": "lb",
+                                "bodyFat": 18,
+                            },
+                        }
+                    ]
+                }
+            }
+        )
+        self.assertEqual(len(result.records), 2)
+        self.assertAlmostEqual(result.records[0].value.value, 72.5747792)
+        self.assertEqual(result.records[1].kind, MetricKind.BODY_FAT)
+        self.assertEqual(result.records[1].value.value, 18)
+
+    def test_nested_unitless_weight_uses_garmin_grams_without_guessing(self) -> None:
+        result = _map(
+            {
+                "weight": {
+                    "dailyWeightSummaries": [
+                        {
+                            "summaryDate": DAY,
+                            "latestWeight": {"weight": 72.8},
+                        }
+                    ]
+                }
+            }
+        )
+        self.assertEqual(result.records, ())
+        self.assertEqual(result.issues[0].reason, IssueReason.OUT_OF_RANGE)
+
 
 class TimeAndZoneTests(unittest.TestCase):
     def test_running_threshold_sync_day_follows_athlete_zone(self) -> None:
@@ -763,6 +865,23 @@ class ProvenanceTests(unittest.TestCase):
     def test_observations_for_one_record_share_a_record_id(self) -> None:
         result = _map({"sleep": {"calendarDate": DAY, "sleepTimeSeconds": 25200}})
         self.assertEqual(result.records[0].provenance.source_record_id, f"sleep:{DAY}")
+
+    def test_list_payloads_include_index_in_source_record_id(self) -> None:
+        result = _map(
+            {
+                "sleep": [
+                    {"calendarDate": DAY, "sleepTimeSeconds": 25200},
+                    {"calendarDate": DAY, "sleepTimeSeconds": 27900},
+                ]
+            }
+        )
+        self.assertEqual(len(result.records), 2)
+        self.assertEqual(
+            result.records[0].provenance.source_record_id, f"sleep:{DAY}:0"
+        )
+        self.assertEqual(
+            result.records[1].provenance.source_record_id, f"sleep:{DAY}:1"
+        )
 
 
 class ContractTests(unittest.TestCase):

@@ -76,7 +76,6 @@ $("#logsDownloadButton").addEventListener("click", downloadServerLogs);
 $("#logsDeleteButton")?.addEventListener("click", deleteServerLogs);
 $("#privacyExportButton").addEventListener("click", downloadPrivacyExport);
 $("#privacyDeleteButton").addEventListener("click", deletePrivacyData);
-$("#changeHistoryRefreshButton").addEventListener("click", loadChangeHistory);
 $("#notificationEnableButton").addEventListener("click", enableNotifications);
 $("#backupDownloadButton").addEventListener("click", () => { downloadDatabaseBackup().catch((error) => toast(error.message, true)); });
 $("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);

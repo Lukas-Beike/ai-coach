@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.config import Config
 from backend.db.manager import DatabaseManager
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ class PublicBootstrapDependencies:
     morning_checkin_state_service: Callable[[], Any]
     coach_quick_actions_service: Callable[[], Any]
     provider_state_service: Callable[[], Any]
+    provider_registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
 
 
 class PublicBootstrapService:
@@ -63,6 +65,7 @@ class PublicBootstrapService:
 
     def read(self) -> dict[str, Any]:
         deps = self._dependencies
+        registry = getattr(deps, "provider_registry", DEFAULT_PROVIDER_REGISTRY)
         # Resolve the manager only after taking the shared lock; all reads below
         # then reuse this single unit of work, including nested service reads.
         with deps.database_lock, deps.database_manager().unit_of_work() as db:
@@ -185,10 +188,10 @@ class PublicBootstrapService:
                     or None,
                 },
                 "provider_resync": {
-                    "intervals": deps.full_provider_resync_service().state(
-                        "intervals", db
-                    ),
-                    "garmin": deps.full_provider_resync_service().state("garmin", db),
+                    provider_id: deps.full_provider_resync_service().state(
+                        provider_id, db
+                    )
+                    for _, provider_id in registry.full_resync_routes()
                 },
                 "sync": deps.sync_public_state_service().browser_state(
                     freshness=freshness,
@@ -209,12 +212,10 @@ class PublicBootstrapService:
                     "state": deps.workout_library_sync_state_service().summary(),
                 },
                 "sync_settings": {
-                    "intervals_days": deps.sync_state_repository().sync_period(
-                        "intervals", deps.sync_period_defaults, deps.all_sync_days
-                    ),
-                    "garmin_days": deps.sync_state_repository().sync_period(
-                        "garmin", deps.sync_period_defaults, deps.all_sync_days
-                    ),
+                    f"{provider_id}_days": deps.sync_state_repository().sync_period(
+                        provider_id, deps.sync_period_defaults, deps.all_sync_days
+                    )
+                    for provider_id in registry.sync_period_defaults()
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {

@@ -59,8 +59,9 @@ class CoachRequestPayloadService:
         )
         if not allow_mutations:
             model_instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
+        projected_dialogue = compact_coach_dialogue(context, selection)
         dialogue_input = {
-            "dialogue": compact_coach_dialogue(context, selection),
+            "dialogue": projected_dialogue,
             "current_message": message,
             "confirmed_steps": command_receipts,
         }
@@ -69,7 +70,7 @@ class CoachRequestPayloadService:
                 "current_message": message,
                 "confirmed_steps": command_receipts,
                 **{
-                    key: context[key]
+                    key: projected_dialogue[key]
                     for key in (
                         "current_user_message_id",
                         "local_date",
@@ -78,7 +79,7 @@ class CoachRequestPayloadService:
                     )
                 },
             }
-        payload = {
+        payload: dict[str, Any] = {
             "model": model or self._settings.selected_model(),
             "reasoning": {
                 "effort": thinking_level or self._settings.selected_thinking_level()

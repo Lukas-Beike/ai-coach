@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=306">
+  <link rel="stylesheet" href="/styles.css?v=310">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -167,6 +167,14 @@
         </div>
         </section>
         <section id="nutritionDiary" aria-label="Ernährungstagebuch">
+          <section id="nutritionWeek" class="nutrition-tools" aria-labelledby="nutritionWeekHeading">
+            <h3 id="nutritionWeekHeading">Letzte 7 Tage</h3>
+            <p id="nutritionWeekPeriod" class="fine-print"></p>
+            <output id="nutritionWeekStatus" class="tab-sync-detail" aria-live="polite"></output>
+            <div id="nutritionWeekTotals" class="nutrition-totals"></div>
+            <details id="nutritionWeekDetails" hidden><summary>Tageswerte anzeigen</summary><div class="nutrition-week-table"><table aria-label="Ernährung der letzten 7 Tage"><thead><tr><th scope="col">Tag</th><th scope="col">Aufnahme<br>kcal</th><th scope="col">Verbrauch<br>kcal</th><th scope="col">Bilanz<br>kcal</th></tr></thead><tbody id="nutritionWeekDays"></tbody></table></div></details>
+            <p class="fine-print">Sieben abgeschlossene Tage bis gestern. Aufnahme aus deinem Tagebuch, Verbrauch aus Garmin Connect. Die Bilanz setzt vollständig erfasste Mahlzeiten voraus. Fehlende Werte zählen nicht als null; Makro-Durchschnitte berücksichtigen nur Tage mit vollständigen Angaben für das jeweilige Makro.</p>
+          </section>
           <div class="nutrition-toolbar"><button class="secondary-button" type="button" id="nutritionPrevious" aria-label="Vorheriger Tag">←</button><label>Tag <input type="date" id="nutritionDate"></label><button class="secondary-button" type="button" id="nutritionNext" aria-label="Nächster Tag">→</button><button class="secondary-button" type="button" id="nutritionToday">Heute</button></div>
           <div id="nutritionTotals" class="nutrition-totals"></div>
           <div id="nutritionEntries" class="nutrition-list"></div>
@@ -212,7 +220,6 @@
             <label>Trainingspräferenzen<textarea name="training_preferences" rows="3" placeholder="Drinnen/draußen, bevorzugte Einheiten, Ruhetage…"></textarea></label>
             <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Intervals.icu stehen…"></textarea></label>
             <label>Persönliches Schlafziel (Stunden)<input name="sleep_target_hours" type="number" min="4" max="12" step="0.25" placeholder="Optional, zum Beispiel 8"><small>Bestätigtes Ziel für die Auswertung bekannter Nächte; keine automatische Vorgabe.</small></label>
-            <label>Bestätigte Verpflegungsverträglichkeit<textarea name="fueling_tolerance" rows="2" placeholder="Erprobte Kohlenhydratmengen, verträgliche Produkte und Grenzen"></textarea></label>
             <div class="form-grid">
               <label>Coaching-Stil<input name="coaching_style" placeholder="Unterstützend, direkt und evidenzbasiert"></label>
               <label>Zeitzone<select name="timezone" autocomplete="off"><option value="Europe/Berlin">Europe/Berlin</option><option value="Europe/London">Europe/London</option><option value="Europe/Paris">Europe/Paris</option><option value="Europe/Zurich">Europe/Zurich</option><option value="America/New_York">America/New_York</option><option value="America/Chicago">America/Chicago</option><option value="America/Los_Angeles">America/Los_Angeles</option><option value="Asia/Tokyo">Asia/Tokyo</option><option value="Australia/Sydney">Australia/Sydney</option><option value="UTC">UTC</option></select><small>IANA-Zeitzone; die Auswahl steuert Tagesgrenzen und Zeitformatierung.</small></label>
@@ -334,12 +341,6 @@
             <button id="privacyExportButton" type="button" class="secondary-button">Daten exportieren</button>
             <button id="privacyDeleteButton" type="button" class="secondary-button danger-button">Lokale Daten löschen</button>
           </div>
-          <div class="settings-inline-action">
-            <div><strong>Lokale Änderungshistorie</strong><span>Nur sichere strukturierte Änderungen; Undo bleibt lokal und löst keinen Remote-Sync aus.</span></div>
-            <button id="changeHistoryRefreshButton" type="button" class="secondary-button">Historie laden</button>
-          </div>
-          <div id="changeHistoryStatus" class="fine-print" aria-live="polite">Noch nicht geladen.</div>
-          <div id="changeHistoryList" class="change-history-list" aria-live="polite"></div>
           <div id="privacyDeleteNotice" class="remote-delete-notice" hidden role="alert"></div>
           <div id="privacyDeleteResult" class="fine-print" hidden aria-live="polite"></div>
           <div class="settings-inline-action backup-actions">
@@ -463,18 +464,18 @@
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=19" defer></script>
-  <script src="/shared.js?v=9" defer></script>
+  <script src="/shared.js?v=10" defer></script>
   <script src="/auth.js?v=4" defer></script>
   <script src="/sync-status.js?v=5" defer></script>
   <script src="/notifications.js?v=3" defer></script>
-  <script src="/nutrition.js?v=24" defer></script>
-  <script src="/analysis.js?v=110" defer></script>
+  <script src="/nutrition.js?v=26" defer></script>
+  <script src="/analysis.js?v=112" defer></script>
   <script src="/activity-details.js?v=12" defer></script>
-  <script src="/performance-view.js?v=7" defer></script>
-  <script src="/diagnostics.js?v=2" defer></script>
+  <script src="/performance-view.js?v=8" defer></script>
+  <script src="/diagnostics.js?v=3" defer></script>
   <script src="/state-loader.js?v=2" defer></script>
   <script src="/sync-actions.js?v=2" defer></script>
   <script src="/settings.js?v=3" defer></script>
-  <script src="/app.js?v=281" defer></script>
+  <script src="/app.js?v=282" defer></script>
 </body>
 </html>

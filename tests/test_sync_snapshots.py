@@ -67,6 +67,7 @@ class SnapshotMergeTests(unittest.TestCase):
         }
         performance = {
             "synced_at": "new",
+            "cycling_power_profile": {"points": [{"watts": 420}]},
             "athlete": {"id": "new"},
             "recent_wellness": [
                 {"id": "same", "value": "incoming"},
@@ -94,6 +95,9 @@ class SnapshotMergeTests(unittest.TestCase):
 
         self.assertIsNot(result, current)
         self.assertEqual(result["synced_at"], "new")
+        self.assertEqual(
+            result["cycling_power_profile"], performance["cycling_power_profile"]
+        )
         self.assertEqual(result["athlete"], {"id": "new"})
         self.assertEqual(result["recent_activities"], [{"id": "activity"}])
         self.assertEqual(result["unknown_top_level"], {"preserved": True})

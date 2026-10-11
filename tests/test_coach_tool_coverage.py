@@ -1506,13 +1506,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         "assign_activity_equipment:success",
         "log_equipment_maintenance:success",
         "read_nutrition:success",
-        "save_fueling_plan:success",
     )
-    def test_training_records_fueling_and_equipment_tools_use_confirmed_local_state(
+    def test_training_records_and_equipment_tools_use_confirmed_local_state(
         self,
     ):
         self.seed_activity()
-        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
                     "date": "2026-10-03",
@@ -1597,23 +1596,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             message="Protokolliere die Wartung.",
         )
         self.assertTrue(maintenance["stored_locally"])
-        fueling = self.run_tool("read_nutrition", {"planned_unit_id": planned["id"]})[
-            "fueling"
-        ]
-        saved_fueling = self.run_tool(
-            "save_fueling_plan",
-            {
-                "payload": {
-                    "planned_unit_id": planned["id"],
-                    "unit_sha256": fueling["unit_sha256"],
-                    "carbs_g_per_hour": 60,
-                    "fluid_ml_per_hour": 500,
-                }
-            },
-            ["local_nutrition"],
-            message="Speichere diesen bestätigten Verpflegungsplan lokal.",
-        )
-        self.assertFalse(saved_fueling["consumption_logged"])
+        self.assertTrue(self.run_tool("read_nutrition", {})["ok"])
 
     def test_every_mutating_tool_rejects_missing_user_authorization_without_effect(
         self,

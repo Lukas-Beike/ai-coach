@@ -99,6 +99,18 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
+from backend.providers.garmin_fields import (
+    GARMIN_BODY_FAT_ALIASES,
+    GARMIN_DATE_ALIASES,
+    GARMIN_FTP_ALIASES,
+    GARMIN_HRV_LAST_NIGHT_ALIASES,
+    GARMIN_READINESS_ALIASES,
+    GARMIN_RESTING_HR_ALIASES,
+    GARMIN_SLEEP_DURATION_ALIASES,
+    GARMIN_SLEEP_SCORE_ALIASES,
+    GARMIN_VO2MAX_ALIASES,
+    GARMIN_WEIGHT_UNIT_ALIASES,
+)
 
 MAPPER_VERSION: Final = 2
 GARMIN_LABEL: Final = "Garmin Connect"
@@ -116,17 +128,11 @@ _WEIGHT: Final = "weight"
 _WEIGHT_SECTIONS: Final = ("weight", "weigh_ins", "weighIns")
 _BODY_FAT_RECORD: Final = "body_fat"
 _WEIGHT_KEYS: Final = ("weightKg", "weight_kg", "weight")
-_WEIGHT_UNIT_KEYS: Final = ("unitKey", "unit", "weightUnit")
+_WEIGHT_UNIT_KEYS: Final = GARMIN_WEIGHT_UNIT_ALIASES
 _WEIGHT_VALUE_KEYS: Final = ("weightKg", "weight_kg", "weight", "value")
 _WEIGHT_MIN_KG: Final = 30.0
 _WEIGHT_MAX_KG: Final = 300.0
-_BODY_FAT_KEYS: Final = (
-    "bodyFat",
-    "body_fat",
-    "bodyFatPercent",
-    "bodyFatPercentage",
-    "fatPercent",
-)
+_BODY_FAT_KEYS: Final = GARMIN_BODY_FAT_ALIASES
 _BODY_FAT_UNIT_KEYS: Final = ("bodyFatUnit", "bodyFatUnitKey")
 _BODY_FAT_INNER_UNIT_KEYS: Final = ("unitKey", "unit", "bodyFatUnit")
 _BODY_FAT_VALUE_KEYS: Final = ("value", "val", "amount")
@@ -135,9 +141,7 @@ _BODY_FAT_MAX_PERCENT: Final = 70.0
 _WEIGHT_SKIP_KEYS: Final = frozenset({"minweight", "maxweight", "weightdelta"})
 _BODY_FAT_SKIP_KEYS: Final = frozenset({"minbodyfat", "maxbodyfat", "bodyfatdelta"})
 _WALK_DATE_KEYS: Final = (
-    "calendarDate",
-    "summaryDate",
-    "date",
+    *GARMIN_DATE_ALIASES,
     "timestampGMT",
     "timestamp",
 )
@@ -195,7 +199,7 @@ class _Entry:
     observed_at: datetime | None = None
 
 
-_VO2MAX_NAMES: Final = ("vo2MaxPreciseValue",)
+_VO2MAX_NAMES: Final = GARMIN_VO2MAX_ALIASES
 
 _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
     "sleep": (
@@ -203,12 +207,12 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
             None,
             (
                 _Field(
-                    ("sleepTimeSeconds", "sleepDuration"),
+                    GARMIN_SLEEP_DURATION_ALIASES,
                     MetricKind.SLEEP_DURATION,
                     _DEVICE,
                 ),
                 _Field(
-                    ("sleepScore", "overallSleepScore"),
+                    GARMIN_SLEEP_SCORE_ALIASES,
                     MetricKind.SLEEP_SCORE,
                     _PROVIDER,
                 ),
@@ -218,7 +222,7 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
     "hrv": (
         _Group(
             None,
-            (_Field(("hrvLastNight", "lastNightAvg"), MetricKind.HRV_RMSSD, _DEVICE),),
+            (_Field(GARMIN_HRV_LAST_NIGHT_ALIASES, MetricKind.HRV_RMSSD, _DEVICE),),
         ),
     ),
     "resting_hr": (
@@ -226,7 +230,7 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
             None,
             (
                 _Field(
-                    ("restingHeartRate", "restingHR", "resting_heart_rate"),
+                    GARMIN_RESTING_HR_ALIASES,
                     MetricKind.RESTING_HR,
                     _DEVICE,
                 ),
@@ -234,7 +238,9 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
         ),
     ),
     "readiness": (
-        _Group(None, (_Field(("score",), MetricKind.READINESS, _PROVIDER),)),
+        _Group(
+            None, (_Field(GARMIN_READINESS_ALIASES, MetricKind.READINESS, _PROVIDER),)
+        ),
     ),
     "max_metrics": (
         _Group(
@@ -255,7 +261,7 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
             None,
             (
                 _Field(
-                    ("functionalThresholdPower", "ftp"),
+                    GARMIN_FTP_ALIASES,
                     MetricKind.FTP,
                     _PROVIDER,
                     Sport.RIDE,
@@ -268,7 +274,7 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
             None,
             (
                 _Field(
-                    ("functionalThresholdPower", "ftp"),
+                    GARMIN_FTP_ALIASES,
                     MetricKind.FTP,
                     _PROVIDER,
                     Sport.RIDE,
@@ -336,8 +342,12 @@ def _entry(
     day: date,
     suffix: str | None = None,
     observed_at: datetime | None = None,
+    *,
+    index: int | None = None,
 ) -> _Entry:
     base = f"{name}:{day.isoformat()}"
+    if index is not None:
+        base = f"{base}:{index}"
     record_id = base if suffix is None else f"{base}:{suffix}"
     return _Entry(ref, day, record_id, observed_at)
 
@@ -413,11 +423,8 @@ def _decimal(value: object) -> float | None:
 
 
 def _weight_number(value: object) -> float | None:
-    """Weight number as the legacy reader reads it: two decimals unless whole."""
-    number = _decimal(value)
-    if number is None:
-        return None
-    return number if number.is_integer() else round(number, 2)
+    """Finite weight number without losing precision during unit conversion."""
+    return _decimal(value)
 
 
 def _is_blank_unit(unit: object) -> bool:
@@ -507,34 +514,62 @@ class _WeightWalk:
         self._records = 0
 
     def run(self, payload: object) -> None:
-        self._visit(payload, None, 0)
+        self._visit(payload, None, 0, None, False)
 
-    def _visit(self, value: object, inherited: _Day, depth: int) -> None:
+    def _visit(
+        self,
+        value: object,
+        inherited: _Day,
+        depth: int,
+        source_index: int | None,
+        default_gram: bool,
+    ) -> None:
         if depth > _WALK_MAX_DEPTH or self._visits >= _WALK_MAX_VISITS:
             return
         self._visits += 1
         if isinstance(value, Mapping):
-            self._visit_record(value, inherited, depth)
+            self._visit_record(value, inherited, depth, source_index, default_gram)
         elif isinstance(value, list):
-            for item in value[:_WALK_MAX_LIST_ITEMS]:
-                self._visit(item, inherited, depth + 1)
+            for index, item in enumerate(value[:_WALK_MAX_LIST_ITEMS]):
+                self._visit(item, inherited, depth + 1, index, default_gram)
 
     def _visit_record(
-        self, record: Mapping[str, object], inherited: _Day, depth: int
+        self,
+        record: Mapping[str, object],
+        inherited: _Day,
+        depth: int,
+        source_index: int | None,
+        default_gram: bool,
     ) -> None:
         index = self._records
         self._records += 1
         day = _node_day(record, inherited)
+        record_index = source_index if source_index is not None else index
         if self._body_fat:
             self._body_fat_candidate(record, day, index)
         else:
-            self._weight_candidate(record, day, index)
+            self._weight_candidate(
+                record,
+                day,
+                record_index,
+                default_gram,
+            )
         for key, child in record.items():
             if _alnum_key(key) not in self._skip:
-                self._visit(child, day, depth + 1)
+                self._visit(
+                    child,
+                    day,
+                    depth + 1,
+                    source_index,
+                    default_gram or key == "latestWeight",
+                )
 
     def _weight_candidate(
-        self, record: Mapping[str, object], day: _Day, index: int
+        self,
+        record: Mapping[str, object],
+        day: _Day,
+        index: int,
+        default_gram: bool,
     ) -> None:
         measure = _measure(
             record,
@@ -550,6 +585,8 @@ class _WeightWalk:
                 self._record_day(day, ref, report=True)
             return
         field, raw, unit = measure
+        if not unit and (default_gram or "." in field):
+            unit = "gram"
         record_day = self._record_day(day, ref, report=True)
         if record_day is None:
             return
@@ -571,7 +608,7 @@ class _WeightWalk:
             ref,
             field,
             MetricKind.WEIGHT,
-            round(kilograms, 2),
+            kilograms,
         )
 
     def _body_fat_candidate(
@@ -670,11 +707,11 @@ class _HealthMapping:
     def _map_grouped(
         self, name: str, payload: object, groups: tuple[_Group, ...]
     ) -> None:
-        for ref, record in self._records(name, payload):
+        for ref, record, index in self._records(name, payload):
             day = self._record_day(record, ref, fallback=None)
             if day is not None:
                 for group in groups:
-                    self._map_group(name, record, group, ref, day)
+                    self._map_group(name, record, group, ref, day, index=index)
 
     def _map_weight(self, sections: Mapping[str, object]) -> None:
         payload = self._weight_records(_weight_payload(sections))
@@ -697,10 +734,12 @@ class _HealthMapping:
         return payload
 
     def _map_running_threshold(self, payload: object) -> None:
-        for ref, record in self._records(_RUNNING_THRESHOLD, payload):
+        for ref, record, index in self._records(_RUNNING_THRESHOLD, payload):
             day = self._record_day(record, ref, fallback=self._sync_day)
             if day is not None:
-                self._map_group(_RUNNING_THRESHOLD, record, _THRESHOLD_GROUP, ref, day)
+                self._map_group(
+                    _RUNNING_THRESHOLD, record, _THRESHOLD_GROUP, ref, day, index=index
+                )
                 self._report_power(record, ref)
 
     def _report_power(self, record: Mapping[str, object], ref: str) -> None:
@@ -719,6 +758,8 @@ class _HealthMapping:
         group: _Group,
         ref: str,
         day: date,
+        *,
+        index: int | None = None,
     ) -> None:
         source: object = record if group.key is None else record.get(group.key)
         if source is None:
@@ -726,9 +767,9 @@ class _HealthMapping:
         if not isinstance(source, Mapping):
             self.issue(ref, group.key or name, IssueReason.INVALID_TYPE)
             return
-        entry = _entry(name, ref, day, group.key)
+        entry = _entry(name, ref, day, group.key, index=index)
         for field in group.fields:
-            number = self._number(source, field.names, ref)
+            number = self._group_number(name, group, record, source, field, ref)
             if number is not None:
                 self.emit(
                     entry,
@@ -739,18 +780,44 @@ class _HealthMapping:
                     field.sport,
                 )
 
+    def _group_number(
+        self,
+        name: str,
+        group: _Group,
+        record: Mapping[str, object],
+        source: Mapping[str, object],
+        field: _Field,
+        ref: str,
+    ) -> float | None:
+        number = self._number(source, field.names, ref)
+        if number is not None or group.key is not None or name != "sleep":
+            return number
+        nested = record.get("dailySleepDTO")
+        if not isinstance(nested, Mapping):
+            return None
+        number = self._number(nested, field.names, ref)
+        if number is not None or field.kind != MetricKind.SLEEP_SCORE:
+            return number
+        scores = nested.get("sleepScores")
+        overall = scores.get("overall") if isinstance(scores, Mapping) else None
+        return (
+            self._number(overall, ("value",), ref)
+            if isinstance(overall, Mapping)
+            else None
+        )
+
     def _records(
         self, name: str, payload: object
-    ) -> list[tuple[str, Mapping[str, object]]]:
+    ) -> list[tuple[str, Mapping[str, object], int | None]]:
         items: object = [payload] if isinstance(payload, Mapping) else payload
         if not isinstance(items, list):
             self.issue(None, name, IssueReason.INVALID_TYPE)
             return []
-        rows: list[tuple[str, Mapping[str, object]]] = []
+        rows: list[tuple[str, Mapping[str, object], int | None]] = []
         for index, item in enumerate(items):
             ref = f"{name}[{index}]"
             if isinstance(item, Mapping):
-                rows.append((ref, item))
+                rows.append((ref, item, index if isinstance(payload, list) else None))
             else:
                 self.issue(ref, name, IssueReason.INVALID_TYPE)
         return rows
@@ -759,6 +826,9 @@ class _HealthMapping:
         self, record: Mapping[str, object], ref: str, *, fallback: date | None
     ) -> date | None:
         raw = _first_value(record, (_DATE_FIELD,))
+        nested_sleep = record.get("dailySleepDTO")
+        if raw is None and isinstance(nested_sleep, Mapping):
+            raw = _first_value(nested_sleep, (_DATE_FIELD,))
         if raw is None:
             if fallback is None:
                 self.issue(ref, _DATE_FIELD, IssueReason.MISSING)

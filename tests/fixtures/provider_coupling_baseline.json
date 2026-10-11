@@ -78,7 +78,7 @@
       "rule": "garmin_wire_key",
       "path": "backend/performance/garmin_metric_history.py",
       "token": "functionalThresholdPower",
-      "count": 2
+      "count": 1
     },
     {
       "rule": "garmin_wire_key",
@@ -125,25 +125,7 @@
     {
       "rule": "garmin_wire_key",
       "path": "backend/performance/garmin_projection.py",
-      "token": "functionalThresholdPower",
-      "count": 1
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_projection.py",
-      "token": "hrvLastNight",
-      "count": 2
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_projection.py",
       "token": "hrvWeeklyAvg",
-      "count": 2
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_projection.py",
-      "token": "lastNightAvg",
       "count": 2
     },
     {
@@ -151,12 +133,6 @@
       "path": "backend/performance/garmin_projection.py",
       "token": "restingHeartRate",
       "count": 1
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_projection.py",
-      "token": "sleepTimeSeconds",
-      "count": 2
     },
     {
       "rule": "garmin_wire_key",
@@ -498,12 +474,6 @@
       "rule": "icu_identifier",
       "path": "backend/coach/context.py",
       "token": "icu_weighted_avg_watts",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/nutrition/fueling.py",
-      "token": "icu_training_load",
       "count": 1
     },
     {
@@ -948,13 +918,13 @@
       "rule": "provider_literal",
       "path": "backend/http_api/bootstrap_state.py",
       "token": "garmin",
-      "count": 4
+      "count": 1
     },
     {
       "rule": "provider_literal",
       "path": "backend/http_api/bootstrap_state.py",
       "token": "intervals",
-      "count": 5
+      "count": 2
     },
     {
       "rule": "provider_literal",
@@ -971,32 +941,14 @@
     {
       "rule": "provider_literal",
       "path": "backend/http_api/public_state.py",
-      "token": "garmin",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/http_api/public_state.py",
       "token": "intervals",
-      "count": 5
+      "count": 2
     },
     {
       "rule": "provider_literal",
       "path": "backend/http_api/state_versions.py",
       "token": "garmin",
       "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/http_api/sync_commands.py",
-      "token": "garmin",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/http_api/sync_commands.py",
-      "token": "intervals",
-      "count": 4
     },
     {
       "rule": "provider_literal",
