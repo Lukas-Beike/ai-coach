@@ -9,11 +9,13 @@ from typing import Any
 
 from backend.config import Config
 from backend.db import DatabaseManager
+from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.planned_calendar import (
     PlannedCalendarRepairService,
     PlannedCalendarSyncService,
 )
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
+from backend.sync.workout_export import WorkoutExportPort
 
 
 @dataclass(frozen=True)
@@ -59,7 +61,7 @@ class PlannedCalendarSyncAssembly:
         return PlannedCalendarSyncService(
             self._config(),
             self._database_manager(),
-            self._intervals_client,
+            self._export_port(),
             self._state_writer(),
             self._utc_now,
             self._today,
@@ -68,11 +70,14 @@ class PlannedCalendarSyncAssembly:
     def repair_service(self) -> PlannedCalendarRepairService:
         """Create the exact-identity planned-calendar repair use case."""
         return PlannedCalendarRepairService(
-            self._config(),
             self._database_manager(),
-            self._intervals_client,
+            self._export_port(),
             self._state_writer(),
             self._utc_now,
             self._today,
             self._future_days,
         )
+
+    def _export_port(self) -> WorkoutExportPort:
+        """Bind the Intervals.icu export target; the client resolves per call."""
+        return IntervalsWorkoutExport(self._intervals_client)
