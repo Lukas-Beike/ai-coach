@@ -1,0 +1,68 @@
+---
+name: ai-coach-skill-evaluation
+description: Create, revise, or explicitly evaluate repository-owned Intervals Coach skills, including trigger quality and workflow usefulness. Do not use for ordinary application changes, general benchmarks, or installing app plugins.
+license: Apache-2.0 adaptation; see ../THIRD_PARTY.md.
+---
+
+# Maintaining and evaluating project skills
+
+Adapted from Anthropic skill-creator's task comparison and evaluation workflow.
+Modified to keep skills local, preserve project boundaries, and avoid automatic
+delegation or external writes; see [provenance](../THIRD_PARTY.md).
+
+## Author the smallest useful workflow
+
+- Read [the skill index](../README.md) and relevant project instructions first,
+  scanning sources and references before reading. Check existing skills for
+  overlap; improve a cohesive owner before creating another one.
+- Keep canonical skills under `.agents/skills/`. Names must be unique and match
+  the folder. Use YAML
+  frontmatter with `name` and a description that states when to trigger and when
+  to route elsewhere. Register the skill in the index.
+- Describe non-obvious decisions, project-specific pitfalls, needed evidence, and
+  output expectations concisely. Add scripts or references only for reusable work
+  that warrants them; resolve links inside the repository. Preserve upstream
+  license, attribution, revision, and modification notices when adapting sources.
+- Never copy to personal skill directories or app caches. A skill cannot override
+  authorization, weaken safety/CI gates, or supply a missing MCP tool or login.
+  Do not turn routine implementation choices into redundant approval steps.
+
+## Prepare comparable tasks
+
+For an explicit behavioral evaluation, choose a small representative set with:
+
+- A positive task where the skill should help and a nearby task where it should
+  not trigger; include natural wording instead of always naming the skill.
+- A difficult boundary such as an obsolete test assumption, sparse UI data,
+  untrusted provider text, or a request that does not authorize a remote write.
+- Observable expected outcomes and prohibited actions. Grade correctness and
+  contract preservation before style, speed, or token use.
+
+Pin the repository revision, skill versions, prompts, synthetic inputs, model,
+effort, tools, permissions, and timeouts. For a new skill compare with no skill;
+for a revision compare with the saved old version. Keep shared `AGENTS.md` policy
+identical. Prevent baseline sessions from discovering the candidate through the
+index or auto-loading; if the host cannot isolate contexts, label the comparison
+as a manual exercise rather than a controlled benchmark.
+
+## Run, assess, and revise
+
+- Use independent disposable worktrees or fixtures with identical starting state.
+  Keep generated outputs and transcripts in an OS temporary directory outside
+  tracked source; never include real accounts, credentials, athlete data, or live
+  deployment. Do not push, publish, merge, or send messages for a test scenario.
+- Run sequentially unless the user requests delegation. If delegated, follow
+  [the orchestration skill](../orchestrated-plan-implementation/SKILL.md) and the
+  user's model choices; the parent reviews results and any proposed patches.
+- Check artifacts and observable behavior against predefined expectations. When
+  useful, compare anonymized outputs without knowing which skill produced them.
+  Record pass/fail with evidence, boundary violations, unnecessary steps, elapsed
+  time, and measured tokens if available. Do not invent metrics or score compliance
+  solely by matching the skill's wording.
+- Explain failures, revise the specific instruction causing them, then rerun the
+  affected cases and at least one retained case. Favor the shorter workflow when
+  outcomes are equivalent; do not broaden triggers to win a narrow test set.
+- Validate frontmatter, unique names, local links, and `git diff --check`; run
+  `python -m unittest discover -s tests -p test_ai_docs_contract.py -v` after scanning
+  the Markdown it reads. Static validation is not behavioral evaluation. Report
+  run counts and limits; never claim benchmarks or improvements not measured.

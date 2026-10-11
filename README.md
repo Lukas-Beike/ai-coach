@@ -525,6 +525,52 @@ When a database restore is initiated:
 
 ## Development, Testing & Contribution
 
+### AI coding instructions
+
+Keep shared policy in [AGENTS.md](AGENTS.md) and its scoped files, PR review
+criteria in [REVIEW.md](REVIEW.md), and task workflows in the
+[repository skill index](.agents/skills/README.md). Load relevant workflows on
+demand; keep deployment commands here. All project skills have one canonical
+root, `.agents/skills/`; full review and `pr` were moved from the legacy `.codex/`
+root without duplicate copies. No duplicate `CLAUDE.md` or app-specific rules
+layer is needed.
+
+For any coding agent, start in the task worktree and load root plus applicable
+scoped AGENTS guidance. Identify the requested behavior, affected owner, and
+acceptance check; select the relevant skill, implement the complete flow, inspect
+the final diff, and run affected validation. Include final-state evidence and
+unverified checks in the handoff. Source code and current workflow behavior take
+precedence over remembered paths or stale operating assumptions.
+
+AI documentation is checked by the existing
+`Validate repository AI documentation` workflow. Locally, after secrets scans,
+run `python -m unittest discover -s tests -p test_ai_docs_contract.py -v`.
+These structural checks catch broken guidance/discovery; they do not measure
+coding quality. Behavioral comparisons use the repository skill-evaluation workflow
+with synthetic tasks and isolated sessions, without live accounts or deployments.
+
+For Claude Code, verify instruction loading in the actual session:
+
+1. Run `claude --version`; native AGENTS support requires 2.1.277+, with broader
+   session support from 2.1.281. Restart after upgrading.
+2. In `/config`, check **Project instructions**. The default
+   `claude-md-or-agents-md` works when no project/ancestor `CLAUDE.md`,
+   `.claude/CLAUDE.md`, or `CLAUDE.local.md` shadows AGENTS. If one is needed,
+   choose `claude-md-and-agents-md`; ensure the built-in AGENTS plugin is enabled.
+3. Use `/memory` to confirm root instructions loaded; after reading backend,
+   frontend, or test files, verify their scoped instructions too.
+
+Claude instruction loading does not auto-discover skills under `.agents/`.
+Follow the skill index explicitly; do not copy skills globally. Project
+workflows remain repository-owned; app-supplied skills and their tools have
+[separate replacement constraints](.agents/skills/references/app-skill-ownership.md).
+AGENTS and review text guide behavior; CI, permissions, and hooks provide
+deterministic enforcement.
+These files do not activate hosted reviews or prove session configuration.
+
+References: [Claude best practices](https://code.claude.com/docs/en/best-practices)
+and [AGENTS loading](https://code.claude.com/docs/en/memory#agents-md).
+
 ### Local Development on Windows
 
 Because native Windows environments often lack compatible pre-compiled wheels for `sqlcipher3-binary`, the canonical development and testing environment is the local Docker container.

@@ -23,6 +23,26 @@ SPEC.loader.exec_module(release_source)
 
 
 class WorkflowSourceTests(unittest.TestCase):
+    def test_ai_docs_requires_guidance_before_discovery(self):
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/validate-ai-docs.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("  pull_request:\n", workflow)
+        self.assertNotIn("pull_request_target:", workflow)
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn("AI_DOCS_REQUIRED: '1'", workflow)
+        validator = workflow.index(
+            "python -m unittest discover -s tests -p test_ai_docs_contract.py -v"
+        )
+        for relative in (
+            "AGENTS.md",
+            "REVIEW.md",
+            ".agents/skills/README.md",
+            "tests/test_ai_docs_contract.py",
+        ):
+            self.assertLess(workflow.index(f"test -f {relative}"), validator)
+
     def test_dependabot_covers_all_manifests_on_develop(self):
         root = Path(__file__).resolve().parents[1]
         configuration = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
