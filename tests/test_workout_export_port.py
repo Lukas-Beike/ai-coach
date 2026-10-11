@@ -52,13 +52,13 @@ class FakeExportTarget:
         self.deleted: list[str] = []
         self.remote: dict[str, dict] = {}
 
-    def serialize(self, local_id, workout, *, today):
+    def serialize(self, local_id, export):
         self.calls.append("serialize")
         return {
             "external_id": f"intervals-coach-{local_id}",
-            "name": workout["name"],
-            "type": workout["sport"],
-            "start_date_local": f"{workout['date']}T06:00:00",
+            "name": export.name,
+            "type": export.sport_token,
+            "start_date_local": f"{export.start_date_local[:10]}T06:00:00",
         }
 
     def upsert(self, payloads):

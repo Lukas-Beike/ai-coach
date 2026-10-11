@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 
 from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
+from backend.planning.workout_export import build_planned_workout_export
 from backend.providers.intervals_client import IntervalsClient
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.workout_export import WorkoutExportCapabilities, WorkoutExportPort
@@ -55,7 +56,9 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
     def test_serialize_matches_planning_payload_and_never_resolves_client(self):
         factory = Mock()
         export = IntervalsWorkoutExport(factory)
-        payload = export.serialize(LOCAL_ID, workout(), today=TODAY)
+        payload = export.serialize(
+            LOCAL_ID, build_planned_workout_export(workout(), today=TODAY)
+        )
         self.assertEqual(
             payload,
             planning_workouts.workout_event_payload(LOCAL_ID, workout(), today=TODAY),
@@ -63,7 +66,9 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
         factory.assert_not_called()
 
     def test_upsert_posts_bulk_events_with_upsert_flag(self):
-        payload = self.export.serialize(LOCAL_ID, workout(), today=TODAY)
+        payload = self.export.serialize(
+            LOCAL_ID, build_planned_workout_export(workout(), today=TODAY)
+        )
         self.request.return_value = [{"id": "event-1", "type": "WeightTraining"}]
 
         saved = self.export.upsert([payload])
@@ -118,7 +123,9 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
         )
 
     def test_readback_accepts_saved_event_and_rejects_sport_mismatch(self):
-        payload = self.export.serialize(LOCAL_ID, workout(), today=TODAY)
+        payload = self.export.serialize(
+            LOCAL_ID, build_planned_workout_export(workout(), today=TODAY)
+        )
         saved = {**payload, "id": "event-1", "type": "WeightTraining"}
         self.export.verify_readback(workout(), saved)
 
@@ -129,7 +136,9 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
     def test_readback_and_delete_do_not_resolve_client_until_called(self):
         factory = Mock()
         export = IntervalsWorkoutExport(factory)
-        payload = export.serialize(LOCAL_ID, workout(), today=TODAY)
+        payload = export.serialize(
+            LOCAL_ID, build_planned_workout_export(workout(), today=TODAY)
+        )
         export.verify_readback(
             workout(), {**payload, "id": "event-1", "type": "WeightTraining"}
         )

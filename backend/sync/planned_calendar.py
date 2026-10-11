@@ -24,6 +24,7 @@ from backend.errors import (
 )
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
+from backend.planning.workout_export import build_planned_workout_export
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
 from backend.sync.workout_export import WorkoutExportPort
 
@@ -196,7 +197,8 @@ class PlannedCalendarSyncService:
         self, normalized_id: str, workout: dict[str, Any]
     ) -> dict[str, Any]:
         event_payload = self._export.serialize(
-            normalized_id, workout, today=self._today()
+            normalized_id,
+            build_planned_workout_export(workout, today=self._today()),
         )
         remote_external_id = str(workout.get("remote_event_external_id") or "").strip()
         if remote_external_id:
@@ -624,7 +626,8 @@ class PlannedCalendarRepairService:
         keeper: dict[str, Any] | None,
     ) -> None:
         payload = context.export.serialize(
-            context.local_id, context.workout, today=context.today
+            context.local_id,
+            build_planned_workout_export(context.workout, today=context.today),
         )
         if keeper:
             payload["id"] = str(keeper["id"])

@@ -9,8 +9,9 @@ such as the planned-calendar sync and repair services.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
 from typing import Any, Protocol, runtime_checkable
+
+from backend.canonical.planned_workout import PlannedWorkoutExport
 
 
 @dataclass(frozen=True)
@@ -26,12 +27,11 @@ class WorkoutExportPort(Protocol):
     def capabilities(self) -> WorkoutExportCapabilities:
         """Declare which local record families this target can export."""
 
-    def serialize(
-        self, local_id: str, workout: dict[str, Any], *, today: date
-    ) -> dict[str, Any]:
-        """Render one local planned unit as the target's event payload.
+    def serialize(self, local_id: str, export: PlannedWorkoutExport) -> dict[str, Any]:
+        """Render one provider-neutral planned-workout export as the target's payload.
 
-        Pure local work: it must not touch the remote target.
+        Pure local work: it must not touch the remote target. The caller builds
+        ``export`` from the local planned unit (see planning.workout_export).
         """
 
     def upsert(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
