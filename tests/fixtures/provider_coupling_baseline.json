@@ -1074,13 +1074,13 @@
       "rule": "provider_literal",
       "path": "backend/sync/freshness.py",
       "token": "garmin",
-      "count": 6
+      "count": 3
     },
     {
       "rule": "provider_literal",
       "path": "backend/sync/freshness.py",
       "token": "intervals",
-      "count": 16
+      "count": 9
     },
     {
       "rule": "provider_literal",
@@ -1171,12 +1171,6 @@
       "path": "backend/sync/scheduler.py",
       "token": "intervals",
       "count": 8
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/state.py",
-      "token": "intervals",
-      "count": 2
     },
     {
       "rule": "provider_literal",
