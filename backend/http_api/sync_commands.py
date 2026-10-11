@@ -29,13 +29,15 @@ def _uses_sync_period(registry: ProviderRegistry, provider_id: str) -> bool:
     return route is not None and route.uses_sync_period
 
 
-def _post_paths(registry: ProviderRegistry) -> frozenset[str]:
+def sync_post_paths(registry: ProviderRegistry) -> frozenset[str]:
+    """Return every sync POST path that ``registry`` routes to the endpoint."""
     manual = (path for path, _ in registry.manual_routes())
     full_resync = (path for path, _ in registry.full_resync_routes())
     return frozenset({SYNC_JOBS_PATH, PERFORMANCE_REFRESH_PATH, *manual, *full_resync})
 
 
-def _body_paths(registry: ProviderRegistry) -> frozenset[str]:
+def sync_body_paths(registry: ProviderRegistry) -> frozenset[str]:
+    """Return the sync POST paths that ``registry`` reads a JSON body for."""
     # Only period-based manual routes and full resyncs read a request body.
     period_routes = (
         path
@@ -44,6 +46,20 @@ def _body_paths(registry: ProviderRegistry) -> frozenset[str]:
     )
     full_resync = (path for path, _ in registry.full_resync_routes())
     return frozenset({SYNC_JOBS_PATH, *period_routes, *full_resync})
+
+
+def handles_sync_path(registry: ProviderRegistry, path: str) -> bool:
+    """Return whether ``registry`` routes ``path`` to the sync endpoint."""
+    return (
+        path in sync_post_paths(registry) or SYNC_JOB_RESOLVE_RE.match(path) is not None
+    )
+
+
+def needs_sync_body(registry: ProviderRegistry, path: str) -> bool:
+    """Return whether ``registry`` reads a JSON body for the sync path ``path``."""
+    return (
+        path in sync_body_paths(registry) or SYNC_JOB_RESOLVE_RE.match(path) is not None
+    )
 
 
 def _not_configured_messages(registry: ProviderRegistry) -> dict[str, str]:
@@ -55,8 +71,8 @@ def _not_configured_messages(registry: ProviderRegistry) -> dict[str, str]:
     return messages
 
 
-SYNC_POST_PATHS = _post_paths(DEFAULT_PROVIDER_REGISTRY)
-SYNC_BODY_PATHS = _body_paths(DEFAULT_PROVIDER_REGISTRY)
+SYNC_POST_PATHS = sync_post_paths(DEFAULT_PROVIDER_REGISTRY)
+SYNC_BODY_PATHS = sync_body_paths(DEFAULT_PROVIDER_REGISTRY)
 PROVIDER_NOT_CONFIGURED_MESSAGES = _not_configured_messages(DEFAULT_PROVIDER_REGISTRY)
 _MANUAL_PATHS = {
     provider_id: path for path, provider_id in DEFAULT_PROVIDER_REGISTRY.manual_routes()
@@ -104,16 +120,16 @@ class SyncCommandEndpoint:
         }
         self._full_resync_providers = dict(registry.full_resync_routes())
         self._not_configured = _not_configured_messages(registry)
-        self._post_paths = _post_paths(registry)
-        self._body_paths = _body_paths(registry)
+        self._post_paths = sync_post_paths(registry)
+        self._body_paths = sync_body_paths(registry)
 
     @staticmethod
     def handles(path: str) -> bool:
-        return path in SYNC_POST_PATHS or SYNC_JOB_RESOLVE_RE.match(path) is not None
+        return handles_sync_path(DEFAULT_PROVIDER_REGISTRY, path)
 
     @staticmethod
     def needs_body(path: str) -> bool:
-        return path in SYNC_BODY_PATHS or SYNC_JOB_RESOLVE_RE.match(path) is not None
+        return needs_sync_body(DEFAULT_PROVIDER_REGISTRY, path)
 
     def accepts(self, path: str) -> bool:
         """Return whether this endpoint's registry accepts the sync POST path."""
