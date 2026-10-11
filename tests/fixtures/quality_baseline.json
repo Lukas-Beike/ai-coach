@@ -1561,7 +1561,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_planned_calendar.py",
-      "line": 110,
+      "line": 111,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "3e5ab9bbce4618175b6dfd6dca49546741a6333d2306a6891f3c1755531b9f97"
@@ -2113,7 +2113,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_planned_calendar.py",
-      "line": 110,
+      "line": 111,
       "column": 65,
       "code": "arg-type",
       "message_sha256": "67a23cbd9410f306da2960b552efb8b98e596674f8f448bcdfb691411841ca0d"
@@ -2457,7 +2457,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/planned_calendar.py",
-      "line": 444,
+      "line": 431,
       "column": 19,
       "code": "call-arg",
       "message_sha256": "442fd4cf1edef23c8e8b64550dca5e2deb6cccef376a8f46018b9e74f75cc592"
@@ -2993,7 +2993,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/planned_calendar.py",
-      "line": 351,
+      "line": 341,
       "column": 8,
       "code": "index",
       "message_sha256": "69467071d581b1ef67e8d2e3bf0c5a40d7239c3db643b55b9fafae5ce76a8114"
@@ -3273,7 +3273,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/planned_calendar.py",
-      "line": 539,
+      "line": 525,
       "column": 12,
       "code": "return-value",
       "message_sha256": "361271fe306e85e3cb67c6ae457d6158f8a2b2501683148fe34bb2cae91765ce"
@@ -3521,7 +3521,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/planned_calendar.py",
-      "line": 354,
+      "line": 344,
       "column": 8,
       "code": "union-attr",
       "message_sha256": "3b6755d7a5dc905d0b2a9e780572db535a8a3d4867910dcfbfa4028dfb62502e"
@@ -3689,7 +3689,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_planned_calendar.py",
-      "line": 46,
+      "line": 47,
       "column": 8,
       "code": "var-annotated",
       "message_sha256": "971f8b933791aa8c6acee5ea47c503a064113c78285a9dc7b15cc2d553517b01"
@@ -3697,15 +3697,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_planned_calendar.py",
-      "line": 47,
-      "column": 8,
-      "code": "var-annotated",
-      "message_sha256": "eafc8eaa37e4ffbc2729d7e9973ad53bb9a69cb30f31533e6871457ca2123781"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_planned_calendar.py",
-      "line": 48,
+      "line": 49,
       "column": 8,
       "code": "var-annotated",
       "message_sha256": "9710df7244a3c90f48188a2e33cfd8c302d5a75abe3a278c6d119c8747714ba1"

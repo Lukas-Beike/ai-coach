@@ -15,6 +15,7 @@ from backend.db import DatabaseManager, row_factory
 from backend.errors import AppError
 from backend.planning import library
 from backend.planning.planned_units import planned_unit_payload_hash
+from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.planned_calendar import (
     PlannedCalendarRepairService,
     PlannedCalendarSyncService,
@@ -44,7 +45,7 @@ class FakeIntervalsClient:
         self.remote_event = remote_event
         self.events = list(events or [])
         self.upserts = []
-        self.get_paths = []
+        self.read_ids: list[str] = []
         self.deleted = []
         self.collection_reads = 0
         self.collection_error = None
@@ -68,10 +69,10 @@ class FakeIntervalsClient:
             self.events.append(saved)
         return result
 
-    def get(self, path):
-        self.get_paths.append(path)
+    def get_event(self, event_id):
+        self.read_ids.append(event_id)
         if self.on_get:
-            return self.on_get(path)
+            return self.on_get(event_id)
         if isinstance(self.remote_event, Exception):
             raise self.remote_event
         return self.remote_event
@@ -82,7 +83,7 @@ class FakeIntervalsClient:
             event for event in self.events if str(event.get("id")) != event_id
         ]
 
-    def get_paged_collection(self, _path, _params, _label):
+    def list_events_window(self, *, oldest, newest, category, collection):
         self.collection_reads += 1
         if self.on_collection:
             self.on_collection(self.collection_reads)
@@ -136,33 +137,29 @@ class PlannedCalendarSyncTests(unittest.TestCase):
             data_retention_days=365,
         )
 
-    def make_service(self, *, config=None, client=None):
+    def export_port(self, *, client=None):
         selected_client = client or self.client
 
         def factory():
             self.factory_calls += 1
             return selected_client
 
+        return IntervalsWorkoutExport(factory)
+
+    def make_service(self, *, config=None, client=None):
         return PlannedCalendarSyncService(
             config or self.config,
             self.manager,
-            factory,
+            self.export_port(client=client),
             self.writer,
             lambda: "2026-09-20T12:00:00+00:00",
             lambda: TODAY,
         )
 
     def make_repair_service(self, *, client=None):
-        selected_client = client or self.client
-
-        def factory():
-            self.factory_calls += 1
-            return selected_client
-
         return PlannedCalendarRepairService(
-            self.config,
             self.manager,
-            factory,
+            self.export_port(client=client),
             self.writer,
             lambda: "2026-09-20T12:00:00+00:00",
             lambda: TODAY,
@@ -494,7 +491,7 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.assertIsNone(self.service.sync_entry(LOCAL_ID))
         self.assertEqual(self.client.deleted, ["event-1"])
         self.assertEqual(self.unit()["sync_state"], "synced")
-        self.assertTrue(self.client.get_paths[0].endswith("/events/event-1"))
+        self.assertEqual(self.client.read_ids[0], "event-1")
 
     def test_delete_404_is_already_removed(self):
         self.add_unit(
