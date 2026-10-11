@@ -800,14 +800,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/http_api/sync_commands.py",
-      "line": 174,
-      "column": 12,
-      "code": "arg-type",
-      "message_sha256": "b56eabb6d44884efdb0061ff020af3a73cfab3aeabdd645b01b9e03a91c6cf87"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_garmin_service.py",
       "line": 200,
       "column": 12,

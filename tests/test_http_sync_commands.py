@@ -1,10 +1,17 @@
 """HTTP sync command parsing, authorization preconditions, and queue contracts."""
 
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from backend.errors import AppError
-from backend.http_api.sync_commands import SyncCommandEndpoint
+from backend.http_api import sync_commands
+from backend.http_api.sync_commands import (
+    SyncCommandEndpoint,
+    handles_sync_path,
+    needs_sync_body,
+)
+from backend.providers.descriptors import DEFAULT_PROVIDER_DESCRIPTORS
+from backend.sync.provider_registry import ProviderRegistry
 
 
 class SyncCommandEndpointTests(unittest.TestCase):
@@ -89,6 +96,28 @@ class SyncCommandEndpointTests(unittest.TestCase):
         self.queue.resolve.assert_called_once_with(
             "abc-123", {"strategy": "keep_local"}
         )
+
+    def test_route_table_is_derived_once_per_registry_not_per_request(self):
+        registry = ProviderRegistry(DEFAULT_PROVIDER_DESCRIPTORS)
+        with patch.object(
+            sync_commands,
+            "_build_path_routes",
+            wraps=sync_commands._build_path_routes,
+        ) as build:
+            for _ in range(5):
+                self.assertTrue(handles_sync_path(registry, "/api/sync"))
+                self.assertTrue(needs_sync_body(registry, "/api/sync"))
+                SyncCommandEndpoint(
+                    self.queue,
+                    self.state,
+                    self.performance,
+                    self.full_resync,
+                    lambda: "operation-1",
+                    {"intervals": 90, "garmin": 30},
+                    -1,
+                    registry=registry,
+                )
+        self.assertEqual(build.call_count, 1)
 
 
 if __name__ == "__main__":

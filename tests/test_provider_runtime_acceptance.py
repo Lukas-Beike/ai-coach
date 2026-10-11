@@ -580,6 +580,10 @@ class AcmeHttpRouteTests(AcmeOrchestrationCase):
         self.assertEqual(raised.exception.status, 409)
         self.assertEqual(raised.exception.reason, "not_configured")
         self.assertEqual(str(raised.exception), NOT_CONFIGURED_MESSAGE)
+        self.assertEqual(
+            REGISTRY.get(ACME_ID).not_configured_message, NOT_CONFIGURED_MESSAGE
+        )
+        self.assertNotIn("Intervals.icu", str(raised.exception))
         self.assertEqual(job_rows(self), [])
 
     def test_route_for_an_undeclared_acme_path_is_not_handled(self) -> None:

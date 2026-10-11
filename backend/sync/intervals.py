@@ -26,6 +26,7 @@ from backend.planning.library_service import WorkoutLibraryService
 from backend.providers.intervals import IntervalsApiClient
 from backend.providers.intervals_power import PROFILE_DURATIONS, cycling_power_points
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.freshness_sources import intervals_sync_running
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.library import WorkoutLibraryRefreshService
 from backend.sync.observation import SyncOperationObserver
@@ -621,7 +622,7 @@ class IntervalsSyncRuntime:
             yield scope
 
     def running(self, status: IntervalsSyncStatus) -> bool:
-        return self._lock.locked() or status.get("sync_running") == "1"
+        return intervals_sync_running(self._lock, status.get)
 
     def acquire(self) -> bool:
         return self._lock.acquire(blocking=False)
