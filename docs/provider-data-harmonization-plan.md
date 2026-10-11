@@ -4,8 +4,10 @@ Stand: 10. Oktober 2026. Grundlage ist Commit `44c90499` auf `develop`
 (`APP_VERSION` 1.12.27, veröffentlicht mit Schema v4 und eingefroren als
 `tests/fixtures/schema_v4.sql.txt`; `develop` steht bereits auf
 `CURRENT_SCHEMA_VERSION = 5` mit `nutrition_logs.logged_time_known`). Die
-kanonische Persistenz dieses Plans wird damit **Schema v6**. Status: Welle 1
-(Phase 0 und unabhängige Teile von Phase 1) in Umsetzung, siehe Abschnitt 5.1.
+kanonische Persistenz dieses Plans wird damit **Schema v6**. Status
+(11. Oktober 2026): Welle 1 (Phase 0, kanonisches Paket, Guard) und Welle 2
+(Mapper, Sport-Klassifizierer, Provider-Register) sind gemergt; Welle 3
+(Phase 2) ist der nächste Schritt, siehe Abschnitt 5.1.
 
 Ziel: Daten von Intervals.icu, Garmin Connect und künftigen Providern wie Wahoo
 werden an genau einer Grenze in ein eigenes, versioniertes, kanonisches Format
@@ -370,8 +372,11 @@ Abnahme: volle Suite, Qualitäts-Ratchet ohne neue Befunde. Größe: mittel.
 
 1. `backend/canonical/` mit Vokabular, Datensätzen und Validierung von Einheiten
    und Wertebereichen; Registrierung im Layer-Test.
-2. `providers/intervals_mapping.py` und `providers/garmin_mapping.py`: reine
-   Funktionen mit `MAPPER_VERSION`. Sie bündeln die verstreuten
+2. Mapper je Provider und Datenbereich in `backend/providers/`
+   (`intervals_activity_mapping.py`, `intervals_wellness_mapping.py`,
+   `garmin_activity_mapping.py`, `garmin_health_mapping.py`): reine Funktionen
+   mit `MAPPER_VERSION`, die ein `MappingResult` aus Datensätzen und
+   wertfreien `MappingIssue`s liefern. Sie bündeln die verstreuten
    Garmin-Schlüsselhelfer und Intervals-Aliasketten und ordnen Sportarten zu.
 3. Ein zentraler Sport-Klassifizierer mit Labeltabelle; bestehende
    Klassifizierer delegieren zunächst dorthin.
@@ -520,9 +525,9 @@ gemergt ist.
 
 | Welle | Inhalt | PRs |
 | --- | --- | --- |
-| 1 | Phase 0 vollständig; aus Phase 1 das Leaf-Paket `backend/canonical/` (Vokabular, `Provenance`, `ActivityRecord`, `Observation`, `MetricValue`, Validierung, Layer-Registrierung) und der Kopplungs-Guard mit zählerbasierter Baseline | 12: HRV-Fix; Wire-Fixtures mit Lock-Identitätstest; sieben Charakterisierungs-PRs (aktuelle Metriken, Recovery, Körper-/Chart-Historie, Last/Fokus, Aktivitätsidentität, Coach-Kontext, Aktivitätslesen); Migrationsgerüst; kanonisches Paket; Guard |
-| 2 | Phase 1.2/1.3 und Beginn Phase 4: Intervals- und Garmin-Mapper gegen die Wire-Fixtures, zentraler Sport-Klassifizierer, Provider-Deskriptoren im Register | je Mapper ein PR, Klassifizierer, Deskriptoren |
-| 3 | Phase 2: kanonische Leseschicht über Bestandsdaten, verhaltensgleich gegen die Charakterisierungstests | je Datenbereich ein PR |
+| 1 ✅ | Phase 0 vollständig; aus Phase 1 das Leaf-Paket `backend/canonical/` (Vokabular, `Provenance`, `ActivityRecord`, `Observation`, `MetricValue`, Validierung, Layer-Registrierung) und der Kopplungs-Guard mit zählerbasierter Baseline | 12 (#1043–#1054): HRV-Fix; Wire-Fixtures mit Lock-Identitätstest; sieben Charakterisierungs-PRs (aktuelle Metriken, Recovery, Körper-/Chart-Historie, Last/Fokus, Aktivitätsidentität, Coach-Kontext, Aktivitätslesen); Migrationsgerüst; kanonisches Paket; Guard |
+| 2 ✅ | Phase 1.2/1.3 und Beginn Phase 4: Intervals- und Garmin-Mapper gegen die Wire-Fixtures, zentraler Sport-Klassifizierer, Provider-Deskriptoren im Register | 7 (#1057, #1058, #1060–#1064): kanonische Grundlagen (`sports.py`, `local_time.py`, `mapping.py`, `Observation.sport`); Register (`providers/descriptors.py`, `sync/provider_registry.py`, freshness/state lesen daraus); je ein Mapper für Intervals-Aktivitäten, Intervals-Wellness/-Schwellen, Garmin-Aktivitäten, Garmin-Gesundheit; `activity_kind` delegiert an den Klassifizierer (Paritätstabelle mit 217 Eingaben) |
+| 3 | Phase 2: kanonische Leseschicht über Bestandsdaten, verhaltensgleich gegen die Charakterisierungstests | je Datenbereich ein PR, siehe 5.3 |
 | 4 | Phase 3: Schema v6, Ingest-Dual-Write, Backfill-Job, Aktivitätsidentität | sequenziell |
 | 5+ | Phasen 5–8 | je Domäne ein PR |
 
@@ -531,6 +536,68 @@ Konfliktregeln für Welle 1: Nur HRV-Fix, Migrationsgerüst und kanonisches Pake
 `icu_*`-Bezeichner, Garmin-Wire-Schlüssel oder `"intervals"`/`"garmin"`-Literale
 hinzu oder entfernen sie, damit die Guard-Baseline nach allen Merges gültig
 bleibt. Der Guard erlaubt `backend/providers/` und `backend/canonical/` vorab.
+
+### 5.2 Ergebnis Welle 2: bekannte Abweichungen
+
+Die Mapper haben noch keine Verbraucher; das App-Verhalten ist unverändert.
+Die folgenden Unterschiede zwischen Mappern und heutigen Lesern sind in den
+Modul-Docstrings und PRs dokumentiert und müssen vor dem Umschalten in Welle 3
+entschieden oder durch Paritätstests abgesichert werden:
+
+- **Garmin-Gewicht und -Körperfett:** Der Mapper liest nur flache Datensätze
+  mit `calendarDate` und ausdrücklicher Einheit. `performance/garmin_weight.py`
+  durchsucht verschachtelte Antworten, liest `weightKg`, `summaryDate` und
+  Epoch-Zeitstempel, rät Gramm ab Werten über 300 und kennt Körperfett als
+  Anteil. Echte Garmin-Antworten können deshalb heute im Mapper nur Issues
+  erzeugen. Vor dem Umschalten: Mapper um diese Formen erweitern oder die
+  Fixtures um reale Antwortformen ergänzen (Fixture-Mengentest anpassen).
+- **Garmin `running_threshold`:** ohne Datum, daher Abruftag in der Zone des
+  Athleten; Schwellenleistung wird als `unsupported` gemeldet, weil ihr Sport
+  nicht eindeutig ist.
+- **Garmin-Aktivitäten:** `recorded_by` ist immer `GARMIN` (der Payload hat
+  kein Gerätefeld); Dauer `duration` vor `movingTime` wie im Legacy-Code, die
+  Semantik beider Felder ist nicht gegen die Garmin-API geprüft.
+- **Intervals-Aktivitäten:** Startzeit `start_date` (aware) vor
+  `start_date_local`; andere Leser bevorzugen `start_date_local`.
+  `moving_time = 0` gilt als ungültig. Ein `trainer`-Flag wird nicht gelesen.
+- **Intervals-Wellness/-Schwellen:** Komma-Dezimalzahlen werden abgelehnt
+  (Leser akzeptieren sie); ein verworfener `sportSettings`-FTP erlaubt den
+  `icu_ftp`-Fallback (`current_metrics` nicht); ungültiger Erst-Alias fällt
+  nicht auf den zweiten zurück.
+- **Sport-Klassifizierung:** `activity_kind` und `activity_sport` widersprechen
+  sich bei Mischfeldern (`{"type": "Run", "sport": "Ride"}` ist Rad bzw.
+  Laufen). Legacy-Lücken: Garmin `road_biking`, `mountain_biking`, `biking`
+  → other, „Langlauf“ → running; Teilstring-Fehltreffer („stride“, „brunch“,
+  „Growth“, „Narrow“, „personal trainer“). Die Paritätstabelle friert sie
+  ein; eine Korrektur ist eine bewusste Verhaltensänderung mit eigenem PR.
+- **Register:** `freshness.py` hält Konfigurationsprüfungen und Fallbacks noch
+  selbst; `http_api/sync_commands.py` nennt 365/90 Tage hartkodiert;
+  `resync_keys` und Capabilities haben noch keinen Verbraucher; `daily.py`
+  ist unverändert.
+
+### 5.3 Vorschlag Welle 3
+
+Ziel: Phase 2, kanonische Leseschicht über `snapshots` und `garmin_snapshot`,
+verhaltensgleich gegen die Charakterisierungstests aus Welle 1.
+
+1. **Paritätsgrundlage (zuerst, ein PR je Provider):** Mapper-Lücken aus 5.2
+   schließen, die für die Parität nötig sind (Garmin-Gewicht/-Körperfett,
+   Komma-Dezimalzahlen nach heutiger Leser-Semantik oder dokumentierte
+   Abweichung), und Paritätstests Mapper gegen heutige Leser auf den Fixtures.
+2. **Ports:** `ActivityReader`, `ObservationReader`, `ProviderCoverageReader`
+   in `backend/runtime/ports.py` (nur Protokolle und Tests).
+3. **Legacy-Projektion:** Implementierung in `backend/sync/`, die Snapshots
+   beim Lesen über die Mapper projiziert und je Snapshot-Stand cacht; Issues
+   werden gezählt (Diagnose ohne Athleteninhalte), nie geloggt.
+4. **`SourcePolicy`:** Quellenpräzedenz nach 3.5 als eigene Einheit mit
+   Tabellen-Tests, zunächst exakt die heutige Präzedenz (inklusive der in
+   Welle 1 festgeschriebenen Fehlerfälle); Korrekturen danach einzeln.
+5. **Sitzungsbündelung:** Dublettenerkennung Intervals/Garmin/Wahoo über
+   kanonische Datensätze, verhaltensgleich zu `activities/duplicates.py`.
+
+Die Persistenz v6 (Phase 3) bleibt Welle 4 und setzt Welle 3 voraus. Vor
+Welle 4 ist das veröffentlichte Schema v5 als Fixture einzufrieren, sobald es
+released ist.
 
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
