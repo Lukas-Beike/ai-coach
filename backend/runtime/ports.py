@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from datetime import date
 from typing import Any, Protocol
+
+from backend.canonical.coverage import ProviderCoverage
+from backend.canonical.records import ActivityRecord, Observation
+from backend.canonical.vocabulary import MetricKind, Sport
 
 
 class ProviderSnapshotReader(Protocol):
@@ -15,6 +20,50 @@ class ProviderStateReader(Protocol):
 
 class AudioTranscriber(Protocol):
     def transcribe(self, audio: bytes, content_type: str) -> dict[str, str]: ...
+
+
+class ActivityReader(Protocol):
+    """Reads canonical activity records.
+
+    ``start`` and ``end`` are inclusive bounds on the athlete-local date of each
+    activity's start. Results contain validated canonical records only; mapping
+    issues are not returned here and are exposed only as counts through
+    ``ProviderCoverageReader``.
+    """
+
+    def activities(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> tuple[ActivityRecord, ...]: ...
+
+
+class ObservationReader(Protocol):
+    """Reads canonical observations of one metric kind.
+
+    ``start`` and ``end`` are inclusive bounds on each observation's
+    ``observed_on`` date. ``sport`` restricts results to one sport when given.
+    Results contain validated canonical observations only; mapping issues are
+    exposed only as counts through ``ProviderCoverageReader``.
+    """
+
+    def observations(
+        self,
+        db: Any,
+        kind: MetricKind,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        sport: Sport | None = None,
+    ) -> tuple[Observation, ...]: ...
+
+
+class ProviderCoverageReader(Protocol):
+    """Reports per-provider coverage counts, including mapping issue counts only."""
+
+    def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]: ...
 
 
 ProviderOperation = Callable[[], AbstractContextManager[None]]
