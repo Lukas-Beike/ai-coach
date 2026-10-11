@@ -994,12 +994,6 @@
     },
     {
       "rule": "provider_literal",
-      "path": "backend/sync/jobs.py",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
       "path": "backend/sync/performance.py",
       "token": "intervals",
       "count": 3

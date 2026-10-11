@@ -243,5 +243,12 @@ def builtin_bindings(
 def build_provider_runtime(
     static: ProviderRegistry, bindings: Iterable[ProviderRuntimeBinding]
 ) -> ProviderRuntimeRegistry:
-    """Validate bindings against the static registry and return the runtime view."""
-    return ProviderRuntimeRegistry(static, bindings)
+    """Validate bindings against the static registry and return the runtime view.
+
+    Every descriptor needs a binding here, so a provider cannot silently drop out
+    of scheduling, execution or status.
+    """
+    bound = tuple(bindings)
+    if set(static.ids()) - {binding.provider_id for binding in bound}:
+        raise ValueError("provider descriptor has no runtime binding")
+    return ProviderRuntimeRegistry(static, bound)

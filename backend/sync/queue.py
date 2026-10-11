@@ -60,8 +60,8 @@ class SyncJobQueueService:
     def active(self, provider: str, job_type: str = "refresh") -> bool:
         return self._store.active(provider, job_type)
 
-    def pending_performance_job_id(self) -> str | None:
-        return self._store.pending_performance_job_id()
+    def pending_performance_job_id(self, provider: str) -> str | None:
+        return self._store.pending_performance_job_id(provider)
 
     def enqueue(
         self,
@@ -82,6 +82,7 @@ class SyncJobQueueService:
                     payload,
                     all_sync_days=self._all_sync_days,
                     registry=self._registry,
+                    enforce_period_limit=True,
                 )
             except JobValidationError as exc:
                 raise AppError(400, str(exc), reason="invalid_job_request") from exc

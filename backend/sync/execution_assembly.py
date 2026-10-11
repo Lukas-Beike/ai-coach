@@ -173,4 +173,5 @@ class SyncJobExecutionAssembly:
             historical_sync=build_historical_owner(self._historical, self._state),
             outcome_service=self._state.outcome_service(),
             all_sync_days=self._historical.all_sync_days,
+            registry=runtime.static,
         )

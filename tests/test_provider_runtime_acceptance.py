@@ -462,16 +462,8 @@ class AcmeQueueAndExecutionTests(AcmeOrchestrationCase):
         self.assertEqual(error.reason, "invalid_job_request")
         self.assertEqual(job_rows(self), [])
 
-    @unittest.expectedFailure
     def test_queue_enforces_the_provider_period_limit(self) -> None:
-        """Known production gap, not patched here.
-
-        ``_normalize_refresh_days`` (backend/sync/jobs.py) bounds ``days`` by a
-        fixed 3660 for every provider. The descriptor's ``max_sync_days`` (60 for
-        acme) is only enforced by ``SyncStateRepository.set_sync_period``. A job
-        that bypasses that setter (``POST /api/sync/jobs``, Coach refresh through
-        ``queue.enqueue``) is therefore accepted above the provider limit.
-        """
+        """The descriptor's ``max_sync_days`` (60 for acme) bounds queued jobs."""
         error = self.rejection({"days": 61, "reason": "too long"})
 
         self.assertEqual(error.status, 400)
@@ -645,17 +637,9 @@ class AcmeCoachRefreshTests(AcmeOrchestrationCase):
         self.assertEqual(job_rows(self), [])
 
 
-class AcmePerformanceRefreshGapTests(AcmeOrchestrationCase):
-    @unittest.expectedFailure
+class AcmePerformanceRefreshTests(AcmeOrchestrationCase):
     def test_performance_refresh_single_flight_applies_to_any_provider(self) -> None:
-        """Known production gap, not patched here.
-
-        ``SyncJobStore.enqueue`` (backend/sync/jobs.py) deduplicates an active
-        ``performance_refresh`` only for ``provider='intervals'``, so a second
-        acme request creates a second job. This test declares the acme job type and
-        expects the dedup a registry-driven provider should get; it fails until the
-        single-flight scope is derived from the registry.
-        """
+        """A provider declaring ``performance_refresh`` gets the same dedup."""
         registry = ProviderRegistry(
             (
                 *DEFAULT_PROVIDER_REGISTRY.all(),

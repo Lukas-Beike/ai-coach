@@ -160,7 +160,10 @@ class SyncJobQueueServiceTests(SyncQueueFixtureMixin, unittest.TestCase):
         )
         self.assertTrue(self.service.active("weather"))
         self.assertFalse(self.service.active("calendar"))
-        self.assertEqual(self.service.pending_performance_job_id(), performance["id"])
+        self.assertEqual(
+            self.service.pending_performance_job_id("intervals"), performance["id"]
+        )
+        self.assertIsNone(self.service.pending_performance_job_id("garmin"))
 
         error = self._app_error(lambda: self.service.state("missing"))
         self.assertEqual(error.status, 404)

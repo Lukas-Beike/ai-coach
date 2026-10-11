@@ -324,6 +324,32 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assert_invalid("intervals", "refresh", {"days": value}, message)
 
+    def test_enforced_period_limit_follows_the_provider_descriptor(self):
+        def enforced(provider, days):
+            return normalize_sync_job_request(
+                provider,
+                "refresh",
+                {"days": days},
+                all_sync_days=self.all_sync_days,
+                enforce_period_limit=True,
+            )["payload"]["days"]
+
+        for provider, accepted, rejected in (
+            ("intervals", 365, 366),
+            ("garmin", 90, 91),
+        ):
+            with self.subTest(provider=provider):
+                self.assertEqual(enforced(provider, accepted), accepted)
+                self.assertEqual(enforced(provider, -1), -1)
+                with self.assertRaisesRegex(
+                    JobValidationError, "Synchronisationszeitraum ist zu groß"
+                ):
+                    enforced(provider, rejected)
+        # Without enforcement, persisted jobs queued under older limits still run.
+        self.assertEqual(
+            self.normalize("garmin", "refresh", {"days": 91})["payload"], {"days": 91}
+        )
+
     def test_refresh_validation_order_and_omitted_reason(self):
         self.assert_invalid(
             "intervals",
@@ -647,7 +673,10 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual([job["id"] for job in self.store.list(1)], [weather["id"]])
         self.assertTrue(self.store.active("weather", "refresh"))
         self.assertFalse(self.store.active("calendar", "refresh"))
-        self.assertEqual(self.store.pending_performance_job_id(), performance["id"])
+        self.assertEqual(
+            self.store.pending_performance_job_id("intervals"), performance["id"]
+        )
+        self.assertIsNone(self.store.pending_performance_job_id("garmin"))
 
     def test_all_read_methods_reuse_an_outer_unit_of_work_connection(self):
         manager = DatabaseManager(
@@ -665,7 +694,7 @@ class SyncJobStoreTests(unittest.TestCase):
             self.assertIsNone(store.state("missing"))
             self.assertEqual(store.list(10), [])
             self.assertFalse(store.active("garmin", "refresh"))
-            self.assertIsNone(store.pending_performance_job_id())
+            self.assertIsNone(store.pending_performance_job_id("intervals"))
             self.assertEqual(connect.call_count, 1)
 
     def test_enqueue_persists_compact_utf8_payload_and_server_hash_contract(self):

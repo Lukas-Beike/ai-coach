@@ -59,6 +59,7 @@ RETRYABLE_ERROR_CLASSES = frozenset(
 )
 SYNC_JOB_LIST_LIMIT = 50
 SYNC_JOB_MAX_ATTEMPTS = 3
+MAX_JOB_REFRESH_DAYS = 3660
 INVALID_NUTRITION_MANIFEST_ERROR = "Invalid nutrition approval manifest."
 NUTRITION_MANIFEST_FIELDS = frozenset(
     {
@@ -223,8 +224,14 @@ def normalize_sync_job_request(
     *,
     all_sync_days: int,
     registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
+    enforce_period_limit: bool = False,
 ) -> dict[str, Any]:
-    """Validate and normalize the provider-specific payload persisted for a job."""
+    """Validate and normalize the provider-specific payload persisted for a job.
+
+    ``enforce_period_limit`` applies the provider's own sync-window limit to new
+    refresh requests. Persisted jobs are normalized again at execution without
+    it, so a job queued under an older limit still runs.
+    """
     envelope = validate_job_request(provider, job_type, payload, registry=registry)
     provider_value = envelope["provider"]
     type_value = envelope["type"]
@@ -255,7 +262,7 @@ def normalize_sync_job_request(
         normalized_payload = _normalize_plan_push_job(provider_value, values, registry)
     else:
         normalized_payload = _normalize_refresh_job(
-            provider_value, values, all_sync_days, registry
+            provider_value, values, all_sync_days, registry, enforce_period_limit
         )
     return {
         "provider": provider_value,
@@ -469,14 +476,18 @@ def _normalize_refresh_job(
     values: dict[str, Any],
     all_sync_days: int,
     registry: ProviderRegistry,
+    enforce_period_limit: bool,
 ) -> dict[str, Any]:
     if set(values) - registry.refresh_fields(provider_value):
         raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
 
     normalized_payload: dict[str, Any] = {}
     if "days" in values:
+        max_days = MAX_JOB_REFRESH_DAYS
+        if enforce_period_limit:
+            max_days = min(max_days, registry.max_sync_days(provider_value))
         normalized_payload["days"] = _normalize_refresh_days(
-            values["days"], all_sync_days
+            values["days"], all_sync_days, max_days
         )
     if "force" in values:
         normalized_payload["force"] = _normalize_refresh_force(values["force"])
@@ -487,12 +498,12 @@ def _normalize_refresh_job(
     return normalized_payload
 
 
-def _normalize_refresh_days(value: Any, all_sync_days: int) -> int:
+def _normalize_refresh_days(value: Any, all_sync_days: int, max_days: int) -> int:
     try:
         days = int(value)
     except (TypeError, ValueError) as exc:
         raise JobValidationError("Der Synchronisationszeitraum ist ungültig.") from exc
-    if days != all_sync_days and (days < 1 or days > 3660):
+    if days != all_sync_days and (days < 1 or days > max_days):
         raise JobValidationError("Der Synchronisationszeitraum ist zu groß.")
     return days
 
@@ -582,11 +593,12 @@ class SyncJobStore:
         with self._database_manager.unit_of_work() as db:
             return has_active_job(db, provider, job_type)
 
-    def pending_performance_job_id(self) -> str | None:
+    def pending_performance_job_id(self, provider: str) -> str | None:
         with self._database_manager.unit_of_work() as db:
             row = db.execute(
-                "SELECT id FROM sync_jobs WHERE provider='intervals' AND type='performance_refresh' "
-                "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1"
+                "SELECT id FROM sync_jobs WHERE provider=? AND type='performance_refresh' "
+                "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1",
+                (provider,),
             ).fetchone()
             return row["id"] if row else None
 
@@ -624,13 +636,11 @@ class SyncJobStore:
         job_id = str(self._uuid_factory())
 
         with self._database_manager.unit_of_work() as db:
-            if (
-                normalized["provider"] == "intervals"
-                and normalized["type"] == "performance_refresh"
-            ):
+            if normalized["type"] == "performance_refresh":
                 existing = db.execute(
-                    "SELECT * FROM sync_jobs WHERE provider='intervals' AND type='performance_refresh' "
-                    "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1"
+                    "SELECT * FROM sync_jobs WHERE provider=? AND type='performance_refresh' "
+                    "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1",
+                    (normalized["provider"],),
                 ).fetchone()
                 if existing:
                     current, items = read_job(db, existing["id"])
