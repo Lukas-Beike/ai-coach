@@ -1024,18 +1024,6 @@
     },
     {
       "rule": "provider_literal",
-      "path": "backend/sync/freshness.py",
-      "token": "garmin",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/freshness.py",
-      "token": "intervals",
-      "count": 9
-    },
-    {
-      "rule": "provider_literal",
       "path": "backend/sync/full_resync.py",
       "token": "garmin",
       "count": 5
