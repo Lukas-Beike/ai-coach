@@ -300,11 +300,15 @@ from backend.sync.assembly import (
     ProviderSyncPersistence,
     ProviderSyncRuntime,
 )
+from backend.sync.canonical_projection_assembly import (
+    build_canonical_snapshot_projection,
+)
 from backend.sync.command_assembly import (
     IllnessPauseDependencies,
     SyncCommandAssembly,
     SyncCommandCore,
 )
+from backend.sync.daily import DailySyncMarkerService
 from backend.sync.execution_assembly import (
     CalendarWeatherJobDependencies,
     GarminJobDependencies,
@@ -396,6 +400,7 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutSyncAssembly,
 )
 from backend.sync.snapshot_reader import SnapshotRepositoryReader
+from backend.sync.state import SyncStateRepository
 from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
@@ -852,6 +857,16 @@ SYNC_PERSISTENCE = SyncPersistenceAssembly(
 )
 
 
+def sync_state_repository() -> SyncStateRepository:
+    """Return the sync state repository bound to the runtime provider registry."""
+    return SYNC_PERSISTENCE.state_repository(registry=provider_runtime().static)
+
+
+def sync_daily_markers() -> DailySyncMarkerService:
+    """Return the daily sync marker service bound to the runtime provider registry."""
+    return SYNC_PERSISTENCE.daily_markers(registry=provider_runtime().static)
+
+
 GARMIN_ASSEMBLY = GarminAssembly(
     dependencies=GarminAssembly.Inputs(
         provider=GarminProviderSettings(
@@ -865,8 +880,8 @@ GARMIN_ASSEMBLY = GarminAssembly(
         persistence=GarminPersistenceOwners(
             database_manager=database_manager,
             key_values=KEY_VALUE_REPOSITORY,
-            sync_state_repository=SYNC_PERSISTENCE.state_repository,
-            daily_sync_marker_service=SYNC_PERSISTENCE.daily_markers,
+            sync_state_repository=sync_state_repository,
+            daily_sync_marker_service=sync_daily_markers,
             sync_equipment=lambda payload: (
                 ATHLETE_DATA.equipment().sync_garmin_snapshot(payload)
             ),
@@ -900,7 +915,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
             event_buffer=runtime_events.STATE_EVENT_BUFFER,
             maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
             wake_event=shared_sync_job_wake_event,
-            daily_sync_marker_service=SYNC_PERSISTENCE.daily_markers,
+            daily_sync_marker_service=sync_daily_markers,
         ),
         policy=SyncQueuePolicy(
             all_sync_days=ALL_SYNC_DAYS,
@@ -919,7 +934,7 @@ EXTERNAL_CALENDAR = ExternalCalendarAssembly(
             config=lambda: CONFIG,
             database_manager=database_manager,
             key_values=KEY_VALUE_REPOSITORY,
-            daily_markers=SYNC_PERSISTENCE.daily_markers,
+            daily_markers=sync_daily_markers,
             adaptive_preview_service=lambda: (
                 PLANNING_WORKFLOWS.adaptive_replan_preview_service()
             ),
@@ -952,8 +967,8 @@ INTERVALS_SYNC = IntervalsSyncAssembly(
         persistence=IntervalsPersistenceDependencies(
             database_manager=database_manager,
             key_values=KEY_VALUE_REPOSITORY,
-            state_repository=SYNC_PERSISTENCE.state_repository,
-            daily_markers=SYNC_PERSISTENCE.daily_markers,
+            state_repository=sync_state_repository,
+            daily_markers=sync_daily_markers,
             event_buffer=runtime_events.STATE_EVENT_BUFFER,
             redact_text=REDACTOR.redact_text,
             logger=LOGGER,
@@ -1209,7 +1224,7 @@ WEATHER_ASSEMBLY = WeatherAssembly(
 COACH_CONTEXT = CoachContextAssembly(
     dependencies=CoachContextAssembly.Inputs(
         performance=CoachContextPerformanceSources(
-            sync_state_repository=SYNC_PERSISTENCE.state_repository,
+            sync_state_repository=sync_state_repository,
             weather_service=WEATHER_ASSEMBLY.service,
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             garmin_projection_service=GARMIN_ASSEMBLY.projection_service,
@@ -1278,7 +1293,7 @@ COACH_PROPOSALS = CoachProposalAssembly(
     dependencies=CoachProposalAssembly.Inputs(
         persistence=ProposalPersistence(
             database_manager=database_manager,
-            sync_state_repository=SYNC_PERSISTENCE.state_repository,
+            sync_state_repository=sync_state_repository,
             nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
             nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         ),
@@ -1340,7 +1355,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         sync_earliest_date=SYNC_EARLIEST_DATE,
     ),
     state=SyncJobStateDependencies(
-        sync_state_repository=SYNC_PERSISTENCE.state_repository,
+        sync_state_repository=sync_state_repository,
         queue_service=SYNC_JOB_QUEUE.service,
         outcome_service=SYNC_JOB_QUEUE.outcome_service,
     ),
@@ -1385,14 +1400,14 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
         owners=SyncScheduleOwners(
             profile_service=ATHLETE_DATA.profile,
             queue_service=SYNC_JOB_QUEUE.service,
-            daily_sync_marker_service=SYNC_PERSISTENCE.daily_markers,
+            daily_sync_marker_service=sync_daily_markers,
             garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
         ),
         persistence=SyncSchedulePersistence(
             database_manager=database_manager,
             key_values=KEY_VALUE_REPOSITORY,
             database_lock=DB_LOCK,
-            sync_state_repository=SYNC_PERSISTENCE.state_repository,
+            sync_state_repository=sync_state_repository,
         ),
         controls=SyncScheduleControls(
             intervals_resync_gate=INTERVALS_RESYNC_GATE,
@@ -1584,7 +1599,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
             planning_authority_service=SYNC_COMMANDS.authority,
         ),
         state=StructuredToolRoundState(
-            sync_state_repository=lambda: SYNC_PERSISTENCE.state_repository(),
+            sync_state_repository=lambda: sync_state_repository(),
             job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
         ),
         conversation=StructuredToolRoundConversation(
@@ -1736,6 +1751,14 @@ PUBLIC_STATE = PublicStateAssembly(
     provider_runtime=provider_runtime,
 )
 
+CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
+    intervals_snapshots=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+    snapshot_payloads=SNAPSHOT_REPOSITORY,
+    garmin_payloads=lambda: GARMIN_ASSEMBLY.payload_service(),
+    profile=ATHLETE_PROFILE_SERVICE,
+    clock=ATHLETE_CLOCK.now,
+)
+
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
     dependencies=DiagnosticsAssembly.Inputs(
         runtime=DiagnosticRuntimeDependencies(
@@ -1748,7 +1771,7 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             app_version=APP_VERSION,
         ),
         provider_health=DiagnosticProviderHealth(
-            sync_state=SYNC_PERSISTENCE.state_repository,
+            sync_state=sync_state_repository,
             provider_state=provider_state_service,
             provider_freshness=PROVIDER_SYNC.freshness_service,
             redactor=REDACTOR,
@@ -1765,6 +1788,7 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             external_calendar_reader=EXTERNAL_CALENDAR.reader,
             morning_checkin=COACH_LOCAL.morning_checkin_state_service,
             workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
+            canonical_coverage=lambda: CANONICAL_SNAPSHOT_PROJECTION,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,
@@ -1889,7 +1913,7 @@ HTTP_API = HttpApiAssembly(
             ),
             sync=HttpSyncServices(
                 job_queue=SYNC_JOB_QUEUE.service,
-                state_repository=SYNC_PERSISTENCE.state_repository,
+                state_repository=sync_state_repository,
                 performance_refresh=INTERVALS_SYNC.performance_service,
                 full_resync=PROVIDER_RESYNC.full_resync_service,
                 period_defaults=SYNC_PERIOD_DEFAULTS,
