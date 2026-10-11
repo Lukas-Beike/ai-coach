@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal, Protocol, TypeVar
 
+from backend.errors import AppError
 from backend.providers.descriptors import ProviderDescriptor
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
@@ -84,7 +85,7 @@ class FullResyncHandler(Protocol):
     def configured(self) -> bool:
         """Return whether the provider can run a full resync."""
 
-    def not_configured_error(self) -> Exception:
+    def not_configured_error(self) -> AppError:
         """Return the error raised when the provider is not configured."""
 
     def run(self, operation_id: str, observer: SyncOperationObserver) -> dict[str, Any]:

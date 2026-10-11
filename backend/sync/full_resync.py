@@ -3,100 +3,44 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.errors import INTERVALS_API_KEY_ERROR, AppError
+from backend.errors import AppError
 from backend.sync import observation
-from backend.sync.competitions import CompetitionSyncService
-from backend.sync.garmin_service import GarminSyncService
-from backend.sync.gates import ProviderResyncGate
-from backend.sync.intervals import IntervalsSyncService
+from backend.sync.gates import ProviderResyncGate, resync_gate
 from backend.sync.observation import OPERATION_CONTEXT, SyncOperationObserver
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_runtime import FullResyncHandler
 
 FULL_RESYNC_LABEL = "Vollständiger Resync"
-PROVIDER_INTERVALS_NAME = "Intervals.icu"
 GARMIN_NOT_CONFIGURED_ERROR = "Garmin ist nicht konfiguriert oder nicht verfügbar."
 
-PROVIDER_RESYNC_KEYS: dict[str, dict[str, str]] = {
-    "intervals": {
-        "running": "intervals_full_resync_running",
-        "status": "intervals_full_resync_status",
-        "last_at": "intervals_full_resync_at",
-        "error": "intervals_full_resync_error",
-    },
-    "garmin": {
-        "running": "garmin_full_resync_running",
-        "status": "garmin_full_resync_status",
-        "last_at": "garmin_full_resync_at",
-        "error": "garmin_full_resync_error",
-    },
-}
+RESYNC_FIELDS = ("running", "status", "last_at", "error")
 
 
-@dataclass
-class FullResyncProviderExecution:
-    """Own the provider-specific admission, gates, and resync execution."""
-
-    config: Config
-    intervals_service: IntervalsSyncService
-    garmin_service: GarminSyncService
-    competition_service: CompetitionSyncService
-    intervals_gate: ProviderResyncGate
-    garmin_gate: ProviderResyncGate
-    all_sync_days: int
-
-    def configured(self, provider: str) -> bool:
-        if provider == "intervals":
-            return bool(self.config.intervals_api_key)
-        if provider == "garmin":
-            return self.garmin_service.configured()
-        return True
-
-    def validate_configuration(self, provider: str) -> None:
-        if self.configured(provider):
-            return
-        if provider == "intervals":
-            raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
-        if provider == "garmin":
-            raise AppError(503, GARMIN_NOT_CONFIGURED_ERROR, reason="not_configured")
-
-    def gate(self, provider: str) -> ProviderResyncGate:
-        return self.intervals_gate if provider == "intervals" else self.garmin_gate
-
-    def label(self, provider: str) -> str:
-        return PROVIDER_INTERVALS_NAME if provider == "intervals" else "Garmin"
-
-    def run(
-        self, provider: str, operation_id: str, observer: SyncOperationObserver
-    ) -> dict[str, Any]:
-        if provider == "garmin":
-            return self.garmin_service.sync(
-                days=self.all_sync_days,
-                operation_id=operation_id,
-                reason=FULL_RESYNC_LABEL,
+def resync_field_keys(
+    key_map: Mapping[str, tuple[str, ...]],
+) -> dict[str, dict[str, str]]:
+    """Name each provider's ordered full-resync state keys by their role."""
+    for provider_id, keys in key_map.items():
+        if len(keys) != len(RESYNC_FIELDS):
+            raise ValueError(
+                f"{provider_id} full resync needs keys for "
+                f"{', '.join(RESYNC_FIELDS)}; got {len(keys)}"
             )
+    return {
+        provider_id: dict(zip(RESYNC_FIELDS, keys, strict=True))
+        for provider_id, keys in key_map.items()
+    }
 
-        result = self.intervals_service.sync(
-            FULL_RESYNC_LABEL,
-            activity_days=self.all_sync_days,
-            operation_id=operation_id,
-        )
-        with (
-            observer.observe(
-                "intervals", "competitions", FULL_RESYNC_LABEL, operation_id
-            ) as scope,
-            self.intervals_gate.operation(),
-        ):
-            competitions = self.competition_service.sync(
-                reason=FULL_RESYNC_LABEL, push_local=False
-            )
-            scope.result = competitions
-        return {**result, "competitions": competitions}
+
+PROVIDER_RESYNC_KEYS: dict[str, dict[str, str]] = resync_field_keys(
+    DEFAULT_PROVIDER_REGISTRY.resync_key_map()
+)
 
 
 @dataclass
@@ -105,11 +49,12 @@ class FullResyncStateStore:
 
     database_manager: DatabaseManager
     key_value_repository: KeyValueRepository
+    resync_keys: Mapping[str, Mapping[str, str]]
 
     def state(
         self, provider: str, gate: ProviderResyncGate, db: Any | None = None
     ) -> dict[str, Any]:
-        keys = PROVIDER_RESYNC_KEYS[provider]
+        keys = self.resync_keys[provider]
         if db is None:
             with self.database_manager.reader() as owned:
                 return self.state(provider, gate, owned)
@@ -128,7 +73,7 @@ class FullResyncStateStore:
         }
 
     def start(self, provider: str, label: str) -> None:
-        keys = PROVIDER_RESYNC_KEYS[provider]
+        keys = self.resync_keys[provider]
         self.set_value(keys["running"], "1")
         self.set_value(
             keys["status"],
@@ -138,15 +83,15 @@ class FullResyncStateStore:
         self.set_value(keys["status"], f"{label}: vollständiger Resync läuft…")
 
     def complete(self, provider: str, finished_at: str) -> None:
-        keys = PROVIDER_RESYNC_KEYS[provider]
+        keys = self.resync_keys[provider]
         self.set_value(keys["last_at"], finished_at)
         self.set_value(keys["error"], "")
 
     def record_failure(self, provider: str, redacted_error: str) -> None:
-        self.set_value(PROVIDER_RESYNC_KEYS[provider]["error"], redacted_error)
+        self.set_value(self.resync_keys[provider]["error"], redacted_error)
 
     def finish(self, provider: str) -> None:
-        keys = PROVIDER_RESYNC_KEYS[provider]
+        keys = self.resync_keys[provider]
         try:
             self.set_value(keys["running"], "0")
         finally:
@@ -242,32 +187,40 @@ class FullResyncOperationJournal:
 
 
 class FullProviderResyncService:
-    """Run a provider's full refresh while retaining its last good local data."""
+    """Run a provider's full refresh while retaining its last good local data.
+
+    Each provider contributes a ``FullResyncHandler``; providers without one are
+    rejected as unknown. Gates default to the registered ones, with the Garmin
+    gate as the fallback for an unmapped provider.
+    """
 
     def __init__(
         self,
-        provider_execution: FullResyncProviderExecution,
+        handlers: Mapping[str, FullResyncHandler],
         state_store: FullResyncStateStore,
         operation_journal: FullResyncOperationJournal,
+        *,
+        gates: Mapping[str, ProviderResyncGate] | None = None,
+        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
-        self._provider_execution = provider_execution
+        self._handlers = handlers
         self._state_store = state_store
         self._operation_journal = operation_journal
+        self._gates = gates
+        self._registry = registry
 
     def provider_configured(self, provider: str) -> bool:
-        self._validate_provider(provider)
-        return self._provider_execution.configured(provider)
+        return self._handler(provider).configured()
 
     def state(self, provider: str, db: Any | None = None) -> dict[str, Any]:
-        self._validate_provider(provider)
-        return self._state_store.state(
-            provider, self._provider_execution.gate(provider), db
-        )
+        self._handler(provider)
+        return self._state_store.state(provider, self._gate(provider), db)
 
     def resync(self, provider: str, operation_id: str | None = None) -> dict[str, Any]:
-        self._validate_provider(provider)
-        self._provider_execution.validate_configuration(provider)
-        gate = self._provider_execution.gate(provider)
+        handler = self._handler(provider)
+        if not handler.configured():
+            raise handler.not_configured_error()
+        gate = self._gate(provider)
         if not gate.begin_reset():
             return {"status": "already_running", "source": provider}
 
@@ -286,9 +239,9 @@ class FullProviderResyncService:
             self._operation_journal.log_started(
                 resolved_operation_id, provider, operation_started
             )
-            self._state_store.start(provider, self._provider_execution.label(provider))
-            result = self._provider_execution.run(
-                provider, resolved_operation_id, self._operation_journal.observer
+            self._state_store.start(provider, self._registry.get(provider).label)
+            result = handler.run(
+                resolved_operation_id, self._operation_journal.observer
             )
             finished_at = self._operation_journal.utc_now()
             self._state_store.complete(provider, finished_at)
@@ -329,6 +282,10 @@ class FullProviderResyncService:
                 finally:
                     gate.end_reset()
 
-    def _validate_provider(self, provider: str) -> None:
-        if provider not in PROVIDER_RESYNC_KEYS:
+    def _handler(self, provider: str) -> FullResyncHandler:
+        if provider not in self._handlers:
             raise AppError(400, "Unbekannte Anbindung.")
+        return self._handlers[provider]
+
+    def _gate(self, provider: str) -> ProviderResyncGate:
+        return resync_gate(provider, self._gates)

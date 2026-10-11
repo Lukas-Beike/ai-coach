@@ -4,23 +4,30 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.errors import INTERVALS_API_KEY_ERROR, AppError
+from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
 from backend.runtime.events import StateEventBuffer
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.sync.full_resync import (
+    FULL_RESYNC_LABEL,
+    GARMIN_NOT_CONFIGURED_ERROR,
+    PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
     FullResyncOperationJournal,
-    FullResyncProviderExecution,
     FullResyncStateStore,
 )
-from backend.sync.gates import ProviderResyncGate
+from backend.sync.garmin_service import GarminSyncService
+from backend.sync.gates import ProviderResyncGate, resync_gate
+from backend.sync.intervals import IntervalsSyncService
 from backend.sync.observation import SyncOperationObserver
+from backend.sync.provider_runtime import FullResyncHandler
 
 
 @dataclass(frozen=True)
@@ -55,6 +62,98 @@ class ProviderResyncRuntime:
     uuid_factory: Callable[[], str]
     monotonic: Callable[[], float]
     operation_observer: Callable[[], SyncOperationObserver]
+
+
+class IntervalsFullResync:
+    """Full Intervals.icu resync followed by the shared competition sync."""
+
+    def __init__(
+        self,
+        *,
+        config: Config,
+        intervals_service: IntervalsSyncService,
+        competition_service: CompetitionSyncService,
+        gate: ProviderResyncGate,
+        all_sync_days: int,
+    ) -> None:
+        self._config = config
+        self._intervals_service = intervals_service
+        self._competition_service = competition_service
+        self._gate = gate
+        self._all_sync_days = all_sync_days
+
+    def configured(self) -> bool:
+        return bool(self._config.intervals_api_key)
+
+    def not_configured_error(self) -> AppError:
+        return AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
+
+    def run(self, operation_id: str, observer: SyncOperationObserver) -> dict[str, Any]:
+        result = self._intervals_service.sync(
+            FULL_RESYNC_LABEL,
+            activity_days=self._all_sync_days,
+            operation_id=operation_id,
+        )
+        with (
+            observer.observe(
+                INTERVALS_ID, "competitions", FULL_RESYNC_LABEL, operation_id
+            ) as scope,
+            self._gate.operation(),
+        ):
+            competitions = self._competition_service.sync(
+                reason=FULL_RESYNC_LABEL, push_local=False
+            )
+            scope.result = competitions
+        return {**result, "competitions": competitions}
+
+
+class GarminFullResync:
+    """Full Garmin resync over the complete sync window."""
+
+    def __init__(
+        self, *, garmin_service: GarminSyncService, all_sync_days: int
+    ) -> None:
+        self._garmin_service = garmin_service
+        self._all_sync_days = all_sync_days
+
+    def configured(self) -> bool:
+        return self._garmin_service.configured()
+
+    def not_configured_error(self) -> AppError:
+        return AppError(503, GARMIN_NOT_CONFIGURED_ERROR, reason="not_configured")
+
+    def run(
+        self, operation_id: str, _observer: SyncOperationObserver
+    ) -> dict[str, Any]:
+        return self._garmin_service.sync(
+            days=self._all_sync_days,
+            operation_id=operation_id,
+            reason=FULL_RESYNC_LABEL,
+        )
+
+
+def full_resync_handlers(
+    *,
+    config: Config,
+    intervals_service: IntervalsSyncService,
+    garmin_service: GarminSyncService,
+    competition_service: CompetitionSyncService,
+    gates: Mapping[str, ProviderResyncGate],
+    all_sync_days: int,
+) -> dict[str, FullResyncHandler]:
+    """Map each built-in provider identifier to its full resync handler."""
+    return {
+        INTERVALS_ID: IntervalsFullResync(
+            config=config,
+            intervals_service=intervals_service,
+            competition_service=competition_service,
+            gate=resync_gate(INTERVALS_ID, gates),
+            all_sync_days=all_sync_days,
+        ),
+        GARMIN_ID: GarminFullResync(
+            garmin_service=garmin_service, all_sync_days=all_sync_days
+        ),
+    }
 
 
 class ProviderResyncAssembly:
@@ -113,17 +212,31 @@ class ProviderResyncAssembly:
     def full_resync_service(self) -> FullProviderResyncService:
         """Create full provider resynchronization over current service owners."""
         observer = self._operation_observer()
+        gates: dict[str, ProviderResyncGate] = {
+            INTERVALS_ID: self._intervals_resync_gate,
+            GARMIN_ID: self._garmin_resync_gate,
+        }
+        handlers = full_resync_handlers(
+            config=self._resync_config(),
+            intervals_service=self._intervals_sync_service(),
+            garmin_service=self._garmin_sync_service(),
+            competition_service=self.competition_sync_service(),
+            gates=gates,
+            all_sync_days=self._all_sync_days,
+        )
+        unmanaged = sorted(set(handlers) - set(PROVIDER_RESYNC_KEYS))
+        if unmanaged:
+            raise ValueError(
+                "full resync handlers without registered state keys: "
+                + ", ".join(unmanaged)
+            )
         return FullProviderResyncService(
-            FullResyncProviderExecution(
-                self._resync_config(),
-                self._intervals_sync_service(),
-                self._garmin_sync_service(),
-                self.competition_sync_service(),
-                self._intervals_resync_gate,
-                self._garmin_resync_gate,
-                self._all_sync_days,
+            handlers,
+            FullResyncStateStore(
+                self._database_manager(),
+                self._key_values,
+                PROVIDER_RESYNC_KEYS,
             ),
-            FullResyncStateStore(self._database_manager(), self._key_values),
             FullResyncOperationJournal(
                 observer,
                 self._logger,
@@ -132,4 +245,5 @@ class ProviderResyncAssembly:
                 self._monotonic,
                 self._uuid_factory,
             ),
+            gates=gates,
         )
