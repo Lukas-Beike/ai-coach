@@ -80,7 +80,7 @@ class ServerFrontendTests(ServerTestCase):
                 "activitySportLabel",
                 "saveInlineMetric",
             ),
-            "diagnostics.js": ("loadChangeHistory", "loadLogs", "deleteDiagnostics"),
+            "diagnostics.js": ("loadLogs", "deleteDiagnostics"),
             "state-loader.js": ("loadState", "load", "render"),
             "sync-actions.js": ("syncNow", "syncGarmin", "fullResync"),
             "settings.js": (

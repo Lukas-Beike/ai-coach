@@ -28,6 +28,8 @@ class FakeIntervalsApi:
 
     def get(self, path, params=None, *, cancel_event=None):
         self.calls.append(("get", path, params))
+        if path.endswith("/activity-power-curves"):
+            return self.rows.get("power_curves", {"secs": [], "curves": []})
         return {
             "id": "athlete",
             "name": "Synthetic Athlete",
@@ -208,7 +210,7 @@ class IntervalsSnapshotReaderTests(unittest.TestCase):
         self.assertEqual(between_steps.exception.reason, "chat_cancelled")
         self.assertEqual([call[0] for call in api.calls], ["activities"])
 
-    def test_performance_refresh_reads_only_athlete_and_ninety_day_wellness(self):
+    def test_performance_refresh_reads_athlete_wellness_and_power_curves(self):
         api = FakeIntervalsApi(rows={"performance_wellness": [{"id": "w1", "ctl": 5}]})
         reader = make_reader(api)
         existing = {
@@ -219,7 +221,7 @@ class IntervalsSnapshotReaderTests(unittest.TestCase):
         snapshot = reader.fetch_performance_snapshot(existing)
 
         self.assertEqual(
-            [call[0] for call in api.calls], ["get", "performance_wellness"]
+            [call[0] for call in api.calls], ["get", "performance_wellness", "get"]
         )
         self.assertEqual(
             api.calls[1][2], {"oldest": "2025-10-03", "newest": "2026-01-01"}
@@ -227,6 +229,49 @@ class IntervalsSnapshotReaderTests(unittest.TestCase):
         self.assertEqual(snapshot["recent_activities"][0]["id"], "a1")
         self.assertEqual(snapshot["upcoming_calendar"][0]["id"], "e1")
         self.assertEqual(set(snapshot["raw_provider_data"]), {"athlete", "wellness"})
+
+    def test_power_curves_sync_combines_rides_and_retains_on_optional_failure(self):
+        api = FakeIntervalsApi(
+            rows={
+                "power_curves": {
+                    "secs": [5, 60, 3600],
+                    "curves": [
+                        {
+                            "id": "outdoor",
+                            "start_date_local": "2025-12-30",
+                            "watts": [600, 400, None],
+                        },
+                        {
+                            "id": "indoor",
+                            "start_date_local": "2025-12-31",
+                            "watts": [550, 420, 250],
+                        },
+                        {
+                            "id": "future",
+                            "start_date_local": "2026-01-02",
+                            "watts": [900, 800, 700],
+                        },
+                    ],
+                }
+            }
+        )
+        reader = make_reader(api)
+        snapshot = reader.fetch_snapshot(activity_days=1)
+        profile = snapshot["cycling_power_profile"]
+        self.assertEqual([p["watts"] for p in profile["points"]], [600, 420, 250])
+        self.assertEqual(
+            api.calls[-1][2],
+            {
+                "oldest": "2025-10-04",
+                "newest": "2026-01-01",
+                "type": "Ride",
+                "secs": "5,60,300,1200,3600",
+            },
+        )
+        api.rows["power_curves"] = "invalid"
+        retained = reader._cycling_power_profile("athlete", date(2026, 1, 1), snapshot)
+        self.assertEqual(retained["points"], profile["points"])
+        self.assertEqual(retained["status"], "failed")
 
     def test_provider_error_is_passed_through_unchanged(self):
         error = RuntimeError("provider failure")

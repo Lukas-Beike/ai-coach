@@ -10,7 +10,7 @@ from backend.athlete.local_date import iso_date_prefix
 
 GARMIN_SOURCE = "Garmin Connect"
 
-_DATE_KEYS = ("date", "calendarDate", "summaryDate")
+_DATE_KEYS = ("date", "calendarDate", "summaryDate", "from")
 _IGNORED_NUMERIC_KEYS = {"id", "activityId", "userId"}
 
 
@@ -37,6 +37,13 @@ def _records(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     if isinstance(value, dict):
+        groups = value.get("groupMap")
+        if isinstance(groups, dict) and groups:
+            return [
+                {**item, "date": day}
+                for day, item in groups.items()
+                if isinstance(item, dict)
+            ]
         for key in ("enduranceScoreDTO", "enduranceScoreDTOList"):
             nested = value.get(key)
             if isinstance(nested, (dict, list)):
@@ -66,17 +73,21 @@ def ftp_points(value: Any, *, start: date, end: date) -> list[dict[str, Any]]:
     """Return only dated finite cycling FTP values from the range response."""
     points: dict[str, dict[str, Any]] = {}
     for record in _records(value):
+        # The biometric range API uses from/value; latest FTP uses
+        # calendarDate/functionalThresholdPower. An unqualified value is not FTP.
+        range_record = "from" in record
         observed = _observed(record)
         if observed is None or not start <= observed <= end:
             continue
-        candidate = _number(record.get("functionalThresholdPower"))
+        field = "value" if range_record else "functionalThresholdPower"
+        candidate = _number(record.get(field))
         if candidate is None or not 20 <= candidate <= 2000:
             continue
         points[observed.isoformat()] = {
             "date": observed.isoformat(),
             "value": round(candidate, 2),
             "source": GARMIN_SOURCE,
-            "field": "functionalThresholdPower",
+            "field": field,
         }
     return [points[key] for key in sorted(points)]
 

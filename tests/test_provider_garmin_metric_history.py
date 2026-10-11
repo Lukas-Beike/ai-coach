@@ -176,6 +176,41 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
 
 
 class GarminHistoricMetricNormalizationTests(unittest.TestCase):
+    def test_wire_range_formats_preserve_ftp_and_endurance_weeks(self):
+        points = ftp_points(
+            [
+                {"from": "2026-10-01T00:00:00", "value": 270, "series": "CYCLING"},
+                {"from": "2026-10-02", "value": 275},
+                {"from": "2026-10-03", "calendarDate": "2026-10-04", "value": 280},
+                {"from": "2026-10-07", "value": 290},
+                {"value": 300},
+            ],
+            start=START,
+            end=TODAY,
+        )
+        self.assertEqual(
+            [(row["date"], row["value"]) for row in points],
+            [
+                ("2026-10-01", 270),
+                ("2026-10-02", 275),
+            ],
+        )
+        endurance = metric_points(
+            {
+                "groupMap": {
+                    "2026-09-28": {"groupAverage": 6850, "groupMax": 6900},
+                    "2026-10-05": {"groupAverage": 7000},
+                    "2026-10-12": {"groupAverage": 7100},
+                    "invalid": {"groupAverage": 7200},
+                }
+            },
+            start=START,
+            end=TODAY,
+        )
+        self.assertEqual(
+            [row["values"]["groupAverage"] for row in endurance], [6850, 7000]
+        )
+
     def test_ftp_requires_known_field_dated_finite_bounded_non_future_values(self):
         points = ftp_points(
             [

@@ -582,7 +582,7 @@ let cyclingPowerProfileGeneration = 0;
 function cyclingPowerProfileTable(result) {
   const table = reportNode("table", null, "race-predictions-table");
   const head = reportNode("thead"); const header = reportNode("tr");
-  for (const label of ["Dauer", "Draußen", "Indoor"]) {
+  for (const label of ["Dauer", "Leistung"]) {
     const cell = reportNode("th", label); cell.scope = "col"; header.append(cell);
   }
   head.append(header); table.append(head);
@@ -590,13 +590,11 @@ function cyclingPowerProfileTable(result) {
   for (const [duration, label] of [[5, "5 Sekunden"], [60, "1 Minute"], [300, "5 Minuten"], [1200, "20 Minuten"], [3600, "1 Stunde"]]) {
     const row = reportNode("tr"); row.dataset.powerDuration = String(duration);
     const heading = reportNode("th", label); heading.scope = "row"; row.append(heading);
-    for (const sport of ["Ride", "VirtualRide"]) {
-      const point = result.windows?.["90"]?.power?.find((item) => item.sport === sport && item.duration_seconds === duration);
-      const valid = point?.watts != null && Number.isFinite(Number(point.watts)) && point.status === "ok";
-      const cell = reportNode("td", valid ? analysisValue(point.watts, "W") : "\u2014");
-      if (valid) cell.title = [dateLabel(point.date), point.source].filter(Boolean).join(" · ");
-      row.append(cell);
-    }
+    const candidates = [...(result.windows?.["90"]?.power || []), ...(state.data?.performance?.history?.cycling_power_profile?.points || [])];
+    const point = candidates.filter((item) => item.duration_seconds === duration && item.status === "ok" && item.watts != null && Number.isFinite(Number(item.watts))).sort((a, b) => Number(b.watts) - Number(a.watts))[0];
+    const cell = reportNode("td", point ? analysisValue(point.watts, "W") : "\u2014");
+    if (point) cell.title = [dateLabel(point.date), point.source].filter(Boolean).join(" · ");
+    row.append(cell);
     body.append(row);
   }
   table.append(body);
@@ -613,11 +611,15 @@ async function renderCyclingPowerProfile() {
     const result = await requestAnalysisReport("/api/analysis/power-profiles");
     if (generation !== cyclingPowerProfileGeneration || session !== state.sessionGeneration) return;
     root.replaceChildren(reportNode("h4", "Leistungsprofil"));
-    root.append(reportNode("p", "Beste gemessene Durchschnittsleistung · letzte 90 Tage · lokal gespeicherte Aufzeichnungen", "analysis-reference-note"));
+    root.append(reportNode("p", "Beste gemessene Durchschnittsleistung · letzte 90 Tage · Rad und Indoor zusammen", "analysis-reference-note"));
     root.append(cyclingPowerProfileTable(result));
+    if (state.data?.performance?.history?.cycling_power_profile?.status === "failed") {
+      root.append(reportNode("p", "Leistungskurven konnten zuletzt nicht synchronisiert werden. Angezeigt werden vorhandene Messungen.", "analysis-reference-note"));
+    }
   } catch {
     if (generation === cyclingPowerProfileGeneration && session === state.sessionGeneration) {
-      root.replaceChildren(reportNode("h4", "Leistungsprofil"), reportNode("p", "Leistungsprofil konnte nicht geladen werden.", "empty"));
+      root.replaceChildren(reportNode("h4", "Leistungsprofil"), cyclingPowerProfileTable({}));
+      root.append(reportNode("p", "Lokale Aktivitätsdetails konnten nicht geladen werden. Bereits synchronisierte Leistungskurven bleiben sichtbar.", "empty"));
     }
   }
 }
@@ -686,10 +688,10 @@ function renderAnalysisHistory(history) { // NOSONAR
   ].flatMap(([key, label, unit, color]) => (history.metrics?.[key] || []).filter((item) => item.source === (key === "cycling_eftp_watts" ? "Intervals.icu" : "Garmin Connect")).map((item) => ({
     label: `${label} · ${item.source}`, legendLabel: label.replace(/^Rad \u00b7 /, ""), source: item.source, unit, color,
     line: key === "cycling_eftp_watts" || key.includes("vo2max") ? "dashed" : "solid",
-    cadenceDays: 7,
-    explanation: key === "cycling_eftp_watts" || key.includes("vo2max") ? "Wochenmedian aus vorhandenen Messungen." : "Letzter gültiger Messwert je Woche.",
+    cadenceDays: key === "cycling_ftp_watts" ? 1 : 7,
+    explanation: key === "cycling_ftp_watts" ? "Alle datierten Garmin-FTP-Messungen." : key === "cycling_eftp_watts" || key.includes("vo2max") ? "Wochenmedian aus vorhandenen Messungen." : "Letzter gültiger Messwert je Woche.",
     currentPoint: item.points.filter((point) => point.date <= end).findLast(analysisValidPoint),
-    points: analysisWeeklyPerformancePoints(item.points, performanceStart, end, key === "cycling_eftp_watts" || key.includes("vo2max")),
+    points: key === "cycling_ftp_watts" ? item.points.filter((point) => point.date >= performanceStart && point.date <= end) : analysisWeeklyPerformancePoints(item.points, performanceStart, end, key === "cycling_eftp_watts" || key.includes("vo2max")),
   })));
   for (const [sport, title, primaryUnit] of [["Lauf", "Laufen", "s/km"], ["Rad", "Rad", "W"]]) {
     const sportSeries = performanceSeries.filter((item) => item.label.startsWith(sport));
@@ -698,11 +700,8 @@ function renderAnalysisHistory(history) { // NOSONAR
       const extra = document.createDocumentFragment();
       renderProviderMetrics({ running_tolerance: history.provider_metrics?.running_tolerance }, extra, performanceStart, end);
       charts.push(...extra.children);
-    } else {
-      const window = history.body?.windows?.["12w"];
-      if (window?.start && window?.end) charts.push(bodyMetricChart("cycling_w_per_kg", "Rad-Leistung pro Gewicht", "W/kg", window, "twelveWeeks"));
     }
-    const group = analysisChartGroup(title, charts, sportSeries, "Letzte 12 Kalenderwochen einschließlich der laufenden Woche: letzter gültiger Wochenwert für FTP und Schwellenpace, Wochenmedian für eFTP und VO₂max. Jede Woche mit Messung bleibt als Punkt sichtbar; fehlende Wochen bleiben Lücken. Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Quellen und Messdatum bleiben sichtbar.");
+    const group = analysisChartGroup(title, charts, sportSeries, "Letzte 12 Kalenderwochen einschließlich der laufenden Woche: alle datierten Garmin-FTP-Werte, letzter gültiger Wochenwert für Schwellenpace, Wochenmedian für eFTP und VO₂max. Fehlende Messungen bleiben Lücken. Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Quellen und Messdatum bleiben sichtbar.");
     makeAnalysisSectionCollapsible(group, `development-${sport}`);
     if (sport === "Lauf") group.querySelector(".analysis-section-content").append(predictions);
     else group.querySelector(".analysis-section-content").prepend(powerProfile);
@@ -748,7 +747,7 @@ function providerMetricUnit(key) {
 
 function providerMetricValue(metric, values) {
   const fields = {
-    endurance_score: ["overallScore", "enduranceScore", "score"],
+    endurance_score: ["overallScore", "enduranceScore", "score", "groupAverage"],
     running_tolerance: ["runningTolerance", "tolerance"],
   }[metric] || [];
   for (const field of fields) {

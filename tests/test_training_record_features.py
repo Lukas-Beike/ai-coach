@@ -7,7 +7,6 @@ from backend.athlete.checkins import CheckinService
 from backend.athlete.equipment import EquipmentService, _garmin_kind, _garmin_sport
 from backend.db.repositories import CheckinRepository
 from backend.errors import AppError
-from backend.nutrition.fueling import FuelingService
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.tag_impact import tag_impact
 from backend.performance.training_report import canonical_rows
@@ -314,45 +313,6 @@ class TrainingRecordFeatureTests(unittest.TestCase):
 
     def tearDown(self):
         self.manager.connection.close()
-
-    def test_fueling_plan_is_local_bound_to_current_unit_and_not_consumption(self):
-        unit = {
-            "id": "ride-1",
-            "type": "Ride",
-            "date": "2026-09-20",
-            "duration_minutes": 120,
-        }
-        service = FuelingService(
-            self.manager,
-            lambda: [unit],
-            lambda: [{"id": "meal-1", "name": "Oats", "carbs_g": 60}],
-            dict,
-            lambda: "2026-09-01T00:00:00Z",
-        )
-        preview = service.read("ride-1")
-        saved = service.save(
-            {
-                "planned_unit_id": "ride-1",
-                "unit_sha256": preview["unit_sha256"],
-                "carbs_g_per_hour": 45,
-                "fluid_ml_per_hour": 600,
-                "template_id": "meal-1",
-            }
-        )
-        self.assertTrue(saved["stored_locally"])
-        self.assertFalse(saved["consumption_logged"])
-        self.assertEqual(saved["fueling_plan"]["suggested_portions_during"], 1.5)
-        unit["duration_minutes"] = 150
-        self.assertTrue(service.read("ride-1")["saved_stale"])
-        with self.assertRaises(AppError):
-            service.save(
-                {
-                    "planned_unit_id": "ride-1",
-                    "unit_sha256": preview["unit_sha256"],
-                    "carbs_g_per_hour": 45,
-                    "fluid_ml_per_hour": 600,
-                }
-            )
 
     def test_checkin_tag_omission_preserves_and_empty_object_clears(self):
         connection = self.manager.connection

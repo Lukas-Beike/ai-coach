@@ -24,6 +24,7 @@ from backend.errors import (
 from backend.planning.context import compact_snapshot
 from backend.planning.library_service import WorkoutLibraryService
 from backend.providers.intervals import IntervalsApiClient
+from backend.providers.intervals_power import PROFILE_DURATIONS, cycling_power_points
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.library import WorkoutLibraryRefreshService
@@ -163,6 +164,9 @@ class IntervalsSnapshotReader:
                 "end": calendar_end.isoformat(),
             },
         }
+        incoming["cycling_power_profile"] = self._cycling_power_profile(
+            athlete, today, existing, cancel_event
+        )
         if not incremental:
             return incoming
 
@@ -178,6 +182,7 @@ class IntervalsSnapshotReader:
             if isinstance(existing.get("raw_provider_data"), dict)
             else {}
         )
+        previous_raw = previous_raw or {}
         merged["raw_provider_data"] = {
             "athlete": incoming["raw_provider_data"]["athlete"],
             "activities": deduplicate_api_records(
@@ -193,6 +198,42 @@ class IntervalsSnapshotReader:
         merged["incremental"] = True
         merged["incremental_window_days"] = request_days
         return merged
+
+    def _cycling_power_profile(
+        self,
+        athlete: str,
+        today: date,
+        existing: dict[str, Any],
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        start = today - timedelta(days=89)
+        self._raise_if_cancelled(cancel_event)
+        try:
+            payload = self._api_client.get(
+                f"/athlete/{athlete}/activity-power-curves",
+                {
+                    "oldest": start.isoformat(),
+                    "newest": today.isoformat(),
+                    "type": "Ride",
+                    "secs": ",".join(map(str, PROFILE_DURATIONS)),
+                },
+                **self._cancel_kwargs(cancel_event),
+            )
+            points = cycling_power_points(payload, start, today)
+            self._raise_if_cancelled(cancel_event)
+            return {
+                "status": "ok" if points else "insufficient_data",
+                "start": start.isoformat(),
+                "end": today.isoformat(),
+                "synced_at": self._utc_now(),
+                "points": points,
+            }
+        except AppError as exc:
+            if exc.reason == "chat_cancelled":
+                raise
+            # Optional curves must not discard a successful activity sync or
+            # previously observed best efforts. No provider payload is logged.
+            return {**(existing.get("cycling_power_profile") or {}), "status": "failed"}
 
     def fetch_performance_snapshot(
         self, existing_snapshot: dict[str, Any] | None
@@ -218,6 +259,9 @@ class IntervalsSnapshotReader:
             synced_at=self._utc_now(),
         )
         snapshot["provider_sync"] = {"pagination": self._pagination()}
+        snapshot["cycling_power_profile"] = self._cycling_power_profile(
+            athlete, today, existing
+        )
         snapshot["raw_provider_data"] = {
             "athlete": athlete_data,
             "wellness": wellness,
@@ -309,7 +353,9 @@ class IntervalsSnapshotService:
             )
         if needs_initial_refresh:
             try:
-                kwargs = {"reason": f"Initialer Intervals.icu-Sync ({reason})"}
+                kwargs: dict[str, Any] = {
+                    "reason": f"Initialer Intervals.icu-Sync ({reason})"
+                }
                 if cancel_event is not None:
                     kwargs["cancel_event"] = cancel_event
                 library_refresh = self._workout_library_refresh_service.refresh(
@@ -406,11 +452,12 @@ class IntervalsSyncWorkflow:
         operation_id: str,
         journal: IntervalsSyncJournal,
     ) -> dict[str, Any]:
-        snapshot = self._reader.fetch_snapshot(
-            activity_days=activity_days,
-            **({"end_date": end_date} if end_date is not None else {}),
-            **({"cancel_event": cancel_event} if cancel_event is not None else {}),
-        )
+        fetch_kwargs: dict[str, Any] = {"activity_days": activity_days}
+        if end_date is not None:
+            fetch_kwargs["end_date"] = end_date
+        if cancel_event is not None:
+            fetch_kwargs["cancel_event"] = cancel_event
+        snapshot = self._reader.fetch_snapshot(**fetch_kwargs)
         journal.storing(operation_id)
         snapshot, planned_import = self._snapshots.store_snapshot(
             snapshot, activity_days, end_date

@@ -69,6 +69,28 @@ class NutritionHttpApiTests(unittest.TestCase):
             {"ok": True, "date": "2026-09-24", "total_kcal": 2000, "entry_count": 3},
         )
 
+    def test_week_route_requires_authentication(self) -> None:
+        self.handler.path = "/api/nutrition/week"
+        self.diary_service.get_week_summary.return_value = {"balance_days": 7}
+        self.assertTrue(self.get_routes.handle(self.handler, "/api/nutrition/week"))
+        self.auth.require_auth.assert_called_once_with(self.handler)
+        self.handler.send_json.assert_called_once_with(
+            200, {"ok": True, "balance_days": 7}
+        )
+
+    def test_removed_fueling_route_is_not_handled(self) -> None:
+        self.handler.path = "/api/nutrition/fueling"
+        self.assertFalse(self.get_routes.handle(self.handler, "/api/nutrition/fueling"))
+
+    def test_week_route_rejects_unauthenticated_read_before_service_access(
+        self,
+    ) -> None:
+        self.handler.path = "/api/nutrition/week"
+        self.auth.require_auth.side_effect = AppError(401, "Authentication required")
+        with self.assertRaises(AppError):
+            self.get_routes.handle(self.handler, "/api/nutrition/week")
+        self.diary_service.get_week_summary.assert_not_called()
+
     def test_get_range_route(self) -> None:
         self.handler.path = "/api/nutrition/range?start=2026-09-20&end=2026-09-24"
         self.diary_service.get_range_summary.return_value = [

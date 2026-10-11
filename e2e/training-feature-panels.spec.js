@@ -118,7 +118,11 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator(".planned-day-metrics, .planned-day-form")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Pers.nliche Erholung/ })).toHaveCount(0);
   await expect(page.locator(".planned-insights-title").filter({ hasText: "Check-in & Erholung" })).toHaveCount(0);
-  await expect(page.locator(".calendar-workout-profile[aria-label='Geplantes Intervallprofil']").first()).toBeVisible();
+  const plannedProfile = page.locator(".calendar-workout-profile[aria-label='Geplantes Intervallprofil']").first();
+  await plannedProfile.evaluate((profile) => {
+    for (let section = profile.closest("details"); section; section = section.parentElement.closest("details")) section.open = true;
+  });
+  await expect(plannedProfile).toBeVisible();
   await expect(page.locator(".calendar-workout-profile[aria-label='Aufgezeichnetes Belastungsprofil']").first()).toBeAttached();
 
   await page.evaluate(async () => { await AppRouter.navigate("more/equipment", { historyMode: "replace" }); });

@@ -29,7 +29,7 @@ session cookie; `CSRF` means that session plus the `X-CSRF-Token` header.
 | GET | `/api/logs`, `/api/logs/download`, `/api/diagnostics` | Diagnostics and redacted logs | Auth |
 | GET | `/api/privacy/export`, `/api/privacy/delete/preview`, `/api/privacy/backup` | Privacy export, deletion preview and backup | Auth |
 | GET | `/api/analysis/endurance`, `/api/analysis/power-profiles`, `/api/analysis/season`, `/api/analysis/training-records`, `/api/analysis/scenarios` | Analysis projections and scenarios | Auth |
-| GET | `/api/nutrition/day`, `/api/nutrition/range`, `/api/nutrition/templates`, `/api/nutrition/fueling`, `/api/nutrition/products` | Nutrition projections and product search | Auth |
+| GET | `/api/nutrition/day`, `/api/nutrition/range`, `/api/nutrition/templates`, `/api/nutrition/week`, `/api/nutrition/products` | Nutrition projections and product search | Auth |
 
 ## Writes and jobs
 

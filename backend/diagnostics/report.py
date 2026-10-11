@@ -74,6 +74,7 @@ class DiagnosticReportService:
             "competitions": "SELECT COUNT(*) AS count FROM competitions",
             "athlete_checkins": "SELECT COUNT(*) AS count FROM athlete_checkins",
             "activity_feedback": "SELECT COUNT(*) AS count FROM activity_feedback",
+            "change_history": "SELECT COUNT(*) AS count FROM change_history",
         }
         return {
             name: db.execute(query).fetchone()["count"]
