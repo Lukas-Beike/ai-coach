@@ -2,34 +2,25 @@
 
 ## Project scope
 
-Intervals Coach is a private, mobile-first PWA for one athlete. The backend is
-a Python `http.server` application with SQLite/SQLCipher persistence. It reads
-Intervals.icu data and, optionally, Garmin Connect data, sends a sanitised
-training context to the OpenAI Responses API, stores local application state,
-and stores planned workouts directly in the local training library for later
-synchronization to Intervals.icu.
-
-The application is intentionally standalone. Keep it on a trusted LAN or
-private VPN; it must not be exposed directly to the public internet.
+Intervals Coach is a private, mobile-first PWA for one athlete, using Python
+`http.server`, SQLCipher, Intervals.icu, optional Garmin, and OpenAI Responses.
+Keep it standalone on a trusted LAN/private VPN, never directly on the internet.
+Use [README.md](README.md) for setup and operational commands.
 
 ## Release and database compatibility contract
 
-- Releases preserve existing athlete data. Schema changes require explicit,
-  versioned, transactional SQLCipher migrations and upgrade regression tests.
-- Every schema change must include an upgrade path from the previously released
-  schema. Preserve that schema as a frozen test fixture and verify the migration
-  with existing data, rollback on failure and same-build restart coverage. A
-  schema-changing pull request is not release-ready without this evidence.
-- Updates must support the documented previous release schemas, including
-  direct updates that skip an intermediate release. Never require an empty
-  data directory as a default release or development policy.
-- Use a fresh database only when the user explicitly requests starting with
-  their fresh database. Isolated tests continue to use temporary storage.
-- Keep one current Coach, API and persistence contract while retaining the
-  migrations needed to upgrade supported installations safely.
-- Same-build restarts, backup/restore, provider synchronisation and editing
-  existing data remain supported operations. Reject unknown or newer schemas
-  without deleting, resetting or partially changing athlete data.
+- Preserve all athlete data, including records, snapshots, tombstones, plans,
+  sessions, settings, conversations, usage, and sync state, not just chat history.
+- Schema changes require versioned, transactional SQLCipher migrations from
+  supported released schemas, including documented skipped-release upgrades.
+  Preserve frozen released-schema fixtures; verify populated upgrades, rollback
+  on failure, and same-build restarts. A schema PR is not release-ready without
+  this evidence.
+- Fresh databases require an explicit user request; tests use temporary storage.
+  Never make an empty data directory the default upgrade/development policy.
+- Keep one current Coach/API/persistence contract and the supported migrations.
+  Preserve restart, backup/restore, provider sync, and editing existing records.
+  Reject unknown/newer schemas without deletion, reset, or partial modification.
 
 ## Important boundaries
 
@@ -59,105 +50,75 @@ private VPN; it must not be exposed directly to the public internet.
 
 ## Architecture and durable state
 
-- `server.py`: application entry point and composition root for configuration,
-  dependency wiring, startup and shutdown. Existing HTTP and domain logic is
-  legacy code to extract incrementally; it is not a precedent for new logic.
-- `backend/`: owns application logic. New business logic and use-case
-  orchestration must live in the appropriate domain module here, never in
-  `server.py`. Use `coach/` for Coach workflows, `planning/` for training-plan
-  changes and season preparation, `sync/` for synchronization and scheduling,
-  `providers/` for external service adapters, `db/` for persistence, `http_api/`
-  for HTTP handling and route assembly (including `athlete_assembly.py`),
-  `backup/` for backup/export workflows, `athlete/` for profile/check-ins and
-  athlete-local time, `activities/` for activity feedback, reads, workout
-  profiles and workout text,
-  `calendar/` for public/external calendar data, `diagnostics/` for safe
-  diagnostics, `history/` for change history and undo, `nutrition/` for
-  nutrition workflows, `performance/` for derived/readiness context,
-  `runtime/` for lifecycle and maintenance state, and `weather/` for weather
-  projections and caching, and `canonical/` for provider-neutral vocabulary and
-  record types (a stdlib-only leaf that every layer may import).
-  Cross-cutting owners remain in `config.py`,
-  `privacy.py`, `settings.py`, `change_history.py`, and `observability.py`.
-  Extend an existing cohesive module first; add a focused module only when the
-  responsibility needs its own home.
-- When a feature extends logic still in `server.py`, extract the affected
-  cohesive responsibility into `backend/` as part of that change. Keep the
-  extraction scoped to the feature. A localized corrective fix may remain in
-  legacy code, but must not add a new responsibility or workflow there.
-- Backend modules must not import `server.py` or access its globals indirectly.
-  Pass required dependencies explicitly and keep transaction boundaries with
-  the use case that owns them. Moving helpers while leaving all orchestration
-  in `server.py` does not complete an extraction.
-- Review backend changes for this ownership rule. Preserve behavior and
-  security/data-integrity contracts, and verify extracted logic with focused
-  tests using temporary storage and mocked providers. Reduce `server.py`
-  through clear ownership, not compressed formatting or arbitrary line limits.
-- `public/`: browser/PWA client. Its scoped instructions are in
-  `public/AGENTS.md`.
-- `tests/`: standard-library unit tests. Its scoped instructions are in
-  `tests/AGENTS.md`.
-- `garmin-login.py`: one-time interactive Garmin login/token setup helper.
-- `requirements.in` and `requirements-dev.in`: direct dependency pins;
-  `requirements.txt` and `requirements-dev.txt` are the hash-locked pip-tools
-  outputs used by CI and Docker.
-- `public/service-worker.js`: PWA cache and notification handling.
-- `.github/workflows/`: convention validation, tests/container publishing,
-  Dependabot auto-merge, and daily releases.
-- `Dockerfile`: non-root container image with a writable persistent `/data`
-  mount. `data/` is runtime-only and must never be included in an image.
-- `.env.example`: configuration template. The real `.env` is local-only.
-- `README.md`: user-facing configuration, privacy, Garmin, PWA, and deployment
-  documentation; keep it consistent with behavior changes.
-
-The database contains more than chat history: profile, competitions and sync
-tombstones, snapshots, workout library, training plans, athlete
-check-ins, plan adjustments, public calendar sources/candidates, sessions,
-settings, Garmin snapshots, OpenAI conversation state, usage data, and sync
-status. Treat all of it as durable athlete data.
+- `server.py` is the composition root for configuration, wiring, and lifecycle.
+  New business logic and use-case orchestration belong in `backend/`. When a
+  feature extends legacy logic, extract the affected cohesive responsibility;
+  localized fixes may remain, but no new responsibility or workflow may be added.
+- Backend modules must not import or indirectly access `server.py` globals.
+  Pass dependencies explicitly; keep transactions with the owning use case.
+  Moving helpers alone is not extraction. Preserve behavior and verify focused
+  tests; reduce legacy code through ownership, not formatting or line limits.
+- Domain owners: `coach/` (Coach), `planning/` (plans/seasons), `sync/` (sync/jobs),
+  `providers/` (transport), `db/` (persistence), `http_api/` (HTTP/route assembly),
+  `backup/` (backup/export), `athlete/` (profile/check-ins/local time),
+  `activities/` (feedback/reads/workout text), `calendar/` (external calendars),
+  `diagnostics/` (safe diagnostics), `history/` (changes/undo), `nutrition/`,
+  `performance/` (derived/readiness), `runtime/` (lifecycle/maintenance),
+  `weather/` (weather/cache), and `canonical/` (stdlib-only vocabulary/records).
+  Cross-cutting owners: `config.py`, `privacy.py`, `settings.py`,
+  `change_history.py`, `observability.py`. Extend a cohesive owner first.
+- Apply scoped [backend](backend/AGENTS.md), [frontend](public/AGENTS.md), and
+  [test](tests/AGENTS.md) instructions, plus [browser fixtures](e2e/AGENTS.md)
+  and [CI/release](.github/AGENTS.md), when working in those directories.
+- Keep `README.md` consistent with changed user-visible/configuration behavior.
 
 ## Behaviour requirements
 
-- On startup, initialise the database, start the sync and Coach job workers,
-  and enqueue configured refreshes for calendar, Intervals.icu, Garmin, and
-  weather. A background loop schedules daily sync jobs. Manual refreshes remain
-  available from the UI; the browser may poll local state while a sync runs.
-- A chat request uses the saved local profile and competitions, current
-  performance context, recent local feedback, workout library, and latest
-  provider snapshots. Current performance is not Intervals.icu-only: Garmin,
-  derived values, and AI estimates may be included and must retain source
-  labels.
-- Treat SQLite profile and competition records confirmed by the athlete as
-  authoritative. OpenAI Conversation state is dialogue continuity only, never
-  the athlete database.
-- A chat response must not silently mutate durable profile, competition,
-  check-in, or planning data. Explicit API/UI actions are required.
-- When a prompt explicitly requests current data, refresh through the existing
-  sync path before coaching where supported. Do not add unconditional provider
-  refreshes to every chat request.
-- Model options and defaults come from the provider implementation and
-  configuration. Preserve explicit model selection; verify the code before
-  documenting or changing model policy.
-- Coach uses only the OpenAI Responses API contract. `OPENAI_BASE_URL` may point
-  to an OpenAI Responses-compatible endpoint; Chat Completions and provider
-  fallback paths are unsupported.
-- `APP_VERSION` in `server.py` must match the GitHub release tag. If a release
-  needs a version update, the daily release workflow opens a PR; it must not
-  push directly to protected `main`. The container publishing workflow must
-  reject mismatches.
-- OpenAI credentials and external request payloads must remain out of logs.
-  Keep structured logs redacted and diagnostics free of athlete content and
-  credentials.
-- Voice input is short-lived server-side transcription; audio is not persisted.
-- When changing frontend assets, update the asset query versions in
-  `public/index.html` and the cache name/assets in `public/service-worker.js`.
+- Startup initializes the database and sync/Coach workers, then enqueues configured
+  calendar, Intervals.icu, Garmin, and weather refreshes. Preserve daily scheduling,
+  manual refreshes, and browser polling of local sync state.
+- Chat uses saved profile/competitions, performance, recent local feedback,
+  workout library, and latest provider snapshots. Preserve source labels for
+  Intervals.icu, Garmin, derived values, and AI estimates.
+- Confirmed local profile/competition records are authoritative; OpenAI Conversation
+  state is dialogue continuity only. Durable profile, competition, check-in, and
+  planning mutations require explicit API/UI actions, never a silent chat effect.
+- Explicit current-data requests refresh through existing sync before coaching
+  where supported; do not refresh every chat unconditionally.
+- Preserve explicit model selection; verify options/defaults against provider code
+  and configuration. Only Responses API is supported, including compatible
+  `OPENAI_BASE_URL` endpoints; no Chat Completions or provider fallback paths.
+- `APP_VERSION` in `server.py` must match the release tag. Daily release version
+  changes require a PR, never a direct protected-`main` push; publishing rejects
+  version mismatches.
+- Keep credentials and external request payloads out of logs; redact structured
+  logs. Diagnostics contain no athlete content or credentials. Voice is
+  short-lived transcription; never persist audio.
+- Frontend changes update `public/index.html` query versions and
+  `public/service-worker.js` cache name/assets together.
 
 ## Development and validation
 
 Project-specific skills must remain repository-local. See
-`.agents/skills/README.md` for routing and location rules. Never install or
-synchronize them into a user-global skill directory. Scan sources before
-reading them, including when following skill references.
+[the skill index](.agents/skills/README.md) for routing and location rules.
+Never install or synchronize them globally or into app caches. App-supplied tools
+and managed skills have separate runtime/license constraints; see the index.
+Scan before reading sources or references.
+
+Before editing, inspect the branch, worktree, and existing diff; preserve prior
+work. Locate the owning flow, state the intended behavior and observable acceptance
+check. Plan cross-domain or migration work before coding; keep routine fixes direct.
+Use the smallest relevant skill set and verify remembered guidance against code.
+Implement the requested outcome through its affected callers and consumers; avoid
+speculative abstractions, unrelated cleanup, and stopping at a partial patch.
+
+After editing, inspect the complete diff, including new/deleted files, and run
+affected checks against the final tree. Diagnose failures before retrying; never
+relax a guard to obtain success. Report behavior, evidence, and unrun checks.
+Preserve scope, decisions, changed paths, outstanding work, and validation evidence
+when handing off. Keep temporary plans/reports outside tracked source unless
+requested as deliverables. Delegate only when requested, using the orchestration
+skill and the user's model choices. External actions retain their authorization.
 
 For requested local security reviews or scans, use
 `.agents/skills/ai-coach-codex-security/SKILL.md`. Authenticate through the
@@ -172,17 +133,13 @@ python -m unittest discover -s tests -v
 python -m compileall -q server.py backend tests
 ```
 
-Tests must use temporary data directories and mocked external services. Never
-run tests against the real `.env`, `/data`, OpenAI, Intervals.icu, or Garmin
-accounts. When changing the Dockerfile, dependencies, startup, or deployment,
-also run:
+Tests use temporary data and mocked services, never real `.env`, `/data`, or
+OpenAI/Intervals.icu/Garmin accounts. For Dockerfile, dependency, startup, or
+deployment changes also run `docker build -t ai-coach:local .`.
 
-```powershell
-docker build -t ai-coach:local .
-```
-
-CI and the container image use Python 3.14. Keep code compatible with that
-toolchain unless intentionally changing the toolchain and CI together.
+CI and Docker use Python 3.14; change the toolchain and CI together if needed.
+Direct pins live in `requirements.in`/`requirements-dev.in`; regenerate their
+hash-locked `.txt` outputs using README's dependency-maintenance recipe.
 
 Browser tests use Playwright through `npm run test:e2e`, with projects for
 mobile-small, mobile, tablet, tablet-landscape, and desktop. Focused JavaScript
@@ -204,54 +161,25 @@ checks. Native unit tests use temporary data and mocked providers.
 
 Rebuild the image after application, dependency or startup changes. Preserve
 the existing data mount, token store and recovery backups when recreating a
-container; never use `docker rm -v`. Keep the app on a trusted LAN/VPN.
+container; never use `docker rm -v`. The non-root `ai-coach` container uses port
+8090 and writable persistent `/data`; runtime data must not enter the image.
+Voice needs a secure context: localhost for tests, trusted HTTPS for deployment.
 
 ## Git conventions
 
-- Always work in a dedicated Git worktree and task branch. Create the worktree
-  before editing, and keep the primary checkout unchanged while the task is in
-  progress.
-- Every commit must use Conventional Commits:
-  `<type>(<optional-scope>): <description>`.
-- Before creating a pull request, fetch the latest target branch and check
-  whether it contains commits that are missing from the task branch. Rebase the
-  task branch onto that target branch when needed, resolve and verify all merge
-  conflicts, and confirm that the pull request is mergeable before creating it.
-- Every pull request title must use the same format. Allowed types are
+- Work in a dedicated worktree/task branch created before editing; leave the
+  primary checkout unchanged. Keep runtime files and worktrees out of commits.
+- Commits and PR titles use `<type>(<optional-scope>): <description>`. Types are
   `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`,
   `style`, and `test`; breaking changes use `!` before the colon.
-- Every pull request description must be written in English.
-- When creating a pull request, enable squash auto-merge (`--auto --squash`)
-  when repository permissions and required checks allow it. Do not merge it
-  immediately unless explicitly requested.
-- Keep local worktrees and runtime files out of commits.
-
-## Docker / Unraid deployment
-
-The image/container name is `ai-coach`, the application port is `8090`, and
-the persistent host data directory must be mounted at `/data`. Never use
-`docker rm -v`.
-
-Build/recreate a local container without removing the data volume:
-
-```text
-docker build -t ai-coach:local .
-docker stop ai-coach
-docker rm ai-coach
-docker run -d --name ai-coach --restart unless-stopped --read-only --security-opt no-new-privileges:true -p 8090:8090 -v <host-data-dir>:/data --env-file <host-env-file> ai-coach:local
-```
-
-For Unraid, use the equivalent bind mount and environment-file paths from the
-README. The container runs as a non-root user and `/data` must be writable.
-For Garmin's first MFA login, use the documented one-time
-`garmin-login.py` helper with the persistent `/data` mount.
-
-Do not expose port 8090 directly to the public internet. Voice input requires a
-secure context; local `localhost` testing is allowed, while deployed use needs
-a trusted HTTPS reverse proxy.
+- PR descriptions are English. Before creating a PR, fetch its target, rebase
+  missing target commits, resolve/test conflicts, and confirm mergeability.
+- Enable squash auto-merge (`--auto --squash`) when permissions/checks allow;
+  do not merge immediately unless explicitly requested.
 
 ## Code Review Rules
 
+- Read [REVIEW.md](REVIEW.md) for PR evidence, severity, reporting, and re-review.
 - Report only actionable problems introduced by the pull request.
 - The changed-diff restriction applies to PR reviews. Explicit whole-repository
   audits inspect the recorded current snapshot, including pre-existing defects.
