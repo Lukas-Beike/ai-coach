@@ -1204,7 +1204,8 @@ class DatabaseMigrationTests(unittest.TestCase):
             try:
                 with reopened.unit_of_work() as db:
                     migrate_schema(db)
-                    self.assertEqual(self.rows(db), before)
+                    self.assertEqual(self.rows(db, before), before)
+                    self.assert_provider_tables_empty(db)
                     self.assertTrue(database_schema_is_current(db))
                     self.assertEqual(
                         db.execute("PRAGMA integrity_check").fetchone()[0], "ok"

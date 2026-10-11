@@ -422,7 +422,7 @@ CURRENT_SCHEMA_VERSION = 6
 
 
 def _sql_in_list(enum_type: type[StrEnum]) -> str:
-    return ", ".join(f"'{member.value}'" for member in enum_type)
+    return ", ".join(f"'{member.value}'" for member in enum_type.__members__.values())
 
 
 _PROVIDER_RECORD_STATES = _sql_in_list(ProviderRecordState)

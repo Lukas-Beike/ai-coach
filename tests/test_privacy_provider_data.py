@@ -118,6 +118,39 @@ class _OpenAI:
         raise AssertionError("no conversation was stored")
 
 
+def seed_provider_rows(db):
+    db.execute(
+        "INSERT INTO provider_records(provider, record_kind, source_record_id, payload, "
+        "payload_hash, fetched_at, created_at, updated_at) "
+        "VALUES (?, 'activity', 'rec-1', ?, ?, ?, ?, ?)",
+        (PROVIDER, json.dumps(SECRET_PAYLOAD), "a" * 64, STAMP, STAMP, STAMP),
+    )
+    db.execute(
+        "INSERT INTO activity_sessions(activity_id, primary_provider, "
+        "primary_provider_activity_id, started_at, created_at, updated_at) "
+        "VALUES ('act_1', ?, 'act-1', ?, ?, ?)",
+        (PROVIDER, STAMP, STAMP, STAMP),
+    )
+    db.execute(
+        "INSERT INTO activity_records(provider, provider_activity_id, activity_id, "
+        "mapper_version, source_kind, recorded_by, sport, environment, started_at, "
+        "duration_s, distance_m, load, load_model, avg_hr, avg_power, name, details, "
+        "fetched_at, created_at, updated_at) "
+        "VALUES (?, 'act-1', 'act_1', 1, 'provider_reported', 'manual', 'ride', "
+        "'outdoor', ?, 3600.0, 30000.0, 55.0, 'unknown', 140.0, 210.0, "
+        "'Synthetic ride', ?, ?, ?, ?)",
+        (PROVIDER, STAMP, json.dumps(SECRET_DETAILS), STAMP, STAMP, STAMP),
+    )
+    db.execute(
+        "INSERT INTO observations(natural_key, metric, value, unit, source_kind, "
+        "recorded_by, provider, observed_on, mapper_version, created_at, updated_at) "
+        "VALUES ('weight-1', 'weight', 72.5, 'kg', 'provider_reported', 'manual', ?, "
+        "'2026-10-01', 1, ?, ?)",
+        (PROVIDER, STAMP, STAMP),
+    )
+    db.commit()
+
+
 class ProviderDataFixture(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -129,38 +162,6 @@ class ProviderDataFixture(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.db.execute("PRAGMA foreign_keys = ON")
         initialize_schema(self.db)
-        self.db.commit()
-
-    def seed_provider_rows(self):
-        self.db.execute(
-            "INSERT INTO provider_records(provider, record_kind, source_record_id, payload, "
-            "payload_hash, fetched_at, created_at, updated_at) "
-            "VALUES (?, 'activity', 'rec-1', ?, ?, ?, ?, ?)",
-            (PROVIDER, json.dumps(SECRET_PAYLOAD), "a" * 64, STAMP, STAMP, STAMP),
-        )
-        self.db.execute(
-            "INSERT INTO activity_sessions(activity_id, primary_provider, "
-            "primary_provider_activity_id, started_at, created_at, updated_at) "
-            "VALUES ('act_1', ?, 'act-1', ?, ?, ?)",
-            (PROVIDER, STAMP, STAMP, STAMP),
-        )
-        self.db.execute(
-            "INSERT INTO activity_records(provider, provider_activity_id, activity_id, "
-            "mapper_version, source_kind, recorded_by, sport, environment, started_at, "
-            "duration_s, distance_m, load, load_model, avg_hr, avg_power, name, details, "
-            "fetched_at, created_at, updated_at) "
-            "VALUES (?, 'act-1', 'act_1', 1, 'provider_reported', 'manual', 'ride', "
-            "'outdoor', ?, 3600.0, 30000.0, 55.0, 'unknown', 140.0, 210.0, "
-            "'Synthetic ride', ?, ?, ?, ?)",
-            (PROVIDER, STAMP, json.dumps(SECRET_DETAILS), STAMP, STAMP, STAMP),
-        )
-        self.db.execute(
-            "INSERT INTO observations(natural_key, metric, value, unit, source_kind, "
-            "recorded_by, provider, observed_on, mapper_version, created_at, updated_at) "
-            "VALUES ('weight-1', 'weight', 72.5, 'kg', 'provider_reported', 'manual', ?, "
-            "'2026-10-01', 1, ?, ?)",
-            (PROVIDER, STAMP, STAMP),
-        )
         self.db.commit()
 
 
@@ -206,7 +207,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
             self.assertLessEqual(set(PROVIDER_FILES), set(archive.namelist()))
 
     def test_provider_rows_are_exported_with_sanitized_payloads(self):
-        self.seed_provider_rows()
+        seed_provider_rows(self.db)
         with self.export() as archive:
             records = self.lines(archive, "provider_records.jsonl")
             raw = archive.read("provider_records.jsonl")
@@ -332,13 +333,13 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
         )
 
     def test_preview_counts_provider_rows(self):
-        self.seed_provider_rows()
+        seed_provider_rows(self.db)
         preview = self.service().preview()
         counts = {item["id"]: item["records"] for item in preview["categories"]}
         self.assertEqual(counts["provider_data"], 4)
 
     def test_delete_removes_provider_rows_without_foreign_key_errors(self):
-        self.seed_provider_rows()
+        seed_provider_rows(self.db)
         result = self.service().delete("LOKALE DATEN LÖSCHEN")
         self.assertEqual(result["deleted_categories"]["provider_data"], 4)
         for table in (
