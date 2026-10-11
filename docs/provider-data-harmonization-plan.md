@@ -766,6 +766,62 @@ vor:
 Danach sequenziell Phase 3 (Migration, Dual-Write, Backfill, Resolver,
 tabellenbasierter Port), Phase 5 je Domäne, Phase 6.1/6.2, Phase 7 und Phase 8.
 
+### 5.8 Ergebnis Welle 5 und Phase 3 Schritt 1
+
+Welle 5 ist gemergt:
+
+| Einheit | PR |
+|---|---|
+| W5-1 | #1095 |
+| W5-2 | #1099 |
+| W5-3 | #1093 |
+| W5-4 | #1092 |
+| W5-5 | #1094 |
+| W5-6 | #1096 |
+
+Von den Paritätslücken bleibt nur Lücke 3 (Garmin-Radfahr-FTP-Historie)
+bewusst offen. Mit W5-2 liefert Intervals das Athletengewicht als undatierte
+Beobachtung auf Athletenebene. `SourcePolicy` rankt sie ohne Datum und nimmt
+sie von der Beschränkung auf die neueste Zeile aus.
+
+Phase 3 Schritt 1 ist mit #1100 umgesetzt (Schema v6, additiv). Die DDL folgt
+diesen Entscheidungen:
+
+- **CHECKs:** nur für geschlossene Lebenszyklus-Enums aus
+  `backend/canonical/vocabulary.py`:
+  - `ProviderRecordState`: `active`, `deleted`;
+  - `ActivityRecordState`: `active`, `deleted`, `invalid`;
+  - `ActivitySessionState`: `active`, `hidden`, `duplicate`, `deleted`;
+  - `ActivityLinkKind`: `single`, `exact`, `heuristic`, `confirmed`.
+
+  Daneben prüft die Datenbank nur noch `json_valid` und Längen.
+
+  Offene Vokabulare (Provider, Sport, Metrik, Einheit, Lastmodell, Quelle) und
+  Wertebereiche validiert `backend/canonical` vor dem Schreiben. So wird ein
+  ungültiger Datensatz übersprungen und gezählt, statt den Ingest abzubrechen.
+- **`activity_sessions`:** Es gibt keine Eindeutigkeit auf der
+  Primäraufzeichnung, weil die Primärquelle nach Präzedenz wechseln darf.
+  `state = 'duplicate'` gilt genau dann, wenn `merged_into` gesetzt ist.
+- **`activity_records`:** Schlüssel ist `(provider, provider_activity_id)`;
+  `activity_id` ist ein optionaler Fremdschlüssel auf die Sitzung. Typisierte,
+  nullbare Spalten sind:
+  - Dauer, Bewegungszeit, Distanz, Höhenmeter;
+  - Last, Intensität;
+  - Herzfrequenz (Ø/Max), Leistung (Ø/NP), Kadenz, Energie.
+
+  Weitere Werte stehen im JSON-Feld `details`.
+- **`observations`:** Eindeutig ist der `natural_key`
+  `provider|metric|sport|method|(observed_at oder observed_on)`.
+- **`provider_records`:** `payload_hash` wird über den gespeicherten
+  Rohdatensatz berechnet und dient der Änderungserkennung. Der Export bereinigt
+  Payloads (Credentials, signierte URLs); der Hash ist daher kein
+  Prüfwert für den Export.
+- **Datenschutz:** Die Löschkategorie `provider_data` kommt hinzu, und die
+  Exportformatversion steigt auf 2. Das e2e-Fixture befüllt alle vier Tabellen.
+
+Phase 6.1 (`WorkoutExportPort`) läuft parallel zu Phase 3, weil sie keine
+gemeinsamen Dateien berührt. Phase 6.2 folgt nach 6.1.
+
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
 - Eingefrorenes Fixture des zuletzt veröffentlichten Schemas mit Daten; direkte
