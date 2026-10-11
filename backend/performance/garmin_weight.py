@@ -1,10 +1,17 @@
 """Garmin body-weight normalization and projections."""
 
 import math
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.providers.garmin_fields import (
+    GARMIN_BODY_FAT_ALIASES,
+    GARMIN_WEIGHT_UNIT_ALIASES,
+)
+from backend.providers.garmin_fields import (
+    first_present as _first_present,
+)
 
 UTC_OFFSET_SUFFIX = "+00:00"
 GARMIN_PERFORMANCE_SOURCE = "Garmin Connect"
@@ -14,16 +21,6 @@ def _garmin_key(value: Any) -> str:
     return "".join(
         character for character in str(value).casefold() if character.isalnum()
     )
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def _as_number(value: Any) -> float | int | None:
@@ -50,7 +47,7 @@ def _metric(
 
 def _garmin_weight_kg(value: Any, unit: Any = None) -> float | int | None:
     if isinstance(value, dict):
-        unit = _first_present(value, ("unitKey", "unit", "weightUnit")) or unit
+        unit = _first_present(value, GARMIN_WEIGHT_UNIT_ALIASES) or unit
         value = _first_present(value, ("weightKg", "weight_kg", "weight", "value"))
     number = _as_number(value)
     if number is None:
@@ -70,11 +67,7 @@ def _garmin_record_date(value: Any) -> str | None:
         return None
     if isinstance(value, (int, float)) and value > 100_000_000_000:
         try:
-            return (
-                datetime.fromtimestamp(float(value) / 1000, timezone.utc)
-                .date()
-                .isoformat()
-            )
+            return datetime.fromtimestamp(float(value) / 1000, UTC).date().isoformat()
         except OverflowError, OSError, ValueError:
             return None
     try:
@@ -90,16 +83,14 @@ def _garmin_record_timestamp(item: dict[str, Any]) -> float | None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         try:
             scale = 1000 if value > 100_000_000_000 else 1
-            return datetime.fromtimestamp(
-                float(value) / scale, timezone.utc
-            ).timestamp()
+            return datetime.fromtimestamp(float(value) / scale, UTC).timestamp()
         except OverflowError, OSError, ValueError:
             return None
     if isinstance(value, str) and len(value.strip()) > 10:
         try:
-            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.strip())
             return (
-                parsed.replace(tzinfo=timezone.utc).timestamp()
+                parsed.replace(tzinfo=UTC).timestamp()
                 if parsed.tzinfo is None
                 else parsed.timestamp()
             )
@@ -317,7 +308,7 @@ def _append_weight_record(
     direct = _first_present(value, ("weightKg", "weight_kg", "weight"))
     if direct not in (None, ""):
         weight = _garmin_weight_kg(
-            direct, _first_present(value, ("unitKey", "unit", "weightUnit"))
+            direct, _first_present(value, GARMIN_WEIGHT_UNIT_ALIASES)
         )
         if weight is not None:
             records.append((record_date, float(weight)))
@@ -342,13 +333,7 @@ def _append_body_fat_record(
 ) -> None:
     direct = _first_present(
         value,
-        (
-            "bodyFat",
-            "body_fat",
-            "bodyFatPercent",
-            "bodyFatPercentage",
-            "fatPercent",
-        ),
+        GARMIN_BODY_FAT_ALIASES,
     )
     if direct not in (None, ""):
         raw_value = direct

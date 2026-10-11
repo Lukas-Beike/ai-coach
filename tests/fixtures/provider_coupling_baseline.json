@@ -125,25 +125,7 @@
     {
       "rule": "garmin_wire_key",
       "path": "backend/performance/garmin_projection.py",
-      "token": "functionalThresholdPower",
-      "count": 1
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_projection.py",
-      "token": "hrvLastNight",
-      "count": 2
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_projection.py",
       "token": "hrvWeeklyAvg",
-      "count": 2
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_projection.py",
-      "token": "lastNightAvg",
       "count": 2
     },
     {
@@ -151,12 +133,6 @@
       "path": "backend/performance/garmin_projection.py",
       "token": "restingHeartRate",
       "count": 1
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_projection.py",
-      "token": "sleepTimeSeconds",
-      "count": 2
     },
     {
       "rule": "garmin_wire_key",

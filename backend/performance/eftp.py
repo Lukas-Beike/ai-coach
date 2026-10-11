@@ -5,16 +5,7 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.performance import activity_validation
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
+from backend.providers.garmin_fields import first_present as _first_present
 
 
 def _sport_info_setting(wellness: dict[str, Any]) -> dict[str, Any]:
