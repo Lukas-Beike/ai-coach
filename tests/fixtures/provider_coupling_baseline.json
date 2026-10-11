@@ -1012,18 +1012,6 @@
     },
     {
       "rule": "provider_literal",
-      "path": "backend/sync/executor.py",
-      "token": "garmin",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/executor.py",
-      "token": "intervals",
-      "count": 5
-    },
-    {
-      "rule": "provider_literal",
       "path": "backend/sync/full_resync.py",
       "token": "garmin",
       "count": 5
