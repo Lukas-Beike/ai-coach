@@ -1069,18 +1069,6 @@
       "path": "public/views.js",
       "token": "intervals",
       "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "server.py",
-      "token": "garmin",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "server.py",
-      "token": "intervals",
-      "count": 1
     }
   ]
 }
