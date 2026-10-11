@@ -349,19 +349,6 @@ class AcmeOrchestrationCase(unittest.TestCase):
             registry=REGISTRY,
         )
 
-    def drain(self) -> None:
-        """Claim and run queued jobs until none is claimable, as the worker does."""
-        while (job := self.store.claim()) is not None:
-            self.executor.run(job)
-
-    def job_rows(self) -> list[dict[str, Any]]:
-        with self.database.unit_of_work() as db:
-            rows = db.execute(
-                "SELECT * FROM sync_jobs WHERE provider=? ORDER BY rowid",
-                (ACME_ID,),
-            ).fetchall()
-        return [dict(row) for row in rows]
-
     def acme_freshness(self, *, enabled: bool = True) -> dict[str, Any]:
         entries = self.freshness.current(
             profile={"acme_enabled": enabled},
@@ -375,13 +362,28 @@ class AcmeOrchestrationCase(unittest.TestCase):
         )
 
 
+def drain(case: AcmeOrchestrationCase) -> None:
+    """Claim and run queued jobs until none is claimable, as the worker does."""
+    while (job := case.store.claim()) is not None:
+        case.executor.run(job)
+
+
+def job_rows(case: AcmeOrchestrationCase) -> list[dict[str, Any]]:
+    with case.database.unit_of_work() as db:
+        rows = db.execute(
+            "SELECT * FROM sync_jobs WHERE provider=? ORDER BY rowid",
+            (ACME_ID,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 class AcmeSchedulingTests(AcmeOrchestrationCase):
     def test_startup_enqueues_acme_as_a_startup_refresh(self) -> None:
         policy = _Policy()
 
         self.startup_scheduler({ACME_ID: policy}).schedule()
 
-        rows = self.job_rows()
+        rows = job_rows(self)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["requested_by"], "startup")
         self.assertEqual(
@@ -394,20 +396,20 @@ class AcmeSchedulingTests(AcmeOrchestrationCase):
         scheduler = self.daily_scheduler({ACME_ID: policy})
 
         scheduler.schedule()
-        self.assertEqual(len(self.job_rows()), 1)
-        self.assertEqual(self.job_rows()[0]["requested_by"], "scheduler")
+        self.assertEqual(len(job_rows(self)), 1)
+        self.assertEqual(job_rows(self)[0]["requested_by"], "scheduler")
 
         self.clock.advance(600)
         scheduler.schedule()
-        self.assertEqual(len(self.job_rows()), 1, "an active job blocks a second one")
+        self.assertEqual(len(job_rows(self)), 1, "an active job blocks a second one")
 
-        self.drain()
+        drain(self)
         scheduler.schedule()
-        self.assertEqual(len(self.job_rows()), 1, "marker is not due within an hour")
+        self.assertEqual(len(job_rows(self)), 1, "marker is not due within an hour")
 
         self.clock.advance(4300 - 600)
         scheduler.schedule()
-        rows = self.job_rows()
+        rows = job_rows(self)
         self.assertEqual(len(rows), 2)
         self.assertEqual(
             json.loads(rows[1]["payload"]),
@@ -434,7 +436,7 @@ class AcmeSchedulingTests(AcmeOrchestrationCase):
         self.assertEqual(startup_log, list(REGISTRY.startup_order()))
         self.assertEqual(daily_log[-1], ACME_ID)
         self.assertEqual(startup_log[-1], ACME_ID)
-        self.assertEqual(self.job_rows(), [], "order probes enqueue nothing")
+        self.assertEqual(job_rows(self), [], "order probes enqueue nothing")
 
 
 class AcmeQueueAndExecutionTests(AcmeOrchestrationCase):
@@ -446,7 +448,7 @@ class AcmeQueueAndExecutionTests(AcmeOrchestrationCase):
             requested_by="user",
         )
 
-        rows = self.job_rows()
+        rows = job_rows(self)
         self.assertEqual(len(rows), 1)
         self.assertEqual(
             json.loads(rows[0]["payload"]), {"days": 7, "reason": "manual"}
@@ -458,7 +460,7 @@ class AcmeQueueAndExecutionTests(AcmeOrchestrationCase):
 
         self.assertEqual(error.status, 400)
         self.assertEqual(error.reason, "invalid_job_request")
-        self.assertEqual(self.job_rows(), [])
+        self.assertEqual(job_rows(self), [])
 
     @unittest.expectedFailure
     def test_queue_enforces_the_provider_period_limit(self) -> None:
@@ -473,7 +475,7 @@ class AcmeQueueAndExecutionTests(AcmeOrchestrationCase):
         error = self.rejection({"days": 61, "reason": "too long"})
 
         self.assertEqual(error.status, 400)
-        self.assertEqual(self.job_rows(), [])
+        self.assertEqual(job_rows(self), [])
 
     def rejection(self, payload: dict[str, Any]) -> AppError:
         with self.assertRaises(AppError) as raised:
@@ -485,13 +487,13 @@ class AcmeQueueAndExecutionTests(AcmeOrchestrationCase):
             ACME_ID, "refresh", {"days": "7", "reason": "manual"}, requested_by="user"
         )
 
-        self.drain()
+        drain(self)
 
         self.assertEqual(len(self.owner.calls), 1)
         call = self.owner.calls[0]
         self.assertEqual(call["payload"], {"days": 7, "reason": "manual"})
         self.assertEqual(call["job_type"], "refresh")
-        self.assertEqual(self.job_rows()[0]["status"], "completed")
+        self.assertEqual(job_rows(self)[0]["status"], "completed")
 
 
 class AcmeFreshnessAndStatusTests(AcmeOrchestrationCase):
@@ -502,7 +504,7 @@ class AcmeFreshnessAndStatusTests(AcmeOrchestrationCase):
             ACME_ID, "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
         )
         self.clock.advance(60)
-        self.drain()
+        drain(self)
         success_at = self.clock.current.isoformat()
 
         fresh = self.acme_freshness()
@@ -529,7 +531,7 @@ class AcmeFreshnessAndStatusTests(AcmeOrchestrationCase):
         handler.path = MANUAL_PATH
         self.post_route.handle(handler, MANUAL_PATH)
         self.clock.advance(30)
-        self.drain()
+        drain(self)
 
         status_handler = Mock()
         status_handler.path = "/api/sync/status"
@@ -556,7 +558,7 @@ class AcmeHttpRouteTests(AcmeOrchestrationCase):
 
         status_code, body = handler.send_json.call_args.args
         self.assertEqual(status_code, 202)
-        rows = self.job_rows()
+        rows = job_rows(self)
         self.assertEqual([row["id"] for row in rows], [body["id"]])
         self.assertEqual(rows[0]["requested_by"], "user")
         self.assertEqual(
@@ -573,7 +575,7 @@ class AcmeHttpRouteTests(AcmeOrchestrationCase):
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(str(raised.exception), PERIOD_MESSAGE)
-        self.assertEqual(self.job_rows(), [])
+        self.assertEqual(job_rows(self), [])
 
     def test_unconfigured_provider_is_refused_with_409(self) -> None:
         self.full_resync.provider_configured.return_value = False
@@ -586,7 +588,7 @@ class AcmeHttpRouteTests(AcmeOrchestrationCase):
         self.assertEqual(raised.exception.status, 409)
         self.assertEqual(raised.exception.reason, "not_configured")
         self.assertEqual(str(raised.exception), NOT_CONFIGURED_MESSAGE)
-        self.assertEqual(self.job_rows(), [])
+        self.assertEqual(job_rows(self), [])
 
     def test_route_for_an_undeclared_acme_path_is_not_handled(self) -> None:
         handler = Mock()
@@ -610,7 +612,7 @@ class AcmeCoachRefreshTests(AcmeOrchestrationCase):
 
         self.assertEqual(result["status"], "queued")
         self.assertTrue(result["ok"])
-        rows = self.job_rows()
+        rows = job_rows(self)
         self.assertEqual([row["id"] for row in rows], [result["sync_job_id"]])
         self.assertEqual(rows[0]["requested_by"], "coach")
         self.synchronous.refresh.assert_not_called()
@@ -622,7 +624,7 @@ class AcmeCoachRefreshTests(AcmeOrchestrationCase):
 
         self.assertEqual(result, {"ok": True, "status": "completed"})
         self.synchronous.refresh.assert_called_once()
-        self.assertEqual(self.job_rows(), [])
+        self.assertEqual(job_rows(self), [])
 
     def test_coach_wait_without_a_synchronous_refresh_is_refused(self) -> None:
         service = ProviderRefreshCommandService(
@@ -633,14 +635,14 @@ class AcmeCoachRefreshTests(AcmeOrchestrationCase):
             service.start(ACME_ID, {"days": 7, "_wait_for_completion": True})
 
         self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(self.job_rows(), [])
+        self.assertEqual(job_rows(self), [])
 
     def test_coach_refresh_rejects_unknown_fields_without_queueing(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.refresh.start(ACME_ID, {"bogus": 1})
 
         self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(self.job_rows(), [])
+        self.assertEqual(job_rows(self), [])
 
 
 class AcmePerformanceRefreshGapTests(AcmeOrchestrationCase):
