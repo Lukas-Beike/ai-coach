@@ -6,8 +6,9 @@ Stand: 10. Oktober 2026. Grundlage ist Commit `44c90499` auf `develop`
 `CURRENT_SCHEMA_VERSION = 5` mit `nutrition_logs.logged_time_known`). Die
 kanonische Persistenz dieses Plans wird damit **Schema v6**. Status
 (11. Oktober 2026): Welle 1 (Phase 0, kanonisches Paket, Guard) und Welle 2
-(Mapper, Sport-Klassifizierer, Provider-Register) sind gemergt; Welle 3
-(Phase 2) ist der nächste Schritt, siehe Abschnitt 5.1.
+(Mapper, Sport-Klassifizierer, Provider-Register) und Welle 3 (Phase 2,
+kanonische Leseschicht ohne Verbraucher) sind gemergt; Welle 4 ist der nächste
+Schritt, siehe Abschnitte 5.1 und 5.5.
 
 Ziel: Daten von Intervals.icu, Garmin Connect und künftigen Providern wie Wahoo
 werden an genau einer Grenze in ein eigenes, versioniertes, kanonisches Format
@@ -527,8 +528,8 @@ gemergt ist.
 | --- | --- | --- |
 | 1 ✅ | Phase 0 vollständig; aus Phase 1 das Leaf-Paket `backend/canonical/` (Vokabular, `Provenance`, `ActivityRecord`, `Observation`, `MetricValue`, Validierung, Layer-Registrierung) und der Kopplungs-Guard mit zählerbasierter Baseline | 12 (#1043–#1054): HRV-Fix; Wire-Fixtures mit Lock-Identitätstest; sieben Charakterisierungs-PRs (aktuelle Metriken, Recovery, Körper-/Chart-Historie, Last/Fokus, Aktivitätsidentität, Coach-Kontext, Aktivitätslesen); Migrationsgerüst; kanonisches Paket; Guard |
 | 2 ✅ | Phase 1.2/1.3 und Beginn Phase 4: Intervals- und Garmin-Mapper gegen die Wire-Fixtures, zentraler Sport-Klassifizierer, Provider-Deskriptoren im Register | 7 (#1057, #1058, #1060–#1064): kanonische Grundlagen (`sports.py`, `local_time.py`, `mapping.py`, `Observation.sport`); Register (`providers/descriptors.py`, `sync/provider_registry.py`, freshness/state lesen daraus); je ein Mapper für Intervals-Aktivitäten, Intervals-Wellness/-Schwellen, Garmin-Aktivitäten, Garmin-Gesundheit; `activity_kind` delegiert an den Klassifizierer (Paritätstabelle mit 217 Eingaben) |
-| 3 | Phase 2: kanonische Leseschicht über Bestandsdaten, verhaltensgleich gegen die Charakterisierungstests | je Datenbereich ein PR, siehe 5.3 |
-| 4 | Phase 3: Schema v6, Ingest-Dual-Write, Backfill-Job, Aktivitätsidentität | sequenziell |
+| 3 ✅ | Phase 2: kanonische Leseschicht über Bestandsdaten, verhaltensgleich gegen die Charakterisierungstests, noch ohne Verbraucher | 6 (#1066–#1071): Sitzungsbündelung (`activities/canonical_sessions.py`); Leser-Ports und `ProviderCoverage` (`runtime/ports.py`, `canonical/coverage.py`); Garmin-Gewicht/-Körperfett wie Legacy (`MAPPER_VERSION` 2) mit Paritätstests; Intervals-Paritätstests; `SourcePolicy` (`performance/source_policy.py`); Snapshot-Projektion (`providers/snapshot_projection.py`, `sync/canonical_projection.py`) |
+| 4 | Paritätslücken schließen, erste Verbraucher auf Ports und `SourcePolicy`, danach Phase 3 (Schema v6, Ingest-Dual-Write, Backfill-Job, Aktivitätsidentität) | siehe 5.5; Schema-PRs sequenziell |
 | 5+ | Phasen 5–8 | je Domäne ein PR |
 
 Konfliktregeln für Welle 1: Nur HRV-Fix, Migrationsgerüst und kanonisches Paket
@@ -575,7 +576,7 @@ entschieden oder durch Paritätstests abgesichert werden:
   `resync_keys` und Capabilities haben noch keinen Verbraucher; `daily.py`
   ist unverändert.
 
-### 5.3 Vorschlag Welle 3
+### 5.3 Vorschlag Welle 3 (umgesetzt, siehe 5.4)
 
 Ziel: Phase 2, kanonische Leseschicht über `snapshots` und `garmin_snapshot`,
 verhaltensgleich gegen die Charakterisierungstests aus Welle 1.
@@ -598,6 +599,74 @@ verhaltensgleich gegen die Charakterisierungstests aus Welle 1.
 Die Persistenz v6 (Phase 3) bleibt Welle 4 und setzt Welle 3 voraus. Vor
 Welle 4 ist das veröffentlichte Schema v5 als Fixture einzufrieren, sobald es
 released ist.
+
+### 5.4 Ergebnis Welle 3: Leseschicht und bekannte Abweichungen
+
+Alle neuen Bausteine haben noch keine Produktionsverbraucher; `server.py`, HTTP,
+Frontend und bestehende Leser sind unverändert. Neue Module sind zu 100 %
+abgedeckt.
+
+- **Ports (#1067):** `ActivityReader.activities(db, *, start, end)`,
+  `ObservationReader.observations(db, kind, *, start, end, sport)` und
+  `ProviderCoverageReader.coverage(db)`; Datumsgrenzen inklusiv auf dem lokalen
+  Datum des Athleten. `ProviderCoverage` zählt Aktivitäten, Beobachtungen und
+  Issues je Grund (`count_issues`), nie Feldnamen oder Werte.
+- **Projektion (#1071):** `CanonicalSnapshotProjection` implementiert alle drei
+  Ports über injizierte Callables (Intervals-Snapshot und -Version,
+  Garmin-Payload, Zone, Uhr). Cache-Schlüssel: Intervals-Version, SHA-256 des
+  Garmin-Payloads und Zone, unter `threading.Lock`. Projektionen ohne
+  gespeicherte Sync-Zeit (Uhr-Fallback) werden nicht gecacht, damit sie nicht
+  über Mitternacht veralten. Korrekt ist das nur, wenn der Schreiber den
+  Snapshot vor dem Versionswechsel festschreibt (im Docstring festgehalten).
+  `retrieved_at = None` in der Coverage bedeutet „keine gespeicherte Sync-Zeit“.
+- **Garmin-Gesundheit (#1068):** Gewicht/Körperfett folgen
+  `performance/garmin_weight.py` (Abschnitte `weight`/`weigh_ins`/`weighIns`,
+  beschränkte Rekursion, Gramm-Heuristik ohne Einheit, Epoch-ms als UTC-Datum,
+  `observed_at` aus dem Zeitstempel). Die Walker-Logik ist aus dem Legacy-Code
+  dupliziert; eine gemeinsame Extraktion folgt.
+- **Intervals-Parität (#1069):** 28 Paritätstests; ein `expectedFailure`: Dem
+  Mapper fehlt der athletenweite `lthr`/`max_hr`-Fallback.
+- **`SourcePolicy` (#1070):** `select_current`/`select_daily` bilden die
+  heutige Präzedenz tabellengesteuert ab. Der Aufrufer übergibt
+  `latest_wellness_day`, weil kanonische Datensätze ein fehlendes Feld nicht
+  abbilden; nur Intervals-Werte dieses Tages zählen. Gleiche Garmin-Tage je
+  Sicht wie heute: Gewicht nach Zeitstempel, dann letzte Eingabe; Recovery,
+  Ruhepuls, FTP letzte Eingabe; Planungs-HRV erste Eingabe. Sportbezogene
+  Auswahl ist datumsblind; `sportSettings` behalten den ersten Eintrag.
+  Offene, gepinnte Mapper-Lücken: `cycling_ftp_history`, Garmin-Schlafscore 0,
+  Athletengewicht, Max-HF aus Garmin-Herzfrequenzzonen, VO2max aus
+  `sportSettings`. VO2max- und Max-HF-Hilfsfunktionen sind durch Tests, aber
+  nicht zeilenweise gegen den Legacy-Code abgeglichen.
+- **Sitzungsbündelung (#1066):** `bundle_sessions(records, *, zone)` vergleicht
+  wie Legacy auf lokaler Wandzeit. Gepinnte Abweichungen: fehlende oder
+  0-`moving_time` bei Intervals, 0-Dauer bei Garmin, Garmin-Start in einer
+  DST-Lücke; `latest_wahoo_garmin_duplicate` betrachtet heute nur Paare mit
+  der neuesten Aktivität. Intervals-Sport kommt aus der Typ-Tabelle (ohne
+  Namen); Aufzeichnungen außerhalb der Zone können anders vergleichen. Die
+  Kandidatensuche ist quadratisch und braucht vor einem Lesepfad eine
+  Fenstersuche.
+
+### 5.5 Vorschlag Welle 4
+
+1. **Paritätslücken schließen (ein PR je Provider):** Intervals-Mapper um den
+   athletenweiten `lthr`/`max_hr`-Fallback, `cycling_ftp_history`,
+   Athletengewicht und VO2max aus `sportSettings`; Garmin-Mapper um Schlafscore
+   0 und Max-HF aus Herzfrequenzzonen. Jeweils `MAPPER_VERSION` erhöhen und die
+   gepinnten Abweichungstests in Paritätstests umwandeln.
+2. **Härtung:** gemeinsamen Garmin-Gewichts-Walker aus
+   `performance/garmin_weight.py` extrahieren (eine Implementierung für Leser
+   und Mapper); Fenstersuche statt quadratischer Kandidatensuche in
+   `canonical_sessions.py`.
+3. **Verdrahtung ohne Verbraucherwechsel:** `CanonicalSnapshotProjection` im
+   Composition Root mit den bestehenden Snapshot-Lesern verdrahten und die
+   Coverage-Zählungen in die sichere Diagnose aufnehmen (nur Zähler, keine
+   Athleteninhalte).
+4. **Erste Verbraucher (je Domäne ein PR):** zuerst `load_context` und
+   `current_metrics` über Ports und `SourcePolicy`, gesichert durch die
+   Charakterisierungstests aus Welle 1; danach Recovery und Aktivitätslesen.
+5. **Schema v6 (sequenziell, nach Einfrieren des veröffentlichten v5):**
+   additive Tabellen, Ingest-Dual-Write, Backfill-Job und Aktivitätsidentität
+   mit den Pflichtnachweisen aus Abschnitt 6.
 
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
