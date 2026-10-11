@@ -8,8 +8,10 @@ from datetime import date
 from typing import Any
 
 from backend.errors import AppError
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 TRAINING_PLAN_SCOPE_PREFIX = "training_plan:"
+LOCAL_REQUEST_TARGET = "local"
 
 
 def coach_session_key(session_csrf_hash: str) -> str:
@@ -17,46 +19,63 @@ def coach_session_key(session_csrf_hash: str) -> str:
     return hashlib.sha256(str(session_csrf_hash or "").encode("utf-8")).hexdigest()
 
 
-REQUEST_SCHEMA = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": [
-        "summary",
-        "source_message_ids",
-        "target",
-        "scope",
-        "period",
-        "constraints",
-        "remote_write",
-        "sync_scope",
-    ],
-    "properties": {
-        "summary": {"type": "string", "maxLength": 2000},
-        "source_message_ids": {
-            "type": "array",
-            "items": {"type": "integer"},
-            "minItems": 1,
-            "maxItems": 24,
+def request_target_enum(
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
+) -> list[str]:
+    """Return the request targets: local first, then Coach refresh providers by rank."""
+    return [LOCAL_REQUEST_TARGET, *registry.coach_refresh_targets()]
+
+
+def request_schema(
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
+) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "summary",
+            "source_message_ids",
+            "target",
+            "scope",
+            "period",
+            "constraints",
+            "remote_write",
+            "sync_scope",
+        ],
+        "properties": {
+            "summary": {"type": "string", "maxLength": 2000},
+            "source_message_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "minItems": 1,
+                "maxItems": 24,
+            },
+            "target": {
+                "type": "string",
+                "enum": request_target_enum(registry),
+            },
+            "scope": {"type": "array", "items": {"type": "string"}, "maxItems": 400},
+            "period": {
+                "type": ["object", "null"],
+                "additionalProperties": False,
+                "properties": {"start": {"type": "string"}, "end": {"type": "string"}},
+                "required": ["start", "end"],
+            },
+            "constraints": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 24,
+            },
+            "remote_write": {"type": "boolean"},
+            "sync_scope": {
+                "type": ["string", "null"],
+                "enum": ["created", "selected", "all_pending", None],
+            },
         },
-        "target": {
-            "type": "string",
-            "enum": ["local", "intervals", "garmin", "calendar", "weather"],
-        },
-        "scope": {"type": "array", "items": {"type": "string"}, "maxItems": 400},
-        "period": {
-            "type": ["object", "null"],
-            "additionalProperties": False,
-            "properties": {"start": {"type": "string"}, "end": {"type": "string"}},
-            "required": ["start", "end"],
-        },
-        "constraints": {"type": "array", "items": {"type": "string"}, "maxItems": 24},
-        "remote_write": {"type": "boolean"},
-        "sync_scope": {
-            "type": ["string", "null"],
-            "enum": ["created", "selected", "all_pending", None],
-        },
-    },
-}
+    }
+
+
+REQUEST_SCHEMA = request_schema()
 
 
 def _validate_request_provenance(
@@ -69,8 +88,8 @@ def _validate_request_provenance(
         raise ValueError("request_provenance")
 
 
-def _validate_request_text(value: dict[str, Any]) -> None:
-    if value["target"] not in REQUEST_SCHEMA["properties"]["target"]["enum"]:
+def _validate_request_text(value: dict[str, Any], targets: list[str]) -> None:
+    if value["target"] not in targets:
         raise ValueError("request_target")
     summary = value["summary"]
     if not isinstance(summary, str) or not summary.strip() or len(summary) > 2000:
@@ -111,25 +130,33 @@ def _validate_request_period(period: Any) -> None:
 
 
 def validate_request(
-    value: Any, user_ids: set[int], current_user_id: int
+    value: Any,
+    user_ids: set[int],
+    current_user_id: int,
+    *,
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> dict[str, Any]:
     """Validate provenance and bounds, never the user's choice of words."""
     if not isinstance(value, dict) or set(value) != set(REQUEST_SCHEMA["required"]):
         raise ValueError("request_fields")
     _validate_request_provenance(value, user_ids, current_user_id)
-    _validate_request_text(value)
+    _validate_request_text(value, request_target_enum(registry))
     _validate_request_sync(value)
     _validate_request_period(value["period"])
     return deepcopy(value)
 
 
 def dialogue_tools(
-    tools: list[dict[str, Any]], read_tools: set[str]
+    tools: list[dict[str, Any]],
+    read_tools: set[str],
+    *,
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> list[dict[str, Any]]:
     result = deepcopy(tools)
+    request = request_schema(registry)
     for tool in result:
         if tool["name"] not in read_tools:
-            tool["parameters"]["properties"]["_request"] = deepcopy(REQUEST_SCHEMA)
+            tool["parameters"]["properties"]["_request"] = deepcopy(request)
             tool["parameters"].setdefault("required", []).append("_request")
     return result
 

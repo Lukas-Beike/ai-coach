@@ -808,18 +808,6 @@
     },
     {
       "rule": "provider_literal",
-      "path": "backend/coach/authorization.py",
-      "token": "garmin",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/coach/authorization.py",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
       "path": "backend/coach/context.py",
       "token": "garmin",
       "count": 3
@@ -845,14 +833,8 @@
     {
       "rule": "provider_literal",
       "path": "backend/coach/dialogue_action.py",
-      "token": "garmin",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/coach/dialogue_action.py",
       "token": "intervals",
-      "count": 2
+      "count": 1
     },
     {
       "rule": "provider_literal",
@@ -877,12 +859,6 @@
       "path": "backend/coach/sync_tools.py",
       "token": "intervals",
       "count": 7
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/coach/tool_preparation.py",
-      "token": "intervals",
-      "count": 2
     },
     {
       "rule": "provider_literal",
@@ -991,12 +967,6 @@
       "path": "backend/sync/activity_details.py",
       "token": "intervals",
       "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/commands.py",
-      "token": "intervals",
-      "count": 2
     },
     {
       "rule": "provider_literal",

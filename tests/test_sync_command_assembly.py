@@ -79,7 +79,9 @@ class SyncCommandAssemblyTests(unittest.TestCase):
         ) as factory:
             self.assertIs(assembly.provider_refresh(), result)
 
-        factory.assert_called_once_with(self.queue, self.intervals, -1)
+        factory.assert_called_once_with(
+            self.queue, self.intervals, -1, synchronous_refreshes=None
+        )
         self.queue_service.assert_called_once_with()
         self.intervals_sync.assert_called_once_with()
 

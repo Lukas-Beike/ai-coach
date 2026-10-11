@@ -14,6 +14,7 @@ from backend.coach.morning import (
     ManualMorningCheckinService,
     MorningCheckinStateService,
 )
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class CoachLocalAssembly:
         self,
         *,
         dependencies: CoachLocalAssembly.Inputs,
+        provider_registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         state = dependencies.state
         planning = dependencies.planning
@@ -67,6 +69,7 @@ class CoachLocalAssembly:
         self._garmin_payload = garmin.payload_service
         self._morning_body_battery = garmin.morning_body_battery
         self._logger = garmin.logger
+        self._provider_registry = provider_registry
 
     def quick_actions_service(self) -> CoachQuickActionsService:
         return CoachQuickActionsService(
@@ -85,6 +88,7 @@ class CoachLocalAssembly:
             self._sync_job_queue,
             CoachDialoguePlanScopeService(manager, self._database_lock),
             self._local_date,
+            registry=self._provider_registry,
         )
 
     def clarification_service(self) -> CoachClarificationService:

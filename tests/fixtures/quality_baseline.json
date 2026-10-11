@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "b9ab84e8b7682ab3445bcaf39333f2a910b2bd10",
+  "base": "e4d51d75bde660825d32dbfb22c6ab65d0aa5016",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
@@ -1057,31 +1057,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 119,
-      "column": 15,
-      "code": "arg-type",
-      "message_sha256": "01a4b33e9317a99c5507566b8e6bfae3dc12d7213e6274566ec7a68a005c15c8"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "line": 119,
-      "column": 15,
-      "code": "arg-type",
-      "message_sha256": "5c99e03c0b7482fef0eb1fd152f5eeacad63c96c9362eabe614b1e39e0f6b0c0"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "line": 119,
-      "column": 15,
-      "code": "arg-type",
-      "message_sha256": "c1a535fc787bf4ddd136d75c148e48f96a4ba980cbd2cd66b7844c24bb4d5af4"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "line": 61,
+      "line": 42,
       "column": 15,
       "code": "arg-type",
       "message_sha256": "84c087c3edc1fdc2670002e0a2d344c006de6737fa58730960658598df1aa4c3"
@@ -1089,10 +1065,34 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 61,
+      "line": 42,
       "column": 15,
       "code": "arg-type",
       "message_sha256": "afed839adb87afaffef924126bec2f2edff23d1990be88ea86df4f8d09249830"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 93,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "01a4b33e9317a99c5507566b8e6bfae3dc12d7213e6274566ec7a68a005c15c8"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 93,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "5c99e03c0b7482fef0eb1fd152f5eeacad63c96c9362eabe614b1e39e0f6b0c0"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 93,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "c1a535fc787bf4ddd136d75c148e48f96a4ba980cbd2cd66b7844c24bb4d5af4"
     },
     {
       "tool": "mypy",
@@ -1432,14 +1432,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "line": 97,
-      "column": 32,
-      "code": "arg-type",
-      "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_coach_turn_failures.py",
       "line": 114,
       "column": 33,
@@ -1457,7 +1449,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 65,
+      "line": 46,
       "column": 33,
       "code": "arg-type",
       "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
@@ -1501,14 +1493,6 @@
       "column": 37,
       "code": "arg-type",
       "message_sha256": "6e2a1d5f101c98ee36bc390fe96e5331bf2154a28467c6d499d7a3153e35cda9"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "line": 74,
-      "column": 37,
-      "code": "arg-type",
-      "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
     },
     {
       "tool": "mypy",
@@ -2257,7 +2241,7 @@
     {
       "tool": "mypy",
       "path": "backend/coach/dialogue_action.py",
-      "line": 107,
+      "line": 119,
       "column": 12,
       "code": "attr-defined",
       "message_sha256": "232127bf16e88c0f176ed8e1807960579ac815dba69fc4f319f1bda2d31b8622"
@@ -2517,14 +2501,6 @@
       "column": 21,
       "code": "call-overload",
       "message_sha256": "eb82377dd77074ec135a9350e5dda0b9a5c9f46816d84e117789355db380f38c"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/coach/authorization.py",
-      "line": 117,
-      "column": 52,
-      "code": "call-overload",
-      "message_sha256": "188f40adffde1fb052a30a07373c3bfce193281767de41790f64f915446606a0"
     },
     {
       "tool": "mypy",
@@ -2997,14 +2973,6 @@
       "column": 27,
       "code": "index",
       "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/coach/authorization.py",
-      "line": 73,
-      "column": 30,
-      "code": "index",
-      "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
     },
     {
       "tool": "mypy",
