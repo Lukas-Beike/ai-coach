@@ -122,7 +122,9 @@ class GarminFullResync:
     def not_configured_error(self) -> AppError:
         return AppError(503, GARMIN_NOT_CONFIGURED_ERROR, reason="not_configured")
 
-    def run(self, operation_id: str, observer: SyncOperationObserver) -> dict[str, Any]:
+    def run(
+        self, operation_id: str, _observer: SyncOperationObserver
+    ) -> dict[str, Any]:
         return self._garmin_service.sync(
             days=self._all_sync_days,
             operation_id=operation_id,

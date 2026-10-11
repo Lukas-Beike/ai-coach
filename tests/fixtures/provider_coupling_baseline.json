@@ -1000,18 +1000,6 @@
     },
     {
       "rule": "provider_literal",
-      "path": "backend/sync/full_resync.py",
-      "token": "garmin",
-      "count": 5
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/full_resync.py",
-      "token": "intervals",
-      "count": 6
-    },
-    {
-      "rule": "provider_literal",
       "path": "backend/sync/garmin.py",
       "token": "garmin",
       "count": 3
@@ -1026,13 +1014,7 @@
       "rule": "provider_literal",
       "path": "backend/sync/gates.py",
       "token": "garmin",
-      "count": 2
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/gates.py",
-      "token": "intervals",
-      "count": 2
+      "count": 1
     },
     {
       "rule": "provider_literal",
