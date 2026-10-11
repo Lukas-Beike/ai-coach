@@ -9,7 +9,6 @@ they can be logged or shown without repeating provider content.
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
@@ -22,11 +21,10 @@ from backend.canonical.validation import (
 
 MAX_ISSUE_TEXT_LENGTH: Final = 200
 MAX_NUMBER_TEXT_LENGTH: Final = 64
-# Plain decimal notation with a dot separator. Python-only spellings such as
-# underscores, and locale comma decimals, are rejected.
-_DECIMAL_TEXT: Final = re.compile(
-    r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?"
-)
+# Plain decimal notation with a dot separator. Restricting the characters before
+# float() rejects Python-only spellings such as underscores, non-ASCII digits,
+# "nan"/"inf" words and locale comma decimals.
+_DECIMAL_CHARACTERS: Final = frozenset("0123456789+-.eE")
 
 
 class IssueReason(StrEnum):
@@ -74,9 +72,12 @@ def coerce_number(value: object) -> float | None:
     """
     if isinstance(value, str):
         text = value.strip()
-        if len(text) > MAX_NUMBER_TEXT_LENGTH or _DECIMAL_TEXT.fullmatch(text) is None:
+        if len(text) > MAX_NUMBER_TEXT_LENGTH or not set(text) <= _DECIMAL_CHARACTERS:
             return None
-        number = float(text)
+        try:
+            number = float(text)
+        except ValueError:
+            return None
     elif isinstance(value, bool) or not isinstance(value, int | float):
         return None
     else:
