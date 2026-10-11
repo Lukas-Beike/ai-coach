@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from backend.sync.cursors import read_cursor, write_cursor
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.snapshots import latest_snapshot, save_snapshot
 
 
@@ -19,11 +19,14 @@ class SyncStateRepository:
         key_value_repository: Any,
         snapshot_repository: Any,
         now: Callable[[], str],
+        *,
+        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ):
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
         self._snapshot_repository = snapshot_repository
         self._now = now
+        self._registry = registry
 
     def sync_period(
         self, source: str, defaults: Mapping[str, int], all_days: int
@@ -37,7 +40,7 @@ class SyncStateRepository:
             value = default
         if value == all_days:
             return all_days
-        maximum = DEFAULT_PROVIDER_REGISTRY.max_sync_days(source)
+        maximum = self._registry.max_sync_days(source)
         return max(1, min(value, maximum))
 
     def set_sync_period(
@@ -52,7 +55,7 @@ class SyncStateRepository:
             raise ValueError(
                 "The synchronization period must be a whole number."
             ) from exc
-        maximum = DEFAULT_PROVIDER_REGISTRY.max_sync_days(source)
+        maximum = self._registry.max_sync_days(source)
         if days != all_days and not 1 <= days <= maximum:
             raise ValueError(
                 f"The period for {source} must be {all_days} or between 1 and {maximum} days."
