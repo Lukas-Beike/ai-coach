@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +13,7 @@ from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.plan_selection import StructuredPlanSyncService
+from backend.sync.provider_runtime import SynchronousRefresh
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,8 @@ class SyncCommandCore:
     utc_now: Callable[[], Any]
     training_change_limit: int
     all_sync_days: int
+    # None keeps the Intervals.icu default for the synchronous refresh bindings.
+    synchronous_refreshes: Mapping[str, SynchronousRefresh] | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,7 @@ class SyncCommandAssembly:
             self._core.queue_service(),
             self._core.intervals_sync(),
             self._core.all_sync_days,
+            synchronous_refreshes=self._core.synchronous_refreshes,
         )
 
     def conflicts(self) -> SyncConflictCommandService:
