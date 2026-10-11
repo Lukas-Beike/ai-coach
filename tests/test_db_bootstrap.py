@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import closing
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import backend
@@ -22,13 +22,23 @@ from backend.db.schema import (
 class DatabaseBootstrapTests(unittest.TestCase):
     def setUp(self):
         self.now = "2026-09-15T12:00:00+00:00"
-        self.current_time = datetime(2026, 9, 15, 12, tzinfo=timezone.utc)
+        self.current_time = datetime(2026, 9, 15, 12, tzinfo=UTC)
         self.key_values = KeyValueRepository(lambda: self.now)
 
     def make_connection(self):
         connection = sqlite3.connect(":memory:")
         connection.row_factory = sqlite3.Row
         return connection
+
+    def drop_provider_tables(self, db):
+        # Released schemas predate the schema v6 provider tables; children first.
+        for table in (
+            "observations",
+            "activity_records",
+            "activity_sessions",
+            "provider_records",
+        ):
+            db.execute(f"DROP TABLE {table}")
 
     def bootstrap(self, db, *, retention_days=-1):
         initialize_application_database(
@@ -150,6 +160,7 @@ class DatabaseBootstrapTests(unittest.TestCase):
         db.execute("DROP TABLE nutrition_products")
         db.execute("ALTER TABLE external_calendar_events DROP COLUMN no_training")
         db.execute("ALTER TABLE nutrition_logs DROP COLUMN logged_time_known")
+        self.drop_provider_tables(db)
         db.execute("PRAGMA user_version = 1")
         db.commit()
 
@@ -228,6 +239,7 @@ class DatabaseBootstrapTests(unittest.TestCase):
         )
         # Version 3 predates logged_time_known, so the legacy shape must match.
         db.execute("ALTER TABLE nutrition_logs DROP COLUMN logged_time_known")
+        self.drop_provider_tables(db)
         db.execute("PRAGMA user_version = 3")
 
         self.bootstrap(db, retention_days=1)

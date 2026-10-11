@@ -15,14 +15,23 @@ from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     configure_cipher,
     database_schema_is_current,
+    database_schema_signature,
     initialize_schema,
 )
+from backend.db.schema_history import SHAPE_SCHEMA_V5, released_shape
 
 RELEASE_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_19.sql.txt"
 PREVIOUS_SCHEMA = Path(__file__).with_name("fixtures") / "schema_v2.sql.txt"
 RELEASE_1_12_26_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_26.sql.txt"
 SCHEMA_V4 = Path(__file__).with_name("fixtures") / "schema_v4.sql.txt"
 SCHEMA_V5 = Path(__file__).with_name("fixtures") / "schema_v5.sql.txt"
+# Tables added by schema version 6; absent from every released shape.
+PROVIDER_TABLES = (
+    "provider_records",
+    "activity_records",
+    "activity_sessions",
+    "observations",
+)
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -64,20 +73,76 @@ class DatabaseMigrationTests(unittest.TestCase):
         db.executescript(SCHEMA_V5.read_text(encoding="utf-8"))
         return db
 
-    def full_rows(self, db):
-        # Every column of every table; only valid for a database at schema v5.
+    def existing_tables(self, db):
+        # Tables of the live schema that this database actually contains, in
+        # schema order. Older released databases lack the newer tables.
+        present = {
+            row[0]
+            for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        return [table for table in CURRENT_DATABASE_SCHEMA if table in present]
+
+    def full_rows(self, db, tables=None):
+        # Every column of every table; the default covers the tables present.
+        names = self.existing_tables(db) if tables is None else tables
         return {
             table: [
                 tuple(row)
                 for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid")
             ]
-            for table in CURRENT_DATABASE_SCHEMA
+            for table in names
         }
 
+    def assert_provider_tables_empty(self, db):
+        # Schema v6 creates the canonical provider tables without any backfill.
+        for table in PROVIDER_TABLES:
+            with self.subTest(table=table):
+                self.assertEqual(
+                    db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0
+                )
+
+    def seed_provider_tables(self, db):
+        # Valid canonical rows for the v6 tables; the CHECKs reject anything else.
+        stamp = "2026-10-01T08:00:00+00:00"
+        db.execute(
+            "INSERT INTO provider_records(provider, record_kind, source_record_id, "
+            "payload, payload_hash, fetched_at, created_at, updated_at) "
+            "VALUES ('synthetic-provider', 'activity', 'synthetic-record', "
+            '\'{"name":"Synthetic"}\', ?, ?, ?, ?)',
+            ("a" * 64, stamp, stamp, stamp),
+        )
+        db.execute(
+            "INSERT INTO activity_sessions(activity_id, primary_provider, "
+            "primary_provider_activity_id, started_at, created_at, updated_at) "
+            "VALUES ('act_synthetic', 'synthetic-provider', 'synthetic-activity', ?, ?, ?)",
+            (stamp, stamp, stamp),
+        )
+        db.execute(
+            "INSERT INTO activity_records(provider, provider_activity_id, activity_id, "
+            "mapper_version, source_kind, recorded_by, source_record_id, sport, "
+            "environment, started_at, duration_s, distance_m, load, load_model, "
+            "avg_hr, avg_power, name, fetched_at, created_at, updated_at) "
+            "VALUES ('synthetic-provider', 'synthetic-activity', 'act_synthetic', 1, "
+            "'provider_reported', 'manual', 'synthetic-source', 'ride', 'outdoor', "
+            "?, 3600.0, 30000.0, 55.0, 'unknown', 140.0, 210.0, "
+            "'Synthetic ride', ?, ?, ?)",
+            (stamp, stamp, stamp, stamp),
+        )
+        db.execute(
+            "INSERT INTO observations(natural_key, metric, value, unit, source_kind, "
+            "recorded_by, provider, source_record_id, observed_on, observed_at, "
+            "retrieved_at, label, mapper_version, created_at, updated_at) "
+            "VALUES ('synthetic-weight', 'weight', 72.5, 'kg', 'provider_reported', "
+            "'manual', 'synthetic-provider', 'synthetic-weight', '2026-10-01', ?, ?, "
+            "'Synthetic weight', 1, ?, ?)",
+            (stamp, stamp, stamp, stamp),
+        )
+        db.commit()
+
     def seed_all_tables(self, db):
-        # One synthetic row per durable table, including FK-linked records.
-        for table in CURRENT_DATABASE_SCHEMA:
-            if table == "nutrition_products":
+        # One synthetic row per durable table present, including FK-linked records.
+        for table in self.existing_tables(db):
+            if table in ("nutrition_products", *PROVIDER_TABLES):
                 continue
             columns = list(db.execute(f"PRAGMA table_info({table})"))
             values = []
@@ -102,12 +167,13 @@ class DatabaseMigrationTests(unittest.TestCase):
             )
         db.commit()
 
-    def rows(self, db):
+    def rows(self, db, tables=None):
         # Columns added by later schema versions are checked separately.
         added_later = {
             ("external_calendar_events", "no_training"),
             ("nutrition_logs", "logged_time_known"),
         }
+        names = self.existing_tables(db) if tables is None else tables
         return {
             table: [
                 tuple(row)
@@ -115,7 +181,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                     f"SELECT {','.join(column['name'] for column in db.execute(f'PRAGMA table_info({table})') if (table, column['name']) not in added_later)} FROM {table}"
                 )
             ]
-            for table in CURRENT_DATABASE_SCHEMA
+            for table in names
             if table != "nutrition_products"
         }
 
@@ -130,7 +196,8 @@ class DatabaseMigrationTests(unittest.TestCase):
         migrate_schema(db)
         db.commit()
 
-        self.assertEqual(self.rows(db), before)
+        self.assertEqual(self.rows(db, before), before)
+        self.assert_provider_tables_empty(db)
         self.assertTrue(database_schema_is_current(db))
         self.assertEqual(
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
@@ -559,7 +626,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                 }
                 expected_kv["selected_ai_provider"] = "openai"
                 self.assertEqual(values, expected_kv)
-                after = self.rows(db)
+                after = self.rows(db, before)
                 before.pop("kv")
                 after.pop("kv")
                 self.assertEqual(after, before)
@@ -826,7 +893,8 @@ class DatabaseMigrationTests(unittest.TestCase):
         migrate_schema(db)
         db.commit()
 
-        self.assertEqual(self.rows(db), before)
+        self.assertEqual(self.rows(db, before), before)
+        self.assert_provider_tables_empty(db)
         self.assertEqual(
             db.execute("SELECT logged_time_known FROM nutrition_logs").fetchone()[0],
             1,
@@ -897,38 +965,55 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertEqual(list(db.iterdump()), before)
 
     def test_schema_v5_fixture_is_released_schema_v5(self):
-        # Released v5 equals the live shape until the next schema version lands;
-        # this assertion is expected to change with that version.
         db = self.schema_v5_database()
         self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
-        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V5)
+        self.assertFalse(database_schema_is_current(db))
+        self.assertEqual(
+            set(self.existing_tables(db)),
+            set(CURRENT_DATABASE_SCHEMA) - set(PROVIDER_TABLES),
+        )
 
-    def test_schema_v5_populated_database_opens_as_noop_and_is_restart_stable(self):
+    def test_schema_v5_populated_database_upgrades_preserving_rows_and_is_restart_stable(
+        self,
+    ):
         db = self.schema_v5_database()
         self.seed_all_tables(db)
         before_rows = self.full_rows(db)
-        before_dump = list(db.iterdump())
 
         migrate_schema(db)
         db.commit()
-        migrate_schema(db)
-        db.commit()
+        upgraded_dump = list(db.iterdump())
 
-        self.assertEqual(self.full_rows(db), before_rows)
-        self.assertEqual(list(db.iterdump()), before_dump)
+        self.assertEqual(self.full_rows(db, before_rows), before_rows)
+        self.assert_provider_tables_empty(db)
+        self.assertTrue(database_schema_is_current(db))
         self.assertEqual(
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
         )
+
+        migrate_schema(db)
+        db.commit()
+        self.assertEqual(list(db.iterdump()), upgraded_dump)
         self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
         self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
 
-    def test_schema_v5_database_file_reopens_unchanged_on_the_same_build(self):
+    def test_schema_v5_database_file_upgrades_once_and_reopens_unchanged(self):
         with tempfile.TemporaryDirectory() as data_dir:
             path = Path(data_dir) / "schema-v5.sqlite3"
             with closing(sqlite3.connect(path)) as setup:
                 setup.row_factory = sqlite3.Row
                 setup.executescript(SCHEMA_V5.read_text(encoding="utf-8"))
                 self.seed_all_tables(setup)
+                v5_rows = self.full_rows(setup)
+            with closing(sqlite3.connect(path)) as upgrade:
+                upgrade.row_factory = sqlite3.Row
+                migrate_schema(upgrade)
+                upgrade.commit()
+                self.assertEqual(self.full_rows(upgrade, v5_rows), v5_rows)
+                self.assert_provider_tables_empty(upgrade)
+                self.seed_provider_tables(upgrade)
+
             with closing(sqlite3.connect(path)) as snapshot:
                 snapshot.row_factory = sqlite3.Row
                 before_rows = self.full_rows(snapshot)
@@ -946,8 +1031,43 @@ class DatabaseMigrationTests(unittest.TestCase):
                         CURRENT_SCHEMA_VERSION,
                     )
 
+    def test_schema_v5_upgrade_failure_rolls_back_and_can_be_retried(self):
+        db = self.schema_v5_database()
+        self.seed_all_tables(db)
+        before_dump = list(db.iterdump())
+        with (
+            patch(
+                "backend.db.migrations.PROVIDER_TABLES_DDL",
+                "CREATE TABLE provider_records (id TEXT); INVALID SQL;",
+            ),
+            self.assertRaises(sqlite3.OperationalError),
+        ):
+            migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), before_dump)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
+
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
+        self.assert_provider_tables_empty(db)
+
+    def test_schema_v5_upgrade_validation_failure_rolls_back(self):
+        db = self.schema_v5_database()
+        self.seed_all_tables(db)
+        before_dump = list(db.iterdump())
+        with (
+            patch(
+                "backend.db.migrations.database_schema_is_current",
+                return_value=False,
+            ),
+            self.assertRaisesRegex(RuntimeError, "validiert"),
+        ):
+            migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), before_dump)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
+
     def test_schema_v5_unsupported_versions_are_rejected_without_modification(self):
-        for version in (1, 2, 3, 4, 6, 99):
+        for version in (1, 2, 3, 4, 6, 7, 99):
             with self.subTest(version=version):
                 db = self.schema_v5_database()
                 self.seed_all_tables(db)
@@ -971,8 +1091,20 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertEqual(list(db.iterdump()), before)
         self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
 
+    def test_schema_v6_with_unknown_column_is_rejected_without_modification(self):
+        db = self.schema_v5_database()
+        migrate_schema(db)
+        db.commit()
+        db.execute("ALTER TABLE observations ADD COLUMN unknown TEXT")
+        db.commit()
+        before = list(db.iterdump())
+        with self.assertRaises(RuntimeError):
+            migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), before)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 6)
+
     def test_unknown_or_newer_schema_is_not_modified(self):
-        for version in (None, 5, 6, 99):
+        for version in (None, 5, 6, 7, 99):
             with self.subTest(version=version):
                 db = self.old_database()
                 if version is not None:

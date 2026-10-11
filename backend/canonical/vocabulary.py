@@ -108,3 +108,36 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.ATL: "load",
     MetricKind.TRAINING_LOAD: "load",
 }
+
+
+class ProviderRecordState(StrEnum):
+    """Lifecycle of a raw provider record. Deleted records are kept for sync."""
+
+    ACTIVE = "active"
+    DELETED = "deleted"
+
+
+class ActivityRecordState(StrEnum):
+    """Lifecycle of a provider activity record linked to a canonical session."""
+
+    ACTIVE = "active"
+    DELETED = "deleted"
+    INVALID = "invalid"
+
+
+class ActivityLinkKind(StrEnum):
+    """How an activity session was linked to its primary provider activity."""
+
+    SINGLE = "single"
+    EXACT = "exact"
+    HEURISTIC = "heuristic"
+    CONFIRMED = "confirmed"
+
+
+class ActivitySessionState(StrEnum):
+    """Lifecycle of a canonical activity session."""
+
+    ACTIVE = "active"
+    HIDDEN = "hidden"
+    DUPLICATE = "duplicate"
+    DELETED = "deleted"

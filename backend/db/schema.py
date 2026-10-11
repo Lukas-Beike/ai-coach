@@ -4,8 +4,16 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
+from enum import StrEnum
 from functools import lru_cache
 from typing import Any
+
+from backend.canonical.vocabulary import (
+    ActivityLinkKind,
+    ActivityRecordState,
+    ActivitySessionState,
+    ProviderRecordState,
+)
 
 CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "kv": {"key", "value", "updated_at"},
@@ -294,19 +302,106 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "created_at",
         "updated_at",
     },
+    "provider_records": {
+        "id",
+        "provider",
+        "record_kind",
+        "source_record_id",
+        "payload",
+        "payload_hash",
+        "fetched_at",
+        "mapped_version",
+        "state",
+        "created_at",
+        "updated_at",
+    },
+    "activity_sessions": {
+        "activity_id",
+        "primary_provider",
+        "primary_provider_activity_id",
+        "link_kind",
+        "athlete_confirmed",
+        "state",
+        "merged_into",
+        "started_at",
+        "local_date",
+        "created_at",
+        "updated_at",
+    },
+    "activity_records": {
+        "provider",
+        "provider_activity_id",
+        "activity_id",
+        "state",
+        "mapper_version",
+        "source_kind",
+        "recorded_by",
+        "source_record_id",
+        "sport",
+        "environment",
+        "started_at",
+        "local_date",
+        "duration_s",
+        "distance_m",
+        "load",
+        "load_model",
+        "avg_hr",
+        "avg_power",
+        "moving_duration_s",
+        "elevation_gain_m",
+        "intensity_pct",
+        "max_hr",
+        "normalized_power",
+        "avg_cadence",
+        "energy_kj",
+        "name",
+        "details",
+        "fetched_at",
+        "created_at",
+        "updated_at",
+    },
+    "observations": {
+        "id",
+        "natural_key",
+        "metric",
+        "value",
+        "unit",
+        "method",
+        "aggregation",
+        "source_kind",
+        "recorded_by",
+        "provider",
+        "source_record_id",
+        "sport",
+        "observed_on",
+        "observed_at",
+        "retrieved_at",
+        "label",
+        "details",
+        "mapper_version",
+        "created_at",
+        "updated_at",
+    },
     "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
 }
 
 CURRENT_DATABASE_INDEXES = {
+    "idx_activity_records_activity",
+    "idx_activity_records_local_date",
+    "idx_activity_records_started",
+    "idx_activity_sessions_local_date",
+    "idx_activity_sessions_merged_into",
     "idx_change_history_created_at",
     "idx_change_history_entity",
     "idx_coach_plan_artifacts_conversation",
     "idx_nutrition_logs_date",
     "idx_nutrition_products_name",
     "idx_nutrition_products_status",
+    "idx_observations_metric_date",
     "idx_planned_units_date",
     "idx_planned_units_external_id",
     "idx_planned_units_local_id",
+    "idx_provider_records_reprojection",
     "idx_provider_refresh_area",
     "idx_provider_refresh_created_at",
     "idx_sync_job_items_status",
@@ -315,7 +410,118 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
+
+# Provider-neutral canonical tables (schema version 6). Only closed lifecycle
+# enums are CHECKed here; they are generated from backend.canonical.vocabulary so
+# the SQL cannot drift from Python. Open vocabularies (provider, sport,
+# environment, metric, unit, load model, source kind, recording origin) and
+# numeric ranges are validated by backend.canonical before a row is written, so
+# one invalid record is skipped and counted instead of aborting an ingest.
+# tests/test_db_provider_schema.py checks the generated lists and the table shape.
+
+
+def _sql_in_list(enum_type: type[StrEnum]) -> str:
+    return ", ".join(f"'{member.value}'" for member in enum_type)
+
+
+_PROVIDER_RECORD_STATES = _sql_in_list(ProviderRecordState)
+_ACTIVITY_RECORD_STATES = _sql_in_list(ActivityRecordState)
+_LINK_KINDS = _sql_in_list(ActivityLinkKind)
+_SESSION_STATES = _sql_in_list(ActivitySessionState)
+
+PROVIDER_TABLES_DDL = f"""
+    CREATE TABLE provider_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        record_kind TEXT NOT NULL CHECK (length(record_kind) BETWEEN 1 AND 64),
+        source_record_id TEXT NOT NULL CHECK (length(source_record_id) BETWEEN 1 AND 256),
+        payload TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(payload) AND json_type(payload) = 'object'),
+        payload_hash TEXT NOT NULL CHECK (length(payload_hash) = 64),
+        fetched_at TEXT NOT NULL,
+        mapped_version INTEGER,
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ({_PROVIDER_RECORD_STATES})),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (provider, record_kind, source_record_id)
+    );
+    CREATE INDEX idx_provider_records_reprojection ON provider_records(provider, record_kind, mapped_version);
+    CREATE TABLE activity_sessions (
+        activity_id TEXT PRIMARY KEY CHECK (substr(activity_id, 1, 4) = 'act_' AND length(activity_id) BETWEEN 5 AND 128),
+        primary_provider TEXT NOT NULL CHECK (length(primary_provider) BETWEEN 1 AND 64),
+        primary_provider_activity_id TEXT NOT NULL CHECK (length(primary_provider_activity_id) BETWEEN 1 AND 256),
+        link_kind TEXT NOT NULL DEFAULT 'single' CHECK (link_kind IN ({_LINK_KINDS})),
+        athlete_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (athlete_confirmed IN (0, 1)),
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ({_SESSION_STATES})),
+        merged_into TEXT REFERENCES activity_sessions(activity_id),
+        started_at TEXT NOT NULL,
+        local_date TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK ((state = 'duplicate') = (merged_into IS NOT NULL))
+    );
+    CREATE INDEX idx_activity_sessions_local_date ON activity_sessions(local_date);
+    CREATE INDEX idx_activity_sessions_merged_into ON activity_sessions(merged_into);
+    CREATE TABLE activity_records (
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        provider_activity_id TEXT NOT NULL CHECK (length(provider_activity_id) BETWEEN 1 AND 256),
+        activity_id TEXT REFERENCES activity_sessions(activity_id),
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ({_ACTIVITY_RECORD_STATES})),
+        mapper_version INTEGER NOT NULL,
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        source_record_id TEXT CHECK (source_record_id IS NULL OR length(source_record_id) BETWEEN 1 AND 256),
+        sport TEXT NOT NULL,
+        environment TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        local_date TEXT,
+        duration_s REAL,
+        distance_m REAL,
+        load REAL,
+        load_model TEXT NOT NULL,
+        avg_hr REAL,
+        avg_power REAL,
+        moving_duration_s REAL,
+        elevation_gain_m REAL,
+        intensity_pct REAL,
+        max_hr REAL,
+        normalized_power REAL,
+        avg_cadence REAL,
+        energy_kj REAL,
+        name TEXT,
+        details TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details) AND json_type(details) = 'object'),
+        fetched_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, provider_activity_id)
+    );
+    CREATE INDEX idx_activity_records_local_date ON activity_records(local_date);
+    CREATE INDEX idx_activity_records_activity ON activity_records(activity_id);
+    CREATE INDEX idx_activity_records_started ON activity_records(started_at);
+    CREATE TABLE observations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        natural_key TEXT NOT NULL UNIQUE CHECK (length(natural_key) BETWEEN 1 AND 512),
+        metric TEXT NOT NULL CHECK (length(metric) BETWEEN 1 AND 64),
+        value REAL NOT NULL,
+        unit TEXT NOT NULL CHECK (length(unit) BETWEEN 1 AND 16),
+        method TEXT,
+        aggregation TEXT,
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        provider TEXT CHECK (provider IS NULL OR length(provider) BETWEEN 1 AND 64),
+        source_record_id TEXT CHECK (source_record_id IS NULL OR length(source_record_id) BETWEEN 1 AND 256),
+        sport TEXT,
+        observed_on TEXT NOT NULL,
+        observed_at TEXT,
+        retrieved_at TEXT,
+        label TEXT,
+        details TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details) AND json_type(details) = 'object'),
+        mapper_version INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_observations_metric_date ON observations(metric, observed_on);
+"""
 
 NUTRITION_PRODUCTS_DDL = """
     CREATE TABLE nutrition_products (
@@ -684,6 +890,9 @@ def initialize_schema(db: Any) -> None:
         "CREATE INDEX idx_planned_units_date ON planned_units(json_extract(payload, '$.date'))"
     )
 
+    for statement in PROVIDER_TABLES_DDL.split(";"):
+        if statement.strip():
+            db.execute(statement)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 

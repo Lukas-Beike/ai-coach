@@ -25,6 +25,8 @@ SHAPE_RELEASE_1_12_19: Final = "release-1.12.19"
 SHAPE_SCHEMA_V2: Final = "schema-v2"
 # Schema versions 3 and 4: adds no_training.
 SHAPE_SCHEMA_V3_V4: Final = "schema-v3-v4"
+# Schema version 5: adds logged_time_known. Released before the provider tables.
+SHAPE_SCHEMA_V5: Final = "schema-v5"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
 
@@ -36,6 +38,7 @@ RELEASED_SHAPE_DIGESTS: Final[Mapping[str, str]] = {
     SHAPE_SCHEMA_V3_V4: (
         "d894e341a01bf1a255c277d7a35a53b789a3626fa8d4a3f3d0335e6c45bac3b0"
     ),
+    SHAPE_SCHEMA_V5: "1b47e9f693b025f00045019c9d1633de019618cb48f753c9a213830715040341",
 }
 
 # Stored PRAGMA user_version -> schema shapes that version is allowed to hold.
@@ -45,12 +48,19 @@ RELEASED_SHAPE_DIGESTS: Final[Mapping[str, str]] = {
 # recognizable.
 ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
     0: frozenset(
-        {SHAPE_RELEASE_1_12_19, SHAPE_SCHEMA_V2, SHAPE_SCHEMA_V3_V4, SHAPE_CURRENT}
+        {
+            SHAPE_RELEASE_1_12_19,
+            SHAPE_SCHEMA_V2,
+            SHAPE_SCHEMA_V3_V4,
+            SHAPE_SCHEMA_V5,
+            SHAPE_CURRENT,
+        }
     ),
     1: frozenset({SHAPE_RELEASE_1_12_19}),
     2: frozenset({SHAPE_SCHEMA_V2}),
     3: frozenset({SHAPE_SCHEMA_V3_V4}),
     4: frozenset({SHAPE_SCHEMA_V3_V4}),
+    5: frozenset({SHAPE_SCHEMA_V5}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 

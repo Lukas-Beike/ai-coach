@@ -512,8 +512,8 @@ When a database restore is initiated:
 5. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss.
 
 ### Privacy Export & Data Purge
-- **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history.
-- **Local Data Purge**: Completely wipes all local athlete records from the database. To prevent accidental loss, the action requires entering the exact confirmation phrase `LOKALE DATEN LÖSCHEN`. External accounts (Intervals.icu and Garmin) remain untouched.
+- **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history. Export format version 2 also includes the canonical provider tables (provider records, activity sessions and records, observations) as JSON Lines; credential-like keys are removed from provider payloads before export, and signed download URLs are replaced with a `[redacted]` marker.
+- **Local Data Purge**: Completely wipes all local athlete records from the database, including canonical provider data. To prevent accidental loss, the action requires entering the exact confirmation phrase `LOKALE DATEN LÖSCHEN`. External accounts (Intervals.icu and Garmin) remain untouched.
 
 ### Operational Logging & Diagnostics
 - **Sanitized Logs**: Standard container logs contain only operational timestamps, correlation IDs, status codes, and anonymized error classifications. API tokens, passwords, and athlete metrics are never logged.
