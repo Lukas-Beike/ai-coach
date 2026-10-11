@@ -65,7 +65,7 @@ class CalendarSchedulePolicy:
     def blocked(self) -> bool:
         return False
 
-    def refresh_payload(self, trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
+    def refresh_payload(self, _trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
         return {"reason": reason}
 
 
@@ -82,7 +82,7 @@ class GarminSchedulePolicy:
     def blocked(self) -> bool:
         return False
 
-    def refresh_payload(self, trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
+    def refresh_payload(self, _trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
         days, end_date = self._garmin.automatic_sync_window(self._automatic_sync_days)
         payload: dict[str, Any] = {"days": days, "reason": reason}
         if end_date is not None:
@@ -117,7 +117,7 @@ class IntervalsSchedulePolicy:
     def blocked(self) -> bool:
         return self._blocked_by()
 
-    def refresh_payload(self, trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
+    def refresh_payload(self, _trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
         days = self._sync_state.sync_period(
             INTERVALS_ID, self._sync_period_defaults, self._all_sync_days
         )
