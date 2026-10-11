@@ -362,12 +362,19 @@ from backend.sync.planned_unit_assembly import (
     PlannedUnitRuntime,
     PlannedUnitSyncAssembly,
 )
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_resync_assembly import (
     CompetitionSyncOwners,
     ProviderResyncAssembly,
     ProviderResyncPersistence,
     ProviderResyncRuntime,
     ResyncProviderOwners,
+)
+from backend.sync.provider_runtime import ProviderRuntimeRegistry
+from backend.sync.provider_runtime_assembly import (
+    ProviderRuntimeDependencies,
+    build_provider_runtime,
+    builtin_bindings,
 )
 from backend.sync.queue_assembly import (
     SyncJobQueueAssembly,
@@ -513,6 +520,35 @@ def provider_state_service() -> provider_state.ProviderStateService:
     )
 
 
+def provider_runtime() -> ProviderRuntimeRegistry:
+    """Build a fresh runtime registry over the live built-in provider owners.
+
+    Assemblies call this per build, so schedule snapshots are never reused across
+    builds. Providers are named only by the static descriptor registry.
+    """
+    jobs = SYNC_JOB_DEPENDENCIES
+    return build_provider_runtime(
+        DEFAULT_PROVIDER_REGISTRY,
+        builtin_bindings(
+            ProviderRuntimeDependencies(
+                config=lambda: CONFIG,
+                profile=ATHLETE_DATA.profile,
+                database_manager=database_manager,
+                key_values=KEY_VALUE_REPOSITORY,
+                database_lock=DB_LOCK,
+                intervals_sync_lock=lambda: INTERVALS_SYNC_LOCK,
+                garmin_resync_gate=GARMIN_RESYNC_GATE,
+                garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
+                historical=jobs.historical,
+                state=jobs.state,
+                intervals=jobs.intervals,
+                garmin=jobs.garmin,
+                calendar_weather=jobs.calendar_weather,
+            )
+        ),
+    )
+
+
 PROVIDER_SYNC = ProviderSyncAssembly(
     dependencies=ProviderSyncAssembly.Inputs(
         persistence=ProviderSyncPersistence(
@@ -531,7 +567,8 @@ PROVIDER_SYNC = ProviderSyncAssembly(
             retry_base_seconds=PROVIDER_REFRESH_RETRY_BASE_SECONDS,
             retry_max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
         ),
-    )
+    ),
+    provider_runtime=provider_runtime,
 )
 
 
@@ -787,7 +824,7 @@ def key_value_service() -> KeyValueService:
     return KeyValueService(database_manager, KEY_VALUE_REPOSITORY, DB_LOCK)
 
 
-SYNC_PERIOD_DEFAULTS = {"intervals": 84, "garmin": 84}
+SYNC_PERIOD_DEFAULTS = DEFAULT_PROVIDER_REGISTRY.sync_period_defaults()
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = date(2000, 1, 1)
@@ -871,6 +908,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
             logger=LOGGER,
             retry_base_seconds=SYNC_JOB_RETRY_BASE_SECONDS,
             retry_max_seconds=SYNC_JOB_RETRY_MAX_SECONDS,
+            registry=DEFAULT_PROVIDER_REGISTRY,
         ),
     )
 )
@@ -1287,44 +1325,49 @@ PROVIDER_RESYNC = ProviderResyncAssembly(
             monotonic=time.perf_counter,
             operation_observer=PROVIDER_SYNC.operation_observer,
         ),
-    )
+    ),
+    provider_runtime=provider_runtime,
 )
 
 
+# Shared with provider_runtime() so the lazy registry reuses the same live owners.
+SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
+    historical=HistoricalSyncDependencies(
+        local_now=ATHLETE_CLOCK.now,
+        sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+        all_sync_days=ALL_SYNC_DAYS,
+        sync_chunk_days=SYNC_CHUNK_DAYS,
+        sync_earliest_date=SYNC_EARLIEST_DATE,
+    ),
+    state=SyncJobStateDependencies(
+        sync_state_repository=SYNC_PERSISTENCE.state_repository,
+        queue_service=SYNC_JOB_QUEUE.service,
+        outcome_service=SYNC_JOB_QUEUE.outcome_service,
+    ),
+    intervals=IntervalsJobDependencies(
+        sync_service=INTERVALS_SYNC.sync_service,
+        activity_detail_service=INTERVALS_SYNC.activity_detail_service,
+        performance_refresh_service=INTERVALS_SYNC.performance_service,
+        selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
+        competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
+        nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
+        operation_observer=PROVIDER_SYNC.operation_observer,
+        resync_gate=INTERVALS_RESYNC_GATE,
+    ),
+    garmin=GarminJobDependencies(
+        sync_service=GARMIN_ASSEMBLY.sync_service,
+        morning_body_battery_service=morning_body_battery_service,
+        fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
+    ),
+    calendar_weather=CalendarWeatherJobDependencies(
+        calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
+        weather_sync_service=WEATHER_ASSEMBLY.sync_service,
+    ),
+)
+
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
-    dependencies=SyncJobExecutionAssembly.Inputs(
-        historical=HistoricalSyncDependencies(
-            local_now=ATHLETE_CLOCK.now,
-            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-            all_sync_days=ALL_SYNC_DAYS,
-            sync_chunk_days=SYNC_CHUNK_DAYS,
-            sync_earliest_date=SYNC_EARLIEST_DATE,
-        ),
-        state=SyncJobStateDependencies(
-            sync_state_repository=SYNC_PERSISTENCE.state_repository,
-            queue_service=SYNC_JOB_QUEUE.service,
-            outcome_service=SYNC_JOB_QUEUE.outcome_service,
-        ),
-        intervals=IntervalsJobDependencies(
-            sync_service=INTERVALS_SYNC.sync_service,
-            activity_detail_service=INTERVALS_SYNC.activity_detail_service,
-            performance_refresh_service=INTERVALS_SYNC.performance_service,
-            selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
-            competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
-            nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
-            operation_observer=PROVIDER_SYNC.operation_observer,
-            resync_gate=INTERVALS_RESYNC_GATE,
-        ),
-        garmin=GarminJobDependencies(
-            sync_service=GARMIN_ASSEMBLY.sync_service,
-            morning_body_battery_service=morning_body_battery_service,
-            fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
-        ),
-        calendar_weather=CalendarWeatherJobDependencies(
-            calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
-            weather_sync_service=WEATHER_ASSEMBLY.sync_service,
-        ),
-    )
+    dependencies=SYNC_JOB_DEPENDENCIES,
+    provider_runtime=provider_runtime,
 )
 
 
@@ -1369,7 +1412,8 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
             morning_body_battery_service=morning_body_battery_service,
             logger=LOGGER,
         ),
-    )
+    ),
+    provider_runtime=provider_runtime,
 )
 
 SYNC_COMMANDS = SyncCommandAssembly(
@@ -1393,6 +1437,7 @@ SYNC_COMMANDS = SyncCommandAssembly(
         redactor=REDACTOR,
         today=lambda: ATHLETE_CLOCK.now().date(),
     ),
+    provider_runtime=provider_runtime,
 )
 
 
@@ -1687,7 +1732,8 @@ PUBLIC_STATE = PublicStateAssembly(
             all_sync_days=lambda: ALL_SYNC_DAYS,
             planned_workout_label=lambda: PLANNED_WORKOUT_LABEL,
         ),
-    )
+    ),
+    provider_runtime=provider_runtime,
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
