@@ -264,6 +264,13 @@ class RegistryValidationTests(unittest.TestCase):
                 ACME_ONLY_STATIC, [_acme_binding(), _acme_binding()]
             )
 
+    def test_every_descriptor_requires_a_binding(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no runtime binding"):
+            build_provider_runtime(ACME_ONLY_STATIC, [])
+
+        runtime = build_provider_runtime(ACME_ONLY_STATIC, [_acme_binding()])
+        self.assertIs(runtime.static, ACME_ONLY_STATIC)
+
     def test_freshness_sources_must_match_descriptor_areas(self) -> None:
         with self.assertRaisesRegex(ValueError, "freshness sources"):
             ProviderRuntimeRegistry(ACME_ONLY_STATIC, [fake_binding(freshness={})])
@@ -432,15 +439,8 @@ class DispatchRoutingTests(unittest.TestCase):
             "type": "refresh",
             "payload": {"reason": "Coach"},
         }
-        envelope = {"provider": ACME_ID, "type": "refresh", "payload": job["payload"]}
 
-        # Normalization still reads only the built-in registry; stub it here so
-        # the test covers the runtime branch of the executor's routing.
-        with mock.patch(
-            "backend.sync.executor.normalize_sync_job_request",
-            return_value=envelope,
-        ):
-            result = assembly.executor().execute(job)
+        result = assembly.executor().execute(job)
 
         self.assertEqual(result, {"status": "completed"})
         self.assertEqual(owner.calls[0]["reason"], "Coach")

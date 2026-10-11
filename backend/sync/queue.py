@@ -82,6 +82,7 @@ class SyncJobQueueService:
                     payload,
                     all_sync_days=self._all_sync_days,
                     registry=self._registry,
+                    enforce_period_limit=True,
                 )
             except JobValidationError as exc:
                 raise AppError(400, str(exc), reason="invalid_job_request") from exc
