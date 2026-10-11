@@ -307,3 +307,35 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
             server.key_value_service().get("coach_pending_request"),
             '{"summary":"previous"}',
         )
+
+    def test_clean_advisory_turn_clears_stale_failed_pending_request(self):
+        server.key_value_service().set(
+            "coach_pending_request",
+            json.dumps({"summary": "Previous failed", "status": "failed"}),
+        )
+        status, text, failures = self.finalize(
+            self.response("Lauf locker mit den Vomeros."), []
+        )
+        self.assertEqual((status, failures), ("completed", []))
+        self.assertEqual(text, "Lauf locker mit den Vomeros.")
+        self.assertEqual(
+            server.key_value_service().get("coach_pending_request"), "null"
+        )
+
+    def test_clean_advisory_turn_does_not_clear_active_clarification_pending_request(
+        self,
+    ):
+        server.key_value_service().set(
+            "coach_pending_request",
+            json.dumps(
+                {"summary": "Needs clarification", "status": "needs_clarification"}
+            ),
+        )
+        status, _, failures = self.finalize(
+            self.response("Hier ist deine Antwort."), []
+        )
+        self.assertEqual((status, failures), ("completed", []))
+        self.assertEqual(
+            json.loads(server.key_value_service().get("coach_pending_request")),
+            {"summary": "Needs clarification", "status": "needs_clarification"},
+        )

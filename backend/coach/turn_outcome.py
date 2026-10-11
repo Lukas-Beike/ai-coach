@@ -172,6 +172,7 @@ class CoachStructuredOutcomeService:
             effects,
             failures=failures,
             incomplete_answer=incomplete_answer,
+            missing_answer=missing_answer,
             question=question,
             cancelled=cancelled,
             allow_mutations=allow_mutations,
@@ -253,6 +254,7 @@ class CoachStructuredOutcomeService:
         *,
         failures: list[dict[str, Any]],
         incomplete_answer: bool,
+        missing_answer: bool = False,
         question: str,
         cancelled: bool,
         allow_mutations: bool,
@@ -291,13 +293,26 @@ class CoachStructuredOutcomeService:
                 ensure_ascii=False,
             )
         elif (
-            effects
-            and not question
+            not question
             and not failures
             and not incomplete_answer
+            and not missing_answer
             and allow_mutations
         ):
-            pending_value = "null"
+            if effects:
+                pending_value = "null"
+            else:
+                with self._database_lock, self._database_manager.reader() as db:
+                    raw_pending = self._key_values.get(db, "coach_pending_request")
+                try:
+                    current_pending = json.loads(raw_pending or "null")
+                except ValueError, TypeError:
+                    current_pending = None
+                if (
+                    isinstance(current_pending, dict)
+                    and current_pending.get("status") == "failed"
+                ):
+                    pending_value = "null"
         if pending_value is not None:
             with self._database_lock, self._database_manager.unit_of_work() as db:
                 self._key_values.set(db, "coach_pending_request", pending_value)

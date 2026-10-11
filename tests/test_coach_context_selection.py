@@ -215,6 +215,117 @@ class CoachContextSelectionTests(unittest.TestCase):
         self.assertEqual(compact["attachment_evidence"], context["attachment_evidence"])
         self.assertEqual(len(context["messages"]), 25)
 
+    def test_failed_pending_request_does_not_trap_new_training_or_advisory_questions(
+        self,
+    ):
+        failed_pending = {
+            "summary": "Frühstück erfassen",
+            "source_message_ids": [1],
+            "status": "failed",
+            "question": None,
+        }
+        user_message = (
+            "Ich würde heute gerne eine Ausdauereinheit machen. Sollte ich einen "
+            "lockeren Lauf machen oder eine Einheit auf dem Rad?"
+        )
+        selection = select_coach_context(
+            user_message, {"pending_request": failed_pending}
+        )
+        self.assertNotEqual(selection.name, "fallback")
+        self.assertEqual(selection.name, "activity_analysis")
+
+        context = {
+            "current_user_message_id": 2,
+            "messages": [
+                {"id": 1, "role": "user", "content": "Frühstück: 65g Whey"},
+                {"id": 2, "role": "user", "content": user_message},
+            ],
+            "pending_request": failed_pending,
+        }
+        compact = compact_coach_dialogue(context, selection)
+        self.assertIsNone(compact["pending_request"])
+
+    def test_failed_pending_request_retained_on_explicit_continuation_or_retry(self):
+        failed_pending = {
+            "summary": "Frühstück erfassen",
+            "source_message_ids": [1],
+            "status": "failed",
+            "question": None,
+        }
+        for message in (
+            "Versuch es nochmal",
+            "Bitte erneut versuchen",
+            "Ja mach das trotzdem",
+        ):
+            with self.subTest(message=message):
+                selection = select_coach_context(
+                    message, {"pending_request": failed_pending}
+                )
+                self.assertEqual(selection.name, "fallback")
+                context = {
+                    "current_user_message_id": 2,
+                    "messages": [{"id": 1, "role": "user", "content": "Frühstück"}],
+                    "pending_request": failed_pending,
+                }
+                compact = compact_coach_dialogue(context, selection)
+                self.assertEqual(compact["pending_request"], failed_pending)
+
+    def test_needs_clarification_pending_request_does_not_trap_new_workout_command(
+        self,
+    ):
+        clarification_pending = {
+            "summary": "Snack erfassen: eine Scheibe Vollkornbrot...",
+            "source_message_ids": [1],
+            "status": "needs_clarification",
+            "question": "Soll ich den Snack so eintragen?",
+        }
+        workout_message = (
+            "Plane mir eine Einheit mit 45 Minuten. 5 x 30 Sekunden bei 400 Watt "
+            "zwischen drin. Warmup mit ramp 10 Minuten auf 200 W. "
+            "200 W zwischen den Antritten. 5 minuten cooldown von 200W auf 150W."
+        )
+        selection = select_coach_context(
+            workout_message, {"pending_request": clarification_pending}
+        )
+        self.assertNotEqual(selection.name, "fallback")
+        self.assertEqual(selection.name, "weekly_planning")
+
+        context = {
+            "current_user_message_id": 2,
+            "messages": [
+                {"id": 1, "role": "user", "content": "Snack: Brot und Kaese"},
+                {"id": 2, "role": "user", "content": workout_message},
+            ],
+            "pending_request": clarification_pending,
+        }
+        compact = compact_coach_dialogue(context, selection)
+        self.assertIsNone(compact["pending_request"])
+
+    def test_needs_clarification_pending_request_retained_on_continuation_or_short_answer(
+        self,
+    ):
+        clarification_pending = {
+            "summary": "Snack erfassen: eine Scheibe Vollkornbrot...",
+            "source_message_ids": [1],
+            "status": "needs_clarification",
+            "question": "Soll ich den Snack so eintragen?",
+        }
+        for message in ("Ja bitte", "Mach das", "Die zweite", "Auf Freitag"):
+            with self.subTest(message=message):
+                selection = select_coach_context(
+                    message, {"pending_request": clarification_pending}
+                )
+                self.assertEqual(selection.name, "fallback")
+                context = {
+                    "current_user_message_id": 2,
+                    "messages": [
+                        {"id": 1, "role": "user", "content": "Snack: Brot und Kaese"}
+                    ],
+                    "pending_request": clarification_pending,
+                }
+                compact = compact_coach_dialogue(context, selection)
+                self.assertEqual(compact["pending_request"], clarification_pending)
+
     def test_missing_current_message_id_does_not_remove_unidentified_messages(self):
         context = {
             "messages": [{"role": "user", "content": "Synthetic earlier message"}]
