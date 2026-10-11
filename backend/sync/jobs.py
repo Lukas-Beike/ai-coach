@@ -1,8 +1,10 @@
 """Provider-job contracts shared by the persistence and worker layers.
 
-The module deliberately has no database, HTTP, or provider dependency.  It
-owns the small state-machine vocabulary so the server can persist jobs without
-duplicating validation and retry decisions in request handlers.
+The module deliberately has no database, HTTP, or provider transport dependency.
+Provider rules (accepted providers, job types, refresh fields) come from the
+declarative provider registry. It owns the small state-machine vocabulary so the
+server can persist jobs without duplicating validation and retry decisions in
+request handlers.
 """
 
 from __future__ import annotations
@@ -18,8 +20,9 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.runtime.clock import utc_now as system_utc_now
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
-PROVIDERS = frozenset({"intervals", "garmin", "calendar", "weather"})
+PROVIDERS = frozenset(DEFAULT_PROVIDER_REGISTRY.ids())
 JOB_TYPES = frozenset(
     {
         "refresh",
@@ -184,14 +187,23 @@ def utc_timestamp(now: datetime | None = None) -> str:
 
 
 def validate_job_request(
-    provider: Any, job_type: Any, payload: Any = None
+    provider: Any,
+    job_type: Any,
+    payload: Any = None,
+    *,
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> dict[str, Any]:
     """Validate and copy the bounded provider-job envelope."""
     provider_value = str(provider or "").strip().casefold()
-    if provider_value not in PROVIDERS:
+    if provider_value not in registry.ids():
         raise JobValidationError("Unsupported provider.")
     type_value = str(job_type or "").strip().casefold()
     if type_value not in JOB_TYPES:
+        raise JobValidationError("Unsupported job type.")
+    # The refresh normalizer does not consult supports_job, so gate it here.
+    if type_value == "refresh" and not registry.supports_job(
+        provider_value, type_value
+    ):
         raise JobValidationError("Unsupported job type.")
     if payload is None:
         payload_value: dict[str, Any] = {}
@@ -205,33 +217,45 @@ def validate_job_request(
 
 
 def normalize_sync_job_request(
-    provider: Any, job_type: Any, payload: Any = None, *, all_sync_days: int
+    provider: Any,
+    job_type: Any,
+    payload: Any = None,
+    *,
+    all_sync_days: int,
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> dict[str, Any]:
     """Validate and normalize the provider-specific payload persisted for a job."""
-    envelope = validate_job_request(provider, job_type, payload)
+    envelope = validate_job_request(provider, job_type, payload, registry=registry)
     provider_value = envelope["provider"]
     type_value = envelope["type"]
     values = envelope["payload"]
-    if type_value == "historical_backfill" and provider_value not in {
-        "intervals",
-        "garmin",
-    }:
+    if type_value == "historical_backfill" and not registry.supports_job(
+        provider_value, type_value
+    ):
         raise JobValidationError(
             "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig."
         )
     if type_value == "activity_details":
-        normalized_payload = _normalize_activity_details_job(provider_value, values)
+        normalized_payload = _normalize_activity_details_job(
+            provider_value, values, registry
+        )
     elif type_value == "nutrition_sync":
-        normalized_payload = _normalize_nutrition_sync_job(provider_value, values)
+        normalized_payload = _normalize_nutrition_sync_job(
+            provider_value, values, registry
+        )
     elif type_value == "competition_push":
-        normalized_payload = _normalize_competition_push_job(provider_value, values)
+        normalized_payload = _normalize_competition_push_job(
+            provider_value, values, registry
+        )
     elif type_value == "performance_refresh":
-        normalized_payload = _normalize_reason_only_job(provider_value, values)
+        normalized_payload = _normalize_reason_only_job(
+            provider_value, values, registry
+        )
     elif type_value == "plan_push":
-        normalized_payload = _normalize_plan_push_job(provider_value, values)
+        normalized_payload = _normalize_plan_push_job(provider_value, values, registry)
     else:
         normalized_payload = _normalize_refresh_job(
-            provider_value, values, all_sync_days
+            provider_value, values, all_sync_days, registry
         )
     return {
         "provider": provider_value,
@@ -241,9 +265,10 @@ def normalize_sync_job_request(
 
 
 def _normalize_activity_details_job(
-    provider: str, values: dict[str, Any]
+    provider: str, values: dict[str, Any], registry: ProviderRegistry
 ) -> dict[str, Any]:
-    if provider != "intervals" or set(values) != {"activity_id"}:
+    supported = registry.supports_job(provider, "activity_details")
+    if not supported or set(values) != {"activity_id"}:
         raise JobValidationError("Ungültiger Aktivitätsdetailauftrag.")
     value = values.get("activity_id")
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", value):
@@ -252,10 +277,11 @@ def _normalize_activity_details_job(
 
 
 def _normalize_nutrition_sync_job(
-    provider: str, values: dict[str, Any]
+    provider: str, values: dict[str, Any], registry: ProviderRegistry
 ) -> dict[str, Any]:
     allowed_fields = {"date", "pending_limit", "approval_manifest"}
-    if provider != "intervals" or set(values) - allowed_fields:
+    supported = registry.supports_job(provider, "nutrition_sync")
+    if not supported or set(values) - allowed_fields:
         raise JobValidationError("Ungültiger Ernährungssynchronisierungsauftrag.")
     if "approval_manifest" in values:
         return _normalize_approved_nutrition_job(values)
@@ -355,8 +381,10 @@ def _validate_nutrition_approval_hash(entry: dict[str, Any]) -> None:
         raise JobValidationError("Nutrition approval hash does not match its totals.")
 
 
-def _normalize_reason_only_job(provider: str, values: dict[str, Any]) -> dict[str, str]:
-    if provider != "intervals":
+def _normalize_reason_only_job(
+    provider: str, values: dict[str, Any], registry: ProviderRegistry
+) -> dict[str, str]:
+    if not registry.supports_job(provider, "performance_refresh"):
         raise JobValidationError("Dieser Job ist nur für Intervals.icu zulässig.")
     if set(values) - {"reason"}:
         raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
@@ -364,9 +392,9 @@ def _normalize_reason_only_job(provider: str, values: dict[str, Any]) -> dict[st
 
 
 def _normalize_competition_push_job(
-    provider: str, values: dict[str, Any]
+    provider: str, values: dict[str, Any], registry: ProviderRegistry
 ) -> dict[str, Any]:
-    if provider != "intervals":
+    if not registry.supports_job(provider, "competition_push"):
         raise JobValidationError("Dieser Job ist nur für Intervals.icu zulässig.")
     if set(values) - {"reason", "approval_manifest"}:
         raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
@@ -412,8 +440,10 @@ def _normalize_plan_push_entry(entry: Any) -> dict[str, str]:
     return {"library_workout_id": workout_id, "expected_payload_hash": payload_hash}
 
 
-def _normalize_plan_push_job(provider: str, values: dict[str, Any]) -> dict[str, Any]:
-    if provider != "intervals":
+def _normalize_plan_push_job(
+    provider: str, values: dict[str, Any], registry: ProviderRegistry
+) -> dict[str, Any]:
+    if not registry.supports_job(provider, "plan_push"):
         raise JobValidationError("Plan-Push-Jobs sind nur für Intervals.icu zulässig.")
     if set(values) - {"entries", "reason", "repair"}:
         raise JobValidationError("Ein Plan-Push-Job enthält nicht unterstützte Felder.")
@@ -435,9 +465,12 @@ def _normalize_plan_push_job(provider: str, values: dict[str, Any]) -> dict[str,
 
 
 def _normalize_refresh_job(
-    provider_value: str, values: dict[str, Any], all_sync_days: int
+    provider_value: str,
+    values: dict[str, Any],
+    all_sync_days: int,
+    registry: ProviderRegistry,
 ) -> dict[str, Any]:
-    if set(values) - _refresh_job_fields(provider_value):
+    if set(values) - registry.refresh_fields(provider_value):
         raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
 
     normalized_payload: dict[str, Any] = {}
@@ -452,15 +485,6 @@ def _normalize_refresh_job(
     if values.get("reason") is not None:
         normalized_payload["reason"] = _normalize_refresh_reason(values["reason"])
     return normalized_payload
-
-
-def _refresh_job_fields(provider: str) -> set[str]:
-    return {
-        "intervals": {"days", "reason", "end_date"},
-        "garmin": {"days", "reason", "end_date"},
-        "calendar": {"reason"},
-        "weather": {"force", "reason"},
-    }[provider]
 
 
 def _normalize_refresh_days(value: Any, all_sync_days: int) -> int:
@@ -536,10 +560,13 @@ class SyncJobStore:
         database_manager: Any,
         now: Callable[[], str],
         uuid_factory: Callable[[], str],
+        *,
+        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ):
         self._database_manager = database_manager
         self._now = now
         self._uuid_factory = uuid_factory
+        self._registry = registry
 
     def state(self, job_id: str) -> dict[str, Any] | None:
         with self._database_manager.unit_of_work() as db:
@@ -573,7 +600,10 @@ class SyncJobStore:
         """Persist a normalized, credential-free envelope and its items atomically."""
         try:
             normalized = validate_job_request(
-                envelope.get("provider"), envelope.get("type"), envelope.get("payload")
+                envelope.get("provider"),
+                envelope.get("type"),
+                envelope.get("payload"),
+                registry=self._registry,
             )
         except (AttributeError, ValueError) as exc:
             raise SyncJobInvalidOperationError(str(exc)) from exc
