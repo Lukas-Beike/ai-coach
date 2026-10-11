@@ -26,6 +26,75 @@ class ObservedSyncJob(TypedDict):
     status: NotRequired[str]
 
 
+def _pending_value(
+    command_receipts: list[dict[str, Any]],
+    effects: list[dict[str, Any]],
+    failures: list[dict[str, Any]],
+    *,
+    incomplete_answer: bool,
+    question: str,
+    cancelled: bool,
+    allow_mutations: bool,
+    context: dict[str, Any],
+    message: str,
+) -> str | None:
+    can_update = allow_mutations and not cancelled and not question
+    if can_update and (failures or incomplete_answer):
+        last_request = next(
+            (
+                entry.get("request")
+                for entry in reversed(command_receipts)
+                if entry.get("request")
+            ),
+            None,
+        )
+        selection = select_coach_context(message, context)
+        pending_request = (
+            context.get("pending_request") or {}
+            if selection.retain_pending_request
+            else {}
+        )
+        tool_names = [
+            entry["tool"]
+            for entry in (failures + effects)
+            if isinstance(entry, dict) and "tool" in entry
+        ]
+        request = last_request or pending_request
+        summary = request.get("summary") or message
+        domain = request.get("domain") or infer_coach_domain(summary, tools=tool_names)
+        return json.dumps(
+            {
+                "summary": summary,
+                "source_message_ids": request.get("source_message_ids")
+                or [context["current_user_message_id"]],
+                "status": "failed",
+                "domain": domain,
+                "question": None,
+                "completed_steps": [
+                    {"tool": entry["tool"], "status": entry["result"].get("status")}
+                    for entry in effects
+                ],
+            },
+            ensure_ascii=False,
+        )
+    if can_update and effects and not failures:
+        return "null"
+    return None
+
+
+def _may_clear_pending(
+    question: str,
+    failures: list[dict[str, Any]],
+    incomplete_answer: bool,
+    missing_answer: bool,
+    allow_mutations: bool,
+    cancelled: bool,
+) -> bool:
+    return allow_mutations and not (
+        question or failures or incomplete_answer or missing_answer or cancelled
+    )
+
+
 def _failure_message(
     text: str,
     question: str,
@@ -262,70 +331,28 @@ class CoachStructuredOutcomeService:
         context: dict[str, Any],
         message: str,
     ) -> None:
-        pending_value: str | None = None
-        if (
-            (failures or incomplete_answer)
-            and allow_mutations
-            and not cancelled
-            and not question
-        ):
-            last_request = next(
-                (
-                    entry.get("request")
-                    for entry in reversed(command_receipts)
-                    if entry.get("request")
-                ),
-                None,
-            )
-            selection = select_coach_context(message, context)
-            pending_request = (
-                context.get("pending_request") or {}
-                if selection.retain_pending_request
-                else {}
-            )
-            tool_names = [
-                entry["tool"]
-                for entry in (failures + effects)
-                if isinstance(entry, dict) and "tool" in entry
-            ]
-            summary = (last_request or pending_request).get("summary") or message
-            domain = (last_request or pending_request).get(
-                "domain"
-            ) or infer_coach_domain(summary, tools=tool_names)
-            pending_value = json.dumps(
-                {
-                    "summary": summary,
-                    "source_message_ids": (last_request or {}).get("source_message_ids")
-                    or [context["current_user_message_id"]],
-                    "status": "failed",
-                    "domain": domain,
-                    "question": None,
-                    "completed_steps": [
-                        {"tool": entry["tool"], "status": entry["result"].get("status")}
-                        for entry in effects
-                    ],
-                },
-                ensure_ascii=False,
-            )
-        elif (
-            effects
-            and not failures
-            and allow_mutations
-            and not cancelled
-            and not question
-        ):
-            pending_value = "null"
+        pending_value = _pending_value(
+            command_receipts,
+            effects,
+            failures,
+            incomplete_answer=incomplete_answer,
+            question=question,
+            cancelled=cancelled,
+            allow_mutations=allow_mutations,
+            context=context,
+            message=message,
+        )
 
         if pending_value is not None:
             with self._database_lock, self._database_manager.unit_of_work() as db:
                 self._key_values.set(db, "coach_pending_request", pending_value)
-        elif (
-            not question
-            and not failures
-            and not incomplete_answer
-            and not missing_answer
-            and allow_mutations
-            and not cancelled
+        elif _may_clear_pending(
+            question,
+            failures,
+            incomplete_answer,
+            missing_answer,
+            allow_mutations,
+            cancelled,
         ):
             with self._database_lock, self._database_manager.unit_of_work() as db:
                 raw_pending = self._key_values.get(db, "coach_pending_request")

@@ -203,46 +203,20 @@ def select_coach_context(
     ]
     pending = dialogue.get("pending_request")
     pending_status = pending.get("status") if isinstance(pending, dict) else None
-    pending_domain = pending.get("domain") if isinstance(pending, dict) else None
-    if not pending_domain and isinstance(pending, dict):
-        pending_text = (
-            f"{pending.get('summary', '')} {pending.get('question', '')}".casefold()
-        )
-        pending_matched = {
-            name
-            for name, pattern in PROFILE_KEYWORDS
-            if re.search(pattern, pending_text)
-        }
-        pending_domain = _domain_of_profiles(pending_matched)
-
+    pending_domain = _pending_domain(pending)
     message_domain = _domain_of_profiles(set(matched))
+    is_pending_active = _pending_request_is_active(
+        pending,
+        pending_status,
+        pending_domain,
+        message_domain,
+        normalized,
+        retry,
+        continuation,
+    )
 
-    if pending_status in {"failed", "needs_clarification"}:
-        has_domain_conflict = (
-            message_domain is not None
-            and pending_domain is not None
-            and message_domain != pending_domain
-        )
-        if has_domain_conflict:
-            is_pending_active = False
-        elif pending_status == "failed":
-            is_pending_active = bool(retry or continuation)
-        elif pending_status == "needs_clarification":
-            is_pending_active = bool(
-                continuation
-                or retry
-                or (pending_domain is not None and message_domain == pending_domain)
-                or bool(re.search(CLARIFICATION_ANSWER_PATTERN, normalized))
-            )
-    else:
-        is_pending_active = bool(pending)
-
-    if is_pending_active or (
-        (continuation or pronoun)
-        and (
-            (continuation and (not matched or len(normalized.split()) <= 3))
-            or len(set(matched) - {"today_training"}) > 1
-        )
+    if _needs_fallback_context(
+        is_pending_active, continuation, pronoun, matched, normalized
     ):
         return CoachContextSelection(
             "fallback", retain_pending_request=is_pending_active
@@ -256,15 +230,7 @@ def select_coach_context(
         sections.update({"planning", "training_plans"})
     if "provider_refresh_or_sync" in matched:
         return CoachContextSelection(name, retain_pending_request=is_pending_active)
-    if re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.", normalized):
-        return CoachContextSelection(name, retain_pending_request=is_pending_active)
-    if planning and any(
-        re.search(pattern, normalized)
-        for pattern in (
-            r"monat|month|jahr|year|saison|season",
-            r"\b(?:wochen|weeks|tage|days)\b",
-        )
-    ):
+    if _requires_full_time_context(planning, normalized):
         return CoachContextSelection(name, retain_pending_request=is_pending_active)
     if attachments:
         name = "attachment_analysis"
@@ -276,6 +242,74 @@ def select_coach_context(
         planning,
         retain_dialogue=bool(continuation or pronoun or has_receipts),
         retain_pending_request=is_pending_active,
+    )
+
+
+def _pending_domain(pending: object) -> str | None:
+    if not isinstance(pending, dict):
+        return None
+    domain = pending.get("domain")
+    if domain:
+        return domain
+    pending_text = (
+        f"{pending.get('summary', '')} {pending.get('question', '')}".casefold()
+    )
+    matched = {
+        name for name, pattern in PROFILE_KEYWORDS if re.search(pattern, pending_text)
+    }
+    return _domain_of_profiles(matched)
+
+
+def _pending_request_is_active(
+    pending: object,
+    status: object,
+    pending_domain: str | None,
+    message_domain: str | None,
+    normalized: str,
+    retry: bool,
+    continuation: bool,
+) -> bool:
+    if not isinstance(pending, dict):
+        return False
+    if status not in {"failed", "needs_clarification"}:
+        return True
+    if pending_domain and message_domain and pending_domain != message_domain:
+        return False
+    if status == "failed":
+        return bool(retry or continuation)
+    return bool(
+        continuation
+        or retry
+        or (pending_domain is not None and message_domain == pending_domain)
+        or re.search(CLARIFICATION_ANSWER_PATTERN, normalized)
+    )
+
+
+def _needs_fallback_context(
+    pending_active: bool,
+    continuation: bool,
+    pronoun: bool,
+    matched: list[str],
+    normalized: str,
+) -> bool:
+    ambiguous_continuation = continuation and (
+        not matched or len(normalized.split()) <= 3
+    )
+    multiple_topics = len(set(matched) - {"today_training"}) > 1
+    return pending_active or (
+        (continuation or pronoun) and (ambiguous_continuation or multiple_topics)
+    )
+
+
+def _requires_full_time_context(planning: bool, normalized: str) -> bool:
+    if re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.", normalized):
+        return True
+    return planning and any(
+        re.search(pattern, normalized)
+        for pattern in (
+            r"monat|month|jahr|year|saison|season",
+            r"\b(?:wochen|weeks|tage|days)\b",
+        )
     )
 
 

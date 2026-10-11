@@ -769,20 +769,7 @@ class _HealthMapping:
             return
         entry = _entry(name, ref, day, group.key, index=index)
         for field in group.fields:
-            number = self._number(source, field.names, ref)
-            if number is None and group.key is None and name == "sleep":
-                nested = record.get("dailySleepDTO")
-                if isinstance(nested, Mapping):
-                    number = self._number(nested, field.names, ref)
-                    if number is None and field.kind == MetricKind.SLEEP_SCORE:
-                        scores = nested.get("sleepScores")
-                        overall = (
-                            scores.get("overall")
-                            if isinstance(scores, Mapping)
-                            else None
-                        )
-                        if isinstance(overall, Mapping):
-                            number = self._number(overall, ("value",), ref)
+            number = self._group_number(name, group, record, source, field, ref)
             if number is not None:
                 self.emit(
                     entry,
@@ -792,6 +779,32 @@ class _HealthMapping:
                     field.source_kind,
                     field.sport,
                 )
+
+    def _group_number(
+        self,
+        name: str,
+        group: _Group,
+        record: Mapping[str, object],
+        source: Mapping[str, object],
+        field: _Field,
+        ref: str,
+    ) -> float | None:
+        number = self._number(source, field.names, ref)
+        if number is not None or group.key is not None or name != "sleep":
+            return number
+        nested = record.get("dailySleepDTO")
+        if not isinstance(nested, Mapping):
+            return None
+        number = self._number(nested, field.names, ref)
+        if number is not None or field.kind != MetricKind.SLEEP_SCORE:
+            return number
+        scores = nested.get("sleepScores")
+        overall = scores.get("overall") if isinstance(scores, Mapping) else None
+        return (
+            self._number(overall, ("value",), ref)
+            if isinstance(overall, Mapping)
+            else None
+        )
 
     def _records(
         self, name: str, payload: object
