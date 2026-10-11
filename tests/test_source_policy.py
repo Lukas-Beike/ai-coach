@@ -90,7 +90,13 @@ def _obs(
     observed_at: datetime | None = None,
     record_id: str | None = None,
 ) -> Observation:
-    """Build a valid observation for one provider, or a provider-less one."""
+    """Build a valid observation for one provider, or a provider-less one.
+
+    Intervals observations default to their ISO day as record id, as wellness rows
+    do. An athlete-record value is modelled by passing an athlete record id.
+    """
+    if record_id is None and provider is INTERVALS:
+        record_id = day.isoformat()
     source_kind = (
         SourceKind.PROVIDER_REPORTED if provider is not None else SourceKind.AI_ESTIMATE
     )
@@ -986,25 +992,63 @@ class IntentionalDeviationTests(unittest.TestCase):
             290,
         )
 
-    def test_athlete_level_weight_is_not_observed(self) -> None:
-        # Gap: the legacy weight chain falls back to the Intervals athlete record.
-        # Athlete-level values carry no row date, and the mapper does not observe
-        # them, so the policy has no weight where legacy reads 81.
-        athlete = {"weight": 81.0}
-        observations = _mapped([], athlete, {})
-
-        legacy = current_performance_metrics(
-            {"athlete": athlete, "recent_wellness": [], "recent_activities": []},
-            {},
-            garmin_performance_metrics({}, TODAY),
+    def test_athlete_level_weight_matches_the_legacy_fallback(self) -> None:
+        # Parity: the legacy weight chain reads the latest wellness weight first and
+        # the athlete weight only when that is missing. Athlete values are undated,
+        # so they rank below dated Intervals values, even on the same day.
+        cases: tuple[tuple[str, list[dict[str, Any]], float, float], ...] = (
+            ("no wellness rows", [], 81.0, 81.0),
+            (
+                "same-day wellness weight wins over the athlete weight",
+                [_wellness(LATEST_DAY.isoformat(), weight=81.0)],
+                80.0,
+                81.0,
+            ),
+            (
+                "newest row without weight falls back to the athlete weight",
+                [
+                    _wellness("2026-05-03", weight=79.0),
+                    _wellness("2026-05-04", restingHR=50),
+                ],
+                80.0,
+                80.0,
+            ),
         )
-        self.assertEqual(legacy["weight_kg"]["value"], 81.0)
-        self.assertIsNone(select_current(observations, MetricKind.WEIGHT))
+        for label, rows, athlete_weight, expected in cases:
+            with self.subTest(label):
+                athlete = {"weight": athlete_weight}
+                legacy = current_performance_metrics(
+                    {
+                        "athlete": athlete,
+                        "recent_wellness": rows,
+                        "recent_activities": [],
+                    },
+                    {},
+                    garmin_performance_metrics({}, TODAY),
+                )
+                # The athlete observation is listed first to show that input order
+                # does not decide between an undated and a dated weight.
+                observations = [
+                    *map_intervals_athlete_thresholds(
+                        athlete, observed_on=TODAY, retrieved_at=RETRIEVED_AT
+                    ).records,
+                    *map_intervals_wellness(rows, retrieved_at=RETRIEVED_AT).records,
+                ]
+                latest = _latest_day(rows) if rows else None
+                self.assertEqual(legacy["weight_kg"]["value"], expected)
+                self.assertEqual(
+                    _values(
+                        select_current(
+                            observations,
+                            MetricKind.WEIGHT,
+                            latest_wellness_day=latest,
+                        )
+                    ),
+                    expected,
+                )
 
-    def test_sport_setting_vo2max_is_not_observed_by_the_mapper(self) -> None:
-        # Gap: sportSettings VO2max is not in the Intervals threshold mapper's
-        # fields yet, so the policy has no observation where the legacy reader
-        # reads 58. Add a mapper field before the consumer switches over.
+    def test_sport_setting_vo2max_matches_the_legacy_reader(self) -> None:
+        # Parity: the sport-setting VO2max is selected for its own sport only.
         athlete = {"sportSettings": [{"types": ["Ride"], "vo2max": 58}]}
         observations = _mapped([], athlete, {})
 
@@ -1018,8 +1062,12 @@ class IntentionalDeviationTests(unittest.TestCase):
             garmin_performance_metrics({}, TODAY),
         )
         self.assertEqual(legacy["cycling_vo2max_ml_kg_min"]["value"], 58)
+        self.assertEqual(
+            _values(select_current(observations, MetricKind.VO2MAX, sport=Sport.RIDE)),
+            58,
+        )
         self.assertIsNone(
-            select_current(observations, MetricKind.VO2MAX, sport=Sport.RIDE)
+            select_current(observations, MetricKind.VO2MAX, sport=Sport.RUN)
         )
 
     @staticmethod
