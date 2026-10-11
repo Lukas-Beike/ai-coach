@@ -22,12 +22,13 @@ from backend.sync.full_resync import (
     FullProviderResyncService,
     FullResyncOperationJournal,
     FullResyncStateStore,
+    resync_field_keys,
 )
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.gates import ProviderResyncGate, resync_gate
 from backend.sync.intervals import IntervalsSyncService
 from backend.sync.observation import SyncOperationObserver
-from backend.sync.provider_runtime import FullResyncHandler
+from backend.sync.provider_runtime import FullResyncHandler, ProviderRuntimeRegistry
 
 
 @dataclass(frozen=True)
@@ -166,7 +167,12 @@ class ProviderResyncAssembly:
         persistence: ProviderResyncPersistence
         runtime: ProviderResyncRuntime
 
-    def __init__(self, *, dependencies: ProviderResyncAssembly.Inputs) -> None:
+    def __init__(
+        self,
+        *,
+        dependencies: ProviderResyncAssembly.Inputs,
+        provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
+    ) -> None:
         competition = dependencies.competition
         resync = dependencies.resync
         persistence = dependencies.persistence
@@ -189,6 +195,7 @@ class ProviderResyncAssembly:
         self._uuid_factory = runtime.uuid_factory
         self._monotonic = runtime.monotonic
         self._operation_observer = runtime.operation_observer
+        self._provider_runtime = provider_runtime
 
     def competition_reconciler(self) -> CompetitionSyncReconciler:
         """Create local persistence for remote competition reconciliation."""
@@ -211,6 +218,8 @@ class ProviderResyncAssembly:
 
     def full_resync_service(self) -> FullProviderResyncService:
         """Create full provider resynchronization over current service owners."""
+        if self._provider_runtime is not None:
+            return self._runtime_full_resync_service(self._provider_runtime())
         observer = self._operation_observer()
         gates: dict[str, ProviderResyncGate] = {
             INTERVALS_ID: self._intervals_resync_gate,
@@ -246,4 +255,34 @@ class ProviderResyncAssembly:
                 self._uuid_factory,
             ),
             gates=gates,
+        )
+
+    def _runtime_full_resync_service(
+        self, runtime: ProviderRuntimeRegistry
+    ) -> FullProviderResyncService:
+        """Build the resync service from the registry's handlers and state keys."""
+        observer = self._operation_observer()
+        handlers = runtime.resync_handlers()
+        gates: dict[str, ProviderResyncGate] = {}
+        for provider_id in handlers:
+            gate = runtime.binding(provider_id).gate
+            if gate is not None:
+                gates[provider_id] = gate
+        return FullProviderResyncService(
+            handlers,
+            FullResyncStateStore(
+                self._database_manager(),
+                self._key_values,
+                resync_field_keys(runtime.static.resync_key_map()),
+            ),
+            FullResyncOperationJournal(
+                observer,
+                self._logger,
+                self._redactor.redact_text,
+                self._utc_now,
+                self._monotonic,
+                self._uuid_factory,
+            ),
+            gates=gates,
+            registry=runtime.static,
         )

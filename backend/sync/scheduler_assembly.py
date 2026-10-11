@@ -18,7 +18,10 @@ from backend.sync import scheduler
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.gates import ProviderResyncGate
-from backend.sync.provider_runtime import ProviderSchedulePolicy
+from backend.sync.provider_runtime import (
+    ProviderRuntimeRegistry,
+    ProviderSchedulePolicy,
+)
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.schedule_policies import build_schedule_policies, intervals_busy
 from backend.sync.state import SyncStateRepository
@@ -65,7 +68,11 @@ class DailySyncLoopSettings:
 
 
 class SyncSchedulerAssembly:
-    """Create configured scheduler and daily-loop objects on demand."""
+    """Create configured scheduler and daily-loop objects on demand.
+
+    With ``provider_runtime`` the schedules and registry order come from the
+    runtime registry, resolved fresh for each scheduler that is built.
+    """
 
     @dataclass(frozen=True)
     class Inputs:
@@ -75,7 +82,12 @@ class SyncSchedulerAssembly:
         policy: SyncSchedulePolicy
         daily_loop: DailySyncLoopSettings
 
-    def __init__(self, *, dependencies: SyncSchedulerAssembly.Inputs) -> None:
+    def __init__(
+        self,
+        *,
+        dependencies: SyncSchedulerAssembly.Inputs,
+        provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
+    ) -> None:
         owners = dependencies.owners
         persistence = dependencies.persistence
         controls = dependencies.controls
@@ -101,6 +113,7 @@ class SyncSchedulerAssembly:
         self._sync_earliest_date = policy.sync_earliest_date
         self._morning_body_battery_service = daily_loop.morning_body_battery_service
         self._logger = daily_loop.logger
+        self._provider_runtime = provider_runtime
 
     def daily_scheduler(self) -> scheduler.DailySyncScheduler:
         """Create a daily schedule using the current provider configuration."""
@@ -113,6 +126,7 @@ class SyncSchedulerAssembly:
         garmin = self._garmin_sync_service()
         database = self._database_manager()
         sync_state = self._sync_state_repository()
+        runtime = self._runtime()
         return scheduler.DailySyncScheduler(
             profile,
             queue,
@@ -132,13 +146,18 @@ class SyncSchedulerAssembly:
                 sync_period_defaults=self._sync_period_defaults,
                 all_sync_days=self._all_sync_days,
             ),
-            schedule_policies=self._schedule_policies(
-                profile=profile,
-                garmin=garmin,
-                sync_state=sync_state,
-                calendar_enabled=calendar_enabled,
-                intervals_enabled=intervals_enabled,
+            schedule_policies=(
+                self._schedule_policies(
+                    profile=profile,
+                    garmin=garmin,
+                    sync_state=sync_state,
+                    calendar_enabled=calendar_enabled,
+                    intervals_enabled=intervals_enabled,
+                )
+                if runtime is None
+                else runtime.schedule_policies()["daily"]
             ),
+            registry=None if runtime is None else runtime.static,
         )
 
     def startup_scheduler(self) -> scheduler.StartupSyncScheduler:
@@ -150,6 +169,7 @@ class SyncSchedulerAssembly:
         queue = self._queue_service()
         garmin = self._garmin_sync_service()
         sync_state = self._sync_state_repository()
+        runtime = self._runtime()
         return scheduler.StartupSyncScheduler(
             profile,
             queue,
@@ -164,14 +184,22 @@ class SyncSchedulerAssembly:
                 sync_chunk_days=self._sync_chunk_days,
                 sync_earliest_date=self._sync_earliest_date,
             ),
-            schedule_policies=self._schedule_policies(
-                profile=profile,
-                garmin=garmin,
-                sync_state=sync_state,
-                calendar_enabled=calendar_enabled,
-                intervals_enabled=intervals_enabled,
+            schedule_policies=(
+                self._schedule_policies(
+                    profile=profile,
+                    garmin=garmin,
+                    sync_state=sync_state,
+                    calendar_enabled=calendar_enabled,
+                    intervals_enabled=intervals_enabled,
+                )
+                if runtime is None
+                else runtime.schedule_policies()["startup"]
             ),
+            registry=None if runtime is None else runtime.static,
         )
+
+    def _runtime(self) -> ProviderRuntimeRegistry | None:
+        return None if self._provider_runtime is None else self._provider_runtime()
 
     def _schedule_policies(
         self,
