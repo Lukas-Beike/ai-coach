@@ -294,15 +294,13 @@ function appendNutritionMacroNote(totals, entriesWithoutMacros) {
 function nutritionWeekValue(value, unit, signed = false) {
   if (value == null) return "Nicht verfügbar";
   const prefix = signed && value > 0 ? "+" : "";
-  return `${prefix}${AppFormat.number(value, { digits: unit === "g" ? 1 : 0 })}${unit ? ` ${unit}` : ""}`;
-}
+  const suffix = unit ? ` ${unit}` : "";  return `${prefix}${AppFormat.number(value, { digits: unit === "g" ? 1 : 0 })}${suffix}`;}
 
 function renderNutritionWeek(week) {
   document.querySelector("#nutritionWeekPeriod").textContent = `${nutritionExpenditureDate(week.start_date)} – ${nutritionExpenditureDate(week.end_date)}`;
   const totals = document.querySelector("#nutritionWeekTotals");
   const balance = week.balance_kcal;
-  const balanceLabel = balance == null ? "Bilanz" : balance > 0 ? "Kalorienüberschuss" : balance < 0 ? "Kaloriendefizit" : "Ausgeglichene Bilanz";
-  const items = [[balanceLabel, balance, "kcal", week.balance_days, true],
+  let balanceLabel = "Bilanz";  if (balance != null) {    balanceLabel = "Ausgeglichene Bilanz";    if (balance > 0) balanceLabel = "Kalorienüberschuss";    if (balance < 0) balanceLabel = "Kaloriendefizit";  }  const items = [[balanceLabel, balance, "kcal", week.balance_days, true],
     ...[["Ø Aufnahme", "intake_kcal", "kcal"], ["Ø Verbrauch", "expenditure_kcal", "kcal"], ["Ø Kohlenhydrate", "carbs_g", "g"], ["Ø Protein", "protein_g", "g"], ["Ø Fett", "fat_g", "g"]].map(([label, key, unit]) => [label, week.averages[key].value, unit, week.averages[key].days, false])];
   totals.replaceChildren(...items.map(([label, value, unit, days, isBalance]) => {
     const tile = document.createElement("div"); tile.className = "nutrition-total";

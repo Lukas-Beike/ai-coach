@@ -632,6 +632,12 @@ globalThis.matchMedia("(max-width: 599px)").addEventListener("change", () => {
   if (state.data) { renderAnalysisHistory(state.data.performance?.history); renderPersonalRecovery(state.data.performance?.personal_recovery); }
 });
 
+function performanceSeriesExplanation(key) {
+  if (key === "cycling_ftp_watts") return "Alle datierten Garmin-FTP-Messungen.";
+  if (key === "cycling_eftp_watts" || key.includes("vo2max")) return "Wochenmedian aus vorhandenen Messungen.";
+  return "Letzter gültiger Messwert je Woche.";
+}
+
 function renderAnalysisHistory(history) { // NOSONAR
   const root = document.querySelector("#analysisHistoryCharts");
   const loadRoot = document.querySelector("#analysisLoadCharts");
@@ -689,7 +695,7 @@ function renderAnalysisHistory(history) { // NOSONAR
     label: `${label} · ${item.source}`, legendLabel: label.replace(/^Rad \u00b7 /, ""), source: item.source, unit, color,
     line: key === "cycling_eftp_watts" || key.includes("vo2max") ? "dashed" : "solid",
     cadenceDays: key === "cycling_ftp_watts" ? 1 : 7,
-    explanation: key === "cycling_ftp_watts" ? "Alle datierten Garmin-FTP-Messungen." : key === "cycling_eftp_watts" || key.includes("vo2max") ? "Wochenmedian aus vorhandenen Messungen." : "Letzter gültiger Messwert je Woche.",
+    explanation: performanceSeriesExplanation(key),
     currentPoint: item.points.filter((point) => point.date <= end).findLast(analysisValidPoint),
     points: key === "cycling_ftp_watts" ? item.points.filter((point) => point.date >= performanceStart && point.date <= end) : analysisWeeklyPerformancePoints(item.points, performanceStart, end, key === "cycling_eftp_watts" || key.includes("vo2max")),
   })));

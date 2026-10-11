@@ -8,6 +8,23 @@ from backend.errors import AppError
 PROFILE_DURATIONS = (5, 60, 300, 1200, 3600)
 
 
+def _curve_day(curve: dict[str, Any], start: date, end: date) -> date | None:
+    try:
+        day = date.fromisoformat(str(curve.get("start_date_local"))[:10])
+    except ValueError:
+        return None
+    return day if start <= day <= end else None
+
+
+def _valid_power(duration: Any, value: Any) -> bool:
+    return (
+        type(duration) is int
+        and duration in PROFILE_DURATIONS
+        and type(value) in {int, float}
+        and 0 <= value <= 5000
+    )
+
+
 def cycling_power_points(payload: Any, start: date, end: date) -> list[dict[str, Any]]:
     """Normalize the documented activity-power-curves payload, without estimates."""
     if not isinstance(payload, dict):
@@ -19,21 +36,12 @@ def cycling_power_points(payload: Any, start: date, end: date) -> list[dict[str,
     for curve in curves:
         if not isinstance(curve, dict):
             continue
-        try:
-            day = date.fromisoformat(str(curve.get("start_date_local"))[:10])
-        except ValueError:
-            continue
+        day = _curve_day(curve, start, end)
         watts = curve.get("watts")
-        if (
-            not start <= day <= end
-            or not isinstance(watts, list)
-            or len(watts) != len(durations)
-        ):
+        if day is None or not isinstance(watts, list) or len(watts) != len(durations):
             continue
         for duration, value in zip(durations, watts, strict=True):
-            if type(duration) is not int or duration not in PROFILE_DURATIONS:
-                continue
-            if type(value) not in {int, float} or not 0 <= value <= 5000:
+            if not _valid_power(duration, value):
                 continue
             if duration not in best or value > best[duration]["watts"]:
                 best[duration] = {
