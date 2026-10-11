@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 import unittest
+from contextlib import contextmanager
+from unittest.mock import Mock
 
 from test_coach_dialogue import DialogueHarness, server
+
+from backend.coach.turn_outcome import CoachStructuredOutcomeService
 
 
 class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
@@ -47,7 +51,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
             cancelled=options.get("cancelled", False),
             allow_mutations=options.get("allow_mutations", True),
             context=options.get("context", {"current_user_message_id": 17}),
-            message="Synthetic user request",
+            message=options.get("message", "Synthetic user request"),
         )
 
     def test_successful_effect_uses_provider_text_and_clears_pending_request(self):
@@ -100,114 +104,151 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
         self.assertNotIn("Synchronized successfully", text)
 
-    def test_observed_terminal_job_status_replaces_queued_status(self):
-        status, text, _ = self.finalize(
-            self.response("Synchronized successfully."),
-            [
-                {
-                    "tool": "start_intervals_plan_sync",
-                    "result": {
-                        "ok": True,
-                        "status": "queued",
-                        "sync_job_id": "synthetic-job-2",
-                    },
+    def test_remote_job_observation_supersedes_original_queued_receipt(self):
+        receipts = [
+            {
+                "call_id": "sync",
+                "tool": "start_intervals_plan_sync",
+                "result": {
+                    "ok": True,
+                    "status": "queued",
+                    "sync_job_id": "synthetic-job-1",
                 },
-                {
-                    "tool": "get_sync_job",
-                    "result": {
-                        "ok": True,
-                        "job": {"id": "synthetic-job-2", "status": "completed"},
-                    },
+            },
+            {
+                "call_id": "inspect",
+                "tool": "inspect_sync_job",
+                "result": {
+                    "ok": True,
+                    "job": {"id": "synthetic-job-1", "status": "completed"},
                 },
-            ],
+            },
+        ]
+        status, text, failures = self.finalize(
+            self.response("Synchronized successfully."), receipts
         )
         self.assertEqual(status, "completed")
-        self.assertIn("synthetic-job-2: completed", text)
+        self.assertEqual(failures, [])
+        self.assertIn("synthetic-job-1: completed", text)
         self.assertIn("Remote-Abschluss ist bestätigt", text)
         self.assertNotIn("Synchronized successfully", text)
 
-    def test_mixed_local_and_queued_effects_replace_model_completion_claim(self):
-        status, text, failures = self.finalize(
-            self.response("The check-in and remote sync are both complete."),
-            [
-                self.success(),
-                {
-                    "tool": "refresh_current_performance",
-                    "result": {
-                        "ok": True,
-                        "status": "queued",
-                        "sync_job_id": "mixed-job",
-                    },
+    def test_pending_receipt_observation_retains_unconfirmed_wording(self):
+        receipts = [
+            {
+                "call_id": "sync",
+                "tool": "start_intervals_plan_sync",
+                "result": {
+                    "ok": True,
+                    "status": "queued",
+                    "sync_job_id": "synthetic-job-2",
                 },
-            ],
+            },
+            {
+                "call_id": "inspect",
+                "tool": "inspect_sync_job",
+                "result": {
+                    "ok": True,
+                    "job": {"id": "synthetic-job-2", "status": "running"},
+                },
+            },
+        ]
+        status, text, failures = self.finalize(
+            self.response("Still syncing."), receipts
         )
-
         self.assertEqual(status, "completed")
         self.assertEqual(failures, [])
-        self.assertIn("Tages-Check-in gespeichert", text)
-        self.assertIn("mixed-job: queued", text)
+        self.assertIn("synthetic-job-2: running", text)
         self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
-        self.assertNotIn("both complete", text)
 
-    def test_queued_receipt_does_not_suppress_clarifying_question(self):
-        _, text, _ = self.finalize(
-            self.response("The sync completed."),
-            [
-                {
-                    "tool": "refresh_current_performance",
-                    "result": {
-                        "ok": True,
-                        "status": "queued",
-                        "sync_job_id": "question-job",
-                    },
-                }
-            ],
-            question="Which training period should I refresh?",
-        )
-
-        self.assertIn("question-job: queued", text)
-        self.assertIn("Which training period should I refresh?", text)
-        self.assertNotIn("The sync completed", text)
-
-    def test_incomplete_queued_outcome_keeps_warning_and_authoritative_receipts(self):
-        status, text, _ = self.finalize(
-            self.response("The update completed.", status="incomplete"),
-            [
-                self.success(),
-                {
-                    "tool": "refresh_current_performance",
-                    "result": {
-                        "ok": True,
-                        "status": "queued",
-                        "sync_job_id": "partial-job",
-                    },
-                },
-            ],
-        )
-
-        self.assertEqual(status, "partial")
-        self.assertIn("Tages-Check-in gespeichert", text)
-        self.assertIn("partial-job: queued", text)
-        self.assertIn("Antwort wurde nicht abgeschlossen", text)
-        self.assertNotIn("The update completed", text)
-
-    def test_incomplete_queued_outcome_keeps_warning_before_question(self):
-        status, text, _ = self.finalize(
-            self.response("The update completed.", status="incomplete"),
-            [
-                {
-                    "tool": "refresh_current_performance",
-                    "result": {
-                        "ok": True,
-                        "status": "queued",
-                        "sync_job_id": "question-partial-job",
-                    },
-                }
-            ],
-            question="Which training period should I refresh?",
-        )
-
+    def test_repaired_failure_clears_failure_text_and_sets_completed(self):
+        failed = self.failure()
+        repaired = {
+            "call_id": "repair",
+            "tool": "update_profile",
+            "result": {"ok": True, "status": "updated"},
+        }
+        receipts = [failed, repaired]
+        status, text, failures = self.finalize(self.response("Repaired"), receipts)
         self.assertEqual(status, "completed")
+        self.assertEqual(failures, [])
+        self.assertEqual(text, "Repaired")
+        self.assertTrue(failed["resolved"])
+
+    def test_approval_required_result_keeps_pending_approval_wording(self):
+        result = {
+            "ok": True,
+            "status": "approval_required",
+            "proposed_action": {"action_type": "remote_coach_write"},
+        }
+        status, text, failures = self.finalize(
+            self.response("Done"),
+            [
+                {
+                    "call_id": "plan",
+                    "tool": "create_workout_on_intervals",
+                    "result": result,
+                }
+            ],
+        )
+        self.assertEqual(status, "completed")
+        self.assertEqual(failures, [])
+        self.assertIn("wartet auf deine ausdrückliche Freigabe", text)
+
+    def test_partial_failure_with_queued_job_includes_both_receipts(self):
+        queued = {
+            "call_id": "sync",
+            "tool": "start_intervals_plan_sync",
+            "result": {
+                "ok": True,
+                "status": "queued",
+                "sync_job_id": "synthetic-job-partial",
+            },
+        }
+        failed = self.failure()
+        status, text, failures = self.finalize(
+            self.response("Ignored"), [queued, failed]
+        )
+        self.assertEqual(status, "partial")
+        self.assertEqual(failures, [failed])
+        self.assertIn("synthetic-job-partial: queued", text)
+        self.assertIn("Synthetic conflict", text)
+
+    def test_incomplete_answer_with_queued_job_includes_continuation_notice(self):
+        queued = {
+            "call_id": "sync",
+            "tool": "start_intervals_plan_sync",
+            "result": {
+                "ok": True,
+                "status": "queued",
+                "sync_job_id": "synthetic-job-inc",
+            },
+        }
+        status, text, failures = self.finalize(
+            self.response("Done", status="incomplete"), [queued]
+        )
+        self.assertEqual(status, "partial")
+        self.assertEqual(failures, [])
+        self.assertIn("synthetic-job-inc: queued", text)
+        self.assertIn("Antwort wurde nicht abgeschlossen", text)
+
+    def test_question_with_queued_job_preserves_question_and_job_receipt(self):
+        queued = {
+            "call_id": "sync",
+            "tool": "start_intervals_plan_sync",
+            "result": {
+                "ok": True,
+                "status": "queued",
+                "sync_job_id": "question-partial-job",
+            },
+        }
+        status, text, failures = self.finalize(
+            self.response("The update completed.", status="incomplete"),
+            [queued],
+            question="Which training period should I refresh?",
+        )
+        self.assertEqual(status, "completed")
+        self.assertEqual(failures, [])
         self.assertIn("question-partial-job: queued", text)
         self.assertIn("Antwort wurde nicht abgeschlossen", text)
         self.assertIn("Which training period should I refresh?", text)
@@ -233,6 +274,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
                 "summary": "Repair profile",
                 "source_message_ids": [17],
                 "status": "failed",
+                "domain": "nutrition_or_profile",
                 "question": None,
                 "completed_steps": [{"tool": "save_checkin", "status": "saved"}],
             },
@@ -322,7 +364,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
             server.key_value_service().get("coach_pending_request"), "null"
         )
 
-    def test_clean_advisory_turn_does_not_clear_active_clarification_pending_request(
+    def test_clean_advisory_turn_clears_active_clarification_pending_request(
         self,
     ):
         server.key_value_service().set(
@@ -336,6 +378,202 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual((status, failures), ("completed", []))
         self.assertEqual(
-            json.loads(server.key_value_service().get("coach_pending_request")),
-            {"summary": "Needs clarification", "status": "needs_clarification"},
+            server.key_value_service().get("coach_pending_request"), "null"
         )
+
+    def test_empty_text_turn_with_effects_clears_failed_pending_request(self):
+        server.key_value_service().set(
+            "coach_pending_request",
+            json.dumps({"summary": "Previous failed", "status": "failed"}),
+        )
+        receipts = [self.success()]
+        status, text, failures = self.finalize(self.response(""), receipts)
+        self.assertEqual((status, failures), ("partial", []))
+        self.assertIn("Tages-Check-in gespeichert", text)
+        self.assertEqual(
+            server.key_value_service().get("coach_pending_request"), "null"
+        )
+
+    def test_unrelated_read_only_tool_turn_clears_abandoned_clarification(self):
+        server.key_value_service().set(
+            "coach_pending_request",
+            json.dumps(
+                {
+                    "summary": "Snack erfassen",
+                    "status": "needs_clarification",
+                    "domain": "nutrition_or_profile",
+                }
+            ),
+        )
+        status, _, failures = self.finalize(
+            self.response("Read-only advice"),
+            [{"tool": "get_profile", "result": {"ok": True}}],
+            message="Welche Schuhe für morgen?",
+        )
+        self.assertEqual((status, failures), ("completed", []))
+        self.assertEqual(
+            server.key_value_service().get("coach_pending_request"), "null"
+        )
+
+    def test_incomplete_new_topic_does_not_reuse_abandoned_summary(self):
+        pending = {
+            "summary": "Snack erfassen",
+            "status": "needs_clarification",
+            "domain": "nutrition_or_profile",
+        }
+        self.finalize(
+            self.response("Partial", status="incomplete"),
+            [],
+            context={"pending_request": pending, "current_user_message_id": 17},
+            message="Plane Intervalle morgen",
+        )
+        stored = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(stored["summary"], "Plane Intervalle morgen")
+        self.assertEqual(stored["domain"], "training")
+
+    def test_related_read_preserves_clarification_for_later_answer(self):
+        pending = {
+            "summary": "Einheit verschieben",
+            "status": "needs_clarification",
+            "domain": "training",
+            "question": "Welche Einheit?",
+        }
+        server.key_value_service().set("coach_pending_request", json.dumps(pending))
+        self.finalize(
+            self.response("Synthetic weekly overview"),
+            [{"tool": "list_planned_workouts", "result": {"ok": True}}],
+            message="Zeig mir die Woche nochmal.",
+        )
+        self.assertEqual(
+            json.loads(server.key_value_service().get("coach_pending_request")), pending
+        )
+
+    def test_clean_advice_clears_clarification_within_same_broad_domain(self):
+        server.key_value_service().set(
+            "coach_pending_request",
+            json.dumps(
+                {
+                    "summary": "Einheit verschieben",
+                    "status": "needs_clarification",
+                    "domain": "training",
+                    "question": "Welche Einheit?",
+                }
+            ),
+        )
+        self.finalize(
+            self.response("Synthetic training advice"),
+            [],
+            message="Wie soll ich morgen trainieren?",
+        )
+        self.assertEqual(
+            server.key_value_service().get("coach_pending_request"), "null"
+        )
+
+    def test_pending_cleanup_reads_and_writes_in_one_transaction(self):
+        database = object()
+        active = False
+        manager, key_values = Mock(), Mock()
+
+        @contextmanager
+        def transaction():
+            nonlocal active
+            active = True
+            try:
+                yield database
+            finally:
+                active = False
+
+        def read(db, key):
+            self.assertTrue(active)
+            self.assertIs(db, database)
+            self.assertEqual(key, "coach_pending_request")
+            return '{"status":"needs_clarification"}'
+
+        def write(db, key, value):
+            self.assertTrue(active)
+            self.assertIs(db, database)
+            self.assertEqual((key, value), ("coach_pending_request", "null"))
+
+        manager.unit_of_work.side_effect = transaction
+        key_values.get.side_effect = read
+        key_values.set.side_effect = write
+        service = CoachStructuredOutcomeService(
+            manager, transaction(), key_values, frozenset()
+        )
+        service.finalize(
+            self.response(),
+            [],
+            question="",
+            cancelled=False,
+            allow_mutations=True,
+            context={},
+            message="Unrelated question",
+        )
+        manager.reader.assert_not_called()
+        manager.unit_of_work.assert_called_once()
+        key_values.set.assert_called_once()
+
+    def test_mixed_local_and_queued_effects_replace_model_completion_claim(self):
+        status, text, failures = self.finalize(
+            self.response("The check-in and remote sync are both complete."),
+            [
+                self.success(),
+                {
+                    "tool": "refresh_current_performance",
+                    "result": {
+                        "ok": True,
+                        "status": "queued",
+                        "sync_job_id": "mixed-job",
+                    },
+                },
+            ],
+        )
+
+        self.assertEqual(status, "completed")
+        self.assertEqual(failures, [])
+        self.assertIn("Tages-Check-in gespeichert", text)
+        self.assertIn("mixed-job: queued", text)
+        self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
+        self.assertNotIn("both complete", text)
+
+    def test_queued_receipt_does_not_suppress_clarifying_question(self):
+        _, text, _ = self.finalize(
+            self.response("The sync completed."),
+            [
+                {
+                    "tool": "refresh_current_performance",
+                    "result": {
+                        "ok": True,
+                        "status": "queued",
+                        "sync_job_id": "question-job",
+                    },
+                }
+            ],
+            question="Which training period should I refresh?",
+        )
+
+        self.assertIn("question-job: queued", text)
+        self.assertIn("Which training period should I refresh?", text)
+        self.assertNotIn("The sync completed", text)
+
+    def test_incomplete_queued_outcome_keeps_warning_and_authoritative_receipts(self):
+        status, text, _ = self.finalize(
+            self.response("The update completed.", status="incomplete"),
+            [
+                self.success(),
+                {
+                    "tool": "refresh_current_performance",
+                    "result": {
+                        "ok": True,
+                        "status": "queued",
+                        "sync_job_id": "partial-job",
+                    },
+                },
+            ],
+        )
+
+        self.assertEqual(status, "partial")
+        self.assertIn("Tages-Check-in gespeichert", text)
+        self.assertIn("partial-job: queued", text)
+        self.assertIn("Antwort wurde nicht abgeschlossen", text)
+        self.assertNotIn("The update completed", text)

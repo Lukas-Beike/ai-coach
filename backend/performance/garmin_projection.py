@@ -6,16 +6,23 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.performance import freshness as performance_freshness
 from backend.performance.activity_validation import bounded_activity_metric
+from backend.providers.garmin_fields import (
+    GARMIN_FTP_ALIASES,
+    GARMIN_HRV_LAST_NIGHT_ALIASES,
+    GARMIN_SLEEP_DURATION_ALIASES,
+    GARMIN_SLEEP_SCORE_ALIASES,
+)
+from backend.providers.garmin_fields import (
+    first_present as _first_present,
+)
 
 GARMIN_CONTEXT_FIELDS = {
     "date",
     "calendarDate",
     "start",
     "end",
-    "sleepTimeSeconds",
-    "sleepDuration",
-    "sleepScore",
-    "overallSleepScore",
+    *GARMIN_SLEEP_DURATION_ALIASES,
+    *GARMIN_SLEEP_SCORE_ALIASES,
     "deepSleepSeconds",
     "lightSleepSeconds",
     "remSleepSeconds",
@@ -26,8 +33,7 @@ GARMIN_CONTEXT_FIELDS = {
     "hrvStatus",
     "hrvWeeklyAvg",
     "weeklyAvg",
-    "hrvLastNight",
-    "lastNightAvg",
+    *GARMIN_HRV_LAST_NIGHT_ALIASES,
     "bodyBattery",
     "body_battery",
     "charged",
@@ -57,8 +63,7 @@ GARMIN_CONTEXT_FIELDS = {
     "latestWeight",
     "restingHeartRate",
     "restingHR",
-    "functionalThresholdPower",
-    "ftp",
+    *GARMIN_FTP_ALIASES,
     "power",
     "speed",
     "heartRate",
@@ -285,15 +290,12 @@ GARMIN_RECOVERY_FIELDS = (
     "date",
     "calendarDate",
     "summaryDate",
-    "sleepTimeSeconds",
-    "sleepDuration",
-    "sleepScore",
-    "overallSleepScore",
+    *GARMIN_SLEEP_DURATION_ALIASES,
+    *GARMIN_SLEEP_SCORE_ALIASES,
     "hrvStatus",
     "hrvWeeklyAvg",
     "weeklyAvg",
-    "hrvLastNight",
-    "lastNightAvg",
+    *GARMIN_HRV_LAST_NIGHT_ALIASES,
     "bodyBattery",
     "body_battery",
     "charged",
@@ -310,16 +312,6 @@ GARMIN_RECOVERY_FIELDS = (
     "readinessScore",
     "recoveryTime",
 )
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def _selected(item: Any, fields: tuple[str, ...]) -> dict[str, Any]:

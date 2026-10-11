@@ -10,6 +10,7 @@ from typing import Any
 
 from backend import observability
 from backend.coach.authorization import authorized_operations
+from backend.coach.context_selection import infer_coach_domain
 from backend.coach.outcomes import (
     COACH_ACTION_LABELS,
     coach_effect_label,
@@ -321,6 +322,9 @@ class CoachTurnFailureService:
                 (receipt["user_message_id"],),
             ).fetchone()
             if user:
+                tool_name = receipt.get("tool")
+                tools = [tool_name] if tool_name else []
+                domain = infer_coach_domain(user["content"], tools=tools)
                 self._deps.key_values.set(
                     db,
                     "coach_pending_request",
@@ -329,6 +333,7 @@ class CoachTurnFailureService:
                             "summary": user["content"],
                             "source_message_ids": [receipt["user_message_id"]],
                             "status": "failed",
+                            "domain": domain,
                             "question": None,
                             "completed_steps": [
                                 {

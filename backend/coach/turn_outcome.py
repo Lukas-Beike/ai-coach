@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, NotRequired, TypedDict
 
+from backend.coach.context_selection import infer_coach_domain, select_coach_context
 from backend.coach.outcomes import (
     coach_effect_label,
     coach_failure_lines,
@@ -276,14 +277,28 @@ class CoachStructuredOutcomeService:
                 ),
                 None,
             )
-            pending_request = context.get("pending_request") or {}
+            selection = select_coach_context(message, context)
+            pending_request = (
+                context.get("pending_request") or {}
+                if selection.retain_pending_request
+                else {}
+            )
+            tool_names = [
+                entry["tool"]
+                for entry in (failures + effects)
+                if isinstance(entry, dict) and "tool" in entry
+            ]
+            summary = (last_request or pending_request).get("summary") or message
+            domain = (last_request or pending_request).get(
+                "domain"
+            ) or infer_coach_domain(summary, tools=tool_names)
             pending_value = json.dumps(
                 {
-                    "summary": (last_request or pending_request).get("summary")
-                    or message,
+                    "summary": summary,
                     "source_message_ids": (last_request or {}).get("source_message_ids")
                     or [context["current_user_message_id"]],
                     "status": "failed",
+                    "domain": domain,
                     "question": None,
                     "completed_steps": [
                         {"tool": entry["tool"], "status": entry["result"].get("status")}
@@ -293,26 +308,39 @@ class CoachStructuredOutcomeService:
                 ensure_ascii=False,
             )
         elif (
+            effects
+            and not failures
+            and allow_mutations
+            and not cancelled
+            and not question
+        ):
+            pending_value = "null"
+
+        if pending_value is not None:
+            with self._database_lock, self._database_manager.unit_of_work() as db:
+                self._key_values.set(db, "coach_pending_request", pending_value)
+        elif (
             not question
             and not failures
             and not incomplete_answer
             and not missing_answer
             and allow_mutations
+            and not cancelled
         ):
-            if effects:
-                pending_value = "null"
-            else:
-                with self._database_lock, self._database_manager.reader() as db:
-                    raw_pending = self._key_values.get(db, "coach_pending_request")
+            with self._database_lock, self._database_manager.unit_of_work() as db:
+                raw_pending = self._key_values.get(db, "coach_pending_request")
                 try:
                     current_pending = json.loads(raw_pending or "null")
                 except ValueError, TypeError:
                     current_pending = None
-                if (
-                    isinstance(current_pending, dict)
-                    and current_pending.get("status") == "failed"
-                ):
-                    pending_value = "null"
-        if pending_value is not None:
-            with self._database_lock, self._database_manager.unit_of_work() as db:
-                self._key_values.set(db, "coach_pending_request", pending_value)
+                if isinstance(current_pending, dict):
+                    selection = select_coach_context(
+                        message, {"pending_request": current_pending}
+                    )
+                    if current_pending.get("status") == "failed" or (
+                        current_pending.get("status") == "needs_clarification"
+                        and (
+                            not command_receipts or not selection.retain_pending_request
+                        )
+                    ):
+                        self._key_values.set(db, "coach_pending_request", "null")

@@ -10,20 +10,11 @@ from typing import Any
 from backend.activities.identity import activity_kind
 from backend.performance import freshness as performance_freshness
 from backend.performance import garmin_observations, garmin_weight
+from backend.providers.garmin_fields import first_present as _first_present
 
 GARMIN_PERFORMANCE_SOURCE = "Garmin Connect"
 GARMIN_RUN_PREDICTION_SOURCE = "Garmin Connect Laufprognose"
 _VO2MAX_UNIT = "ml/kg/min"
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def _as_number(value: Any) -> float | int | None:
@@ -397,16 +388,12 @@ def _garmin_max_hr_samples(
 ) -> tuple[dict[str, float | int], dict[str, list[float | int]], list[Any]]:
     profile_max_hr = garmin_profile_max_hr(snapshot)
     values: dict[str, list[float | int]] = {"cycling": [], "running": []}
-    stored = (
-        snapshot.get("sport_max_hr")
-        if isinstance(snapshot.get("sport_max_hr"), dict)
-        else {}
-    )
-    activities = (
-        snapshot.get("activities")
-        if isinstance(snapshot.get("activities"), list)
-        else []
-    )
+    stored = snapshot.get("sport_max_hr")
+    if not isinstance(stored, dict):
+        stored = {}
+    activities = snapshot.get("activities")
+    if not isinstance(activities, list):
+        activities = []
     for kind, samples in values.items():
         profile_value = profile_max_hr.get(kind) or profile_max_hr.get("generic")
         if profile_value is not None:
@@ -436,20 +423,20 @@ def _garmin_performance_units(
 ) -> dict[str, tuple[float | int | None, str, str]]:
     cycling_ftp, running_power, running_pace, running_hr, cycling_hr = thresholds
     return {
-        "weight_kg": (weight["value"], "kg", "Garmin Connect K\u00c3\u00b6rpergewicht"),
+        "weight_kg": (weight["value"], "kg", "Garmin Connect Körpergewicht"),
         "cycling_max_hr_bpm": (
             max(max_hr_values["cycling"], default=None),
             "bpm",
             "Garmin Connect Herzfrequenzzonen"
             if profile_max_hr
-            else "Garmin Connect Radaktivit\u00c3\u00a4ten",
+            else "Garmin Connect Radaktivitäten",
         ),
         "running_max_hr_bpm": (
             max(max_hr_values["running"], default=None),
             "bpm",
             "Garmin Connect Herzfrequenzzonen"
             if profile_max_hr
-            else "Garmin Connect Laufaktivit\u00c3\u00a4ten",
+            else "Garmin Connect Laufaktivitäten",
         ),
         "cycling_vo2max_ml_kg_min": (
             cycling_vo2,

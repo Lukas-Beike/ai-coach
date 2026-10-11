@@ -156,3 +156,29 @@ performance modules (for example `eftp.py:10` and `daily_health.py:55`), and the
 alias tuples at lines 96-134 repeat the lists in
 `backend/performance/garmin_projection.py:12-66`. A Garmin key change would then
 need edits in several places, and the copies can drift apart.
+
+## Remediation
+
+All ten findings are addressed in the task worktree:
+
+| Findings | Change |
+|---|---|
+| 1 | Successful tool effects clear the failed pending request even when model text is empty. |
+| 2, 3, 6, 9 | Pending requests record their domain; selection rejects domain conflicts and unrelated messages, restores check-in/nutrition terms, and retains explicit retries and clarification replies. Full-context and attachment-continuity payloads respect the same pending-request projection. |
+| 4 | The mapper accepts daily weight summaries, nested latest weights with Garmin's implicit gram unit, and nested daily sleep DTOs including overall sleep scores. |
+| 5 | Clean advisory turns clear abandoned clarifications, including turns using read tools. Incomplete new topics do not reuse an abandoned summary. |
+| 7 | Pending-request reads, status checks, and clears run inside one writer transaction. |
+| 8 | List observations include their record index in provenance IDs. |
+| 10 | Provider-owned field aliases and first-present lookup are shared with performance readers; the provider-coupling baseline shrinks accordingly. |
+
+Regression coverage includes empty-text success, topic changes, incidental pronouns,
+retry wording, weekday clarification replies, attachment continuity, transaction
+boundaries, nested Garmin payloads, declared units, and duplicate-date provenance.
+Validation uses synthetic fixtures, temporary storage, and mocked providers.
+
+Validation: the full backend suite passed in four shards (4,140 tests, 16
+skipped). The final advisory-cleanup refinement also passed 28 focused tests,
+including the intervening-read continuation regression. Changed Python files
+pass Ruff checks and formatting, backend files pass mypy, and compilation and
+Git whitespace checks pass. The Docker build succeeds; SQLCipher container
+regressions use read-only sources, temporary storage and disabled networking.

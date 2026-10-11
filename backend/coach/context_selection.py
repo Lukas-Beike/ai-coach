@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -57,7 +58,7 @@ PROFILE_KEYWORDS = (
     ("competition_preparation", r"wettkampf|rennen|race|competition|marathon"),
     (
         "profile_or_checkin",
-        r"check-in|ruhepuls|gewicht|profil|gegessen|mittag|frühstück|abendessen|kcal|snack|\bate\b|calorie|kalorie",
+        r"check.?in|ruhepuls|gewicht|profil|gegessen|mittag|frühstück|fruehstueck|abendessen|kcal|snack|\bate\b|calorie|kalorie|nutrition|ernährung|ernaehrung|mahlzeit|befinden",
     ),
     (
         "activity_analysis",
@@ -65,11 +66,28 @@ PROFILE_KEYWORDS = (
     ),
     ("today_training", r"heute|morgen|today|tomorrow|wetter|weather"),
 )
-CONTINUATION_PATTERN = r"\b(ja|yes|ok|okay|mach|weiter|fortsetzen|das|diese|diesen|that|those|it|continue)\b"
-RETRY_PATTERN = r"\b(nochmal|erneut|retry|wiederhol|versuch|trotzdem)\b"
+CONTINUATION_PATTERN = (
+    r"^\s*(?:bitte\s+|please\s+)?"
+    r"(?:ja|yes|ok|okay|mach(?:\s+(?:das|es|den\s+plan))?|plan\s+fortsetzen"
+    r"|do\s+it|that's\s+it|weiter|fortsetzen|continue)"
+    r"(?:\s+(?:bitte|please|das|es|so|trotzdem|weiter|mach|do|it))*[.!?,\s]*$"
+)
+RETRY_PATTERN = (
+    r"^\s*(?:bitte\s+|please\s+)?"
+    r"(?:nochmal|noch\s+einmal|erneut|retry|wiederholen|versuch(?:\s+es)?|try(?:\s+it)?)"
+    r"(?:\s+(?:nochmal|noch|einmal|erneut|again|versuchen|bitte|please))*[.!?,\s]*$"
+)
+PRONOUN_PATTERN = r"\b(?:das|diese|diesen|that|those|it)\b"
+CLARIFICATION_ANSWER_PATTERN = (
+    r"^\s*(?:(?:die|der|das|the)\s+(?:erste|zweite|dritte|first|second|third)"
+    r"|(?:(?:auf|am|on)\s+)?(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag"
+    r"|monday|tuesday|wednesday|thursday|friday|saturday|sunday))"
+    r"[.!?,\s]*$"
+)
 
 
 def _domain_of_profiles(profiles: set[str]) -> str | None:
+    profiles = profiles - {"today_training"} if len(profiles) > 1 else profiles
     if not profiles:
         return None
     if profiles <= {"profile_or_checkin"}:
@@ -77,6 +95,27 @@ def _domain_of_profiles(profiles: set[str]) -> str | None:
     if profiles <= {"provider_refresh_or_sync"}:
         return "sync"
     return "training"
+
+
+def infer_coach_domain(
+    text: str = "",
+    *,
+    tools: Sequence[str] | None = None,
+) -> str | None:
+    if tools:
+        for t in tools:
+            if any(sub in t for sub in ("nutrition", "checkin", "profile")):
+                return "nutrition_or_profile"
+        for t in tools:
+            if any(sub in t for sub in ("sync", "refresh")):
+                return "sync"
+        return "training"
+
+    normalized = text.casefold()
+    matched = {
+        name for name, pattern in PROFILE_KEYWORDS if re.search(pattern, normalized)
+    }
+    return _domain_of_profiles(matched)
 
 
 @dataclass(frozen=True)
@@ -87,6 +126,7 @@ class CoachContextSelection:
     activity_limit: int = 5
     include_library: bool = True
     retain_dialogue: bool = False
+    retain_pending_request: bool = True
 
     def project(self, context: dict[str, Any], local_date: str = "") -> dict[str, Any]:
         result = {key: value for key, value in context.items() if key in self.sections}
@@ -155,20 +195,18 @@ def select_coach_context(
     has_receipts: bool = False,
 ) -> CoachContextSelection:
     normalized = message.casefold()
-    continuation = re.search(CONTINUATION_PATTERN, normalized)
-    retry = re.search(RETRY_PATTERN, normalized)
+    continuation = bool(re.search(CONTINUATION_PATTERN, normalized))
+    retry = bool(re.search(RETRY_PATTERN, normalized))
+    pronoun = bool(re.search(PRONOUN_PATTERN, normalized))
     matched = [
         name for name, pattern in PROFILE_KEYWORDS if re.search(pattern, normalized)
     ]
     pending = dialogue.get("pending_request")
     pending_status = pending.get("status") if isinstance(pending, dict) else None
-    if pending_status == "failed":
-        is_pending_active = bool(continuation or retry)
-    elif pending_status == "needs_clarification":
+    pending_domain = pending.get("domain") if isinstance(pending, dict) else None
+    if not pending_domain and isinstance(pending, dict):
         pending_text = (
             f"{pending.get('summary', '')} {pending.get('question', '')}".casefold()
-            if isinstance(pending, dict)
-            else ""
         )
         pending_matched = {
             name
@@ -176,25 +214,39 @@ def select_coach_context(
             if re.search(pattern, pending_text)
         }
         pending_domain = _domain_of_profiles(pending_matched)
-        message_domain = _domain_of_profiles(set(matched))
-        is_pending_active = bool(
-            continuation
-            or retry
-            or len(normalized.split()) <= 3
-            or not matched
-            or (pending_domain is not None and message_domain == pending_domain)
+
+    message_domain = _domain_of_profiles(set(matched))
+
+    if pending_status in {"failed", "needs_clarification"}:
+        has_domain_conflict = (
+            message_domain is not None
+            and pending_domain is not None
+            and message_domain != pending_domain
         )
+        if has_domain_conflict:
+            is_pending_active = False
+        elif pending_status == "failed":
+            is_pending_active = bool(retry or continuation)
+        elif pending_status == "needs_clarification":
+            is_pending_active = bool(
+                continuation
+                or retry
+                or (pending_domain is not None and message_domain == pending_domain)
+                or bool(re.search(CLARIFICATION_ANSWER_PATTERN, normalized))
+            )
     else:
         is_pending_active = bool(pending)
+
     if is_pending_active or (
-        continuation
+        (continuation or pronoun)
         and (
-            not matched
-            or len(normalized.split()) <= 3
+            (continuation and (not matched or len(normalized.split()) <= 3))
             or len(set(matched) - {"today_training"}) > 1
         )
     ):
-        return CoachContextSelection("fallback")
+        return CoachContextSelection(
+            "fallback", retain_pending_request=is_pending_active
+        )
     name = matched[0] if matched else "general_coaching"
     sections = set(BASE_SECTIONS)
     planning = bool(
@@ -203,9 +255,9 @@ def select_coach_context(
     if planning:
         sections.update({"planning", "training_plans"})
     if "provider_refresh_or_sync" in matched:
-        return CoachContextSelection(name)
+        return CoachContextSelection(name, retain_pending_request=is_pending_active)
     if re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.", normalized):
-        return CoachContextSelection(name)
+        return CoachContextSelection(name, retain_pending_request=is_pending_active)
     if planning and any(
         re.search(pattern, normalized)
         for pattern in (
@@ -213,7 +265,7 @@ def select_coach_context(
             r"\b(?:wochen|weeks|tage|days)\b",
         )
     ):
-        return CoachContextSelection(name)
+        return CoachContextSelection(name, retain_pending_request=is_pending_active)
     if attachments:
         name = "attachment_analysis"
     return CoachContextSelection(
@@ -222,7 +274,8 @@ def select_coach_context(
         14 if planning else 3,
         5 if planning or "activity_analysis" in matched else 1,
         planning,
-        retain_dialogue=bool(continuation or has_receipts),
+        retain_dialogue=bool(continuation or pronoun or has_receipts),
+        retain_pending_request=is_pending_active,
     )
 
 
@@ -250,7 +303,7 @@ def compact_coach_dialogue(
     if (
         isinstance(pending, dict)
         and pending.get("status") in {"failed", "needs_clarification"}
-        and selection.name != "fallback"
+        and not selection.retain_pending_request
     ):
         result["pending_request"] = None
     return result

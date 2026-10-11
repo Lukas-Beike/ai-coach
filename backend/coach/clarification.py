@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from backend.coach.context_selection import infer_coach_domain
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
@@ -28,9 +29,11 @@ class CoachClarificationService:
         user_ids = {
             item["id"]
             for item in context["messages"]
-            if item["role"] == "user" and type(item["id"]) is int
+            if isinstance(item, dict)
+            and item.get("role") == "user"
+            and type(item.get("id")) is int
         }
-        current_user_id = context["current_user_message_id"]
+        current_user_id = context.get("current_user_message_id")
         if (
             not isinstance(ids, list)
             or not 1 <= len(ids) <= 24
@@ -60,11 +63,13 @@ class CoachClarificationService:
                 reason="request_question",
             )
 
+        domain = infer_coach_domain(f"{summary} {question}")
         pending = {
             "summary": summary,
             "question": question,
             "source_message_ids": ids,
             "status": "needs_clarification",
+            "domain": domain,
         }
         with self._db_lock, self._database_manager.unit_of_work() as db:
             self._key_values.set(
