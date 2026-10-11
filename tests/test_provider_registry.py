@@ -556,6 +556,21 @@ class OrchestrationParityTests(unittest.TestCase):
                 DEFAULT_PROVIDER_REGISTRY.get(provider_id).not_configured_message
             )
 
+    def test_each_provider_rejects_with_its_own_not_configured_message(self) -> None:
+        messages = {
+            descriptor.provider_id: descriptor.not_configured_message
+            for descriptor in DEFAULT_PROVIDER_REGISTRY.all()
+            if descriptor.not_configured_message is not None
+        }
+        self.assertEqual(len(set(messages.values())), len(messages))
+        for provider_id, message in messages.items():
+            with self.subTest(provider_id=provider_id):
+                self.assertIn(DEFAULT_PROVIDER_REGISTRY.get(provider_id).label, message)
+                for other_id in messages:
+                    if other_id != provider_id:
+                        other_label = DEFAULT_PROVIDER_REGISTRY.get(other_id).label
+                        self.assertNotIn(other_label, message)
+
     def test_period_error_messages_match_previous_text(self) -> None:
         for provider_id, expected in PREVIOUS_PERIOD_MESSAGES.items():
             with self.subTest(provider_id=provider_id):

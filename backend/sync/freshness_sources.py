@@ -138,13 +138,23 @@ DEFAULT_FRESHNESS_SOURCES: Mapping[str, Mapping[str, FreshnessSource]] = (
 )
 
 
+def intervals_sync_running(lock: _Lock, get_value: Callable[[str], Any]) -> bool:
+    """Return whether an Intervals.icu sync is running: lock held or flag set.
+
+    ``backend.sync.intervals`` delegates its runtime check here, so the lock and
+    stored-flag rule has one implementation. The flag lives in key-value state
+    and is compared exactly, so only the stored value ``"1"`` counts as running.
+    """
+    return bool(lock.locked()) or get_value(INTERVALS_RUNNING_FLAG) == "1"
+
+
 def intervals_running_probe(
     lock: _Lock, get_value: Callable[[str], Any]
 ) -> Callable[[], bool]:
     """Return the Intervals.icu running check: its sync lock or the stored flag."""
 
     def running() -> bool:
-        return bool(lock.locked()) or get_value(INTERVALS_RUNNING_FLAG) == "1"
+        return intervals_sync_running(lock, get_value)
 
     return running
 
