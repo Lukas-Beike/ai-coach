@@ -228,9 +228,9 @@ GARBAGE_CASES: list[tuple[str, dict[str, object], list[Triple], int]] = [
         0,
     ),
     (
-        "weight has no unit",
-        {"weight": {"calendarDate": DAY, "weight": 72100}},
-        [("weight[0]", "weight", IssueReason.UNKNOWN_VALUE)],
+        "weight declared in kilograms is not reinterpreted as grams",
+        {"weight": {"calendarDate": DAY, "weight": 72100, "unitKey": "kg"}},
+        [("weight[0]", "weight", IssueReason.OUT_OF_RANGE)],
         0,
     ),
     (
@@ -312,6 +312,81 @@ GARBAGE_CASES: list[tuple[str, dict[str, object], list[Triple], int]] = [
         "device-keyed training status is unsupported",
         {"daily_training_status": {"mostRecentTrainingStatus": {}}},
         [(None, "daily_training_status", IssueReason.UNSUPPORTED)],
+        0,
+    ),
+    (
+        "weight date does not exist",
+        {"weight": [{"calendarDate": "2026-02-30", "weight": 72, "unitKey": "kg"}]},
+        [("weight[0]", "calendarDate", IssueReason.INVALID_TYPE)],
+        0,
+    ),
+    (
+        "weight and body fat record has no date and is reported once",
+        {"weight": [{"weight": 72, "unitKey": "kg", "bodyFat": 18}]},
+        [("weight[0]", "calendarDate", IssueReason.MISSING)],
+        0,
+    ),
+    (
+        "body fat record has no date",
+        {"weight": [{"bodyFat": 18.5}]},
+        [("weight[0]", "calendarDate", IssueReason.MISSING)],
+        0,
+    ),
+    (
+        "weight has only an unreadable epoch",
+        {"weight": [{"timestampGMT": 1e300, "weight": 72, "unitKey": "kg"}]},
+        [("weight[0]", "calendarDate", IssueReason.MISSING)],
+        0,
+    ),
+    (
+        "body fat unit is unknown",
+        {"weight": {"calendarDate": DAY, "bodyFat": 18, "bodyFatUnit": "stone"}},
+        [("weight[0]", "bodyFat", IssueReason.UNKNOWN_VALUE)],
+        0,
+    ),
+    (
+        "body fat unit is not text",
+        {"weight": {"calendarDate": DAY, "bodyFat": 18, "bodyFatUnit": 5}},
+        [("weight[0]", "bodyFat", IssueReason.UNKNOWN_VALUE)],
+        0,
+    ),
+    (
+        "scalar weight section is reported once",
+        {"weight": 72.5},
+        [(None, "weight", IssueReason.INVALID_TYPE)],
+        0,
+    ),
+    (
+        "scalar weight entries are reported by index",
+        {"weight": ["x", 5, None]},
+        [
+            ("weight[0]", "weight", IssueReason.INVALID_TYPE),
+            ("weight[1]", "weight", IssueReason.INVALID_TYPE),
+        ],
+        0,
+    ),
+    (
+        "weight unit made only of symbols is unknown",
+        {"weight": {"calendarDate": DAY, "weight": 72, "unitKey": "%"}},
+        [("weight[0]", "weight", IssueReason.UNKNOWN_VALUE)],
+        0,
+    ),
+    (
+        "body fat unit made only of symbols is unknown",
+        {"weight": {"calendarDate": DAY, "bodyFat": 18, "bodyFatUnit": "-"}},
+        [("weight[0]", "bodyFat", IssueReason.UNKNOWN_VALUE)],
+        0,
+    ),
+    (
+        "invalid date on a weight object without a value is reported",
+        {"weight": {"calendarDate": "soon", "weight": {"unitKey": "kg"}}},
+        [("weight[0]", "calendarDate", IssueReason.INVALID_TYPE)],
+        0,
+    ),
+    (
+        "epoch too large for a float has no readable day",
+        {"weight": {"timestampGMT": 10**400, "weight": 72, "unitKey": "kg"}},
+        [("weight[0]", "calendarDate", IssueReason.MISSING)],
         0,
     ),
 ]
@@ -461,8 +536,8 @@ class AliasAndUnitTests(unittest.TestCase):
             (" Gram ", 72100, 72.1),
             ("kilogram", 72.4, 72.4),
             ("kg", 72.4, 72.4),
-            ("lb", 160, 160 * 0.45359237),
-            ("Pounds", 160, 160 * 0.45359237),
+            ("lb", 160, 72.57),
+            ("Pounds", 160, 72.57),
         ]
         for unit, raw, expected in cases:
             with self.subTest(unit=unit):
@@ -473,7 +548,94 @@ class AliasAndUnitTests(unittest.TestCase):
                 obs = result.records[0]
                 self.assertEqual(obs.kind, MetricKind.WEIGHT)
                 self.assertEqual(obs.value.unit, "kg")
-                self.assertAlmostEqual(obs.value.value, expected, places=6)
+                self.assertAlmostEqual(obs.value.value, expected, places=2)
+
+    def test_weight_without_unit_uses_the_legacy_magnitude_guess(self) -> None:
+        # The legacy reader divides values above 300 by 1000 when no unit is given.
+        cases: list[tuple[float, float]] = [(72100, 72.1), (72.4, 72.4), (300, 300)]
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                result = _map({"weight": {"calendarDate": DAY, "weight": raw}})
+                self.assertEqual(_rows(result), [("weight", expected, DAY, "-")])
+                self.assertEqual(_issues(result), [])
+
+    def test_whitespace_weight_unit_uses_the_magnitude_guess(self) -> None:
+        result = _map(
+            {"weight": {"calendarDate": DAY, "weight": 72100, "unitKey": "  "}}
+        )
+
+        self.assertEqual(_rows(result), [("weight", 72.1, DAY, "-")])
+
+    def test_nested_weight_without_a_value_is_silent(self) -> None:
+        result = _map({"weight": {"calendarDate": DAY, "weight": {"unitKey": "kg"}}})
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(result.issues, ())
+
+    def test_unreadable_timestamps_leave_observed_at_empty(self) -> None:
+        for timestamp in (True, 1e300, "soon, later today"):
+            with self.subTest(timestamp=timestamp):
+                result = _map(
+                    {
+                        "weight": {
+                            "calendarDate": DAY,
+                            "weight": 72,
+                            "unitKey": "kg",
+                            "timestampGMT": timestamp,
+                        }
+                    }
+                )
+                self.assertEqual(len(result.records), 1)
+                self.assertIsNone(result.records[0].observed_at)
+
+    def test_body_fat_records_do_not_share_weight_record_ids(self) -> None:
+        result = _map(
+            {
+                "weight": [
+                    {
+                        "calendarDate": DAY,
+                        "minWeight": {
+                            "calendarDate": DAY,
+                            "bodyFat": 20,
+                            "unitKey": "%",
+                        },
+                    },
+                    {"calendarDate": DAY, "weight": 70, "unitKey": "kg"},
+                ]
+            }
+        )
+
+        ids = sorted(obs.provenance.source_record_id or "" for obs in result.records)
+        self.assertEqual(ids, ["body_fat:2026-10-10:1", "weight:2026-10-10:1"])
+
+    def test_weight_is_read_from_weigh_in_section_aliases(self) -> None:
+        for section in ("weigh_ins", "weighIns"):
+            with self.subTest(section=section):
+                result = _map(
+                    {section: [{"calendarDate": DAY, "weight": 71.5, "unitKey": "kg"}]}
+                )
+                self.assertEqual(_rows(result), [("weight", 71.5, DAY, "-")])
+
+    def test_weight_records_carry_timestamp_and_index_record_id(self) -> None:
+        result = _map(
+            {
+                "weight": [
+                    {
+                        "calendarDate": DAY,
+                        "weight": 72.1,
+                        "unitKey": "kg",
+                        "timestampGMT": "2026-10-10T06:30:00Z",
+                    },
+                    {"calendarDate": DAY, "weight": 71.9, "unitKey": "kg"},
+                ]
+            }
+        )
+
+        first, second = result.records
+        self.assertEqual(first.observed_at, datetime(2026, 10, 10, 6, 30, tzinfo=UTC))
+        self.assertIsNone(second.observed_at)
+        self.assertEqual(first.provenance.source_record_id, f"weight:{DAY}:0")
+        self.assertEqual(second.provenance.source_record_id, f"weight:{DAY}:1")
 
     def test_weight_unit_alias_precedence(self) -> None:
         cases: list[dict[str, object]] = [
@@ -605,7 +767,7 @@ class ProvenanceTests(unittest.TestCase):
 
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 1)
+        self.assertEqual(MAPPER_VERSION, 2)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):

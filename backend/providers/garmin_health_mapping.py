@@ -20,24 +20,40 @@ Mapped sections and their canonical kinds:
   reported as UNSUPPORTED: ``garmin_metrics`` labels it running watts, but Garmin's
   lactate-threshold power is cycling-based, so no sport is assigned.
 * ``cycling_ftp`` and ``cycling_ftp_history``: FTP for cycling.
-* ``weight``: WEIGHT in kilograms, converted from the declared unit, and
-  BODY_FAT in percent.
+* ``weight``, ``weigh_ins`` or ``weighIns`` (the first truthy one wins, as in the
+  legacy ``or`` chain): WEIGHT in kilograms and BODY_FAT in percent. Nested records
+  are searched with the legacy reader's depth, visit and list limits.
 
-Time rule: observations are dated by ``calendarDate``, the field the collector
-guarantees on dated records. No mapped health section carries a timestamp, so
-``observed_at`` stays None and ``parse_provider_datetime`` is not needed.
-``running_threshold`` has no date. The collector requests it as the latest value
-on the sync day, so its observation day is the athlete-zone date of
-``retrieved_at``.
+Time rule: most observations are dated by ``calendarDate``, the field the collector
+guarantees on dated records. ``running_threshold`` has no date; the collector
+requests it as the latest value on the sync day, so its observation day is the
+athlete-zone date of ``retrieved_at``.
+
+Weight and body fat follow the legacy reader ``backend/performance/garmin_weight``
+for record shapes. A record's day is the first present of calendarDate,
+summaryDate, date, timestampGMT or timestamp. Epoch milliseconds are read as a UTC
+date, as the legacy reader does. A record with no date of its own inherits its
+nearest dated ancestor's day. A present but unreadable ISO date is not inherited: a record under it with no
+readable date of its own is reported as invalid, which differs from the legacy
+reader that keeps the unreadable text as a day key. An epoch that cannot be
+converted is inherited, as the legacy reader does. When the record carries a
+timestamp
+(timestampGMT, timestamp, measurementDate or date), ``observed_at`` holds it as an
+aware datetime (UTC when naive), so consumers can choose the latest value per day.
 
 Alias precedence: the first present, non-empty name in each field's tuple wins.
 The tuples follow today's readers in ``backend/performance`` (``recovery_context``,
 ``planning_recovery``, ``garmin_weight``, ``garmin_metrics``).
 
-Weight units: ``gram``/``g`` are divided by 1000, ``kilogram``/``kg`` are kept,
-and ``pound``/``lb`` are converted. A missing or unrecognised unit is reported as
-UNKNOWN_VALUE and never guessed. The reader's magnitude guess (values above 300
-are grams) is deliberately not copied.
+Weight units: ``gram``/``grams``/``g`` are divided by 1000, ``kilogram``/
+``kilograms``/``kg`` are kept, and any unit containing ``lb`` or ``pound`` is
+converted from pounds. A record with no declared unit uses the legacy magnitude
+guess: values above 300 are grams. A declared unit is never reinterpreted, and an
+unknown or non-text unit is reported as UNKNOWN_VALUE. Weight must lie in 30 to
+300 kg and body fat in 2 to 70 percent, the legacy bounds. Body fat units follow
+the legacy reader: ``fraction`` and ``ratio`` are multiplied by 100, ``percent``,
+``%`` or no unit are used as they are, and any other unit is UNKNOWN_VALUE.
+Kilograms and percent are rounded to two decimals, as the legacy reader rounds.
 
 Ignored without an issue: sections with no canonical kind in this wave
 (``activities``, ``gear``, ``daily_stats``, ``training_status``,
@@ -50,7 +66,9 @@ Source kinds: sensor values (sleep duration, HRV, resting heart rate, scale weig
 and body fat) are DEVICE_MEASURED. Garmin's calculations (sleep score, readiness,
 VO2max, thresholds, FTP) are PROVIDER_REPORTED. The source record id is
 ``<section>:<calendarDate>``, with ``:<object>`` appended for nested objects, for
-example ``max_metrics:2026-10-10:cycling``.
+example ``max_metrics:2026-10-10:cycling``. Weight records use ``weight:<day>:<record index>`` and body-fat records use
+``body_fat:<day>:<record index>``, because one day can hold several weigh-ins and
+a weigh-in and its body-fat value must not share an id.
 
 Plausibility: a value must be strictly positive and inside ``METRIC_BOUNDS``.
 Zero is rejected for every metric because none of these values is legitimately
@@ -59,9 +77,10 @@ zero; a zero score is treated as a sentinel.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, tzinfo
+from datetime import UTC, date, datetime, tzinfo
 from typing import Final
 
 from backend.canonical.local_time import local_date
@@ -81,7 +100,7 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-MAPPER_VERSION: Final = 1
+MAPPER_VERSION: Final = 2
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
@@ -89,16 +108,63 @@ _DAY_TEXT_LENGTH: Final = 10  # "YYYY-MM-DD"
 _DEVICE: Final = SourceKind.DEVICE_MEASURED
 _PROVIDER: Final = SourceKind.PROVIDER_REPORTED
 _GRAMS_PER_KILOGRAM: Final = 1000.0
+_GRAM_GUESS_THRESHOLD: Final = 300.0
 _KG_PER_POUND: Final = 0.45359237
 _GRAM_UNITS: Final = frozenset({"gram", "grams", "g"})
 _KILOGRAM_UNITS: Final = frozenset({"kilogram", "kilograms", "kg"})
-_POUND_UNITS: Final = frozenset({"pound", "pounds", "lb", "lbs"})
-_WEIGHT_UNIT_FIELDS: Final = ("unitKey", "unit", "weightUnit")
 _WEIGHT: Final = "weight"
+_WEIGHT_SECTIONS: Final = ("weight", "weigh_ins", "weighIns")
+_BODY_FAT_RECORD: Final = "body_fat"
+_WEIGHT_KEYS: Final = ("weightKg", "weight_kg", "weight")
+_WEIGHT_UNIT_KEYS: Final = ("unitKey", "unit", "weightUnit")
+_WEIGHT_VALUE_KEYS: Final = ("weightKg", "weight_kg", "weight", "value")
+_WEIGHT_MIN_KG: Final = 30.0
+_WEIGHT_MAX_KG: Final = 300.0
+_BODY_FAT_KEYS: Final = (
+    "bodyFat",
+    "body_fat",
+    "bodyFatPercent",
+    "bodyFatPercentage",
+    "fatPercent",
+)
+_BODY_FAT_UNIT_KEYS: Final = ("bodyFatUnit", "bodyFatUnitKey")
+_BODY_FAT_INNER_UNIT_KEYS: Final = ("unitKey", "unit", "bodyFatUnit")
+_BODY_FAT_VALUE_KEYS: Final = ("value", "val", "amount")
+_BODY_FAT_MIN_PERCENT: Final = 2.0
+_BODY_FAT_MAX_PERCENT: Final = 70.0
+_WEIGHT_SKIP_KEYS: Final = frozenset({"minweight", "maxweight", "weightdelta"})
+_BODY_FAT_SKIP_KEYS: Final = frozenset({"minbodyfat", "maxbodyfat", "bodyfatdelta"})
+_WALK_DATE_KEYS: Final = (
+    "calendarDate",
+    "summaryDate",
+    "date",
+    "timestampGMT",
+    "timestamp",
+)
+_WALK_TIMESTAMP_KEYS: Final = ("timestampGMT", "timestamp", "measurementDate", "date")
+_WALK_MAX_DEPTH: Final = 20
+_WALK_MAX_VISITS: Final = 2000
+_WALK_MAX_LIST_ITEMS: Final = 500
+_EPOCH_MS_THRESHOLD: Final = 100_000_000_000
+_TEXT_DATE: Final = re.compile(r"\d{4}-\d{2}-\d{2}")
+_TEXT_DATETIME: Final = re.compile(r"\d{4}-\d{2}-\d{2}[T ].+")
 _RUNNING_THRESHOLD: Final = "running_threshold"
 _UNSUPPORTED_SECTIONS: Final = frozenset(
     {"body_battery", "daily_training_status", "training_load_balance"}
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _InvalidDay:
+    """A date field that was present but unreadable.
+
+    Nested weight records inherit it, as the legacy reader inherits its garbage
+    day key, so they are not emitted under an outer record's day.
+    """
+
+
+_INVALID_DAY: Final = _InvalidDay()
+type _Day = date | _InvalidDay | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +192,7 @@ class _Entry:
     ref: str
     day: date
     record_id: str
+    observed_at: datetime | None = None
 
 
 _VO2MAX_NAMES: Final = ("vo2MaxPreciseValue",)
@@ -211,23 +278,6 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
     ),
 }
 
-_BODY_FAT_GROUP: Final = _Group(
-    None,
-    (
-        _Field(
-            (
-                "bodyFat",
-                "body_fat",
-                "bodyFatPercent",
-                "bodyFatPercentage",
-                "fatPercent",
-            ),
-            MetricKind.BODY_FAT,
-            _DEVICE,
-        ),
-    ),
-)
-
 _THRESHOLD_GROUP: Final = _Group(
     "speed_and_heart_rate",
     (
@@ -253,13 +303,21 @@ _SECTION_ORDER: Final = (
 )
 
 
-def _first_value(record: Mapping[str, object], names: tuple[str, ...]) -> object | None:
-    """Return the first present, non-empty alias, or None when none is present."""
+def _named_value(
+    record: Mapping[str, object], names: tuple[str, ...]
+) -> tuple[str, object] | None:
+    """Return the first present, non-empty alias with its name, or None."""
     for name in names:
         value = record.get(name)
         if value is not None and value != "":
-            return value
+            return name, value
     return None
+
+
+def _first_value(record: Mapping[str, object], names: tuple[str, ...]) -> object | None:
+    """Return the first present, non-empty alias, or None when none is present."""
+    named = _named_value(record, names)
+    return None if named is None else named[1]
 
 
 def _parse_day(text: object) -> date | None:
@@ -272,28 +330,312 @@ def _parse_day(text: object) -> date | None:
         return None
 
 
-def _entry(name: str, ref: str, day: date, suffix: str | None = None) -> _Entry:
+def _entry(
+    name: str,
+    ref: str,
+    day: date,
+    suffix: str | None = None,
+    observed_at: datetime | None = None,
+) -> _Entry:
     base = f"{name}:{day.isoformat()}"
-    return _Entry(ref, day, base if suffix is None else f"{base}:{suffix}")
+    record_id = base if suffix is None else f"{base}:{suffix}"
+    return _Entry(ref, day, record_id, observed_at)
+
+
+def _alnum_key(value: object) -> str:
+    """Casefolded text with only letters and digits, as the legacy reader keys."""
+    return "".join(
+        character for character in str(value).casefold() if character.isalnum()
+    )
+
+
+def _iso_day(text: str) -> date | None:
+    """Calendar date of a date or datetime string, read as the legacy reader does."""
+    value = text.replace("Z", "+00:00").strip()
+    try:
+        if _TEXT_DATE.fullmatch(value):
+            return date.fromisoformat(value)
+        if _TEXT_DATETIME.fullmatch(value):
+            return datetime.fromisoformat(value).date()
+    except ValueError:
+        return None
+    return None
+
+
+def _epoch_day(milliseconds: float) -> date | None:
+    try:
+        return datetime.fromtimestamp(float(milliseconds) / 1000, UTC).date()
+    except OverflowError, OSError, ValueError:
+        return None
+
+
+def _raw_day(raw: object) -> _Day:
+    """Day of one date field. None means the field gives no day and is inherited."""
+    if isinstance(raw, int | float) and raw > _EPOCH_MS_THRESHOLD:
+        return _epoch_day(raw)
+    day = _iso_day(str(raw))
+    return _INVALID_DAY if day is None else day
+
+
+def _node_day(record: Mapping[str, object], inherited: _Day) -> _Day:
+    raw = _first_value(record, _WALK_DATE_KEYS)
+    if raw is None:
+        return inherited
+    day = _raw_day(raw)
+    return inherited if day is None else day
+
+
+def _observed_at(record: Mapping[str, object]) -> datetime | None:
+    """Aware timestamp of a weight record, or None when it has none."""
+    raw = _first_value(record, _WALK_TIMESTAMP_KEYS)
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int | float):
+        scale = 1000 if raw > _EPOCH_MS_THRESHOLD else 1
+        try:
+            return datetime.fromtimestamp(float(raw) / scale, UTC)
+        except OverflowError, OSError, ValueError:
+            return None
+    if isinstance(raw, str) and len(raw.strip()) > _DAY_TEXT_LENGTH:
+        try:
+            parsed = datetime.fromisoformat(raw.strip())
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    return None
+
+
+def _decimal(value: object) -> float | None:
+    """Finite number from a number or text, with a comma accepted as decimal."""
+    if isinstance(value, str):
+        value = value.replace(",", ".")
+    return coerce_number(value)
+
+
+def _weight_number(value: object) -> float | None:
+    """Weight number as the legacy reader reads it: two decimals unless whole."""
+    number = _decimal(value)
+    if number is None:
+        return None
+    return number if number.is_integer() else round(number, 2)
+
+
+def _is_blank_unit(unit: object) -> bool:
+    """True when no unit is declared: empty, falsy, or whitespace-only text."""
+    return not unit or (isinstance(unit, str) and not unit.strip())
 
 
 def _weight_kg(number: float, unit: object) -> float | None:
-    """Convert a weight in its declared unit to kilograms, or None when unknown."""
+    """Kilograms for a weight in its declared unit, or None when the unit is unknown."""
+    if _is_blank_unit(unit):
+        return (
+            number / _GRAMS_PER_KILOGRAM if number > _GRAM_GUESS_THRESHOLD else number
+        )
     if not isinstance(unit, str):
         return None
-    key = unit.strip().casefold()
+    key = _alnum_key(unit)
+    if "lb" in key or "pound" in key:
+        return number * _KG_PER_POUND
     if key in _GRAM_UNITS:
         return number / _GRAMS_PER_KILOGRAM
     if key in _KILOGRAM_UNITS:
         return number
-    if key in _POUND_UNITS:
-        return number * _KG_PER_POUND
     return None
+
+
+def _body_fat_percent(number: float, unit: object) -> float | None:
+    """Percent for a body-fat value in its declared unit, or None when unknown."""
+    if _is_blank_unit(unit):
+        return number
+    if not isinstance(unit, str):
+        return None
+    key = _alnum_key(unit)
+    if "fraction" in key or "ratio" in key:
+        return number * 100
+    if "percent" in key or "%" in unit:
+        return number
+    return None
+
+
+def _measure(
+    record: Mapping[str, object],
+    keys: tuple[str, ...],
+    unit_keys: tuple[str, ...],
+    inner_unit_keys: tuple[str, ...],
+    inner_value_keys: tuple[str, ...],
+) -> tuple[str, object, object] | None:
+    """Return (field, raw value, unit) for one measure, unwrapping a nested object.
+
+    The unit of a nested object takes precedence over the record's own unit, as in
+    the legacy ``or`` chain. A nested object without a value yields None.
+    """
+    named = _named_value(record, keys)
+    if named is None:
+        return None
+    field, raw = named
+    unit = _first_value(record, unit_keys)
+    if isinstance(raw, Mapping):
+        inner = _named_value(raw, inner_value_keys)
+        if inner is None:
+            return None
+        unit = _first_value(raw, inner_unit_keys) or unit
+        field = f"{field}.{inner[0]}"
+        raw = inner[1]
+    return field, raw, unit
 
 
 def _within_bounds(kind: MetricKind, number: float) -> bool:
     lower, upper = METRIC_BOUNDS[kind]
     return 0 < number and lower <= number <= upper
+
+
+class _WeightWalk:
+    """Searches a weight payload for weight or body-fat records, as the legacy reader.
+
+    Each mapping is a candidate record. Its day is its own date field or, when it
+    has none, the day of its nearest dated ancestor. Traversal stops at the legacy
+    depth and visit limits, and skips the min, max and delta keys of the other
+    measure. The index numbers records in traversal order, matching the legacy
+    reader's order for latest-per-day selection.
+    """
+
+    def __init__(self, mapping: _HealthMapping, *, body_fat: bool) -> None:
+        self._mapping = mapping
+        self._body_fat = body_fat
+        self._skip = _BODY_FAT_SKIP_KEYS if body_fat else _WEIGHT_SKIP_KEYS
+        self._visits = 0
+        self._records = 0
+
+    def run(self, payload: object) -> None:
+        self._visit(payload, None, 0)
+
+    def _visit(self, value: object, inherited: _Day, depth: int) -> None:
+        if depth > _WALK_MAX_DEPTH or self._visits >= _WALK_MAX_VISITS:
+            return
+        self._visits += 1
+        if isinstance(value, Mapping):
+            self._visit_record(value, inherited, depth)
+        elif isinstance(value, list):
+            for item in value[:_WALK_MAX_LIST_ITEMS]:
+                self._visit(item, inherited, depth + 1)
+
+    def _visit_record(
+        self, record: Mapping[str, object], inherited: _Day, depth: int
+    ) -> None:
+        index = self._records
+        self._records += 1
+        day = _node_day(record, inherited)
+        if self._body_fat:
+            self._body_fat_candidate(record, day, index)
+        else:
+            self._weight_candidate(record, day, index)
+        for key, child in record.items():
+            if _alnum_key(key) not in self._skip:
+                self._visit(child, day, depth + 1)
+
+    def _weight_candidate(
+        self, record: Mapping[str, object], day: _Day, index: int
+    ) -> None:
+        measure = _measure(
+            record,
+            _WEIGHT_KEYS,
+            _WEIGHT_UNIT_KEYS,
+            _WEIGHT_UNIT_KEYS,
+            _WEIGHT_VALUE_KEYS,
+        )
+        ref = f"{_WEIGHT}[{index}]"
+        if measure is None:
+            # A weight object with no value still reports a bad date on its record.
+            if _named_value(record, _WEIGHT_KEYS) is not None:
+                self._record_day(day, ref, report=True)
+            return
+        field, raw, unit = measure
+        record_day = self._record_day(day, ref, report=True)
+        if record_day is None:
+            return
+        number = _weight_number(raw)
+        if number is None:
+            self._mapping.issue(ref, field, IssueReason.INVALID_NUMBER)
+            return
+        kilograms = _weight_kg(number, unit)
+        if kilograms is None:
+            self._mapping.issue(ref, field, IssueReason.UNKNOWN_VALUE)
+            return
+        if not _WEIGHT_MIN_KG <= kilograms <= _WEIGHT_MAX_KG:
+            self._mapping.issue(ref, field, IssueReason.OUT_OF_RANGE)
+            return
+        self._emit(
+            record,
+            record_day,
+            index,
+            ref,
+            field,
+            MetricKind.WEIGHT,
+            round(kilograms, 2),
+        )
+
+    def _body_fat_candidate(
+        self, record: Mapping[str, object], day: _Day, index: int
+    ) -> None:
+        measure = _measure(
+            record,
+            _BODY_FAT_KEYS,
+            _BODY_FAT_UNIT_KEYS,
+            _BODY_FAT_INNER_UNIT_KEYS,
+            _BODY_FAT_VALUE_KEYS,
+        )
+        if measure is None:
+            return
+        ref = f"{_WEIGHT}[{index}]"
+        field, raw, unit = measure
+        # A record that also carries a weight reports its date problems once,
+        # through the weight walk.
+        report = _named_value(record, _WEIGHT_KEYS) is None
+        record_day = self._record_day(day, ref, report=report)
+        if record_day is None:
+            return
+        number = _decimal(raw)
+        if number is None:
+            self._mapping.issue(ref, field, IssueReason.INVALID_NUMBER)
+            return
+        percent = _body_fat_percent(number, unit)
+        if percent is None:
+            self._mapping.issue(ref, field, IssueReason.UNKNOWN_VALUE)
+            return
+        if not _BODY_FAT_MIN_PERCENT <= percent <= _BODY_FAT_MAX_PERCENT:
+            self._mapping.issue(ref, field, IssueReason.OUT_OF_RANGE)
+            return
+        self._emit(
+            record,
+            record_day,
+            index,
+            ref,
+            field,
+            MetricKind.BODY_FAT,
+            round(percent, 2),
+        )
+
+    def _record_day(self, day: _Day, ref: str, *, report: bool) -> date | None:
+        if isinstance(day, date):
+            return day
+        if report:
+            reason = IssueReason.MISSING if day is None else IssueReason.INVALID_TYPE
+            self._mapping.issue(ref, _DATE_FIELD, reason)
+        return None
+
+    def _emit(
+        self,
+        record: Mapping[str, object],
+        day: date,
+        index: int,
+        ref: str,
+        field: str,
+        kind: MetricKind,
+        number: float,
+    ) -> None:
+        prefix = _BODY_FAT_RECORD if kind is MetricKind.BODY_FAT else _WEIGHT
+        entry = _entry(prefix, ref, day, str(index), observed_at=_observed_at(record))
+        self._mapping.emit(entry, kind, number, field, _DEVICE)
 
 
 class _HealthMapping:
@@ -307,19 +649,19 @@ class _HealthMapping:
 
     def map_sections(self, sections: object) -> None:
         if not isinstance(sections, Mapping):
-            self._issue(None, "sections", IssueReason.INVALID_TYPE)
+            self.issue(None, "sections", IssueReason.INVALID_TYPE)
             return
         for name in _SECTION_ORDER:
-            if name in sections:
+            if name == _WEIGHT:
+                self._map_weight(sections)
+            elif name in sections:
                 self._map_section(name, sections[name])
 
     def _map_section(self, name: str, payload: object) -> None:
         if payload is None:
             return
         if name in _UNSUPPORTED_SECTIONS:
-            self._issue(None, name, IssueReason.UNSUPPORTED)
-        elif name == _WEIGHT:
-            self._map_weight(payload)
+            self.issue(None, name, IssueReason.UNSUPPORTED)
         elif name == _RUNNING_THRESHOLD:
             self._map_running_threshold(payload)
         else:
@@ -334,22 +676,25 @@ class _HealthMapping:
                 for group in groups:
                     self._map_group(name, record, group, ref, day)
 
-    def _map_weight(self, payload: object) -> None:
-        for ref, record in self._records(_WEIGHT, payload):
-            day = self._record_day(record, ref, fallback=None)
-            if day is not None:
-                self._map_weight_kg(record, _entry(_WEIGHT, ref, day))
-                self._map_group(_WEIGHT, record, _BODY_FAT_GROUP, ref, day)
+    def _map_weight(self, sections: Mapping[str, object]) -> None:
+        payload = self._weight_records(_weight_payload(sections))
+        _WeightWalk(self, body_fat=False).run(payload)
+        _WeightWalk(self, body_fat=True).run(payload)
 
-    def _map_weight_kg(self, record: Mapping[str, object], entry: _Entry) -> None:
-        number = self._number(record, ("weight",), entry.ref)
-        if number is None:
-            return
-        kilograms = _weight_kg(number, _first_value(record, _WEIGHT_UNIT_FIELDS))
-        if kilograms is None:
-            self._issue(entry.ref, "weight", IssueReason.UNKNOWN_VALUE)
-            return
-        self._emit(entry, MetricKind.WEIGHT, kilograms, "weight", _DEVICE)
+    def _weight_records(self, payload: object) -> object:
+        """Drop scalar weight entries with an issue; the walk reads the rest."""
+        if isinstance(payload, list):
+            kept: list[object] = []
+            for index, item in enumerate(payload):
+                if isinstance(item, Mapping | list):
+                    kept.append(item)
+                elif item:
+                    self.issue(f"{_WEIGHT}[{index}]", _WEIGHT, IssueReason.INVALID_TYPE)
+            return kept
+        if payload and not isinstance(payload, Mapping):
+            self.issue(None, _WEIGHT, IssueReason.INVALID_TYPE)
+            return None
+        return payload
 
     def _map_running_threshold(self, payload: object) -> None:
         for ref, record in self._records(_RUNNING_THRESHOLD, payload):
@@ -363,9 +708,9 @@ class _HealthMapping:
         if power is None:
             return
         if not isinstance(power, Mapping):
-            self._issue(ref, "power", IssueReason.INVALID_TYPE)
+            self.issue(ref, "power", IssueReason.INVALID_TYPE)
         elif _first_value(power, ("functionalThresholdPower",)) is not None:
-            self._issue(ref, "power.functionalThresholdPower", IssueReason.UNSUPPORTED)
+            self.issue(ref, "power.functionalThresholdPower", IssueReason.UNSUPPORTED)
 
     def _map_group(
         self,
@@ -379,13 +724,13 @@ class _HealthMapping:
         if source is None:
             return
         if not isinstance(source, Mapping):
-            self._issue(ref, group.key or name, IssueReason.INVALID_TYPE)
+            self.issue(ref, group.key or name, IssueReason.INVALID_TYPE)
             return
         entry = _entry(name, ref, day, group.key)
         for field in group.fields:
             number = self._number(source, field.names, ref)
             if number is not None:
-                self._emit(
+                self.emit(
                     entry,
                     field.kind,
                     number,
@@ -399,7 +744,7 @@ class _HealthMapping:
     ) -> list[tuple[str, Mapping[str, object]]]:
         items: object = [payload] if isinstance(payload, Mapping) else payload
         if not isinstance(items, list):
-            self._issue(None, name, IssueReason.INVALID_TYPE)
+            self.issue(None, name, IssueReason.INVALID_TYPE)
             return []
         rows: list[tuple[str, Mapping[str, object]]] = []
         for index, item in enumerate(items):
@@ -407,7 +752,7 @@ class _HealthMapping:
             if isinstance(item, Mapping):
                 rows.append((ref, item))
             else:
-                self._issue(ref, name, IssueReason.INVALID_TYPE)
+                self.issue(ref, name, IssueReason.INVALID_TYPE)
         return rows
 
     def _record_day(
@@ -416,11 +761,11 @@ class _HealthMapping:
         raw = _first_value(record, (_DATE_FIELD,))
         if raw is None:
             if fallback is None:
-                self._issue(ref, _DATE_FIELD, IssueReason.MISSING)
+                self.issue(ref, _DATE_FIELD, IssueReason.MISSING)
             return fallback
         day = _parse_day(raw)
         if day is None:
-            self._issue(ref, _DATE_FIELD, IssueReason.INVALID_TYPE)
+            self.issue(ref, _DATE_FIELD, IssueReason.INVALID_TYPE)
         return day
 
     def _number(
@@ -431,10 +776,10 @@ class _HealthMapping:
             return None
         number = coerce_number(raw)
         if number is None:
-            self._issue(ref, names[0], IssueReason.INVALID_NUMBER)
+            self.issue(ref, names[0], IssueReason.INVALID_NUMBER)
         return number
 
-    def _emit(
+    def emit(
         self,
         entry: _Entry,
         kind: MetricKind,
@@ -444,7 +789,7 @@ class _HealthMapping:
         sport: Sport | None = None,
     ) -> None:
         if not _within_bounds(kind, number):
-            self._issue(entry.ref, field, IssueReason.OUT_OF_RANGE)
+            self.issue(entry.ref, field, IssueReason.OUT_OF_RANGE)
             return
         provenance = Provenance(
             provider=ProviderId.GARMIN,
@@ -459,14 +804,24 @@ class _HealthMapping:
                 kind=kind,
                 value=MetricValue(number, kind.unit),
                 observed_on=entry.day,
-                observed_at=None,
+                observed_at=entry.observed_at,
                 provenance=provenance,
                 sport=sport,
             )
         )
 
-    def _issue(self, record_ref: str | None, field: str, reason: IssueReason) -> None:
+    def issue(self, record_ref: str | None, field: str, reason: IssueReason) -> None:
         self.issues.append(MappingIssue(record_ref, field, reason))
+
+
+def _weight_payload(sections: Mapping[str, object]) -> object:
+    """First truthy weight section, as the legacy ``or`` chain picks it."""
+    payload: object = None
+    for name in _WEIGHT_SECTIONS:
+        payload = sections.get(name)
+        if payload:
+            break
+    return payload
 
 
 def map_garmin_health(
