@@ -8,21 +8,29 @@ from typing import Any
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 SYNC_INTERVAL_SECONDS = 60 * 60
 
 
-def daily_marker_key(source: str) -> str:
-    """Return the durable last-success key for a known provider."""
-    if source not in {"intervals", "garmin", "calendar"}:
+def _require_daily_source(source: str, registry: ProviderRegistry) -> None:
+    if source not in registry.daily_marker_ids():
         raise ValueError(f"unknown daily sync source: {source}")
+
+
+def daily_marker_key(
+    source: str, *, registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
+) -> str:
+    """Return the durable last-success key for a known provider."""
+    _require_daily_source(source, registry)
     return f"sync_{source}_last_success_at"
 
 
-def daily_attempt_marker_key(source: str) -> str:
+def daily_attempt_marker_key(
+    source: str, *, registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
+) -> str:
     """Return the durable last-attempt key for a known provider."""
-    if source not in {"intervals", "garmin", "calendar"}:
-        raise ValueError(f"unknown daily sync source: {source}")
+    _require_daily_source(source, registry)
     return f"sync_{source}_last_attempt_at"
 
 
@@ -31,12 +39,13 @@ def daily_sync_is_due(
     now: datetime,
     *,
     get_value: Callable[[str], str | None],
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> bool:
     """Check whether a provider's last success or attempt was an hour ago."""
     timestamps = []
     for marker in (
-        get_value(daily_attempt_marker_key(source)),
-        get_value(daily_marker_key(source)),
+        get_value(daily_attempt_marker_key(source, registry=registry)),
+        get_value(daily_marker_key(source, registry=registry)),
     ):
         if not marker:
             continue
@@ -57,9 +66,10 @@ def mark_daily_sync(
     now: datetime,
     *,
     set_value: Callable[[str, str], None],
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> None:
     """Store the provider's last successful refresh time."""
-    set_value(daily_marker_key(source), now.isoformat())
+    set_value(daily_marker_key(source, registry=registry), now.isoformat())
 
 
 def mark_daily_sync_attempt(
@@ -67,9 +77,10 @@ def mark_daily_sync_attempt(
     now: datetime,
     *,
     set_value: Callable[[str, str], None],
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> None:
     """Store when a scheduled provider refresh was queued."""
-    set_value(daily_attempt_marker_key(source), now.isoformat())
+    set_value(daily_attempt_marker_key(source, registry=registry), now.isoformat())
 
 
 class DailySyncMarkerService:
@@ -80,10 +91,13 @@ class DailySyncMarkerService:
         database_manager: DatabaseManager,
         key_value_repository: KeyValueRepository,
         local_now: Callable[[], datetime],
+        *,
+        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
         self._local_now = local_now
+        self._registry = registry
 
     def is_due(self, source: str, now: datetime | None = None) -> bool:
         """Check whether the latest provider attempt or success is due."""
@@ -93,6 +107,7 @@ class DailySyncMarkerService:
                 source,
                 current,
                 get_value=lambda key: self._key_value_repository.get(db, key),
+                registry=self._registry,
             )
 
     def mark(self, source: str, now: datetime | None = None) -> None:
@@ -109,6 +124,7 @@ class DailySyncMarkerService:
             source,
             current,
             set_value=lambda key, value: self._key_value_repository.set(db, key, value),
+            registry=self._registry,
         )
 
     def mark_attempt(self, source: str, now: datetime | None = None) -> None:
@@ -121,4 +137,5 @@ class DailySyncMarkerService:
                 set_value=lambda key, value: self._key_value_repository.set(
                     db, key, value
                 ),
+                registry=self._registry,
             )

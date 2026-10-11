@@ -8,16 +8,16 @@
   "diagnostics": [
     {
       "tool": "ruff",
-      "path": "backend/sync/garmin.py",
-      "line": 420,
+      "path": "backend/sync/jobs.py",
+      "line": 1016,
       "column": 40,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
     },
     {
       "tool": "ruff",
-      "path": "backend/sync/jobs.py",
-      "line": 986,
+      "path": "backend/sync/garmin.py",
+      "line": 420,
       "column": 40,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -97,7 +97,15 @@
     {
       "tool": "ruff",
       "path": "backend/sync/jobs.py",
-      "line": 183,
+      "line": 1017,
+      "column": 29,
+      "code": "UP017",
+      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/jobs.py",
+      "line": 186,
       "column": 29,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -114,14 +122,6 @@
       "tool": "ruff",
       "path": "tests/test_change_history.py",
       "line": 70,
-      "column": 29,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/sync/jobs.py",
-      "line": 987,
       "column": 29,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -233,7 +233,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/jobs.py",
-      "line": 182,
+      "line": 185,
       "column": 38,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -320,16 +320,16 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_sync_daily.py",
-      "line": 101,
+      "path": "tests/test_history_service.py",
+      "line": 105,
       "column": 45,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
     },
     {
       "tool": "ruff",
-      "path": "tests/test_history_service.py",
-      "line": 105,
+      "path": "tests/test_sync_daily.py",
+      "line": 109,
       "column": 45,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -465,7 +465,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_sync_daily.py",
-      "line": 87,
+      "line": 95,
       "column": 52,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -3577,7 +3577,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/queue.py",
-      "line": 69,
+      "line": 73,
       "column": 25,
       "code": "valid-type",
       "message_sha256": "e544e9bb666fd02cbac8c6d513743b7609ad210eee16d21cef00ba879ce33aba"
@@ -3688,14 +3688,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_sync_daily.py",
-      "line": 31,
-      "column": 8,
-      "code": "var-annotated",
-      "message_sha256": "37be5558bef32f626c26a60cea819ddce9084acb87003a4b88b839ee5872808d"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_daily_sync_scheduler.py",
       "line": 32,
       "column": 8,
@@ -3709,6 +3701,14 @@
       "column": 8,
       "code": "var-annotated",
       "message_sha256": "6797e377ccdd96cb1a1ba656b01f06555b2805a23eead0e2b58e0de11bf46a87"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_daily.py",
+      "line": 39,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "37be5558bef32f626c26a60cea819ddce9084acb87003a4b88b839ee5872808d"
     },
     {
       "tool": "mypy",
