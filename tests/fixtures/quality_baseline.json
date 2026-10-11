@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "8b0cb3bce42c92b3a335f0f87635c8ced1e9acfd",
+  "base": "4a1099888fb6f162df75bed71a23a5fc24435ea2",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
@@ -35,14 +35,6 @@
       "path": "backend/weather/cache.py",
       "line": 53,
       "column": 43,
-      "code": "FURB162",
-      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/performance/garmin_weight.py",
-      "line": 100,
-      "column": 45,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
     },
@@ -248,14 +240,6 @@
     },
     {
       "tool": "ruff",
-      "path": "backend/performance/garmin_weight.py",
-      "line": 102,
-      "column": 39,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/performance/morning_battery_service.py",
       "line": 200,
       "column": 39,
@@ -266,14 +250,6 @@
       "tool": "ruff",
       "path": "backend/providers/garmin_morning.py",
       "line": 50,
-      "column": 39,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/performance/garmin_weight.py",
-      "line": 94,
       "column": 39,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -634,14 +610,6 @@
       "tool": "ruff",
       "path": "backend/performance/garmin_observations.py",
       "line": 33,
-      "column": 61,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/performance/garmin_weight.py",
-      "line": 74,
       "column": 61,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -1512,14 +1480,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/coach/request_payload.py",
-      "line": 128,
-      "column": 34,
-      "code": "arg-type",
-      "message_sha256": "0eb0c3b2dbe530d9741379c8a2f9bde0b26fe4b24bb7478eeff4afe2dcb3e1b8"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_executor.py",
       "line": 162,
       "column": 34,
@@ -1637,14 +1597,6 @@
       "column": 45,
       "code": "arg-type",
       "message_sha256": "67958b7c1fac70ca3a74973695e370b3a28aacc2292e2b73bc5fb9486b8c6bd1"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/coach/request_payload.py",
-      "line": 121,
-      "column": 46,
-      "code": "arg-type",
-      "message_sha256": "0eb0c3b2dbe530d9741379c8a2f9bde0b26fe4b24bb7478eeff4afe2dcb3e1b8"
     },
     {
       "tool": "mypy",
@@ -1893,14 +1845,6 @@
       "column": 53,
       "code": "arg-type",
       "message_sha256": "d5cb5499bdad3d5dc5be6fe20caed8367899b89ae79dfaf3b32017d076dee632"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/performance/garmin_metrics.py",
-      "line": 418,
-      "column": 55,
-      "code": "arg-type",
-      "message_sha256": "191d29b851ef2b4cccfd534394145c0e02452f8fb324266008ab916264c05c91"
     },
     {
       "tool": "mypy",
@@ -3288,14 +3232,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/coach/request_payload.py",
-      "line": 112,
-      "column": 12,
-      "code": "operator",
-      "message_sha256": "707d8043b32df45b81e34c30d7ca9376fba066f666a023a63841bec514d52b59"
-    },
-    {
-      "tool": "mypy",
       "path": "backend/activities/duplicates.py",
       "line": 270,
       "column": 13,
@@ -3352,14 +3288,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/coach/request_payload.py",
-      "line": 103,
-      "column": 8,
-      "code": "operator",
-      "message_sha256": "707d8043b32df45b81e34c30d7ca9376fba066f666a023a63841bec514d52b59"
-    },
-    {
-      "tool": "mypy",
       "path": "backend/weather/projection.py",
       "line": 104,
       "column": 8,
@@ -3405,14 +3333,6 @@
       "column": 11,
       "code": "return-value",
       "message_sha256": "0394215e142f9965a2058edade273fe77f53ddfff461f70895aaa6f8fe221999"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/performance/garmin_metrics.py",
-      "line": 419,
-      "column": 11,
-      "code": "return-value",
-      "message_sha256": "560a335294ece6798b3bfe82027b1ac0955498f98e3bfd018ceda8ee97c08e3c"
     },
     {
       "tool": "mypy",
@@ -3645,14 +3565,6 @@
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/performance/garmin_metrics.py",
-      "line": 415,
-      "column": 34,
-      "code": "union-attr",
-      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
     },
     {
       "tool": "mypy",

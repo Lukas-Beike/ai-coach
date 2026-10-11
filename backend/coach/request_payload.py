@@ -79,7 +79,7 @@ class CoachRequestPayloadService:
                     )
                 },
             }
-        payload = {
+        payload: dict[str, Any] = {
             "model": model or self._settings.selected_model(),
             "reasoning": {
                 "effort": thinking_level or self._settings.selected_thinking_level()

@@ -282,6 +282,21 @@ def _pending_request_is_active(
         or retry
         or (pending_domain is not None and message_domain == pending_domain)
         or re.search(CLARIFICATION_ANSWER_PATTERN, normalized)
+        or _is_concise_clarification_answer(pending, normalized, message_domain)
+    )
+
+
+def _is_concise_clarification_answer(
+    pending: dict[str, Any], normalized: str, message_domain: str | None
+) -> bool:
+    question = pending.get("question")
+    return bool(
+        isinstance(question, str)
+        and question.strip()
+        and normalized.strip()
+        and "?" not in normalized
+        and len(normalized.split()) <= 3
+        and message_domain is None
     )
 
 

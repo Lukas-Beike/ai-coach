@@ -328,6 +328,34 @@ class CoachContextSelectionTests(unittest.TestCase):
                 compact = compact_coach_dialogue(context, selection)
                 self.assertEqual(compact["pending_request"], clarification_pending)
 
+    def test_concise_freeform_answer_retains_an_active_clarification(self):
+        pending = {
+            "summary": "Tagesform für heute festhalten",
+            "source_message_ids": [1],
+            "status": "needs_clarification",
+            "question": "Wie fühlen sich deine Beine an?",
+        }
+        selection = select_coach_context(
+            "Ziemlich schwer.", {"pending_request": pending}
+        )
+        self.assertEqual(selection.name, "fallback")
+        self.assertEqual(
+            compact_coach_dialogue({"pending_request": pending}, selection)[
+                "pending_request"
+            ],
+            pending,
+        )
+
+        unrelated_question = select_coach_context(
+            "Faszienrollen sinnvoll?", {"pending_request": pending}
+        )
+        self.assertNotEqual(unrelated_question.name, "fallback")
+        self.assertIsNone(
+            compact_coach_dialogue({"pending_request": pending}, unrelated_question)[
+                "pending_request"
+            ]
+        )
+
     def test_missing_current_message_id_does_not_remove_unidentified_messages(self):
         context = {
             "messages": [{"role": "user", "content": "Synthetic earlier message"}]
