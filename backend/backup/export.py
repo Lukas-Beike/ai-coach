@@ -32,8 +32,12 @@ PayloadDecoder = Callable[[Any], Any]
 Clock = Callable[[], float]
 TimeoutErrorFactory = Callable[[], Exception]
 
-PRIVACY_EXPORT_FORMAT_VERSION = 1
+PRIVACY_EXPORT_FORMAT_VERSION = 2
 PRIVACY_EXPORT_JSONL_FILES = {
+    "provider_records.jsonl",
+    "activity_sessions.jsonl",
+    "activity_records.jsonl",
+    "observations.jsonl",
     "athlete_checkins.jsonl",
     "activity_feedback.jsonl",
     "external_calendar_events.jsonl",
@@ -327,6 +331,63 @@ class PrivacyArchiveExportService:
                         (dict(row) for row in db.execute(f"SELECT * FROM {table}")),
                         deadline,
                     )
+                self._write_jsonl(
+                    archive,
+                    "provider_records.jsonl",
+                    (
+                        sanitized_provider_row(row, "payload")
+                        for row in db.execute(
+                            "SELECT id, provider, record_kind, source_record_id, payload, payload_hash, fetched_at, "
+                            "mapped_version, state, created_at, updated_at "
+                            "FROM provider_records ORDER BY provider, record_kind, source_record_id"
+                        )
+                    ),
+                    deadline,
+                )
+                self._write_jsonl(
+                    archive,
+                    "activity_sessions.jsonl",
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT activity_id, primary_provider, primary_provider_activity_id, link_kind, "
+                            "athlete_confirmed, state, merged_into, started_at, local_date, created_at, updated_at "
+                            "FROM activity_sessions ORDER BY started_at, activity_id"
+                        )
+                    ),
+                    deadline,
+                )
+                self._write_jsonl(
+                    archive,
+                    "activity_records.jsonl",
+                    (
+                        sanitized_provider_row(row, "details")
+                        for row in db.execute(
+                            "SELECT provider, provider_activity_id, activity_id, state, mapper_version, source_kind, "
+                            "recorded_by, source_record_id, sport, environment, started_at, local_date, duration_s, "
+                            "distance_m, load, load_model, avg_hr, avg_power, moving_duration_s, "
+                            "elevation_gain_m, intensity_pct, max_hr, normalized_power, avg_cadence, "
+                            "energy_kj, name, details, fetched_at, "
+                            "created_at, updated_at "
+                            "FROM activity_records ORDER BY started_at, provider, provider_activity_id"
+                        )
+                    ),
+                    deadline,
+                )
+                self._write_jsonl(
+                    archive,
+                    "observations.jsonl",
+                    (
+                        sanitized_provider_row(row, "details")
+                        for row in db.execute(
+                            "SELECT id, natural_key, metric, value, unit, method, aggregation, source_kind, "
+                            "recorded_by, provider, source_record_id, sport, observed_on, observed_at, "
+                            "retrieved_at, label, details, mapper_version, created_at, updated_at "
+                            "FROM observations ORDER BY observed_on, metric, id"
+                        )
+                    ),
+                    deadline,
+                )
                 archive.writestr(
                     "planning.json",
                     json.dumps(
@@ -413,6 +474,52 @@ def decode_payload(value: Any) -> Any:
         return json.loads(value)
     except TypeError, ValueError:
         return {}
+
+
+_CREDENTIAL_KEY_MARKERS = (
+    "token",
+    "secret",
+    "password",
+    "credential",
+    "authorization",
+    "cookie",
+    "api_key",
+    "apikey",
+)
+_SIGNED_URL_MARKERS = ("signature=", "x-amz-signature", "token=")
+REDACTED_VALUE = "[redacted]"
+
+
+def _is_signed_url(text: str) -> bool:
+    lowered = text.lower()
+    return "http" in lowered and any(
+        marker in lowered for marker in _SIGNED_URL_MARKERS
+    )
+
+
+def sanitized_provider_payload(value: Any) -> Any:
+    """Remove credential-like keys and signed download URLs before export."""
+    if isinstance(value, dict):
+        return {
+            key: sanitized_provider_payload(item)
+            for key, item in value.items()
+            if not any(marker in str(key).lower() for marker in _CREDENTIAL_KEY_MARKERS)
+        }
+    if isinstance(value, list):
+        return [sanitized_provider_payload(item) for item in value]
+    if isinstance(value, str) and _is_signed_url(value):
+        return REDACTED_VALUE
+    return value
+
+
+def sanitized_provider_row(
+    row: Mapping[str, Any], *json_columns: str
+) -> dict[str, Any]:
+    """Copy a provider-table row, decoding and sanitizing its JSON columns."""
+    result = dict(row)
+    for column in json_columns:
+        result[column] = sanitized_provider_payload(decode_payload(result[column]))
+    return result
 
 
 def iter_workout_library(

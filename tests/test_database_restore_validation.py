@@ -38,6 +38,15 @@ def service(data_dir: Path, **overrides: object) -> DatabaseRestoreValidationSer
     return DatabaseRestoreValidationService(DatabaseRestoreValidationConfig(**values))  # type: ignore[arg-type]
 
 
+# Provider tables arrived with schema v6; an old release backup has none.
+OLD_RELEASE_ABSENT_PROVIDER_TABLES = (
+    "activity_records",
+    "activity_sessions",
+    "observations",
+    "provider_records",
+)
+
+
 class DatabaseRestoreValidationTests(unittest.TestCase):
     def test_stage_enforces_payload_boundary_and_uses_uuid_filename(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -151,6 +160,8 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 connection.execute(
                     "ALTER TABLE nutrition_logs DROP COLUMN logged_time_known"
                 )
+                for table in OLD_RELEASE_ABSENT_PROVIDER_TABLES:
+                    connection.execute(f"DROP TABLE {table}")
                 connection.execute("PRAGMA user_version = 1")
                 connection.execute(
                     "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES ('token', 'csrf', 1, 'now', 'now')"
@@ -349,6 +360,8 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 connection.execute(
                     "ALTER TABLE nutrition_logs DROP COLUMN logged_time_known"
                 )
+                for table in OLD_RELEASE_ABSENT_PROVIDER_TABLES:
+                    connection.execute(f"DROP TABLE {table}")
                 connection.execute("PRAGMA user_version = 1")
                 connection.execute(
                     "INSERT INTO sync_job_items(id, job_id, item_key, operation, payload_hash, status, created_at, updated_at) VALUES ('item', 'missing-job', 'key', 'pull', 'hash', 'pending', 'now', 'now')"

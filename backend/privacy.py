@@ -212,6 +212,17 @@ PRIVACY_DELETE_SCOPE = (
             "provider_sync_cursors",
         ),
     ),
+    (
+        "provider_data",
+        "Kanonische Provider-Aktivitäten, Beobachtungen und Provider-Records",
+        # Children first: activity_records references activity_sessions.
+        (
+            "observations",
+            "activity_records",
+            "activity_sessions",
+            "provider_records",
+        ),
+    ),
 )
 PRIVACY_REMOTE_SCOPE = (
     "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
