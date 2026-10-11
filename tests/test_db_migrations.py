@@ -4,6 +4,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,6 +22,7 @@ RELEASE_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_19.sql.txt"
 PREVIOUS_SCHEMA = Path(__file__).with_name("fixtures") / "schema_v2.sql.txt"
 RELEASE_1_12_26_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_26.sql.txt"
 SCHEMA_V4 = Path(__file__).with_name("fixtures") / "schema_v4.sql.txt"
+SCHEMA_V5 = Path(__file__).with_name("fixtures") / "schema_v5.sql.txt"
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -56,6 +58,21 @@ class DatabaseMigrationTests(unittest.TestCase):
         db = self.connect()
         db.executescript(RELEASE_1_12_26_SCHEMA.read_text(encoding="utf-8"))
         return db
+
+    def schema_v5_database(self):
+        db = self.connect()
+        db.executescript(SCHEMA_V5.read_text(encoding="utf-8"))
+        return db
+
+    def full_rows(self, db):
+        # Every column of every table; only valid for a database at schema v5.
+        return {
+            table: [
+                tuple(row)
+                for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid")
+            ]
+            for table in CURRENT_DATABASE_SCHEMA
+        }
 
     def seed_all_tables(self, db):
         # One synthetic row per durable table, including FK-linked records.
@@ -878,6 +895,81 @@ class DatabaseMigrationTests(unittest.TestCase):
             migrate_schema(db)
 
         self.assertEqual(list(db.iterdump()), before)
+
+    def test_schema_v5_fixture_is_released_schema_v5(self):
+        # Released v5 equals the live shape until the next schema version lands;
+        # this assertion is expected to change with that version.
+        db = self.schema_v5_database()
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
+        self.assertTrue(database_schema_is_current(db))
+
+    def test_schema_v5_populated_database_opens_as_noop_and_is_restart_stable(self):
+        db = self.schema_v5_database()
+        self.seed_all_tables(db)
+        before_rows = self.full_rows(db)
+        before_dump = list(db.iterdump())
+
+        migrate_schema(db)
+        db.commit()
+        migrate_schema(db)
+        db.commit()
+
+        self.assertEqual(self.full_rows(db), before_rows)
+        self.assertEqual(list(db.iterdump()), before_dump)
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+        self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_schema_v5_database_file_reopens_unchanged_on_the_same_build(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            path = Path(data_dir) / "schema-v5.sqlite3"
+            with closing(sqlite3.connect(path)) as setup:
+                setup.row_factory = sqlite3.Row
+                setup.executescript(SCHEMA_V5.read_text(encoding="utf-8"))
+                self.seed_all_tables(setup)
+            with closing(sqlite3.connect(path)) as snapshot:
+                snapshot.row_factory = sqlite3.Row
+                before_rows = self.full_rows(snapshot)
+                before_dump = list(snapshot.iterdump())
+
+            for _ in range(2):
+                with closing(sqlite3.connect(path)) as db:
+                    db.row_factory = sqlite3.Row
+                    migrate_schema(db)
+                    db.commit()
+                    self.assertEqual(self.full_rows(db), before_rows)
+                    self.assertEqual(list(db.iterdump()), before_dump)
+                    self.assertEqual(
+                        db.execute("PRAGMA user_version").fetchone()[0],
+                        CURRENT_SCHEMA_VERSION,
+                    )
+
+    def test_schema_v5_unsupported_versions_are_rejected_without_modification(self):
+        for version in (1, 2, 3, 4, 6, 99):
+            with self.subTest(version=version):
+                db = self.schema_v5_database()
+                self.seed_all_tables(db)
+                db.execute(f"PRAGMA user_version = {version}")
+                db.commit()
+                before = list(db.iterdump())
+                with self.assertRaises(RuntimeError):
+                    migrate_schema(db)
+                self.assertEqual(list(db.iterdump()), before)
+                self.assertEqual(
+                    db.execute("PRAGMA user_version").fetchone()[0], version
+                )
+
+    def test_schema_v5_with_unknown_column_is_rejected_without_modification(self):
+        db = self.schema_v5_database()
+        db.execute("ALTER TABLE kv ADD COLUMN unknown TEXT")
+        db.commit()
+        before = list(db.iterdump())
+        with self.assertRaises(RuntimeError):
+            migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), before)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
 
     def test_unknown_or_newer_schema_is_not_modified(self):
         for version in (None, 5, 6, 99):

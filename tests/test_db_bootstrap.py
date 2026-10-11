@@ -174,6 +174,44 @@ class DatabaseBootstrapTests(unittest.TestCase):
             "Synthetic oats",
         )
 
+    def test_schema_v5_database_bootstraps_without_losing_records(self):
+        schema_v5 = Path(__file__).with_name("fixtures") / "schema_v5.sql.txt"
+        db = self.make_connection()
+        self.addCleanup(db.close)
+        db.executescript(schema_v5.read_text(encoding="utf-8"))
+        db.execute(
+            "INSERT INTO messages(role, content, created_at) VALUES ('user', 'Synthetic question', ?)",
+            (self.now,),
+        )
+        db.execute(
+            "INSERT INTO snapshots(payload, created_at) VALUES ('{}', ?)", (self.now,)
+        )
+        db.execute(
+            "INSERT INTO nutrition_logs(id, meal_date, logged_at, meal_type, description, kcal, created_at, updated_at, logged_time_known) VALUES ('meal-1', '2026-09-15', ?, 'lunch', 'Synthetic meal', 500, ?, ?, 0)",
+            (self.now, self.now, self.now),
+        )
+        db.commit()
+
+        self.bootstrap(db)
+
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+        self.assertEqual(
+            db.execute("SELECT content FROM messages").fetchone()[0],
+            "Synthetic question",
+        )
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0], 1)
+        self.assertEqual(
+            tuple(
+                db.execute(
+                    "SELECT description, logged_time_known FROM nutrition_logs WHERE id='meal-1'"
+                ).fetchone()
+            ),
+            ("Synthetic meal", 0),
+        )
+
     def test_bounded_retention_keeps_removed_gemini_state_absent(self):
         db = self.make_connection()
         self.addCleanup(db.close)
