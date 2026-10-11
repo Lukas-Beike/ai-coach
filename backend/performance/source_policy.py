@@ -37,10 +37,11 @@ manual values, per-sport settings from the wellness row, Intervals eFTP, the
 generic top-level FTP and threshold-HR fallbacks, and activity-derived fallbacks
 such as the maximum recorded heart rate.
 
-Mapper gaps still open are pinned by named tests in
-``tests/test_source_policy.py``: Garmin cycling FTP history, Garmin sleep score 0
-and Garmin heart-rate-zone max HR. Athlete-level weight, athlete-wide threshold
-HR and max HR, and sport-setting VO2max are mapped and covered by parity tests.
+The one mapper gap still open is pinned by a named test in
+``tests/test_source_policy.py``: Garmin cycling FTP history is observed, but the
+legacy current FTP reads only the cycling FTP section. Garmin sleep score 0 and
+Garmin heart-rate-zone max HR, athlete-level weight, athlete-wide threshold HR and
+max HR, and sport-setting VO2max are mapped and covered by parity tests.
 
 This module is stdlib-only except for ``backend.canonical`` and must not import
 ``server.py``, providers or other domain packages.
