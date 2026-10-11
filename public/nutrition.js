@@ -58,14 +58,17 @@ async function prepareNutritionImage(file, { maxEdge = MAX_NUTRITION_IMAGE_EDGE,
 }
 
 function renderNutritionSegments(route) {
+  const week = route === "nutrition/week";
   const meals = route === "nutrition/meals";
   const products = route === "nutrition/products";
-  document.querySelector("#nutritionDiary").hidden = meals || products;
+  document.querySelector("#nutritionDiary").hidden = week || meals || products;
+  document.querySelector("#nutritionWeek").hidden = !week;
   document.querySelector("#nutritionMeals").hidden = !meals;
   document.querySelector("#nutritionProductsPanel").hidden = !products;
   document.querySelectorAll("[data-nutrition-segment]").forEach((link) => {
     let activeSegment = "diary";
     if (meals) activeSegment = "meals";
+    if (week) activeSegment = "week";
     if (products) activeSegment = "products";
     const active = link.dataset.nutritionSegment === activeSegment;
     link.classList.toggle("active", active);
@@ -311,6 +314,27 @@ function renderNutritionWeek(week) {
     tile.append(number, caption, coverage); return tile;
   }));
   document.querySelector("#nutritionWeekStatus").textContent = week.balance_days === 7 ? "Alle sieben Tage auswertbar." : `${week.balance_days} von 7 Tagen mit Aufnahme und Gesamtverbrauch auswertbar. Für die übrigen Tage bleibt die Bilanz offen.`;
+  const scale = Math.max(1, ...week.days.flatMap((day) => [day.intake_kcal, day.expenditure_kcal].filter((value) => Number.isFinite(value) && value >= 0)));
+  document.querySelector("#nutritionWeekChart").replaceChildren(...week.days.map((day) => {
+    const row = document.createElement("div"); row.className = "nutrition-week-chart-day";
+    const date = document.createElement("strong"); date.textContent = nutritionExpenditureDate(day.date).slice(0, 5);
+    row.append(date);
+    for (const [key, label, kind] of [["intake_kcal", "Aufnahme", "intake"], ["expenditure_kcal", "Verbrauch", "expenditure"]]) {
+      const value = day[key];
+      const series = document.createElement("div"); series.className = `nutrition-week-chart-series is-${kind}`;
+      const track = document.createElement("span"); track.className = "nutrition-week-chart-track";
+      if (Number.isFinite(value) && value >= 0) {
+        const bar = document.createElement("span"); bar.className = "nutrition-week-chart-bar";
+        bar.style.width = `${value / scale * 100}%`;
+        track.append(bar);
+      } else track.classList.add("is-missing");
+      const amount = document.createElement("span"); amount.textContent = value == null ? "–" : `${nutritionWeekValue(value, "kcal")}`;
+      series.setAttribute("aria-label", `${label}: ${amount.textContent}${value == null ? " (keine Daten)" : ""}`);
+      series.append(track, amount); row.append(series);
+    }
+    return row;
+  }));
+  document.querySelector("#nutritionWeekChartSection").hidden = false;
   document.querySelector("#nutritionWeekDays").replaceChildren(...week.days.map((day) => {
     const row = document.createElement("tr");
     const date = document.createElement("th"); date.scope = "row"; date.textContent = nutritionExpenditureDate(day.date).slice(0, 5); row.append(date);
@@ -327,6 +351,8 @@ async function loadNutritionWeek(sequence, generation) {
   status.textContent = "Wochenübersicht wird geladen…";
   document.querySelector("#nutritionWeekTotals").replaceChildren();
   document.querySelector("#nutritionWeekDays").replaceChildren();
+  document.querySelector("#nutritionWeekChart").replaceChildren();
+  document.querySelector("#nutritionWeekChartSection").hidden = true;
   document.querySelector("#nutritionWeekPeriod").textContent = "";
   document.querySelector("#nutritionWeekDetails").hidden = true;
   try {
@@ -341,7 +367,7 @@ async function loadNutrition() {
   const sequence = ++nutritionLoadSequence;
   const generation = state.sessionGeneration;
 
-  void loadNutritionWeek(sequence, generation);
+  if (state.route === "nutrition/week") { void loadNutritionWeek(sequence, generation); return; }
   const dateInput = document.querySelector("#nutritionDate");
   const status = document.querySelector("#nutritionStatus");
   status.textContent = "Ernährung wird geladen…";
@@ -391,11 +417,12 @@ function resetNutritionView() {
   ++nutritionLoadSequence;
   ++nutritionProductLoadSequence;
   stopNutritionBarcode();
-  document.querySelector("#nutritionBarcodeDialog")?.close();
-  document.querySelector("#nutritionProductUseDialog")?.close();
-  nutritionProductForUse = null;
-  document.querySelector("#nutritionDate").value = "";
-  for (const id of ["nutritionWeekPeriod", "nutritionWeekStatus", "nutritionWeekTotals", "nutritionWeekDays", "nutritionEntries", "nutritionTemplates", "nutritionTotals", "nutritionStatus", "nutritionProducts", "nutritionProductStatus", "nutritionExpenditureTotals", "nutritionExpenditureStatus", "nutritionExpenditureDate"]) document.getElementById(id)?.replaceChildren();
+  document.querySelector("#nutritionBarcodeDialog")?.close();
+  document.querySelector("#nutritionProductUseDialog")?.close();
+  nutritionProductForUse = null;
+  document.querySelector("#nutritionDate").value = "";
+  for (const id of ["nutritionWeekPeriod", "nutritionWeekStatus", "nutritionWeekTotals", "nutritionWeekDays", "nutritionWeekChart", "nutritionEntries", "nutritionTemplates", "nutritionTotals", "nutritionStatus", "nutritionProducts", "nutritionProductStatus", "nutritionExpenditureTotals", "nutritionExpenditureStatus", "nutritionExpenditureDate"]) document.getElementById(id)?.replaceChildren();
+  document.querySelector("#nutritionWeekChartSection").hidden = true;
   const editor = document.querySelector("#nutritionExtraction"); if (editor) { editor.replaceChildren(); editor.hidden = true; }
   const query = document.querySelector("#nutritionProductQuery"); if (query) query.value = "";
 }

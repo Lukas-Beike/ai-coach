@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=310">
+  <link rel="stylesheet" href="/styles.css?v=312">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -143,6 +143,7 @@
         <div class="panel-heading"><div><span class="eyebrow">ERNÄHRUNG</span><h2>Ernährung</h2><span class="tab-sync-detail">Erfassen und ändern über deinen Coach</span></div></div>
         <nav class="plan-segment-nav" aria-label="Ernährungsbereiche">
           <a href="#nutrition/diary" data-nutrition-segment="diary">Tagebuch</a>
+          <a href="#nutrition/week" data-nutrition-segment="week">Letzte 7 Tage</a>
           <a href="#nutrition/meals" data-nutrition-segment="meals">Meine Mahlzeiten</a>
           <a href="#nutrition/products" data-nutrition-segment="products">Produkte</a>
         </nav>
@@ -166,15 +167,20 @@
           <div id="nutritionExtraction" class="nutrition-product-editor" hidden></div>
         </div>
         </section>
-        <section id="nutritionDiary" aria-label="Ernährungstagebuch">
-          <section id="nutritionWeek" class="nutrition-tools" aria-labelledby="nutritionWeekHeading">
+        <section id="nutritionWeek" class="nutrition-tools" aria-labelledby="nutritionWeekHeading" hidden>
             <h3 id="nutritionWeekHeading">Letzte 7 Tage</h3>
             <p id="nutritionWeekPeriod" class="fine-print"></p>
             <output id="nutritionWeekStatus" class="tab-sync-detail" aria-live="polite"></output>
             <div id="nutritionWeekTotals" class="nutrition-totals"></div>
+            <div id="nutritionWeekChartSection" class="nutrition-week-chart" aria-labelledby="nutritionWeekChartHeading" hidden>
+              <h4 id="nutritionWeekChartHeading">Tagesverlauf</h4>
+              <p class="nutrition-week-legend"><span>Aufnahme</span><span>Verbrauch</span></p>
+              <div id="nutritionWeekChart" class="nutrition-week-chart-days"></div>
+            </div>
             <details id="nutritionWeekDetails" hidden><summary>Tageswerte anzeigen</summary><div class="nutrition-week-table"><table aria-label="Ernährung der letzten 7 Tage"><thead><tr><th scope="col">Tag</th><th scope="col">Aufnahme<br>kcal</th><th scope="col">Verbrauch<br>kcal</th><th scope="col">Bilanz<br>kcal</th></tr></thead><tbody id="nutritionWeekDays"></tbody></table></div></details>
             <p class="fine-print">Sieben abgeschlossene Tage bis gestern. Aufnahme aus deinem Tagebuch, Verbrauch aus Garmin Connect. Die Bilanz setzt vollständig erfasste Mahlzeiten voraus. Fehlende Werte zählen nicht als null; Makro-Durchschnitte berücksichtigen nur Tage mit vollständigen Angaben für das jeweilige Makro.</p>
-          </section>
+        </section>
+        <section id="nutritionDiary" aria-label="Ernährungstagebuch">
           <div class="nutrition-toolbar"><button class="secondary-button" type="button" id="nutritionPrevious" aria-label="Vorheriger Tag">←</button><label>Tag <input type="date" id="nutritionDate"></label><button class="secondary-button" type="button" id="nutritionNext" aria-label="Nächster Tag">→</button><button class="secondary-button" type="button" id="nutritionToday">Heute</button></div>
           <div id="nutritionTotals" class="nutrition-totals"></div>
           <div id="nutritionEntries" class="nutrition-list"></div>
@@ -457,10 +463,10 @@
     </div>
   </dialog>
   <script src="/api.js?v=224" defer></script>
-  <script src="/navigation.js?v=231" defer></script>
+  <script src="/navigation.js?v=232" defer></script>
   <script src="/state.js?v=220" defer></script>
   <script src="/views.js?v=224" defer></script>
-  <script src="/plan-views.js?v=6" defer></script>
+  <script src="/plan-views.js?v=7" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=19" defer></script>
@@ -468,7 +474,7 @@
   <script src="/auth.js?v=4" defer></script>
   <script src="/sync-status.js?v=5" defer></script>
   <script src="/notifications.js?v=3" defer></script>
-  <script src="/nutrition.js?v=26" defer></script>
+  <script src="/nutrition.js?v=27" defer></script>
   <script src="/analysis.js?v=112" defer></script>
   <script src="/activity-details.js?v=12" defer></script>
   <script src="/performance-view.js?v=8" defer></script>
@@ -476,6 +482,6 @@
   <script src="/state-loader.js?v=2" defer></script>
   <script src="/sync-actions.js?v=2" defer></script>
   <script src="/settings.js?v=3" defer></script>
-  <script src="/app.js?v=282" defer></script>
+  <script src="/app.js?v=283" defer></script>
 </body>
 </html>
