@@ -839,8 +839,6 @@ test("natural Coach clarification survives reload and saves the follow-up", asyn
   await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
   await page.reload();
   await expect(page.locator("#messages")).toContainText("Wie fühlen sich deine Beine an?");
-  const jumpToComposer = page.locator("#chatJumpToComposer");
-  if (await jumpToComposer.isVisible()) await jumpToComposer.click();
   await page.locator("#messageInput").fill("Ziemlich schwer.");
   await page.locator("#messageInput").press("Enter");
   await expect(page.locator("#messages")).toContainText("Deine Rückmeldung ist gespeichert.");
