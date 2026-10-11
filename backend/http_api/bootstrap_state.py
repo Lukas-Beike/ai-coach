@@ -65,6 +65,7 @@ class PublicBootstrapService:
 
     def read(self) -> dict[str, Any]:
         deps = self._dependencies
+        registry = getattr(deps, "provider_registry", DEFAULT_PROVIDER_REGISTRY)
         # Resolve the manager only after taking the shared lock; all reads below
         # then reuse this single unit of work, including nested service reads.
         with deps.database_lock, deps.database_manager().unit_of_work() as db:
@@ -190,7 +191,7 @@ class PublicBootstrapService:
                     provider_id: deps.full_provider_resync_service().state(
                         provider_id, db
                     )
-                    for _, provider_id in deps.provider_registry.full_resync_routes()
+                    for _, provider_id in registry.full_resync_routes()
                 },
                 "sync": deps.sync_public_state_service().browser_state(
                     freshness=freshness,
@@ -214,7 +215,7 @@ class PublicBootstrapService:
                     f"{provider_id}_days": deps.sync_state_repository().sync_period(
                         provider_id, deps.sync_period_defaults, deps.all_sync_days
                     )
-                    for provider_id in deps.provider_registry.sync_period_defaults()
+                    for provider_id in registry.sync_period_defaults()
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {

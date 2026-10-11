@@ -105,6 +105,7 @@ class PublicStateService:
 
     def read(self, local_only: bool = False) -> dict[str, Any]:
         deps = self._deps
+        registry = getattr(deps, "provider_registry", DEFAULT_PROVIDER_REGISTRY)
         prelude = deps.local_prelude.read(local_only)
         snapshot = prelude.snapshot
         activities = prelude.activities
@@ -181,7 +182,7 @@ class PublicStateService:
                 },
                 "provider_resync": {
                     provider_id: deps.provider_resync.state(provider_id, db)
-                    for _, provider_id in deps.provider_registry.full_resync_routes()
+                    for _, provider_id in registry.full_resync_routes()
                 },
                 "sync": sync,
                 "library_sync": {
@@ -194,7 +195,7 @@ class PublicStateService:
                     f"{provider_id}_days": deps.sync_state.sync_period(
                         provider_id, deps.sync_period_defaults, deps.all_sync_days
                     )
-                    for provider_id in deps.provider_registry.sync_period_defaults()
+                    for provider_id in registry.sync_period_defaults()
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {
