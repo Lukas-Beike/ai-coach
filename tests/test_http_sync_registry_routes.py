@@ -22,6 +22,7 @@ from backend.http_api.sync_commands import (
     SYNC_POST_PATHS,
     SyncCommandEndpoint,
 )
+from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.providers.descriptors import ManualSyncRoute
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
@@ -317,6 +318,97 @@ class InjectedRegistryMockProviderTests(unittest.TestCase):
         self.assertEqual((202, {"id": "job-1"}), endpoint.execute(ACME_PATH))
         full_resync.provider_configured.assert_not_called()
         queue.enqueue.assert_called_once()
+
+
+class InjectedRegistryPostRouteTests(unittest.TestCase):
+    """The POST route decides acceptance and body reads from its injected registry."""
+
+    def test_injected_fixed_payload_route_is_accepted_without_body(self) -> None:
+        registry = _acme_registry(
+            uses_sync_period=False,
+            payload=(("reason", "manual"),),
+            message=None,
+        )
+        endpoint = Mock()
+        endpoint.execute.return_value = (202, {"id": "job-9"})
+        handler = Mock()
+
+        handled = SyncCommandPostRoute(lambda: endpoint, registry=registry).handle(
+            handler, ACME_PATH
+        )
+
+        self.assertTrue(handled)
+        handler.read_json.assert_not_called()
+        endpoint.execute.assert_called_once_with(ACME_PATH, None)
+        handler.send_json.assert_called_once_with(202, {"id": "job-9"})
+
+    def test_injected_period_route_reads_the_body(self) -> None:
+        registry = _acme_registry(
+            uses_sync_period=True,
+            payload=(("reason", "manual"),),
+            message=None,
+        )
+        endpoint = Mock()
+        endpoint.execute.return_value = (202, {"id": "job-10"})
+        handler = Mock()
+        handler.read_json.return_value = {"days": 7}
+
+        handled = SyncCommandPostRoute(lambda: endpoint, registry=registry).handle(
+            handler, ACME_PATH
+        )
+
+        self.assertTrue(handled)
+        handler.read_json.assert_called_once_with()
+        endpoint.execute.assert_called_once_with(ACME_PATH, {"days": 7})
+
+    def test_default_route_rejects_injected_path_without_building_endpoint(
+        self,
+    ) -> None:
+        factory = Mock()
+        handler = Mock()
+
+        handled = SyncCommandPostRoute(factory).handle(handler, ACME_PATH)
+
+        self.assertFalse(handled)
+        factory.assert_not_called()
+        handler.read_json.assert_not_called()
+        handler.send_json.assert_not_called()
+
+    def test_injected_route_rejects_a_path_no_registry_provider_declares(self) -> None:
+        registry = _acme_registry(
+            uses_sync_period=False,
+            payload=(("reason", "manual"),),
+            message=None,
+        )
+        factory = Mock()
+        handler = Mock()
+
+        handled = SyncCommandPostRoute(factory, registry=registry).handle(
+            handler, "/api/acme-mock/other"
+        )
+
+        self.assertFalse(handled)
+        factory.assert_not_called()
+        handler.read_json.assert_not_called()
+
+    def test_injected_registry_keeps_builtin_sync_paths(self) -> None:
+        registry = _acme_registry(
+            uses_sync_period=False,
+            payload=(("reason", "manual"),),
+            message=None,
+        )
+        endpoint = Mock()
+        endpoint.execute.return_value = (202, {"id": "job-11"})
+        handler = Mock()
+        handler.read_json.return_value = {"days": 3}
+
+        self.assertTrue(
+            SyncCommandPostRoute(lambda: endpoint, registry=registry).handle(
+                handler, "/api/sync"
+            )
+        )
+        handler.read_json.assert_called_once_with()
+        endpoint.execute.assert_called_once_with("/api/sync", {"days": 3})
 
 
 if __name__ == "__main__":

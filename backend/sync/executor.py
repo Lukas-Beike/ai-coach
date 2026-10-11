@@ -29,6 +29,7 @@ from backend.sync.jobs import (
 )
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.performance import PerformanceRefreshService
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.provider_runtime import ProviderJobOwner
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.selected import SelectedWorkoutSyncService
@@ -465,11 +466,13 @@ class SyncJobExecutor:
         outcome_service: SyncJobOutcomeService,
         all_sync_days: int,
         job_owners: Mapping[str, ProviderJobOwner],
+        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._job_owners = job_owners
         self._historical_sync = historical_sync
         self._outcome_service = outcome_service
         self._all_sync_days = all_sync_days
+        self._registry = registry
 
     def run(self, job: dict[str, Any]) -> None:
         """Execute a claimed job, recording failures through its outcome owner."""
@@ -491,6 +494,7 @@ class SyncJobExecutor:
                 if isinstance(stored_payload, dict)
                 else decode_job_payload(stored_payload),
                 all_sync_days=self._all_sync_days,
+                registry=self._registry,
             )
         except JobValidationError as exc:
             raise AppError(400, str(exc), reason="invalid_job_request") from exc

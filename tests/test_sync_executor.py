@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
-from provider_runtime_fakes import ACME_ID, FakeJobOwner
+from provider_runtime_fakes import ACME_ID, FakeJobOwner, acme_descriptor
 
 from backend.errors import AppError
 from backend.providers.descriptors import CALENDAR_ID, WEATHER_ID
@@ -29,6 +29,7 @@ from backend.sync.executor import (
     build_job_owners,
     dispatch_provider_job,
 )
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 
 class RecordingService:
@@ -218,6 +219,7 @@ class SyncJobExecutorTests(unittest.TestCase):
                 "historical_sync",
                 "outcome_service",
                 "all_sync_days",
+                "registry",
             },
         )
 
@@ -730,8 +732,51 @@ class AcmeMockProviderJobTests(unittest.TestCase):
             result = executor.execute(self.job)
 
         self.assertEqual(result, {"status": "completed", "rows": 3})
-        normalize.assert_called_once_with(ACME_ID, "refresh", {}, all_sync_days=-1)
+        normalize.assert_called_once_with(
+            ACME_ID,
+            "refresh",
+            {},
+            all_sync_days=-1,
+            registry=DEFAULT_PROVIDER_REGISTRY,
+        )
         self.assertEqual(self.owner.calls[0]["job_type"], "refresh")
+
+    def test_injected_registry_normalizes_the_acme_job_and_default_rejects_it(
+        self,
+    ) -> None:
+        registry = ProviderRegistry(
+            (*DEFAULT_PROVIDER_REGISTRY.all(), acme_descriptor())
+        )
+        job = {
+            "id": "job-acme",
+            "provider": ACME_ID,
+            "type": "refresh",
+            "payload": {"reason": "acme sync"},
+        }
+        injected_owner = FakeJobOwner({"status": "completed", "rows": 3})
+        injected = SyncJobExecutor(
+            job_owners={ACME_ID: injected_owner},
+            historical_sync=Mock(),
+            outcome_service=cast(Any, RecordingOutcomes()),
+            all_sync_days=-1,
+            registry=registry,
+        )
+
+        self.assertEqual(injected.execute(job), {"status": "completed", "rows": 3})
+        self.assertEqual(injected_owner.calls[0]["payload"], {"reason": "acme sync"})
+
+        default_owner = FakeJobOwner()
+        default = SyncJobExecutor(
+            job_owners={ACME_ID: default_owner},
+            historical_sync=Mock(),
+            outcome_service=cast(Any, RecordingOutcomes()),
+            all_sync_days=-1,
+        )
+        with self.assertRaises(AppError) as raised:
+            default.execute(job)
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(raised.exception.reason, "invalid_job_request")
+        self.assertEqual(default_owner.calls, [])
 
     def test_run_completes_the_acme_job_and_queues_its_declared_follow_up(
         self,
