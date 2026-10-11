@@ -22,6 +22,7 @@ from backend.http_api.state_prelude import (
 from backend.planning import season as planning_season
 from backend.runtime.ports import ProviderStateReader
 from backend.sync import intervals_state
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 if TYPE_CHECKING:
     from backend.athlete.profile import ProfileService
@@ -80,6 +81,7 @@ class PublicStateDependencies:
     calendar_history_days: int
     calendar_future_days: int
     local_now: Callable[[], datetime]
+    provider_registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
 
 
 class PublicStateService:
@@ -178,8 +180,8 @@ class PublicStateService:
                     "status": self._get_value("garmin_sync_status", manager) or None,
                 },
                 "provider_resync": {
-                    "intervals": deps.provider_resync.state("intervals", db),
-                    "garmin": deps.provider_resync.state("garmin", db),
+                    provider_id: deps.provider_resync.state(provider_id, db)
+                    for _, provider_id in deps.provider_registry.full_resync_routes()
                 },
                 "sync": sync,
                 "library_sync": {
@@ -189,12 +191,10 @@ class PublicStateService:
                     "state": deps.workout_library_sync_state.summary(),
                 },
                 "sync_settings": {
-                    "intervals_days": deps.sync_state.sync_period(
-                        "intervals", deps.sync_period_defaults, deps.all_sync_days
-                    ),
-                    "garmin_days": deps.sync_state.sync_period(
-                        "garmin", deps.sync_period_defaults, deps.all_sync_days
-                    ),
+                    f"{provider_id}_days": deps.sync_state.sync_period(
+                        provider_id, deps.sync_period_defaults, deps.all_sync_days
+                    )
+                    for provider_id in deps.provider_registry.sync_period_defaults()
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {
