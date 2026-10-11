@@ -85,7 +85,7 @@ def sport_records(
 
 class ModuleContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 1)
+        self.assertEqual(MAPPER_VERSION, 2)
 
     def test_naive_retrieved_at_is_a_programming_error_for_both_mappers(self) -> None:
         naive_time = naive("2026-10-11T08:00:00")
@@ -480,6 +480,7 @@ class AthleteFixtureTests(unittest.TestCase):
                 (MetricKind.THRESHOLD_HR, Sport.RUN, 172),
                 (MetricKind.MAX_HR, Sport.RUN, 192),
                 (MetricKind.THRESHOLD_PACE, Sport.RUN, 4.2),
+                (MetricKind.WEIGHT, None, 70.0),
             },
         )
 
@@ -509,6 +510,7 @@ class AthleteFixtureTests(unittest.TestCase):
                 MetricKind.THRESHOLD_HR,
                 MetricKind.MAX_HR,
                 MetricKind.THRESHOLD_PACE,
+                MetricKind.WEIGHT,
             },
         )
 
@@ -906,6 +908,121 @@ class AthleteRecordIdentityTests(unittest.TestCase):
             issue_tuples(result),
             [(None, "sportSettings", IssueReason.INVALID_TYPE)],
         )
+
+
+class AthleteWeightAndThresholdTests(unittest.TestCase):
+    def test_athlete_weight_is_undated_and_sport_neutral(self) -> None:
+        result = thresholds({"id": "a1", "weight": 81.5})
+        self.assertEqual(sport_records(result), {(MetricKind.WEIGHT, None, 81.5)})
+        self.assertEqual(result.issues, ())
+        record = result.records[0]
+        self.assertEqual(record.observed_on, OBSERVED_ON)
+        self.assertEqual(record.value.unit, MetricKind.WEIGHT.unit)
+        self.assertEqual(record.provenance.source_record_id, "a1")
+
+    def test_comma_decimal_and_out_of_range_athlete_weight_are_rejected(self) -> None:
+        self.assertEqual(
+            issue_tuples(thresholds({"id": "a1", "weight": "81,5"})),
+            [("a1", "weight", IssueReason.INVALID_NUMBER)],
+        )
+        result = thresholds({"id": "a1", "weight": 500})
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            issue_tuples(result), [("a1", "weight", IssueReason.OUT_OF_RANGE)]
+        )
+
+    def test_athlete_wide_lthr_and_max_hr_are_sport_neutral(self) -> None:
+        result = thresholds({"id": "a1", "lthr": 165, "max_hr": 188})
+        self.assertEqual(
+            sport_records(result),
+            {(MetricKind.THRESHOLD_HR, None, 165), (MetricKind.MAX_HR, None, 188)},
+        )
+        self.assertEqual(result.issues, ())
+
+    def test_athlete_wide_max_hr_aliases_follow_the_reader_order(self) -> None:
+        result = thresholds({"id": "a1", "maxHR": 190, "max_heartrate": 180})
+        self.assertEqual(sport_records(result), {(MetricKind.MAX_HR, None, 190)})
+
+    def test_zero_athlete_lthr_and_max_hr_are_unset_without_issues(self) -> None:
+        result = thresholds({"id": "a1", "lthr": 0, "max_hr": 0})
+        self.assertEqual(result.records, ())
+        self.assertEqual(result.issues, ())
+
+    def test_sport_setting_lthr_keeps_the_athlete_value_as_its_own_record(
+        self,
+    ) -> None:
+        result = thresholds(
+            {
+                "id": "a1",
+                "lthr": 165,
+                "sportSettings": [{"types": ["Ride"], "lthr": "not-a-number"}],
+            }
+        )
+        self.assertEqual(sport_records(result), {(MetricKind.THRESHOLD_HR, None, 165)})
+        self.assertEqual(
+            issue_tuples(result), [("a1", "lthr", IssueReason.INVALID_NUMBER)]
+        )
+
+
+class Vo2MaxMappingTests(unittest.TestCase):
+    def test_ride_vo2max_aliases_follow_the_reader_order(self) -> None:
+        result = thresholds(
+            {"sportSettings": [{"types": ["Ride"], "vo2max": 58, "vo2_max": 55}]}
+        )
+        self.assertEqual(sport_records(result), {(MetricKind.VO2MAX, Sport.RIDE, 58)})
+        fallback = thresholds(
+            {
+                "sportSettings": [
+                    {"types": ["Ride"], "vo2_max": 55, "cycling_vo2max": 50}
+                ]
+            }
+        )
+        self.assertEqual(sport_records(fallback), {(MetricKind.VO2MAX, Sport.RIDE, 55)})
+
+    def test_cycling_and_running_vo2max_keys_are_read_for_their_sport(self) -> None:
+        result = thresholds(
+            {
+                "sportSettings": [
+                    {"types": ["Ride"], "cycling_vo2max": 50},
+                    {"types": ["Run"], "running_vo2max": 52.5},
+                    {"types": ["Run"], "cycling_vo2max": 49},
+                ]
+            }
+        )
+        self.assertEqual(
+            sport_records(result),
+            {
+                (MetricKind.VO2MAX, Sport.RIDE, 50),
+                (MetricKind.VO2MAX, Sport.RUN, 52.5),
+            },
+        )
+
+    def test_vo2max_is_read_only_for_ride_and_run(self) -> None:
+        result = thresholds({"sportSettings": [{"types": ["Swim"], "vo2max": 45}]})
+        self.assertEqual(result.records, ())
+        self.assertEqual(result.issues, ())
+
+    def test_zero_vo2max_is_unset_without_falling_through(self) -> None:
+        result = thresholds(
+            {"sportSettings": [{"types": ["Ride"], "vo2max": 0, "vo2_max": 55}]}
+        )
+        self.assertEqual(result.records, ())
+        self.assertEqual(result.issues, ())
+
+    def test_out_of_range_vo2max_is_rejected_under_its_alias(self) -> None:
+        result = thresholds(
+            {"sportSettings": [{"types": ["Run"], "running_vo2max": 200}]}
+        )
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            issue_tuples(result),
+            [(None, "running_vo2max", IssueReason.OUT_OF_RANGE)],
+        )
+
+    def test_wellness_zero_vo2max_is_unset_without_issues(self) -> None:
+        result = wellness([row(vo2max=0)])
+        self.assertEqual(result.records, ())
+        self.assertEqual(result.issues, ())
 
 
 class AthleteGarbageTests(unittest.TestCase):

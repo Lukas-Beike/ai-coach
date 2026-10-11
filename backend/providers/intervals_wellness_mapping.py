@@ -28,21 +28,39 @@ Athlete thresholds
     Athlete ids that are not short ASCII identifiers are not echoed and yield
     ``source_record_id`` None.
 
-    A zero FTP, lthr, max_hr or pace means "not set". It yields nothing, and
-    its alias chain does not fall through to a later alias, as in the readers.
-    ``threshold_pace`` is mapped for Run entries only, because the readers use
-    it only for running. Values below 20 are metres per second. Larger values
-    are seconds per kilometre and convert to ``1000 / value`` m/s.
+    A zero FTP, lthr, max_hr, pace or VO2max means "not set". It yields nothing,
+    and its alias chain does not fall through to a later alias, as in the
+    readers. ``threshold_pace`` is mapped for Run entries only, because the
+    readers use it only for running. Values below 20 are metres per second.
+    Larger values are seconds per kilometre and convert to ``1000 / value`` m/s.
+    VO2max is Ride-scoped through ``vo2max``, ``vo2_max`` or ``cycling_vo2max``
+    and Run-scoped through ``vo2max``, ``vo2_max`` or ``running_vo2max``. Zero
+    VO2max is unset in wellness rows too.
 
     Top-level ``icu_ftp`` becomes a Ride FTP observation only when no Ride FTP
     observation was mapped. A rejected sportSettings FTP therefore allows the
     fallback, which ``current_metrics`` does not do. ``sportInfo``, ``eftp``
     and warm-up or cool-down times are not read.
+
+Athlete record
+    ``weight`` (kg) is observed with sport None on the caller's ``observed_on``,
+    as ``current_metrics`` reads it after the wellness row. The athlete-wide
+    ``lthr`` and ``max_hr`` are observed with sport None. They are the values
+    that the readers use when a sport has no value of its own. A consumer applies
+    that fallback per sport and must not treat sport None as a sport value.
+
+    Known deviations from the readers, pinned in ``tests/test_intervals_mapping_parity.py``:
+    a zero athlete-wide lthr is 0 bpm in ``current_metrics`` but unset here;
+    a rejected sport value lets the athlete-wide fallback apply, as the top-level
+    FTP does; a comma-decimal athlete weight is rejected as malformed. Athlete-wide
+    VO2max, athlete body fat, activity-derived max HR and wellness ``sportInfo``
+    are not mapped.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Final
@@ -65,7 +83,7 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-MAPPER_VERSION: Final = 1
+MAPPER_VERSION: Final = 2
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
 _DAY_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
@@ -80,6 +98,7 @@ _UNSET_WHEN_ZERO: Final = frozenset(
         MetricKind.THRESHOLD_HR,
         MetricKind.MAX_HR,
         MetricKind.THRESHOLD_PACE,
+        MetricKind.VO2MAX,
     }
 )
 
@@ -107,13 +126,27 @@ _WELLNESS_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
     (MetricKind.ATL, ("atl", "atlLoad")),
 )
 
+_LTHR_ALIASES: Final = ("lthr",)
+_MAX_HR_ALIASES: Final = ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")
 _SPORT_SETTING_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
     (MetricKind.FTP, ("ftp", "indoor_ftp")),
-    (MetricKind.THRESHOLD_HR, ("lthr",)),
-    (MetricKind.MAX_HR, ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")),
+    (MetricKind.THRESHOLD_HR, _LTHR_ALIASES),
+    (MetricKind.MAX_HR, _MAX_HR_ALIASES),
 )
+# The Run entry reads running_vo2max where the Ride entry reads cycling_vo2max,
+# as current_metrics does. Other sports have no VO2max observation.
+_VO2MAX_ALIASES_BY_SPORT: Final[Mapping[Sport, tuple[str, ...]]] = {
+    Sport.RIDE: ("vo2max", "vo2_max", "cycling_vo2max"),
+    Sport.RUN: ("vo2max", "vo2_max", "running_vo2max"),
+}
 _RUN_PACE_ALIASES: Final = ("threshold_pace",)
 _TOP_LEVEL_RIDE_FTP_ALIASES: Final = ("icu_ftp",)
+# Athlete-wide values: sport None, read after the sport entries.
+_ATHLETE_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
+    (MetricKind.WEIGHT, ("weight",)),
+    (MetricKind.THRESHOLD_HR, _LTHR_ALIASES),
+    (MetricKind.MAX_HR, _MAX_HR_ALIASES),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +203,8 @@ def map_intervals_athlete_thresholds(
     collector = _Collector()
     for entry in _sport_settings(athlete, scope, collector):
         _map_sport_setting(entry, scope, collector)
+    for kind, aliases in _ATHLETE_FIELDS:
+        _add_field(collector, scope, athlete, kind, aliases)
     if not _has_ride_ftp(collector.records):
         _add_field(
             collector,
@@ -265,6 +300,11 @@ def _map_sport_setting(entry: object, scope: _Scope, collector: _Collector) -> N
         return
     for kind, aliases in _SPORT_SETTING_FIELDS:
         _add_field(collector, scope, entry, kind, aliases, sport=sport)
+    vo2max_aliases = _VO2MAX_ALIASES_BY_SPORT.get(sport)
+    if vo2max_aliases is not None:
+        _add_field(
+            collector, scope, entry, MetricKind.VO2MAX, vo2max_aliases, sport=sport
+        )
     if sport is Sport.RUN:
         _add_field(
             collector,

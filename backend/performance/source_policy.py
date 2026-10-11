@@ -22,6 +22,10 @@ Within a provider, ``select_current`` ranks as the legacy readers do:
 * other dated kinds: newest ``observed_on``, then the last Garmin input record;
 * sport-scoped kinds (FTP, thresholds, max HR, VO2max): dates are ignored, the
   last Garmin input record wins, and the first Intervals sport setting wins.
+* Intervals athlete-level values (weight from the athlete record) carry the
+  athlete id rather than a wellness day. They are exempt from the latest-row
+  restriction and rank below any dated observation, so the latest wellness value
+  wins and the athlete value is the fallback, as the ``current_metrics`` chain.
 
 For ``select_daily``, each calendar day independently takes the first provider in
 the rule's order that has an observation that day. Within a provider the first
@@ -33,9 +37,11 @@ manual values, per-sport settings from the wellness row, Intervals eFTP, the
 generic top-level FTP and threshold-HR fallbacks, and activity-derived fallbacks
 such as the maximum recorded heart rate.
 
-Mapper gaps are pinned by named tests in ``tests/test_source_policy.py``: Garmin
-cycling FTP history, Garmin sleep score 0, athlete-level weight, Garmin
-heart-rate-zone max HR and sport-setting VO2max.
+The one mapper gap still open is pinned by a named test in
+``tests/test_source_policy.py``: Garmin cycling FTP history is observed, but the
+legacy current FTP reads only the cycling FTP section. Garmin sleep score 0 and
+Garmin heart-rate-zone max HR, athlete-level weight, athlete-wide threshold HR and
+max HR, and sport-setting VO2max are mapped and covered by parity tests.
 
 This module is stdlib-only except for ``backend.canonical`` and must not import
 ``server.py``, providers or other domain packages.
@@ -172,13 +178,29 @@ _SPORT_SCOPED: Final[frozenset[MetricKind]] = frozenset(
 type _Rank = tuple[date, datetime, int]
 
 
+def _is_athlete_level(observation: Observation) -> bool:
+    """Return True for Intervals values taken from the athlete record.
+
+    Wellness observations use their ``YYYY-MM-DD`` row id, so an Intervals
+    observation whose record id is not its own ISO day comes from the athlete
+    record (or has no record id). Known limit: an athlete id that is itself an ISO
+    date would be misread as a wellness value. Intervals athlete ids are not dates.
+    """
+    if observation.provenance.provider is not _INTERVALS:
+        return False
+    return (
+        observation.provenance.source_record_id != observation.observed_on.isoformat()
+    )
+
+
 def _current_rank(index: int, observation: Observation, kind: MetricKind) -> _Rank:
     """Rank within one provider; a larger rank wins.
 
     The tie key is the input position: the last Garmin record wins, and the first
-    Intervals record wins.
+    Intervals record wins. Athlete-level values rank below any dated value.
     """
-    day = _NO_DATE if kind in _SPORT_SCOPED else observation.observed_on
+    undated = kind in _SPORT_SCOPED or _is_athlete_level(observation)
+    day = _NO_DATE if undated else observation.observed_on
     moment = (
         (observation.observed_at or _EARLIEST)
         if kind is MetricKind.WEIGHT
@@ -203,7 +225,9 @@ def _within_latest_row(
 ) -> bool:
     if not rule.latest_intervals_row or latest_wellness_day is None:
         return True
-    if observation.provenance.provider is not _INTERVALS:
+    if observation.provenance.provider is not _INTERVALS or _is_athlete_level(
+        observation
+    ):
         return True
     return observation.observed_on == latest_wellness_day
 
