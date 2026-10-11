@@ -250,22 +250,32 @@ function performanceSection(root, title, items, detail = "") {
   root.append(section);
 }
 
-function renderCurrentPerformance(metrics) {
+function currentPerformanceValues(metrics, history) {
+  const values = { ...metrics };
+  const pulse = [values.running_max_hr_bpm, values.cycling_max_hr_bpm].filter((item) => item?.value != null && Number.isFinite(Number(item.value))).sort((a, b) => Number(b.value) - Number(a.value))[0];
+  values.max_hr_bpm = pulse;
+  const power = (history?.body?.windows?.["12w"]?.metrics?.cycling_w_per_kg || []).flatMap((item) => (item.points || []).filter(analysisValidPoint).map((point) => ({ ...point, source: item.source, unit: "W/kg" }))).sort((a, b) => b.date.localeCompare(a.date) || Number(b.source === "Garmin Connect") - Number(a.source === "Garmin Connect"))[0];
+  values.cycling_w_per_kg = power;
+  return values;
+}
+
+function renderCurrentPerformance(metrics, history) {
+  metrics = currentPerformanceValues(metrics, history);
   const root = document.getElementById("currentPerformance");
   root.replaceChildren(reportNode("h3", "Aktuelle Leistungswerte"));
   const groups = [
+    ["Allgemein", [["max_hr_bpm", "Maximale Herzfrequenz"]]],
     ["Laufen", [
       ["run_threshold_pace_seconds_per_km", "Schwellenpace"],
       ["run_threshold_watts", "Schwellenleistung"],
       ["run_threshold_hr_bpm", "Schwellen-Herzfrequenz"],
-      ["running_max_hr_bpm", "Maximale Herzfrequenz"],
       ["running_vo2max_ml_kg_min", "VO\u2082max \u00b7 Sch\u00e4tzung"],
     ]],
     ["Radfahren", [
       ["cycling_ftp_watts", "FTP"],
+      ["cycling_w_per_kg", "Leistung pro Gewicht"],
       ["cycling_eftp_watts", "eFTP \u00b7 Sch\u00e4tzung"],
       ["bike_threshold_hr_bpm", "Schwellen-Herzfrequenz"],
-      ["cycling_max_hr_bpm", "Maximale Herzfrequenz"],
       ["cycling_vo2max_ml_kg_min", "VO\u2082max \u00b7 Sch\u00e4tzung"],
     ]],
   ];
@@ -281,7 +291,9 @@ function renderCurrentPerformance(metrics) {
       row.append(heading, reportNode("td", metric?.value == null ? "\u2014" : analysisValue(metric.value, metric.unit || "")));
       body.append(row);
     }
-    table.append(body); grid.append(table);
+    table.append(body);
+    if (sport === "Allgemein") table.classList.add("current-performance-general");
+    grid.append(table);
   }
   root.append(grid);
   makeAnalysisSectionCollapsible(root, "current-performance");
@@ -298,7 +310,7 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   const root = $("#performancePredictions");
   root.replaceChildren();
   const values = performance?.metrics || {};
-  renderCurrentPerformance(values);
+  renderCurrentPerformance(values, performance?.history);
   const predictions = racePredictionRows(values);
   root.hidden = false;
   root.append(reportNode("h4", "Laufprognosen"));

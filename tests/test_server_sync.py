@@ -1365,6 +1365,7 @@ class ServerSyncTests(ServerTestCase):
                     [{"id": "2026-08-31"}],
                     [],
                     {"id": "athlete-1"},
+                    {"secs": [], "curves": []},
                 ],
             ):
                 snapshot = reader.fetch_snapshot(activity_days=1)

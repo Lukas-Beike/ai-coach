@@ -955,10 +955,6 @@ def build_structured_tool_schemas(
                     "type": "string",
                     "description": "Optional specific date YYYY-MM-DD",
                 },
-                "planned_unit_id": {
-                    "type": "string",
-                    "description": "Optional local unit ID: read fueling suggestion, exact current fingerprint and confirmed plan instead of intake.",
-                },
                 "start": {
                     "type": "string",
                     "description": "Optional start date YYYY-MM-DD for range",
@@ -967,38 +963,6 @@ def build_structured_tool_schemas(
                     "type": "string",
                     "description": "Optional end date YYYY-MM-DD for range",
                 },
-            },
-        ),
-        _canonical_coach_tool(
-            "save_fueling_plan",
-            "Save an explicitly confirmed local training fueling plan after reading its current fingerprint with read_nutrition. Never log consumption or synchronize a workout. Ask about quantities and tolerance; do not infer actual intake.",
-            {
-                "payload": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "planned_unit_id",
-                        "unit_sha256",
-                        "carbs_g_per_hour",
-                        "fluid_ml_per_hour",
-                    ],
-                    "properties": {
-                        "planned_unit_id": {"type": "string"},
-                        "unit_sha256": {"type": "string"},
-                        "carbs_g_per_hour": {
-                            "type": "number",
-                            "minimum": 0,
-                            "maximum": 120,
-                        },
-                        "fluid_ml_per_hour": {
-                            "type": "number",
-                            "minimum": 0,
-                            "maximum": 1500,
-                        },
-                        "template_id": {"type": "string"},
-                        "notes": {"type": "string"},
-                    },
-                }
             },
         ),
     ]

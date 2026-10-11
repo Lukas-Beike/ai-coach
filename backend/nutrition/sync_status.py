@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from backend.db.manager import DatabaseManager
@@ -52,6 +52,60 @@ class NutritionSyncStatusService:
         validated_date = validate_iso_date(meal_date)
         with self._db_lock, self._database_manager.unit_of_work() as db:
             return self._nutrition_repository.day_sync_snapshot(db, validated_date)
+
+    def get_week_summary(self) -> dict[str, Any]:
+        """Compare logged intake with measured expenditure for seven closed days."""
+        today = self._local_now().date()
+        dates = [
+            (today - timedelta(days=offset)).isoformat() for offset in range(7, 0, -1)
+        ]
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            summaries = [
+                self._nutrition_repository.day_summary(db, day) for day in dates
+            ]
+            serialized = self._key_value_repository.get(db, "garmin_snapshot")
+        try:
+            snapshot = json.loads(serialized or "{}")
+        except TypeError, ValueError:
+            snapshot = {}
+        days = []
+        for summary in summaries:
+            expenditure = garmin_daily_expenditure(snapshot, summary["date"], today)
+            intake = summary["total_kcal"] if summary["entry_count"] else None
+            consumed = expenditure["total_kcal"]
+            days.append(
+                {
+                    "date": summary["date"],
+                    "intake_kcal": intake,
+                    "expenditure_kcal": consumed,
+                    "balance_kcal": intake - consumed
+                    if intake is not None and consumed is not None
+                    else None,
+                    "energy_expenditure": expenditure,
+                    **{
+                        key: summary[f"total_{key}"] if summary["entry_count"] else None
+                        for key in ("carbs_g", "protein_g", "fat_g")
+                    },
+                }
+            )
+        averages = {}
+        for key in ("intake_kcal", "expenditure_kcal", "carbs_g", "protein_g", "fat_g"):
+            values = [day[key] for day in days if day[key] is not None]
+            averages[key] = {
+                "value": round(sum(values) / len(values), 1) if values else None,
+                "days": len(values),
+            }
+        balances = [
+            day["balance_kcal"] for day in days if day["balance_kcal"] is not None
+        ]
+        return {
+            "start_date": dates[0],
+            "end_date": dates[-1],
+            "days": days,
+            "averages": averages,
+            "balance_kcal": sum(balances) if balances else None,
+            "balance_days": len(balances),
+        }
 
     def approval_manifest(
         self,

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 import threading
@@ -68,6 +69,71 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
         self.assertEqual(summary["energy_expenditure"]["status"], "unavailable")
         self.assertTrue(summary["energy_expenditure"]["provisional"])
         self.assertIsNone(summary["energy_expenditure"]["total_kcal"])
+
+    def test_week_uses_closed_days_and_only_paired_values_for_balance(self) -> None:
+        for day, kcal, carbs in [
+            ("2026-09-17", 2200, 200),
+            ("2026-09-18", 1800, None),
+            ("2026-09-19", 1600, 100),
+            ("2026-09-24", 9999, 999),
+        ]:
+            self.service.log_meal(
+                {
+                    "meal_date": day,
+                    "description": "Synthetic meal",
+                    "kcal": kcal,
+                    "carbs_g": carbs,
+                    "protein_g": 100,
+                    "fat_g": 50,
+                }
+            )
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO kv(key,value,updated_at) VALUES (?,?,?)",
+                (
+                    "garmin_snapshot",
+                    json.dumps(
+                        {
+                            "daily_stats": [
+                                {"date": "2026-09-17", "totalKilocalories": 2000},
+                                {"date": "2026-09-18", "totalKilocalories": 2100},
+                                {"date": "2026-09-20", "totalKilocalories": 2300},
+                                {
+                                    "date": "2026-09-19",
+                                    "activeKilocalories": 600,
+                                    "bmrKilocalories": 1500,
+                                },
+                                {"date": "2026-09-24", "totalKilocalories": 9999},
+                            ]
+                        }
+                    ),
+                    self.fixed_now,
+                ),
+            )
+        week = self.service.get_week_summary()
+        self.assertEqual(
+            (week["start_date"], week["end_date"]), ("2026-09-17", "2026-09-23")
+        )
+        self.assertEqual(len(week["days"]), 7)
+        self.assertEqual(week["balance_kcal"], -100)
+        self.assertEqual(week["balance_days"], 2)
+        self.assertEqual(week["averages"]["intake_kcal"], {"value": 1866.7, "days": 3})
+        self.assertEqual(
+            week["averages"]["expenditure_kcal"], {"value": 2133.3, "days": 3}
+        )
+        self.assertEqual(week["averages"]["carbs_g"], {"value": 150, "days": 2})
+        self.assertIsNone(week["days"][2]["balance_kcal"])
+        self.assertIsNone(week["days"][3]["intake_kcal"])
+        self.assertEqual(
+            week["days"][0]["energy_expenditure"]["source"], "Garmin Connect"
+        )
+
+    def test_empty_week_does_not_invent_zero_intake_or_macros(self) -> None:
+        week = self.service.get_week_summary()
+        self.assertIsNone(week["balance_kcal"])
+        self.assertEqual(week["balance_days"], 0)
+        for metric in week["averages"].values():
+            self.assertEqual(metric, {"value": None, "days": 0})
 
 
 if __name__ == "__main__":

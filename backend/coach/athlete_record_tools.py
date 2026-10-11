@@ -67,7 +67,6 @@ class CoachAthleteRecordToolService:
             "save_nutrition_entry",
             "update_nutrition_entry",
             "delete_nutrition_entry",
-            "save_fueling_plan",
         }:
             return self._execute_nutrition(name, arguments, intent)
         if name == "save_checkin":
@@ -156,10 +155,6 @@ class CoachAthleteRecordToolService:
         require_coach_scope(intent, self._nutrition_scope(name, arguments))
         if not self._nutrition_diary or not self._nutrition_meal_library:
             raise AppError(500, _NUTRITION_UNAVAILABLE)
-        if name == "save_fueling_plan":
-            return self._nutrition_diary.fueling().save(
-                structured_action_payload(arguments)
-            )
         if name == "save_nutrition_template":
             return self._save_nutrition_template(arguments)
         if name == "save_nutrition_product":

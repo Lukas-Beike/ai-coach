@@ -1224,9 +1224,10 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   #chatPanel > .voice-status { width: min(100%, 760px); margin-right: auto; margin-left: auto; }
   #settingsPanel.active { display: grid; grid-template-columns: minmax(190px, 220px) minmax(0, 1fr); align-items: start; gap: 0 24px; }
   #settingsPanel > .section-heading { grid-column: 1 / -1; }
-  #settingsPanel > .more-segment-nav { position: sticky; top: 24px; grid-column: 1; display: grid; align-content: start; gap: 4px; margin: 0; }
+  #settingsPanel > .more-segment-nav { position: sticky; top: 24px; grid-column: 1; grid-row: 2 / span 8; display: grid; align-content: start; gap: 4px; margin: 0; }
   #settingsPanel > .more-segment-nav a { flex: none; min-height: 46px; justify-content: start; padding: 10px 12px; text-align: left; }
-  #settingsPanel > details { grid-column: 2; width: 100%; }
+  #settingsPanel > .settings-section { grid-column: 2; width: 100%; min-width: 0; }
+  #settingsPanel > .session-settings { order: 1; }
 }
 
 @media (max-width: 767px) {
@@ -1364,27 +1365,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   html.chat-keyboard-open .coach-working { bottom: calc(148px + env(safe-area-inset-bottom)); }
   html.chat-keyboard-open body:has(#chatPanel.active) .toast { bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--composer-height, 0px) + 12px); }
 }
-.change-history-list {
-  display: grid;
-  gap: 0.6rem;
-  margin-top: 0.75rem;
-}
-
-.change-history-item {
-  display: grid;
-  gap: 0.35rem;
-  padding: 0.75rem;
-  border: 1px solid var(--line, var(--history-border-fallback));
-  border-radius: 0.7rem;
-}
-
-.change-history-item-header {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: space-between;
-  align-items: baseline;
-}
-
 .provider-freshness {
   margin-top: 1rem;
 }
@@ -1473,6 +1453,11 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-component-list small { display: block; margin-top: 3px; overflow-wrap: anywhere; }
 .nutrition-tools { display: grid; gap: 12px; margin: 20px 0; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 .nutrition-tools h3, .nutrition-tools p { margin: 0; }
+.nutrition-week-table { overflow-x: auto; margin-top: 12px; }
+.nutrition-week-table table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.nutrition-week-table th, .nutrition-week-table td { padding: 8px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+.nutrition-week-table th:first-child, .nutrition-week-table td:first-child { text-align: left; }
+#nutritionWeek .nutrition-total small { display: block; margin-top: 4px; }
 .nutrition-search { display: grid; gap: 6px; }
 .nutrition-search-row { display: flex; gap: 8px; align-items: center; }
 .nutrition-search-row input { min-width: 0; flex: 1; }
@@ -1549,6 +1534,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 
 .current-performance-groups { display: grid; gap: 24px; margin-top: 0; }
 .current-performance-table { width: 100%; border-collapse: collapse; }
+.current-performance-general { grid-column: 1 / -1; }
 .current-performance-table caption { text-align: left; color: var(--accent-bright); font-size: .9rem; font-weight: 600; padding-bottom: 8px; }
 .current-performance-table th, .current-performance-table td { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .current-performance-table th { text-align: left; font-size: .85rem; font-weight: 500; }

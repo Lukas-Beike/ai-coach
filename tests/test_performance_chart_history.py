@@ -6,6 +6,43 @@ from backend.performance.chart_history import analysis_history
 
 
 class AnalysisHistoryTests(unittest.TestCase):
+    def test_saved_raw_ftp_range_is_read_without_another_sync(self):
+        result = analysis_history(
+            None,
+            {
+                "cycling_ftp_history": [
+                    {"from": "2026-10-01", "value": 270},
+                    {"from": "2026-10-02", "value": 272},
+                ],
+            },
+            date(2026, 10, 2),
+        )
+        self.assertEqual(
+            result["metrics"]["cycling_ftp_watts"][0]["points"][-2:],
+            [
+                {"date": "2026-10-01", "value": 270},
+                {"date": "2026-10-02", "value": 272},
+            ],
+        )
+
+    def test_saved_endurance_group_map_repairs_previously_empty_projection(self):
+        result = analysis_history(
+            None,
+            {
+                "endurance_score": {"groupMap": {"2026-09-28": {"groupAverage": 6850}}},
+                "provider_metrics": {
+                    "endurance_score": {"points": [], "status": "unknown"}
+                },
+            },
+            date(2026, 10, 2),
+        )
+        self.assertEqual(
+            result["provider_metrics"]["endurance_score"]["points"][0]["values"][
+                "groupAverage"
+            ],
+            6850,
+        )
+
     def test_garmin_acute_load_is_dated_and_never_derived_from_daily_or_chronic_load(
         self,
     ):

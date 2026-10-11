@@ -16,6 +16,8 @@ def merge_performance_snapshot(
     merged = dict(current or {})
     merged["synced_at"] = performance["synced_at"]
     merged["athlete"] = performance.get("athlete", {})
+    if "cycling_power_profile" in performance:
+        merged["cycling_power_profile"] = performance["cycling_power_profile"]
     merged["recent_wellness"] = deduplicate_api_records(
         list(performance.get("recent_wellness") or [])
         + list(merged.get("recent_wellness") or [])
@@ -57,6 +59,8 @@ def merge_historical_snapshot(
         if isinstance(historical.get("raw_provider_data"), dict)
         else {}
     )
+    current_raw = current_raw or {}
+    historical_raw = historical_raw or {}
     merged["raw_provider_data"] = {
         "athlete": current_raw.get("athlete") or historical_raw.get("athlete") or {},
         "activities": deduplicate_api_records(

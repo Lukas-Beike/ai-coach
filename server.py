@@ -986,10 +986,6 @@ NUTRITION_ASSEMBLY = NutritionAssembly(
             utc_now=runtime_clock.utc_now,
             local_now=ATHLETE_CLOCK.now,
             intervals_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
-            read_planned_units=lambda: PLANNING_DATA.planned_unit().list(
-                500, future_only=True
-            ),
-            read_profile=lambda: ATHLETE_DATA.profile().get(),
             photo_extractor=lambda: NutritionPhotoExtractionService(
                 selected_model=SETTINGS.selected_model,
                 openai_request=lambda path, payload: (

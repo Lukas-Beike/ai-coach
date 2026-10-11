@@ -130,7 +130,6 @@ function renderActiveRoute(mainRoute, panelRoute) {
   if (state.data && mainRoute === "more") {
     void loadContextPreview();
     void loadLogs();
-    void loadChangeHistory();
   }
 }
 

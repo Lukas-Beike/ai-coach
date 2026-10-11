@@ -212,7 +212,6 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
             ("save_nutrition_template", {"payload": {"name": "Meal"}}),
             ("log_nutrition_template", {"id": "template-1"}),
             ("delete_nutrition_template", {"id": "template-1"}),
-            ("save_fueling_plan", {"payload": {}}),
         ):
             with self.subTest(name=name), self.assertRaises(AppError) as raised:
                 self.service.execute(

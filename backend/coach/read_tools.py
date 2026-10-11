@@ -205,11 +205,6 @@ class CoachReadToolService:
             return {"ok": False, "error": "NutritionService ist nicht verfügbar."}
         service = self._nutrition_diary()
         meal_library = self._nutrition_meal_library()
-        if arguments.get("planned_unit_id"):
-            return {
-                "ok": True,
-                "fueling": service.fueling().read(arguments["planned_unit_id"]),
-            }
         templates = meal_library.list_templates()
         products = meal_library.list_products()
         product_projection = (

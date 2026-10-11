@@ -78,7 +78,7 @@
       "rule": "garmin_wire_key",
       "path": "backend/performance/garmin_metric_history.py",
       "token": "functionalThresholdPower",
-      "count": 2
+      "count": 1
     },
     {
       "rule": "garmin_wire_key",
@@ -498,12 +498,6 @@
       "rule": "icu_identifier",
       "path": "backend/coach/context.py",
       "token": "icu_weighted_avg_watts",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/nutrition/fueling.py",
-      "token": "icu_training_load",
       "count": 1
     },
     {

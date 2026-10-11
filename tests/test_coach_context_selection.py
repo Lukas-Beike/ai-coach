@@ -237,9 +237,6 @@ class CoachContextSelectionTests(unittest.TestCase):
                 "delete_duplicate_intervals_activity"
             },
             "Gleiche die Ernährung mit Intervals ab": {"sync_nutrition"},
-            "Speichere einen Verpflegungsplan für den Halbmarathon": {
-                "save_fueling_plan"
-            },
         }
         registered = {tool["name"] for tool in server.COACH_DIALOGUE_TOOLS}
         for message, expected in cases.items():

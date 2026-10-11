@@ -27,8 +27,9 @@ test("@responsive standard demo shows one compact race table and sport-specific 
   const running = page.locator("[data-analysis-section='development-Lauf']");
   const powerProfile = cycling.locator("#cyclingPowerProfile");
   await expect(powerProfile.locator("tbody tr")).toHaveCount(5);
-  await expect(powerProfile.locator("tbody td")).toHaveText(Array.from({ length: 10 }, () => /^\d+(?:,\d+)? W$/));
-  await expect(cycling.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(1);
+  await expect(powerProfile.locator("tbody td")).toHaveText(Array.from({ length: 5 }, () => /^\d+(?:,\d+)? W$/));
+  await expect(cycling.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(0);
+  await expect(page.locator("#currentPerformance [data-metric='cycling_w_per_kg']")).toHaveCount(1);
   await expect(running).toContainText("Lauf-Belastbarkeit");
   await expect(running.locator("#performancePredictions")).toHaveCount(1);
   await expect(running.locator(".analysis-group-title")).toHaveText("Laufen");
@@ -76,7 +77,7 @@ test("@responsive current performance groups real values by sport before the cha
   } });
   const root = page.locator("#currentPerformance");
   await expect(root).toBeVisible();
-  await expect(root.locator("caption")).toHaveText(["Laufen", "Radfahren"]);
+  await expect(root.locator("caption")).toHaveText(["Allgemein", "Laufen", "Radfahren"]);
   await expect(root.locator("[data-metric='cycling_ftp_watts']")).toContainText("280 W");
   await expect(root.locator("small")).toHaveCount(0);
   await expect(root).not.toContainText("Garmin");
@@ -233,14 +234,14 @@ test("@responsive repeated performance values are labelled once without a normal
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator(".analysis-period-controls")).toHaveCount(0);
   expect((await root.locator(".analysis-point-value").allTextContents()).sort()).toEqual(["200", "210"]);
-  await expect(root.locator('circle[data-series="0"]')).toHaveCount(5);
+  await expect(root.locator('circle[data-series="0"]')).toHaveCount(30);
   await expect(root.locator(".analysis-current-line")).toHaveCount(0);
   await expect(root.locator(".analysis-baseline-band")).toHaveCount(0);
   await root.getByRole("button", { name: "Erklärung zu FTP", exact: true }).click();
   await expect(root.locator(".analysis-info-tooltip:popover-open")).not.toContainText("Grüner Bereich");
 });
 
-test("@responsive performance uses weekly last values and medians, keeps equal weeks and ignores the load period", async ({ page }) => {
+test("@responsive performance keeps dated FTP values and weekly medians independently of the load period", async ({ page }) => {
   const points = [
     { date: "2026-06-01", value: 999 },
     { date: "2026-09-01", value: 200 }, { date: "2026-09-02", value: 220 }, { date: "2026-09-03", value: 210 },
@@ -255,18 +256,18 @@ test("@responsive performance uses weekly last values and medians, keeps equal w
   await expect(root.locator(".analysis-period-controls")).toHaveCount(0);
   const ftp = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Leistungsschwelle · FTP / eFTP", exact: true }) });
   await ftp.getByText("Werte ansehen", { exact: true }).click();
-  await expect(ftp.locator("tbody tr")).toHaveCount(2);
+  await expect(ftp.locator("tbody tr")).toHaveCount(7);
   await expect(ftp.locator("tbody")).toContainText("03.09.2026");
   await expect(ftp.locator("tbody")).toContainText("09.09.2026");
-  await expect(ftp.locator("tbody td:nth-child(2)")).toHaveText([/210 W/, /210 W/]);
-  await expect(ftp.locator("tbody td:nth-child(3)")).toHaveText([/210 W.*3 Messungen/, /215 W.*2 Messungen/]);
+  await expect(ftp.locator("tbody td:nth-child(2)")).toHaveText([/200 W/, /220 W/, /210 W/, "–", /220 W/, /210 W/, "–"]);
+  await expect(ftp.locator("tbody td:nth-child(3)")).toHaveText(["–", "–", "–", /210 W.*3 Messungen/, "–", "–", /215 W.*2 Messungen/]);
   const pace = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schwellenpace", exact: true }) });
   await pace.getByText("Werte ansehen", { exact: true }).click();
   await expect(pace.locator("tbody td:nth-child(2)")).toHaveText([/4:50 min\/km/, /4:50 min\/km/]);
   await page.evaluate(async () => { await AppRouter.navigate("analysis/load", { historyMode: "replace" }); });
   await page.locator("#analysisLoadCharts").getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await page.evaluate(async () => { await AppRouter.navigate("analysis/performance", { historyMode: "replace" }); });
-  await expect(ftp.locator("tbody tr")).toHaveCount(2);
+  await expect(ftp.locator("tbody tr")).toHaveCount(7);
 });
 
 test("@responsive latest measurement stays visible without inventing measurements in empty weeks", async ({ page }) => {

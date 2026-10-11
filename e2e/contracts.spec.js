@@ -682,7 +682,7 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(cycling).not.toContainText("%");
   await expect(cycling.locator(".analysis-coverage")).toHaveCount(0);
   await cycling.getByRole("button", { name: "Erklärung zu FTP", exact: true }).click();
-  await expect(cycling.locator(".analysis-info-tooltip:popover-open")).toContainText(/Daten für \d+ von \d+ Wochen vorhanden\./);
+  await expect(cycling.locator(".analysis-info-tooltip:popover-open")).toContainText(/Daten für \d+ von \d+ Tagen vorhanden\./);
   await page.keyboard.press("Escape");
   expect((await cycling.locator('path[data-series="0"]').first().getAttribute("d")).match(/M/g)).toHaveLength(1);
   const details = cycling.locator("details:not([data-analysis-section])").filter({ has: page.getByText("Werte ansehen", { exact: true }) }).first();
@@ -693,10 +693,11 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   const AxeBuilder = require("@axe-core/playwright").default;
   expect((await new AxeBuilder({ page }).include("#analysisHistoryCharts").analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  const predictionsText = await charts.locator("#performancePredictions").textContent();
   await page.evaluate(() => renderAnalysisHistory({
     start: "2026-07-05", end: "2026-10-02", load: { points: [] }, metrics: {},
   }));
   await expect(charts.locator("svg")).toHaveCount(0);
   await expect(charts.locator(".empty").filter({ hasText: "Noch keine datierten Werte im Zeitraum vorhanden." })).toHaveCount(4);
-  await expect(charts.locator("#performancePredictions")).toContainText("Noch keine Prognosen");
+  await expect(charts.locator("#performancePredictions")).toHaveText(predictionsText);
 });

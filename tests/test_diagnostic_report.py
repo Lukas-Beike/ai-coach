@@ -34,6 +34,7 @@ class _Database:
             "competitions": 5,
             "athlete_checkins": 6,
             "activity_feedback": 7,
+            "change_history": 8,
         }
 
     def execute(self, query, parameters=()):
@@ -188,6 +189,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "competitions": 5,
                 "athlete_checkins": 6,
                 "activity_feedback": 7,
+                "change_history": 8,
                 "workout_library_state": {"local": 2},
                 "external_calendar_events": 1,
             },
@@ -221,7 +223,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
 
         self.assertEqual(self.manager.transactions, 1)
         self.assertEqual(self.lock.entries, 1)
-        self.assertEqual(len(self.db.queries), 5)
+        self.assertEqual(len(self.db.queries), 6)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query, _parameters in self.db.queries],
             [
@@ -230,6 +232,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "competitions",
                 "athlete_checkins",
                 "activity_feedback",
+                "change_history",
             ],
         )
         self.assertEqual(self.key_values.get.call_count, 8)

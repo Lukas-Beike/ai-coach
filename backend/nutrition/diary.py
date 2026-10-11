@@ -48,7 +48,6 @@ class NutritionDiaryService:
         utc_now: Callable[[], str],
         local_now: Callable[[], datetime],
         meal_library: NutritionMealLibraryService,
-        fueling_service: Callable[[], Any] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock
@@ -59,7 +58,6 @@ class NutritionDiaryService:
         self._sync_status = NutritionSyncStatusService(
             database_manager, db_lock, nutrition_repository, utc_now, local_now
         )
-        self._fueling_service = fueling_service
 
     def log_product(
         self,
@@ -93,11 +91,6 @@ class NutritionDiaryService:
                 "source": "manual",
             }
         )
-
-    def fueling(self) -> Any:
-        if not self._fueling_service:
-            raise AppError(503, "Trainingsverpflegung ist nicht verfügbar.")
-        return self._fueling_service()
 
     def log_template(
         self,
@@ -402,6 +395,9 @@ class NutritionDiaryService:
 
     def get_day_summary(self, meal_date: str) -> dict[str, Any]:
         return self._sync_status.get_day_summary(meal_date)
+
+    def get_week_summary(self) -> dict[str, Any]:
+        return self._sync_status.get_week_summary()
 
     def get_sync_snapshot(self, meal_date: str) -> dict[str, Any]:
         return self._sync_status.get_sync_snapshot(meal_date)
