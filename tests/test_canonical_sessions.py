@@ -8,14 +8,27 @@ the cases where canonical records cannot carry what the legacy rule read.
 from __future__ import annotations
 
 import json
+import random
 import unittest
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any
+from unittest import mock
 from zoneinfo import ZoneInfo
 
-from backend.activities.canonical_sessions import ActivitySession, bundle_sessions
+from backend.activities import canonical_sessions
+from backend.activities.canonical_sessions import (
+    ActivitySession,
+    _Entry,
+    _garmin_matches_intervals,
+    _is_intervals,
+    _is_intervals_ride,
+    _order_key,
+    _wahoo_and_garmin_copy_match,
+    _wall_clock,
+    bundle_sessions,
+)
 from backend.activities.duplicates import (
     filter_garmin_activities,
     garmin_activity_duplicates_intervals,
@@ -23,6 +36,7 @@ from backend.activities.duplicates import (
     latest_wahoo_garmin_duplicate,
 )
 from backend.canonical.records import ActivityRecord, Provenance
+from backend.canonical.sports import legacy_activity_family
 from backend.canonical.vocabulary import (
     Environment,
     LoadModel,
@@ -127,6 +141,7 @@ def _ride(
     started_at: datetime = datetime(2026, 6, 1, 7, 0, tzinfo=BERLIN),
     duration_s: float | None = 3600.0,
     distance_m: float | None = 30000.0,
+    sport: Sport = Sport.RIDE,
 ) -> ActivityRecord:
     """Build a canonical ride directly, for values the mappers never produce."""
     return ActivityRecord(
@@ -141,7 +156,7 @@ def _ride(
             retrieved_at=RETRIEVED_AT if provider is not None else None,
             label=None,
         ),
-        sport=Sport.RIDE,
+        sport=sport,
         environment=Environment.UNKNOWN,
         started_at=started_at,
         duration_s=duration_s,
@@ -611,6 +626,276 @@ class SessionStructureTests(unittest.TestCase):
         sessions = bundle_sessions(records, zone=BERLIN)
         self.assertEqual(1, len(sessions))
         self.assertEqual((), sessions[0].duplicates)
+
+
+DST_ANCHORS = (
+    # Berlin springs forward at 01:00 UTC on 2026-03-29 (02:00 CET to 03:00 CEST).
+    datetime(2026, 3, 29, 0, 30, tzinfo=UTC),
+    # Berlin falls back at 01:00 UTC on 2026-10-25 (03:00 CEST to 02:00 CET).
+    datetime(2026, 10, 25, 0, 30, tzinfo=UTC),
+)
+START_OFFSETS_MIN = (-61, -31, -30, -29, -1, 0, 1, 29, 30, 31, 61)
+SAMPLE_PROVIDERS = (
+    ProviderId.INTERVALS,
+    ProviderId.INTERVALS,
+    ProviderId.GARMIN,
+    ProviderId.GARMIN,
+    None,
+)
+SAMPLE_ORIGINS = (
+    RecordingOrigin.WAHOO,
+    RecordingOrigin.GARMIN,
+    RecordingOrigin.UNKNOWN,
+)
+SAMPLE_SPORTS = (Sport.RIDE, Sport.RIDE, Sport.RIDE, Sport.RUN, Sport.WALK, Sport.OTHER)
+SAMPLE_DURATIONS_S: tuple[float | None, ...] = (
+    None,
+    0.0,
+    1.0,
+    119.0,
+    120.0,
+    121.0,
+    3600.0,
+    3600.0,
+    3660.0,
+    4000.0,
+    4200.0,
+    5400.0,
+)
+SAMPLE_DISTANCES_M: tuple[float | None, ...] = (
+    None,
+    0.0,
+    499.0,
+    500.0,
+    501.0,
+    30000.0,
+    30500.0,
+    33000.0,
+    60000.0,
+    88500.0,
+)
+SCALE_START = datetime(2026, 1, 1, tzinfo=UTC)
+# Each slot holds one Wahoo ride, one Garmin copy and one Garmin record: 5,001 total.
+SCALE_SLOTS = 1667
+
+
+def _quadratic_bundle_sessions(
+    records: Iterable[ActivityRecord], *, zone: tzinfo
+) -> tuple[ActivitySession, ...]:
+    """Return sessions from the all-pairs comparison that the window search replaced.
+
+    Every record is compared with every candidate in start order. The rule
+    predicates are the module's own, so parity isolates the candidate search.
+    """
+    entries = [
+        _Entry(record, _wall_clock(record, zone), legacy_activity_family(record.sport))
+        for record in sorted(records, key=_order_key)
+    ]
+    duplicate_of: dict[int, int] = {}
+    wahoo_rides = [
+        index
+        for index, entry in enumerate(entries)
+        if _is_intervals_ride(entry.record, RecordingOrigin.WAHOO)
+    ]
+    garmin_copies = [
+        index
+        for index, entry in enumerate(entries)
+        if _is_intervals_ride(entry.record, RecordingOrigin.GARMIN)
+    ]
+    for copy_index in garmin_copies:
+        for wahoo_index in wahoo_rides:
+            if _wahoo_and_garmin_copy_match(entries[wahoo_index], entries[copy_index]):
+                duplicate_of[copy_index] = wahoo_index
+                break
+    for index, entry in enumerate(entries):
+        if entry.record.provenance.provider is not ProviderId.GARMIN:
+            continue
+        for target_index, target in enumerate(entries):
+            if _is_intervals(target.record) and _garmin_matches_intervals(
+                entry, target
+            ):
+                duplicate_of[index] = duplicate_of.get(target_index, target_index)
+                break
+    members: dict[int, list[ActivityRecord]] = {
+        index: [] for index in range(len(entries)) if index not in duplicate_of
+    }
+    for index, entry in enumerate(entries):
+        if index in duplicate_of:
+            members[duplicate_of[index]].append(entry.record)
+    return tuple(
+        ActivitySession(entries[primary].record, tuple(duplicates))
+        for primary, duplicates in members.items()
+    )
+
+
+def _generated_records(seed: int, count: int = 300) -> list[ActivityRecord]:
+    """Return a seeded mix of Intervals, Garmin and derived records around DST edges.
+
+    Starts cluster around event instants so that candidates, ties and offsets at
+    exactly the 30-minute boundary all occur. The DST anchors put starts on both
+    sides of the spring gap and of the autumn overlap.
+    """
+    rng = random.Random(seed)
+    events: list[datetime] = list(DST_ANCHORS)
+    events.extend(
+        datetime(2026, 1, 1, tzinfo=UTC)
+        + timedelta(days=rng.randrange(365), hours=rng.randrange(24))
+        for _ in range(12)
+    )
+    records: list[ActivityRecord] = []
+    for index in range(count):
+        if rng.random() < 0.5:
+            offset = rng.choice(START_OFFSETS_MIN)
+        else:
+            offset = rng.randint(-150, 150)
+        provider = rng.choice(SAMPLE_PROVIDERS)
+        prefix = "d" if provider is None else provider.value[0]
+        records.append(
+            _ride(
+                f"{prefix}-{index}",
+                provider=provider,
+                recorded_by=rng.choice(SAMPLE_ORIGINS),
+                sport=rng.choice(SAMPLE_SPORTS),
+                started_at=rng.choice(events) + timedelta(minutes=offset),
+                duration_s=rng.choice(SAMPLE_DURATIONS_S),
+                distance_m=rng.choice(SAMPLE_DISTANCES_M),
+            )
+        )
+    return records
+
+
+class WindowSearchParityTests(unittest.TestCase):
+    """The window search returns exactly the sessions of the quadratic reference."""
+
+    def assert_parity(
+        self, records: list[ActivityRecord]
+    ) -> tuple[ActivitySession, ...]:
+        expected = _quadratic_bundle_sessions(records, zone=BERLIN)
+        self.assertEqual(expected, bundle_sessions(records, zone=BERLIN))
+        return expected
+
+    def test_fixture_sets_match_the_quadratic_reference(self) -> None:
+        intervals = _map_intervals(_load_fixture("intervals", "activities.json"))
+        garmin = _map_garmin(_load_fixture("garmin", "activities.json"))
+        for name, records in (
+            ("intervals", intervals),
+            ("garmin", garmin),
+            ("combined", [*intervals, *garmin]),
+        ):
+            with self.subTest(name):
+                sessions = self.assert_parity(records)
+                if name == "combined":
+                    self.assertTrue(any(session.duplicates for session in sessions))
+
+    def test_inline_scenarios_match_the_quadratic_reference(self) -> None:
+        scenarios = (
+            [
+                *_map_intervals([_wahoo(), _garmin_copy()]),
+                *_map_garmin([garmin_ride()]),
+            ],
+            _map_intervals(
+                [
+                    intervals_ride(id="early", start_date_local="2026-06-01T07:00:00"),
+                    intervals_ride(id="late", start_date_local="2026-06-01T07:20:00"),
+                    _wahoo(id="w-1", start_date_local="2026-06-01T07:10:00"),
+                    _garmin_copy(id="g-1", start_date_local="2026-06-01T07:10:00"),
+                ]
+            )
+            + _map_garmin([garmin_ride(startTimeLocal="2026-06-01 07:10:00")]),
+        )
+        for index, records in enumerate(scenarios):
+            with self.subTest(index):
+                self.assert_parity(records)
+
+    def test_generated_sets_match_the_quadratic_reference(self) -> None:
+        for seed in range(4):
+            with self.subTest(seed=seed):
+                records = _generated_records(seed)
+                sessions = self.assert_parity(records)
+                self.assertTrue(any(session.duplicates for session in sessions))
+                shuffled = list(records)
+                random.Random(seed + 100).shuffle(shuffled)
+                self.assert_parity(shuffled)
+
+
+class WindowSearchEdgeTests(unittest.TestCase):
+    def test_window_at_the_datetime_limits_saturates_instead_of_overflowing(
+        self,
+    ) -> None:
+        low = datetime.min.replace(tzinfo=UTC)
+        high = datetime.max.replace(tzinfo=UTC)
+        records = [
+            _ride(
+                "intervals-low",
+                recorded_by=RecordingOrigin.WAHOO,
+                started_at=low + timedelta(minutes=10),
+            ),
+            _ride("garmin-low", provider=ProviderId.GARMIN, started_at=low),
+            _ride(
+                "intervals-high",
+                recorded_by=RecordingOrigin.WAHOO,
+                started_at=high - timedelta(minutes=10),
+            ),
+            _ride("garmin-high", provider=ProviderId.GARMIN, started_at=high),
+        ]
+        sessions = bundle_sessions(records, zone=UTC)
+        pairs = {
+            session.primary.activity_id: [d.activity_id for d in session.duplicates]
+            for session in sessions
+        }
+        self.assertEqual(
+            {"intervals-low": ["garmin-low"], "intervals-high": ["garmin-high"]},
+            pairs,
+        )
+
+
+class WindowSearchScalingTests(unittest.TestCase):
+    def test_five_thousand_records_compare_only_candidates_in_their_window(
+        self,
+    ) -> None:
+        records: list[ActivityRecord] = []
+        for slot in range(SCALE_SLOTS):
+            started_at = SCALE_START + timedelta(hours=slot)
+            records.append(
+                _ride(
+                    f"wahoo-{slot}",
+                    recorded_by=RecordingOrigin.WAHOO,
+                    started_at=started_at,
+                )
+            )
+            records.append(
+                _ride(
+                    f"copy-{slot}",
+                    recorded_by=RecordingOrigin.GARMIN,
+                    started_at=started_at,
+                )
+            )
+            records.append(
+                _ride(
+                    f"garmin-{slot}", provider=ProviderId.GARMIN, started_at=started_at
+                )
+            )
+        with (
+            mock.patch.object(
+                canonical_sessions,
+                "_wahoo_and_garmin_copy_match",
+                wraps=canonical_sessions._wahoo_and_garmin_copy_match,
+            ) as copy_checks,
+            mock.patch.object(
+                canonical_sessions,
+                "_garmin_matches_intervals",
+                wraps=canonical_sessions._garmin_matches_intervals,
+            ) as garmin_checks,
+        ):
+            sessions = bundle_sessions(records, zone=BERLIN)
+        self.assertEqual(5001, len(records))
+        self.assertEqual(SCALE_SLOTS, len(sessions))
+        self.assertTrue(all(len(session.duplicates) == 2 for session in sessions))
+        # Slots are one hour apart, so each copy has one Wahoo candidate in its
+        # window and each Garmin record has two Intervals candidates. The all-pairs
+        # scan would make about 2.8 million copy and 5.6 million Garmin comparisons.
+        self.assertEqual(SCALE_SLOTS, copy_checks.call_count)
+        self.assertEqual(2 * SCALE_SLOTS, garmin_checks.call_count)
 
 
 if __name__ == "__main__":

@@ -20,11 +20,16 @@ Assignment is first match wins in deterministic order (start instant, then
 provider, then activity id). A record is a duplicate of at most one primary, and
 every input record appears in exactly one session. A Garmin-provider duplicate
 of a Garmin-recorded Intervals copy joins that copy's Wahoo session.
+
+Candidates are found by a sorted wall-clock window (``_WallWindow``) instead of a
+scan over every record. The window contains exactly the candidates the start rule
+accepts, so the sessions are the ones the full comparison would produce.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from bisect import bisect_left, bisect_right
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from typing import Final
@@ -92,8 +97,53 @@ def _is_intervals_ride(record: ActivityRecord, origin: RecordingOrigin) -> bool:
     )
 
 
+def _window_bounds(wall: datetime) -> tuple[datetime, datetime]:
+    """Return the inclusive wall-clock bounds of START_WINDOW around ``wall``.
+
+    A bound that would leave the datetime range saturates at the range limit. Every
+    representable wall clock then still lies inside the window on that side.
+    """
+    try:
+        low = wall - START_WINDOW
+    except OverflowError:
+        low = datetime.min  # noqa: DTZ901 - wall clocks are naive by design
+    try:
+        high = wall + START_WINDOW
+    except OverflowError:
+        high = datetime.max  # noqa: DTZ901 - wall clocks are naive by design
+    return low, high
+
+
+class _WallWindow:
+    """Entry indices ordered by wall clock, for the START_WINDOW candidate search.
+
+    The start rules compare naive wall-clock times, so the index is ordered on the
+    wall clock itself rather than on the instant. An instant window would need a
+    bound on the UTC-offset change between two starts, which a zone does not
+    promise: DST shifts the wall clock by that change, and the autumn hour occurs
+    twice. The wall-clock range ``[wall - START_WINDOW, wall + START_WINDOW]`` is
+    exactly the set that ``abs(wall difference) <= START_WINDOW`` accepts, so the
+    search misses no match. The rule predicates still decide every candidate.
+    """
+
+    def __init__(self, entries: Sequence[_Entry], indices: Iterable[int]) -> None:
+        self._indices = sorted(indices, key=lambda index: entries[index].wall)
+        self._walls = [entries[index].wall for index in self._indices]
+
+    def near(self, wall: datetime) -> list[int]:
+        """Return the indices whose wall clock lies within START_WINDOW of ``wall``."""
+        low, high = _window_bounds(wall)
+        return self._indices[
+            bisect_left(self._walls, low) : bisect_right(self._walls, high)
+        ]
+
+
 def _assign_duplicates(entries: tuple[_Entry, ...]) -> dict[int, int]:
-    """Map each duplicate's index to the index of its primary."""
+    """Map each duplicate's index to the index of its primary.
+
+    Each search takes the lowest-indexed matching candidate. That is the first match
+    in start order, which is what a scan over every candidate would have found.
+    """
     duplicate_of: dict[int, int] = {}
     wahoo_rides = [
         index
@@ -105,21 +155,32 @@ def _assign_duplicates(entries: tuple[_Entry, ...]) -> dict[int, int]:
         for index, entry in enumerate(entries)
         if _is_intervals_ride(entry.record, RecordingOrigin.GARMIN)
     ]
+    wahoo_window = _WallWindow(entries, wahoo_rides)
     for copy_index in garmin_ride_copies:
-        for wahoo_index in wahoo_rides:
-            if _wahoo_and_garmin_copy_match(entries[wahoo_index], entries[copy_index]):
-                duplicate_of[copy_index] = wahoo_index
-                break
+        copy = entries[copy_index]
+        matches = [
+            index
+            for index in wahoo_window.near(copy.wall)
+            if _wahoo_and_garmin_copy_match(entries[index], copy)
+        ]
+        if matches:
+            duplicate_of[copy_index] = min(matches)
 
+    intervals = [
+        index for index, entry in enumerate(entries) if _is_intervals(entry.record)
+    ]
+    intervals_window = _WallWindow(entries, intervals)
     for index, entry in enumerate(entries):
         if entry.record.provenance.provider is not ProviderId.GARMIN:
             continue
-        for target_index, target in enumerate(entries):
-            if _is_intervals(target.record) and _garmin_matches_intervals(
-                entry, target
-            ):
-                duplicate_of[index] = duplicate_of.get(target_index, target_index)
-                break
+        matches = [
+            target_index
+            for target_index in intervals_window.near(entry.wall)
+            if _garmin_matches_intervals(entry, entries[target_index])
+        ]
+        if matches:
+            target_index = min(matches)
+            duplicate_of[index] = duplicate_of.get(target_index, target_index)
     return duplicate_of
 
 
