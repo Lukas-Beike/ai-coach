@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from backend.canonical.sports import classify_sport_text, legacy_activity_family
+
 _UTC_OFFSET_SUFFIX = "+00:00"
 _ACTIVITY_KIND_FIELDS = (
     "type",
@@ -37,17 +39,7 @@ def activity_kind(activity: Any) -> str:
     value = " ".join(
         str(activity.get(key) or "") for key in _ACTIVITY_KIND_FIELDS
     ).casefold()
-    if any(
-        term in value for term in ("ride", "bike", "cycling", "rad", "velo", "bicycle")
-    ):
-        return "cycling"
-    if any(term in value for term in ("run", "lauf", "jog")):
-        return "running"
-    if any(term in value for term in ("swim", "schwimm")):
-        return "swimming"
-    if any(term in value for term in ("strength", "kraft", "weight", "gym")):
-        return "strength"
-    return "other"
+    return legacy_activity_family(classify_sport_text(value))
 
 
 def intervals_activity_device_source(activity: Any) -> str | None:

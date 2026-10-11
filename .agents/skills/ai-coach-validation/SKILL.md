@@ -12,4 +12,6 @@ Use after changes or when validating a suspected regression.
 - PWA assets: when `public/index.html`, any asset listed in `service-worker.js`, or `service-worker.js` changes, verify matching asset query and cache versions.
 - Docker or startup changes: run `docker build -t ai-coach:local .`.
 - Use temporary data and mocked providers. Never use real `.env`, `/data`, credentials, or athlete data.
+- Verify the final changed state: bind results to the revision and any uncommitted changes tested. After a material edit or rebase, rerun affected checks before reusing earlier success. Inspect child-test failures and artifacts rather than relying only on a wrapper exit code.
+- For a functional regression, demonstrate the original trigger and the corrected behavior with a focused check where feasible. Static contract checks validate instruction structure, not skill behavior; local checks do not establish hosted review, merge, publication, or deployment.
 - Report each check as passed, failed, blocked, or not run, including the shortest decisive evidence and the reason for skipped checks.

@@ -2,14 +2,34 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from backend.coach import streams as coach_streams
 from backend.db.manager import DATABASE_MANAGER_CACHE
+from backend.planning.context import compact_snapshot
 from backend.runtime import clock as runtime_clock
+
+PROVIDER_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "providers"
+PROVIDER_SYNCED_TEXT = "2026-10-10T06:00:00+00:00"
+GARMIN_FIXTURE_SECTIONS = (
+    "activities",
+    "sleep",
+    "hrv",
+    "resting_hr",
+    "readiness",
+    "max_metrics",
+    "cycling_ftp",
+    "running_threshold",
+    "weight",
+    "cycling_ftp_history",
+    "daily_training_status",
+    "training_load_balance",
+)
 
 
 class IntervalsRequestRecorder:
@@ -199,3 +219,28 @@ def reset_application_state(server) -> None:
             db.execute(f"DELETE FROM {table}")
     server.ATHLETE_DATA.profile().save({})
     coach_streams.CHAT_STREAM_REGISTRY.clear_state()
+
+
+def load_provider_fixture(path: str) -> Any:
+    """Read one read-only wire fixture under tests/fixtures/providers."""
+    return json.loads((PROVIDER_FIXTURE_ROOT / path).read_text(encoding="utf-8"))
+
+
+def intervals_snapshot_fixture(synced_at: str = PROVIDER_SYNCED_TEXT) -> dict[str, Any]:
+    """Compact Intervals.icu snapshot built from the wire fixtures."""
+    return compact_snapshot(
+        load_provider_fixture("intervals/athlete.json"),
+        load_provider_fixture("intervals/activities.json"),
+        load_provider_fixture("intervals/wellness.json"),
+        load_provider_fixture("intervals/events.json"),
+        all_sync_days=42,
+        synced_at=synced_at,
+    )
+
+
+def garmin_payload_fixture(synced_at: str = PROVIDER_SYNCED_TEXT) -> dict[str, Any]:
+    """Stored Garmin payload with every fixture section and its sync time."""
+    payload: dict[str, Any] = {"synced_at": synced_at}
+    for name in GARMIN_FIXTURE_SECTIONS:
+        payload[name] = load_provider_fixture(f"garmin/{name}.json")
+    return payload
