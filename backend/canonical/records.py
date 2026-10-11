@@ -91,6 +91,7 @@ class Observation:
     observed_on: date
     observed_at: datetime | None
     provenance: Provenance
+    sport: Sport | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.kind, MetricKind, "kind")
@@ -99,6 +100,8 @@ class Observation:
         require_date(self.observed_on, "observed_on")
         optional_aware_datetime(self.observed_at, "observed_at")
         require_instance(self.provenance, Provenance, "provenance")
+        if self.sport is not None:
+            require_instance(self.sport, Sport, "sport")
 
 
 @dataclass(frozen=True, slots=True)

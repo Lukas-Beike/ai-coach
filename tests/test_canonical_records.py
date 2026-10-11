@@ -158,6 +158,19 @@ class ObservationTests(unittest.TestCase):
         record = observation(observed_at=None)
         self.assertIsNone(record.observed_at)
 
+    def test_sport_is_optional_and_defaults_to_none(self) -> None:
+        self.assertIsNone(observation().sport)
+        self.assertIsNone(observation(sport=None).sport)
+        self.assertIs(Sport.RUN, observation(sport=Sport.RUN).sport)
+
+    def test_rejects_sport_given_as_text_or_number(self) -> None:
+        for value in ("run", 1):
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(TypeError, "sport must be a Sport"),
+            ):
+                observation(sport=value)
+
     def test_rejects_naive_observed_at(self) -> None:
         with self.assertRaisesRegex(ValueError, "observed_at must be"):
             observation(observed_at=NAIVE_MORNING)
