@@ -80,7 +80,7 @@ class CanonicalCoverageSummaryTests(unittest.TestCase):
         garmin = providers[str(ProviderId.GARMIN)]
         self.assertEqual(intervals["sync_time_stored"], True)
         self.assertEqual(intervals["activities"], 5)
-        self.assertEqual(intervals["observations"], 31)
+        self.assertEqual(intervals["observations"], 32)
         self.assertEqual(intervals["issues"][str(IssueReason.UNSUPPORTED)], 0)
         self.assertEqual(garmin["sync_time_stored"], True)
         self.assertEqual(garmin["activities"], 2)
