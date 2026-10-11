@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "4a1099888fb6f162df75bed71a23a5fc24435ea2",
+  "base": "e4d51d75bde660825d32dbfb22c6ab65d0aa5016",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
@@ -800,6 +800,14 @@
     },
     {
       "tool": "mypy",
+      "path": "backend/http_api/sync_commands.py",
+      "line": 158,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "b56eabb6d44884efdb0061ff020af3a73cfab3aeabdd645b01b9e03a91c6cf87"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_sync_worker.py",
       "line": 171,
       "column": 12,
@@ -1093,14 +1101,6 @@
       "column": 15,
       "code": "arg-type",
       "message_sha256": "afed839adb87afaffef924126bec2f2edff23d1990be88ea86df4f8d09249830"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/http_api/sync_commands.py",
-      "line": 100,
-      "column": 16,
-      "code": "arg-type",
-      "message_sha256": "b56eabb6d44884efdb0061ff020af3a73cfab3aeabdd645b01b9e03a91c6cf87"
     },
     {
       "tool": "mypy",

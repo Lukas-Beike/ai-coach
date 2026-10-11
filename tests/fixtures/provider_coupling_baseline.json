@@ -918,13 +918,13 @@
       "rule": "provider_literal",
       "path": "backend/http_api/bootstrap_state.py",
       "token": "garmin",
-      "count": 4
+      "count": 1
     },
     {
       "rule": "provider_literal",
       "path": "backend/http_api/bootstrap_state.py",
       "token": "intervals",
-      "count": 5
+      "count": 2
     },
     {
       "rule": "provider_literal",
@@ -941,32 +941,14 @@
     {
       "rule": "provider_literal",
       "path": "backend/http_api/public_state.py",
-      "token": "garmin",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/http_api/public_state.py",
       "token": "intervals",
-      "count": 5
+      "count": 2
     },
     {
       "rule": "provider_literal",
       "path": "backend/http_api/state_versions.py",
       "token": "garmin",
       "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/http_api/sync_commands.py",
-      "token": "garmin",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/http_api/sync_commands.py",
-      "token": "intervals",
-      "count": 4
     },
     {
       "rule": "provider_literal",
