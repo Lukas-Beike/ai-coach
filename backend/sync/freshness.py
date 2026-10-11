@@ -1,8 +1,13 @@
-"""Read-only projection of the freshness of configured data providers."""
+"""Read-only projection of the freshness of configured data providers.
+
+The projection walks the registry's freshness areas in descriptor order. Each
+area reads its fallbacks and configured predicate from a ``FreshnessSource``
+keyed by provider id and area name; the built-in sources live in
+``backend.sync.freshness_sources``.
+"""
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -10,23 +15,26 @@ from typing import Any
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.providers.descriptors import FreshnessArea
+from backend.sync.freshness_sources import (
+    DEFAULT_FRESHNESS_SOURCES,
+    GARMIN_CORE_ERROR_SIGNAL,
+    GARMIN_TOKENSTORE_SIGNAL,
+)
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_runtime import FreshnessInputs, FreshnessSource
 from backend.sync.refresh import cleanup_refresh_history
 
-WEATHER_CACHE_KEY = "weather_cache"
-WEATHER_FAILURE_KEY = "weather_failure"
 UTC_OFFSET_SUFFIX = "+00:00"
 PROVIDER_REFRESH_RETENTION_DAYS = 30
 PROVIDER_REFRESH_MAX_ROWS = 200
-_PROVIDER_FRESHNESS_AREAS = {
-    (provider_id, area.area): area
+PROVIDER_REFRESH_STALE_SECONDS = {
+    (provider_id, area.area): area.stale_after_s
     for provider_id, area in DEFAULT_PROVIDER_REGISTRY.freshness_areas()
 }
-PROVIDER_REFRESH_STALE_SECONDS = {
-    key: area.stale_after_s for key, area in _PROVIDER_FRESHNESS_AREAS.items()
-}
 PROVIDER_REFRESH_LABELS = {
-    key: area.label for key, area in _PROVIDER_FRESHNESS_AREAS.items()
+    (provider_id, area.area): area.label
+    for provider_id, area in DEFAULT_PROVIDER_REGISTRY.freshness_areas()
 }
 
 
@@ -59,61 +67,14 @@ def _scheduled_provider_retry_at(
     return None
 
 
-def _provider_freshness_inputs(
-    *,
-    config: Config,
-    get_value: Callable[[str], str | None],
-    profile: Mapping[str, Any],
-    garmin_has_core_error: bool,
-    garmin_tokenstore_exists: bool,
-) -> tuple[
-    dict[tuple[str, str], Any], dict[tuple[str, str], Any], dict[tuple[str, str], bool]
-]:
-    fallbacks = {
-        ("intervals", "activities"): get_value("last_sync_at"),
-        ("intervals", "competitions"): get_value("last_competition_sync_at"),
-        ("intervals", "performance"): get_value("last_performance_refresh_at"),
-        ("garmin", "data"): get_value("last_garmin_sync_at"),
-        ("weather", "forecast"): None,
-        ("calendar", "events"): get_value("last_external_calendar_sync_at"),
-    }
-    fallback_errors = {
-        ("intervals", "activities"): get_value("last_sync_error"),
-        ("intervals", "competitions"): get_value("last_competition_sync_error"),
-        ("intervals", "performance"): get_value("last_performance_error"),
-        ("garmin", "data"): garmin_has_core_error,
-        ("weather", "forecast"): get_value(WEATHER_FAILURE_KEY),
-        ("calendar", "events"): get_value("last_external_calendar_sync_error"),
-    }
-    try:
-        cached_weather = json.loads(get_value(WEATHER_CACHE_KEY) or "{}")
-        if isinstance(cached_weather, dict):
-            fallbacks[("weather", "forecast")] = cached_weather.get("fetched_at")
-    except TypeError, ValueError:
-        pass
-    configured = {
-        ("intervals", "activities"): bool(config.intervals_api_key),
-        ("intervals", "competitions"): bool(config.intervals_api_key),
-        ("intervals", "performance"): bool(config.intervals_api_key),
-        ("garmin", "data"): bool(
-            config.garmin_fixture_path
-            or config.garmin_email
-            or garmin_tokenstore_exists
-        ),
-        ("weather", "forecast"): bool(profile.get("weather_location")),
-        ("calendar", "events"): bool(config.calendar_ical_url),
-    }
-    return fallbacks, fallback_errors, configured
-
-
 def _provider_freshness_last_good_state(
-    key: tuple[str, str], last_good: Any, *, now: datetime
+    stale_after_s: int, last_good: Any, *, now: datetime
 ) -> str:
     parsed = _parse_utc(last_good)
     if parsed is None:
         return "stale" if last_good else "error"
     age = (now - parsed).total_seconds()
-    return "stale" if age > PROVIDER_REFRESH_STALE_SECONDS[key] else "fresh"
+    return "stale" if age > stale_after_s else "fresh"
 
 
 def _provider_fallback_error_code(fallback_error: bool) -> str | None:
@@ -131,7 +92,7 @@ def _provider_freshness_error_code(
 
 
 def _provider_freshness_status(
-    key: tuple[str, str],
+    stale_after_s: int,
     configured: bool,
     row: Mapping[str, Any] | None,
     last_good: Any,
@@ -152,11 +113,86 @@ def _provider_freshness_status(
             return "partial", _provider_fallback_error_code(fallback_error)
     if last_good:
         return _provider_freshness_last_good_state(
-            key, last_good, now=now
+            stale_after_s, last_good, now=now
         ), _provider_fallback_error_code(fallback_error)
     if fallback_error:
         return "error", "provider_error"
     return "never_loaded", None
+
+
+def _provider_freshness_entry(
+    db: Any,
+    provider_id: str,
+    area: FreshnessArea,
+    source: FreshnessSource,
+    inputs: FreshnessInputs,
+    *,
+    now: datetime,
+) -> dict[str, Any]:
+    row = db.execute(
+        "SELECT * FROM provider_refresh_history WHERE provider=? AND area=? ORDER BY started_at DESC LIMIT 1",
+        (provider_id, area.area),
+    ).fetchone()
+    last_success = db.execute(
+        "SELECT finished_at FROM provider_refresh_history WHERE provider=? AND area=? AND status IN ('success','partial') "
+        "ORDER BY finished_at DESC LIMIT 1",
+        (provider_id, area.area),
+    ).fetchone()
+    row = dict(row) if row else None
+    configured = bool(source.configured(inputs))
+    fallback = source.fallback_at(inputs)
+    fallback_error = bool(source.fallback_error(inputs))
+    last_attempt = row.get("started_at") if row else fallback
+    last_good = (last_success["finished_at"] if last_success else None) or fallback
+    scheduled_retry = _scheduled_provider_retry_at(db, provider_id, now=now)
+    state, error_code = _provider_freshness_status(
+        area.stale_after_s,
+        configured,
+        row,
+        last_good,
+        fallback_error,
+        now=now,
+    )
+    return {
+        "provider": provider_id,
+        "area": area.area,
+        "label": area.label,
+        "configured": configured,
+        "read_only": area.read_only,
+        "state": state,
+        "phase": row.get("phase") if row else None,
+        "last_attempt_at": last_attempt,
+        "last_success_at": last_good,
+        "error_code": error_code,
+        "next_retry_at": scheduled_retry,
+        "stale": state == "stale",
+        "has_last_good": bool(last_good),
+    }
+
+
+def _check_sources_match_registry(
+    sources: Mapping[str, Mapping[str, FreshnessSource]],
+    registry: ProviderRegistry,
+) -> None:
+    """Reject sources that disagree with the registry's declared areas.
+
+    A provider with sources must supply exactly its declared area names, as the
+    runtime registry requires of a binding; a source for an undeclared provider
+    is an error. Failing here keeps a partial projection from being returned.
+    """
+    declared: dict[str, set[str]] = {}
+    for provider_id, area in registry.freshness_areas():
+        declared.setdefault(provider_id, set()).add(area.area)
+    for provider_id, areas in sources.items():
+        if provider_id not in declared:
+            raise ValueError(
+                f"freshness sources name undeclared provider {provider_id!r}"
+            )
+        if set(areas) != declared[provider_id]:
+            raise ValueError(
+                f"freshness sources for {provider_id!r} must cover exactly "
+                "its declared freshness areas"
+            )
 
 
 def provider_freshness_state(
@@ -170,68 +206,51 @@ def provider_freshness_state(
     now: datetime,
     retention_days: int = PROVIDER_REFRESH_RETENTION_DAYS,
     max_rows: int = PROVIDER_REFRESH_MAX_ROWS,
+    freshness_sources: Mapping[str, Mapping[str, FreshnessSource]] | None = None,
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> list[dict[str, Any]]:
     """Build the provider freshness projection on a caller-owned connection.
 
-    The cleanup intentionally remains uncommitted: the caller owns transaction
-    boundaries and may roll back the diagnostic cleanup together with its work.
+    A provider without freshness sources is omitted, as it is from the runtime
+    registry. A provider with sources must supply exactly its declared areas;
+    mismatches raise ``ValueError`` before any database work. The cleanup
+    intentionally remains uncommitted: the caller owns transaction boundaries
+    and may roll back the diagnostic cleanup together with its work.
     """
     current_time = (
         now.astimezone(timezone.utc)
         if now.tzinfo is not None
         else now.replace(tzinfo=timezone.utc)
     )
-    fallbacks, fallback_errors, configured = _provider_freshness_inputs(
+    sources = (
+        DEFAULT_FRESHNESS_SOURCES if freshness_sources is None else freshness_sources
+    )
+    _check_sources_match_registry(sources, registry)
+    inputs = FreshnessInputs(
         config=config,
         get_value=get_value,
         profile=profile,
-        garmin_has_core_error=garmin_has_core_error,
-        garmin_tokenstore_exists=garmin_tokenstore_exists,
+        signals={
+            GARMIN_CORE_ERROR_SIGNAL: garmin_has_core_error,
+            GARMIN_TOKENSTORE_SIGNAL: garmin_tokenstore_exists,
+        },
     )
     cutoff = (current_time - timedelta(days=retention_days)).isoformat()
     cleanup_refresh_history(db, cutoff=cutoff, max_rows=max_rows)
     result: list[dict[str, Any]] = []
-    for key, label in PROVIDER_REFRESH_LABELS.items():
-        provider, area = key
-        row = db.execute(
-            "SELECT * FROM provider_refresh_history WHERE provider=? AND area=? ORDER BY started_at DESC LIMIT 1",
-            (provider, area),
-        ).fetchone()
-        last_success = db.execute(
-            "SELECT finished_at FROM provider_refresh_history WHERE provider=? AND area=? AND status IN ('success','partial') "
-            "ORDER BY finished_at DESC LIMIT 1",
-            (provider, area),
-        ).fetchone()
-        row = dict(row) if row else None
-        fallback = fallbacks[key]
-        fallback_error = bool(fallback_errors[key])
-        last_attempt = row.get("started_at") if row else fallback
-        last_good = (last_success["finished_at"] if last_success else None) or fallback
-        scheduled_retry = _scheduled_provider_retry_at(db, provider, now=current_time)
-        state, error_code = _provider_freshness_status(
-            key,
-            configured[key],
-            row,
-            last_good,
-            fallback_error,
-            now=current_time,
-        )
+    for provider_id, area in registry.freshness_areas():
+        provider_sources = sources.get(provider_id)
+        if provider_sources is None:
+            continue
         result.append(
-            {
-                "provider": provider,
-                "area": area,
-                "label": label,
-                "configured": configured[key],
-                "read_only": _PROVIDER_FRESHNESS_AREAS[key].read_only,
-                "state": state,
-                "phase": row.get("phase") if row else None,
-                "last_attempt_at": last_attempt,
-                "last_success_at": last_good,
-                "error_code": error_code,
-                "next_retry_at": scheduled_retry,
-                "stale": state == "stale",
-                "has_last_good": bool(last_good),
-            }
+            _provider_freshness_entry(
+                db,
+                provider_id,
+                area,
+                provider_sources[area.area],
+                inputs,
+                now=current_time,
+            )
         )
     return result
 
@@ -245,11 +264,16 @@ class ProviderFreshnessService:
         database_manager: DatabaseManager,
         key_value_repository: KeyValueRepository,
         now: Callable[[], datetime],
+        *,
+        freshness_sources: Mapping[str, Mapping[str, FreshnessSource]] | None = None,
+        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._config = config
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
         self._now = now
+        self._freshness_sources = freshness_sources
+        self._registry = registry
 
     def current(
         self,
@@ -268,4 +292,6 @@ class ProviderFreshnessService:
                 garmin_has_core_error=garmin_has_core_error,
                 garmin_tokenstore_exists=garmin_tokenstore_exists,
                 now=now,
+                freshness_sources=self._freshness_sources,
+                registry=self._registry,
             )
