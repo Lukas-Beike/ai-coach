@@ -62,8 +62,10 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   const periods = await page.evaluate(() => {
     const history = state.data.performance.history;
     const focus = state.data.performance.training_focus;
+    const bodyWindow = history.body.windows["12w"];
     return {
       expected: `${dateLabel(addDateKey(history.end, -((new Date(`${history.end}T12:00:00Z`).getUTCDay() + 6) % 7) - 77))} bis ${dateLabel(history.end)}`,
+      expectedBody: `${dateLabel(bodyWindow.start)} bis ${dateLabel(bodyWindow.end)}`,
       same: focus.end === history.end && focus.start === addDateKey(history.end, -27),
       titles: [...document.querySelectorAll("#analysisHistoryCharts svg > title")].map((node) => node.textContent),
     };
@@ -74,7 +76,9 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await page.locator("#analysisHistoryCharts").getByRole("button", { name: "Erklärung zu FTP", exact: true }).click();
   await expect(page.locator("#analysisHistoryCharts .analysis-info-tooltip:popover-open")).toContainText(/Seit .+: \+\d+(?:,\d+)? W/);
   await page.keyboard.press("Escape");
-  for (const title of periods.titles) expect(title).toContain(periods.expected);
+  for (const title of periods.titles) {
+    expect(title).toContain(title.startsWith("Rad-Leistung pro Gewicht") ? periods.expectedBody : periods.expected);
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 
   await page.evaluate(async () => { await AppRouter.navigate("analysis/recovery", { historyMode: "replace" }); });

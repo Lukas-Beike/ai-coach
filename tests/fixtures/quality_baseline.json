@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "9f49367526ea3917cc32bc4fdc51e87abf8642ff",
+  "base": "e4d51d75bde660825d32dbfb22c6ab65d0aa5016",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
@@ -49,7 +49,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 108,
+      "line": 136,
       "column": 45,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -65,7 +65,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 105,
+      "line": 133,
       "column": 47,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -80,16 +80,8 @@
     },
     {
       "tool": "ruff",
-      "path": "e2e/test_fixture_standard_data.py",
-      "line": 3,
-      "column": 1,
-      "code": "I001",
-      "message_sha256": "2ae03c24054492f44ee1ee930d27576b6f82dcbcd8a35fc5af09314810893d40"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/performance/personal_recovery.py",
-      "line": 217,
+      "line": 218,
       "column": 16,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -105,7 +97,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/freshness.py",
-      "line": 185,
+      "line": 180,
       "column": 24,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -160,7 +152,7 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_provider_garmin_morning.py",
+      "path": "backend/sync/freshness.py",
       "line": 42,
       "column": 30,
       "code": "UP017",
@@ -168,8 +160,8 @@
     },
     {
       "tool": "ruff",
-      "path": "backend/sync/freshness.py",
-      "line": 47,
+      "path": "tests/test_provider_garmin_morning.py",
+      "line": 42,
       "column": 30,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -193,7 +185,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/freshness.py",
-      "line": 187,
+      "line": 182,
       "column": 33,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -283,22 +275,6 @@
       "path": "backend/performance/garmin_weight.py",
       "line": 94,
       "column": 39,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "e2e/fixture_runtime.py",
-      "line": 1217,
-      "column": 40,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "e2e/fixture_runtime.py",
-      "line": 1228,
-      "column": 40,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
     },
@@ -449,7 +425,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 118,
+      "line": 146,
       "column": 47,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -457,7 +433,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 167,
+      "line": 195,
       "column": 48,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -465,7 +441,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 115,
+      "line": 143,
       "column": 49,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -473,15 +449,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 164,
-      "column": 49,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "e2e/fixture_runtime.py",
-      "line": 1865,
+      "line": 192,
       "column": 49,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -528,7 +496,7 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_personal_recovery.py",
+      "path": "tests/test_sync_intervals.py",
       "line": 126,
       "column": 53,
       "code": "UP017",
@@ -536,8 +504,8 @@
     },
     {
       "tool": "ruff",
-      "path": "tests/test_sync_intervals.py",
-      "line": 126,
+      "path": "tests/test_personal_recovery.py",
+      "line": 154,
       "column": 53,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -769,7 +737,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_personal_recovery.py",
-      "line": 123,
+      "line": 151,
       "column": 73,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -3217,7 +3185,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 1889,
+      "line": 2027,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3321,7 +3289,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 1807,
+      "line": 1945,
       "column": 21,
       "code": "misc",
       "message_sha256": "0ba1e959a9929a580b50012a0a160f4a70e2714e7183d6bc45b46b3eb2904c2c"

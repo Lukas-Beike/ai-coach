@@ -10,6 +10,7 @@ from typing import Any
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.refresh import cleanup_refresh_history
 
 WEATHER_CACHE_KEY = "weather_cache"
@@ -17,21 +18,15 @@ WEATHER_FAILURE_KEY = "weather_failure"
 UTC_OFFSET_SUFFIX = "+00:00"
 PROVIDER_REFRESH_RETENTION_DAYS = 30
 PROVIDER_REFRESH_MAX_ROWS = 200
+_PROVIDER_FRESHNESS_AREAS = {
+    (provider_id, area.area): area
+    for provider_id, area in DEFAULT_PROVIDER_REGISTRY.freshness_areas()
+}
 PROVIDER_REFRESH_STALE_SECONDS = {
-    ("intervals", "activities"): 48 * 60 * 60,
-    ("intervals", "competitions"): 48 * 60 * 60,
-    ("intervals", "performance"): 48 * 60 * 60,
-    ("garmin", "data"): 48 * 60 * 60,
-    ("weather", "forecast"): 3 * 60 * 60,
-    ("calendar", "events"): 48 * 60 * 60,
+    key: area.stale_after_s for key, area in _PROVIDER_FRESHNESS_AREAS.items()
 }
 PROVIDER_REFRESH_LABELS = {
-    ("intervals", "activities"): "Intervals.icu · Training",
-    ("intervals", "competitions"): "Intervals.icu · Wettkämpfe",
-    ("intervals", "performance"): "Intervals.icu · Leistung",
-    ("garmin", "data"): "Garmin",
-    ("weather", "forecast"): "Open-Meteo",
-    ("calendar", "events"): "Gemeinsamer Kalender",
+    key: area.label for key, area in _PROVIDER_FRESHNESS_AREAS.items()
 }
 
 
@@ -227,7 +222,7 @@ def provider_freshness_state(
                 "area": area,
                 "label": label,
                 "configured": configured[key],
-                "read_only": key != ("intervals", "competitions"),
+                "read_only": _PROVIDER_FRESHNESS_AREAS[key].read_only,
                 "state": state,
                 "phase": row.get("phase") if row else None,
                 "last_attempt_at": last_attempt,

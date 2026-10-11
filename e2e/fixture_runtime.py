@@ -5,10 +5,10 @@ import os
 import sys
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
-FIXTURE_DEMO_SEED_VERSION = "6"
+FIXTURE_DEMO_SEED_VERSION = "7"
 FIXTURE_TRAINING_FEATURES_SEED_VERSION = "1"
 # canned keeps the canned Coach replies; offline simulates an unreachable OpenAI.
 FIXTURE_OPENAI_MODES = ("canned", "offline")
@@ -466,6 +466,14 @@ def demo_performance_history(today):
                     "run_threshold_pace_seconds_per_km": round(
                         298 - 24 * progress - variation
                     ),
+                    "run_5k_seconds": round(1510 - 110 * progress + variation * 5),
+                    "run_10k_seconds": round(3160 - 220 * progress + variation * 10),
+                    "run_half_marathon_seconds": round(
+                        7060 - 500 * progress + variation * 20
+                    ),
+                    "run_marathon_seconds": round(
+                        15100 - 1000 * progress + variation * 40
+                    ),
                 },
             }
         )
@@ -783,6 +791,7 @@ def _fixture_demo_garmin(today, history):
                 "bmrKilocalories": 0 if offset == 12 else 1540 + (offset % 4) * 8,
                 "totalKilocalories": 0 if offset == 12 else 1960 + (offset % 6) * 42,
                 "totalSteps": 6500 + (offset % 5) * 900,
+                "floorsAscended": 5 + offset % 7,
             }
         )
         # Weight is measured every other day; body fat is intentionally sparse.
@@ -805,10 +814,25 @@ def _fixture_demo_garmin(today, history):
         "source": FIXTURE_SOURCE,
         "synced_at": server.runtime_clock.utc_now(),
         "source_freshness": {
-            "daily_stats": {
+            source: {
                 "freshness": "current",
                 "fetched_at": server.runtime_clock.utc_now(),
+                "observed_at": today.isoformat(),
             }
+            for source in (
+                "daily_stats",
+                "weight",
+                "max_metrics",
+                "cycling_ftp",
+                "running_threshold",
+                "heart_rate_zones",
+                "race_predictions",
+                "sleep",
+                "hrv",
+                "resting_hr",
+                "readiness",
+                "body_battery",
+            )
         },
         "performance_history": history,
         "weight": weight,
@@ -860,11 +884,54 @@ def _fixture_demo_garmin(today, history):
         "max_metrics": [
             {
                 "calendarDate": today.isoformat(),
-                "running": {"vo2MaxPreciseValue": 50.7},
-                "cycling": {"vo2MaxPreciseValue": 53.1},
+                "running": {
+                    "vo2MaxPreciseValue": history[-1]["metrics"][
+                        "running_vo2max_ml_kg_min"
+                    ]
+                },
+                "cycling": {
+                    "vo2MaxPreciseValue": history[-1]["metrics"][
+                        "cycling_vo2max_ml_kg_min"
+                    ]
+                },
             }
         ],
-        "cycling_ftp": {"power": 284, "calendarDate": today.isoformat()},
+        "cycling_ftp": {
+            "functionalThresholdPower": history[-1]["metrics"]["cycling_ftp_watts"],
+            "calendarDate": today.isoformat(),
+        },
+        "running_threshold": {
+            "calendarDate": today.isoformat(),
+            "paceInSecondsPerKilometer": history[-1]["metrics"][
+                "run_threshold_pace_seconds_per_km"
+            ],
+            "power": 310,
+            "heartRate": 168,
+            "heartRateCycling": 162,
+        },
+        "heart_rate_zones": [
+            {"sport": "running", "maxHeartRateUsed": 190},
+            {"sport": "cycling", "maxHeartRateUsed": 184},
+        ],
+        "race_predictions": {
+            "calendarDate": today.isoformat(),
+            **{
+                distance: history[-1]["metrics"][key]
+                for distance, key in (
+                    ("5k", "run_5k_seconds"),
+                    ("10k", "run_10k_seconds"),
+                    ("halfMarathon", "run_half_marathon_seconds"),
+                    ("marathon", "run_marathon_seconds"),
+                )
+            },
+        },
+        "readiness": [
+            {
+                "calendarDate": (today - timedelta(days=offset)).isoformat(),
+                "score": 65 + offset % 6 * 3,
+            }
+            for offset in range(90)
+        ],
         "sleep": [
             {
                 "calendarDate": (today - timedelta(days=offset)).isoformat(),
@@ -1161,6 +1228,8 @@ def _fixture_seed_wave2(today, snapshot, garmin):
             return
 
     by_id = _fixture_wave2_summaries(today, snapshot)
+    _fixture_nutrition_products()
+    _fixture_library_templates()
     _fixture_wave2_feedback(by_id)
     _fixture_wave2_details(by_id)
     _fixture_wave2_competitions(today)
@@ -1173,6 +1242,7 @@ def _fixture_seed_wave2(today, snapshot, garmin):
                     k: {
                         "freshness": "current",
                         "fetched_at": server.runtime_clock.utc_now(),
+                        "observed_at": today.isoformat(),
                     }
                     for k in (
                         "endurance_score",
@@ -1184,7 +1254,7 @@ def _fixture_seed_wave2(today, snapshot, garmin):
             "cycling_ftp_history": [
                 {
                     "calendarDate": (today - timedelta(days=i * 14)).isoformat(),
-                    "functionalThresholdPower": 255 + i * 4,
+                    "functionalThresholdPower": 284 - i * 4,
                     "unit": "synthetic watts",
                 }
                 for i in range(7)
@@ -1209,12 +1279,13 @@ def _fixture_seed_wave2(today, snapshot, garmin):
                 {
                     "calendarDate": (today - timedelta(days=i)).isoformat(),
                     "sleepTimeSeconds": 25200 + (i % 3) * 900,
+                    "sleepScore": 76 + i % 5 * 3,
                     "sleepStartTimestampGMT": int(
                         (
                             datetime.combine(
                                 today - timedelta(days=i),
                                 datetime.min.time(),
-                                tzinfo=timezone.utc,
+                                tzinfo=UTC,
                             )
                             - timedelta(hours=1, minutes=30)
                         ).timestamp()
@@ -1225,9 +1296,9 @@ def _fixture_seed_wave2(today, snapshot, garmin):
                             datetime.combine(
                                 today - timedelta(days=i),
                                 datetime.min.time(),
-                                tzinfo=timezone.utc,
+                                tzinfo=UTC,
                             )
-                            + timedelta(hours=6)
+                            + timedelta(hours=5, minutes=30 + (i % 3) * 15)
                         ).timestamp()
                         * 1000
                     ),
@@ -1249,7 +1320,7 @@ def _fixture_seed_wave2(today, snapshot, garmin):
                                 datetime.min.time(),
                                 tzinfo=timezone(timedelta(hours=2)),
                             )
-                            + timedelta(hours=6)
+                            + timedelta(hours=5, minutes=30 + (i % 3) * 15)
                         ).timestamp()
                         * 1000
                     ),
@@ -1257,6 +1328,25 @@ def _fixture_seed_wave2(today, snapshot, garmin):
                 for i in range(90)
             ],
         }
+    )
+    from backend.performance.morning_battery import morning_body_battery_record
+
+    # Dated samples bracket the actual fixture sleep interval, never live data.
+    sleep = garmin["sleep"][0]
+    garmin["body_battery"] = [
+        {
+            "calendarDate": today.isoformat(),
+            "bodyBatteryValuesArray": [
+                [sleep["sleepStartTimestampGMT"], 24],
+                [sleep["sleepEndTimestampGMT"], 82],
+            ],
+        }
+    ]
+    attempted_at = datetime.fromtimestamp(
+        sleep["sleepEndTimestampGMT"] / 1000, UTC
+    ) + timedelta(minutes=30)
+    garmin["morning_body_battery"] = morning_body_battery_record(
+        today, sleep, garmin["body_battery"], attempted_at=attempted_at.isoformat()
     )
     from backend.performance.history import append_garmin_performance_history
 
@@ -1278,6 +1368,54 @@ def _fixture_completed_sports(today, by_id):
             "source": FIXTURE_SOURCE,
         }
     return by_id
+
+
+def _fixture_nutrition_products():
+    """Local manual products show gram/ml bases and archived catalog entries."""
+    service = server.NUTRITION_ASSEMBLY.meal_library_service()
+    existing = {item["id"] for item in service.list_products(include_archived=True)}
+    for key, name, unit, kcal, carbs, protein, fat, status in (
+        ("oats", "Synthetic oats", "g", 370, 60, 13, 7, "active"),
+        ("drink", "Synthetic sports drink", "ml", 24, 6, 0, 0, "active"),
+        ("gel", "Synthetic archived gel", "g", 250, 62, 0, 0, "archived"),
+    ):
+        product_id = f"fixture-product-{key}"
+        if product_id not in existing:
+            service.save_product(
+                {
+                    "id": product_id,
+                    "name": name,
+                    "basis_amount": 100,
+                    "basis_unit": unit,
+                    "kcal": kcal,
+                    "carbs_g": carbs,
+                    "protein_g": protein,
+                    "fat_g": fat,
+                    "source": "manual",
+                    "status": status,
+                }
+            )
+
+
+def _fixture_library_templates():
+    """Reusable templates are separate from already dated planned workouts."""
+    service = server.PLANNING_DATA.workout_library()
+    existing = {item["name"] for item in service.list(include_archived=True)}
+    for sport, description in (
+        ("Ride", "- 20m 60%"),
+        ("VirtualRide", "- 20m 55%"),
+        ("Run", "- 20m Z1 HR"),
+    ):
+        name = f"Synthetic reusable {sport}"
+        if name not in existing:
+            service.create_template(
+                {
+                    "name": name,
+                    "sport": sport,
+                    "duration_minutes": 20,
+                    "description": description,
+                }
+            )
 
 
 def _fixture_wave2_summaries(today, snapshot):
@@ -1862,7 +2000,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                         "interval_quality": interval_quality(detailed, None),
                     },
                     "source": "Intervals.icu",
-                    "observed_at": datetime.now(timezone.utc).isoformat(),
+                    "observed_at": datetime.now(UTC).isoformat(),
                     "full_resolution": True,
                     "available_streams": ["time", "watts", "heartrate"],
                 },

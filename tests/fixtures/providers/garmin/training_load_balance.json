@@ -1,0 +1,19 @@
+{
+  "mostRecentTrainingLoadBalance": {
+    "metricsTrainingLoadBalanceDTOMap": {
+      "3300001": {
+        "calendarDate": "2026-10-10",
+        "primaryTrainingDevice": true,
+        "monthlyLoadAerobicLow": 420.0,
+        "monthlyLoadAerobicLowTargetMin": 300.0,
+        "monthlyLoadAerobicLowTargetMax": 600.0,
+        "monthlyLoadAerobicHigh": 180.0,
+        "monthlyLoadAerobicHighTargetMin": 120.0,
+        "monthlyLoadAerobicHighTargetMax": 260.0,
+        "monthlyLoadAnaerobic": 30.0,
+        "monthlyLoadAnaerobicTargetMin": 0.0,
+        "monthlyLoadAnaerobicTargetMax": 80.0
+      }
+    }
+  }
+}

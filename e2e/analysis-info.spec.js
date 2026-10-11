@@ -5,13 +5,92 @@ async function performanceFixture(page, changes, route = "performance") {
   await page.route("**/api/performance", async (request) => {
     const response = await request.fetch();
     const data = await response.json();
-    Object.assign(data.performance, changes);
+    Object.assign(data.performance, { metrics: {} }, changes);
     await request.fulfill({ response, json: data });
   });
   await page.goto(`/#analysis/${route}`);
   await expect(page.locator("#appShell")).toBeVisible();
   await page.waitForFunction(() => state.loadedAreas.has("performance") && !state.loadPromise);
 }
+
+test("@responsive standard demo shows one compact race table and sport-specific collapsible development", async ({ page }) => {
+  expect((await page.request.get("/api/fixture/demo")).ok()).toBe(true);
+  await page.goto("/#analysis/performance");
+  const table = page.locator("#performancePredictions");
+  await expect(table.locator("tbody tr")).toHaveCount(4);
+  await expect(table.locator("thead th")).toHaveCount(2);
+  for (const distance of ["5 km", "10 km", "Halbmarathon", "Marathon"]) await expect(table.getByRole("rowheader", { name: distance, exact: true })).toBeVisible();
+  await expect(table).not.toContainText("Garmin");
+  await expect(page.locator("[data-race-distance], #existingPerformanceReports")).toHaveCount(0);
+  await expect(page.locator("#analysisHistoryCharts")).not.toContainText("Historische Entwicklung");
+  const cycling = page.locator("[data-analysis-section='development-Rad']");
+  const running = page.locator("[data-analysis-section='development-Lauf']");
+  const powerProfile = cycling.locator("#cyclingPowerProfile");
+  await expect(powerProfile.locator("tbody tr")).toHaveCount(5);
+  await expect(powerProfile.locator("tbody td")).toHaveText(Array.from({ length: 10 }, () => /^\d+(?:,\d+)? W$/));
+  await expect(cycling.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(1);
+  await expect(running).toContainText("Lauf-Belastbarkeit");
+  await expect(running.locator("#performancePredictions")).toHaveCount(1);
+  await expect(running.locator(".analysis-group-title")).toHaveText("Laufen");
+  await expect(cycling.locator(".analysis-group-title")).toHaveText("Rad");
+  const endurance = page.locator("#performanceEnduranceCharts");
+  await expect(endurance).toContainText("Ausdauer-Score");
+  expect(await endurance.evaluate((element) => element.previousElementSibling.id)).toBe("currentPerformance");
+  for (const group of [running, cycling]) {
+    const title = await group.locator(".analysis-group-title").boundingBox();
+    const help = await group.locator("xpath=../button[contains(@class, 'analysis-section-help')]").boundingBox();
+    expect(help.x - title.x - title.width).toBeGreaterThanOrEqual(12);
+    expect(help.width).toBeGreaterThanOrEqual(44);
+    expect(help.height).toBeGreaterThanOrEqual(44);
+    await group.locator("xpath=../button[contains(@class, 'analysis-section-help')]").click();
+    await expect(group).toHaveAttribute("open", "");
+    await page.keyboard.press("Escape");
+  }
+  await running.locator(":scope > summary").click();
+  await expect(table).toBeHidden();
+  await running.locator(":scope > summary").click();
+  await expect(page.locator("#performanceWeightCharts")).toHaveCount(0);
+  await cycling.locator(":scope > summary").click();
+  await expect(cycling).not.toHaveAttribute("open", "");
+  await expect(cycling.locator("svg").first()).toBeHidden();
+  await expect(running.locator("svg").first()).toBeVisible();
+  await cycling.locator(":scope > summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(cycling.locator("svg").first()).toBeVisible();
+  await page.evaluate(() => renderAnalysisHistory(state.data.performance.history));
+  await expect(cycling.locator("svg").first()).toBeVisible();
+  await cycling.locator(":scope > summary").click();
+  await page.evaluate(() => renderAnalysisHistory(state.data.performance.history));
+  await expect(cycling.locator("svg").first()).toBeHidden();
+  await cycling.locator(":scope > summary").click();
+  expect((await new AxeBuilder({ page }).include("#dataPanel").analyze()).violations).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("@responsive current performance groups real values by sport before the charts", async ({ page }) => {
+  await performanceFixture(page, { metrics: {
+    cycling_ftp_watts: { value: 280, unit: "W", source: "Garmin Connect", observed_at: "2026-10-01", freshness: "stale" },
+    run_threshold_pace_seconds_per_km: { value: 270, unit: "s/km", source: "Garmin Connect" },
+    running_vo2max_ml_kg_min: { value: 52, unit: "ml/kg/min", source: "Intervals.icu" },
+    run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect" },
+  } });
+  const root = page.locator("#currentPerformance");
+  await expect(root).toBeVisible();
+  await expect(root.locator("caption")).toHaveText(["Laufen", "Radfahren"]);
+  await expect(root.locator("[data-metric='cycling_ftp_watts']")).toContainText("280 W");
+  await expect(root.locator("small")).toHaveCount(0);
+  await expect(root).not.toContainText("Garmin");
+  await expect(root).not.toContainText("Intervals.icu");
+  await expect(root).not.toContainText("01.10.2026");
+  await expect(root.locator("[data-metric='run_threshold_pace_seconds_per_km']")).toContainText("4:30");
+  await expect(root.locator("[data-metric='run_threshold_watts'] td")).toHaveText("\u2014");
+  await expect(root).not.toContainText("5 km");
+  expect(await root.evaluate((element) => !!(element.compareDocumentPosition(document.getElementById("analysisHistoryCharts")) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+  expect((await new AxeBuilder({ page }).include("#currentPerformance").analyze()).violations).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.evaluate(() => { location.hash = "#analysis/load"; });
+  await expect(root).toBeHidden();
+});
 
 test("@responsive recovery uses independent scales, honest coverage over exactly fourteen days", async ({ page }) => {
   await performanceFixture(page, { personal_recovery: {
@@ -39,16 +118,49 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
 
 test("@responsive Garmin acute load switches fourteen days and twelve weeks with real gaps", async ({ page }) => {
   const points = Array.from({ length: 90 }, (_, index) => ({ date: new Date(Date.UTC(2026, 6, 3 + index)).toISOString().slice(0, 10), value: index >= 38 && index <= 44 ? null : 300 + index }));
-  await performanceFixture(page, { history: { start: points[0].date, end: points.at(-1).date, load: { source: "Garmin Connect", points }, metrics: {} } }, "load");
-  const root = page.locator("#analysisLoadCharts");
-  await expect(root.locator("svg")).toHaveCount(1);
+  await performanceFixture(page, { history: { start: points[0].date, end: points.at(-1).date, load: { source: "Garmin Connect", points }, training_time: { source: "Intervals.icu", points: points.map((point) => ({ ...point, value: point.value == null ? null : 1 })) }, metrics: {} } }, "load");
+  const loadRoot = page.locator("#analysisLoadCharts");
+  await expect(loadRoot.locator("svg")).toHaveCount(2);
+  const root = loadRoot.locator(".analysis-chart-card").first();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(11);
+  await expect(root.locator("rect.analysis-series-bar")).toHaveCount(11);
+  await expect(root.locator(".analysis-point-value[data-value-series]")).toHaveCount(11);
+  expect(await root.locator(".analysis-date-tick").allTextContents()).toEqual(expect.arrayContaining([expect.stringMatching(/^\d{2}\.\d{2}$/)]));
+  await expect(root).not.toContainText("KW ");
   await expect(root.locator("path[data-series='0']")).toHaveAttribute("d", /M.*L/);
   await expect(root).not.toContainText("Fitness");
-  await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
+  await loadRoot.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(14);
-  await root.getByRole("button", { name: "12 Wochen", exact: true }).click();
+  for (const chart of await loadRoot.locator(".analysis-chart-card").all()) {
+    await expect(chart.locator(".analysis-point-value[data-value-series]")).toHaveCount(14);
+    const boxes = await chart.locator(".analysis-point-value[data-value-series]").evaluateAll((labels) => labels.map((label) => {
+      const box = label.getBoundingClientRect(); return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+    }));
+    for (let index = 0; index < boxes.length; index++) {
+      const box = boxes[index];
+      expect(boxes.slice(index + 1).some((other) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top)).toBe(false);
+    }
+  }
+  await loadRoot.getByRole("button", { name: "12 Wochen", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(11);
+  for (const svg of await loadRoot.locator("svg").all()) {
+    const geometry = await svg.evaluate((element) => {
+      const dots = [...element.querySelectorAll("circle[data-series]")];
+      const bars = [...element.querySelectorAll("rect.analysis-series-bar")];
+      const path = element.querySelector("path[data-series]").getAttribute("d");
+      return { dots: dots.map((dot) => [Number(dot.getAttribute("cx")), Number(dot.getAttribute("cy"))]),
+        bars: bars.map((bar) => [Number(bar.getAttribute("x")) + Number(bar.getAttribute("width")) / 2, Number(bar.getAttribute("y"))]),
+        line: [...path.matchAll(/[ML](-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g)].map((match) => [Number(match[1]), Number(match[2])]) };
+    });
+    expect(geometry.dots.length).toBeGreaterThan(0);
+    expect(geometry.bars.length).toBe(geometry.dots.length);
+    geometry.dots.forEach((dot, index) => {
+      expect(geometry.bars[index][0]).toBeCloseTo(dot[0], 4);
+      expect(geometry.bars[index][1]).toBeCloseTo(dot[1], 4);
+      expect(geometry.line[index][0]).toBeCloseTo(dot[0], 2);
+      expect(geometry.line[index][1]).toBeCloseTo(dot[1], 2);
+    });
+  }
   expect((await new AxeBuilder({ page }).include("#analysisLoadCharts").analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
@@ -94,31 +206,6 @@ test("sparse FTP uses a current value line alongside a dense eFTP series", async
   await expect(chart.locator('.analysis-current-line[data-series="0"]')).toHaveCount(0);
   await expect(chart.locator('path[data-series="1"]')).toHaveCount(1);
   await expect(page.locator("#analysisHistoryCharts")).toContainText("Seit 01.09.2026: +10 W");
-});
-
-test("@responsive best windows table and endurance efficiency chart are compact and link-free", async ({ page }) => {
-  await page.route("**/api/analysis/endurance", (route) => route.fulfill({ json: { status: "ok", activities: [
-    { activity_id: "r1", sport: "Ride", date: "2026-09-10", name: "A", aerobic: { efficiency: 1.42, unit: "W/bpm", drift_percent: 3 } },
-    { activity_id: "r2", sport: "Ride", date: "2026-09-24", name: "B", aerobic: { efficiency: 1.5, unit: "W/bpm", drift_percent: 2 } },
-    { activity_id: "u1", sport: "Run", date: "2026-09-20", name: "C", aerobic: { efficiency: null, reason: "x" } },
-  ] } }));
-  await page.route("**/api/analysis/power-profiles", (route) => route.fulfill({ json: { status: "ok", best: [
-    { sport: "Ride", duration_seconds: 300, watts: 280, date: "2026-09-20", activity_id: "r1" },
-    { sport: "Ride", duration_seconds: 5, watts: 700, date: "2026-09-21", activity_id: "r2" },
-  ], activities: [] } }));
-  await performanceFixture(page, {}, "performance");
-  const root = page.locator("#existingPerformanceReports");
-  await expect(root.getByRole("heading", { name: "Beste Fenster je Aktivit\u00e4t" })).toBeVisible();
-  await expect(root.locator("section", { hasText: "Beste Fenster" }).locator("tbody tr")).toHaveCount(2);
-  await expect(root.locator("section", { hasText: "Beste Fenster" }).locator("tbody tr").first()).toContainText("5 s");
-  await expect(root.getByRole("heading", { name: /Ausdauer-Effizienz/ })).toBeVisible();
-  await expect(root.locator("svg")).toHaveCount(1);
-  await expect(root).not.toContainText("Quelle/Methode");
-  await expect(root).not.toContainText("Leistungsprofil");
-  await expect(root.locator("tbody button, tbody a")).toHaveCount(0);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  const AxeBuilder = require("@axe-core/playwright").default;
-  expect((await new AxeBuilder({ page }).include("#existingPerformanceReports").analyze()).violations).toEqual([]);
 });
 
 test("@responsive pace ticks stay distinct and faster pace is higher", async ({ page }) => {
@@ -252,47 +339,17 @@ test("@responsive performance keeps predictions in the dedicated table", async (
   await expect(page.locator("#performanceSummary")).toBeHidden();
 });
 
-test("@responsive race estimates chart current times and reports missing history honestly", async ({ page }) => {
+test("@responsive historical race estimates never create duplicate charts", async ({ page }) => {
   await performanceFixture(page, {
-    metrics: {
-      run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect", note: "Garmin Connect Laufprognose" },
-      run_10k_seconds: { value: 2500, unit: "s", source: "Garmin Connect", note: "Garmin Connect Laufprognose" },
-    },
-    history: { start: "2026-09-01", end: "2026-10-01", load: { points: [] }, metrics: {} },
-  });
-  const root = page.locator("#analysisHistoryCharts");
-  const chart = root.locator("svg[aria-label='Garmin Connect Laufprognosen nach Distanz']");
-  await expect(chart.locator("rect[data-race-distance]")).toHaveCount(2);
-  await expect(chart).toContainText("20:00");
-  await expect(root).toContainText("Noch keine historische Entwicklung der Laufprognosen verfügbar.");
-});
-
-test("@responsive race prediction history renders a sourced connected line across missing weeks", async ({ page }) => {
-  const points = [
-    { date: "2026-09-01", value: 1200 },
-    { date: "2026-09-08", value: null },
-    { date: "2026-09-15", value: 1180 },
-  ];
-  await performanceFixture(page, {
-    metrics: {},
+    metrics: { run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect", note: "Garmin Connect Laufprognose" } },
     history: { start: "2026-09-01", end: "2026-10-01", load: { points: [] }, metrics: {
-      run_5k_seconds: [{ source: "Garmin Connect", points }],
+      run_5k_seconds: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 1250 }, { date: "2026-09-15", value: 1200 }] }],
     } },
   });
-  const root = page.locator("#analysisHistoryCharts");
-  const chart = root.locator(".analysis-chart-card").first().locator("svg").last();
-  await expect(chart.locator("circle[data-series='0']")).toHaveCount(2);
-  const geometry = await chart.evaluate((svg) => {
-    const path = svg.querySelector("path[data-series='0']").getAttribute("d");
-    const line = [...path.matchAll(/[ML](-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g)]
-      .map((match) => [Number(match[1]).toFixed(2), Number(match[2]).toFixed(2)]);
-    const markers = [...svg.querySelectorAll("circle[data-series='0']")]
-      .map((circle) => [Number(circle.getAttribute("cx")).toFixed(2), Number(circle.getAttribute("cy")).toFixed(2)]);
-    return { path, line, markers };
-  });
-  expect(geometry.path).not.toMatch(/M.*M/);
-  expect(geometry.line).toEqual(geometry.markers);
-  await expect(root).toContainText("Quelle: Garmin Connect");
+  await expect(page.locator("#performancePredictions")).toContainText("20:00");
+  await expect(page.locator("#performancePredictions")).not.toContainText("Garmin");
+  await expect(page.locator("#analysisHistoryCharts svg")).toHaveCount(0);
+  await expect(page.locator("[data-race-distance]")).toHaveCount(0);
 });
 
 test("@responsive provider metrics render as charts without raw text", async ({ page }) => {
@@ -317,7 +374,7 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
     },
   });
   const performance = page.locator("#analysisHistoryCharts");
-  await expect(performance.getByRole("heading", { name: "Ausdauer-Score" })).toBeVisible();
+  await expect(page.locator("#performanceEnduranceCharts").getByRole("heading", { name: "Ausdauer-Score" })).toBeVisible();
   await expect(performance.getByRole("heading", { name: "Lauf-Belastbarkeit" })).toHaveCount(0);
   await expect(performance).not.toContainText("Garmin-Provider-Metriken");
   await expect(performance).not.toContainText("Rohfeld");
@@ -337,8 +394,8 @@ test("@responsive predictions list only race estimates and never body weight", a
   const predictions = page.locator("#performancePredictions");
   await expect(predictions.getByRole("heading", { name: "Laufprognosen" })).toBeVisible();
   await expect(predictions.locator("tbody tr")).toHaveCount(1);
-  await expect(predictions).toContainText("10 km (geschätzt)");
-  await expect(predictions).toContainText("Garmin Connect");
+  await expect(predictions).toContainText("10 km");
+  await expect(predictions).not.toContainText("Garmin Connect");
   await expect(predictions).not.toContainText("Gewicht");
   await expect(predictions).not.toContainText("72");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -410,23 +467,4 @@ test("@responsive legend info buttons are at least 44x44 and never overlap each 
       expect(overlaps, `legend buttons ${first} and ${second} overlap`).toBe(false);
     }
   }
-});
-
-test("@responsive endurance efficiency keeps small ratios readable instead of rounding them to zero", async ({ page }) => {
-  await page.route("**/api/analysis/endurance", (route) => route.fulfill({ json: { status: "ok", activities: [
-    { activity_id: "a1", sport: "Run", date: "2026-09-01", name: "A", aerobic: { efficiency: 0.0234, unit: "(m/s)/bpm", drift_percent: 2 } },
-    { activity_id: "a2", sport: "Run", date: "2026-09-02", name: "B", aerobic: { efficiency: 0.0241, unit: "(m/s)/bpm", drift_percent: 1 } },
-    { activity_id: "a3", sport: "Run", date: "2026-09-03", name: "C", aerobic: { efficiency: 0.0229, unit: "(m/s)/bpm", drift_percent: 1 } },
-  ] } }));
-  await page.route("**/api/analysis/power-profiles", (route) => route.fulfill({ json: { status: "ok", best: [], activities: [] } }));
-  await performanceFixture(page, {}, "performance");
-  const chart = page.locator("#existingPerformanceReports svg");
-  await expect(chart).toHaveCount(1);
-  const ticks = await chart.locator(".analysis-value-tick").allTextContents();
-  expect(new Set(ticks).size).toBe(ticks.length);
-  expect(ticks).not.toContain("0");
-  const values = await chart.locator(".analysis-point-value").allTextContents();
-  expect(values.length).toBeGreaterThan(0);
-  expect(values.every((value) => value.startsWith("0,02"))).toBe(true);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

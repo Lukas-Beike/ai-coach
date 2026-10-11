@@ -1,0 +1,15 @@
+{
+  "mostRecentTrainingStatus": {
+    "latestTrainingStatusData": {
+      "3300001": {
+        "calendarDate": "2026-10-10",
+        "primaryTrainingDevice": true,
+        "acuteTrainingLoadDTO": {
+          "dailyTrainingLoadAcute": 480.0,
+          "dailyTrainingLoadChronic": 410.0,
+          "dailyAcuteChronicWorkloadRatio": 1.17
+        }
+      }
+    }
+  }
+}

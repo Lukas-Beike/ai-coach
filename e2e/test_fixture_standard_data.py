@@ -1,8 +1,8 @@
 """Focused contracts for the disposable standard demo fixture data shapes."""
 
 import json
-import threading
 import os
+import threading
 import unittest
 from collections import Counter
 from contextlib import contextmanager
@@ -18,7 +18,9 @@ from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
 from backend.performance.body import body_history
+from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.daily_health import garmin_daily_expenditure
+from backend.performance.garmin_metrics import garmin_performance_metrics
 from backend.providers.calendar import parse_ical_calendar
 from e2e import fixture_runtime
 
@@ -32,6 +34,88 @@ V6_UNIT_NAMES = {
 class StandardFixtureDataTests(unittest.TestCase):
     def setUp(self):
         self.today = date(2026, 10, 6)
+
+    def test_standard_performance_metrics_survive_provider_normalization(self):
+        garmin = fixture_runtime._fixture_demo_garmin(
+            self.today, fixture_runtime.demo_performance_history(self.today)
+        )
+        metrics = garmin_performance_metrics(garmin, self.today)
+        history = analysis_history({}, garmin, self.today)
+        for key, metric in metrics.items():
+            with self.subTest(metric=key):
+                self.assertIsNotNone(metric["value"])
+                self.assertEqual(metric["source"], "Garmin Connect")
+                self.assertEqual(metric["freshness"], "current")
+                self.assertEqual(metric["observed_at"], self.today.isoformat())
+        for key in METRIC_KEYS:
+            if key == "cycling_eftp_watts":
+                continue  # Intervals eFTP is covered with both providers below.
+            with self.subTest(history=key):
+                points = history["metrics"][key][0]["points"]
+                self.assertGreater(sum(p["value"] is not None for p in points), 10)
+                self.assertTrue(any(p["value"] is None for p in points))
+                self.assertEqual(points[-1]["value"], metrics[key]["value"])
+
+    def test_v6_demo_upgrade_adds_performance_and_recovery_once(self):
+        with self._temporary_fixture_database("fixture-v7-upgrade-") as server:
+            fixture_runtime.initialise_fixture()
+            fixture_runtime.seed_preview_demo()
+            with server.database_manager().unit_of_work() as db:
+                before = json.loads(
+                    server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot")
+                )
+                before.pop("race_predictions")
+                for row in before["performance_history"]:
+                    for key in list(row["metrics"]):
+                        if key.startswith("run_") and key.endswith("seconds"):
+                            row["metrics"].pop(key)
+                server.KEY_VALUE_REPOSITORY.set(
+                    db, "garmin_snapshot", json.dumps(before)
+                )
+                server.KEY_VALUE_REPOSITORY.set(db, "preview_demo_seed_version", "6")
+            upgraded = fixture_runtime.seed_preview_demo()
+            with server.database_manager().unit_of_work() as db:
+                garmin = json.loads(
+                    server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot")
+                )
+            repeated = fixture_runtime.seed_preview_demo()
+            with server.database_manager().unit_of_work() as db:
+                restarted = json.loads(
+                    server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot")
+                )
+            today = server.ATHLETE_CLOCK.now().date()
+            products = server.NUTRITION_ASSEMBLY.meal_library_service().list_products(
+                include_archived=True
+            )
+            templates = server.PLANNING_DATA.workout_library().list()
+            fixture_runtime._fixture_library_templates()
+            self.assertEqual(server.PLANNING_DATA.workout_library().list(), templates)
+
+        self.assertEqual(
+            upgraded["seed_version"], fixture_runtime.FIXTURE_DEMO_SEED_VERSION
+        )
+        self.assertEqual(repeated, {"ready": True})
+        self.assertEqual(restarted, garmin)
+        metrics = garmin_performance_metrics(garmin, today)
+        self.assertIsNotNone(metrics["run_marathon_seconds"]["value"])
+        self.assertEqual(garmin["morning_body_battery"]["status"], "ready")
+        self.assertEqual(garmin["morning_body_battery"]["before_sleep"]["value"], 24)
+        self.assertEqual(garmin["morning_body_battery"]["morning"]["value"], 82)
+        self.assertEqual(len(garmin["readiness"]), 90)
+        self.assertEqual(len(products), 3)
+        self.assertEqual({p["basis_unit"] for p in products}, {"g", "ml"})
+        self.assertEqual({p["status"] for p in products}, {"active", "archived"})
+        self.assertEqual({p["type"] for p in templates}, {"Ride", "VirtualRide", "Run"})
+        self.assertEqual(len(templates), 3)
+        self.assertTrue(all(p.get("external_id") is None for p in templates))
+        self.assertTrue(all(p.get("date") is None for p in templates))
+        for sleep in garmin["sleep"]:
+            self.assertEqual(
+                (sleep["sleepEndTimestampGMT"] - sleep["sleepStartTimestampGMT"])
+                / 1000,
+                sleep["sleepTimeSeconds"],
+            )
+            self.assertGreater(sleep["sleepScore"], 0)
 
     def test_standard_dataset_covers_sparse_body_history_and_both_ftp_sources(self):
         wellness = fixture_runtime._fixture_demo_wellness(self.today)
@@ -696,8 +780,11 @@ class StandardFixtureDataTests(unittest.TestCase):
         self.assertEqual(before["version"], "5")
         self.assertEqual(before["swims"], [])
         self.assertEqual(before["camp_units"], [])
-        self.assertEqual(upgraded, {"ready": True, "seed_version": "6"})
-        self.assertEqual(after["version"], "6")
+        self.assertEqual(
+            upgraded,
+            {"ready": True, "seed_version": fixture_runtime.FIXTURE_DEMO_SEED_VERSION},
+        )
+        self.assertEqual(after["version"], fixture_runtime.FIXTURE_DEMO_SEED_VERSION)
         self.assertEqual(after["sick_illness"], "Erkältung, synthetisch")
         self.assertEqual(len(after["swims"]), 2)
         self.assertEqual(after["unit_name_counts"], {name: 1 for name in V6_UNIT_NAMES})

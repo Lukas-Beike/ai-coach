@@ -1,0 +1,20 @@
+[
+  {
+    "calendarDate": "2026-10-09",
+    "sleepTimeSeconds": 25200,
+    "sleepScore": 78,
+    "deepSleepSeconds": 4800,
+    "lightSleepSeconds": 13800,
+    "remSleepSeconds": 4500,
+    "awakeSleepSeconds": 1200
+  },
+  {
+    "calendarDate": "2026-10-10",
+    "sleepTimeSeconds": 27900,
+    "sleepScore": 86,
+    "deepSleepSeconds": 5600,
+    "lightSleepSeconds": 15100,
+    "remSleepSeconds": 5400,
+    "awakeSleepSeconds": 1000
+  }
+]

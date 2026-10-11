@@ -111,8 +111,8 @@ function ensureRouteData(route = state.route) {
   if (panelRoute === "plan" && !state.loadedAreas.has("plan")) requested.push("plan");
   if (panelRoute === "plan" && !state.loadedAreas.has("library")) requested.push("library");
   if (requested.length) load("/api/bootstrap?local=1", requested);
-  if (panelRoute === "analysis") void loadAnalysisReports();
   if (route === "more/equipment") void renderTrainingRecords();
+  if (route === "analysis/performance") void renderCyclingPowerProfile();
 }
 
 function renderActiveRoute(mainRoute, panelRoute) {

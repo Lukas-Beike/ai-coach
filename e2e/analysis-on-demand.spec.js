@@ -17,7 +17,10 @@ function trackReportRequests(page) {
 async function mockReports(page) {
   await page.route(`**${ENDURANCE}`, (route) => route.fulfill({ json: { activities: [] } }));
   await page.route(`**${POWER_PROFILES}`, (route) => route.fulfill({ json: {
-    best: [{ sport: "Ride", duration_seconds: 300, watts: 250, date: "2026-10-01" }],
+    windows: { "90": { power: [
+      ...[5, 60, 300, 1200].map((duration_seconds) => ({ sport: "Ride", duration_seconds, watts: 250, status: "ok", date: "2026-10-01", source: "Intervals.icu" })),
+      { sport: "VirtualRide", duration_seconds: 3600, watts: 210, status: "ok", date: "2026-10-02", source: "Intervals.icu" },
+    ] } },
   } }));
   await page.route(`**${TRAINING_RECORDS}`, (route) => route.fulfill({ json: {
     equipment: { items: [], garmin_items: [] },
@@ -34,7 +37,7 @@ async function routeTo(page, hash) {
   await page.evaluate((target) => { location.hash = target; }, hash);
 }
 
-test("@responsive analysis reports stay off the coach start and load once on analysis", async ({ page }) => {
+test("@responsive cycling power profile loads only on performance and keeps unknown durations empty", async ({ page }) => {
   await mockReports(page);
   const reportCounts = trackReportRequests(page);
   await waitForInitialState(page);
@@ -42,34 +45,43 @@ test("@responsive analysis reports stay off the coach start and load once on ana
 
   await routeTo(page, "#analysis/performance");
   await expect(page.locator("#dataPanel")).toHaveClass(/active/);
-  await expect(page.locator("#existingPerformanceReports").getByRole("heading", { name: "Beste Fenster je Aktivität" })).toBeVisible();
-  expect(reportCounts()).toEqual({ [ENDURANCE]: 1, [POWER_PROFILES]: 1, [TRAINING_RECORDS]: 0 });
+  await expect(page.locator("#performancePredictions")).toBeVisible();
+  await expect(page.locator("#cyclingPowerProfile tbody tr")).toHaveCount(5);
+  await expect(page.locator("#cyclingPowerProfile [data-power-duration='5'] td")).toHaveText(["250 W", "—"]);
+  await expect(page.locator("#cyclingPowerProfile [data-power-duration='3600'] td")).toHaveText(["—", "210 W"]);
+  await expect(page.locator("#cyclingPowerProfile")).toContainText("letzte 90 Tage");
+  expect(await page.locator("#cyclingPowerProfile").evaluate((element) => element.closest("[data-analysis-section]").dataset.analysisSection)).toBe("development-Rad");
+  expect(reportCounts()).toEqual({ [ENDURANCE]: 0, [POWER_PROFILES]: 1, [TRAINING_RECORDS]: 0 });
 });
 
-test("@responsive cold start on analysis requests each report exactly once", async ({ page }) => {
+test("@responsive cold start on performance fetches only the power profile", async ({ page }) => {
   await mockReports(page);
   const reportCounts = trackReportRequests(page);
   await page.goto("/#analysis/performance");
   await expect(page.locator("#appShell")).toBeVisible();
   await page.waitForFunction(() => AppState.state.initialStateLoaded);
-  await expect(page.locator("#existingPerformanceReports").getByRole("heading", { name: "Beste Fenster je Aktivität" })).toBeVisible();
-  expect(reportCounts()).toEqual({ [ENDURANCE]: 1, [POWER_PROFILES]: 1, [TRAINING_RECORDS]: 0 });
+  await expect(page.locator("#performancePredictions")).toBeVisible();
+  await expect(page.locator("#cyclingPowerProfile tbody tr")).toHaveCount(5);
+  expect(reportCounts()).toEqual({ [ENDURANCE]: 0, [POWER_PROFILES]: 1, [TRAINING_RECORDS]: 0 });
 });
 
-test("@responsive analysis reports are reused across navigation until the data changes", async ({ page }) => {
+test("@responsive cycling power profile stays cached across navigation and chart rerenders", async ({ page }) => {
   await mockReports(page);
   const reportCounts = trackReportRequests(page);
   await waitForInitialState(page);
 
   await routeTo(page, "#analysis/performance");
-  await expect(page.locator("#existingPerformanceReports").getByRole("heading", { name: "Beste Fenster je Aktivität" })).toBeVisible();
+  await expect(page.locator("#performancePredictions")).toBeVisible();
+  await expect(page.locator("#cyclingPowerProfile tbody tr")).toHaveCount(5);
   const afterFirstVisit = reportCounts();
+  await page.evaluate(() => renderAnalysisHistory(state.data.performance.history));
+  await expect(page.locator("#cyclingPowerProfile tbody tr")).toHaveCount(5);
 
   await routeTo(page, "#coach");
   await expect(page.locator("#chatPanel")).toHaveClass(/active/);
   await routeTo(page, "#analysis/performance");
   await expect(page.locator("#dataPanel")).toHaveClass(/active/);
-  await expect(page.locator("#existingPerformanceReports").getByRole("heading", { name: "Beste Fenster je Aktivität" })).toBeVisible();
+  await expect(page.locator("#performancePredictions")).toBeVisible();
   expect(reportCounts()).toEqual(afterFirstVisit);
 });
 

@@ -1,0 +1,32 @@
+[
+  {
+    "activityId": 910001,
+    "activityName": "Synthetic morning ride",
+    "activityType": {"typeKey": "cycling"},
+    "startTimeLocal": "2026-10-08 07:15:00",
+    "distance": 88500.0,
+    "duration": 5400.0,
+    "averageHR": 142,
+    "maxHR": 171,
+    "calories": 1450,
+    "trainingEffect": 3.1,
+    "trainingEffectLabel": "AEROBIC_BASE",
+    "activityTrainingLoad": 72.0,
+    "vO2MaxValue": 58.0,
+    "elevationGain": 640.0
+  },
+  {
+    "activityId": 910002,
+    "activityName": "Synthetic easy run",
+    "activityType": {"typeKey": "running"},
+    "startTimeLocal": "2026-10-09 18:05:00",
+    "distance": 7600.0,
+    "duration": 2400.0,
+    "averageHR": 138,
+    "maxHR": 156,
+    "calories": 520,
+    "trainingEffect": 2.4,
+    "trainingEffectLabel": "RECOVERY",
+    "activityTrainingLoad": 38.0
+  }
+]

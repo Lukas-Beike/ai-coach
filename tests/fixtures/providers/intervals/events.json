@@ -1,0 +1,33 @@
+[
+  {
+    "id": 7001,
+    "start_date_local": "2026-10-12T07:00:00",
+    "category": "WORKOUT",
+    "name": "Synthetic tempo ride",
+    "description": "Synthetic sample workout text",
+    "type": "Ride",
+    "moving_time": 4500,
+    "elapsed_time": 4700,
+    "icu_training_load": 65,
+    "icu_intensity": 0.8,
+    "target": "POWER",
+    "external_id": "synthetic-plan-001",
+    "owner_note": "synthetic field that is not a compacted calendar field"
+  },
+  {
+    "id": 7002,
+    "start_date_local": "2026-10-15T00:00:00",
+    "category": "NOTE",
+    "name": "Synthetic rest day",
+    "description": "Synthetic note"
+  },
+  {
+    "id": 7003,
+    "start_date_local": "2026-10-18T08:00:00",
+    "category": "RACE_A",
+    "name": "Synthetic 10 km race",
+    "type": "Run",
+    "distance": 10000.0,
+    "moving_time": 2700
+  }
+]

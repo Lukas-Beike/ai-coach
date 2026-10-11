@@ -1047,9 +1047,6 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("Running Tolerance", analysis)
         self.assertIn('return { endurance_score: "Punkte" }[key] || "";', analysis)
         self.assertIn("unit: providerMetricUnit(key)", analysis)
-        self.assertIn('const SPORT_FAMILIES = { VirtualRide: "Ride" };', analysis)
-        self.assertIn("analysisSportFamily(item.sport)", analysis)
-        self.assertIn("bestWindows.set(key", analysis)
         self.assertIn("SPORT_LABELS[item.sport] || item.sport", analysis)
         self.assertIn(
             "Daten f\u00fcr ${count} von ${total} ${unitWord} vorhanden.", analysis
@@ -1057,7 +1054,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('item.cadenceDays === 7 ? "Wochen" : "Tagen"', analysis)
         self.assertNotIn("Tage mit Messung", analysis)
         self.assertNotIn("${readings.length}/${item.points.length}", analysis)
-        self.assertIn("function analysisIsoWeek(dateKey)", analysis)
+        self.assertNotIn("function analysisIsoWeek(dateKey)", analysis)
+        self.assertNotIn("renderExistingPerformanceReports", analysis)
+        self.assertNotIn("renderRacePredictionCharts", analysis)
         self.assertIn(
             "weekTicks ? analysisWeekTickLabel : analysisDayTickLabel", analysis
         )
@@ -1080,7 +1079,7 @@ class ServerFrontendTests(ServerTestCase):
         wrapper = (
             'makeScrollRegionFocusable(reportNode("div", null, "analysis-chart-table")'
         )
-        self.assertEqual(analysis.count(wrapper), 3)
+        self.assertEqual(analysis.count(wrapper), 2)
         self.assertIn(
             'makeScrollRegionFocusable(node("div", null, "analysis-chart-table")',
             details,
@@ -1365,7 +1364,6 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("scale.pattern", analysis)
         plan_views = (public / "plan-views.js").read_text(encoding="utf-8")
         self.assertIn("SEASON_PHASE_LABELS[next.phase]", plan_views)
-
 
     def test_ux_copy_labels_and_readable_context_preview(self):
         index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")

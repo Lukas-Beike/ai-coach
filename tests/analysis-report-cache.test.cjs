@@ -6,7 +6,7 @@ const { test } = require("node:test");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/analysis.js"), "utf8");
 const start = source.indexOf("const analysisReportCache = new Map();");
-const end = source.indexOf("\nasync function loadAnalysisReports", start);
+const end = source.indexOf("\nglobalThis.matchMedia", start);
 const TRAINING_RECORDS = "/api/analysis/training-records";
 
 function createContext(calls) {

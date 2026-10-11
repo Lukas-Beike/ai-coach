@@ -5,7 +5,7 @@ const vm = require("node:vm");
 const { test } = require("node:test");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/analysis.js"), "utf8");
-const start = source.indexOf("function analysisIsoWeek(");
+const start = source.indexOf("function analysisWeekTickLabel(");
 const end = source.indexOf("\nfunction appendAnalysisDateTicks(", start);
 
 function loadTickLabels() {
@@ -15,13 +15,13 @@ function loadTickLabels() {
   return { weekTickLabel: context.analysisWeekTickLabel, dayTickLabel: context.analysisDayTickLabel };
 }
 
-test("calendar-week ticks label the ISO week that contains the tick date", () => {
+test("weekly ticks show a date from the displayed week", () => {
   const { weekTickLabel } = loadTickLabels();
-  assert.equal(weekTickLabel("2026-10-05"), "KW 41");
-  assert.equal(weekTickLabel("2026-10-11"), "KW 41");
-  assert.equal(weekTickLabel("2025-12-29"), "KW 1");
-  assert.equal(weekTickLabel("2027-01-01"), "KW 53");
-  assert.equal(weekTickLabel("2026-12-31"), "KW 53");
+  assert.equal(weekTickLabel("2026-10-05"), "05.10");
+  assert.equal(weekTickLabel("2026-10-11"), "11.10");
+  assert.equal(weekTickLabel("2025-12-29"), "29.12");
+  assert.equal(weekTickLabel("2027-01-01"), "01.01");
+  assert.equal(weekTickLabel("2026-12-31"), "31.12");
 });
 
 test("rolling seven-day buckets keep day-month date labels", () => {

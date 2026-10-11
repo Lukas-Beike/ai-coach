@@ -1,0 +1,10 @@
+{
+  "speed_and_heart_rate": {
+    "speed": 3.6,
+    "heartRate": 168,
+    "heartRateCycling": 160
+  },
+  "power": {
+    "functionalThresholdPower": 290
+  }
+}

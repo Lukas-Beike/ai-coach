@@ -1,0 +1,11 @@
+[
+  {
+    "sport": "DEFAULT",
+    "maxHeartRateUsed": 190,
+    "zone1Floor": 95,
+    "zone2Floor": 114,
+    "zone3Floor": 133,
+    "zone4Floor": 152,
+    "zone5Floor": 171
+  }
+]
