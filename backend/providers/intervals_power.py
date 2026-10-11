@@ -25,6 +25,22 @@ def _valid_power(duration: Any, value: Any) -> bool:
     )
 
 
+def _curve_samples(
+    curve: Any, durations: list[Any], start: date, end: date
+) -> list[tuple[date, int, int | float]]:
+    if not isinstance(curve, dict):
+        return []
+    day = _curve_day(curve, start, end)
+    watts = curve.get("watts")
+    if day is None or not isinstance(watts, list) or len(watts) != len(durations):
+        return []
+    return [
+        (day, duration, value)
+        for duration, value in zip(durations, watts, strict=True)
+        if _valid_power(duration, value)
+    ]
+
+
 def cycling_power_points(payload: Any, start: date, end: date) -> list[dict[str, Any]]:
     """Normalize the documented activity-power-curves payload, without estimates."""
     if not isinstance(payload, dict):
@@ -34,15 +50,7 @@ def cycling_power_points(payload: Any, start: date, end: date) -> list[dict[str,
         raise AppError(502, "Ungültiges Rad-Leistungsprofil vom Anbieter.")
     best: dict[int, dict[str, Any]] = {}
     for curve in curves:
-        if not isinstance(curve, dict):
-            continue
-        day = _curve_day(curve, start, end)
-        watts = curve.get("watts")
-        if day is None or not isinstance(watts, list) or len(watts) != len(durations):
-            continue
-        for duration, value in zip(durations, watts, strict=True):
-            if not _valid_power(duration, value):
-                continue
+        for day, duration, value in _curve_samples(curve, durations, start, end):
             if duration not in best or value > best[duration]["watts"]:
                 best[duration] = {
                     "duration_seconds": duration,
