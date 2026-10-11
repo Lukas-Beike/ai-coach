@@ -22,6 +22,7 @@ from backend.http_api.state_prelude import (
     PublicStateWeatherPrelude,
 )
 from backend.http_api.state_versions import StateVersionService
+from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.status import SyncPublicStateService
 
 
@@ -97,7 +98,12 @@ class PublicStateAssembly:
         operations: PublicStateOperationalServices
         calendar: PublicStateCalendarSettings
 
-    def __init__(self, *, dependencies: PublicStateAssembly.Inputs) -> None:
+    def __init__(
+        self,
+        *,
+        dependencies: PublicStateAssembly.Inputs,
+        provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
+    ) -> None:
         core = dependencies.core
         owners = dependencies.owners
         projections = dependencies.projections
@@ -148,6 +154,7 @@ class PublicStateAssembly:
         self._sync_period_defaults = calendar.sync_period_defaults
         self._all_sync_days = calendar.all_sync_days
         self._planned_workout_label = calendar.planned_workout_label
+        self._provider_runtime = provider_runtime
 
     def performance_state_service(self) -> PublicPerformanceStateService:
         sync = self._sync_persistence()
@@ -179,6 +186,11 @@ class PublicStateAssembly:
         config = self._config()
         athlete = self._athlete_data()
         garmin = self._garmin()
+        running_probes = (
+            None
+            if self._provider_runtime is None
+            else self._provider_runtime().running_probes()
+        )
         return SyncPublicStateService(
             config,
             self._database_manager(),
@@ -190,6 +202,7 @@ class PublicStateAssembly:
             self._sync_job_queue().service(),
             self.state_version_service(),
             self._intervals_sync_lock(),
+            running_probes=running_probes,
         )
 
     def weather_state_service(self) -> PublicWeatherStateService:
