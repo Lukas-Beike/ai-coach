@@ -136,9 +136,16 @@ class CompetitionWriterTests(unittest.TestCase):
         self.assertEqual(
             REPOSITORY.resolve_remote_id(self.db, self.kind, "c1", "501"), "777"
         )
-        self.db.execute("UPDATE remote_links SET remote_id=NULL, sync_state='pending'")
+
+    def test_a_pending_link_does_not_revive_a_rejected_duplicate_id(self) -> None:
+        insert_competition(self.db, "c1", intervals_event_id="501", external_id="x")
+        insert_competition(self.db, "c2", intervals_event_id="501", external_id="y")
+        REPOSITORY.refresh_from_slots(self.db, self.kind, "c1")
+        REPOSITORY.refresh_from_slots(self.db, self.kind, "c2")
+        self.assertEqual(link(self.db, self.kind, "c2"), (None, "y", "pending"))
+        self.assertIsNone(REPOSITORY.resolve_remote_id(self.db, self.kind, "c2", "501"))
         self.assertEqual(
-            REPOSITORY.resolve_remote_id(self.db, self.kind, "c1", "501"), "501"
+            REPOSITORY.resolve_remote_external_id(self.db, self.kind, "c2", "z"), "y"
         )
 
 

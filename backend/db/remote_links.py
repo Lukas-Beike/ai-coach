@@ -287,9 +287,14 @@ class RemoteLinkRepository:
         local_id: str,
         legacy_remote_id: Any = None,
     ) -> str | None:
-        """Return the Intervals.icu remote id, preferring the link over the slot."""
+        """Return the Intervals.icu remote id; the slot counts only without a link.
+
+        An existing link is authoritative even without a remote id: the upgrade
+        and the writers leave a duplicate legacy claim pending on purpose, so
+        its retained slot must not revive the rejected id.
+        """
         link = self.get(db, entity_kind, local_id, ProviderId.INTERVALS.value)
-        if link is not None and link.remote_id is not None:
+        if link is not None:
             return link.remote_id
         return _slot_text(legacy_remote_id)
 
@@ -300,9 +305,9 @@ class RemoteLinkRepository:
         local_id: str,
         legacy_external_id: Any = None,
     ) -> str | None:
-        """Return the Intervals.icu external id, preferring the link over the slot."""
+        """Return the Intervals.icu external id; the slot counts only without a link."""
         link = self.get(db, entity_kind, local_id, ProviderId.INTERVALS.value)
-        if link is not None and link.remote_external_id is not None:
+        if link is not None:
             return link.remote_external_id
         return _slot_text(legacy_external_id)
 
