@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -21,17 +22,27 @@ METHOD = "local-training-report-v1"
 def canonical_rows(snapshot: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
     raw = (snapshot.get("raw_provider_data") or {}).get("activities")
     rows = raw if isinstance(raw, list) else snapshot.get("recent_activities", [])
-    rows = [row for row in deduplicate_api_records(rows or []) if isinstance(row, dict)]
-    wahoo = [row for row in rows if intervals_activity_device_source(row) == "wahoo"]
+    return deduplicated_rows(rows or [])
+
+
+def deduplicated_rows(rows: Sequence[Any]) -> tuple[list[dict[str, Any]], int]:
+    """Drop duplicate rows and Garmin rows that a matching Wahoo row duplicates.
+
+    Returns the kept rows and how many rows were dropped.
+    """
+    unique = [
+        row for row in deduplicate_api_records(list(rows)) if isinstance(row, dict)
+    ]
+    wahoo = [row for row in unique if intervals_activity_device_source(row) == "wahoo"]
     kept = [
         row
-        for row in rows
+        for row in unique
         if not (
             intervals_activity_device_source(row) == "garmin"
             and any(intervals_cycling_activities_match(other, row) for other in wahoo)
         )
     ]
-    return kept, len(rows) - len(kept)
+    return kept, len(unique) - len(kept)
 
 
 def activity_day(row: dict[str, Any], timezone: str = "UTC") -> str:

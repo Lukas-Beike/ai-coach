@@ -40,6 +40,25 @@ class ActivityReader(Protocol):
     ) -> tuple[ActivityRecord, ...]: ...
 
 
+class ActivityRowReader(Protocol):
+    """Reads the raw Intervals.icu activity payloads behind the canonical records.
+
+    Rows are provider dictionaries (device source, ``icu_*`` fields, laps, gear),
+    untrusted data, before any de-duplication. ``start`` and ``end`` are inclusive
+    bounds on the athlete-local date of each activity, as in ``ActivityReader``.
+    Deleted or tombstoned activities are never returned. The legacy source keeps
+    the snapshot order; the table source orders by activity start, then id.
+    """
+
+    def activity_rows(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> tuple[dict[str, Any], ...]: ...
+
+
 class ObservationReader(Protocol):
     """Reads canonical observations of one metric kind.
 

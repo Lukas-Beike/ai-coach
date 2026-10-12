@@ -479,6 +479,54 @@ def active_activity_rows(
     )
 
 
+def active_activity_payload_texts(
+    db: Any,
+    *,
+    provider: str,
+    record_kind: str,
+    start: str | None = None,
+    end: str | None = None,
+) -> list[str]:
+    """Return the stored raw payload text of one provider's live activities.
+
+    Only active raw records whose activity record is active and whose session is
+    not deleted are returned, so tombstoned activities are never served. ``start``
+    and ``end`` are inclusive ISO dates on the stored athlete-local date. Order is
+    the activity start time, then the provider activity id.
+    """
+    clauses = [
+        "p.provider = ?",
+        "p.record_kind = ?",
+        "p.state = ?",
+        "r.state = ?",
+        "s.state <> ?",
+    ]
+    params: list[object] = [
+        provider,
+        record_kind,
+        ProviderRecordState.ACTIVE.value,
+        ActivityRecordState.ACTIVE.value,
+        ActivitySessionState.DELETED.value,
+    ]
+    if start is not None:
+        clauses.append("r.local_date >= ?")
+        params.append(start)
+    if end is not None:
+        clauses.append("r.local_date <= ?")
+        params.append(end)
+    rows = _fetch_all(
+        db,
+        "SELECT p.payload FROM provider_records AS p "
+        "JOIN activity_records AS r ON r.provider = p.provider "
+        "AND r.provider_activity_id = p.source_record_id "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        f"WHERE {' AND '.join(clauses)} ORDER BY r.started_at, "
+        "r.provider_activity_id",
+        tuple(params),
+    )
+    return [str(row["payload"]) for row in rows]
+
+
 def current_observation_rows(
     db: Any,
     metric: str,

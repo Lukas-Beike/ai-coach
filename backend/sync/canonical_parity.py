@@ -50,6 +50,7 @@ from backend.db import canonical_store
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.runtime.ports import (
     ActivityReader,
+    ActivityRowReader,
     ObservationReader,
     ProviderSnapshotReader,
 )
@@ -59,8 +60,11 @@ _ACTIVITY_LIST_KEY: Final = "activities"
 type _Ranges = Mapping[str, tuple[date, date]]
 
 
-class CanonicalReader(ActivityReader, ObservationReader, Protocol):
-    """The two reads the parity check compares: activities and observations."""
+class CanonicalReader(ActivityReader, ActivityRowReader, ObservationReader, Protocol):
+    """The reads a canonical source serves: activities, raw rows and observations.
+
+    The parity check compares activities and observations only.
+    """
 
 
 @dataclass(slots=True)

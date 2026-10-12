@@ -10,8 +10,8 @@ can count them; they are never logged here.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime, tzinfo
-from typing import Final
+from datetime import date, datetime, tzinfo
+from typing import Any, Final
 
 from backend.canonical.local_time import local_date, parse_provider_datetime
 from backend.canonical.mapping import MappingIssue, MappingResult
@@ -30,6 +30,8 @@ type ProjectedSnapshot = tuple[
 
 _STORED_TIME_KEY: Final = "synced_at"
 _INTERVALS_ACTIVITIES_KEY: Final = "recent_activities"
+_INTERVALS_RAW_KEY: Final = "raw_provider_data"
+_INTERVALS_RAW_ACTIVITIES_KEY: Final = "activities"
 _INTERVALS_WELLNESS_KEY: Final = "recent_wellness"
 _INTERVALS_ATHLETE_KEY: Final = "athlete"
 _GARMIN_ACTIVITIES_KEY: Final = "activities"
@@ -86,6 +88,37 @@ def project_garmin_snapshot(
     )
     health = map_garmin_health(payload, zone=zone, retrieved_at=retrieved_at)
     return activities, health
+
+
+def intervals_activity_rows(snapshot: object) -> tuple[dict[str, Any], ...]:
+    """Return the raw activity rows of a stored Intervals.icu snapshot.
+
+    The raw ``activities`` list is preferred, else the compact ``recent_activities``
+    list; entries that are not mappings are dropped. Order is the stored order.
+    """
+    if not isinstance(snapshot, Mapping):
+        return ()
+    raw = snapshot.get(_INTERVALS_RAW_KEY)
+    rows = raw.get(_INTERVALS_RAW_ACTIVITIES_KEY) if isinstance(raw, Mapping) else None
+    if not isinstance(rows, list):
+        rows = snapshot.get(_INTERVALS_ACTIVITIES_KEY)
+    if not isinstance(rows, list):
+        return ()
+    return tuple(row for row in rows if isinstance(row, dict))
+
+
+def intervals_row_local_date(
+    row: Mapping[str, Any], *, zone: tzinfo, retrieved_at: datetime
+) -> date | None:
+    """Return the athlete-local date the mapper gives one raw row, or None.
+
+    A row the mapper rejects has no date; the table source never stores such a
+    row either.
+    """
+    mapped = map_intervals_activities([row], zone=zone, retrieved_at=retrieved_at)
+    if not mapped.records:
+        return None
+    return local_date(mapped.records[0].started_at, zone)
 
 
 def _empty_projection() -> ProjectedSnapshot:
