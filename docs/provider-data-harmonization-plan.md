@@ -918,6 +918,9 @@ Entscheidungen:
 |---|---|---|
 | W6-5 | Tabellenleser für die Leseports mit paritätsgesicherter Umschaltung | #1107 |
 | P5-U1 | Paritäts-Ledger: welche Ausgabefelder der kanonische Weg exakt reproduziert | #1108 |
+| P5-U2 | Label-Tabelle `providers/source_labels.py` je Ansicht und Provider | #1109 |
+| P5-U8 | Legacy-Reader beziehen ihre Provider-Labels aus der Label-Tabelle | #1110 |
+| P5-U3 | Kommazahlen im Intervals-Wellness-Mapping (Mapper-Version 3) | #1112 |
 
 Entscheidungen W6-5:
 
@@ -956,6 +959,20 @@ Ergebnis P5-U1 (Ledger über vier synthetische Fälle):
   Lauf-Schwellenleistung (Garmin-Laufleistung kanonisch nicht abbildbar),
   Maximalpuls (Rückfall auf Aktivitätswerte), Ruhepuls-Datum beim
   Intervals-Rückfall, Körperfett aus dem Profil.
+
+Ergebnis P5-U2, P5-U8 und P5-U3:
+
+- **Labels:** Alle Provider-Labels der Ansichten kommen aus einer Tabelle; die
+  Ausgabe ist bytegleich. Literal bleiben nur Prosa, Wahoo, abgeleitete Werte,
+  „Intervals.icu (allgemein)“ in den aktuellen Kennzahlen (nur über
+  `observation_source_label` erreichbar, folgt mit U5) und der eFTP-Schlüssel
+  „Intervals.icu“ im Körperverlauf.
+- **Kommazahlen:** `coerce_comma_decimal_number` liest Text wie die Legacy-Reader
+  (jedes Komma als Dezimalpunkt; „1,200“ ist 1,2 wie bisher). Die Anhebung der
+  Mapper-Version auf 3 projiziert gespeicherte Rohdaten neu und erzwingt eine neue
+  Paritätsprüfung. Gewicht und Gewichtsserie sind damit umstellbar; die CTL-Zeile
+  bleibt im Ledger, weil der Legacy-Weg den Rohtext „58,2“ ausgibt. Freigabe
+  dieser einen geänderten Ledger-Zeile durch den Koordinator.
 
 Aufteilung Phase 5 (Stufen):
 
