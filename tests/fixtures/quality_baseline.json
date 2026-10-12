@@ -1425,7 +1425,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/assembly.py",
-      "line": 489,
+      "line": 491,
       "column": 37,
       "code": "arg-type",
       "message_sha256": "6e2a1d5f101c98ee36bc390fe96e5331bf2154a28467c6d499d7a3153e35cda9"

@@ -175,10 +175,10 @@ class PublicStateAssembly:
             athlete.profile(),
             garmin.projection_service(),
             self._local_date,
-            self._canonical_performance_source(),
+            self.canonical_performance_source(),
         )
 
-    def _canonical_performance_source(self) -> CanonicalPerformanceSource | None:
+    def canonical_performance_source(self) -> CanonicalPerformanceSource | None:
         if self._observation_reader is None:
             return None
         return CanonicalPerformanceSource(
