@@ -112,6 +112,9 @@ class WahooConnectionService:
         # Wahoo rotates refresh tokens: two concurrent refreshes would spend the
         # same refresh token twice, so refreshing is serialized per process.
         self._refresh_lock = threading.Lock()
+        # Bumped by every disconnect; a callback whose code exchange overlapped a
+        # disconnect must not store its grant and silently reconnect.
+        self._generation = 0
 
     def _now(self) -> datetime:
         return _parse_time(self._utc_now()) or datetime.now(UTC)
@@ -186,6 +189,7 @@ class WahooConnectionService:
         on the cross-site redirect), so the server-stored state is the only
         proof that this login was started by the authenticated athlete.
         """
+        generation = self._generation
         if not self._consume_state(str(state or "")):
             return CALLBACK_ERROR
         code = str(code or "")
@@ -197,8 +201,11 @@ class WahooConnectionService:
             grant = self._oauth().exchange_code(code)
         except Exception:  # noqa: BLE001 - the callback must always redirect
             return CALLBACK_ERROR
-        now = self._now()
-        self._store_grant(grant, now, connected_at=now)
+        with self._refresh_lock:
+            if self._generation != generation:
+                return CALLBACK_ERROR
+            now = self._now()
+            self._store_grant(grant, now, connected_at=now)
         return CALLBACK_CONNECTED
 
     # Tokens --------------------------------------------------------------
@@ -272,6 +279,7 @@ class WahooConnectionService:
         # Holding the refresh lock keeps an in-flight refresh from writing
         # fresh tokens back after the athlete disconnected.
         with self._refresh_lock:
+            self._generation += 1
             if self._stored_tokens() is not None:
                 try:
                     self._oauth().deauthorize(self._access_token_locked())

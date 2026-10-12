@@ -27,7 +27,6 @@ WAHOO_SCOPES = (
     "plans_read",
     "plans_write",
     "power_zones_read",
-    "offline_data",
 )
 WAHOO_SERVICE = "wahoo"
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"

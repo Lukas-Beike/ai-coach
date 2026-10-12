@@ -340,6 +340,21 @@ class WahooConnectionServiceTests(unittest.TestCase):
         self.assertFalse(result["remote_revoked"])
         self.assertNotIn(WAHOO_TOKENS_KEY, self.values.data)
 
+    def test_disconnect_during_code_exchange_prevents_reconnect(self):
+        self.service.start_authorization()
+
+        def exchange_while_disconnecting(*_args, **_kwargs):
+            self.request.side_effect = None
+            self.service.disconnect()
+            return grant_payload()
+
+        self.request.side_effect = exchange_while_disconnecting
+        self.assertEqual(
+            self.service.complete_authorization("code-1", "state-0"), "error"
+        )
+        self.assertNotIn(WAHOO_TOKENS_KEY, self.values.data)
+        self.assertFalse(self.service.status()["connected"])
+
     def test_disconnect_when_never_connected_is_idempotent(self):
         self.assertFalse(self.service.disconnect()["connected"])
         self.request.assert_not_called()
