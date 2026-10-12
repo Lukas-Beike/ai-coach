@@ -111,8 +111,13 @@ class HttpPostDispatcher:
             return
         if self._nutrition.handle(handler, path):
             return
-        if self._equipment and self._equipment.handle(handler, path):
-            return
-        if self._wahoo and self._wahoo.handle(handler, path):
+        if self._handle_optional(handler, path):
             return
         raise AppError(404, NOT_FOUND_ERROR)
+
+    def _handle_optional(self, handler: Any, path: str) -> bool:
+        return any(
+            route.handle(handler, path)
+            for route in (self._equipment, self._wahoo)
+            if route is not None
+        )

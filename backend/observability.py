@@ -270,7 +270,7 @@ def _redact_url(match: re.Match[str]) -> str:
         return "[REDACTED_URL]" + trailing
 
 
-_QUERY_PARAM_RE = re.compile(r"([?&])([^=&\s\"'#]+)=([^&\s\"'#]*)")
+_QUERY_PARAM_RE = re.compile(r"([?&])([^=&?\s\"'#]+)=([^&\s\"'#]*)")
 
 
 def redact_request_query(value: str) -> str:
