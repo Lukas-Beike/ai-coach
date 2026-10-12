@@ -1069,11 +1069,18 @@ Energieverbrauch, Ausrüstung, FTP-Verlauf und Freshness aus `retrieved_at`.
 Gemeinsame Regel wie in Phase 5: kanonische Werte nur, wenn Provider, Tag und
 Wert dem Legacy-Datensatz entsprechen; ohne `canonical=` läuft der Legacy-Weg.
 
-Nicht in dieser Session abschließbar:
+Entscheidungen vom 2026-10-12 (Nutzerfreigabe):
 
-- **Rückbau von Legacy-Lesern, Dual-Write und Snapshot-Reduktion:** laut Phase 7 (§4) erst
-  nach mehreren Releases mit stabiler Parität zulässig.
-- **Phase 8 (Wahoo):** wartet auf API-Zugang und Klärung der Nutzungsbedingungen.
+- **Rückbau Option 1:** Legacy-Leser, Paritätsprüfungen und Dual-Write werden
+  entfernt; alle Leser nutzen nur die kanonischen Tabellen. Es wird nichts
+  gelöscht: `snapshots` und `garmin_snapshot` bleiben eingefroren erhalten und
+  erhalten nur noch Sync-Metadaten und Zustandsdaten. Die Snapshot-Reduktion
+  (Löschen nach verifiziertem Nachweis) bleibt ein späterer, eigener Schritt.
+- **Phase 8 (Wahoo):** API-Zugang (`WAHOO_CLIENT_ID`/`WAHOO_CLIENT_SECRET`) liegt
+  vor, Nutzungsbedingungen sind geklärt. Umfang: Workouts/Aktivitäten lesen und
+  Pläne an Wahoo senden. Login per OAuth-Autorisierungscode aus der PWA; Tokens
+  verschlüsselt in der Datenbank. Damit ist Wahoo das zweite Ausgabeziel, und
+  Phase 6.3 (`remote_links`) ist beauftragt.
 
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
@@ -1163,8 +1170,8 @@ Die ursprünglich offenen Punkte sind entschieden (Oktober 2026):
 1. **Aufbewahrung von Rohdaten:** Zusammenfassungen unbegrenzt (klein,
    ermöglichen Neuprojektion); Streams weiterhin nur bei Bedarf und begrenzt.
 2. **Wahoo-Zielbild:** zuerst inbound (Workouts und Leistungszonen, Bündelung
-   mit Kopien in Intervals.icu). Outbound und Phase 6.3 bleiben aufgeschoben,
-   bis ein zweites Exportziel beauftragt ist.
+   mit Kopien in Intervals.icu). Seit 2026-10-12 ist zusätzlich Outbound
+   (Pläne an Wahoo) beauftragt; damit wird Phase 6.3 umgesetzt.
 3. **Präzedenz:** fest im Code (`SourcePolicy`); eine Athleteneinstellung erst
    bei konkretem Bedarf.
 4. **Coach-Kontext:** nach Fachbereichen statt nach Providern, als eigener PR
