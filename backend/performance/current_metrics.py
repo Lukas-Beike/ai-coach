@@ -458,29 +458,27 @@ def _performance_vo2_and_prediction_metrics(
         athlete, ("running_vo2max", "vo2max", "vo2_max")
     )
     return {
-        "cycling_vo2max_ml_kg_min": (
-            garmin_metrics["cycling_vo2max_ml_kg_min"]
-            if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None
-            else _vo2max_metric(
+        "cycling_vo2max_ml_kg_min": _preferred_performance_metric(
+            garmin_metrics,
+            "cycling_vo2max_ml_kg_min",
+            _vo2max_metric(
                 None if canonical is None else canonical.cycling_vo2max,
                 cycling_sport_vo2,
                 cycling_athlete_vo2,
-            )
+            ),
         ),
-        "running_vo2max_ml_kg_min": (
-            garmin_metrics["running_vo2max_ml_kg_min"]
-            if garmin_metrics["running_vo2max_ml_kg_min"]["value"] is not None
-            else _vo2max_metric(
+        "running_vo2max_ml_kg_min": _preferred_performance_metric(
+            garmin_metrics,
+            "running_vo2max_ml_kg_min",
+            _vo2max_metric(
                 None if canonical is None else canonical.running_vo2max,
                 running_sport_vo2,
                 running_athlete_vo2,
-            )
+            ),
         ),
         **{
-            key: (
-                garmin_metrics[key]
-                if garmin_metrics[key]["value"] is not None
-                else _metric(None, "s", None)
+            key: _preferred_performance_metric(
+                garmin_metrics, key, _metric(None, "s", None)
             )
             for key in (
                 "run_5k_seconds",

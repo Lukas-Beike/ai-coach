@@ -16,7 +16,7 @@ the legacy values.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -150,8 +150,10 @@ def read_performance_inputs(
         start=min(days),
         end=latest_day,
     )
-    return replace(
-        loaded,
+    return CanonicalPerformanceInputs(
+        wellness_day=loaded.wellness_day,
+        ctl=loaded.ctl,
+        atl=loaded.atl,
         current=read_current_inputs(
             reader, db, snapshot, latest_wellness_day=latest_day
         ),
