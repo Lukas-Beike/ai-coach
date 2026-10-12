@@ -1,353 +1,55 @@
-"""Normalize local workout drafts and validate Intervals.icu workout data."""
+"""Normalize local workout drafts and validate Intervals.icu workout data.
 
-import math
-import re
-from datetime import date, datetime, timedelta
-from itertools import pairwise
+This module is the planning facade for workouts. Validation lives in
+``workout_validation``, the provider-neutral export model in ``workout_export``,
+and the Intervals.icu catalog and payload mapping in
+``backend.providers.intervals_workouts``. Names re-exported here keep existing
+callers stable.
+"""
+
+from datetime import date, datetime
 from typing import Any
 
 from backend.activities.workout_text import (
     WorkoutTextError,
     canonical_workout_zones,
-    structured_duration,
     verify_workout_readback,
 )
 from backend.errors import AppError
-
-COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
-
-INTERVALS_WORKOUT_SPORTS = {
-    "cycling": "Ride",
-    "rad": "Ride",
-    "rad outdoor": "Ride",
-    "radfahren": "Ride",
-    "ride": "Ride",
-    "virtualride": "VirtualRide",
-    "virtual ride": "VirtualRide",
-    "rad indoor": "VirtualRide",
-    "indoor cycling": "VirtualRide",
-    "virtual cycling": "VirtualRide",
-    "running": "Run",
-    "lauf": "Run",
-    "laufen": "Run",
-    "run": "Run",
-    "strength": "WeightTraining",
-    "kraft": "WeightTraining",
-    "krafttraining": "WeightTraining",
-    "weighttraining": "WeightTraining",
-    "bike": "Ride",
-    "biking": "Ride",
-    "bicycle": "Ride",
-    "bike workout": "Ride",
-    "cycling workout": "Ride",
-    "swim": "Swim",
-    "swimming": "Swim",
-    "schwimmen": "Swim",
-    "run workout": "Run",
-    "jogging": "Run",
-    "jog": "Run",
-    "gym": "WeightTraining",
-    "weights": "WeightTraining",
-    "weight training": "WeightTraining",
-    "hiking": "Hike",
-    "walking": "Walk",
-    "row": "Rowing",
-    "rowing": "Rowing",
-    "yoga": "Yoga",
-}
-
-INTERVALS_WORKOUT_TYPES = {
-    "Ride",
-    "Run",
-    "Swim",
-    "WeightTraining",
-    "Hike",
-    "Walk",
-    "AlpineSki",
-    "BackcountrySki",
-    "Badminton",
-    "Canoeing",
-    "Crossfit",
-    "EBikeRide",
-    "EMountainBikeRide",
-    "Elliptical",
-    "Golf",
-    "GravelRide",
-    "Handcycle",
-    "HighIntensityIntervalTraining",
-    "IceSkate",
-    "InlineSkate",
-    "Kayaking",
-    "Kitesurf",
-    "MountainBikeRide",
-    "NordicSki",
-    "OpenWaterSwim",
-    "Padel",
-    "Pilates",
-    "Pickleball",
-    "Racquetball",
-    "Rugby",
-    "RockClimbing",
-    "RollerSki",
-    "Rowing",
-    "Sail",
-    "Skateboard",
-    "Snowboard",
-    "Snowshoe",
-    "Soccer",
-    "Squash",
-    "StairStepper",
-    "StandUpPaddling",
-    "Surfing",
-    "TableTennis",
-    "Tennis",
-    "TrailRun",
-    "Transition",
-    "Velomobile",
-    "VirtualRide",
-    "VirtualRow",
-    "VirtualRun",
-    "WaterSport",
-    "Wheelchair",
-    "Windsurf",
-    "Workout",
-    "Yoga",
-    "Other",
-}
-
-# These sport families have duration/distance and intensity prescriptions.
-# Other supported activities retain free-text instructions (e.g. Yoga/Golf).
-INTERVALS_ENDURANCE_WORKOUT_TYPES = {
-    "Ride",
-    "VirtualRide",
-    "EBikeRide",
-    "EMountainBikeRide",
-    "GravelRide",
-    "MountainBikeRide",
-    "Velomobile",
-    "Handcycle",
-    "Run",
-    "TrailRun",
-    "VirtualRun",
-    "Walk",
-    "Hike",
-    "Wheelchair",
-    "Swim",
-    "OpenWaterSwim",
-    "Rowing",
-    "VirtualRow",
-    "Canoeing",
-    "Kayaking",
-    "StandUpPaddling",
-    "NordicSki",
-    "RollerSki",
-    "Snowshoe",
-    "IceSkate",
-    "InlineSkate",
-    "Elliptical",
-    "StairStepper",
-}
-
-WORKOUT_STEP_QUANTITY = re.compile(r"\d+(?:[.,]\d+)?\s*(?P<unit>[A-Za-z'\"]+)")
-WORKOUT_STEP_QUANTITY_UNITS = {
-    "km",
-    "mtr",
-    "mi",
-    "yd",
-    "yard",
-    "yards",
-    "meter",
-    "meters",
-    "metre",
-    "metres",
-    "minute",
-    "minutes",
-    "min",
-    "mins",
-    "second",
-    "seconds",
-    "sec",
-    "secs",
-    "hour",
-    "hours",
-    "hr",
-    "hrs",
-    "h",
-    "m",
-    "s",
-    "'",
-    '"',
-}
-WORKOUT_STEP_TIME_UNITS = {
-    "h",
-    "m",
-    "s",
-    "hours",
-    "hrs",
-    "minutes",
-    "mins",
-    "seconds",
-    "secs",
-    "'",
-    '"',
-}
-_TARGET_TYPES = {"AUTO", "POWER", "HR", "PACE"}
-
-
-def intervals_workout_sport(value: Any) -> str:
-    """Return the provider's canonical activity type for workout payloads."""
-    raw = str(value or "Ride").strip()
-    normalized = re.sub(r"[\s_-]+", " ", raw.casefold())
-    canonical = INTERVALS_WORKOUT_SPORTS.get(
-        raw.casefold()
-    ) or INTERVALS_WORKOUT_SPORTS.get(normalized)
-    if canonical:
-        return canonical
-    for activity_type in INTERVALS_WORKOUT_TYPES:
-        if activity_type.casefold() == raw.casefold():
-            return activity_type
-    return "Other"
-
-
-def _workout_step_amounts(text: str) -> list[re.Match[str]]:
-    """Return step quantities, excluding pace denominators such as /100m."""
-    return [
-        match
-        for match in WORKOUT_STEP_QUANTITY.finditer(text)
-        if match.group("unit") in WORKOUT_STEP_QUANTITY_UNITS
-        and (match.start() == 0 or text[match.start() - 1] != "/")
-    ]
-
-
-def _raise_ambiguous_workout_step(line_number: int, message: str) -> None:
-    raise AppError(
-        400,
-        f"Workout-Text in Zeile {line_number} ist mehrdeutig: {message}",
-        reason="ambiguous_workout_step",
-    )
-
-
-def _is_composite_duration(amounts: list[re.Match[str]]) -> bool:
-    return all(
-        current.start() == previous.end()
-        and previous.group("unit").casefold() in WORKOUT_STEP_TIME_UNITS
-        and current.group("unit").casefold() in WORKOUT_STEP_TIME_UNITS
-        for previous, current in pairwise(amounts)
-    )
-
-
-def _validate_endurance_workout_steps(description: str) -> None:
-    for line_number, line in enumerate(description.splitlines(), 1):
-        stripped = line.lstrip(" \t")
-        if not stripped.startswith("-"):
-            continue
-        text = stripped[1:].lstrip(" \t")
-        if not text:
-            continue
-        amounts = _workout_step_amounts(text)
-        if amounts and amounts[0].start() != 0:
-            _raise_ambiguous_workout_step(
-                line_number,
-                "Trainingsschritte mit '- ' müssen direkt mit Dauer oder Distanz beginnen "
-                "(z.B. '- 6km Z1 HR'). Hinweise, Bedingungen und optionale Gesamtstrecken "
-                "als eigenen Absatz ohne '- ' schreiben; sonst zählt Intervals.icu sie als weitere Schritte.",
-            )
-        if len(amounts) > 1 and not _is_composite_duration(amounts):
-            _raise_ambiguous_workout_step(
-                line_number,
-                "Ein Trainingsschritt darf nur eine Distanz oder Dauer enthalten; "
-                "zusammengesetzte Zeiten wie '- 1h30m Z2' sind erlaubt. "
-                "Optionale Gesamtstrecken als eigenen Absatz ohne '- ' schreiben.",
-            )
-
-
-def _structured_workout_duration(description: str, target: str) -> tuple[float, bool]:
-    try:
-        return structured_duration(description, target)
-    except WorkoutTextError as exc:
-        raise AppError(400, str(exc), reason=exc.reason) from exc
-
-
-def _validate_workout_duration_match(
-    seconds: float, has_distance: bool, expected_seconds: float | None
-) -> None:
-    if expected_seconds is None or (
-        seconds <= expected_seconds
-        if has_distance
-        else abs(seconds - expected_seconds) <= 30
-    ):
-        return
-    raise AppError(
-        400,
-        f"Trainingsschritte ergeben {seconds / 60:g} Minuten, die angegebene Dauer ist {expected_seconds / 60:g} Minuten. "
-        "Dauer und Workout-Text einschliesslich aller Wiederholungen, Pausen, Warmup und Cooldown abgleichen; keine fehlenden Minuten erfinden.",
-        reason="workout_duration_mismatch",
-    )
-
-
-def _as_number(value: Any) -> float | int | None:
-    try:
-        number = float(str(value).replace(",", "."))
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
-
-
-def validate_workout_description(workout: dict[str, Any]) -> float | None:
-    """Require quantity-first endurance steps; never guess intent from prose."""
-    sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
-    if sport not in INTERVALS_ENDURANCE_WORKOUT_TYPES:
-        return None
-    description = str(workout.get("description") or "")[:12000]
-    _validate_endurance_workout_steps(description)
-    seconds, has_distance = _structured_workout_duration(
-        description, str(workout.get("target") or "AUTO")
-    )
-    expected_minutes = _as_number(workout.get("duration_minutes"))
-    expected_seconds = (
-        expected_minutes * 60
-        if expected_minutes is not None
-        else _as_number(workout.get("moving_time"))
-    )
-    _validate_workout_duration_match(seconds, has_distance, expected_seconds)
-    return None if has_distance else seconds
+from backend.planning.workout_export import (
+    build_planned_workout_export,
+    planned_target,
+)
+from backend.planning.workout_validation import (  # noqa: F401
+    WORKOUT_STEP_QUANTITY,
+    WORKOUT_STEP_QUANTITY_UNITS,
+    WORKOUT_STEP_TIME_UNITS,
+    _is_composite_duration,
+    _raise_ambiguous_workout_step,
+    _structured_workout_duration,
+    _validate_endurance_workout_steps,
+    _validate_workout_duration_match,
+    _workout_step_amounts,
+    validate_workout_description,
+)
+from backend.providers.intervals_workouts import (  # noqa: F401
+    COACH_EVENT_EXTERNAL_PREFIX,
+    INTERVALS_DEFAULT_WORKOUT_TYPE,
+    INTERVALS_ENDURANCE_WORKOUT_TYPES,
+    INTERVALS_WORKOUT_SPORTS,
+    INTERVALS_WORKOUT_TYPES,
+    intervals_event_payload,
+    intervals_workout_sport,
+)
 
 
 def workout_event_payload(
     workout_id: str, workout: dict[str, Any], *, today: date
 ) -> dict[str, Any]:
-    structured_seconds = validate_workout_description(workout)
-    try:
-        workout_date = date.fromisoformat(str(workout["date"]))
-    except (KeyError, TypeError, ValueError) as exc:
-        raise AppError(
-            400, "Das Trainingsdatum muss das Format JJJJ-MM-TT haben."
-        ) from exc
-    if workout_date < today - timedelta(days=1):
-        raise AppError(400, "Eine Einheit in der Vergangenheit wird nicht übertragen.")
-    duration = int(workout.get("duration_minutes", 0))
-    if duration < 5 or duration > 600:
-        raise AppError(
-            400, "Die Trainingsdauer muss zwischen 5 und 600 Minuten liegen."
-        )
-    return {
-        "category": "WORKOUT",
-        "start_date_local": str(
-            workout.get("start_date_local") or workout_date.isoformat() + "T00:00:00"
-        )[:40],
-        "type": intervals_workout_sport(workout.get("sport") or workout.get("type")),
-        "name": str(workout.get("name") or "Coach workout")[:200],
-        "description": str(workout.get("description") or "")[:12000],
-        "moving_time": round(structured_seconds)
-        if structured_seconds is not None
-        else duration * 60,
-        "target": workout.get("target")
-        if workout.get("target") in _TARGET_TYPES
-        else "AUTO",
-        "external_id": f"{COACH_EVENT_EXTERNAL_PREFIX}{workout_id}",
-    }
+    """Return the Intervals.icu event payload for one planned unit."""
+    return intervals_event_payload(
+        workout_id, build_planned_workout_export(workout, today=today)
+    )
 
 
 def library_workout_payload(workout: dict[str, Any]) -> dict[str, Any]:
@@ -372,7 +74,9 @@ def library_workout_event_payload(
 ) -> dict[str, Any]:
     planned = {
         "date": plan_date,
-        "sport": workout.get("type") or workout.get("sport") or "Ride",
+        "sport": workout.get("type")
+        or workout.get("sport")
+        or INTERVALS_DEFAULT_WORKOUT_TYPE,
         "name": workout.get("name") or "Bibliotheks-Einheit",
         "description": workout.get("description") or "",
         "duration_minutes": workout.get("duration_minutes")
@@ -413,7 +117,7 @@ def validate_workout_start_date(value: Any, workout_date: str) -> str:
         raise AppError(400, message, reason="invalid_workout_start_date")
     start_date_local = value.strip()
     try:
-        parsed_start = datetime.fromisoformat(start_date_local.replace("Z", "+00:00"))
+        parsed_start = datetime.fromisoformat(start_date_local)
     except ValueError as exc:
         raise AppError(400, message, reason="invalid_workout_start_date") from exc
     if (
@@ -437,9 +141,7 @@ def normalize_workout(workout: Any, *, today: date) -> dict[str, Any]:
             endurance=sport in INTERVALS_ENDURANCE_WORKOUT_TYPES,
         ),
         "duration_minutes": workout.get("duration_minutes"),
-        "target": workout.get("target")
-        if workout.get("target") in _TARGET_TYPES
-        else "AUTO",
+        "target": planned_target(workout.get("target")),
         "rationale": str(
             workout.get("rationale") or "Manuell geplante Einheit"
         ).strip()[:2000],

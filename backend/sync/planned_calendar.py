@@ -11,9 +11,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 from urllib.error import HTTPError
-from urllib.parse import quote
 
-from backend.athlete.local_date import iso_date_prefix
 from backend.config import Config
 from backend.db import DatabaseManager
 from backend.errors import (
@@ -24,8 +22,9 @@ from backend.errors import (
     AppError,
 )
 from backend.planning import library as planning_library
-from backend.planning import workouts as planning_workouts
+from backend.planning.workout_export import build_planned_workout_export
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
+from backend.sync.workout_export import WorkoutExportPort
 
 _PLANNED_UNIT_SYNCS: set[str] = set()
 _PLANNED_UNIT_SYNC_LOCK = threading.Lock()
@@ -59,14 +58,14 @@ class PlannedCalendarSyncService:
         self,
         config: Config,
         database_manager: DatabaseManager,
-        provider_client_factory: Callable[[], Any],
+        export: WorkoutExportPort,
         state_writer: PlannedUnitSyncStateWriter,
         now: Callable[[], str],
         today: Callable[[], date],
     ) -> None:
         self._config = config
         self._database_manager = database_manager
-        self._provider_client_factory = provider_client_factory
+        self._export = export
         self._state_writer = state_writer
         self._now = now
         self._today = today
@@ -136,12 +135,8 @@ class PlannedCalendarSyncService:
     def _remote_event_is_invalid(self, remote_id: str, event: Any) -> bool:
         return (
             not isinstance(event, dict)
-            or str(event.get("id") or "") != remote_id
-            or event.get("category") != "WORKOUT"
-            or iso_date_prefix(str(event.get("start_date_local") or ""))
-            < self._today().isoformat()
-            or event.get("paired_activity_id")
-            or event.get("paired_event_id")
+            or self._export.event_identity(event) != remote_id
+            or not self._export.is_unpaired_future_planned(event, today=self._today())
         )
 
     @staticmethod
@@ -154,10 +149,8 @@ class PlannedCalendarSyncService:
     def _delete_remote_event(
         self, remote_id: str, normalized_id: str, original_payload: str
     ) -> None:
-        client = self._provider_client_factory()
-        athlete = quote(self._config.intervals_athlete_id, safe="")
         try:
-            event = client.get(f"/athlete/{athlete}/events/{quote(remote_id, safe='')}")
+            event = self._export.read_event(remote_id)
         except AppError as exc:
             if self._is_not_found(exc):
                 return
@@ -169,7 +162,7 @@ class PlannedCalendarSyncService:
                 reason="intervals_workout_identity_conflict",
             )
         self._recheck(normalized_id, original_payload)
-        client.delete_event(remote_id)
+        self._export.delete(remote_id)
 
     def _mark_removed(self, normalized_id: str, original_payload: str) -> None:
         with self._database_manager.unit_of_work() as db:
@@ -197,8 +190,9 @@ class PlannedCalendarSyncService:
     def _event_payload(
         self, normalized_id: str, workout: dict[str, Any]
     ) -> dict[str, Any]:
-        event_payload = planning_workouts.workout_event_payload(
-            normalized_id, workout, today=self._today()
+        event_payload = self._export.serialize(
+            normalized_id,
+            build_planned_workout_export(workout, today=self._today()),
         )
         remote_external_id = str(workout.get("remote_event_external_id") or "").strip()
         if remote_external_id:
@@ -221,8 +215,8 @@ class PlannedCalendarSyncService:
             error=str(error),
             remote_event={
                 **event,
-                "external_id": event.get("external_id")
-                or event_payload.get("external_id"),
+                "external_id": self._export.event_external_id(event)
+                or self._export.event_external_id(event_payload),
             },
             expected_payload=expected_payload,
         )
@@ -235,14 +229,17 @@ class PlannedCalendarSyncService:
         expected_payload: str,
     ) -> dict[str, Any]:
         self._require_calendar_access()
-        result = self._provider_client_factory().upsert_calendar_events([event_payload])
+        result = self._export.upsert([event_payload])
         event = result[0] if isinstance(result, list) and result else None
-        if not isinstance(event, dict) or not str(event.get("id") or "").strip():
+        if (
+            not isinstance(event, dict)
+            or not self._export.event_identity(event).strip()
+        ):
             raise AppError(
                 502, "Intervals.icu hat keine geplante Einheit zurückgegeben."
             )
         try:
-            planning_workouts.validate_intervals_workout_result(workout, event)
+            self._export.verify_readback(workout, event)
         except AppError as exc:
             self._persist_sync_error(
                 normalized_id, event, event_payload, exc, expected_payload
@@ -264,8 +261,8 @@ class PlannedCalendarSyncService:
             "synced",
             remote_event={
                 **event,
-                "external_id": event.get("external_id")
-                or event_payload.get("external_id"),
+                "external_id": self._export.event_external_id(event)
+                or self._export.event_external_id(event_payload),
             },
             expected_payload=row["payload"],
         )
@@ -281,8 +278,7 @@ class _PlannedCalendarRepairContext:
     planned_date: date
     today: date
     removing: bool
-    client: Any
-    athlete: str
+    export: WorkoutExportPort
     remote_id: str
     identities: set[str]
     other_remote_ids: set[str]
@@ -295,16 +291,14 @@ class PlannedCalendarRepairBatch:
 
     def __init__(
         self,
-        config: Config,
         database_manager: DatabaseManager,
-        client: Any,
+        export: WorkoutExportPort,
         requested: list[dict[str, Any]],
         *,
         today: date,
         future_days: int,
     ) -> None:
-        self.client = client
-        self.athlete = quote(config.intervals_athlete_id, safe="")
+        self.export = export
         local_ids = [str(item["library_workout_id"]) for item in requested]
         newest = ""
         if local_ids:
@@ -316,11 +310,8 @@ class PlannedCalendarRepairBatch:
                     local_ids,
                 ).fetchone()
             newest = str((row or {}).get("newest") or "")
-        self.params = {
-            "oldest": today.isoformat(),
-            "newest": max(newest, (today + timedelta(days=future_days)).isoformat()),
-            "category": "WORKOUT",
-        }
+        self.oldest = today.isoformat()
+        self.newest = max(newest, (today + timedelta(days=future_days)).isoformat())
         self.events: dict[str, dict[str, Any]] | None = None
         self.read_error: Exception | None = None
         self.completions: list[
@@ -328,9 +319,7 @@ class PlannedCalendarRepairBatch:
         ] = []
 
     def _read(self) -> list[dict[str, Any]]:
-        return self.client.get_paged_collection(
-            f"/athlete/{self.athlete}/events", self.params, "repair_workouts"
-        )
+        return self.export.list_window(oldest=self.oldest, newest=self.newest)
 
     def snapshot(self) -> list[dict[str, Any]]:
         if self.read_error is not None:
@@ -338,9 +327,9 @@ class PlannedCalendarRepairBatch:
         if self.events is None:
             try:
                 self.events = {
-                    str(event["id"]): event
+                    identity: event
                     for event in self._read()
-                    if event.get("id") not in (None, "")
+                    if (identity := self.export.event_identity(event))
                 }
             except Exception as exc:
                 self.read_error = exc
@@ -348,7 +337,7 @@ class PlannedCalendarRepairBatch:
         return list(self.events.values())
 
     def remember(self, event: dict[str, Any]) -> None:
-        self.events[str(event["id"])] = event
+        self.events[self.export.event_identity(event)] = event
 
     def forget(self, event_id: str) -> None:
         self.events.pop(event_id, None)
@@ -376,17 +365,15 @@ class PlannedCalendarRepairService:
 
     def __init__(
         self,
-        config: Config,
         database_manager: DatabaseManager,
-        provider_client_factory: Callable[[], Any],
+        export: WorkoutExportPort,
         state_writer: PlannedUnitSyncStateWriter,
         now: Callable[[], str],
         today: Callable[[], date],
         future_days: int,
     ) -> None:
-        self._config = config
         self._database_manager = database_manager
-        self._provider_client_factory = provider_client_factory
+        self._export = export
         self._state_writer = state_writer
         self._now = now
         self._today = today
@@ -396,9 +383,8 @@ class PlannedCalendarRepairService:
         self, requested: list[dict[str, Any]]
     ) -> PlannedCalendarRepairBatch:
         return PlannedCalendarRepairBatch(
-            self._config,
             self._database_manager,
-            self._provider_client_factory(),
+            self._export,
             requested,
             today=self._today(),
             future_days=self._future_days,
@@ -430,7 +416,7 @@ class PlannedCalendarRepairService:
                 (
                     event
                     for event in related
-                    if str(event.get("id")) == context.remote_id
+                    if context.export.event_identity(event) == context.remote_id
                 ),
                 related[0] if related else None,
             )
@@ -477,7 +463,7 @@ class PlannedCalendarRepairService:
                 "Reparatur-Sync ist nur für zukünftige geplante Einheiten erlaubt.",
                 reason="invalid_plan",
             )
-        client = batch.client if batch is not None else self._provider_client_factory()
+        export = batch.export if batch is not None else self._export
         return _PlannedCalendarRepairContext(
             local_id=local_id,
             expected_hash=expected_hash,
@@ -486,11 +472,10 @@ class PlannedCalendarRepairService:
             planned_date=planned_date,
             today=today,
             removing=bool(workout.get("local_deleted") or workout.get("archived")),
-            client=client,
-            athlete=quote(self._config.intervals_athlete_id, safe=""),
+            export=export,
             remote_id=str(workout.get("remote_event_id") or ""),
             identities={
-                f"{planning_workouts.COACH_EVENT_EXTERNAL_PREFIX}{local_id}",
+                export.external_id_for(local_id),
                 *(
                     [str(workout["remote_event_external_id"])]
                     if workout.get("remote_event_external_id")
@@ -501,10 +486,7 @@ class PlannedCalendarRepairService:
                 str(item["remote_id"]) for item in others if item.get("remote_id")
             },
             other_external_ids={
-                *{
-                    f"{planning_workouts.COACH_EVENT_EXTERNAL_PREFIX}{item['local_id']}"
-                    for item in others
-                },
+                *{export.external_id_for(str(item["local_id"])) for item in others},
                 *{
                     str(item["remote_external_id"])
                     for item in others
@@ -535,13 +517,8 @@ class PlannedCalendarRepairService:
         event: dict[str, Any],
         belongs_elsewhere: bool,
     ) -> bool:
-        return (
-            belongs_elsewhere
-            or event.get("category") != "WORKOUT"
-            or iso_date_prefix(str(event.get("start_date_local") or ""))
-            < context.today.isoformat()
-            or event.get("paired_activity_id")
-            or event.get("paired_event_id")
+        return belongs_elsewhere or not context.export.is_unpaired_future_planned(
+            event, today=context.today
         )
 
     @staticmethod
@@ -553,19 +530,18 @@ class PlannedCalendarRepairService:
         return (
             not context.removing
             and not belongs_elsewhere
-            and event.get("category") == "WORKOUT"
-            and str(event.get("start_date_local") or "").startswith(
-                context.planned_date.isoformat()
+            and context.export.is_namesake_on_day(
+                event,
+                day=context.planned_date.isoformat(),
+                name=context.workout.get("name"),
             )
-            and str(event.get("name") or "").strip().casefold()
-            == str(context.workout.get("name") or "").strip().casefold()
         )
 
     def _related_event(
         self, context: _PlannedCalendarRepairContext, event: dict[str, Any]
     ) -> bool:
-        event_id = str(event.get("id") or "")
-        external_id = str(event.get("external_id") or "")
+        event_id = context.export.event_identity(event)
+        external_id = context.export.event_external_id(event)
         belongs_elsewhere = (
             event_id in context.other_remote_ids
             or external_id in context.other_external_ids
@@ -600,14 +576,8 @@ class PlannedCalendarRepairService:
             if context.batch is not None:
                 events = context.batch.snapshot()
             else:
-                events = context.client.get_paged_collection(
-                    f"/athlete/{context.athlete}/events",
-                    {
-                        "oldest": context.today.isoformat(),
-                        "newest": context.newest,
-                        "category": "WORKOUT",
-                    },
-                    "repair_workouts",
+                events = context.export.list_window(
+                    oldest=context.today.isoformat(), newest=context.newest
                 )
         return [event for event in events if self._related_event(context, event)]
 
@@ -623,13 +593,12 @@ class PlannedCalendarRepairService:
         related: list[dict[str, Any]],
     ) -> None:
         if not context.remote_id or any(
-            str(event.get("id")) == context.remote_id for event in related
+            context.export.event_identity(event) == context.remote_id
+            for event in related
         ):
             return
         try:
-            context.client.get(
-                f"/athlete/{context.athlete}/events/{quote(context.remote_id, safe='')}"
-            )
+            context.export.read_event(context.remote_id)
         except AppError as exc:
             if self._is_not_found(exc):
                 return
@@ -645,27 +614,31 @@ class PlannedCalendarRepairService:
         context: _PlannedCalendarRepairContext,
         keeper: dict[str, Any] | None,
     ) -> None:
-        payload = planning_workouts.workout_event_payload(
-            context.local_id, context.workout, today=context.today
+        payload = context.export.serialize(
+            context.local_id,
+            build_planned_workout_export(context.workout, today=context.today),
         )
         if keeper:
             payload["id"] = str(keeper["id"])
-            payload["external_id"] = str(
-                keeper.get("external_id") or payload["external_id"]
+            payload["external_id"] = (
+                context.export.event_external_id(keeper) or payload["external_id"]
             )
         context.identities.add(payload["external_id"])
         self._recheck(context, PLANNED_CALENDAR_RECHECK_ERROR)
-        response = context.client.upsert_calendar_events([payload])
+        response = context.export.upsert([payload])
         result = (
             response[0] if isinstance(response, list) and len(response) == 1 else None
         )
-        if not isinstance(result, dict) or not str(result.get("id") or "").strip():
+        if (
+            not isinstance(result, dict)
+            or not context.export.event_identity(result).strip()
+        ):
             raise AppError(
                 502,
                 "Intervals.icu hat keine eindeutige reparierte Einheit zurückgegeben.",
                 reason="intervals_workout_verification_failed",
             )
-        context.remote_id = str(result["id"])
+        context.remote_id = context.export.event_identity(result)
         saved_event = {
             **result,
             "external_id": payload["external_id"],
@@ -714,15 +687,17 @@ class PlannedCalendarRepairService:
                 )
         if conflict is not None:
             raise conflict
-        if not str(result.get("start_date_local") or "").startswith(
-            context.planned_date.isoformat()
-        ) or result.get("name") != context.workout.get("name"):
+        if not context.export.confirms_planned_event(
+            result,
+            day=context.planned_date.isoformat(),
+            name=context.workout.get("name"),
+        ):
             raise AppError(
                 502,
                 "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestätigt.",
                 reason="intervals_workout_verification_failed",
             )
-        planning_workouts.validate_intervals_workout_result(context.workout, result)
+        context.export.verify_readback(context.workout, result)
 
     def _delete_duplicates(
         self,
@@ -730,11 +705,11 @@ class PlannedCalendarRepairService:
         related: list[dict[str, Any]],
     ) -> None:
         for event in related:
-            if not context.removing and str(event.get("id")) == context.remote_id:
+            event_id = context.export.event_identity(event)
+            if not context.removing and event_id == context.remote_id:
                 continue
-            event_id = str(event["id"])
             self._recheck(context, PLANNED_CALENDAR_RECHECK_ERROR)
-            context.client.delete_event(event_id)
+            context.export.delete(event_id)
             if context.batch is not None:
                 context.batch.forget(event_id)
 
@@ -754,7 +729,8 @@ class PlannedCalendarRepairService:
                         reason="intervals_workout_verification_failed",
                     )
             elif (
-                len(remaining) != 1 or str(remaining[0].get("id")) != context.remote_id
+                len(remaining) != 1
+                or context.export.event_identity(remaining[0]) != context.remote_id
             ):
                 raise AppError(
                     502,
@@ -763,17 +739,17 @@ class PlannedCalendarRepairService:
                 )
             else:
                 event = remaining[0]
-                if not str(event.get("start_date_local") or "").startswith(
-                    context.planned_date.isoformat()
-                ) or event.get("name") != context.workout.get("name"):
+                if not context.export.confirms_planned_event(
+                    event,
+                    day=context.planned_date.isoformat(),
+                    name=context.workout.get("name"),
+                ):
                     raise AppError(
                         502,
                         "Der Kalender bestätigt Datum oder Namen der reparierten Einheit nicht.",
                         reason="intervals_workout_verification_failed",
                     )
-                planning_workouts.validate_intervals_workout_result(
-                    context.workout, event
-                )
+                context.export.verify_readback(context.workout, event)
                 verified = event
             with self._database_manager.unit_of_work() as db:
                 current = db.execute(

@@ -4,10 +4,15 @@ import math
 from typing import Any
 
 from backend.activities.identity import activity_kind
+from backend.canonical.vocabulary import ProviderId
+from backend.providers.source_labels import SourceView, provider_label
 
-PROVIDER_INTERVALS_NAME = "Intervals.icu"
+PROVIDER_INTERVALS_NAME = provider_label(
+    ProviderId.INTERVALS, SourceView.CURRENT_METRIC
+)
+# provider_label has no view for this wellness label, so it stays a literal.
 PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
-GARMIN_PERFORMANCE_SOURCE = "Garmin Connect"
+GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.CURRENT_METRIC)
 VO2MAX_UNIT = "ml/kg/min"
 
 

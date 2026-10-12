@@ -11,6 +11,10 @@ from itertools import pairwise
 from typing import Any
 from urllib.parse import quote
 
+from backend.activities.activity_reference import (
+    ActivityReferenceResolver,
+    NoActivityReferences,
+)
 from backend.activities.detail_projection import (
     COACH_ACTIVITY_DETAIL_STREAM_FIELDS,
     detailed_activity,
@@ -59,6 +63,7 @@ class ActivityDetailRefreshService:
         utc_now: Callable[[], str],
         configured: bool,
         read_planned_units: Callable[[], list[dict[str, Any]]] = list,
+        references: ActivityReferenceResolver | None = None,
     ) -> None:
         self._api_client = api_client
         self._state_repository = state_repository
@@ -66,9 +71,12 @@ class ActivityDetailRefreshService:
         self._utc_now = utc_now
         self._configured = configured
         self._read_planned_units = read_planned_units
+        self._references = NoActivityReferences() if references is None else references
 
     def refresh(self, activity_id: str) -> dict[str, Any]:
-        activity_id = normalize_activity_id(activity_id)
+        activity_id = normalize_activity_id(
+            self._references.resolve(normalize_activity_id(activity_id))
+        )
         snapshot = self._state_repository.latest_snapshot() or {}
         rows = (snapshot.get("raw_provider_data") or {}).get("activities") or []
         summary = next(

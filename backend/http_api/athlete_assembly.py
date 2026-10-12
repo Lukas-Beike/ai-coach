@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from backend.activities.activity_reference import ActivityReferences
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
 from backend.athlete.checkins import CheckinService
@@ -82,6 +83,7 @@ class AthleteDataAssembly:
             self._local_date,
             self._utc_now,
             canonical_rows,
+            resolve_activity=ActivityReferences(self._database_manager()).resolve,
         )
 
     def activity_feedback(self) -> ActivityFeedbackService:
@@ -89,6 +91,7 @@ class AthleteDataAssembly:
             self._database_manager(),
             self._activity_feedback_repository,
             self._snapshot_reader,
+            references=ActivityReferences(self._database_manager()),
         )
 
     def duplicate_activity(self) -> DuplicateActivityService:
@@ -98,6 +101,7 @@ class AthleteDataAssembly:
             self._snapshot_reader,
             self._utc_now,
             self._event_buffer,
+            references=ActivityReferences(self._database_manager()),
         )
 
     def checkin(self) -> CheckinService:

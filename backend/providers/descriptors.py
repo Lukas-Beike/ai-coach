@@ -281,28 +281,33 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             "intervals_full_resync_at",
             "intervals_full_resync_error",
         ),
-        # backend/sync/jobs.py: JOB_TYPES; every type is intervals-only or allowed.
+        # Accepted job types; backend/sync/jobs.py checks them via supports_job.
         job_types=_ALL_INTERVALS_JOB_TYPES,
-        # backend/sync/jobs.py: _refresh_job_fields["intervals"].
+        # Refresh payload fields; backend/sync/jobs.py enforces them via the
+        # registry's refresh_fields.
         refresh_fields=frozenset({"days", "reason", "end_date"}),
-        # backend/sync/scheduler.py via server.py:790 SYNC_PERIOD_DEFAULTS.
+        # Default sync window reported by ProviderRegistry.sync_period_defaults to
+        # http_api public and bootstrap state. The sync services still take their
+        # window from the separate server.py SYNC_PERIOD_DEFAULTS literal, so the
+        # two values must be kept equal by hand.
         default_sync_days=_INTERVALS_DEFAULT_SYNC_DAYS,
-        # scheduler.py:68-74 daily order rank 3; scheduler.py:229-234 startup rank 1;
-        # sync/daily.py:17,23 and sync/queue.py:92-97 daily marker.
+        # Ranks feed ProviderRegistry.daily_order and startup_order; the daily
+        # marker feeds backend/sync/daily.py and backend/sync/queue.py.
         schedule=SchedulePolicy(daily_rank=3, startup_rank=1, daily_marker=True),
-        # coach/authorization.py:41-44 enum order (local=0, intervals=1, ...).
+        # Coach refresh order; ProviderRegistry.coach_refresh_targets reads it.
         coach_rank=1,
-        # coach/tool_preparation.py:70-78 waits for the intervals refresh.
+        # Coach waits for this refresh before answering (coach/tool_preparation.py).
         coach_waits_for_completion=True,
-        # http_api/sync_commands.py:33-42.
+        # Message for not-configured responses (http_api/sync_commands.py).
         not_configured_message=_INTERVALS_NOT_CONFIGURED_MESSAGE,
-        # http_api/sync_commands.py:15-32,108-127,150-172 (/api/sync, sync period).
+        # Manual route with a sync period; http_api/sync_commands.py builds the
+        # POST table from it.
         manual_sync=ManualSyncRoute(
             path="/api/sync",
             uses_sync_period=True,
             payload=(("reason", "manual"),),
         ),
-        # http_api/sync_commands.py:15-32 (/api/intervals/full-resync).
+        # Full-resync route; ProviderRegistry.full_resync_routes lists it.
         full_resync_path="/api/intervals/full-resync",
     ),
     ProviderDescriptor(
@@ -333,9 +338,10 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             "garmin_full_resync_at",
             "garmin_full_resync_error",
         ),
-        # backend/sync/jobs.py: historical_backfill is intervals/garmin only.
+        # historical_backfill is accepted here; backend/sync/jobs.py rejects it for
+        # providers that do not declare it.
         job_types=frozenset({"refresh", "historical_backfill"}),
-        # backend/sync/jobs.py: _refresh_job_fields["garmin"].
+        # Refresh payload fields; backend/sync/jobs.py enforces them via the registry.
         refresh_fields=frozenset({"days", "reason", "end_date"}),
         default_sync_days=_GARMIN_DEFAULT_SYNC_DAYS,
         schedule=SchedulePolicy(daily_rank=2, startup_rank=2, daily_marker=True),
@@ -362,11 +368,11 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         ),
         max_sync_days=DEFAULT_MAX_SYNC_DAYS,
         resync_keys=(),
-        # backend/sync/jobs.py: _refresh_job_fields["weather"].
+        # Refresh payload fields; backend/sync/jobs.py enforces them via the registry.
         refresh_fields=frozenset({"force", "reason"}),
         schedule=SchedulePolicy(daily_rank=0, startup_rank=3, daily_marker=False),
         coach_rank=4,
-        # http_api/sync_commands.py:150-172 (manual weather refresh, forced).
+        # Forced manual weather refresh (http_api/sync_commands.py).
         manual_sync=ManualSyncRoute(
             path="/api/weather/sync",
             uses_sync_period=False,

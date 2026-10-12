@@ -19,10 +19,14 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_runtime import ProviderSchedulePolicy
 from backend.sync.queue import SyncJobQueueService
+from backend.sync.schedule_policies import build_schedule_policies, intervals_busy
 from backend.sync.state import SyncStateRepository
 
 AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
+_HISTORICAL_BACKFILL = "historical_backfill"
 
 
 @dataclass(frozen=True)
@@ -52,100 +56,68 @@ class DailySyncScheduler:
         maintenance_gate: MaintenanceGate,
         *,
         config: DailySyncSchedulerConfig,
+        schedule_policies: Mapping[str, ProviderSchedulePolicy] | None = None,
+        registry: ProviderRegistry | None = None,
     ) -> None:
-        self._profile = profile
         self._queue = queue
         self._markers = markers
-        self._garmin = garmin
         self._database = database
         self._key_values = key_values
         self._database_lock = database_lock
-        self._sync_state = sync_state
         self._intervals_resync_gate = intervals_resync_gate
         self._maintenance_gate = maintenance_gate
         self._config = config
+        self._registry = DEFAULT_PROVIDER_REGISTRY if registry is None else registry
+        self._daily_marker_ids = self._registry.daily_marker_ids()
+        self._policies: Mapping[str, ProviderSchedulePolicy] = (
+            build_schedule_policies(
+                profile=profile,
+                garmin=garmin,
+                sync_state=sync_state,
+                calendar_enabled=config.calendar_url_enabled,
+                intervals_enabled=config.intervals_key_enabled,
+                garmin_automatic_sync_days=config.garmin_automatic_sync_days,
+                sync_period_defaults=config.sync_period_defaults,
+                all_sync_days=config.all_sync_days,
+                intervals_blocked=self._intervals_blocked,
+            )
+            if schedule_policies is None
+            else schedule_policies
+        )
 
     def schedule(self) -> None:
-        """Enqueue eligible weather, calendar, Garmin, and Intervals jobs."""
+        """Enqueue eligible refresh jobs in the registry's daily rank order."""
         with self._maintenance_gate.operation():
-            self._schedule_weather()
-            self._schedule_calendar()
-            self._schedule_garmin()
-            self._schedule_intervals()
+            for provider_id in self._registry.daily_order():
+                policy = self._policies.get(provider_id)
+                if policy is not None:
+                    self._schedule_provider(provider_id, policy)
 
-    def _schedule_weather(self) -> None:
-        if not self._profile.get().get(
-            "weather_location", ""
-        ).strip() or self._queue.active("weather"):
+    def _schedule_provider(
+        self, provider_id: str, policy: ProviderSchedulePolicy
+    ) -> None:
+        if not policy.configured():
             return
-        self._queue.enqueue(
-            "weather",
-            "refresh",
-            {"force": False, "reason": self._config.auto_update_label},
-            requested_by="scheduler",
-        )
-
-    def _schedule_calendar(self) -> None:
-        if (
-            not self._config.calendar_url_enabled
-            or not self._markers.is_due("calendar")
-            or self._queue.active("calendar")
+        if provider_id in self._daily_marker_ids and not self._markers.is_due(
+            provider_id
         ):
             return
+        if policy.blocked() or self._queue.active(provider_id):
+            return
         self._queue.enqueue(
-            "calendar",
+            provider_id,
             "refresh",
-            {"reason": self._config.auto_update_label},
+            policy.refresh_payload("daily", self._config.auto_update_label),
             requested_by="scheduler",
         )
 
-    def _schedule_garmin(self) -> None:
-        if (
-            not self._garmin.configured()
-            or not self._markers.is_due("garmin")
-            or self._queue.active("garmin")
-        ):
-            return
-        days, end_date = self._garmin.automatic_sync_window(
-            self._config.garmin_automatic_sync_days
+    def _intervals_blocked(self) -> bool:
+        return intervals_busy(
+            self._database,
+            self._key_values,
+            self._database_lock,
+            self._intervals_resync_gate,
         )
-        payload = {"days": days, "reason": self._config.auto_update_label}
-        if end_date is not None:
-            payload["end_date"] = end_date.isoformat()
-        self._queue.enqueue(
-            "garmin",
-            "refresh",
-            payload,
-            requested_by="scheduler",
-        )
-
-    def _schedule_intervals(self) -> None:
-        if (
-            not self._config.intervals_key_enabled
-            or not self._markers.is_due("intervals")
-            or self._sync_running()
-            or self._intervals_resync_gate.is_resetting()
-        ):
-            return
-        if self._queue.active("intervals"):
-            return
-        self._queue.enqueue(
-            "intervals",
-            "refresh",
-            {
-                "days": self._sync_state.sync_period(
-                    "intervals",
-                    self._config.sync_period_defaults,
-                    self._config.all_sync_days,
-                ),
-                "reason": self._config.auto_update_label,
-            },
-            requested_by="scheduler",
-        )
-
-    def _sync_running(self) -> bool:
-        with self._database_lock, self._database.unit_of_work() as db:
-            return self._key_values.get(db, "sync_running") == "1"
 
 
 class DailySyncLoop:
@@ -208,6 +180,11 @@ class StartupSyncSchedulerConfig:
     sync_earliest_date: date
 
 
+def _never_blocked() -> bool:
+    # Startup never asks a policy whether it is blocked; see schedule_policies.
+    return False
+
+
 class StartupSyncScheduler:
     """Enqueue configured startup refreshes and historical backfills."""
 
@@ -219,83 +196,59 @@ class StartupSyncScheduler:
         sync_state: SyncStateRepository,
         *,
         config: StartupSyncSchedulerConfig,
+        schedule_policies: Mapping[str, ProviderSchedulePolicy] | None = None,
+        registry: ProviderRegistry | None = None,
     ) -> None:
-        self._profile = profile
         self._queue = queue
-        self._garmin = garmin
         self._sync_state = sync_state
         self._config = config
+        self._registry = DEFAULT_PROVIDER_REGISTRY if registry is None else registry
+        self._policies: Mapping[str, ProviderSchedulePolicy] = (
+            build_schedule_policies(
+                profile=profile,
+                garmin=garmin,
+                sync_state=sync_state,
+                calendar_enabled=config.calendar_enabled,
+                intervals_enabled=config.intervals_enabled,
+                garmin_automatic_sync_days=config.garmin_automatic_sync_days,
+                sync_period_defaults=config.sync_period_defaults,
+                all_sync_days=config.all_sync_days,
+                intervals_blocked=_never_blocked,
+            )
+            if schedule_policies is None
+            else schedule_policies
+        )
 
     def schedule(self) -> None:
-        """Queue startup work in the established provider order."""
-        self._schedule_calendar()
-        self._schedule_intervals()
-        self._schedule_garmin()
-        self._schedule_weather()
+        """Queue startup work in the registry's startup rank order."""
+        for provider_id in self._registry.startup_order():
+            policy = self._policies.get(provider_id)
+            if policy is not None:
+                self._schedule_provider(provider_id, policy)
 
-    def _schedule_calendar(self) -> None:
-        if self._config.calendar_enabled and not self._queue.active(
-            "calendar", "refresh"
-        ):
-            self._queue.enqueue(
-                "calendar", "refresh", {"reason": "startup"}, requested_by="startup"
-            )
-
-    def _schedule_intervals(self) -> None:
-        if not self._config.intervals_enabled:
+    def _schedule_provider(
+        self, provider_id: str, policy: ProviderSchedulePolicy
+    ) -> None:
+        if not policy.configured():
             return
-        if not self._queue.active("intervals", "refresh"):
+        if not self._queue.active(provider_id, "refresh"):
             self._queue.enqueue(
-                "intervals",
+                provider_id,
                 "refresh",
-                {
-                    "days": self._sync_state.sync_period(
-                        "intervals",
-                        self._config.sync_period_defaults,
-                        self._config.all_sync_days,
-                    ),
-                    "reason": "startup",
-                },
+                policy.refresh_payload("startup", "startup"),
                 requested_by="startup",
             )
-        self._enqueue_historical_backfill("intervals")
-
-    def _schedule_garmin(self) -> None:
-        if not self._garmin.configured():
-            return
-        if not self._queue.active("garmin", "refresh"):
-            days, end_date = self._garmin.automatic_sync_window(
-                self._config.garmin_automatic_sync_days
-            )
-            payload = {"days": days, "reason": "startup"}
-            if end_date is not None:
-                payload["end_date"] = end_date.isoformat()
-            self._queue.enqueue(
-                "garmin",
-                "refresh",
-                payload,
-                requested_by="startup",
-            )
-        self._enqueue_historical_backfill("garmin")
-
-    def _schedule_weather(self) -> None:
-        location = self._profile.get().get("weather_location", "")
-        if location.strip() and not self._queue.active("weather", "refresh"):
-            self._queue.enqueue(
-                "weather",
-                "refresh",
-                {"force": True, "reason": "startup"},
-                requested_by="startup",
-            )
+        if self._registry.supports_job(provider_id, _HISTORICAL_BACKFILL):
+            self._enqueue_historical_backfill(provider_id)
 
     def _enqueue_historical_backfill(self, provider: str) -> None:
-        if self._queue.active(provider, "historical_backfill"):
+        if self._queue.active(provider, _HISTORICAL_BACKFILL):
             return
         payload = self._historical_backfill_payload(provider)
         if payload is not None:
             self._queue.enqueue(
                 provider,
-                "historical_backfill",
+                _HISTORICAL_BACKFILL,
                 payload,
                 requested_by="startup",
             )

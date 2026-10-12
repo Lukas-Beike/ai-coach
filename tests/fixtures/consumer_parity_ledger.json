@@ -1,0 +1,519 @@
+{
+  "description": "Consumer parity ledger: rows where the canonical read path (projection plus select_current or the per-provider daily view) differs from the legacy performance readers on the same synthetic inputs. A field without rows is switchable. Rows may only be removed; record them with the regeneration command, which refuses new or changed rows.",
+  "regeneration": "python tests/canonical_consumer_parity.py --snapshot",
+  "cases": [
+    "complete",
+    "intervals_only",
+    "sparse_profile",
+    "garmin_only"
+  ],
+  "fields": {
+    "weight_kg": {
+      "compared": 4,
+      "matched": 4,
+      "rows": 0,
+      "switchable": true
+    },
+    "body_fat_pct": {
+      "compared": 4,
+      "matched": 2,
+      "rows": 1,
+      "switchable": false
+    },
+    "cycling_ftp_watts": {
+      "compared": 4,
+      "matched": 1,
+      "rows": 2,
+      "switchable": false
+    },
+    "run_threshold_watts": {
+      "compared": 4,
+      "matched": 0,
+      "rows": 2,
+      "switchable": false
+    },
+    "bike_threshold_hr_bpm": {
+      "compared": 4,
+      "matched": 3,
+      "rows": 0,
+      "switchable": true
+    },
+    "run_threshold_hr_bpm": {
+      "compared": 4,
+      "matched": 3,
+      "rows": 0,
+      "switchable": true
+    },
+    "run_threshold_pace": {
+      "compared": 4,
+      "matched": 0,
+      "rows": 3,
+      "switchable": false
+    },
+    "cycling_vo2max_ml_kg_min": {
+      "compared": 4,
+      "matched": 3,
+      "rows": 0,
+      "switchable": true
+    },
+    "running_vo2max_ml_kg_min": {
+      "compared": 4,
+      "matched": 3,
+      "rows": 0,
+      "switchable": true
+    },
+    "cycling_max_hr_bpm": {
+      "compared": 4,
+      "matched": 2,
+      "rows": 1,
+      "switchable": false
+    },
+    "running_max_hr_bpm": {
+      "compared": 4,
+      "matched": 2,
+      "rows": 1,
+      "switchable": false
+    },
+    "sleep_hours": {
+      "compared": 4,
+      "matched": 0,
+      "rows": 4,
+      "switchable": false
+    },
+    "sleep_score": {
+      "compared": 4,
+      "matched": 4,
+      "rows": 0,
+      "switchable": true
+    },
+    "resting_hr": {
+      "compared": 4,
+      "matched": 4,
+      "rows": 0,
+      "switchable": true
+    },
+    "resting_hr_date": {
+      "compared": 4,
+      "matched": 2,
+      "rows": 2,
+      "switchable": false
+    },
+    "readiness": {
+      "compared": 4,
+      "matched": 3,
+      "rows": 0,
+      "switchable": true
+    },
+    "ctl": {
+      "compared": 4,
+      "matched": 2,
+      "rows": 1,
+      "switchable": false
+    },
+    "atl": {
+      "compared": 4,
+      "matched": 3,
+      "rows": 0,
+      "switchable": true
+    },
+    "body_weight_kg_series": {
+      "compared": 784,
+      "matched": 14,
+      "rows": 0,
+      "switchable": true
+    },
+    "body_fat_pct_series": {
+      "compared": 784,
+      "matched": 8,
+      "rows": 0,
+      "switchable": true
+    }
+  },
+  "rows": [
+    {
+      "case": "complete",
+      "field": "cycling_ftp_watts",
+      "point": "current",
+      "legacy": 262.0,
+      "canonical": 268.0
+    },
+    {
+      "case": "complete",
+      "field": "run_threshold_pace",
+      "point": "current",
+      "legacy": 256.0,
+      "canonical": 3.9
+    },
+    {
+      "case": "complete",
+      "field": "run_threshold_watts",
+      "point": "current",
+      "legacy": 215.0,
+      "canonical": null
+    },
+    {
+      "case": "complete",
+      "field": "sleep_hours",
+      "point": "current",
+      "legacy": 7.3,
+      "canonical": 26400.0
+    },
+    {
+      "case": "garmin_only",
+      "field": "cycling_ftp_watts",
+      "point": "current",
+      "legacy": 262.0,
+      "canonical": 268.0
+    },
+    {
+      "case": "garmin_only",
+      "field": "run_threshold_pace",
+      "point": "current",
+      "legacy": 256.0,
+      "canonical": 3.9
+    },
+    {
+      "case": "garmin_only",
+      "field": "run_threshold_watts",
+      "point": "current",
+      "legacy": 215.0,
+      "canonical": null
+    },
+    {
+      "case": "garmin_only",
+      "field": "sleep_hours",
+      "point": "current",
+      "legacy": 7.3,
+      "canonical": 26400.0
+    },
+    {
+      "case": "intervals_only",
+      "field": "cycling_max_hr_bpm",
+      "point": "current",
+      "legacy": 181.0,
+      "canonical": null
+    },
+    {
+      "case": "intervals_only",
+      "field": "resting_hr_date",
+      "point": "current",
+      "legacy": null,
+      "canonical": "2026-10-11"
+    },
+    {
+      "case": "intervals_only",
+      "field": "run_threshold_pace",
+      "point": "current",
+      "legacy": 256.0,
+      "canonical": 3.9
+    },
+    {
+      "case": "intervals_only",
+      "field": "running_max_hr_bpm",
+      "point": "current",
+      "legacy": 176.0,
+      "canonical": null
+    },
+    {
+      "case": "intervals_only",
+      "field": "sleep_hours",
+      "point": "current",
+      "legacy": 7.5,
+      "canonical": 27000.0
+    },
+    {
+      "case": "sparse_profile",
+      "field": "body_fat_pct",
+      "point": "current",
+      "legacy": 14.0,
+      "canonical": null
+    },
+    {
+      "case": "sparse_profile",
+      "field": "ctl",
+      "point": "current",
+      "legacy": "58,2",
+      "canonical": 58.2
+    },
+    {
+      "case": "sparse_profile",
+      "field": "resting_hr_date",
+      "point": "current",
+      "legacy": null,
+      "canonical": "2026-10-11"
+    },
+    {
+      "case": "sparse_profile",
+      "field": "sleep_hours",
+      "point": "current",
+      "legacy": 0.0,
+      "canonical": null
+    }
+  ],
+  "labels": [
+    {
+      "case": "complete",
+      "field": "weight_kg",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "complete",
+      "field": "body_fat_pct",
+      "legacy_source": "Intervals.icu Wellness",
+      "canonical_provider": "intervals"
+    },
+    {
+      "case": "complete",
+      "field": "cycling_ftp_watts",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "complete",
+      "field": "run_threshold_watts",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": null
+    },
+    {
+      "case": "complete",
+      "field": "bike_threshold_hr_bpm",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "complete",
+      "field": "run_threshold_hr_bpm",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "complete",
+      "field": "run_threshold_pace",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "complete",
+      "field": "cycling_vo2max_ml_kg_min",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "complete",
+      "field": "running_vo2max_ml_kg_min",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "complete",
+      "field": "cycling_max_hr_bpm",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "complete",
+      "field": "running_max_hr_bpm",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "intervals_only",
+      "field": "weight_kg",
+      "legacy_source": "Intervals.icu Wellness",
+      "canonical_provider": "intervals"
+    },
+    {
+      "case": "intervals_only",
+      "field": "body_fat_pct",
+      "legacy_source": "Intervals.icu Wellness",
+      "canonical_provider": "intervals"
+    },
+    {
+      "case": "intervals_only",
+      "field": "cycling_ftp_watts",
+      "legacy_source": "Intervals.icu",
+      "canonical_provider": "intervals"
+    },
+    {
+      "case": "intervals_only",
+      "field": "run_threshold_watts",
+      "legacy_source": null,
+      "canonical_provider": null
+    },
+    {
+      "case": "intervals_only",
+      "field": "bike_threshold_hr_bpm",
+      "legacy_source": "Intervals.icu",
+      "canonical_provider": "intervals"
+    },
+    {
+      "case": "intervals_only",
+      "field": "run_threshold_hr_bpm",
+      "legacy_source": "Intervals.icu",
+      "canonical_provider": "intervals"
+    },
+    {
+      "case": "intervals_only",
+      "field": "run_threshold_pace",
+      "legacy_source": "Intervals.icu",
+      "canonical_provider": "intervals"
+    },
+    {
+      "case": "intervals_only",
+      "field": "cycling_vo2max_ml_kg_min",
+      "legacy_source": "Intervals.icu",
+      "canonical_provider": "intervals"
+    },
+    {
+      "case": "intervals_only",
+      "field": "running_vo2max_ml_kg_min",
+      "legacy_source": "Intervals.icu",
+      "canonical_provider": "intervals"
+    },
+    {
+      "case": "intervals_only",
+      "field": "cycling_max_hr_bpm",
+      "legacy_source": "Intervals.icu",
+      "canonical_provider": null
+    },
+    {
+      "case": "intervals_only",
+      "field": "running_max_hr_bpm",
+      "legacy_source": "Intervals.icu",
+      "canonical_provider": null
+    },
+    {
+      "case": "sparse_profile",
+      "field": "weight_kg",
+      "legacy_source": "Intervals.icu Wellness",
+      "canonical_provider": "intervals"
+    },
+    {
+      "case": "sparse_profile",
+      "field": "body_fat_pct",
+      "legacy_source": "Manuell",
+      "canonical_provider": null
+    },
+    {
+      "case": "sparse_profile",
+      "field": "cycling_ftp_watts",
+      "legacy_source": null,
+      "canonical_provider": null
+    },
+    {
+      "case": "sparse_profile",
+      "field": "run_threshold_watts",
+      "legacy_source": null,
+      "canonical_provider": null
+    },
+    {
+      "case": "sparse_profile",
+      "field": "bike_threshold_hr_bpm",
+      "legacy_source": null,
+      "canonical_provider": null
+    },
+    {
+      "case": "sparse_profile",
+      "field": "run_threshold_hr_bpm",
+      "legacy_source": null,
+      "canonical_provider": null
+    },
+    {
+      "case": "sparse_profile",
+      "field": "run_threshold_pace",
+      "legacy_source": null,
+      "canonical_provider": null
+    },
+    {
+      "case": "sparse_profile",
+      "field": "cycling_vo2max_ml_kg_min",
+      "legacy_source": null,
+      "canonical_provider": null
+    },
+    {
+      "case": "sparse_profile",
+      "field": "running_vo2max_ml_kg_min",
+      "legacy_source": null,
+      "canonical_provider": null
+    },
+    {
+      "case": "sparse_profile",
+      "field": "cycling_max_hr_bpm",
+      "legacy_source": null,
+      "canonical_provider": null
+    },
+    {
+      "case": "sparse_profile",
+      "field": "running_max_hr_bpm",
+      "legacy_source": null,
+      "canonical_provider": null
+    },
+    {
+      "case": "garmin_only",
+      "field": "weight_kg",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "garmin_only",
+      "field": "body_fat_pct",
+      "legacy_source": null,
+      "canonical_provider": null
+    },
+    {
+      "case": "garmin_only",
+      "field": "cycling_ftp_watts",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "garmin_only",
+      "field": "run_threshold_watts",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": null
+    },
+    {
+      "case": "garmin_only",
+      "field": "bike_threshold_hr_bpm",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "garmin_only",
+      "field": "run_threshold_hr_bpm",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "garmin_only",
+      "field": "run_threshold_pace",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "garmin_only",
+      "field": "cycling_vo2max_ml_kg_min",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "garmin_only",
+      "field": "running_vo2max_ml_kg_min",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "garmin_only",
+      "field": "cycling_max_hr_bpm",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    },
+    {
+      "case": "garmin_only",
+      "field": "running_max_hr_bpm",
+      "legacy_source": "Garmin Connect",
+      "canonical_provider": "garmin"
+    }
+  ]
+}

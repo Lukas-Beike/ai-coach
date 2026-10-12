@@ -16,6 +16,7 @@ from backend.coach.context import (
     CoachTrainingContextService,
 )
 from backend.coach.request_payload import CoachRequestPayloadService
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.settings import SettingsService
 
 
@@ -29,6 +30,8 @@ class CoachContextPerformanceSources:
     today: Callable[[], Any]
     local_date: Callable[[], Any]
     utc_now: Callable[[], datetime]
+    # When set, Coach performance reads CTL and ATL from canonical observations.
+    canonical: CanonicalPerformanceSource | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +76,7 @@ class CoachContextAssembly:
         self._today = performance.today
         self._local_date = performance.local_date
         self._utc_now = performance.utc_now
+        self._canonical = performance.canonical
         self._checkin_service = planning.checkin_service
         self._planned_unit_service = planning.planned_unit_service
         self._daily_context_service = planning.daily_context_service
@@ -107,6 +111,7 @@ class CoachContextAssembly:
                 self._garmin_payload_service(),
                 self._garmin_projection_service(),
                 self._local_date,
+                self._canonical,
             ),
         )
 

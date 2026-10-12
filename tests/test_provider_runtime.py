@@ -18,6 +18,7 @@ from provider_runtime_fakes import (
     fake_binding,
 )
 
+from backend.errors import AppError
 from backend.providers.descriptors import (
     DEFAULT_PROVIDER_DESCRIPTORS,
     ProviderDescriptor,
@@ -52,8 +53,8 @@ class _FakeResync:
     def configured(self) -> bool:
         return True
 
-    def not_configured_error(self) -> Exception:
-        return RuntimeError("not configured")
+    def not_configured_error(self) -> AppError:
+        return AppError(503, "not configured", reason="not_configured")
 
     def run(self, operation_id: str, observer: Any) -> dict[str, Any]:
         return {"operation_id": operation_id}

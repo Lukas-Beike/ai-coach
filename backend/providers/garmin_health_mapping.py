@@ -20,6 +20,11 @@ Mapped sections and their canonical kinds:
   reported as UNSUPPORTED: ``garmin_metrics`` labels it running watts, but Garmin's
   lactate-threshold power is cycling-based, so no sport is assigned.
 * ``cycling_ftp`` and ``cycling_ftp_history``: FTP for cycling.
+* ``heart_rate_zones``: MAX_HR for each sport category (cycling, running or
+  generic). Every object under a record is read for ``maxHeartRateUsed``,
+  ``maxHeartRate`` or ``maxHR``, with the legacy category terms and the legacy
+  80 to 260 bpm window. Values above the canonical 250 bpm bound are reported
+  OUT_OF_RANGE, so 251 to 260 bpm are not mapped.
 * ``weight``, ``weigh_ins`` or ``weighIns`` (the first truthy one wins, as in the
   legacy ``or`` chain): WEIGHT in kilograms and BODY_FAT in percent. Nested records
   are searched with the legacy reader's depth, visit and list limits.
@@ -27,7 +32,8 @@ Mapped sections and their canonical kinds:
 Time rule: most observations are dated by ``calendarDate``, the field the collector
 guarantees on dated records. ``running_threshold`` has no date; the collector
 requests it as the latest value on the sync day, so its observation day is the
-athlete-zone date of ``retrieved_at``.
+athlete-zone date of ``retrieved_at``. Undated ``heart_rate_zones`` records use
+the same sync day.
 
 Weight and body fat follow the legacy reader ``backend/performance/garmin_weight``
 for record shapes. A record's day is the first present of calendarDate,
@@ -55,30 +61,33 @@ the legacy reader: ``fraction`` and ``ratio`` are multiplied by 100, ``percent``
 ``%`` or no unit are used as they are, and any other unit is UNKNOWN_VALUE.
 Kilograms and percent are rounded to two decimals, as the legacy reader rounds.
 
-Ignored without an issue: sections with no canonical kind in this wave
-(``activities``, ``gear``, ``daily_stats``, ``training_status``,
-``heart_rate_zones``, ``race_predictions``, ``endurance_score``,
-``running_tolerance``) and unknown keys. Body battery (charged and drained only,
-no level) and the device-keyed ``daily_training_status`` and
+Ignored without an issue: sections with no canonical kind in this wave (``activities``,
+``gear``, ``daily_stats``, ``training_status``, ``race_predictions``,
+``endurance_score``, ``running_tolerance``) and unknown keys. Body battery (charged and
+drained only, no level) and the device-keyed ``daily_training_status`` and
 ``training_load_balance`` each yield one UNSUPPORTED issue per section.
 
 Source kinds: sensor values (sleep duration, HRV, resting heart rate, scale weight
 and body fat) are DEVICE_MEASURED. Garmin's calculations (sleep score, readiness,
 VO2max, thresholds, FTP) are PROVIDER_REPORTED. The source record id is
 ``<section>:<calendarDate>``, with ``:<object>`` appended for nested objects, for
-example ``max_metrics:2026-10-10:cycling``. Weight records use ``weight:<day>:<record index>`` and body-fat records use
-``body_fat:<day>:<record index>``, because one day can hold several weigh-ins and
-a weigh-in and its body-fat value must not share an id.
+example ``max_metrics:2026-10-10:cycling``. Weight records use ``weight:<day>:<record
+index>`` and body-fat records use ``body_fat:<day>:<record index>``, because one day can
+hold several weigh-ins and a weigh-in and its body-fat value must not share an id.
+Heart-rate zone maxima use ``heart_rate_zones:<day>:<record index>:<object index>``,
+with the record index omitted for a single object.
 
-Plausibility: a value must be strictly positive and inside ``METRIC_BOUNDS``.
-Zero is rejected for every metric because none of these values is legitimately
-zero; a zero score is treated as a sentinel.
+Plausibility: a value must lie inside ``METRIC_BOUNDS``. Zero is rejected for every
+metric except the sleep score, where Garmin's 0 is a measured score kept as
+reported, as the legacy reader keeps it. Other zero measurements, such as a zero
+sleep duration, are still rejected; the parity tests name the remaining
+differences from the legacy readers.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, tzinfo
 from typing import Final
@@ -88,6 +97,7 @@ from backend.canonical.mapping import (
     IssueReason,
     MappingIssue,
     MappingResult,
+    coerce_comma_decimal_number,
     coerce_number,
 )
 from backend.canonical.records import MetricValue, Observation, Provenance
@@ -101,7 +111,6 @@ from backend.canonical.vocabulary import (
 )
 from backend.providers.garmin_fields import (
     GARMIN_BODY_FAT_ALIASES,
-    GARMIN_DATE_ALIASES,
     GARMIN_FTP_ALIASES,
     GARMIN_HRV_LAST_NIGHT_ALIASES,
     GARMIN_READINESS_ALIASES,
@@ -111,8 +120,16 @@ from backend.providers.garmin_fields import (
     GARMIN_VO2MAX_ALIASES,
     GARMIN_WEIGHT_UNIT_ALIASES,
 )
+from backend.providers.garmin_weight_walk import (
+    BODY_FAT_SKIP_KEYS,
+    WALK_DATE_KEYS,
+    WEIGHT_SKIP_KEYS,
+    alnum_key,
+    walk_records,
+    weight_payload,
+)
 
-MAPPER_VERSION: Final = 2
+MAPPER_VERSION: Final = 3
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
@@ -125,7 +142,6 @@ _KG_PER_POUND: Final = 0.45359237
 _GRAM_UNITS: Final = frozenset({"gram", "grams", "g"})
 _KILOGRAM_UNITS: Final = frozenset({"kilogram", "kilograms", "kg"})
 _WEIGHT: Final = "weight"
-_WEIGHT_SECTIONS: Final = ("weight", "weigh_ins", "weighIns")
 _BODY_FAT_RECORD: Final = "body_fat"
 _WEIGHT_KEYS: Final = ("weightKg", "weight_kg", "weight")
 _WEIGHT_UNIT_KEYS: Final = GARMIN_WEIGHT_UNIT_ALIASES
@@ -138,21 +154,17 @@ _BODY_FAT_INNER_UNIT_KEYS: Final = ("unitKey", "unit", "bodyFatUnit")
 _BODY_FAT_VALUE_KEYS: Final = ("value", "val", "amount")
 _BODY_FAT_MIN_PERCENT: Final = 2.0
 _BODY_FAT_MAX_PERCENT: Final = 70.0
-_WEIGHT_SKIP_KEYS: Final = frozenset({"minweight", "maxweight", "weightdelta"})
-_BODY_FAT_SKIP_KEYS: Final = frozenset({"minbodyfat", "maxbodyfat", "bodyfatdelta"})
-_WALK_DATE_KEYS: Final = (
-    *GARMIN_DATE_ALIASES,
-    "timestampGMT",
-    "timestamp",
-)
 _WALK_TIMESTAMP_KEYS: Final = ("timestampGMT", "timestamp", "measurementDate", "date")
-_WALK_MAX_DEPTH: Final = 20
-_WALK_MAX_VISITS: Final = 2000
-_WALK_MAX_LIST_ITEMS: Final = 500
 _EPOCH_MS_THRESHOLD: Final = 100_000_000_000
 _TEXT_DATE: Final = re.compile(r"\d{4}-\d{2}-\d{2}")
 _TEXT_DATETIME: Final = re.compile(r"\d{4}-\d{2}-\d{2}[T ].+")
 _RUNNING_THRESHOLD: Final = "running_threshold"
+_HEART_RATE_ZONES: Final = "heart_rate_zones"
+_MAX_HR_KEYS: Final = ("maxHeartRateUsed", "maxHeartRate", "maxHR")
+_MAX_HR_FLOOR: Final = 80.0
+_HEART_RATE_SPORT_KEYS: Final = ("sport", "sportType", "activityType")
+_HEART_RATE_LIST_LIMIT: Final = 100
+_LATEST_WEIGHT_KEYS: Final = frozenset({"latestWeight"})
 _UNSUPPORTED_SECTIONS: Final = frozenset(
     {"body_battery", "daily_training_status", "training_load_balance"}
 )
@@ -302,11 +314,14 @@ _SECTION_ORDER: Final = (
     _RUNNING_THRESHOLD,
     "cycling_ftp",
     "cycling_ftp_history",
+    _HEART_RATE_ZONES,
     _WEIGHT,
     "body_battery",
     "daily_training_status",
     "training_load_balance",
 )
+# Public name for the canonical plan, which keeps one raw record per section.
+GARMIN_HEALTH_SECTION_NAMES: Final = _SECTION_ORDER
 
 
 def _named_value(
@@ -352,13 +367,6 @@ def _entry(
     return _Entry(ref, day, record_id, observed_at)
 
 
-def _alnum_key(value: object) -> str:
-    """Casefolded text with only letters and digits, as the legacy reader keys."""
-    return "".join(
-        character for character in str(value).casefold() if character.isalnum()
-    )
-
-
 def _iso_day(text: str) -> date | None:
     """Calendar date of a date or datetime string, read as the legacy reader does."""
     value = text.replace("Z", "+00:00").strip()
@@ -387,12 +395,10 @@ def _raw_day(raw: object) -> _Day:
     return _INVALID_DAY if day is None else day
 
 
-def _node_day(record: Mapping[str, object], inherited: _Day) -> _Day:
-    raw = _first_value(record, _WALK_DATE_KEYS)
-    if raw is None:
-        return inherited
-    day = _raw_day(raw)
-    return inherited if day is None else day
+def _own_day(record: Mapping[str, object]) -> _Day:
+    """Day of a record's own date field, or None when it gives none to inherit."""
+    raw = _first_value(record, WALK_DATE_KEYS)
+    return None if raw is None else _raw_day(raw)
 
 
 def _observed_at(record: Mapping[str, object]) -> datetime | None:
@@ -417,9 +423,7 @@ def _observed_at(record: Mapping[str, object]) -> datetime | None:
 
 def _decimal(value: object) -> float | None:
     """Finite number from a number or text, with a comma accepted as decimal."""
-    if isinstance(value, str):
-        value = value.replace(",", ".")
-    return coerce_number(value)
+    return coerce_comma_decimal_number(value)
 
 
 def _weight_number(value: object) -> float | None:
@@ -440,7 +444,7 @@ def _weight_kg(number: float, unit: object) -> float | None:
         )
     if not isinstance(unit, str):
         return None
-    key = _alnum_key(unit)
+    key = alnum_key(unit)
     if "lb" in key or "pound" in key:
         return number * _KG_PER_POUND
     if key in _GRAM_UNITS:
@@ -456,7 +460,7 @@ def _body_fat_percent(number: float, unit: object) -> float | None:
         return number
     if not isinstance(unit, str):
         return None
-    key = _alnum_key(unit)
+    key = alnum_key(unit)
     if "fraction" in key or "ratio" in key:
         return number * 100
     if "percent" in key or "%" in unit:
@@ -493,76 +497,72 @@ def _measure(
 
 def _within_bounds(kind: MetricKind, number: float) -> bool:
     lower, upper = METRIC_BOUNDS[kind]
+    if kind is MetricKind.SLEEP_SCORE:
+        # Garmin's 0 is a measured score; the legacy reader keeps it.
+        return lower <= number <= upper
     return 0 < number and lower <= number <= upper
+
+
+def _heart_rate_nodes(value: object) -> Iterator[Mapping[str, object]]:
+    """Mappings under one record, the record first, in the legacy reader's order.
+
+    Lists are read up to the legacy item limit. The walk keeps an explicit stack, so
+    a deeply nested payload cannot exhaust the recursion limit.
+    """
+    stack: list[object] = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, Mapping):
+            yield item
+            stack.extend(reversed(list(item.values())))
+        elif isinstance(item, list):
+            stack.extend(reversed(item[:_HEART_RATE_LIST_LIMIT]))
+
+
+def _heart_rate_sport(value: object) -> Sport | None:
+    """Sport of a heart-rate zone object, by the legacy reader's category terms."""
+    key = alnum_key(value)
+    if any(term in key for term in ("cycling", "cycl", "bike", "ride")):
+        return Sport.RIDE
+    if any(term in key for term in ("running", "run")):
+        return Sport.RUN
+    return None
+
+
+def _top_level_items(payload: object) -> object:
+    """A list payload within the legacy item limit; any other payload as it is."""
+    return payload[:_HEART_RATE_LIST_LIMIT] if isinstance(payload, list) else payload
 
 
 class _WeightWalk:
     """Searches a weight payload for weight or body-fat records, as the legacy reader.
 
-    Each mapping is a candidate record. Its day is its own date field or, when it
-    has none, the day of its nearest dated ancestor. Traversal stops at the legacy
-    depth and visit limits, and skips the min, max and delta keys of the other
-    measure. The index numbers records in traversal order, matching the legacy
-    reader's order for latest-per-day selection.
+    Each record the shared walk yields is a candidate. Traversal order, the depth,
+    visit and list limits, and the skipped min, max and delta keys come from
+    ``garmin_weight_walk``, the same walk the legacy reader uses. A weight record
+    takes the index of the list item it sits under, when there is one, which keeps
+    the legacy reader's order for latest-per-day selection.
     """
 
     def __init__(self, mapping: _HealthMapping, *, body_fat: bool) -> None:
         self._mapping = mapping
         self._body_fat = body_fat
-        self._skip = _BODY_FAT_SKIP_KEYS if body_fat else _WEIGHT_SKIP_KEYS
-        self._visits = 0
-        self._records = 0
+        self._skip = BODY_FAT_SKIP_KEYS if body_fat else WEIGHT_SKIP_KEYS
 
     def run(self, payload: object) -> None:
-        self._visit(payload, None, 0, None, False)
-
-    def _visit(
-        self,
-        value: object,
-        inherited: _Day,
-        depth: int,
-        source_index: int | None,
-        default_gram: bool,
-    ) -> None:
-        if depth > _WALK_MAX_DEPTH or self._visits >= _WALK_MAX_VISITS:
-            return
-        self._visits += 1
-        if isinstance(value, Mapping):
-            self._visit_record(value, inherited, depth, source_index, default_gram)
-        elif isinstance(value, list):
-            for index, item in enumerate(value[:_WALK_MAX_LIST_ITEMS]):
-                self._visit(item, inherited, depth + 1, index, default_gram)
-
-    def _visit_record(
-        self,
-        record: Mapping[str, object],
-        inherited: _Day,
-        depth: int,
-        source_index: int | None,
-        default_gram: bool,
-    ) -> None:
-        index = self._records
-        self._records += 1
-        day = _node_day(record, inherited)
-        record_index = source_index if source_index is not None else index
-        if self._body_fat:
-            self._body_fat_candidate(record, day, index)
-        else:
-            self._weight_candidate(
-                record,
-                day,
-                record_index,
-                default_gram,
-            )
-        for key, child in record.items():
-            if _alnum_key(key) not in self._skip:
-                self._visit(
-                    child,
-                    day,
-                    depth + 1,
-                    source_index,
-                    default_gram or key == "latestWeight",
+        for walked in walk_records(
+            payload,
+            skip_keys=self._skip,
+            resolve_day=_own_day,
+            marker_keys=_LATEST_WEIGHT_KEYS,
+        ):
+            if self._body_fat:
+                self._body_fat_candidate(walked.record, walked.day, walked.ordinal)
+            else:
+                index = (
+                    walked.ordinal if walked.list_index is None else walked.list_index
                 )
+                self._weight_candidate(walked.record, walked.day, index, walked.marked)
 
     def _weight_candidate(
         self,
@@ -701,6 +701,8 @@ class _HealthMapping:
             self.issue(None, name, IssueReason.UNSUPPORTED)
         elif name == _RUNNING_THRESHOLD:
             self._map_running_threshold(payload)
+        elif name == _HEART_RATE_ZONES:
+            self._map_heart_rate_zones(payload)
         else:
             self._map_grouped(name, payload, _GROUPED_SECTIONS[name])
 
@@ -714,7 +716,7 @@ class _HealthMapping:
                     self._map_group(name, record, group, ref, day, index=index)
 
     def _map_weight(self, sections: Mapping[str, object]) -> None:
-        payload = self._weight_records(_weight_payload(sections))
+        payload = self._weight_records(weight_payload(sections))
         _WeightWalk(self, body_fat=False).run(payload)
         _WeightWalk(self, body_fat=True).run(payload)
 
@@ -750,6 +752,43 @@ class _HealthMapping:
             self.issue(ref, "power", IssueReason.INVALID_TYPE)
         elif _first_value(power, ("functionalThresholdPower",)) is not None:
             self.issue(ref, "power.functionalThresholdPower", IssueReason.UNSUPPORTED)
+
+    def _map_heart_rate_zones(self, payload: object) -> None:
+        for ref, record, index in self._records(
+            _HEART_RATE_ZONES, _top_level_items(payload)
+        ):
+            day = self._record_day(record, ref, fallback=self._sync_day)
+            if day is None:
+                continue
+            for ordinal, node in enumerate(_heart_rate_nodes(record)):
+                self._map_max_hr(node, ref, day, index=index, ordinal=ordinal)
+
+    def _map_max_hr(
+        self,
+        node: Mapping[str, object],
+        ref: str,
+        day: date,
+        *,
+        index: int | None,
+        ordinal: int,
+    ) -> None:
+        number = self._number(node, _MAX_HR_KEYS, ref)
+        if number is None:
+            return
+        value = round(number, 2)
+        if value < _MAX_HR_FLOOR:
+            self.issue(ref, _MAX_HR_KEYS[0], IssueReason.OUT_OF_RANGE)
+            return
+        entry = _entry(_HEART_RATE_ZONES, ref, day, str(ordinal), index=index)
+        sport = _heart_rate_sport(_first_value(node, _HEART_RATE_SPORT_KEYS))
+        self.emit(
+            entry,
+            MetricKind.MAX_HR,
+            value,
+            _MAX_HR_KEYS[0],
+            _PROVIDER,
+            sport,
+        )
 
     def _map_group(
         self,
@@ -882,16 +921,6 @@ class _HealthMapping:
 
     def issue(self, record_ref: str | None, field: str, reason: IssueReason) -> None:
         self.issues.append(MappingIssue(record_ref, field, reason))
-
-
-def _weight_payload(sections: Mapping[str, object]) -> object:
-    """First truthy weight section, as the legacy ``or`` chain picks it."""
-    payload: object = None
-    for name in _WEIGHT_SECTIONS:
-        payload = sections.get(name)
-        if payload:
-            break
-    return payload
 
 
 def map_garmin_health(

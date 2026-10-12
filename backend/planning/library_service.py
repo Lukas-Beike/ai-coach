@@ -10,6 +10,10 @@ from typing import Any
 from backend import change_history
 from backend.errors import CORRUPT_LIBRARY_ERROR, AppError
 from backend.planning import library, workouts
+from backend.providers.intervals_workouts import (
+    INTERVALS_DEFAULT_WORKOUT_TYPE,
+    INTERVALS_TEMPLATE_WORKOUT_TYPES,
+)
 
 INSERT_LIBRARY_SQL = (
     "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, "
@@ -182,7 +186,7 @@ class WorkoutLibraryService:
         local_id = str(self._id_factory())
         library_workout = {
             **workout,
-            "type": workout.get("sport") or "Ride",
+            "type": workout.get("sport") or INTERVALS_DEFAULT_WORKOUT_TYPE,
             "moving_time": int(workout.get("duration_minutes") or 0) * 60,
         }
         entry = library.normalize_library_workout(
@@ -226,8 +230,8 @@ class WorkoutLibraryService:
             raise AppError(
                 400, "Die Vorlagendauer muss zwischen 5 und 1440 Minuten liegen."
             )
-        sport = str(workout.get("sport") or "Ride")
-        if sport not in {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining"}:
+        sport = str(workout.get("sport") or INTERVALS_DEFAULT_WORKOUT_TYPE)
+        if sport not in INTERVALS_TEMPLATE_WORKOUT_TYPES:
             raise AppError(400, "Ungültige Sportart der Vorlage.")
         return self.create_local_entry(
             {

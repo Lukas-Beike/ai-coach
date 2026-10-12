@@ -13,6 +13,7 @@ from backend.db.repositories import KeyValueRepository
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import freshness, observation, refresh
+from backend.sync.provider_runtime import ProviderRuntimeRegistry
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ class ProviderSyncAssembly:
         self,
         *,
         dependencies: ProviderSyncAssembly.Inputs,
+        provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
     ) -> None:
         persistence = dependencies.persistence
         runtime = dependencies.runtime
@@ -64,6 +66,7 @@ class ProviderSyncAssembly:
         self._uuid_factory = retry.uuid_factory
         self._retry_base_seconds = retry.retry_base_seconds
         self._retry_max_seconds = retry.retry_max_seconds
+        self._provider_runtime = provider_runtime
 
     def refresh_tracker(self) -> refresh.ProviderRefreshTracker:
         """Return the cache-owned tracker bound to the current manager."""
@@ -86,6 +89,16 @@ class ProviderSyncAssembly:
 
     def freshness_service(self) -> freshness.ProviderFreshnessService:
         """Create a freshness projection for the active config and manager."""
+        if self._provider_runtime is None:
+            return freshness.ProviderFreshnessService(
+                self._config(), self._database_manager(), self._key_values, self._now
+            )
+        runtime = self._provider_runtime()
         return freshness.ProviderFreshnessService(
-            self._config(), self._database_manager(), self._key_values, self._now
+            self._config(),
+            self._database_manager(),
+            self._key_values,
+            self._now,
+            freshness_sources=runtime.freshness_sources(),
+            registry=runtime.static,
         )

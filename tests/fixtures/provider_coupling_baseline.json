@@ -173,20 +173,8 @@
     {
       "rule": "garmin_wire_key",
       "path": "backend/performance/garmin_weight.py",
-      "token": "calendarDate",
-      "count": 2
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_weight.py",
-      "token": "summaryDate",
-      "count": 2
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/performance/garmin_weight.py",
       "token": "timestampGMT",
-      "count": 3
+      "count": 1
     },
     {
       "rule": "garmin_wire_key",
@@ -774,7 +762,7 @@
       "rule": "provider_literal",
       "path": "backend/activities/duplicates.py",
       "token": "garmin",
-      "count": 2
+      "count": 1
     },
     {
       "rule": "provider_literal",
@@ -808,18 +796,6 @@
     },
     {
       "rule": "provider_literal",
-      "path": "backend/coach/authorization.py",
-      "token": "garmin",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/coach/authorization.py",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
       "path": "backend/coach/context.py",
       "token": "garmin",
       "count": 3
@@ -845,14 +821,8 @@
     {
       "rule": "provider_literal",
       "path": "backend/coach/dialogue_action.py",
-      "token": "garmin",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/coach/dialogue_action.py",
       "token": "intervals",
-      "count": 2
+      "count": 1
     },
     {
       "rule": "provider_literal",
@@ -877,12 +847,6 @@
       "path": "backend/coach/sync_tools.py",
       "token": "intervals",
       "count": 7
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/coach/tool_preparation.py",
-      "token": "intervals",
-      "count": 2
     },
     {
       "rule": "provider_literal",
@@ -994,60 +958,6 @@
     },
     {
       "rule": "provider_literal",
-      "path": "backend/sync/commands.py",
-      "token": "intervals",
-      "count": 2
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/daily.py",
-      "token": "garmin",
-      "count": 2
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/daily.py",
-      "token": "intervals",
-      "count": 2
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/executor.py",
-      "token": "garmin",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/executor.py",
-      "token": "intervals",
-      "count": 5
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/freshness.py",
-      "token": "garmin",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/freshness.py",
-      "token": "intervals",
-      "count": 9
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/full_resync.py",
-      "token": "garmin",
-      "count": 5
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/full_resync.py",
-      "token": "intervals",
-      "count": 6
-    },
-    {
-      "rule": "provider_literal",
       "path": "backend/sync/garmin.py",
       "token": "garmin",
       "count": 3
@@ -1062,31 +972,13 @@
       "rule": "provider_literal",
       "path": "backend/sync/gates.py",
       "token": "garmin",
-      "count": 2
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/gates.py",
-      "token": "intervals",
-      "count": 2
+      "count": 1
     },
     {
       "rule": "provider_literal",
       "path": "backend/sync/intervals.py",
       "token": "intervals",
       "count": 6
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/jobs.py",
-      "token": "garmin",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/jobs.py",
-      "token": "intervals",
-      "count": 9
     },
     {
       "rule": "provider_literal",
@@ -1099,30 +991,6 @@
       "path": "backend/sync/plan_commands.py",
       "token": "intervals",
       "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/queue.py",
-      "token": "garmin",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/queue.py",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/scheduler.py",
-      "token": "garmin",
-      "count": 6
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/scheduler.py",
-      "token": "intervals",
-      "count": 8
     },
     {
       "rule": "provider_literal",
@@ -1181,18 +1049,6 @@
     {
       "rule": "provider_literal",
       "path": "public/views.js",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "server.py",
-      "token": "garmin",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "server.py",
       "token": "intervals",
       "count": 1
     }

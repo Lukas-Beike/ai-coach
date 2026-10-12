@@ -128,6 +128,10 @@ MAPPED_SPORT_SETTING_KEYS = frozenset(
         "maxHeartRate",
         "max_heartrate",
         "threshold_pace",
+        "vo2max",
+        "vo2_max",
+        "cycling_vo2max",
+        "running_vo2max",
     }
 )
 
@@ -483,18 +487,12 @@ class WellnessParityTests(unittest.TestCase):
             ]
         )
 
-    # Known deviation, named so that it stays visible.
-
-    def test_comma_decimal_is_strict_in_the_mapper_and_accepted_by_legacy(self) -> None:
-        # Deviation: coerce_number rejects "70,1" as malformed. The legacy readers
-        # replace the comma with a dot and accept the value.
+    def test_comma_decimal_weight_is_accepted_by_mapper_and_legacy(self) -> None:
+        # Both the mapper and the legacy readers replace the comma with a dot.
         row = {"id": LATEST_DAY, "weight": "70,1"}
         result = map_wellness([row])
-        self.assertIsNone(first_value(result, MetricKind.WEIGHT))
-        self.assertEqual(
-            [(issue.field, issue.reason) for issue in result.issues],
-            [("weight", IssueReason.INVALID_NUMBER)],
-        )
+        self.assertEqual(first_value(result, MetricKind.WEIGHT), 70.1)
+        self.assertEqual(result.issues, ())
         legacy = legacy_metrics(
             {"athlete": {}, "recent_wellness": [row], "recent_activities": []}
         )
@@ -562,6 +560,10 @@ class ThresholdParityTests(unittest.TestCase):
             "maxHeartRate": 182,
             "max_heartrate": 183,
             "threshold_pace": 4.0,
+            "vo2max": 58,
+            "vo2_max": 57,
+            "cycling_vo2max": 56,
+            "running_vo2max": 55,
         }
         compact_setting = compact_form({"sportSettings": [setting]}, [], [])["athlete"][
             "sport_settings"
@@ -639,20 +641,91 @@ class ThresholdParityTests(unittest.TestCase):
                     [IssueReason.OUT_OF_RANGE],
                 )
 
-    @unittest.expectedFailure
-    def test_athlete_level_lthr_and_max_hr_fallbacks_are_mapped(self) -> None:
-        # Known gap, not a documented deviation: current_metrics falls back to the
-        # athlete-level lthr and max_hr when no sport setting carries them, and the
-        # mapper does not read those fields. Remove this decorator when the mapper
-        # gains the fallback, and bump its MAPPER_VERSION at the same time.
+    def test_athlete_level_lthr_and_max_hr_match_the_legacy_fallback(self) -> None:
+        # Parity: current_metrics falls back to the athlete-level lthr and max_hr
+        # for both sports when no sport setting carries them. The mapper emits them
+        # with sport None, and the consumer applies the per-sport fallback.
         athlete = {"id": "i-synthetic-001", "lthr": 165, "max_hr": 188}
         legacy = legacy_metrics(compact_form(athlete, [], []))
         result = map_thresholds(athlete)
+        self.assertEqual(first_value(result, MetricKind.THRESHOLD_HR), 165)
+        self.assertEqual(first_value(result, MetricKind.MAX_HR), 188)
+        for name in ("bike_threshold_hr_bpm", "run_threshold_hr_bpm"):
+            with self.subTest(metric=name):
+                self.assertEqual(legacy[name]["value"], 165)
+        for name in ("cycling_max_hr_bpm", "running_max_hr_bpm"):
+            with self.subTest(metric=name):
+                self.assertEqual(legacy[name]["value"], 188)
+
+    def test_sport_setting_lthr_overrides_the_athlete_level_value(self) -> None:
+        # The Ride setting wins for Ride; Run has no setting, so the athlete-level
+        # value (sport None) is its fallback in both readers.
+        athlete = {
+            "lthr": 165,
+            "sportSettings": [{"types": ["Ride"], "lthr": 168}],
+        }
+        legacy = legacy_metrics(compact_form(athlete, [], []))
+        result = map_thresholds(athlete)
+        self.assertEqual(legacy["bike_threshold_hr_bpm"]["value"], 168)
         self.assertEqual(
-            first_value(result, MetricKind.THRESHOLD_HR),
-            legacy["bike_threshold_hr_bpm"]["value"],
+            first_value(result, MetricKind.THRESHOLD_HR, sport=Sport.RIDE), 168
         )
+        self.assertEqual(legacy["run_threshold_hr_bpm"]["value"], 165)
+        self.assertIsNone(first_value(result, MetricKind.THRESHOLD_HR, sport=Sport.RUN))
+        self.assertEqual(first_value(result, MetricKind.THRESHOLD_HR), 165)
+
+    def test_athlete_weight_matches_current_metrics(self) -> None:
+        # The fixture athlete carries weight 70.0 and no wellness rows, so the
+        # legacy weight chain reads the athlete record.
+        result = map_thresholds(self.athlete)
+        self.assertEqual(self.legacy["weight_kg"]["value"], 70.0)
+        self.assertEqual(first_value(result, MetricKind.WEIGHT), 70.0)
+
+    def test_sport_setting_vo2max_matches_current_metrics(self) -> None:
+        athlete = {
+            "sportSettings": [
+                {"types": ["Ride"], "vo2max": 58},
+                {"types": ["Run"], "running_vo2max": 52.5},
+            ]
+        }
+        legacy = legacy_metrics(compact_form(athlete, [], []))
+        result = map_thresholds(athlete)
+        self.assertEqual(legacy["cycling_vo2max_ml_kg_min"]["value"], 58)
+        self.assertEqual(first_value(result, MetricKind.VO2MAX, sport=Sport.RIDE), 58)
+        self.assertEqual(legacy["running_vo2max_ml_kg_min"]["value"], 52.5)
+        self.assertEqual(first_value(result, MetricKind.VO2MAX, sport=Sport.RUN), 52.5)
+
+    def test_zero_sport_vo2max_is_unset_in_both_readers(self) -> None:
+        # Both readers stop at the zero vo2max and do not fall through to vo2_max.
+        athlete = {"sportSettings": [{"types": ["Ride"], "vo2max": 0, "vo2_max": 55}]}
+        legacy = legacy_metrics(compact_form(athlete, [], []))
+        result = map_thresholds(athlete)
+        self.assertIsNone(legacy["cycling_vo2max_ml_kg_min"]["value"])
+        self.assertIsNone(first_value(result, MetricKind.VO2MAX, sport=Sport.RIDE))
+
+    # Known deviations for the athlete-level fallback, named so they stay visible.
+
+    def test_zero_athlete_lthr_is_unset_where_legacy_reads_zero(self) -> None:
+        # Deviation: the legacy generic lthr fallback reads 0 bpm. The mapper treats
+        # a zero athlete-level lthr as unset, as it does for a zero sport setting.
+        athlete = {"lthr": 0}
+        legacy = legacy_metrics(compact_form(athlete, [], []))
+        self.assertEqual(legacy["bike_threshold_hr_bpm"]["value"], 0)
+        self.assertIsNone(first_value(map_thresholds(athlete), MetricKind.THRESHOLD_HR))
+
+    def test_rejected_sport_lthr_lets_the_athlete_level_value_apply(self) -> None:
+        # Deviation: a sport lthr that the mapper rejects leaves the sport unset, so
+        # the athlete-level value is the only Ride candidate the mapper offers.
+        athlete = {
+            "lthr": 165,
+            "sportSettings": [{"types": ["Ride"], "lthr": "not-a-number"}],
+        }
+        result = map_thresholds(athlete)
+        self.assertIsNone(
+            first_value(result, MetricKind.THRESHOLD_HR, sport=Sport.RIDE)
+        )
+        self.assertEqual(first_value(result, MetricKind.THRESHOLD_HR), 165)
         self.assertEqual(
-            first_value(result, MetricKind.MAX_HR),
-            legacy["cycling_max_hr_bpm"]["value"],
+            [issue.reason for issue in result.issues],
+            [IssueReason.INVALID_NUMBER],
         )

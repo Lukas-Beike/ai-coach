@@ -8,6 +8,7 @@ from backend.athlete.clock import AthleteLocalClock
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.state import SyncStateRepository
 
 
@@ -29,14 +30,25 @@ class SyncPersistenceAssembly:
         self._utc_now = utc_now
         self._athlete_clock = athlete_clock
 
-    def state_repository(self) -> SyncStateRepository:
+    def state_repository(
+        self, *, registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
+    ) -> SyncStateRepository:
         """Create sync persistence bound to the current manager."""
         return SyncStateRepository(
-            self._database_manager(), self._key_values, self._snapshots, self._utc_now
+            self._database_manager(),
+            self._key_values,
+            self._snapshots,
+            self._utc_now,
+            registry=registry,
         )
 
-    def daily_markers(self) -> DailySyncMarkerService:
+    def daily_markers(
+        self, *, registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
+    ) -> DailySyncMarkerService:
         """Create daily markers bound to the current manager and athlete clock."""
         return DailySyncMarkerService(
-            self._database_manager(), self._key_values, self._athlete_clock().now
+            self._database_manager(),
+            self._key_values,
+            self._athlete_clock().now,
+            registry=registry,
         )

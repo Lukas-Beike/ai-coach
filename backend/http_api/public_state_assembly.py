@@ -22,6 +22,9 @@ from backend.http_api.state_prelude import (
     PublicStateWeatherPrelude,
 )
 from backend.http_api.state_versions import StateVersionService
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.runtime.ports import ObservationReader
+from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.status import SyncPublicStateService
 
 
@@ -36,6 +39,8 @@ class PublicStateCoreInputs:
     app_version: str
     key_values: Callable[[], Any]
     key_value_service: Callable[[], Any]
+    # When set, the performance endpoint reads CTL and ATL from canonical observations.
+    observation_reader: Callable[[], ObservationReader] | None = None
 
 
 @dataclass(frozen=True)
@@ -97,7 +102,12 @@ class PublicStateAssembly:
         operations: PublicStateOperationalServices
         calendar: PublicStateCalendarSettings
 
-    def __init__(self, *, dependencies: PublicStateAssembly.Inputs) -> None:
+    def __init__(
+        self,
+        *,
+        dependencies: PublicStateAssembly.Inputs,
+        provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
+    ) -> None:
         core = dependencies.core
         owners = dependencies.owners
         projections = dependencies.projections
@@ -112,6 +122,7 @@ class PublicStateAssembly:
         self._app_version = core.app_version
         self._key_values = core.key_values
         self._key_value_service = core.key_value_service
+        self._observation_reader = core.observation_reader
         self._snapshot_repository = owners.snapshot_repository
         self._sync_persistence = owners.sync_persistence
         self._planning_data = owners.planning_data
@@ -148,6 +159,7 @@ class PublicStateAssembly:
         self._sync_period_defaults = calendar.sync_period_defaults
         self._all_sync_days = calendar.all_sync_days
         self._planned_workout_label = calendar.planned_workout_label
+        self._provider_runtime = provider_runtime
 
     def performance_state_service(self) -> PublicPerformanceStateService:
         sync = self._sync_persistence()
@@ -159,6 +171,14 @@ class PublicStateAssembly:
             athlete.profile(),
             garmin.projection_service(),
             self._local_date,
+            self._canonical_performance_source(),
+        )
+
+    def _canonical_performance_source(self) -> CanonicalPerformanceSource | None:
+        if self._observation_reader is None:
+            return None
+        return CanonicalPerformanceSource(
+            self._database_manager, self._observation_reader
         )
 
     def state_version_service(self) -> StateVersionService:
@@ -179,6 +199,11 @@ class PublicStateAssembly:
         config = self._config()
         athlete = self._athlete_data()
         garmin = self._garmin()
+        running_probes = (
+            None
+            if self._provider_runtime is None
+            else self._provider_runtime().running_probes()
+        )
         return SyncPublicStateService(
             config,
             self._database_manager(),
@@ -190,6 +215,7 @@ class PublicStateAssembly:
             self._sync_job_queue().service(),
             self.state_version_service(),
             self._intervals_sync_lock(),
+            running_probes=running_probes,
         )
 
     def weather_state_service(self) -> PublicWeatherStateService:
@@ -292,6 +318,7 @@ class PublicStateAssembly:
             CalendarWindowRange(
                 self._calendar_history_days(), self._calendar_future_days()
             ),
+            self.performance_state_service().canonical_inputs,
         )
 
     def weather_prelude_service(self) -> PublicStateWeatherPrelude:

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from backend import config as app_config
 from backend import observability
+from backend.activities.detail_store import summary_fingerprint
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -220,6 +221,7 @@ from backend.nutrition.assembly import (
     NutritionRuntime,
 )
 from backend.nutrition.photo import NutritionPhotoExtractionService
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.morning_battery_service import (
     MORNING_BODY_BATTERY_SERVICE_CACHE,
     MorningBatteryClock,
@@ -300,11 +302,18 @@ from backend.sync.assembly import (
     ProviderSyncPersistence,
     ProviderSyncRuntime,
 )
+from backend.sync.canonical_backfill_assembly import build_canonical_backfill
+from backend.sync.canonical_projection_assembly import (
+    build_canonical_snapshot_projection,
+)
+from backend.sync.canonical_read_assembly import build_canonical_read
+from backend.sync.canonical_read_selector import CanonicalReadSelector
 from backend.sync.command_assembly import (
     IllnessPauseDependencies,
     SyncCommandAssembly,
     SyncCommandCore,
 )
+from backend.sync.daily import DailySyncMarkerService
 from backend.sync.execution_assembly import (
     CalendarWeatherJobDependencies,
     GarminJobDependencies,
@@ -331,6 +340,7 @@ from backend.sync.garmin_service import (
     GarminMorningRemoteReader,
     shared_garmin_sync_lock,
 )
+from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
@@ -362,12 +372,19 @@ from backend.sync.planned_unit_assembly import (
     PlannedUnitRuntime,
     PlannedUnitSyncAssembly,
 )
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_resync_assembly import (
     CompetitionSyncOwners,
     ProviderResyncAssembly,
     ProviderResyncPersistence,
     ProviderResyncRuntime,
     ResyncProviderOwners,
+)
+from backend.sync.provider_runtime import ProviderRuntimeRegistry
+from backend.sync.provider_runtime_assembly import (
+    ProviderRuntimeDependencies,
+    build_provider_runtime,
+    builtin_bindings,
 )
 from backend.sync.queue_assembly import (
     SyncJobQueueAssembly,
@@ -389,6 +406,7 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutSyncAssembly,
 )
 from backend.sync.snapshot_reader import SnapshotRepositoryReader
+from backend.sync.state import SyncStateRepository
 from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
@@ -419,7 +437,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.12.31"
+APP_VERSION = "1.12.32"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -513,6 +531,35 @@ def provider_state_service() -> provider_state.ProviderStateService:
     )
 
 
+def provider_runtime() -> ProviderRuntimeRegistry:
+    """Build a fresh runtime registry over the live built-in provider owners.
+
+    Assemblies call this per build, so schedule snapshots are never reused across
+    builds. Providers are named only by the static descriptor registry.
+    """
+    jobs = SYNC_JOB_DEPENDENCIES
+    return build_provider_runtime(
+        DEFAULT_PROVIDER_REGISTRY,
+        builtin_bindings(
+            ProviderRuntimeDependencies(
+                config=lambda: CONFIG,
+                profile=ATHLETE_DATA.profile,
+                database_manager=database_manager,
+                key_values=KEY_VALUE_REPOSITORY,
+                database_lock=DB_LOCK,
+                intervals_sync_lock=lambda: INTERVALS_SYNC_LOCK,
+                garmin_resync_gate=GARMIN_RESYNC_GATE,
+                garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
+                historical=jobs.historical,
+                state=jobs.state,
+                intervals=jobs.intervals,
+                garmin=jobs.garmin,
+                calendar_weather=jobs.calendar_weather,
+            )
+        ),
+    )
+
+
 PROVIDER_SYNC = ProviderSyncAssembly(
     dependencies=ProviderSyncAssembly.Inputs(
         persistence=ProviderSyncPersistence(
@@ -531,7 +578,8 @@ PROVIDER_SYNC = ProviderSyncAssembly(
             retry_base_seconds=PROVIDER_REFRESH_RETRY_BASE_SECONDS,
             retry_max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
         ),
-    )
+    ),
+    provider_runtime=provider_runtime,
 )
 
 
@@ -542,7 +590,11 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
     return MORNING_BODY_BATTERY_SERVICE_CACHE.get(
         manager,
         config_id,
-        MorningBatteryStore(manager, KEY_VALUE_REPOSITORY),
+        MorningBatteryStore(
+            manager,
+            KEY_VALUE_REPOSITORY,
+            GarminSnapshotWriter(KEY_VALUE_REPOSITORY, lambda: ATHLETE_CLOCK.now().tzinfo),
+        ),
         MorningBatterySource(
             GARMIN_ASSEMBLY.fixture_loader(),
             GarminMorningRemoteReader(
@@ -593,11 +645,15 @@ ATHLETE_DATA = AthleteDataAssembly(
 ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
     database_manager_runtime.DATABASE_MANAGER_CACHE
 )
+# Declared ahead of its first lambda reference; assigned by build_canonical_read below.
+CANONICAL_READ: CanonicalReadSelector
+
 ACTIVITY_READS = ActivityReadAssembly(
     database_manager,
     SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
     ATHLETE_DATA.activity_feedback,
     lambda: ATHLETE_DATA.equipment().read(),
+    observation_reader=lambda: CANONICAL_READ,
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
@@ -787,7 +843,7 @@ def key_value_service() -> KeyValueService:
     return KeyValueService(database_manager, KEY_VALUE_REPOSITORY, DB_LOCK)
 
 
-SYNC_PERIOD_DEFAULTS = {"intervals": 84, "garmin": 84}
+SYNC_PERIOD_DEFAULTS = DEFAULT_PROVIDER_REGISTRY.sync_period_defaults()
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = date(2000, 1, 1)
@@ -815,6 +871,16 @@ SYNC_PERSISTENCE = SyncPersistenceAssembly(
 )
 
 
+def sync_state_repository() -> SyncStateRepository:
+    """Return the sync state repository bound to the runtime provider registry."""
+    return SYNC_PERSISTENCE.state_repository(registry=provider_runtime().static)
+
+
+def sync_daily_markers() -> DailySyncMarkerService:
+    """Return the daily sync marker service bound to the runtime provider registry."""
+    return SYNC_PERSISTENCE.daily_markers(registry=provider_runtime().static)
+
+
 GARMIN_ASSEMBLY = GarminAssembly(
     dependencies=GarminAssembly.Inputs(
         provider=GarminProviderSettings(
@@ -828,8 +894,8 @@ GARMIN_ASSEMBLY = GarminAssembly(
         persistence=GarminPersistenceOwners(
             database_manager=database_manager,
             key_values=KEY_VALUE_REPOSITORY,
-            sync_state_repository=SYNC_PERSISTENCE.state_repository,
-            daily_sync_marker_service=SYNC_PERSISTENCE.daily_markers,
+            sync_state_repository=sync_state_repository,
+            daily_sync_marker_service=sync_daily_markers,
             sync_equipment=lambda payload: (
                 ATHLETE_DATA.equipment().sync_garmin_snapshot(payload)
             ),
@@ -863,7 +929,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
             event_buffer=runtime_events.STATE_EVENT_BUFFER,
             maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
             wake_event=shared_sync_job_wake_event,
-            daily_sync_marker_service=SYNC_PERSISTENCE.daily_markers,
+            daily_sync_marker_service=sync_daily_markers,
         ),
         policy=SyncQueuePolicy(
             all_sync_days=ALL_SYNC_DAYS,
@@ -871,6 +937,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
             logger=LOGGER,
             retry_base_seconds=SYNC_JOB_RETRY_BASE_SECONDS,
             retry_max_seconds=SYNC_JOB_RETRY_MAX_SECONDS,
+            registry=DEFAULT_PROVIDER_REGISTRY,
         ),
     )
 )
@@ -881,7 +948,7 @@ EXTERNAL_CALENDAR = ExternalCalendarAssembly(
             config=lambda: CONFIG,
             database_manager=database_manager,
             key_values=KEY_VALUE_REPOSITORY,
-            daily_markers=SYNC_PERSISTENCE.daily_markers,
+            daily_markers=sync_daily_markers,
             adaptive_preview_service=lambda: (
                 PLANNING_WORKFLOWS.adaptive_replan_preview_service()
             ),
@@ -914,8 +981,8 @@ INTERVALS_SYNC = IntervalsSyncAssembly(
         persistence=IntervalsPersistenceDependencies(
             database_manager=database_manager,
             key_values=KEY_VALUE_REPOSITORY,
-            state_repository=SYNC_PERSISTENCE.state_repository,
-            daily_markers=SYNC_PERSISTENCE.daily_markers,
+            state_repository=sync_state_repository,
+            daily_markers=sync_daily_markers,
             event_buffer=runtime_events.STATE_EVENT_BUFFER,
             redact_text=REDACTOR.redact_text,
             logger=LOGGER,
@@ -1171,7 +1238,7 @@ WEATHER_ASSEMBLY = WeatherAssembly(
 COACH_CONTEXT = CoachContextAssembly(
     dependencies=CoachContextAssembly.Inputs(
         performance=CoachContextPerformanceSources(
-            sync_state_repository=SYNC_PERSISTENCE.state_repository,
+            sync_state_repository=sync_state_repository,
             weather_service=WEATHER_ASSEMBLY.service,
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             garmin_projection_service=GARMIN_ASSEMBLY.projection_service,
@@ -1179,6 +1246,10 @@ COACH_CONTEXT = CoachContextAssembly(
             today=lambda: ATHLETE_CLOCK.now().date(),
             local_date=lambda: ATHLETE_CLOCK.now().date(),
             utc_now=lambda: datetime.now(UTC),
+            canonical=CanonicalPerformanceSource(
+                database_manager=lambda: database_manager(),
+                observation_reader=lambda: CANONICAL_READ,
+            ),
         ),
         planning=CoachContextPlanningSources(
             checkin_service=ATHLETE_DATA.checkin,
@@ -1240,7 +1311,7 @@ COACH_PROPOSALS = CoachProposalAssembly(
     dependencies=CoachProposalAssembly.Inputs(
         persistence=ProposalPersistence(
             database_manager=database_manager,
-            sync_state_repository=SYNC_PERSISTENCE.state_repository,
+            sync_state_repository=sync_state_repository,
             nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
             nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         ),
@@ -1287,44 +1358,49 @@ PROVIDER_RESYNC = ProviderResyncAssembly(
             monotonic=time.perf_counter,
             operation_observer=PROVIDER_SYNC.operation_observer,
         ),
-    )
+    ),
+    provider_runtime=provider_runtime,
 )
 
 
+# Shared with provider_runtime() so the lazy registry reuses the same live owners.
+SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
+    historical=HistoricalSyncDependencies(
+        local_now=ATHLETE_CLOCK.now,
+        sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+        all_sync_days=ALL_SYNC_DAYS,
+        sync_chunk_days=SYNC_CHUNK_DAYS,
+        sync_earliest_date=SYNC_EARLIEST_DATE,
+    ),
+    state=SyncJobStateDependencies(
+        sync_state_repository=sync_state_repository,
+        queue_service=SYNC_JOB_QUEUE.service,
+        outcome_service=SYNC_JOB_QUEUE.outcome_service,
+    ),
+    intervals=IntervalsJobDependencies(
+        sync_service=INTERVALS_SYNC.sync_service,
+        activity_detail_service=INTERVALS_SYNC.activity_detail_service,
+        performance_refresh_service=INTERVALS_SYNC.performance_service,
+        selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
+        competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
+        nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
+        operation_observer=PROVIDER_SYNC.operation_observer,
+        resync_gate=INTERVALS_RESYNC_GATE,
+    ),
+    garmin=GarminJobDependencies(
+        sync_service=GARMIN_ASSEMBLY.sync_service,
+        morning_body_battery_service=morning_body_battery_service,
+        fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
+    ),
+    calendar_weather=CalendarWeatherJobDependencies(
+        calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
+        weather_sync_service=WEATHER_ASSEMBLY.sync_service,
+    ),
+)
+
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
-    dependencies=SyncJobExecutionAssembly.Inputs(
-        historical=HistoricalSyncDependencies(
-            local_now=ATHLETE_CLOCK.now,
-            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-            all_sync_days=ALL_SYNC_DAYS,
-            sync_chunk_days=SYNC_CHUNK_DAYS,
-            sync_earliest_date=SYNC_EARLIEST_DATE,
-        ),
-        state=SyncJobStateDependencies(
-            sync_state_repository=SYNC_PERSISTENCE.state_repository,
-            queue_service=SYNC_JOB_QUEUE.service,
-            outcome_service=SYNC_JOB_QUEUE.outcome_service,
-        ),
-        intervals=IntervalsJobDependencies(
-            sync_service=INTERVALS_SYNC.sync_service,
-            activity_detail_service=INTERVALS_SYNC.activity_detail_service,
-            performance_refresh_service=INTERVALS_SYNC.performance_service,
-            selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
-            competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
-            nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
-            operation_observer=PROVIDER_SYNC.operation_observer,
-            resync_gate=INTERVALS_RESYNC_GATE,
-        ),
-        garmin=GarminJobDependencies(
-            sync_service=GARMIN_ASSEMBLY.sync_service,
-            morning_body_battery_service=morning_body_battery_service,
-            fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
-        ),
-        calendar_weather=CalendarWeatherJobDependencies(
-            calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
-            weather_sync_service=WEATHER_ASSEMBLY.sync_service,
-        ),
-    )
+    dependencies=SYNC_JOB_DEPENDENCIES,
+    provider_runtime=provider_runtime,
 )
 
 
@@ -1342,14 +1418,14 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
         owners=SyncScheduleOwners(
             profile_service=ATHLETE_DATA.profile,
             queue_service=SYNC_JOB_QUEUE.service,
-            daily_sync_marker_service=SYNC_PERSISTENCE.daily_markers,
+            daily_sync_marker_service=sync_daily_markers,
             garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
         ),
         persistence=SyncSchedulePersistence(
             database_manager=database_manager,
             key_values=KEY_VALUE_REPOSITORY,
             database_lock=DB_LOCK,
-            sync_state_repository=SYNC_PERSISTENCE.state_repository,
+            sync_state_repository=sync_state_repository,
         ),
         controls=SyncScheduleControls(
             intervals_resync_gate=INTERVALS_RESYNC_GATE,
@@ -1369,7 +1445,8 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
             morning_body_battery_service=morning_body_battery_service,
             logger=LOGGER,
         ),
-    )
+    ),
+    provider_runtime=provider_runtime,
 )
 
 SYNC_COMMANDS = SyncCommandAssembly(
@@ -1393,6 +1470,7 @@ SYNC_COMMANDS = SyncCommandAssembly(
         redactor=REDACTOR,
         today=lambda: ATHLETE_CLOCK.now().date(),
     ),
+    provider_runtime=provider_runtime,
 )
 
 
@@ -1539,7 +1617,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
             planning_authority_service=SYNC_COMMANDS.authority,
         ),
         state=StructuredToolRoundState(
-            sync_state_repository=lambda: SYNC_PERSISTENCE.state_repository(),
+            sync_state_repository=lambda: sync_state_repository(),
             job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
         ),
         conversation=StructuredToolRoundConversation(
@@ -1642,6 +1720,7 @@ PUBLIC_STATE = PublicStateAssembly(
             app_version=APP_VERSION,
             key_values=lambda: KEY_VALUE_REPOSITORY,
             key_value_service=key_value_service,
+            observation_reader=lambda: CANONICAL_READ,
         ),
         owners=PublicStateOwnerAssemblies(
             snapshot_repository=SNAPSHOT_REPOSITORY,
@@ -1687,7 +1766,32 @@ PUBLIC_STATE = PublicStateAssembly(
             all_sync_days=lambda: ALL_SYNC_DAYS,
             planned_workout_label=lambda: PLANNED_WORKOUT_LABEL,
         ),
-    )
+    ),
+    provider_runtime=provider_runtime,
+)
+
+CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
+    intervals_snapshots=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+    snapshot_payloads=SNAPSHOT_REPOSITORY,
+    garmin_payloads=lambda: GARMIN_ASSEMBLY.payload_service(),
+    profile=ATHLETE_PROFILE_SERVICE,
+    clock=ATHLETE_CLOCK.now,
+)
+
+CANONICAL_READ = build_canonical_read(
+    legacy=CANONICAL_SNAPSHOT_PROJECTION,
+    key_values=KEY_VALUE_REPOSITORY,
+    snapshots=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+    fingerprint=summary_fingerprint,
+)
+
+CANONICAL_BACKFILL = build_canonical_backfill(
+    database=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    clock=runtime_clock.utc_now,
+    parity=CANONICAL_READ,
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
@@ -1702,7 +1806,7 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             app_version=APP_VERSION,
         ),
         provider_health=DiagnosticProviderHealth(
-            sync_state=SYNC_PERSISTENCE.state_repository,
+            sync_state=sync_state_repository,
             provider_state=provider_state_service,
             provider_freshness=PROVIDER_SYNC.freshness_service,
             redactor=REDACTOR,
@@ -1719,6 +1823,9 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             external_calendar_reader=EXTERNAL_CALENDAR.reader,
             morning_checkin=COACH_LOCAL.morning_checkin_state_service,
             workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
+            canonical_coverage=lambda: CANONICAL_READ,
+            canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
+            canonical_read=lambda: CANONICAL_READ,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,
@@ -1843,7 +1950,7 @@ HTTP_API = HttpApiAssembly(
             ),
             sync=HttpSyncServices(
                 job_queue=SYNC_JOB_QUEUE.service,
-                state_repository=SYNC_PERSISTENCE.state_repository,
+                state_repository=sync_state_repository,
                 performance_refresh=INTERVALS_SYNC.performance_service,
                 full_resync=PROVIDER_RESYNC.full_resync_service,
                 period_defaults=SYNC_PERIOD_DEFAULTS,
@@ -1897,6 +2004,7 @@ def main() -> None:
         )
         sync_worker = sync_job_worker()
         sync_worker.start()
+        CANONICAL_BACKFILL.worker.start()
         COACH_JOB_WORKER.start(
             COACH_BACKGROUND_JOBS.job_store,
             COACH_BACKGROUND_JOBS.background_job_runner,
@@ -1922,12 +2030,14 @@ def main() -> None:
         if sync_worker is not None:
             sync_worker.stop()
         COACH_JOB_WORKER.stop()
+        CANONICAL_BACKFILL.worker.stop()
         server.server_close()
         if daily_thread is not None:
             daily_thread.join(timeout=5)
         if sync_worker is not None:
             sync_worker.join(timeout=5)
         COACH_JOB_WORKER.join(timeout=5)
+        CANONICAL_BACKFILL.worker.join(timeout=5)
 
 
 if __name__ == "__main__":

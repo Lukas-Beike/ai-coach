@@ -8,7 +8,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -25,7 +25,9 @@ from backend.planning.context import compact_snapshot
 from backend.planning.library_service import WorkoutLibraryService
 from backend.providers.intervals import IntervalsApiClient
 from backend.providers.intervals_power import PROFILE_DURATIONS, cycling_power_points
+from backend.sync.canonical_ingest import ingest_intervals_snapshot
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.freshness_sources import intervals_sync_running
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.library import WorkoutLibraryRefreshService
 from backend.sync.observation import SyncOperationObserver
@@ -305,12 +307,7 @@ class IntervalsSnapshotService:
             snapshot = merge_historical_snapshot(
                 self._sync_state_repository.latest_snapshot(), snapshot
             )
-            self._sync_state_repository.save_snapshot(snapshot, update_full_sync=False)
-        else:
-            self._sync_state_repository.save_snapshot(
-                snapshot, activity_days=activity_days
-            )
-
+        zone = self._local_now().tzinfo or UTC
         provider_sync = snapshot.get("provider_sync", {})
         calendar_window = (
             provider_sync.get("calendar_window", {})
@@ -318,10 +315,29 @@ class IntervalsSnapshotService:
             else {}
         )
         planned_import = {"imported": 0, "updated": 0, "conflicts": 0}
-        if end_date is None:
-            # Nested service calls intentionally share this UOW: reconciliation
-            # and its initial-import marker must roll back together.
-            with self._database_manager.unit_of_work() as db:
+        # The legacy snapshot, its canonical rows and planned-unit reconciliation
+        # commit together. Cursors are written by the caller after this returns.
+        with self._database_manager.unit_of_work() as db:
+            if end_date is not None:
+                self._sync_state_repository.save_snapshot(
+                    snapshot, update_full_sync=False
+                )
+            else:
+                self._sync_state_repository.save_snapshot(
+                    snapshot, activity_days=activity_days
+                )
+            ingest_intervals_snapshot(
+                db,
+                snapshot,
+                zone=zone,
+                # Only a full, non-incremental window may delete; historical fetches never do.
+                activity_days=activity_days if end_date is None else None,
+                all_sync_days=self._all_sync_days,
+                earliest_date=self._earliest_date,
+            )
+            if end_date is None:
+                # Nested service calls intentionally share this UOW: reconciliation
+                # and its initial-import marker must roll back together.
                 pending_repair = db.execute(
                     "SELECT 1 FROM sync_jobs WHERE provider='intervals' AND type='plan_push' "
                     "AND status IN ('queued', 'running') "
@@ -621,7 +637,7 @@ class IntervalsSyncRuntime:
             yield scope
 
     def running(self, status: IntervalsSyncStatus) -> bool:
-        return self._lock.locked() or status.get("sync_running") == "1"
+        return intervals_sync_running(self._lock, status.get)
 
     def acquire(self) -> bool:
         return self._lock.acquire(blocking=False)

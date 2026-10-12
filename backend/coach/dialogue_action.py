@@ -12,6 +12,7 @@ from backend.coach.dialogue import validate_request
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.queue import SyncJobQueueService
 
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
@@ -28,7 +29,7 @@ OBJECT_SCOPE_TABLES = {
     "nutrition_template": ("nutrition_templates", "id"),
     "nutrition_product": ("nutrition_products", "id"),
 }
-BROAD_SCOPES = frozenset(
+LOCAL_BROAD_SCOPES = frozenset(
     {
         "local_profile",
         "local_plan",
@@ -38,15 +39,21 @@ BROAD_SCOPES = frozenset(
         "activity_feedback",
         "adaptive_replan",
         "intervals_sync",
-        "intervals_refresh",
-        "garmin_refresh",
-        "calendar_refresh",
-        "weather_refresh",
         "local_nutrition",
         "local_nutrition_product",
         "local_equipment",
     }
 )
+
+
+def broad_scope_tokens(
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
+) -> frozenset[str]:
+    """Return scope tokens naming a whole area, including each refresh target."""
+    refresh = frozenset(
+        f"{target}_refresh" for target in registry.coach_refresh_targets()
+    )
+    return LOCAL_BROAD_SCOPES | refresh
 
 
 class CoachDialogueActionService:
@@ -59,12 +66,16 @@ class CoachDialogueActionService:
         sync_jobs: Callable[[], SyncJobQueueService],
         plan_scope: CoachDialoguePlanScopeService,
         today: Callable[[], date],
+        *,
+        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock
         self._sync_jobs = sync_jobs
         self._plan_scope = plan_scope
         self._today = today
+        self._registry = registry
+        self._broad_scopes = broad_scope_tokens(registry)
 
     def classify(
         self,
@@ -97,6 +108,7 @@ class CoachDialogueActionService:
                 arguments.pop("_request", None),
                 user_ids,
                 context["current_user_message_id"],
+                registry=self._registry,
             )
         except (TypeError, ValueError) as exc:
             error = AppError(
@@ -168,8 +180,8 @@ class CoachDialogueActionService:
         }
         return remote_write, refresh
 
-    @staticmethod
     def _validate_target(
+        self,
         request: dict[str, Any],
         target: str,
         scope: set[str],
@@ -195,7 +207,7 @@ class CoachDialogueActionService:
                 reason="request_target",
             )
         if refresh and (
-            target not in {"intervals", "garmin", "calendar", "weather"}
+            target not in self._registry.coach_refresh_targets()
             or f"{target}_refresh" not in scope
         ):
             raise AppError(
@@ -208,11 +220,13 @@ class CoachDialogueActionService:
         self, name: str, arguments: dict[str, Any], scope: set[str]
     ) -> None:
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            self._validate_scope_tokens(db, name, scope)
+            self._validate_scope_tokens(db, name, scope, self._broad_scopes)
         self._validate_template_action_scope(name, arguments, scope)
 
     @staticmethod
-    def _validate_scope_tokens(db: Any, name: str, scope: set[str]) -> None:
+    def _validate_scope_tokens(
+        db: Any, name: str, scope: set[str], broad_scopes: frozenset[str]
+    ) -> None:
         for token in scope:
             kind, _, object_id = token.partition(":")
             if kind in OBJECT_SCOPE_TABLES and object_id:
@@ -233,7 +247,7 @@ class CoachDialogueActionService:
                         "Dieser Plan ist archiviert. Wähle den aktuellen Plan oder erstelle einen neuen.",
                         reason="request_object_missing",
                     )
-            elif token not in BROAD_SCOPES:
+            elif token not in broad_scopes:
                 raise AppError(
                     400,
                     "Der Auftrag enthält einen ungültigen Objektbezug.",

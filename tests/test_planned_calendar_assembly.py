@@ -5,6 +5,7 @@ from datetime import date
 from unittest.mock import Mock, patch
 
 from backend.sync import planned_calendar_assembly as assembly_module
+from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.planned_calendar_assembly import (
     PlannedCalendarLocalState,
     PlannedCalendarProvider,
@@ -67,12 +68,37 @@ class PlannedCalendarSyncAssemblyTests(unittest.TestCase):
 
         self.assertIsNotNone(sync_service)
         self.assertIsNotNone(repair_service)
-        self.assertIs(sync_type.call_args.args[2], callbacks["intervals_client"])
-        self.assertIs(repair_type.call_args.args[2], callbacks["intervals_client"])
+        sync_port = sync_type.call_args.args[2]
+        repair_port = repair_type.call_args.args[1]
+        self.assertIsInstance(sync_port, IntervalsWorkoutExport)
+        self.assertIsInstance(repair_port, IntervalsWorkoutExport)
         self.assertEqual(sync_type.call_args.args[3], "sync writer")
-        self.assertEqual(repair_type.call_args.args[3], "repair writer")
+        self.assertEqual(repair_type.call_args.args[2], "repair writer")
         self.assertEqual(repair_type.call_args.args[-1], 35)
         self.assertEqual(callbacks["state_writer"].call_count, 2)
+        callbacks["intervals_client"].assert_not_called()
+
+    def test_export_port_resolves_intervals_client_per_remote_call(self):
+        remote = Mock()
+        remote.get_event.return_value = {"id": "event-1"}
+        callbacks = {
+            "config": Mock(),
+            "database_manager": Mock(),
+            "intervals_client": Mock(return_value=remote),
+            "state_writer": Mock(),
+            "utc_now": Mock(),
+            "today": Mock(),
+        }
+        assembly = self._assembly(callbacks)
+
+        with patch.object(assembly_module, "PlannedCalendarRepairService") as repair:
+            assembly.repair_service()
+        port = repair.call_args.args[1]
+        callbacks["intervals_client"].assert_not_called()
+
+        self.assertEqual(port.read_event("event-1"), {"id": "event-1"})
+        callbacks["intervals_client"].assert_called_once_with()
+        remote.get_event.assert_called_once_with("event-1")
 
 
 if __name__ == "__main__":

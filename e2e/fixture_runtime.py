@@ -1,5 +1,6 @@
 """Fresh SQLCipher runtime for local integration tests; all providers are blocked."""
 
+import hashlib
 import json
 import os
 import sys
@@ -1229,6 +1230,7 @@ def _fixture_seed_wave2(today, snapshot, garmin):
 
     by_id = _fixture_wave2_summaries(today, snapshot)
     _fixture_nutrition_products()
+    _fixture_provider_records(today)
     _fixture_library_templates()
     _fixture_wave2_feedback(by_id)
     _fixture_wave2_details(by_id)
@@ -1395,6 +1397,46 @@ def _fixture_nutrition_products():
                     "status": status,
                 }
             )
+
+
+def _fixture_provider_records(today):
+    """Synthetic canonical provider rows (schema v6) for export and deletion checks."""
+    stamp = f"{today.isoformat()}T08:00:00+00:00"
+    payload = json.dumps({"name": "Synthetic provider ride"})
+    payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    with server.database_manager().unit_of_work() as db:
+        if db.execute(
+            "SELECT 1 FROM activity_sessions WHERE activity_id = ?",
+            ("act_fixture1",),
+        ).fetchone():
+            return
+        db.execute(
+            "INSERT INTO provider_records(provider, record_kind, source_record_id, payload, payload_hash, "
+            "fetched_at, created_at, updated_at) "
+            "VALUES ('fixture-provider', 'activity', 'fixture-activity-1', ?, ?, ?, ?, ?)",
+            (payload, payload_hash, stamp, stamp, stamp),
+        )
+        db.execute(
+            "INSERT INTO activity_sessions(activity_id, primary_provider, primary_provider_activity_id, "
+            "started_at, local_date, created_at, updated_at) "
+            "VALUES ('act_fixture1', 'fixture-provider', 'fixture-activity-1', ?, ?, ?, ?)",
+            (stamp, today.isoformat(), stamp, stamp),
+        )
+        db.execute(
+            "INSERT INTO activity_records(provider, provider_activity_id, activity_id, mapper_version, "
+            "source_kind, recorded_by, sport, environment, started_at, local_date, duration_s, distance_m, "
+            "load, load_model, avg_hr, avg_power, name, details, fetched_at, created_at, updated_at) "
+            "VALUES ('fixture-provider', 'fixture-activity-1', 'act_fixture1', 1, 'provider_reported', "
+            "'unknown', 'ride', 'indoor', ?, ?, 3600.0, 40000.0, 60.0, 'unknown', 140.0, 200.0, "
+            "'Synthetic provider ride', '{}', ?, ?, ?)",
+            (stamp, today.isoformat(), stamp, stamp, stamp),
+        )
+        db.execute(
+            "INSERT INTO observations(natural_key, metric, value, unit, source_kind, recorded_by, observed_on, "
+            "label, details, mapper_version, created_at, updated_at) "
+            "VALUES (?, 'weight', 72.5, 'kg', 'athlete_entered', 'manual', ?, 'Synthetic weigh-in', '{}', 1, ?, ?)",
+            (f"fixture-weigh-in-{today.isoformat()}", today.isoformat(), stamp, stamp),
+        )
 
 
 def _fixture_library_templates():

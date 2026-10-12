@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import date
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from backend.canonical.coverage import ProviderCoverage
 from backend.canonical.records import ActivityRecord, Observation
@@ -60,10 +60,33 @@ class ObservationReader(Protocol):
     ) -> tuple[Observation, ...]: ...
 
 
+@runtime_checkable
+class ObservationSourceSelector(ObservationReader, Protocol):
+    """An observation reader that chooses its serving source for every read.
+
+    ``reader_for`` makes that choice once and returns the chosen reader, so a
+    caller with several reads in one unit of work does not repeat it per read.
+    """
+
+    def reader_for(self, db: Any) -> ObservationReader: ...
+
+
 class ProviderCoverageReader(Protocol):
     """Reports per-provider coverage counts, including mapping issue counts only."""
 
     def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]: ...
+
+
+class CanonicalReadRefresher(Protocol):
+    """Re-checks which canonical source serves reads and records the result.
+
+    Both methods write only their own content-free switch state, in the caller's
+    transaction. ``record_failure`` receives the exception class name only.
+    """
+
+    def refresh(self, db: Any) -> None: ...
+
+    def record_failure(self, db: Any, error_class: str) -> None: ...
 
 
 ProviderOperation = Callable[[], AbstractContextManager[None]]

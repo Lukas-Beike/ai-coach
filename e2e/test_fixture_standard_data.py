@@ -759,6 +759,34 @@ class StandardFixtureDataTests(unittest.TestCase):
             short_constraints[0]["date"], scenarios["short_units"][0]["date"]
         )
 
+    def test_fresh_seed_contains_one_canonical_provider_set(self):
+        with self._temporary_fixture_database("fixture-v6-provider-") as server:
+            fixture_runtime.initialise_fixture()
+            fixture_runtime.seed_preview_demo()
+            fixture_runtime.seed_preview_demo()
+            with server.database_manager().unit_of_work() as db:
+                counts = {
+                    table: db.execute(
+                        f"SELECT COUNT(*) AS count FROM {table}"
+                    ).fetchone()["count"]
+                    for table in (
+                        "provider_records",
+                        "activity_sessions",
+                        "activity_records",
+                        "observations",
+                    )
+                }
+
+        self.assertEqual(
+            counts,
+            {
+                "provider_records": 1,
+                "activity_sessions": 1,
+                "activity_records": 1,
+                "observations": 1,
+            },
+        )
+
     def test_v5_database_upgrades_to_v6_scenarios_without_duplicates(self):
         with self._temporary_fixture_database("fixture-v6-upgrade-") as server:
             fixture_runtime.initialise_fixture()

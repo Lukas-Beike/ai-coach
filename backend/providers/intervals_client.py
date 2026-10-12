@@ -276,6 +276,20 @@ class IntervalsClient:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         return self.put(f"/athlete/{athlete}/events/bulk-delete", identifiers)
 
+    def get_event(self, event_id: str) -> Any:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        return self.get(f"/athlete/{athlete}/events/{quote(event_id, safe='')}")
+
+    def list_events_window(
+        self, *, oldest: str, newest: str, category: str, collection: str
+    ) -> list[dict[str, Any]]:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        return self.get_paged_collection(
+            f"/athlete/{athlete}/events",
+            {"oldest": oldest, "newest": newest, "category": category},
+            collection,
+        )
+
     def delete_event(self, event_id: str) -> Any:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         return self.delete(f"/athlete/{athlete}/events/{quote(event_id, safe='')}")

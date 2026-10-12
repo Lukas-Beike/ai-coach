@@ -10,6 +10,7 @@ from typing import Any
 from backend.activities.feedback import ActivityFeedbackService
 from backend.calendar import canonical as calendar_canonical
 from backend.db.manager import DatabaseManager
+from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.sync.adaptive import AdaptivePreviewFollowupService
 from backend.sync.state import SyncStateRepository
@@ -30,6 +31,7 @@ class LocalStatePrelude:
     canonical_planned: list[dict[str, Any]]
     calendar_window: dict[str, Any]
     weather: dict[str, Any] | None
+    performance_inputs: CanonicalPerformanceInputs | None = None
 
 
 class PublicStateLocalPrelude:
@@ -45,6 +47,8 @@ class PublicStateLocalPrelude:
         database_lock: Any,
         today: Callable[[], date],
         window: CalendarWindowRange,
+        performance_inputs: Callable[[Any, Any], CanonicalPerformanceInputs | None]
+        | None = None,
     ) -> None:
         self._sync_state = sync_state
         self._activity_feedback = activity_feedback
@@ -54,10 +58,16 @@ class PublicStateLocalPrelude:
         self._database_lock = database_lock
         self._today = today
         self._window = window
+        self._performance_inputs = performance_inputs
 
     def read(self, local_only: bool) -> LocalStatePrelude:
-        with self._database_lock, self._database_manager.unit_of_work():
+        with self._database_lock, self._database_manager.unit_of_work() as db:
             snapshot = self._sync_state.latest_snapshot()
+            performance_inputs = (
+                self._performance_inputs(db, snapshot)
+                if self._performance_inputs is not None
+                else None
+            )
             activities = self._activity_feedback.attach_to_activities(
                 snapshot.get("recent_activities", [])
                 if isinstance(snapshot, dict)
@@ -97,6 +107,7 @@ class PublicStateLocalPrelude:
             canonical_planned,
             calendar_window,
             weather,
+            performance_inputs,
         )
 
 

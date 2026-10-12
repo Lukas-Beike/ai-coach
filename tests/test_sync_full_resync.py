@@ -4,22 +4,29 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing, contextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from provider_runtime_fakes import ACME_ID, acme_descriptor, fake_binding
+
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
+from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
 from backend.sync.full_resync import (
     PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
     FullResyncOperationJournal,
-    FullResyncProviderExecution,
     FullResyncStateStore,
+    resync_field_keys,
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import OPERATION_CONTEXT
+from backend.sync.provider_registry import ProviderRegistry
+from backend.sync.provider_resync_assembly import full_resync_handlers
+from backend.sync.provider_runtime import ProviderRuntimeRegistry
 
 NOW = "2026-09-20T12:00:00+00:00"
 
@@ -128,18 +135,24 @@ class FullProviderResyncServiceTests(unittest.TestCase):
             lambda: 10.0,
             operation_id_factory or (lambda: "generated-operation"),
         )
+        gates = {INTERVALS_ID: self.intervals_gate, GARMIN_ID: self.garmin_gate}
+        handlers = full_resync_handlers(
+            config=config or SimpleNamespace(intervals_api_key="fake-key"),
+            intervals_service=self.intervals_service,
+            garmin_service=self.garmin_service,
+            competition_service=self.competition_service,
+            gates=gates,
+            all_sync_days=-1,
+        )
         return FullProviderResyncService(
-            FullResyncProviderExecution(
-                config or SimpleNamespace(intervals_api_key="fake-key"),
-                self.intervals_service,
-                self.garmin_service,
-                self.competition_service,
-                self.intervals_gate,
-                self.garmin_gate,
-                -1,
+            handlers,
+            FullResyncStateStore(
+                self.database,
+                key_values or self.key_values,
+                PROVIDER_RESYNC_KEYS,
             ),
-            FullResyncStateStore(self.database, key_values or self.key_values),
             operation_journal,
+            gates=gates,
         )
 
     def _get_value(self, provider, field):
@@ -356,6 +369,167 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(self._get_value("intervals", "running"), "0")
         self.assertEqual(restored, {"operation_id": "outer", "trigger": "chat"})
         self.assertFalse(self.intervals_gate.is_resetting())
+
+
+ACME_KEYS = (
+    "acme_full_resync_running",
+    "acme_full_resync_status",
+    "acme_full_resync_at",
+    "acme_full_resync_error",
+)
+
+
+class AcmeFullResyncHandler:
+    """Test-only handler for the provider that is registered only in tests."""
+
+    def __init__(self, *, configured=True, read_status=None):
+        self._configured = configured
+        self._read_status = read_status
+        self.calls = []
+        self.status_during_run = None
+
+    def configured(self):
+        return self._configured
+
+    def not_configured_error(self):
+        return AppError(503, "Acme ist nicht konfiguriert.", reason="not_configured")
+
+    def run(self, operation_id, observer):
+        self.calls.append((operation_id, observer))
+        if self._read_status is not None:
+            self.status_during_run = self._read_status()
+        return {"activities": 3}
+
+
+class RegisteredOnlyProviderResyncTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        database_path = (
+            Path(self.temporary_directory.name) / "registered-resync.sqlite3"
+        )
+        with closing(sqlite3.connect(database_path)) as db:
+            db.execute(
+                "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
+            )
+            db.commit()
+        self.database = DatabaseManager(
+            database_path,
+            sqlite3,
+            row_factory=row_factory,
+            persist_connections=False,
+        )
+        self.key_values = KeyValueRepository(lambda: NOW)
+        self.observer = RecordingObserver()
+        self.logger = RecordingLogger()
+        self.gate = RecordingResyncGate(ACME_ID)
+        self.handler = AcmeFullResyncHandler(
+            read_status=lambda: self._stored(ACME_KEYS[1])
+        )
+
+    def tearDown(self):
+        self.database.close()
+        self.temporary_directory.cleanup()
+
+    def _stored(self, key):
+        with self.database.reader() as db:
+            return self.key_values.get(db, key)
+
+    def _runtime(self, *, with_handler=True):
+        if not with_handler:
+            return ProviderRuntimeRegistry(
+                ProviderRegistry([acme_descriptor()]), [fake_binding(ACME_ID)]
+            )
+        descriptor = replace(acme_descriptor(), resync_keys=ACME_KEYS)
+        binding = replace(
+            fake_binding(ACME_ID),
+            gate=self.gate,
+            full_resync=lambda: self.handler,
+        )
+        return ProviderRuntimeRegistry(ProviderRegistry([descriptor]), [binding])
+
+    def _service(self, runtime):
+        return FullProviderResyncService(
+            runtime.resync_handlers(),
+            FullResyncStateStore(
+                self.database,
+                self.key_values,
+                resync_field_keys(runtime.static.resync_key_map()),
+            ),
+            FullResyncOperationJournal(
+                self.observer,
+                self.logger,
+                lambda value: value,
+                lambda: NOW,
+                lambda: 10.0,
+                lambda: "generated-operation",
+            ),
+            gates={ACME_ID: self.gate},
+            registry=runtime.static,
+        )
+
+    def test_registered_provider_runs_full_resync_through_its_handler(self):
+        service = self._service(self._runtime())
+
+        result = service.resync(ACME_ID, "acme-operation")
+
+        self.assertEqual(
+            result,
+            {
+                "status": "ok",
+                "source": ACME_ID,
+                "resynced_at": NOW,
+                "activities": 3,
+            },
+        )
+        self.assertEqual(self.handler.calls, [("acme-operation", self.observer)])
+        self.assertEqual(
+            self.handler.status_during_run,
+            "Acme mock: vollständiger Resync läuft…",
+        )
+        self.assertEqual(self._stored("acme_full_resync_running"), "0")
+        self.assertEqual(self._stored("acme_full_resync_status"), "")
+        self.assertEqual(self._stored("acme_full_resync_at"), NOW)
+        self.assertEqual(self._stored("acme_full_resync_error"), "")
+        state = service.state(ACME_ID)
+        self.assertEqual(
+            list(state), ["running", "status", "last_resync_at", "last_error"]
+        )
+        self.assertEqual(state["last_resync_at"], NOW)
+        self.assertTrue(service.provider_configured(ACME_ID))
+        self.assertFalse(self.gate.is_resetting())
+        self.assertEqual(self.logger.events[-1][2]["event"], "operation_completed")
+
+    def test_registered_provider_without_handler_is_rejected_like_unknown_provider(
+        self,
+    ):
+        service = self._service(self._runtime(with_handler=False))
+
+        with self.assertRaises(AppError) as caught:
+            service.resync(ACME_ID)
+        self.assertEqual(
+            (caught.exception.status, caught.exception.message),
+            (400, "Unbekannte Anbindung."),
+        )
+        with self.assertRaises(AppError) as caught:
+            service.state(ACME_ID)
+        self.assertEqual(caught.exception.status, 400)
+        with self.assertRaises(AppError) as caught:
+            service.provider_configured(ACME_ID)
+        self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(self.handler.calls, [])
+        self.assertFalse(self.gate.is_resetting())
+        self.assertIsNone(self._stored("acme_full_resync_running"))
+
+    def test_unconfigured_handler_error_is_raised_before_gate_reset(self):
+        self.handler = AcmeFullResyncHandler(configured=False)
+        service = self._service(self._runtime())
+
+        with self.assertRaises(AppError) as caught:
+            service.resync(ACME_ID)
+        self.assertEqual(caught.exception.message, "Acme ist nicht konfiguriert.")
+        self.assertEqual(caught.exception.reason, "not_configured")
+        self.assertEqual(self.handler.calls, [])
+        self.assertFalse(self.gate.is_resetting())
 
 
 if __name__ == "__main__":

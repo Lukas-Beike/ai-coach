@@ -246,7 +246,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "get_activity_details",
-            "Read a bounded, sanitized detailed analysis projection for exactly one completed Intervals.icu activity from the local snapshot. Use only after an explicit request to analyse or deeply review that one activity; resolve its exact activity ID with list_recent_activities first when needed. Never use this for generic activity summaries or all past activities.",
+            "Read a bounded, sanitized detailed analysis projection for exactly one completed Intervals.icu activity from the local snapshot. Use only after an explicit request to analyse or deeply review that one activity; resolve its exact activity ID with list_recent_activities first when needed; activity_id accepts the local ID (act_...) or the provider activity ID. Never use this for generic activity summaries or all past activities.",
             {"activity_id": {"type": "string", "minLength": 1, "maxLength": 200}},
             strict=True,
         ),
@@ -606,7 +606,7 @@ def build_structured_tool_schemas(
                         "activity_id": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "Exact existing activity ID from the current local snapshot.",
+                            "description": "Exact existing activity ID from the current local snapshot: the local ID (act_...) or the provider activity ID.",
                         },
                         "activity_name": {"type": ["string", "null"]},
                         "activity_date": {"type": ["string", "null"]},
@@ -629,7 +629,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "delete_activity_feedback",
-            "Delete the local feedback record for one completed activity.",
+            "Delete the local feedback record for one completed activity. activity_id accepts the local ID (act_...) or the provider activity ID.",
             {"activity_id": {"type": "string"}},
         ),
         _canonical_coach_tool(
@@ -1012,7 +1012,7 @@ def build_structured_tool_schemas(
         ),
         (
             "assign_activity_equipment",
-            "Explicitly assign a canonical completed activity to matching active equipment. If sport_pending or parent_pending is true, ask the athlete for the missing equipment detail before assignment. Reassignment recalculates both usage counters. equipment_id=null explicitly clears assignment. Never infer a favorite bike/shoe.",
+            "Explicitly assign a canonical completed activity to matching active equipment. If sport_pending or parent_pending is true, ask the athlete for the missing equipment detail before assignment. Reassignment recalculates both usage counters. equipment_id=null explicitly clears assignment. activity_id accepts the local ID (act_...) or the provider activity ID. Never infer a favorite bike/shoe.",
             {
                 "activity_id": {"type": "string"},
                 "equipment_id": {"type": ["string", "null"]},

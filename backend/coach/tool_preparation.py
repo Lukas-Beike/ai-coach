@@ -9,6 +9,7 @@ from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.outcomes import unresolved_coach_steps
 from backend.errors import AppError
 from backend.sync.authority import PlanningAuthorityService
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.state import SyncStateRepository
 
 
@@ -23,6 +24,8 @@ class CoachStructuredToolPreparationService:
         read_only_tools: frozenset[str],
         sync_period_defaults: Mapping[str, int],
         all_sync_days: int,
+        *,
+        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._dialogue_action = dialogue_action
         self._sync_state = sync_state
@@ -30,6 +33,7 @@ class CoachStructuredToolPreparationService:
         self._read_only_tools = read_only_tools
         self._sync_period_defaults = sync_period_defaults
         self._all_sync_days = all_sync_days
+        self._registry = registry
 
     def prepare(
         self,
@@ -66,15 +70,13 @@ class CoachStructuredToolPreparationService:
                 "Vor der Synchronisierung muss der fehlgeschlagene lokale Schritt abgeschlossen werden.",
                 reason="request_dependency",
             )
-        if (
-            name == "start_provider_refresh"
-            and action.get("target_system") == "intervals"
-        ):
+        target = action.get("target_system")
+        if name == "start_provider_refresh" and self._waits_for_completion(target):
             arguments["_wait_for_completion"] = True
             arguments.setdefault(
                 "days",
                 self._sync_state.sync_period(
-                    "intervals", self._sync_period_defaults, self._all_sync_days
+                    target, self._sync_period_defaults, self._all_sync_days
                 ),
             )
         if name == "get_sync_job":
@@ -91,6 +93,13 @@ class CoachStructuredToolPreparationService:
         if name == "start_intervals_plan_sync":
             self._prepare_plan_sync(arguments, action, command_receipts)
         return action
+
+    def _waits_for_completion(self, target: Any) -> bool:
+        """Return whether the target's descriptor makes a Coach refresh wait."""
+        return (
+            target in self._registry.coach_refresh_targets()
+            and self._registry.get(target).coach_waits_for_completion
+        )
 
     def _request_is_paused(
         self, name: str, question: str, cancelled: bool, paused: bool

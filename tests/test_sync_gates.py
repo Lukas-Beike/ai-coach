@@ -5,8 +5,33 @@ from __future__ import annotations
 import threading
 import unittest
 
+from provider_runtime_fakes import ACME_ID
+
 from backend.errors import AppError
-from backend.sync.gates import ProviderResyncGate
+from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
+from backend.sync.gates import (
+    GARMIN_RESYNC_GATE,
+    INTERVALS_RESYNC_GATE,
+    ProviderResyncGate,
+    resync_gate,
+)
+
+
+class ResyncGateMappingTests(unittest.TestCase):
+    def test_default_mapping_selects_intervals_and_garmin_gates(self) -> None:
+        self.assertIs(resync_gate(INTERVALS_ID), INTERVALS_RESYNC_GATE)
+        self.assertIs(resync_gate(GARMIN_ID), GARMIN_RESYNC_GATE)
+
+    def test_unmapped_provider_falls_back_to_garmin_gate(self) -> None:
+        self.assertIs(resync_gate(ACME_ID), GARMIN_RESYNC_GATE)
+        self.assertIs(resync_gate(INTERVALS_ID, {}), GARMIN_RESYNC_GATE)
+
+    def test_injected_mapping_replaces_defaults_and_keeps_garmin_fallback(self) -> None:
+        acme_gate = ProviderResyncGate("Acme mock")
+        gates = {ACME_ID: acme_gate}
+
+        self.assertIs(resync_gate(ACME_ID, gates), acme_gate)
+        self.assertIs(resync_gate(INTERVALS_ID, gates), GARMIN_RESYNC_GATE)
 
 
 class ProviderResyncGateTests(unittest.TestCase):

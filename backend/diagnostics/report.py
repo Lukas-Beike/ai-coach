@@ -14,11 +14,21 @@ from backend.coach.morning import MorningCheckinStateService
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.diagnostics.canonical_backfill import (
+    CanonicalBackfillStatusReader,
+    summarize_canonical_backfill,
+)
+from backend.diagnostics.canonical_coverage import summarize_canonical_coverage
+from backend.diagnostics.canonical_read import (
+    CanonicalReadStatusReader,
+    summarize_canonical_read,
+)
 from backend.diagnostics.history import CoachDiagnosticHistoryService
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.observability import DiagnosticCapture, Redactor
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.state import ProviderStateService
+from backend.runtime.ports import ProviderCoverageReader
 from backend.settings import SettingsService
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.freshness import ProviderFreshnessService
@@ -54,8 +64,11 @@ class DiagnosticReportDependencies:
     external_calendar_reader: ExternalCalendarReader
     morning_checkin: MorningCheckinStateService
     workout_library_sync_state: WorkoutLibrarySyncStateService
+    canonical_coverage: ProviderCoverageReader
     recent_logs: RecentLogEntriesService
     diagnostic_capture: DiagnosticCapture
+    canonical_backfill: CanonicalBackfillStatusReader | None = None
+    canonical_read: CanonicalReadStatusReader | None = None
 
 
 class DiagnosticReportService:
@@ -174,6 +187,13 @@ class DiagnosticReportService:
                         deps.external_calendar_reader.list_events()
                     ),
                 },
+                "canonical_coverage": summarize_canonical_coverage(
+                    deps.canonical_coverage, db
+                ),
+                "canonical_backfill": summarize_canonical_backfill(
+                    deps.canonical_backfill, db
+                ),
+                "canonical_read": summarize_canonical_read(deps.canonical_read, db),
                 "logs": deps.recent_logs.list(),
                 "debug_capture": {
                     **diagnostic_capture_status,

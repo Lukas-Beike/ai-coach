@@ -485,6 +485,97 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             "operation=self._intervals_operation", ast.unparse(client_factory)
         )
 
+    def test_sync_persistence_reads_pass_the_runtime_registry_through_helpers(
+        self,
+    ) -> None:
+        server_tree = _parse(SERVER_PATH)
+        helper_names = {"sync_state_repository", "sync_daily_markers"}
+        helpers = [
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name in helper_names
+        ]
+        self.assertEqual({helper.name for helper in helpers}, helper_names)
+        helper_nodes = {id(node) for helper in helpers for node in ast.walk(helper)}
+        for helper in helpers:
+            self.assertIn("registry=provider_runtime().static", ast.unparse(helper))
+
+        raw_access = [
+            node.lineno
+            for node in ast.walk(server_tree)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "SYNC_PERSISTENCE"
+            and node.attr in {"state_repository", "daily_markers"}
+            and id(node) not in helper_nodes
+        ]
+        self.assertEqual(
+            [],
+            raw_access,
+            "Sync state and marker reads must use the registry-bound helpers:\n"
+            + "\n".join(f"server.py:{line}" for line in raw_access),
+        )
+
+    def test_canonical_projection_is_composed_once_through_its_assembly(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        constructed = [
+            node.lineno
+            for node in ast.walk(server_tree)
+            if isinstance(node, ast.Name) and node.id == "CanonicalSnapshotProjection"
+        ]
+        self.assertEqual([], constructed)
+
+        projection = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == "CANONICAL_SNAPSHOT_PROJECTION"
+                for target in node.targets
+            )
+        )
+        composed = projection.value
+        self.assertIsInstance(composed, ast.Call)
+        assert isinstance(composed, ast.Call)
+        self.assertEqual(
+            "build_canonical_snapshot_projection",
+            ast.unparse(composed.func),
+        )
+
+        diagnostics = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "DIAGNOSTICS_ASSEMBLY"
+                for target in node.targets
+            )
+        )
+        self.assertIn(
+            "canonical_coverage=lambda: CANONICAL_READ",
+            ast.unparse(diagnostics.value),
+        )
+        self.assertIn(
+            "canonical_read=lambda: CANONICAL_READ",
+            ast.unparse(diagnostics.value),
+        )
+
+        read_selector = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "CANONICAL_READ"
+                for target in node.targets
+            )
+        )
+        assert isinstance(read_selector.value, ast.Call)
+        self.assertEqual(
+            "build_canonical_read",
+            ast.unparse(read_selector.value.func),
+        )
+
     def test_weather_service_cache_is_owned_by_weather_service_module(self) -> None:
         weather_tree = _parse(BACKEND_ROOT / "weather" / "service.py")
         self.assertTrue(

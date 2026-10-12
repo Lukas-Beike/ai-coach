@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from backend.activities.activity_reference import ActivityReferences
 from backend.activities.detail_store import ActivityDetailStore
 from backend.athlete.clock import AthleteLocalClock
 from backend.config import Config
@@ -142,6 +143,7 @@ class IntervalsSyncAssembly:
             store=ActivityDetailStore(self._database_manager()),
             utc_now=self._utc_now,
             configured=bool(config.intervals_api_key),
+            references=ActivityReferences(self._database_manager()),
             read_planned_units=lambda: (
                 self._planned_unit_service().list(500)
                 if self._planned_unit_service

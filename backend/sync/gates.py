@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from functools import wraps
 from typing import Any, TypeVar, cast
 
 from backend.errors import AppError
+from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
 
 _Function = TypeVar("_Function", bound=Callable[..., Any])
 
@@ -65,11 +66,22 @@ class ProviderResyncGate:
 
 INTERVALS_RESYNC_GATE = ProviderResyncGate("Intervals.icu")
 GARMIN_RESYNC_GATE = ProviderResyncGate("Garmin")
+DEFAULT_RESYNC_GATES: Mapping[str, ProviderResyncGate] = {
+    INTERVALS_ID: INTERVALS_RESYNC_GATE,
+    GARMIN_ID: GARMIN_RESYNC_GATE,
+}
+
+
+def resync_gate(
+    provider: str, gates: Mapping[str, ProviderResyncGate] | None = None
+) -> ProviderResyncGate:
+    """Return a provider's gate; a provider without a mapped gate uses the Garmin gate."""
+    mapping = DEFAULT_RESYNC_GATES if gates is None else gates
+    return mapping.get(provider, GARMIN_RESYNC_GATE)
 
 
 def provider_operation(provider: str) -> AbstractContextManager[None]:
-    gate = INTERVALS_RESYNC_GATE if provider == "intervals" else GARMIN_RESYNC_GATE
-    return gate.operation()
+    return resync_gate(provider).operation()
 
 
 def _operation_guard(provider: str) -> Callable[[_Function], _Function]:
@@ -84,5 +96,5 @@ def _operation_guard(provider: str) -> Callable[[_Function], _Function]:
     return decorate
 
 
-intervals_operation = _operation_guard("intervals")
-garmin_operation = _operation_guard("garmin")
+intervals_operation = _operation_guard(INTERVALS_ID)
+garmin_operation = _operation_guard(GARMIN_ID)

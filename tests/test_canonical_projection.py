@@ -109,7 +109,8 @@ class FixtureProjectionTests(unittest.TestCase):
             [record.started_at for record in activities],
             sorted(record.started_at for record in activities),
         )
-        self.assertEqual(len(observations), 49)
+        # The fixture athlete's weight is one more Intervals observation (mapper v2).
+        self.assertEqual(len(observations), 50)
         for record in activities:
             self.assertEqual(record.provenance.retrieved_at, SYNCED_AT)
 
@@ -122,7 +123,8 @@ class FixtureProjectionTests(unittest.TestCase):
         intervals = coverage[ProviderId.INTERVALS]
         garmin = coverage[ProviderId.GARMIN]
         self.assertEqual(intervals.activity_count, 5)
-        self.assertEqual(intervals.observation_count, 31)
+        # Includes the fixture athlete's weight (mapper v2).
+        self.assertEqual(intervals.observation_count, 32)
         self.assertEqual(intervals.retrieved_at, SYNCED_AT)
         self.assertEqual(garmin.activity_count, 2)
         self.assertEqual(garmin.observation_count, 18)

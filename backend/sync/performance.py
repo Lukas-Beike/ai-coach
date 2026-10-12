@@ -13,6 +13,7 @@ from backend.config import Config
 from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import COACH_ABORTED_ERROR, INTERVALS_API_KEY_ERROR, AppError
+from backend.providers.descriptors import INTERVALS_ID
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.queue import SyncJobQueueService
@@ -231,7 +232,7 @@ class PerformanceRefreshFollowupService:
                 self._raise_refresh_failed()
             return "waiting", None
 
-        pending_id = self._queue_service.pending_performance_job_id()
+        pending_id = self._queue_service.pending_performance_job_id(INTERVALS_ID)
         if pending_id:
             return "job", pending_id
         if self._get_value("performance_refresh_running") == "1":

@@ -1,14 +1,18 @@
 """Map authenticated synchronization POST requests to concrete sync use cases.
 
 Provider routes, their not-configured messages and their period rules come from
-the provider registry. The performance refresh, the job queue and job resolution
-are not provider routes and stay explicit in this module.
+the provider registry. The registry is read once per registry into a single
+route table (``SyncRouteSurface``), so a request only looks its path up. The
+performance refresh, the job queue and job resolution are not provider routes
+and stay explicit in this module.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
+from functools import lru_cache
 from typing import Any
 
 from backend.canonical.vocabulary import ProviderId
@@ -24,26 +28,31 @@ SYNC_JOBS_PATH = "/api/sync/jobs"
 PERFORMANCE_REFRESH_PATH = "/api/performance/refresh"
 
 
-def _uses_sync_period(registry: ProviderRegistry, provider_id: str) -> bool:
-    route = registry.get(provider_id).manual_sync
-    return route is not None and route.uses_sync_period
+@dataclass(frozen=True, slots=True)
+class _ManualRoute:
+    """A registry manual route: its provider, period rule and fixed job fields."""
+
+    provider_id: str
+    uses_sync_period: bool
+    fixed_payload: tuple[tuple[str, object], ...]
 
 
-def _post_paths(registry: ProviderRegistry) -> frozenset[str]:
-    manual = (path for path, _ in registry.manual_routes())
-    full_resync = (path for path, _ in registry.full_resync_routes())
-    return frozenset({SYNC_JOBS_PATH, PERFORMANCE_REFRESH_PATH, *manual, *full_resync})
+@dataclass(frozen=True, slots=True)
+class _PathRoute:
+    """Everything the registry routes one sync POST path to.
 
+    ``fixed_body`` marks the job endpoint, which always reads a body.
+    """
 
-def _body_paths(registry: ProviderRegistry) -> frozenset[str]:
-    # Only period-based manual routes and full resyncs read a request body.
-    period_routes = (
-        path
-        for path, provider_id in registry.manual_routes()
-        if _uses_sync_period(registry, provider_id)
-    )
-    full_resync = (path for path, _ in registry.full_resync_routes())
-    return frozenset({SYNC_JOBS_PATH, *period_routes, *full_resync})
+    fixed_body: bool = False
+    manual: _ManualRoute | None = None
+    full_resync_provider: str | None = None
+
+    @property
+    def reads_body(self) -> bool:
+        if self.fixed_body or self.full_resync_provider is not None:
+            return True
+        return self.manual is not None and self.manual.uses_sync_period
 
 
 def _not_configured_messages(registry: ProviderRegistry) -> dict[str, str]:
@@ -55,9 +64,83 @@ def _not_configured_messages(registry: ProviderRegistry) -> dict[str, str]:
     return messages
 
 
-SYNC_POST_PATHS = _post_paths(DEFAULT_PROVIDER_REGISTRY)
-SYNC_BODY_PATHS = _body_paths(DEFAULT_PROVIDER_REGISTRY)
-PROVIDER_NOT_CONFIGURED_MESSAGES = _not_configured_messages(DEFAULT_PROVIDER_REGISTRY)
+def _build_path_routes(registry: ProviderRegistry) -> dict[str, _PathRoute]:
+    routes: dict[str, _PathRoute] = {
+        SYNC_JOBS_PATH: _PathRoute(fixed_body=True),
+        PERFORMANCE_REFRESH_PATH: _PathRoute(),
+    }
+    for descriptor in registry.all():
+        manual = descriptor.manual_sync
+        if manual is not None:
+            current = routes.get(manual.path, _PathRoute())
+            routes[manual.path] = replace(
+                current,
+                manual=_ManualRoute(
+                    descriptor.provider_id, manual.uses_sync_period, manual.payload
+                ),
+            )
+        if descriptor.full_resync_path is not None:
+            current = routes.get(descriptor.full_resync_path, _PathRoute())
+            routes[descriptor.full_resync_path] = replace(
+                current, full_resync_provider=descriptor.provider_id
+            )
+    return routes
+
+
+class SyncRouteSurface:
+    """The sync POST surface one registry defines, as a single route table."""
+
+    def __init__(self, registry: ProviderRegistry) -> None:
+        self._routes = _build_path_routes(registry)
+        self._not_configured = _not_configured_messages(registry)
+
+    def route(self, path: str) -> _PathRoute | None:
+        return self._routes.get(path)
+
+    def paths(self) -> frozenset[str]:
+        return frozenset(self._routes)
+
+    def body_paths(self) -> frozenset[str]:
+        return frozenset(
+            path for path, route in self._routes.items() if route.reads_body
+        )
+
+    def accepts(self, path: str) -> bool:
+        return path in self._routes or SYNC_JOB_RESOLVE_RE.match(path) is not None
+
+    def requires_body(self, path: str) -> bool:
+        route = self._routes.get(path)
+        reads_body = route is not None and route.reads_body
+        return reads_body or SYNC_JOB_RESOLVE_RE.match(path) is not None
+
+    def not_configured_message(self, provider: str) -> str | None:
+        """Return the rejection text for a provider id, matched case-insensitively."""
+        return self._not_configured.get(provider.strip().casefold())
+
+    def not_configured_messages(self) -> Mapping[str, str]:
+        return dict(self._not_configured)
+
+
+@lru_cache(maxsize=32)
+def _surface_for(registry: ProviderRegistry) -> SyncRouteSurface:
+    """Derive the surface once per registry; registries are immutable."""
+    return SyncRouteSurface(registry)
+
+
+def handles_sync_path(registry: ProviderRegistry, path: str) -> bool:
+    """Return whether ``registry`` routes ``path`` to the sync endpoint."""
+    return _surface_for(registry).accepts(path)
+
+
+def needs_sync_body(registry: ProviderRegistry, path: str) -> bool:
+    """Return whether ``registry`` reads a JSON body for the sync path ``path``."""
+    return _surface_for(registry).requires_body(path)
+
+
+_DEFAULT_SURFACE = _surface_for(DEFAULT_PROVIDER_REGISTRY)
+SYNC_POST_PATHS = _DEFAULT_SURFACE.paths()
+SYNC_BODY_PATHS = _DEFAULT_SURFACE.body_paths()
+PROVIDER_NOT_CONFIGURED_MESSAGES = _DEFAULT_SURFACE.not_configured_messages()
 _MANUAL_PATHS = {
     provider_id: path for path, provider_id in DEFAULT_PROVIDER_REGISTRY.manual_routes()
 }
@@ -94,34 +177,23 @@ class SyncCommandEndpoint:
         self._period_defaults = period_defaults
         self._all_sync_days = all_sync_days
         self._registry = registry
-        self._manual_routes = {
-            descriptor.manual_sync.path: (
-                descriptor.provider_id,
-                descriptor.manual_sync,
-            )
-            for descriptor in registry.all()
-            if descriptor.manual_sync is not None
-        }
-        self._full_resync_providers = dict(registry.full_resync_routes())
-        self._not_configured = _not_configured_messages(registry)
-        self._post_paths = _post_paths(registry)
-        self._body_paths = _body_paths(registry)
+        self._surface = _surface_for(registry)
 
     @staticmethod
     def handles(path: str) -> bool:
-        return path in SYNC_POST_PATHS or SYNC_JOB_RESOLVE_RE.match(path) is not None
+        return handles_sync_path(DEFAULT_PROVIDER_REGISTRY, path)
 
     @staticmethod
     def needs_body(path: str) -> bool:
-        return path in SYNC_BODY_PATHS or SYNC_JOB_RESOLVE_RE.match(path) is not None
+        return needs_sync_body(DEFAULT_PROVIDER_REGISTRY, path)
 
     def accepts(self, path: str) -> bool:
         """Return whether this endpoint's registry accepts the sync POST path."""
-        return path in self._post_paths or SYNC_JOB_RESOLVE_RE.match(path) is not None
+        return self._surface.accepts(path)
 
     def requires_body(self, path: str) -> bool:
         """Return whether this endpoint's registry reads a JSON body for the path."""
-        return path in self._body_paths or SYNC_JOB_RESOLVE_RE.match(path) is not None
+        return self._surface.requires_body(path)
 
     def execute(self, path: str, payload: Any = None) -> tuple[int, dict[str, Any]]:
         if path == SYNC_JOBS_PATH:
@@ -130,13 +202,17 @@ class SyncCommandEndpoint:
             return 200, self._queue.resolve(match.group(1), payload)
         if path == PERFORMANCE_REFRESH_PATH:
             return 200, self._performance.refresh()
-        if path in self._manual_routes:
-            provider_id, route = self._manual_routes[path]
+        route = self._surface.route(path)
+        if route is not None and route.manual is not None:
+            manual = route.manual
             return self._manual_refresh(
-                provider_id, route.uses_sync_period, route.payload, payload
+                manual.provider_id,
+                manual.uses_sync_period,
+                manual.fixed_payload,
+                payload,
             )
-        if path in self._full_resync_providers:
-            return self._full_resync_command(self._full_resync_providers[path], payload)
+        if route is not None and route.full_resync_provider is not None:
+            return self._full_resync_command(route.full_resync_provider, payload)
         raise ValueError(f"Unsupported sync path: {path}")
 
     def _enqueue_job(self, payload: Any) -> tuple[int, dict[str, Any]]:
@@ -153,9 +229,10 @@ class SyncCommandEndpoint:
                 for key in ("days", "force", "reason")
                 if key in payload
             }
-        self._require_provider_configured(payload.get("provider"))
+        provider: Any = payload.get("provider")
+        self._require_provider_configured(provider)
         return 202, self._queue.enqueue(
-            payload.get("provider"),
+            provider,
             payload.get("type", "refresh"),
             envelope,
             requested_by="user",
@@ -165,10 +242,10 @@ class SyncCommandEndpoint:
         """Reject unconfigured provider work before any job or period is stored."""
         if not isinstance(provider, str):
             return
-        normalized = provider.strip().casefold()
-        message = self._not_configured.get(normalized)
+        message = self._surface.not_configured_message(provider)
         if message is None:
             return
+        normalized = provider.strip().casefold()
         if not self._full_resync.provider_configured(normalized):
             raise AppError(409, message, reason="not_configured")
 

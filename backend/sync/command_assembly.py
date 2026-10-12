@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +13,7 @@ from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.plan_selection import StructuredPlanSyncService
+from backend.sync.provider_runtime import ProviderRuntimeRegistry, SynchronousRefresh
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,8 @@ class SyncCommandCore:
     utc_now: Callable[[], Any]
     training_change_limit: int
     all_sync_days: int
+    # None keeps the Intervals.icu default for the synchronous refresh bindings.
+    synchronous_refreshes: Mapping[str, SynchronousRefresh] | None = None
 
 
 @dataclass(frozen=True)
@@ -47,9 +50,11 @@ class SyncCommandAssembly:
         *,
         core: SyncCommandCore,
         illness_pause: IllnessPauseDependencies,
+        provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
     ) -> None:
         self._core = core
         self._illness_pause = illness_pause
+        self._provider_runtime = provider_runtime
 
     def illness_pause(self) -> IllnessPauseSyncService:
         return IllnessPauseSyncService(
@@ -63,10 +68,14 @@ class SyncCommandAssembly:
         )
 
     def provider_refresh(self) -> ProviderRefreshCommandService:
+        synchronous_refreshes = self._core.synchronous_refreshes
+        if self._provider_runtime is not None:
+            synchronous_refreshes = self._provider_runtime().synchronous_refreshes()
         return ProviderRefreshCommandService(
             self._core.queue_service(),
             self._core.intervals_sync(),
             self._core.all_sync_days,
+            synchronous_refreshes=synchronous_refreshes,
         )
 
     def conflicts(self) -> SyncConflictCommandService:

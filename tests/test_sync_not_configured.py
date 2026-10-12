@@ -11,13 +11,12 @@ from unittest.mock import MagicMock, Mock
 from backend.errors import AppError, public_error_contract
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
+from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
 from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.external_calendar import ExternalCalendarSyncService
-from backend.sync.full_resync import (
-    FullProviderResyncService,
-    FullResyncProviderExecution,
-)
+from backend.sync.full_resync import FullProviderResyncService
 from backend.sync.garmin_service import GarminSyncService
+from backend.sync.provider_resync_assembly import full_resync_handlers
 from backend.sync.refresh import ProviderRefreshTracker, retry_at, sync_job_error_class
 
 try:
@@ -31,28 +30,28 @@ NOT_CONFIGURED_CONSTANTS = frozenset(
 NOW = datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
 
 
-def _execution(
-    *, intervals_api_key: str = "", garmin_configured: bool = False
-) -> FullResyncProviderExecution:
+def _resync_service(
+    config: Mock, *, garmin_configured: bool = False
+) -> FullProviderResyncService:
     garmin_service = Mock()
     garmin_service.configured.return_value = garmin_configured
-    return FullResyncProviderExecution(
-        config=Mock(intervals_api_key=intervals_api_key),
+    handlers = full_resync_handlers(
+        config=config,
         intervals_service=Mock(),
         garmin_service=garmin_service,
         competition_service=Mock(),
-        intervals_gate=Mock(),
-        garmin_gate=Mock(),
+        gates={INTERVALS_ID: Mock(), GARMIN_ID: Mock()},
         all_sync_days=-1,
     )
+    return FullProviderResyncService(handlers, Mock(), Mock())
 
 
 def _full_resync_intervals_not_configured() -> None:
-    _execution().validate_configuration("intervals")
+    _resync_service(Mock(intervals_api_key="")).resync("intervals")
 
 
 def _full_resync_garmin_not_configured() -> None:
-    _execution().validate_configuration("garmin")
+    _resync_service(Mock(intervals_api_key="")).resync("garmin")
 
 
 def _activity_details_not_configured() -> None:
@@ -201,8 +200,8 @@ class NotConfiguredSyncRouteTests(unittest.TestCase):
         self.state = Mock()
         self.state.sync_period.return_value = 90
         self.state.set_sync_period.return_value = 7
-        self.execution = _execution()
-        full_resync = FullProviderResyncService(self.execution, Mock(), Mock())
+        self.config = Mock(intervals_api_key="")
+        full_resync = _resync_service(self.config)
         self.endpoint = SyncCommandEndpoint(
             self.queue,
             self.state,
@@ -256,7 +255,7 @@ class NotConfiguredSyncRouteTests(unittest.TestCase):
         )
 
     def test_configured_intervals_manual_refresh_still_enqueues(self):
-        self.execution.config.intervals_api_key = "test-key"
+        self.config.intervals_api_key = "test-key"
         self.queue.enqueue.return_value = {"id": "job-1"}
         handler = Mock()
         handler.read_json.return_value = {"days": 7}

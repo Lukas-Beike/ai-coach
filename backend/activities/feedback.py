@@ -6,6 +6,10 @@ import builtins
 import math
 from typing import Any
 
+from backend.activities.activity_reference import (
+    ActivityReferenceResolver,
+    NoActivityReferences,
+)
 from backend.errors import AppError
 from backend.runtime.ports import ProviderSnapshotReader
 
@@ -69,10 +73,13 @@ class ActivityFeedbackService:
         database_manager: Any,
         feedback_repository: Any,
         snapshot_reader: ProviderSnapshotReader,
+        *,
+        references: ActivityReferenceResolver | None = None,
     ):
         self._database_manager = database_manager
         self._feedback_repository = feedback_repository
         self._snapshot_reader = snapshot_reader
+        self._references = NoActivityReferences() if references is None else references
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 500))
@@ -80,7 +87,9 @@ class ActivityFeedbackService:
             return self._feedback_repository.list(db, bounded_limit)
 
     def save(self, activity_id: Any, value: Any) -> dict[str, Any]:
-        feedback = normalize_activity_feedback(activity_id, value)
+        feedback = normalize_activity_feedback(
+            self._references.resolve(activity_id), value
+        )
         with self._database_manager.unit_of_work() as db:
             existing = self._feedback_repository.get(db, feedback["activity_id"]) or {}
             for field in (
@@ -112,7 +121,9 @@ class ActivityFeedbackService:
 
     def save_coach(self, activity_id: Any, value: Any) -> dict[str, Any]:
         """Save feedback only for an activity in the latest local snapshot."""
-        normalized = normalize_activity_feedback(activity_id, value)
+        normalized = normalize_activity_feedback(
+            self._references.resolve(activity_id), value
+        )
         if (
             not normalized["notes"]
             and normalized.get("session_rpe") is None

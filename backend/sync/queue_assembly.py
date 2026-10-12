@@ -8,11 +8,13 @@ from datetime import datetime
 from threading import Event
 from typing import Any
 
+from backend.activities.activity_reference import ActivityReferences
 from backend.db.manager import DatabaseManager
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import job_outcomes, jobs, queue
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ class SyncQueuePolicy:
     logger: Any
     retry_base_seconds: int
     retry_max_seconds: int
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
 
 
 class SyncJobQueueAssembly:
@@ -70,11 +73,15 @@ class SyncJobQueueAssembly:
         self._logger = policy.logger
         self._retry_base_seconds = policy.retry_base_seconds
         self._retry_max_seconds = policy.retry_max_seconds
+        self._registry = policy.registry
 
     def store(self) -> jobs.SyncJobStore:
         """Create a store bound to the active database manager."""
         return jobs.SyncJobStore(
-            self._database_manager(), self._now, self._uuid_factory
+            self._database_manager(),
+            self._now,
+            self._uuid_factory,
+            registry=self._registry,
         )
 
     def service(self) -> queue.SyncJobQueueService:
@@ -86,6 +93,8 @@ class SyncJobQueueAssembly:
             self._wake_event(),
             self._all_sync_days,
             self._daily_sync_marker_service(),
+            registry=self._registry,
+            references=ActivityReferences(self._database_manager()),
         )
 
     def outcome_service(self) -> job_outcomes.SyncJobOutcomeService:

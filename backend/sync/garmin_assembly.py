@@ -22,6 +22,7 @@ from backend.sync.garmin_service import (
     GarminSyncSource,
     shared_garmin_sync_lock,
 )
+from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.state import SyncStateRepository
 from backend.sync.status import SyncOperationStateWriter
 
@@ -135,6 +136,10 @@ class GarminAssembly:
             self._utc_now,
             self._datetime_now,
             self._sync_equipment,
+            snapshot_writer=GarminSnapshotWriter(
+                self._key_values,
+                lambda: self._athlete_clock.now().tzinfo,
+            ),
         )
 
     def remote_reader(self) -> GarminRemoteReader:

@@ -7,9 +7,15 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
+from provider_runtime_fakes import ACME_ID, acme_descriptor
+
 from backend.db.manager import DatabaseManager
+from backend.providers.descriptors import DEFAULT_PROVIDER_DESCRIPTORS
 from backend.sync.jobs import (
     ALLOWED_JOB_TRANSITIONS,
+    JOB_TYPES,
+    PROVIDERS,
+    UNSUPPORTED_JOB_FIELDS_ERROR,
     JobValidationError,
     SyncJobInvalidOperationError,
     SyncJobInvalidStateError,
@@ -27,6 +33,50 @@ from backend.sync.jobs import (
     retry_delay,
     validate_job_request,
 )
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+
+# Provider-level rejection text per job type, as the live validators raise it.
+# Type-level errors (unknown job type, field errors) are not listed here.
+PROVIDER_REJECTIONS = {
+    "historical_backfill": (
+        "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig."
+    ),
+    "activity_details": "Ungültiger Aktivitätsdetailauftrag.",
+    "nutrition_sync": "Ungültiger Ernährungssynchronisierungsauftrag.",
+    "performance_refresh": "Dieser Job ist nur für Intervals.icu zulässig.",
+    "competition_push": "Dieser Job ist nur für Intervals.icu zulässig.",
+    "plan_push": "Plan-Push-Jobs sind nur für Intervals.icu zulässig.",
+}
+# Payloads valid for the Intervals.icu-only types, so only the provider check can fail.
+PROBE_PAYLOADS = {
+    "activity_details": {"activity_id": "activity-1"},
+    "nutrition_sync": {"date": "2026-09-20"},
+}
+
+
+def _probe_message(provider, job_type, registry=DEFAULT_PROVIDER_REGISTRY):
+    """Return the validator's rejection text for a probe job, or None if accepted."""
+    try:
+        normalize_sync_job_request(
+            provider,
+            job_type,
+            PROBE_PAYLOADS.get(job_type),
+            all_sync_days=-1,
+            registry=registry,
+        )
+    except JobValidationError as exc:
+        return str(exc)
+    return None
+
+
+def _refresh_message(provider, payload, registry=DEFAULT_PROVIDER_REGISTRY):
+    try:
+        normalize_sync_job_request(
+            provider, "refresh", payload, all_sync_days=-1, registry=registry
+        )
+    except JobValidationError as exc:
+        return str(exc)
+    return None
 
 
 class SyncJobContractTests(unittest.TestCase):
@@ -273,6 +323,32 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
         ):
             with self.subTest(value=value):
                 self.assert_invalid("intervals", "refresh", {"days": value}, message)
+
+    def test_enforced_period_limit_follows_the_provider_descriptor(self):
+        def enforced(provider, days):
+            return normalize_sync_job_request(
+                provider,
+                "refresh",
+                {"days": days},
+                all_sync_days=self.all_sync_days,
+                enforce_period_limit=True,
+            )["payload"]["days"]
+
+        for provider, accepted, rejected in (
+            ("intervals", 365, 366),
+            ("garmin", 90, 91),
+        ):
+            with self.subTest(provider=provider):
+                self.assertEqual(enforced(provider, accepted), accepted)
+                self.assertEqual(enforced(provider, -1), -1)
+                with self.assertRaisesRegex(
+                    JobValidationError, "Synchronisationszeitraum ist zu groß"
+                ):
+                    enforced(provider, rejected)
+        # Without enforcement, persisted jobs queued under older limits still run.
+        self.assertEqual(
+            self.normalize("garmin", "refresh", {"days": 91})["payload"], {"days": 91}
+        )
 
     def test_refresh_validation_order_and_omitted_reason(self):
         self.assert_invalid(
@@ -597,7 +673,10 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual([job["id"] for job in self.store.list(1)], [weather["id"]])
         self.assertTrue(self.store.active("weather", "refresh"))
         self.assertFalse(self.store.active("calendar", "refresh"))
-        self.assertEqual(self.store.pending_performance_job_id(), performance["id"])
+        self.assertEqual(
+            self.store.pending_performance_job_id("intervals"), performance["id"]
+        )
+        self.assertIsNone(self.store.pending_performance_job_id("garmin"))
 
     def test_all_read_methods_reuse_an_outer_unit_of_work_connection(self):
         manager = DatabaseManager(
@@ -615,7 +694,7 @@ class SyncJobStoreTests(unittest.TestCase):
             self.assertIsNone(store.state("missing"))
             self.assertEqual(store.list(10), [])
             self.assertFalse(store.active("garmin", "refresh"))
-            self.assertIsNone(store.pending_performance_job_id())
+            self.assertIsNone(store.pending_performance_job_id("intervals"))
             self.assertEqual(connect.call_count, 1)
 
     def test_enqueue_persists_compact_utf8_payload_and_server_hash_contract(self):
@@ -910,6 +989,88 @@ class SyncJobStoreTests(unittest.TestCase):
         self.store.update(queued["id"], "completed")
         with self.assertRaises(SyncJobInvalidStateError):
             self.store.resolve(queued["id"])
+
+
+class RegistryValidatorParityTests(unittest.TestCase):
+    """Registry answers must match what the live validators accept and reject."""
+
+    def test_provider_allowlist_is_derived_from_the_default_registry(self):
+        self.assertEqual(PROVIDERS, frozenset(DEFAULT_PROVIDER_REGISTRY.ids()))
+        for provider in DEFAULT_PROVIDER_REGISTRY.ids():
+            with self.subTest(provider=provider):
+                validate_job_request(provider, "refresh", {})
+        with self.assertRaisesRegex(JobValidationError, "Unsupported provider"):
+            validate_job_request("unregistered", "refresh", {})
+
+    def test_every_provider_and_job_type_pair_matches_the_live_validator(self):
+        for provider in DEFAULT_PROVIDER_REGISTRY.ids():
+            for job_type in JOB_TYPES:
+                with self.subTest(provider=provider, job_type=job_type):
+                    supported = DEFAULT_PROVIDER_REGISTRY.supports_job(
+                        provider, job_type
+                    )
+                    message = _probe_message(provider, job_type)
+                    rejected = (
+                        message is not None
+                        and message == PROVIDER_REJECTIONS.get(job_type)
+                    )
+                    self.assertEqual(rejected, not supported)
+
+    def test_refresh_fields_match_the_registry_for_every_provider(self):
+        probes = {
+            "days": 3,
+            "end_date": "2026-09-20",
+            "reason": "manual",
+            "force": False,
+        }
+        for provider in DEFAULT_PROVIDER_REGISTRY.ids():
+            allowed = DEFAULT_PROVIDER_REGISTRY.refresh_fields(provider)
+            for field, value in probes.items():
+                with self.subTest(provider=provider, field=field):
+                    message = _refresh_message(provider, {field: value})
+                    self.assertEqual(
+                        message == UNSUPPORTED_JOB_FIELDS_ERROR,
+                        field not in allowed,
+                    )
+
+
+class TestOnlyProviderValidationTests(unittest.TestCase):
+    """The acme-mock provider is accepted only by the registry that declares it."""
+
+    def setUp(self):
+        self.registry = ProviderRegistry(
+            (*DEFAULT_PROVIDER_DESCRIPTORS, acme_descriptor())
+        )
+
+    def test_test_only_provider_is_accepted_only_by_its_declaring_registry(self):
+        envelope = validate_job_request(
+            ACME_ID, " REFRESH ", {"reason": "manual"}, registry=self.registry
+        )
+        self.assertEqual(
+            envelope,
+            {"provider": ACME_ID, "type": "refresh", "payload": {"reason": "manual"}},
+        )
+        with self.assertRaisesRegex(JobValidationError, "Unsupported provider"):
+            validate_job_request(ACME_ID, "refresh", {"reason": "manual"})
+
+    def test_test_only_provider_fields_and_job_types_follow_its_descriptor(self):
+        result = normalize_sync_job_request(
+            ACME_ID,
+            "refresh",
+            {"reason": "manual"},
+            all_sync_days=-1,
+            registry=self.registry,
+        )
+        self.assertEqual(result["payload"], {"reason": "manual"})
+        self.assertEqual(
+            _refresh_message(ACME_ID, {"days": 3}, self.registry),
+            UNSUPPORTED_JOB_FIELDS_ERROR,
+        )
+        for job_type, message in PROVIDER_REJECTIONS.items():
+            with self.subTest(job_type=job_type):
+                self.assertEqual(
+                    _probe_message(ACME_ID, job_type, self.registry), message
+                )
 
 
 if __name__ == "__main__":

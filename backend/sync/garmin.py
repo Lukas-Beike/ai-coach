@@ -23,6 +23,7 @@ from backend.performance.history import append_garmin_performance_history
 from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_hr
 from backend.providers.garmin_morning import merge_garmin_records
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.refresh import sync_job_error_class
 from backend.sync.state import SyncStateRepository
 
@@ -376,8 +377,11 @@ class GarminSyncStateService:
         utc_now: Callable[[], str],
         current_time: Callable[[], datetime],
         sync_equipment: Callable[[dict[str, Any]], Any] | None = None,
+        *,
+        snapshot_writer: GarminSnapshotWriter,
     ) -> None:
         self._database_manager = database_manager
+        self._snapshot_writer = snapshot_writer
         self._key_value_repository = key_value_repository
         self._sync_state_repository = sync_state_repository
         self._daily_sync_marker_service = daily_sync_marker_service
@@ -485,10 +489,9 @@ class GarminSyncStateService:
         complete = collection_complete(payload)
         if self._sync_equipment is not None and source != "fixture":
             self._sync_equipment(payload)
-        self._set(
-            "garmin_snapshot",
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        )
+        # Canonical rows and the legacy snapshot commit together; cursors come later.
+        with self._database_manager.unit_of_work() as db:
+            self._snapshot_writer.write(db, payload)
         self._set("last_garmin_sync_at", synced_at)
         if end_date is None:
             self._daily_sync_marker_service.mark("garmin")

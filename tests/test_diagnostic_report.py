@@ -97,6 +97,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.freshness.current.return_value = [
             {"provider": "intervals", "state": "fresh"}
         ]
+        self.coverage = Mock()
+        self.coverage.coverage.return_value = ()
         self.capture = Mock()
         self.capture.status.return_value = {"active": True, "entries": 1}
         self.capture.entries.return_value = [
@@ -142,6 +144,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 workout_library_sync_state=SimpleNamespace(
                     summary=lambda: {"local": 2}
                 ),
+                canonical_coverage=self.coverage,
                 recent_logs=SimpleNamespace(list=lambda: [{"event": "safe"}]),
                 diagnostic_capture=self.capture,
             )
@@ -168,11 +171,19 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "external_calendar",
                 "morning_checkin",
                 "database",
+                "canonical_coverage",
+                "canonical_backfill",
+                "canonical_read",
                 "logs",
                 "debug_capture",
                 "note",
             },
         )
+        self.assertEqual(
+            report["canonical_coverage"], {"status": "available", "providers": []}
+        )
+        self.assertEqual(report["canonical_backfill"], {"status": "unavailable"})
+        self.assertEqual(report["canonical_read"], {"status": "unavailable"})
         self.assertEqual(
             report["sync"]["snapshot_counts"],
             {

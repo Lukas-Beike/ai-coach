@@ -12,6 +12,7 @@ from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.freshness import ProviderFreshnessService
+from backend.sync.freshness_sources import default_running_probes
 from backend.sync.garmin import GarminSyncStateService
 from backend.sync.queue import SyncJobQueueService
 
@@ -138,6 +139,8 @@ class SyncPublicStateService:
         sync_job_queue_service: SyncJobQueueService,
         state_version_service: _StateVersionProvider,
         intervals_sync_lock: Any,
+        *,
+        running_probes: Mapping[str, Callable[[], bool]] | None = None,
     ) -> None:
         self._config = config
         self._database_manager = database_manager
@@ -149,6 +152,14 @@ class SyncPublicStateService:
         self._sync_job_queue_service = sync_job_queue_service
         self._state_version_service = state_version_service
         self._intervals_sync_lock = intervals_sync_lock
+        self._running_probes: Mapping[str, Callable[[], bool]] = (
+            default_running_probes(
+                intervals_sync_lock=intervals_sync_lock,
+                get_value=self._get_value,
+            )
+            if running_probes is None
+            else running_probes
+        )
 
     def _get_value(self, key: str) -> str | None:
         with self._database_manager.reader() as db:
@@ -161,9 +172,7 @@ class SyncPublicStateService:
         jobs: list[dict[str, Any]] | None = None,
         state_versions: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        running = (
-            self._intervals_sync_lock.locked() or self._get_value("sync_running") == "1"
-        )
+        running = any(probe() for probe in self._running_probes.values())
         provider_freshness = freshness
         if provider_freshness is None:
             provider_freshness = self._provider_freshness_service.current(

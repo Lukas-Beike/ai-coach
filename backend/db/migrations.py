@@ -9,6 +9,7 @@ from typing import Any, Final
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     NUTRITION_PRODUCTS_DDL,
+    PROVIDER_TABLES_DDL,
     database_schema_is_current,
     database_schema_signature,
 )
@@ -18,6 +19,7 @@ from backend.db.schema_history import (
     SHAPE_RELEASE_1_12_19,
     SHAPE_SCHEMA_V2,
     SHAPE_SCHEMA_V3_V4,
+    SHAPE_SCHEMA_V5,
     released_shape,
 )
 
@@ -248,11 +250,22 @@ def _add_no_training_signal(db: Any) -> None:
 
 
 def _add_logged_time_known(db: Any) -> None:
-    """Schema versions 3 and 4 -> the current schema."""
+    """Schema versions 3 and 4 -> schema version 5."""
     # Existing meal logs were recorded with a time; they keep logged_time_known=1.
     db.execute(
         "ALTER TABLE nutrition_logs ADD COLUMN logged_time_known INTEGER NOT NULL DEFAULT 1"
     )
+
+
+def _add_provider_tables(db: Any) -> None:
+    """Schema version 5 -> schema version 6: empty canonical provider tables.
+
+    Only tables and indexes are created. No existing row is read or copied, so
+    the step is deterministic and cheap regardless of the athlete's data volume.
+    """
+    for statement in PROVIDER_TABLES_DDL.split(";"):
+        if statement.strip():
+            db.execute(statement)
 
 
 UpgradeStep = Callable[[Any], None]
@@ -262,5 +275,6 @@ UpgradeStep = Callable[[Any], None]
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, UpgradeStep]]] = {
     SHAPE_RELEASE_1_12_19: (SHAPE_SCHEMA_V2, _add_nutrition_products),
     SHAPE_SCHEMA_V2: (SHAPE_SCHEMA_V3_V4, _add_no_training_signal),
-    SHAPE_SCHEMA_V3_V4: (SHAPE_CURRENT, _add_logged_time_known),
+    SHAPE_SCHEMA_V3_V4: (SHAPE_SCHEMA_V5, _add_logged_time_known),
+    SHAPE_SCHEMA_V5: (SHAPE_CURRENT, _add_provider_tables),
 }

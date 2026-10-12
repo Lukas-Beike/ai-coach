@@ -867,10 +867,6 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .planned-week-summary { color: var(--muted); font-size: .75rem; line-height: 1.4; }
 .planned-week-days { display: grid; }
 .planned-day { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px 16px; padding: 16px; border-top: 1px solid var(--line); background: var(--surface-raised); scroll-margin-top: 16px; }
-.planned-day-checkin { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; min-width: 0; }
-.planned-day-checkin-status { min-width: 0; margin: 0; color: var(--muted); font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
-.planned-day-checkin-status.is-saved { color: var(--ink); }
-.planned-day-checkin > .secondary-button { min-height: 44px; }
 .planned-day.is-today { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-bright); }
 .planned-day-heading { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 5px; padding-top: 2px; grid-row: 1 / span 2; }
 .planned-day-heading h5 { margin: 0; color: var(--ink); font-size: .92rem; font-weight: 750; }
@@ -1458,6 +1454,20 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-week-table th, .nutrition-week-table td { padding: 8px 4px; text-align: right; border-bottom: 1px solid var(--line); }
 .nutrition-week-table th:first-child, .nutrition-week-table td:first-child { text-align: left; }
 #nutritionWeek .nutrition-total small { display: block; margin-top: 4px; }
+.nutrition-week-chart { min-width: 0; margin-top: 6px; }
+.nutrition-week-chart h4 { margin: 0 0 8px; }
+.nutrition-week-legend { display: flex; gap: 16px; color: var(--muted); font-size: .8rem; }
+.nutrition-week-legend span::before { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; background: var(--chart-series-1); content: ""; }
+.nutrition-week-legend span + span::before { background: var(--chart-series-3); }
+.nutrition-week-chart-days { display: grid; margin-top: 12px; }
+.nutrition-week-chart-day { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 4px 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: .78rem; }
+.nutrition-week-chart-day > strong { grid-row: span 2; align-self: center; }
+.nutrition-week-chart-series { display: grid; grid-template-columns: minmax(0, 1fr) 76px; align-items: center; gap: 8px; }
+.nutrition-week-chart-series > span:last-child { text-align: right; white-space: nowrap; }
+.nutrition-week-chart-track { display: block; height: 12px; border-radius: 3px; background: var(--translucent-surface); }
+.nutrition-week-chart-bar { display: block; height: 100%; border-radius: inherit; background: var(--chart-series-1); }
+.nutrition-week-chart-series.is-expenditure .nutrition-week-chart-bar { background: var(--chart-series-3); }
+.nutrition-week-chart-track.is-missing { background: repeating-linear-gradient(135deg, var(--line), var(--line) 2px, var(--transparent) 2px, var(--transparent) 6px); }
 .nutrition-search { display: grid; gap: 6px; }
 .nutrition-search-row { display: flex; gap: 8px; align-items: center; }
 .nutrition-search-row input { min-width: 0; flex: 1; }
