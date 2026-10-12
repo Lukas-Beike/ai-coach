@@ -696,6 +696,14 @@
     },
     {
       "tool": "mypy",
+      "path": "backend/http_api/state_prelude.py",
+      "line": 104,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "c5b10da3c1a67ec6fec8ae1b72aedf49046619ec7640adc1f88c80d760648235"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_sync_selected.py",
       "line": 110,
       "column": 12,
@@ -973,14 +981,6 @@
       "column": 12,
       "code": "arg-type",
       "message_sha256": "aa86d9820f47bc76dd2f58b52f317e0fa17f587affef1b2ee9e7f772867330eb"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/http_api/state_prelude.py",
-      "line": 94,
-      "column": 12,
-      "code": "arg-type",
-      "message_sha256": "c5b10da3c1a67ec6fec8ae1b72aedf49046619ec7640adc1f88c80d760648235"
     },
     {
       "tool": "mypy",

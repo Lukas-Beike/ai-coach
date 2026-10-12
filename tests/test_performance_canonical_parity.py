@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import unittest
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import date
 from typing import Any
 from unittest.mock import Mock, patch
@@ -27,8 +27,15 @@ from canonical_read_support import (
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, Sport
-from backend.coach.context import CoachPerformanceContextReader
+from backend.coach.context import (
+    CoachPerformanceContextReader,
+    CoachStructuredContextService,
+)
 from backend.http_api.public_performance import PublicPerformanceStateService
+from backend.http_api.state_prelude import (
+    CalendarWindowRange,
+    PublicStateLocalPrelude,
+)
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
@@ -515,9 +522,7 @@ class CanonicalWiringTests(unittest.TestCase):
             service.detail("a1", garmin_snapshot={}, profile={}, today=PARITY_TODAY)
         self.assertEqual(project.call_args.kwargs["canonical"].ctl, 50.0)
 
-    def test_coach_performance_reads_canonical_inputs_from_a_reader_lease(
-        self,
-    ) -> None:
+    def test_coach_reads_snapshot_and_load_inside_one_unit(self) -> None:
         snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
         manager = RecordingManager()
         reader = StubObservationReader(_observations(snapshot), events=manager.events)
@@ -531,6 +536,14 @@ class CanonicalWiringTests(unittest.TestCase):
                 observation_reader=lambda: reader,
             ),
         )
+
+        def read_snapshot() -> dict[str, Any]:
+            manager.events.append("snapshot")
+            return snapshot
+
+        read, canonical = coach.read_snapshot(read_snapshot)
+        self.assertIs(read, snapshot)
+        self.assertEqual(manager.events, ["enter", "snapshot", "read", "read", "exit"])
         with (
             patch(
                 "backend.coach.context.performance_context.current_performance_context",
@@ -541,9 +554,77 @@ class CanonicalWiringTests(unittest.TestCase):
                 side_effect=lambda value: value,
             ),
         ):
-            self.assertEqual(coach.current_performance(snapshot), {})
-        self.assertEqual(manager.events, ["reader", "read", "read", "reader_exit"])
+            self.assertEqual(coach.current_performance(snapshot, canonical), {})
         self.assertEqual(project.call_args.kwargs["canonical"].ctl, 50.0)
+
+    def test_coach_without_a_source_reads_only_the_snapshot(self) -> None:
+        snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
+        coach = CoachPerformanceContextReader(
+            _profile_stub(), _garmin_stub(), Mock(), lambda: PARITY_TODAY
+        )
+        self.assertEqual(coach.read_snapshot(lambda: snapshot), (snapshot, None))
+
+    def test_structured_context_pairs_load_with_the_snapshot_it_reads(self) -> None:
+        snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
+        inputs = CanonicalPerformanceInputs(
+            wellness_day=PARITY_TODAY, ctl=50.0, atl=60.0
+        )
+        performance = Mock()
+        performance.read_snapshot.return_value = (snapshot, inputs)
+        repository = Mock()
+        service = _structured_service(repository, performance)
+        service.build(selection=_performance_selection())
+        performance.read_snapshot.assert_called_once_with(repository.latest_snapshot)
+        repository.latest_snapshot.assert_not_called()
+        performance.current_performance.assert_called_once_with(snapshot, inputs)
+
+    def test_structured_context_with_a_given_snapshot_uses_no_canonical_load(
+        self,
+    ) -> None:
+        snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
+        performance = Mock()
+        service = _structured_service(Mock(), performance)
+        service.build(snapshot, selection=_performance_selection())
+        performance.read_snapshot.assert_not_called()
+        performance.current_performance.assert_called_once_with(snapshot, None)
+
+    def test_public_state_prelude_reads_load_inside_its_snapshot_unit(self) -> None:
+        snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
+        manager = RecordingManager()
+        reader = StubObservationReader(_observations(snapshot), events=manager.events)
+        service = _service(
+            snapshot,
+            CanonicalPerformanceSource(
+                database_manager=lambda: manager,
+                observation_reader=lambda: reader,
+            ),
+        )
+        prelude = _prelude(snapshot, manager, service.canonical_inputs).read(True)
+        self.assertEqual(manager.events, ["enter", "read", "read", "exit"])
+        self.assertEqual(
+            prelude.performance_inputs,
+            CanonicalPerformanceInputs(wellness_day=PARITY_TODAY, ctl=50.0, atl=60.0),
+        )
+        with patch(
+            "backend.http_api.public_performance.performance_context.current_performance_context",
+            return_value={},
+        ) as project:
+            service.from_snapshot(snapshot, prelude.performance_inputs)
+        self.assertEqual(project.call_args.kwargs["canonical"].atl, 60.0)
+
+    def test_public_state_prelude_without_inputs_keeps_the_legacy_read(self) -> None:
+        snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
+        manager = RecordingManager()
+        self.assertIsNone(
+            _prelude(snapshot, manager, None).read(True).performance_inputs
+        )
+        self.assertIsNone(_service(snapshot, None).canonical_inputs("db", snapshot))
+        with patch(
+            "backend.http_api.public_performance.performance_context.current_performance_context",
+            return_value={},
+        ) as project:
+            _service(snapshot, None).from_snapshot(snapshot)
+        project.assert_called_once_with(snapshot, {}, PARITY_PROFILE, PARITY_TODAY)
 
     def test_coach_performance_without_a_source_keeps_the_legacy_call(self) -> None:
         snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
@@ -562,6 +643,44 @@ class CanonicalWiringTests(unittest.TestCase):
         ):
             coach.current_performance(snapshot)
         project.assert_called_once_with(snapshot, {}, PARITY_PROFILE, PARITY_TODAY)
+
+
+def _performance_selection() -> Mock:
+    selection = Mock()
+    selection.sections = frozenset({"current_performance"})
+    return selection
+
+
+def _structured_service(
+    repository: Mock, performance: Mock
+) -> CoachStructuredContextService:
+    return CoachStructuredContextService(
+        repository, Mock(), Mock(), Mock(), Mock(), performance
+    )
+
+
+def _prelude(
+    snapshot: dict[str, Any], manager: RecordingManager, inputs: Any
+) -> PublicStateLocalPrelude:
+    state = Mock()
+    state.latest_snapshot.return_value = snapshot
+    feedback = Mock()
+    feedback.attach_to_activities.return_value = []
+    planned = Mock()
+    planned.list.return_value = []
+    weather = Mock()
+    weather.state.return_value = {}
+    return PublicStateLocalPrelude(
+        state,
+        feedback,
+        planned,
+        weather,
+        manager,  # type: ignore[arg-type]
+        nullcontext(),
+        lambda: PARITY_TODAY,
+        CalendarWindowRange(35, 35),
+        inputs,
+    )
 
 
 def _profile_stub() -> Mock:

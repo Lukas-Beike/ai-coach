@@ -105,8 +105,9 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
         )
         self.assertEqual(result, expected)
         self.assertNotIn("private_description", result)
-        self.repository.latest_snapshot.assert_called_once_with()
-        self.structured.build.assert_called_once_with(self.snapshot)
+        # The structured service reads the snapshot with its canonical inputs.
+        self.repository.latest_snapshot.assert_not_called()
+        self.structured.build.assert_called_once_with()
 
     def test_build_preserves_structured_intervals_until_section_bounding(self):
         intervals = {
@@ -142,7 +143,7 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
             parsed["projection"]["section_characters"]["intervals"],
             len(json.dumps(intervals, ensure_ascii=False, separators=(",", ":"))),
         )
-        self.structured.build.assert_called_once_with(self.snapshot)
+        self.structured.build.assert_called_once_with()
 
     def test_section_and_total_truncation_keep_valid_bounded_context(self):
         budget = len(COACH_PROMPT) + 1000

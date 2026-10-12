@@ -23,7 +23,7 @@ from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
     performance_options,
-    read_performance_inputs,
+    snapshot_with_inputs,
 )
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import context as planning_context
@@ -430,25 +430,24 @@ class CoachPerformanceContextReader:
     def intervals(self, snapshot: Any, planned: Any) -> dict[str, Any]:
         return CoachIntervalsContextService().project(snapshot, planned, self._today())
 
-    def current_performance(self, snapshot: Any) -> Any:
+    def read_snapshot(
+        self, read_snapshot: Callable[[], Any]
+    ) -> tuple[Any, CanonicalPerformanceInputs | None]:
+        """Read the snapshot and its canonical load inputs in one unit of work."""
+        return snapshot_with_inputs(self._canonical, read_snapshot)
+
+    def current_performance(
+        self, snapshot: Any, canonical: CanonicalPerformanceInputs | None = None
+    ) -> Any:
         return coach_performance_projection(
             performance_context.current_performance_context(
                 snapshot,
                 self._garmin_payload_service.snapshot(),
                 self._profile_service.get(),
                 self._today(),
-                **performance_options(self._canonical_inputs(snapshot)),
+                **performance_options(canonical),
             )
         )
-
-    def _canonical_inputs(self, snapshot: Any) -> CanonicalPerformanceInputs | None:
-        source = self._canonical
-        if source is None:
-            return None
-        # The caller read the snapshot in its own unit of work, so this is a
-        # separate read; the reader reuses an enclosing transaction when one exists.
-        with source.database_manager().reader() as db:
-            return read_performance_inputs(source.observation_reader(), db, snapshot)
 
     def garmin(self, snapshot: Any) -> Any:
         return self._garmin_projection_service.coach_context(
@@ -481,12 +480,16 @@ class CoachStructuredContextService:
         *,
         selection: CoachContextSelection | None = None,
     ) -> dict[str, Any]:
-        """Assemble the bounded structured context using explicit read services."""
-        snapshot = (
-            snapshot
-            if snapshot is not None
-            else self._sync_state_repository.latest_snapshot()
-        )
+        """Assemble the bounded structured context using explicit read services.
+
+        Canonical load inputs are only used when this call reads the snapshot
+        itself, so both come from one transaction.
+        """
+        performance_inputs: CanonicalPerformanceInputs | None = None
+        if snapshot is None:
+            snapshot, performance_inputs = self._performance_reader.read_snapshot(
+                self._sync_state_repository.latest_snapshot
+            )
         included = selection.sections if selection else CONTEXT_SECTIONS
         checkins = (
             self._checkin_service.context()
@@ -518,7 +521,13 @@ class CoachStructuredContextService:
             else []
         )
         return self._selected_sections(
-            included, snapshot, checkins, local_planned_workouts, weather, daily_context
+            included,
+            snapshot,
+            checkins,
+            local_planned_workouts,
+            weather,
+            daily_context,
+            performance_inputs=performance_inputs,
         )
 
     def _selected_sections(
@@ -529,6 +538,8 @@ class CoachStructuredContextService:
         local_planned_workouts: Any,
         weather: Any,
         daily_context: Any,
+        *,
+        performance_inputs: CanonicalPerformanceInputs | None = None,
     ) -> dict[str, Any]:
         context = {
             "durable_profile": self._performance_reader.profile()
@@ -560,7 +571,7 @@ class CoachStructuredContextService:
             if "intervals" in included
             else None,
             "current_performance": self._performance_reader.current_performance(
-                snapshot
+                snapshot, performance_inputs
             )
             if "current_performance" in included
             else None,
@@ -818,11 +829,10 @@ class CoachTrainingContextService:
     def build(
         self, *, selection: CoachContextSelection | None = None, local_date: str = ""
     ) -> str:
-        snapshot = self._sync_state_repository.latest_snapshot()
         structured_context = (
-            self._structured_context_service.build(snapshot, selection=selection)
+            self._structured_context_service.build(selection=selection)
             if selection
-            else self._structured_context_service.build(snapshot)
+            else self._structured_context_service.build()
         )
         prompt_context = dict(structured_context)
         if selection:
@@ -972,9 +982,7 @@ class CoachContextPreviewService:
             None,
         )
         context_text = self._coach_training_context_service.build()
-        preview_structured_context = self._coach_structured_context_service.build(
-            snapshot
-        )
+        preview_structured_context = self._coach_structured_context_service.build()
         preview_prompt_context = dict(preview_structured_context)
         preview_local_plans = compact_coach_local_planned_workouts(
             preview_prompt_context.get("local_planned_workouts"),

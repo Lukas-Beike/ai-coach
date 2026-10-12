@@ -318,6 +318,7 @@ class PublicStateAssembly:
             CalendarWindowRange(
                 self._calendar_history_days(), self._calendar_future_days()
             ),
+            self.performance_state_service().canonical_inputs,
         )
 
     def weather_prelude_service(self) -> PublicStateWeatherPrelude:

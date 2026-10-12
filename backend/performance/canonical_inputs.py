@@ -43,6 +43,32 @@ class CanonicalPerformanceSource:
     observation_reader: Callable[[], ObservationReader]
 
 
+def snapshot_with_inputs(
+    source: CanonicalPerformanceSource | None,
+    read_snapshot: Callable[[], Any],
+) -> tuple[Any, CanonicalPerformanceInputs | None]:
+    """Read a snapshot and its canonical load inputs in one unit of work.
+
+    Without a canonical source the snapshot is read exactly as before.
+    """
+    if source is None:
+        return read_snapshot(), None
+    with source.database_manager().unit_of_work() as db:
+        snapshot = read_snapshot()
+        return snapshot, read_performance_inputs(
+            source.observation_reader(), db, snapshot
+        )
+
+
+def inputs_for_snapshot(
+    source: CanonicalPerformanceSource | None, db: Any, snapshot: Any
+) -> CanonicalPerformanceInputs | None:
+    """Read canonical load inputs inside the caller's snapshot transaction."""
+    if source is None:
+        return None
+    return read_performance_inputs(source.observation_reader(), db, snapshot)
+
+
 def load_performance_inputs(
     reader: ObservationReader,
     db: Any,

@@ -10,8 +10,9 @@ from backend.performance import context as performance_context
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
+    inputs_for_snapshot,
     performance_options,
-    read_performance_inputs,
+    snapshot_with_inputs,
 )
 from backend.performance.chart_history import analysis_history
 
@@ -36,20 +37,24 @@ class PublicPerformanceStateService:
         self._canonical = canonical
 
     def performance_state(self) -> dict[str, Any]:
-        source = self._canonical
-        if source is None:
-            return self.from_snapshot(self._sync_state_repository.latest_snapshot())
-        # One unit of work: the snapshot and the canonical reads share a connection.
-        with source.database_manager().unit_of_work() as db:
-            snapshot = self._sync_state_repository.latest_snapshot()
-            canonical = read_performance_inputs(
-                source.observation_reader(), db, snapshot
-            )
+        snapshot, canonical = snapshot_with_inputs(
+            self._canonical, self._sync_state_repository.latest_snapshot
+        )
         return self._project(snapshot, canonical)
 
-    def from_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
-        """Project a snapshot already read by a larger state request."""
-        return self._project(snapshot, None)
+    def canonical_inputs(
+        self, db: Any, snapshot: Any
+    ) -> CanonicalPerformanceInputs | None:
+        """Read the load inputs inside the transaction that read ``snapshot``."""
+        return inputs_for_snapshot(self._canonical, db, snapshot)
+
+    def from_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        canonical: CanonicalPerformanceInputs | None = None,
+    ) -> dict[str, Any]:
+        """Project a snapshot and the inputs a larger state request read with it."""
+        return self._project(snapshot, canonical)
 
     def _project(
         self,
