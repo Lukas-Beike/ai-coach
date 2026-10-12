@@ -26,7 +26,7 @@ class ActivityReferenceResolver(Protocol):
     def local_ids(self, provider_activity_ids: Iterable[str]) -> dict[str, str]: ...
 
 
-class ActivityReferences:
+class ActivityReferences(ActivityReferenceResolver):
     """Resolve local activity ids through the canonical session rows."""
 
     def __init__(self, database_manager: Any) -> None:
@@ -54,7 +54,7 @@ class ActivityReferences:
             )
 
 
-class NoActivityReferences:
+class NoActivityReferences(ActivityReferenceResolver):
     """Identity resolver for owners that are composed without a canonical store."""
 
     def resolve(self, reference: Any) -> Any:
