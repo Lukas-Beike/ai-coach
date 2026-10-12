@@ -9,9 +9,11 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
+from backend.canonical.stored_sports import EQUIPMENT_SPORT_TOKENS
 from backend.errors import AppError
 
 EQUIPMENT_PREFIX = "equipment:"
+EQUIPMENT_SPORTS = frozenset(EQUIPMENT_SPORT_TOKENS)
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
 
 
@@ -532,8 +534,7 @@ def _equipment_identity(payload: dict, today: date) -> tuple[str, date, str]:
     if (
         not name
         or len(name) > 200
-        or payload.get("sport")
-        not in {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining", "Other"}
+        or payload.get("sport") not in EQUIPMENT_SPORTS
         or payload.get("kind") not in {"shoes", "bike", "component", "other"}
         or payload.get("status", "active") not in {"active", "archived"}
     ):
