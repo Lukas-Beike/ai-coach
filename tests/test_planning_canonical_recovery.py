@@ -14,20 +14,18 @@ import json
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, date, datetime
+from datetime import date
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
+from canonical_recovery_support import RecordingReader, recovery_observation
 
-from backend.canonical.records import MetricValue, Observation, Provenance
+from backend.canonical.records import Observation
 from backend.canonical.vocabulary import (
     MetricKind,
     ProviderId,
-    RecordingOrigin,
-    SourceKind,
-    Sport,
 )
 from backend.performance import planning_recovery
 from backend.performance.canonical_recovery import CanonicalDailyRecovery
@@ -42,13 +40,7 @@ from backend.runtime.ports import ObservationSourceSelector
 
 DAY = "2026-09-20"
 OTHER_DAY = "2026-09-21"
-RETRIEVED = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
 TODAY = date(2026, 10, 10)
-UNITS = {
-    MetricKind.SLEEP_SCORE: "score",
-    MetricKind.RESTING_HR: "bpm",
-    MetricKind.READINESS: "score",
-}
 EMPTY = CanonicalDailyRecovery(sleep_score={}, resting_hr={}, readiness={})
 
 
@@ -58,25 +50,7 @@ def _observation(
     day: str = DAY,
     provider: ProviderId = ProviderId.GARMIN,
 ) -> Observation:
-    recorded_by = (
-        RecordingOrigin.GARMIN
-        if provider is ProviderId.GARMIN
-        else RecordingOrigin.MANUAL
-    )
-    return Observation(
-        kind=kind,
-        value=MetricValue(value, UNITS[kind]),
-        observed_on=date.fromisoformat(day),
-        observed_at=None,
-        provenance=Provenance(
-            provider=provider,
-            source_kind=SourceKind.PROVIDER_REPORTED,
-            source_record_id=f"{kind.value}-{day}",
-            recorded_by=recorded_by,
-            retrieved_at=RETRIEVED,
-            label=None,
-        ),
-    )
+    return recovery_observation(kind, value, day, provider)
 
 
 def _legacy(field: str, value: Any, source: str, day: str = DAY) -> dict[str, Any]:
@@ -91,29 +65,16 @@ def _daily(**maps: dict[str, Observation]) -> CanonicalDailyRecovery:
     )
 
 
-class _SpyReader:
+class _SpyReader(RecordingReader):
     """Serves fixed observations per kind, records each read, and counts selections."""
 
     def __init__(self, by_kind: dict[MetricKind, list[Observation]]) -> None:
-        self._by_kind = by_kind
-        self.calls: list[tuple[MetricKind, date | None, date | None]] = []
+        super().__init__(by_kind)
         self.selected = 0
 
     def reader_for(self, db: Any) -> _SpyReader:
         self.selected += 1
         return self
-
-    def observations(
-        self,
-        db: Any,
-        kind: MetricKind,
-        *,
-        start: date | None = None,
-        end: date | None = None,
-        sport: Sport | None = None,
-    ) -> tuple[Observation, ...]:
-        self.calls.append((kind, start, end))
-        return tuple(self._by_kind.get(kind, []))
 
 
 class _CountingSelector:
