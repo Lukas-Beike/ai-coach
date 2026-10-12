@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend import change_history
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 
 
@@ -80,13 +81,15 @@ class AthleteContextService:
             ):
                 db.execute(
                     "INSERT INTO competition_sync_tombstones "
-                    "(id, intervals_event_id, external_id, created_at) "
-                    "VALUES (?, ?, ?, ?)",
+                    "(id, intervals_event_id, external_id, created_at, provider) "
+                    "VALUES (?, ?, ?, ?, ?)",
                     (
                         str(self.new_id()),
                         row.get("intervals_event_id"),
                         row.get("external_id"),
                         now,
+                        # Competition remote slots are Intervals.icu event ids.
+                        ProviderId.INTERVALS.value,
                     ),
                 )
 

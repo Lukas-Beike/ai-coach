@@ -117,6 +117,33 @@ class StandardFixtureDataTests(unittest.TestCase):
             )
             self.assertGreater(sleep["sleepScore"], 0)
 
+    def test_standard_fixture_remote_links_match_the_legacy_remote_slots(self):
+        # The standard fixture only holds local entities, so no legacy slot
+        # carries a remote identifier and remote_links must hold no row either.
+        with self._temporary_fixture_database("fixture-remote-links-") as server:
+            fixture_runtime.initialise_fixture()
+            fixture_runtime.seed_preview_demo()
+            with server.database_manager().unit_of_work() as db:
+                slots = db.execute(
+                    "SELECT (SELECT COUNT(*) FROM workout_library "
+                    "WHERE external_id IS NOT NULL) "
+                    "+ (SELECT COUNT(*) FROM planned_units "
+                    "WHERE external_id IS NOT NULL) "
+                    "+ (SELECT COUNT(*) FROM competitions "
+                    "WHERE intervals_event_id IS NOT NULL "
+                    "OR external_id IS NOT NULL) AS slots"
+                ).fetchone()["slots"]
+                links = db.execute("SELECT COUNT(*) AS n FROM remote_links").fetchone()[
+                    "n"
+                ]
+                unattributed = db.execute(
+                    "SELECT COUNT(*) AS n FROM competition_sync_tombstones "
+                    "WHERE provider IS NULL"
+                ).fetchone()["n"]
+        self.assertEqual(slots, 0)
+        self.assertEqual(links, slots)
+        self.assertEqual(unattributed, 0)
+
     def test_standard_dataset_covers_sparse_body_history_and_both_ftp_sources(self):
         wellness = fixture_runtime._fixture_demo_wellness(self.today)
         garmin = fixture_runtime._fixture_demo_garmin(

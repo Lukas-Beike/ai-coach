@@ -150,6 +150,25 @@ def seed_provider_rows(db):
     db.commit()
 
 
+def seed_remote_link_rows(db):
+    for kind, local_id, remote_id in (
+        ("competition", "1", "event-1"),
+        ("library_workout", "lib-1", "event-2"),
+        ("planned_unit", "u-1", "event-3"),
+    ):
+        db.execute(
+            "INSERT INTO remote_links(entity_kind, local_id, provider, remote_id, "
+            "sync_state) VALUES (?, ?, 'intervals', ?, 'synced')",
+            (kind, local_id, remote_id),
+        )
+    db.execute(
+        "INSERT INTO competition_sync_tombstones(intervals_event_id, external_id, "
+        "created_at, provider) VALUES ('event-9', 'external-9', ?, 'intervals')",
+        (STAMP,),
+    )
+    db.commit()
+
+
 class ProviderDataFixture(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -196,14 +215,37 @@ class PrivacyExportProviderTests(ProviderDataFixture):
     def lines(archive, name):
         return [json.loads(line) for line in archive.read(name).splitlines() if line]
 
-    def test_format_version_three_lists_the_provider_files(self):
-        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 3)
-        self.assertLessEqual(set(PROVIDER_FILES), PRIVACY_EXPORT_JSONL_FILES)
+    def test_format_version_four_lists_the_provider_and_remote_link_files(self):
+        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 4)
+        expected = {*PROVIDER_FILES, "remote_links.jsonl"}
+        self.assertLessEqual(expected, PRIVACY_EXPORT_JSONL_FILES)
         with self.export() as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(manifest["format_version"], 3)
-            self.assertLessEqual(set(PROVIDER_FILES), set(manifest["jsonl_files"]))
-            self.assertLessEqual(set(PROVIDER_FILES), set(archive.namelist()))
+            self.assertEqual(manifest["format_version"], 4)
+            self.assertLessEqual(expected, set(manifest["jsonl_files"]))
+            self.assertLessEqual(expected, set(archive.namelist()))
+
+    def test_remote_links_and_tombstone_providers_are_exported(self):
+        seed_remote_link_rows(self.db)
+        with self.export() as archive:
+            links = self.lines(archive, "remote_links.jsonl")
+            tombstones = self.lines(archive, "competition_sync_tombstones.jsonl")
+        self.assertEqual(
+            [(row["entity_kind"], row["local_id"]) for row in links],
+            [
+                ("competition", "1"),
+                ("library_workout", "lib-1"),
+                ("planned_unit", "u-1"),
+            ],
+        )
+        self.assertEqual(links[0]["provider"], "intervals")
+        self.assertEqual(links[0]["remote_id"], "event-1")
+        self.assertEqual(links[0]["sync_state"], "synced")
+        self.assertEqual(tombstones[0]["provider"], "intervals")
+
+    def test_empty_remote_links_export_an_empty_file(self):
+        with self.export() as archive:
+            self.assertEqual(archive.read("remote_links.jsonl"), b"")
 
     def test_provider_rows_are_exported_with_sanitized_payloads(self):
         seed_provider_rows(self.db)
@@ -380,6 +422,30 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
                 self.assertEqual(
                     self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0],
                     0,
+                )
+
+    def test_remote_links_are_listed_with_the_entities_they_belong_to(self):
+        scope = {category: tables for category, _label, tables in PRIVACY_DELETE_SCOPE}
+        self.assertIn("remote_links", scope["library"])
+        self.assertIn("remote_links", scope["competitions"])
+
+    def test_preview_counts_remote_links_by_owning_group(self):
+        seed_remote_link_rows(self.db)
+        preview = self.service().preview()
+        counts = {item["id"]: item["records"] for item in preview["categories"]}
+        # Two library links, one competition link and one tombstone.
+        self.assertEqual(counts["library"], 2)
+        self.assertEqual(counts["competitions"], 2)
+
+    def test_delete_removes_every_remote_link(self):
+        seed_remote_link_rows(self.db)
+        result = self.service().delete("LOKALE DATEN LÖSCHEN")
+        self.assertEqual(result["deleted_categories"]["library"], 2)
+        self.assertEqual(result["deleted_categories"]["competitions"], 2)
+        for table in ("remote_links", "competition_sync_tombstones"):
+            with self.subTest(table=table):
+                self.assertEqual(
+                    self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0
                 )
 
 

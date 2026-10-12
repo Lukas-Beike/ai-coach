@@ -56,6 +56,28 @@ class DatabaseBootstrapTests(unittest.TestCase):
             "updated_at FROM activity_feedback_v7"
         )
         db.execute("DROP TABLE activity_feedback_v7")
+        # Schema v8 added remote_links and the tombstone provider column; the
+        # tombstone table is rebuilt with its released DDL for the same reason.
+        db.execute("DROP TABLE remote_links")
+        db.execute(
+            "ALTER TABLE competition_sync_tombstones "
+            "RENAME TO competition_sync_tombstones_v8"
+        )
+        db.execute(
+            """
+            CREATE TABLE competition_sync_tombstones (
+                id TEXT PRIMARY KEY,
+                intervals_event_id TEXT,
+                external_id TEXT,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+        db.execute(
+            "INSERT INTO competition_sync_tombstones SELECT id, intervals_event_id, "
+            "external_id, created_at FROM competition_sync_tombstones_v8"
+        )
+        db.execute("DROP TABLE competition_sync_tombstones_v8")
         for table in (
             "observations",
             "activity_records",

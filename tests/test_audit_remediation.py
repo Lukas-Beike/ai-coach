@@ -102,7 +102,7 @@ class AuditRemediationTests(unittest.TestCase):
         def delete(_):
             with server.DB_LOCK, server.database_manager().unit_of_work() as db:
                 db.execute(
-                    "INSERT INTO competition_sync_tombstones VALUES ('later', '456', 'later-external', ?)",
+                    "INSERT INTO competition_sync_tombstones VALUES ('later', '456', 'later-external', ?, NULL)",
                     (runtime_clock.utc_now(),),
                 )
 
