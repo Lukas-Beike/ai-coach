@@ -25,6 +25,10 @@ from backend.planning.context import compact_snapshot
 from backend.planning.library_service import WorkoutLibraryService
 from backend.providers.intervals import IntervalsApiClient
 from backend.providers.intervals_power import PROFILE_DURATIONS, cycling_power_points
+from backend.sync.canonical_coverage_store import (
+    CanonicalCoverageStore,
+    intervals_snapshot_coverage,
+)
 from backend.sync.canonical_ingest import ingest_intervals_snapshot
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.freshness_sources import intervals_sync_running
@@ -290,6 +294,7 @@ class IntervalsSnapshotService:
     ) -> None:
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
+        self._coverage = CanonicalCoverageStore(key_value_repository)
         self._sync_state_repository = sync_state_repository
         self._remote_planned_unit_reconciler = remote_planned_unit_reconciler
         self._workout_library_refresh_service = workout_library_refresh_service
@@ -334,6 +339,9 @@ class IntervalsSnapshotService:
                 activity_days=activity_days if end_date is None else None,
                 all_sync_days=self._all_sync_days,
                 earliest_date=self._earliest_date,
+            )
+            self._coverage.persist(
+                db, intervals_snapshot_coverage(snapshot, zone=zone), zone=zone
             )
             if end_date is None:
                 # Nested service calls intentionally share this UOW: reconciliation

@@ -17,8 +17,10 @@ divergence that the dual-write did not catch is found at the next check, not
 immediately.
 
 Otherwise reads come from the legacy projection, which is always correct. Coverage
-is always served by the legacy projection because mapping issue counts are not
-stored in the tables.
+is served from the summary each ingest persists (``canonical_coverage:<provider>``,
+see ``canonical_coverage_store``), because mapping issue counts are not stored in
+the tables. A provider without a current summary falls back to the legacy
+projection.
 
 The switch state is a content-free record in the ``canonical_read_state`` key. It
 holds the source, a reason word, the digest, the parity counts and, on failure,
@@ -34,7 +36,7 @@ from typing import Any, Final
 
 from backend.canonical.coverage import ProviderCoverage
 from backend.canonical.records import ActivityRecord, Observation
-from backend.canonical.vocabulary import MetricKind, Sport
+from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.db.repositories import KeyValueRepository
 from backend.providers.canonical_plans import current_mapper_versions
 from backend.runtime.ports import (
@@ -44,6 +46,7 @@ from backend.runtime.ports import (
     ProviderCoverageReader,
 )
 from backend.sync.canonical_backfill import BackfillStatus, read_status
+from backend.sync.canonical_coverage_store import CanonicalCoverageStore
 from backend.sync.canonical_parity import CanonicalParity, CanonicalReader
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
 
@@ -72,6 +75,7 @@ class CanonicalReadSelector(
         self._table = table
         self._parity = parity
         self._key_values = key_values
+        self._coverage_store = CanonicalCoverageStore(key_values)
 
     def activities(
         self,
@@ -100,7 +104,23 @@ class CanonicalReadSelector(
         return self._source(db)
 
     def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]:
-        return self._legacy.coverage(db)
+        """Return the coverage persisted at ingest time.
+
+        A provider without a current persisted summary (nothing ingested yet, or
+        mapper versions or time zone changed since) falls back to the legacy
+        projection, which is computed only when at least one provider needs it.
+        """
+        zone = self._legacy.zone(db)
+        stored = {
+            provider: self._coverage_store.load(db, provider, zone=zone)
+            for provider in ProviderId
+        }
+        if all(summary is not None for summary in stored.values()):
+            return tuple(summary for summary in stored.values() if summary is not None)
+        return tuple(
+            stored.get(summary.provider) or summary
+            for summary in self._legacy.coverage(db)
+        )
 
     def serves_tables(self, db: Any) -> bool:
         """Return True while observation and activity reads come from the tables."""

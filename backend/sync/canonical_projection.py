@@ -22,7 +22,7 @@ from datetime import date, datetime, tzinfo
 from itertools import chain
 from typing import Any
 
-from backend.canonical.coverage import ProviderCoverage, count_issues
+from backend.canonical.coverage import ProviderCoverage, summarize_provider
 from backend.canonical.local_time import local_date
 from backend.canonical.mapping import MappingResult
 from backend.canonical.ordering import activity_order, observation_order
@@ -214,15 +214,6 @@ def _in_range(day: date, start: date | None, end: date | None) -> bool:
 
 
 def _coverage(source: _Source) -> ProviderCoverage:
-    days = [observation.observed_on for observation in source.observations.records]
-    return ProviderCoverage(
-        provider=source.provider,
-        retrieved_at=source.stored_at,
-        activity_count=len(source.activities.records),
-        observation_count=len(source.observations.records),
-        issue_counts=count_issues(
-            (*source.activities.issues, *source.observations.issues)
-        ),
-        first_observed_on=min(days, default=None),
-        last_observed_on=max(days, default=None),
+    return summarize_provider(
+        source.provider, source.stored_at, source.activities, source.observations
     )

@@ -133,6 +133,23 @@ def ingest_intervals_snapshot(
     )
 
 
+def ingest_intervals_partial_snapshot(
+    db: Any, snapshot: Mapping[str, Any], *, zone: tzinfo
+) -> CanonicalIngestCounters:
+    """Write the raw block of a partial Intervals.icu fetch, such as a performance refresh.
+
+    A partial window never marks missing records deleted: only a full window
+    knows which records the provider no longer returns.
+    """
+    retrieved_at = stored_retrieved_at(snapshot, zone=zone)
+    if retrieved_at is None:
+        return CanonicalIngestCounters()
+    plan = intervals_ingest_plan(
+        snapshot.get("raw_provider_data"), zone=zone, retrieved_at=retrieved_at
+    )
+    return ingest_plan(db, plan, retrieved_at=retrieved_at, deletion_window=None)
+
+
 def ingest_garmin_payload(
     db: Any, payload: Mapping[str, Any], *, zone: tzinfo
 ) -> CanonicalIngestCounters:

@@ -159,6 +159,27 @@ def read_status(key_values: KeyValueRepository, db: Any) -> str:
     return status if isinstance(status, str) else BackfillStatus.PENDING.value
 
 
+def backfill_complete(key_values: KeyValueRepository, db: Any) -> bool:
+    """Return True when the backfill is complete for the current mapper versions.
+
+    A read-only query. After a mapper upgrade the stored status stays ``complete``
+    until the worker's first batch moves it back to re-projection, so the stored
+    mapper versions are compared too. A missing, corrupt or older record is False.
+    """
+    raw = key_values.get(db, STATE_KEY)
+    if raw is None:
+        return False
+    try:
+        state = json.loads(raw)
+    except ValueError:
+        return False
+    return (
+        isinstance(state, dict)
+        and state.get("status") == BackfillStatus.COMPLETE.value
+        and state.get("versions") == current_mapper_versions()
+    )
+
+
 class CanonicalBackfill:
     """Runs the backfill one batch at a time. The caller owns the transaction."""
 
