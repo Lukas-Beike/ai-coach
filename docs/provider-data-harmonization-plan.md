@@ -974,6 +974,21 @@ Ergebnis P5-U2, P5-U8 und P5-U3:
   bleibt im Ledger, weil der Legacy-Weg den Rohtext „58,2“ ausgibt. Freigabe
   dieser einen geänderten Ledger-Zeile durch den Koordinator.
 
+Ergebnis P5-U4 (#1111):
+
+- **CTL/ATL:** `/api/performance`, `/api/state` und der Coach lesen CTL und ATL
+  aus den kanonischen Beobachtungen (`backend/performance/canonical_inputs.py`),
+  ausgewählt über `select_current` für den letzten Wellness-Tag des Snapshots.
+  Ohne kanonische Quelle oder ohne gültigen Wellness-Tag läuft der Legacy-Aufruf
+  unverändert. Einzige freigegebene Abweichung: Komma-Text „58,2“ wird als
+  Zahl 58.2 ausgegeben.
+- **Konsistenz:** Snapshot und kanonische Eingaben stammen immer aus einer
+  `unit_of_work` (`snapshot_with_inputs`, im State-Prelude `inputs_for_snapshot`).
+  Der Coach nutzt kanonische Eingaben nur, wenn er den Snapshot selbst liest.
+  Mitgegebene Snapshots behalten die Legacy-Werte.
+- **Kompatibilität:** `/api/state` liest das neue Prelude-Feld tolerant, weil
+  Testdoubles das Prelude ohne dieses Feld nachbilden.
+
 Aufteilung Phase 5 (Stufen):
 
 | Stufe | Einheiten |
