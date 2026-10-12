@@ -11,21 +11,16 @@ from __future__ import annotations
 
 import json
 import unittest
-from datetime import UTC, date, datetime
+from datetime import date
 from typing import Any
 from unittest.mock import patch
 
 from canonical_consumer_parity import TODAY
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
+from canonical_recovery_support import RecordingReader, recovery_observation
 
-from backend.canonical.records import MetricValue, Observation, Provenance
-from backend.canonical.vocabulary import (
-    MetricKind,
-    ProviderId,
-    RecordingOrigin,
-    SourceKind,
-    Sport,
-)
+from backend.canonical.records import Observation
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import recovery_context
 from backend.performance.canonical_inputs import read_performance_inputs
 from backend.performance.canonical_recovery_averages import (
@@ -36,8 +31,6 @@ from backend.performance.canonical_recovery_averages import (
 from backend.performance.context import current_performance_context
 from backend.performance.recovery_context import performance_recovery_context
 
-RETRIEVED = datetime(2026, 10, 12, 8, 0, tzinfo=UTC)
-UNITS = {MetricKind.RESTING_HR: "bpm", MetricKind.READINESS: "score"}
 WINDOW_START = date(2026, 10, 6)
 WINDOW_DAYS = [date.fromordinal(WINDOW_START.toordinal() + step) for step in range(7)]
 
@@ -48,45 +41,7 @@ def _observation(
     day: date,
     provider: ProviderId = ProviderId.GARMIN,
 ) -> Observation:
-    recorded_by = (
-        RecordingOrigin.GARMIN
-        if provider is ProviderId.GARMIN
-        else RecordingOrigin.MANUAL
-    )
-    return Observation(
-        kind=kind,
-        value=MetricValue(value, UNITS[kind]),
-        observed_on=day,
-        observed_at=None,
-        provenance=Provenance(
-            provider=provider,
-            source_kind=SourceKind.PROVIDER_REPORTED,
-            source_record_id=f"{kind.value}-{day.isoformat()}",
-            recorded_by=recorded_by,
-            retrieved_at=RETRIEVED,
-            label=None,
-        ),
-    )
-
-
-class _FakeReader:
-    """Serves fixed observations per kind and records each read."""
-
-    def __init__(self, by_kind: dict[MetricKind, list[Observation]]) -> None:
-        self._by_kind = by_kind
-        self.calls: list[tuple[MetricKind, date | None, date | None]] = []
-
-    def observations(
-        self,
-        db: Any,
-        kind: MetricKind,
-        *,
-        start: date | None = None,
-        end: date | None = None,
-        sport: Sport | None = None,
-    ) -> tuple[Observation, ...]:
-        self.calls.append((kind, start, end))
-        return tuple(self._by_kind.get(kind, []))
+    return recovery_observation(kind, value, day.isoformat(), provider)
 
 
 def _dump(value: Any) -> str:
@@ -130,7 +85,7 @@ def _legacy_values(values: list[float]) -> list[tuple[date, float]]:
 
 class ReadRecoveryAverageInputsTests(unittest.TestCase):
     def test_both_kinds_are_read_from_the_start_without_an_end_bound(self) -> None:
-        reader = _FakeReader({})
+        reader = RecordingReader({})
         start = WINDOW_START
         inputs = read_recovery_average_inputs(reader, None, start=start)
         self.assertEqual(
@@ -147,7 +102,7 @@ class ReadRecoveryAverageInputsTests(unittest.TestCase):
         readiness = _observation(
             MetricKind.READINESS, 70.0, WINDOW_DAYS[0], ProviderId.INTERVALS
         )
-        reader = _FakeReader(
+        reader = RecordingReader(
             {MetricKind.RESTING_HR: [resting], MetricKind.READINESS: [readiness]}
         )
         inputs = read_recovery_average_inputs(reader, None, start=WINDOW_START)
