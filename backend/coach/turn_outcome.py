@@ -46,6 +46,22 @@ class _SyncJob:
         return self.writes_remote and (self.started_here or self.status != "completed")
 
 
+def _inspected_jobs(
+    command_receipts: list[dict[str, Any]],
+) -> dict[str, tuple[str, str | None]]:
+    """Latest inspected status per job id, keeping the last reported job type."""
+    inspected: dict[str, tuple[str, str | None]] = {}
+    for entry in command_receipts:
+        job = (entry.get("result") or {}).get("job")
+        if not isinstance(job, dict) or not job.get("id"):
+            continue
+        job_id = str(job["id"])
+        previous_type = inspected.get(job_id, ("", None))[1]
+        job_type = str(job["type"]) if job.get("type") else previous_type
+        inspected[job_id] = (str(job.get("status") or "unknown"), job_type)
+    return inspected
+
+
 def _sync_jobs(
     effects: list[dict[str, Any]], command_receipts: list[dict[str, Any]]
 ) -> dict[str, _SyncJob]:
@@ -54,35 +70,30 @@ def _sync_jobs(
     Unknown job types count as remote writes, so only known data refreshes keep
     the model's answer.
     """
-    jobs: dict[str, _SyncJob] = {}
-    observed_types: dict[str, str] = {}
-    for entry in command_receipts:
-        observed = (entry.get("result") or {}).get("job")
-        if isinstance(observed, dict) and observed.get("id"):
-            job_id = str(observed["id"])
-            if observed.get("type"):
-                observed_types[job_id] = str(observed["type"])
-            jobs[job_id] = _SyncJob(
-                status=str(observed.get("status") or "unknown"),
-                writes_remote=observed.get("type") not in _READ_ONLY_JOB_TYPES,
-                started_here=False,
-            )
+    inspected = _inspected_jobs(command_receipts)
+    jobs = {
+        job_id: _SyncJob(
+            status=status,
+            writes_remote=job_type not in _READ_ONLY_JOB_TYPES,
+            started_here=False,
+        )
+        for job_id, (status, job_type) in inspected.items()
+    }
     for entry in effects:
         result = entry.get("result") or {}
-        if result.get("status") == "queued" and result.get("sync_job_id"):
-            job_id = str(result["sync_job_id"])
-            observed_job = jobs.get(job_id)
-            # An inspected job type is authoritative over the tool that queued it.
-            writes_remote = (
-                observed_types[job_id] not in _READ_ONLY_JOB_TYPES
-                if job_id in observed_types
-                else entry.get("tool") not in _READ_ONLY_REFRESH_TOOLS
-            )
-            jobs[job_id] = _SyncJob(
-                status=observed_job.status if observed_job else "queued",
-                writes_remote=writes_remote,
-                started_here=True,
-            )
+        job_id = str(result.get("sync_job_id") or "")
+        if result.get("status") != "queued" or not job_id:
+            continue
+        status, job_type = inspected.get(job_id, ("queued", None))
+        # An inspected job type is authoritative over the tool that queued it.
+        writes_remote = (
+            job_type not in _READ_ONLY_JOB_TYPES
+            if job_type
+            else entry.get("tool") not in _READ_ONLY_REFRESH_TOOLS
+        )
+        jobs[job_id] = _SyncJob(
+            status=status, writes_remote=writes_remote, started_here=True
+        )
     return jobs
 
 

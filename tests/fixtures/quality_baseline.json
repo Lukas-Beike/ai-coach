@@ -1001,23 +1001,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 42,
-      "column": 15,
-      "code": "arg-type",
-      "message_sha256": "84c087c3edc1fdc2670002e0a2d344c006de6737fa58730960658598df1aa4c3"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "line": 42,
-      "column": 15,
-      "code": "arg-type",
-      "message_sha256": "afed839adb87afaffef924126bec2f2edff23d1990be88ea86df4f8d09249830"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "line": 93,
+      "line": 101,
       "column": 15,
       "code": "arg-type",
       "message_sha256": "01a4b33e9317a99c5507566b8e6bfae3dc12d7213e6274566ec7a68a005c15c8"
@@ -1025,7 +1009,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 93,
+      "line": 101,
       "column": 15,
       "code": "arg-type",
       "message_sha256": "5c99e03c0b7482fef0eb1fd152f5eeacad63c96c9362eabe614b1e39e0f6b0c0"
@@ -1033,10 +1017,26 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 93,
+      "line": 101,
       "column": 15,
       "code": "arg-type",
       "message_sha256": "c1a535fc787bf4ddd136d75c148e48f96a4ba980cbd2cd66b7844c24bb4d5af4"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 47,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "84c087c3edc1fdc2670002e0a2d344c006de6737fa58730960658598df1aa4c3"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/sync/commands.py",
+      "line": 47,
+      "column": 15,
+      "code": "arg-type",
+      "message_sha256": "afed839adb87afaffef924126bec2f2edff23d1990be88ea86df4f8d09249830"
     },
     {
       "tool": "mypy",
@@ -1385,7 +1385,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 46,
+      "line": 51,
       "column": 33,
       "code": "arg-type",
       "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
