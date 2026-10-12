@@ -80,6 +80,37 @@ class WahooWorkoutFetch:
     truncated: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class _PageRows:
+    """The rows of one page inside the window and whether it reached ``since``."""
+
+    workouts: tuple[Mapping[str, Any], ...]
+    skipped: int
+    reached_window_start: bool
+
+
+def _window_rows(
+    rows: list[Any], *, since: datetime, until: datetime | None
+) -> _PageRows:
+    """Keep the page rows that started inside the window."""
+    workouts: list[Mapping[str, Any]] = []
+    skipped = 0
+    reached_window_start = False
+    for row in rows:
+        if not isinstance(row, dict):
+            skipped += 1
+            continue
+        started = _started_at(row)
+        if started is None:
+            # Unusable start: kept for the mapper to count, never filtered.
+            workouts.append(row)
+        elif started < since:
+            reached_window_start = True
+        elif until is None or started <= until:
+            workouts.append(row)
+    return _PageRows(tuple(workouts), skipped, reached_window_start)
+
+
 def _invalid_response() -> AppError:
     return AppError(502, INVALID_RESPONSE_MESSAGE, reason="wahoo_invalid_response")
 
@@ -118,23 +149,10 @@ class WahooClient:
             rows = payload.get("workouts") if isinstance(payload, dict) else None
             if not isinstance(rows, list):
                 raise _invalid_response()
-            reached_window_start = False
-            for row in rows:
-                started = _started_at(row)
-                if not isinstance(row, dict):
-                    skipped += 1
-                    continue
-                if started is None:
-                    # Unusable start: kept for the mapper to count, never filtered.
-                    workouts.append(row)
-                    continue
-                if started < since:
-                    reached_window_start = True
-                    continue
-                if until is not None and started > until:
-                    continue
-                workouts.append(row)
-            if reached_window_start or len(rows) < _page_size(payload):
+            page_rows = _window_rows(rows, since=since, until=until)
+            workouts.extend(page_rows.workouts)
+            skipped += page_rows.skipped
+            if page_rows.reached_window_start or len(rows) < _page_size(payload):
                 return WahooWorkoutFetch(tuple(workouts), skipped)
         return WahooWorkoutFetch(tuple(workouts), skipped, truncated=True)
 

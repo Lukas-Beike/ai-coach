@@ -188,7 +188,7 @@ class WahooOrchestrationCase(WahooSyncCase):
         status = self.connection_service.status()
         return bool(status["configured"] and status["connected"])
 
-    def daily_scheduler(self) -> DailySyncScheduler:
+    def _daily_scheduler(self) -> DailySyncScheduler:
         return DailySyncScheduler(
             Mock(),
             self.queue,
@@ -212,7 +212,7 @@ class WahooOrchestrationCase(WahooSyncCase):
             registry=REGISTRY,
         )
 
-    def startup_scheduler(self) -> StartupSyncScheduler:
+    def _startup_scheduler(self) -> StartupSyncScheduler:
         return StartupSyncScheduler(
             Mock(),
             self.queue,
@@ -231,16 +231,16 @@ class WahooOrchestrationCase(WahooSyncCase):
             registry=REGISTRY,
         )
 
-    def drain(self) -> None:
+    def _drain(self) -> None:
         while (job := self.store.claim()) is not None:
             self.executor.run(job)
 
-    def jobs(self) -> list[dict[str, Any]]:
+    def _jobs(self) -> list[dict[str, Any]]:
         return self.rows(
             "SELECT * FROM sync_jobs WHERE provider = ? ORDER BY rowid", (WAHOO_ID,)
         )
 
-    def wahoo_freshness(self) -> dict[str, Any]:
+    def _wahoo_freshness(self) -> dict[str, Any]:
         entries = self.freshness.current(
             profile={}, garmin_has_core_error=False, garmin_tokenstore_exists=False
         )
@@ -253,29 +253,29 @@ class WahooAcceptanceTests(WahooOrchestrationCase):
             workout(1, LATE_EVENING_UTC),
             workout(2, EARLIER_UTC),
         ]
-        self.assertEqual("never_loaded", self.wahoo_freshness()["state"])
+        self.assertEqual("never_loaded", self._wahoo_freshness()["state"])
 
-        self.startup_scheduler().schedule()
+        self._startup_scheduler().schedule()
 
-        jobs = self.jobs()
+        jobs = self._jobs()
         self.assertEqual(["startup"], [job["requested_by"] for job in jobs])
         self.assertEqual(
             {"days": 84, "reason": "startup"}, json.loads(jobs[0]["payload"])
         )
 
         self.advance(minutes=1)
-        self.drain()
+        self._drain()
 
-        self.assertEqual(["completed"], [job["status"] for job in self.jobs()])
-        rows = self.activity_rows()
+        self.assertEqual(["completed"], [job["status"] for job in self._jobs()])
+        rows = self._activity_rows()
         self.assertEqual({"wahoo"}, {row["provider"] for row in rows})
         self.assertEqual(
             ["2026-10-12", "2026-10-10"], [row["local_date"] for row in rows]
         )
-        self.assertIsNotNone(self.marker())
+        self.assertIsNotNone(self._marker())
         self.assertEqual(["success"], self.refresh_statuses())
 
-        entry = self.wahoo_freshness()
+        entry = self._wahoo_freshness()
         self.assertEqual("fresh", entry["state"])
         self.assertEqual("Wahoo", entry["label"])
         self.assertTrue(entry["configured"])
@@ -296,59 +296,59 @@ class WahooAcceptanceTests(WahooOrchestrationCase):
         )
 
     def test_daily_scheduler_honours_the_marker_interval(self) -> None:
-        scheduler = self.daily_scheduler()
+        scheduler = self._daily_scheduler()
 
         scheduler.schedule()
-        self.assertEqual(1, len(self.jobs()))
-        self.drain()
+        self.assertEqual(1, len(self._jobs()))
+        self._drain()
         scheduler.schedule()
-        self.assertEqual(1, len(self.jobs()), "the marker is not due within an hour")
+        self.assertEqual(1, len(self._jobs()), "the marker is not due within an hour")
 
         self.advance(seconds=4300)
         scheduler.schedule()
-        rows = self.jobs()
+        rows = self._jobs()
         self.assertEqual(2, len(rows))
         self.assertEqual(
             {"days": 84, "reason": AUTO_UPDATE_LABEL}, json.loads(rows[1]["payload"])
         )
-        self.assertTrue(self.value(daily_marker_key(WAHOO_ID)))
+        self.assertTrue(self._value(daily_marker_key(WAHOO_ID)))
 
     def test_disconnect_makes_the_next_run_skip_with_the_descriptor_message(
         self,
     ) -> None:
         self.transport.rows = [workout(1, EARLIER_UTC)]
-        self.startup_scheduler().schedule()
-        self.drain()
+        self._startup_scheduler().schedule()
+        self._drain()
         calls_before = len(self.transport.calls)
-        stored = self.activity_rows()
+        stored = self._activity_rows()
 
         self.connection_service.disconnect()
         self.advance(hours=2)
         self.assertFalse(self.wahoo_connected())
-        self.startup_scheduler().schedule()
-        self.assertEqual(1, len(self.jobs()), "an unconnected account is not queued")
+        self._startup_scheduler().schedule()
+        self.assertEqual(1, len(self._jobs()), "an unconnected account is not queued")
         self.queue.enqueue(
             WAHOO_ID,
             "refresh",
             {"days": 7, "reason": "manual"},
             requested_by="user",
         )
-        self.drain()
+        self._drain()
 
         self.assertEqual(calls_before, len(self.transport.calls))
-        self.assertEqual(stored, self.activity_rows(), "stored activities are kept")
+        self.assertEqual(stored, self._activity_rows(), "stored activities are kept")
         self.assertEqual(
             {"status": "not_configured", "message": WAHOO_NOT_CONFIGURED_MESSAGE},
-            self.executor.execute(self.jobs()[-1]),
+            self.executor.execute(self._jobs()[-1]),
         )
         self.assertEqual(calls_before, len(self.transport.calls))
         self.assertEqual("skipped", self.refresh_statuses()[-1])
-        self.assertEqual("not_configured", self.wahoo_freshness()["state"])
+        self.assertEqual("not_configured", self._wahoo_freshness()["state"])
 
     def test_the_owner_never_writes_to_wahoo(self) -> None:
         self.transport.rows = [workout(1, EARLIER_UTC)]
-        self.startup_scheduler().schedule()
-        self.drain()
+        self._startup_scheduler().schedule()
+        self._drain()
 
         self.assertEqual({"GET"}, {method for method, _url in self.transport.calls})
 

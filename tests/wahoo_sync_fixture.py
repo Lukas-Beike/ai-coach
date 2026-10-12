@@ -157,20 +157,20 @@ class WahooSyncCase(unittest.TestCase):
         with self.database.reader() as db:
             return [dict(row) for row in db.execute(sql, params).fetchall()]
 
-    def value(self, key: str) -> str | None:
+    def _value(self, key: str) -> str | None:
         with self.database.reader() as db:
             return self.key_values.get(db, key)
 
-    def marker(self) -> str | None:
-        return self.value(daily_marker_key("wahoo"))
+    def _marker(self) -> str | None:
+        return self._value(daily_marker_key("wahoo"))
 
-    def activity_rows(self) -> list[dict[str, Any]]:
+    def _activity_rows(self) -> list[dict[str, Any]]:
         return self.rows(
             "SELECT provider, provider_activity_id, local_date, sport, state "
             "FROM activity_records ORDER BY provider_activity_id"
         )
 
-    def canonical_row_count(self) -> int:
+    def _canonical_row_count(self) -> int:
         return sum(
             int(self.rows(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"])
             for table in ("provider_records", "activity_records", "activity_sessions")
