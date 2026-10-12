@@ -1082,6 +1082,36 @@ Entscheidungen vom 2026-10-12 (Nutzerfreigabe):
   verschlüsselt in der Datenbank. Damit ist Wahoo das zweite Ausgabeziel, und
   Phase 6.3 (`remote_links`) ist beauftragt.
 
+### 5.13 Plan Rückbau (Option 1), Phase 6.3 und Phase 8 (ab 2026-10-12)
+
+Bestandsaufnahme: Der Leistungsabruf (`sync/performance.py`) schreibt nur in
+den Snapshot; die Abdeckung (`CanonicalReadSelector.coverage`) liest nur
+Legacy. Nicht kanonisierbare Zustandsdaten (Intervals-Kalender, Leistungsprofil,
+Paginierung, `historical_sync`; Garmin `source_freshness`, Morgen-Body-Battery,
+`errors`, Ausrüstung, nicht gemappte Abschnitte) bleiben im Snapshot. Der
+Rückbau entfernt daher aus neuen Snapshots nur die kanonisierten Abschnitte
+(Aktivitäten, Wellness, gemappte Gesundheitswerte); die Snapshot-Zeilen bleiben
+als Sync-Metadaten und Zustand bestehen. v7 ist unveröffentlicht (1.12.32 hat
+v6); `remote_links` wird v8, v7 wird als develop-Form eingefroren.
+
+| Spur | Einheit | Inhalt | hängt ab von |
+|---|---|---|---|
+| R | R1 | Kanonischer Ingest des Leistungsabrufs, Abdeckung persistiert, Backfill vor dem Lesen abgeschlossen | – |
+| R | R2 | Selektor bedient Tabellen nach abgeschlossenem Backfill ohne Paritätsbedingung | R1 |
+| R | R3–R7 | Leser je Domäne nur kanonisch (Leistung, Planung, Aktivitäten, Coach/HTTP, Garmin-Zustand) | R2 |
+| R | R8 | Paritäts-Infrastruktur und -Tests entfernen | R3–R7 |
+| R | R9 | Kanonisierte Abschnitte nicht mehr in Snapshots schreiben | R8 |
+| R | R10 | Gespeicherte Sportwerte auf `Sport` umschreiben (eigene Schemaversion), Kopplungs-Baseline leeren | S1, R9 |
+| R | R11 | Workout-Sportvokabular hinter `canonical/stored_sports.py`, Dubletten entfernen | – |
+| S | S1 | Schema v8: `remote_links`, Providerspalte der Tombstones, Backfill aus Einzel-Slots, Export Version 4 | – |
+| S | S2 | Remote-IDs lesen und schreiben über `remote_links` | S1 |
+| S | S3 | Bibliotheks-Sync über `WorkoutExportPort` | S2 |
+| W | W1 | Wahoo-Konfiguration, OAuth-Verbindung aus der PWA, Token-Speicher in der DB, Redaktion | – |
+| W | W2 | Wahoo-Client, Mapper, Ingest-Plan, Deskriptor, Laufzeit-Registrierung | W1 |
+| W | W3 | Persistierte Sitzungsbündelung (Intervals, Garmin, Wahoo) | W2 |
+| W | W4 | Wahoo-`WorkoutExportPort` für Pläne, ausdrücklicher Sync mit Ziel aus dem Register | S3, W2 |
+| W | W5 | PWA: Verbinden, Status, Labels; README | W1, W2 |
+
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
 - Eingefrorenes Fixture des zuletzt veröffentlichten Schemas mit Daten; direkte
