@@ -9,6 +9,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import ProviderId
+from backend.performance.canonical_personal_recovery import (
+    CanonicalPersonalRecoveryInputs,
+)
+from backend.performance.canonical_recovery import prefer_canonical
 from backend.performance.display_sources import preferred_providers
 from backend.performance.morning_battery import timestamp
 from backend.performance.recovery import (
@@ -29,6 +33,8 @@ def personal_recovery(
     garmin: dict[str, Any],
     profile: dict[str, Any],
     today: date,
+    *,
+    canonical: CanonicalPersonalRecoveryInputs | None = None,
 ) -> dict[str, Any]:
     cutoff = (today - timedelta(days=42)).isoformat()
     history_start = (today - timedelta(days=83)).isoformat()
@@ -47,6 +53,7 @@ def personal_recovery(
         add((intervals, "hrv", "RMSSD"), day, row.get("hrv"))
         add((intervals, "hrv", "SDNN"), day, row.get("hrvSDNN"))
     _add_garmin_records(garmin, history_start, current_day, add)
+    _prefer_canonical_resting_hr(groups, canonical)
     baselines = [
         _baseline(key, records, cutoff, today)
         for key, records in sorted(groups.items())
@@ -92,6 +99,21 @@ def _add_record(
     ):
         return
     groups.setdefault(key, {})[day] = number
+
+
+def _prefer_canonical_resting_hr(
+    groups: dict[tuple[ProviderId, str, str], dict[str, float]],
+    canonical: CanonicalPersonalRecoveryInputs | None,
+) -> None:
+    """Replace each resting HR day with its canonical record when it matches."""
+    if canonical is None:
+        return
+    for (provider, metric, _), records in groups.items():
+        if metric != "resting_hr":
+            continue
+        daily = canonical.resting_hr.get(provider, {})
+        for day, value in records.items():
+            records[day] = prefer_canonical(daily.get(day), value, provider, day)
 
 
 def _baseline(

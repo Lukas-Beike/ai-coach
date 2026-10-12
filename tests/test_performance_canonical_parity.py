@@ -26,7 +26,7 @@ from canonical_read_support import (
 )
 
 from backend.canonical.records import Observation
-from backend.canonical.vocabulary import MetricKind, Sport
+from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.coach.context import (
     CoachPerformanceContextReader,
     CoachStructuredContextService,
@@ -44,6 +44,9 @@ from backend.performance.canonical_inputs import (
     performance_options,
     read_performance_inputs,
 )
+from backend.performance.canonical_personal_recovery import (
+    CanonicalPersonalRecoveryInputs,
+)
 from backend.performance.canonical_recovery import CanonicalRecoveryInputs
 from backend.performance.load_context import performance_load_context
 from backend.providers.snapshot_projection import project_intervals_snapshot
@@ -55,6 +58,9 @@ EARLIER_DAY = "2026-09-19"
 PARITY_PROFILE = {"timezone": "Europe/Berlin"}
 _NO_RECOVERY = CanonicalRecoveryInputs(
     sleep_score=None, resting_hr=None, readiness=None
+)
+_NO_PERSONAL_RECOVERY = CanonicalPersonalRecoveryInputs(
+    resting_hr={ProviderId.INTERVALS: {}, ProviderId.GARMIN: {}}
 )
 
 
@@ -280,6 +286,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                 ctl=50.0,
                 atl=60.0,
                 recovery=_NO_RECOVERY,
+                personal_recovery=_NO_PERSONAL_RECOVERY,
             ),
         )
 
@@ -309,6 +316,8 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                 (MetricKind.SLEEP_SCORE, earliest, None),
                 (MetricKind.RESTING_HR, earliest, None),
                 (MetricKind.READINESS, earliest, None),
+                # Personal recovery: resting HR from 83 days before the wellness day.
+                (MetricKind.RESTING_HR, date(2026, 6, 29), None),
             ],
         )
 
@@ -352,6 +361,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                 ctl=50.0,
                 atl=60.0,
                 recovery=_NO_RECOVERY,
+                personal_recovery=_NO_PERSONAL_RECOVERY,
             ),
         )
         self.assertEqual(reader.calls[0][1], PARITY_TODAY)
@@ -447,8 +457,8 @@ class CanonicalWiringTests(unittest.TestCase):
             return_value={},
         ) as project:
             service.performance_state()
-        self.assertEqual(manager.events, ["enter", *["read"] * 8, "exit"])
-        self.assertEqual(reader.db_seen, ["db"] * 8)
+        self.assertEqual(manager.events, ["enter", *["read"] * 9, "exit"])
+        self.assertEqual(reader.db_seen, ["db"] * 9)
         self.assertEqual(
             project.call_args.kwargs["canonical"],
             CanonicalPerformanceInputs(
@@ -456,6 +466,7 @@ class CanonicalWiringTests(unittest.TestCase):
                 ctl=50.0,
                 atl=60.0,
                 recovery=_NO_RECOVERY,
+                personal_recovery=_NO_PERSONAL_RECOVERY,
             ),
         )
 
@@ -504,7 +515,7 @@ class CanonicalWiringTests(unittest.TestCase):
         )
         read_snapshot, canonical = service._performance_inputs()
         self.assertIs(read_snapshot, snapshot)
-        self.assertEqual(reader.db_seen, ["db"] * 8)
+        self.assertEqual(reader.db_seen, ["db"] * 9)
         self.assertEqual(_present(canonical).ctl, 50.0)
 
     def test_activity_performance_inputs_without_a_source_read_nothing_extra(
@@ -576,7 +587,7 @@ class CanonicalWiringTests(unittest.TestCase):
         self.assertIs(read, snapshot)
         self.assertEqual(
             manager.events,
-            ["enter", "snapshot", *["read"] * 8, "exit"],
+            ["enter", "snapshot", *["read"] * 9, "exit"],
         )
         with (
             patch(
@@ -634,7 +645,7 @@ class CanonicalWiringTests(unittest.TestCase):
             ),
         )
         prelude = _prelude(snapshot, manager, service.canonical_inputs).read(True)
-        self.assertEqual(manager.events, ["enter", *["read"] * 8, "exit"])
+        self.assertEqual(manager.events, ["enter", *["read"] * 9, "exit"])
         self.assertEqual(
             prelude.performance_inputs,
             CanonicalPerformanceInputs(
@@ -642,6 +653,7 @@ class CanonicalWiringTests(unittest.TestCase):
                 ctl=50.0,
                 atl=60.0,
                 recovery=_NO_RECOVERY,
+                personal_recovery=_NO_PERSONAL_RECOVERY,
             ),
         )
         with patch(
@@ -749,7 +761,7 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         )
         legacy = _service(self.intervals, None, self.garmin).performance_state()
         canonical = _service(self.intervals, source, self.garmin).performance_state()
-        self.assertEqual(counting.calls, 8)
+        self.assertEqual(counting.calls, 9)
         self.assertEqual(_normalized_state(canonical), _normalized_state(legacy))
 
     def test_selector_chooses_its_source_once_for_both_load_reads(self) -> None:
