@@ -23,6 +23,7 @@ from backend.sync.garmin import (
     merge_sources,
     normalize_fixture_sleep_dates,
 )
+from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.refresh import ProviderRefreshTracker, retry_at, sync_job_error_class
 from backend.sync.state import SyncStateRepository
 
@@ -390,6 +391,7 @@ class GarminSyncStateServiceTests(unittest.TestCase):
             self.redactor,
             lambda: UTC_NOW,
             lambda: self.now,
+            snapshot_writer=GarminSnapshotWriter(key_values, lambda: UTC),
         )
 
     def _get(self, key):
