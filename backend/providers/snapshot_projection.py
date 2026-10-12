@@ -107,6 +107,22 @@ def intervals_activity_rows(snapshot: object) -> tuple[dict[str, Any], ...]:
     return tuple(row for row in rows if isinstance(row, dict))
 
 
+def intervals_snapshot_has_only_compact_rows(snapshot: object) -> bool:
+    """Return True when a stored snapshot lists activities only in compact form.
+
+    Snapshots from releases before ``raw_provider_data`` keep their activities only
+    in ``recent_activities``. The backfill cannot map that compact read model, so
+    its rows never reach the tables.
+    """
+    if not isinstance(snapshot, Mapping):
+        return False
+    raw = snapshot.get(_INTERVALS_RAW_KEY)
+    rows = raw.get(_INTERVALS_RAW_ACTIVITIES_KEY) if isinstance(raw, Mapping) else None
+    if isinstance(rows, list):
+        return False
+    return isinstance(snapshot.get(_INTERVALS_ACTIVITIES_KEY), list)
+
+
 def intervals_row_local_date(
     row: Mapping[str, Any], *, zone: tzinfo, retrieved_at: datetime
 ) -> date | None:

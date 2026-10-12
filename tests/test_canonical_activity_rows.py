@@ -30,7 +30,9 @@ class ActivityRowSourceTests(CanonicalReadFixture):
             _by_id(tuple(self.intervals["raw_provider_data"]["activities"])),
         )
 
-    def test_legacy_keeps_the_snapshot_order_and_tables_serve_newest_first(self) -> None:
+    def test_legacy_keeps_the_snapshot_order_and_tables_serve_newest_first(
+        self,
+    ) -> None:
         populate(self)
         snapshot_ids = [
             r["id"] for r in self.intervals["raw_provider_data"]["activities"]
@@ -126,6 +128,25 @@ class ActivityRowSelectorTests(CanonicalReadFixture):
         self.assertEqual(
             len(rows), len(self.intervals["raw_provider_data"]["activities"]) + 1
         )
+
+    def test_complete_backfill_keeps_compact_only_snapshots_on_legacy(self) -> None:
+        populate(self)
+        selector = make_selector(self)
+        self.intervals = copy.deepcopy(self.intervals)
+        del self.intervals["raw_provider_data"]
+        rows = self.read(selector.activity_rows)
+        self.assertEqual(list(rows), self.intervals["recent_activities"])
+        self.assertTrue(rows)
+
+    def test_complete_backfill_serves_tables_without_any_snapshot_rows(self) -> None:
+        populate(self)
+        selector = make_selector(self)
+        self.intervals = copy.deepcopy(self.intervals)
+        del self.intervals["raw_provider_data"]
+        del self.intervals["recent_activities"]
+        rows = self.read(selector.activity_rows)
+        self.assertEqual(list(rows), list(self.read(self.table.activity_rows)))
+        self.assertTrue(rows)
 
     def test_selector_passes_bounds_to_the_active_source(self) -> None:
         populate(self)

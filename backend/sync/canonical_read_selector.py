@@ -103,8 +103,15 @@ class CanonicalReadSelector(
         start: date | None = None,
         end: date | None = None,
     ) -> tuple[dict[str, Any], ...]:
-        """Return raw activity rows from the same source as ``activities``."""
-        return self._source(db).activity_rows(db, start=start, end=end)
+        """Return raw activity rows from the same source as ``activities``.
+
+        A snapshot that lists activities only in compact form stays on legacy: the
+        backfill cannot map those rows, so the tables would serve none of them.
+        """
+        source: CanonicalReader = self._source(db)
+        if source is self._table and self._legacy.has_only_compact_activity_rows(db):
+            source = self._legacy
+        return source.activity_rows(db, start=start, end=end)
 
     def observations(
         self,

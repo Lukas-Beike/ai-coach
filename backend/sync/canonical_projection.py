@@ -31,6 +31,7 @@ from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.providers.snapshot_projection import (
     intervals_activity_rows,
     intervals_row_local_date,
+    intervals_snapshot_has_only_compact_rows,
     project_garmin_snapshot,
     project_intervals_snapshot,
     stored_retrieved_at,
@@ -139,6 +140,10 @@ class CanonicalSnapshotProjection(
             for row in rows
             if _row_in_range(row, zone, retrieved_at, start=start, end=end)
         )
+
+    def has_only_compact_activity_rows(self, db: Any) -> bool:
+        """Return True when the stored snapshot lists activities only in compact form."""
+        return intervals_snapshot_has_only_compact_rows(self._intervals_snapshot(db))
 
     def observations(
         self,
