@@ -19,6 +19,12 @@ from backend.db.repositories import KeyValueRepository
 from backend.performance import activity_validation
 from backend.performance import context as performance_context
 from backend.performance import load as performance_load
+from backend.performance.canonical_inputs import (
+    CanonicalPerformanceInputs,
+    CanonicalPerformanceSource,
+    performance_options,
+    read_performance_inputs,
+)
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import context as planning_context
 from backend.planning import library as planning_library
@@ -410,11 +416,13 @@ class CoachPerformanceContextReader:
         garmin_payload_service: Any,
         garmin_projection_service: Any,
         today: Callable[[], date],
+        canonical: CanonicalPerformanceSource | None = None,
     ) -> None:
         self._profile_service = profile_service
         self._garmin_payload_service = garmin_payload_service
         self._garmin_projection_service = garmin_projection_service
         self._today = today
+        self._canonical = canonical
 
     def profile(self) -> Any:
         return self._profile_service.get()
@@ -429,8 +437,18 @@ class CoachPerformanceContextReader:
                 self._garmin_payload_service.snapshot(),
                 self._profile_service.get(),
                 self._today(),
+                **performance_options(self._canonical_inputs(snapshot)),
             )
         )
+
+    def _canonical_inputs(self, snapshot: Any) -> CanonicalPerformanceInputs | None:
+        source = self._canonical
+        if source is None:
+            return None
+        # The caller read the snapshot in its own unit of work, so this is a
+        # separate read; the reader reuses an enclosing transaction when one exists.
+        with source.database_manager().reader() as db:
+            return read_performance_inputs(source.observation_reader(), db, snapshot)
 
     def garmin(self, snapshot: Any) -> Any:
         return self._garmin_projection_service.coach_context(

@@ -6,7 +6,8 @@ from typing import Any
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.detail_store import ActivityDetailStore
 from backend.performance.activity_read_service import ActivityAnalysisReadService
-from backend.runtime.ports import ProviderSnapshotReader
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.runtime.ports import ObservationReader, ProviderSnapshotReader
 
 
 class ActivityReadAssembly:
@@ -16,11 +17,13 @@ class ActivityReadAssembly:
         snapshot_reader: ProviderSnapshotReader,
         feedback_service: Callable[[], Any],
         read_equipment: Callable[[], dict[str, Any]],
+        observation_reader: Callable[[], ObservationReader] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._snapshot_reader = snapshot_reader
         self._feedback_service = feedback_service
         self._read_equipment = read_equipment
+        self._observation_reader = observation_reader
 
     def activity_read(self) -> ActivityAnalysisReadService:
         manager = self._database_manager()
@@ -31,4 +34,12 @@ class ActivityReadAssembly:
             ActivityDetailStore(manager),
             read_equipment=self._read_equipment,
             references=ActivityReferences(manager),
+            canonical=self._canonical_source(),
+        )
+
+    def _canonical_source(self) -> CanonicalPerformanceSource | None:
+        if self._observation_reader is None:
+            return None
+        return CanonicalPerformanceSource(
+            self._database_manager, self._observation_reader
         )

@@ -5,6 +5,7 @@ from typing import Any
 
 from backend.performance import load as performance_load
 from backend.performance import wellness as performance_wellness
+from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -22,6 +23,8 @@ def performance_load_context(
     wellness_rows: list[dict[str, Any]],
     latest_wellness: dict[str, Any],
     today: date,
+    *,
+    canonical: CanonicalPerformanceInputs | None = None,
 ) -> dict[str, Any]:
     last_7 = performance_load.activity_rollup(activities, 7, today)
     previous_7 = performance_load.activity_rollup(
@@ -46,14 +49,20 @@ def performance_load_context(
         if actual_atl_values
         else None
     )
+    load = {
+        "id": latest_wellness.get("id"),
+        "ctl": _first_present(latest_wellness, ("ctl", "ctLoad")),
+        "atl": _first_present(latest_wellness, ("atl", "atlLoad")),
+        "tsb": performance_wellness.wellness_form_value(latest_wellness),
+        "rampRate": _first_present(latest_wellness, ("rampRate",)),
+    }
+    if canonical is not None:
+        # Only CTL and ATL come from canonical observations; the rest of the
+        # latest wellness row stays on the legacy path.
+        load["ctl"] = canonical.ctl
+        load["atl"] = canonical.atl
     return {
-        "load": {
-            "id": latest_wellness.get("id"),
-            "ctl": _first_present(latest_wellness, ("ctl", "ctLoad")),
-            "atl": _first_present(latest_wellness, ("atl", "atlLoad")),
-            "tsb": performance_wellness.wellness_form_value(latest_wellness),
-            "rampRate": _first_present(latest_wellness, ("rampRate",)),
-        },
+        "load": load,
         "last_7": last_7,
         "previous_7": previous_7,
         "last_30": last_30,
