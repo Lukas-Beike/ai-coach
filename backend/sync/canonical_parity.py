@@ -39,12 +39,12 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, tzinfo
 from typing import Any, Final, Protocol
 
 from backend.canonical.local_time import local_date
-from backend.canonical.records import ActivityRecord, Observation, Provenance
+from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.db import canonical_store
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
@@ -198,14 +198,29 @@ def _raw_activities(snapshot: Mapping[str, Any] | None) -> dict[str, dict[str, A
     }
 
 
-def _without_garmin_fetch_time(provenance: Provenance) -> Provenance:
-    if provenance.provider is ProviderId.GARMIN:
-        return replace(provenance, retrieved_at=None)
-    return provenance
-
-
-def _comparable_activity(record: ActivityRecord) -> ActivityRecord:
-    return replace(record, provenance=_without_garmin_fetch_time(record.provenance))
+def _activity_content(record: ActivityRecord) -> tuple[Hashable, ...]:
+    """What a reader is served for one activity, without the Garmin fetch time."""
+    provenance = record.provenance
+    fetched = (
+        None if provenance.provider is ProviderId.GARMIN else provenance.retrieved_at
+    )
+    return (
+        record.sport,
+        record.environment,
+        record.started_at,
+        record.duration_s,
+        record.distance_m,
+        record.load,
+        record.load_model,
+        record.avg_hr,
+        record.avg_power,
+        record.name,
+        provenance.source_kind,
+        provenance.source_record_id,
+        provenance.recorded_by,
+        provenance.label,
+        fetched,
+    )
 
 
 def _observation_content(observation: Observation) -> tuple[Hashable, ...]:
@@ -278,8 +293,8 @@ def _compare_activities(
     zone: tzinfo,
 ) -> tuple[dict[str, ComparisonCounts], bool]:
     counts = {provider.value: ComparisonCounts() for provider in ProviderId}
-    legacy_groups = _group((_comparable_activity(r) for r in legacy), _activity_key)
-    table_groups = _group((_comparable_activity(r) for r in table), _activity_key)
+    legacy_groups = _group(legacy, _activity_key)
+    table_groups = _group(table, _activity_key)
     ranges = _ranges(
         (_provider_name(r.provenance.provider), local_date(r.started_at, zone))
         for r in legacy
@@ -294,8 +309,8 @@ def _compare_activities(
         )
         _tally(
             bucket,
-            legacy_groups.get(key, []),
-            table_items,
+            [_activity_content(r) for r in legacy_groups.get(key, [])],
+            [_activity_content(r) for r in table_items],
             outside_legacy_range=outside,
         )
     ordered = _same_shared_order(

@@ -11,7 +11,10 @@ from typing import Any
 from canonical_read_support import (
     CanonicalReadFixture,
     LatestSnapshot,
+    first_activity_name,
     intervals_snapshot,
+    make_parity,
+    populate,
 )
 
 from backend.activities.detail_store import summary_fingerprint
@@ -101,8 +104,8 @@ class ParityTests(CanonicalReadFixture):
         )
 
     def test_populated_clean_fixture_passes_with_identical_served_content(self) -> None:
-        self.populate()
-        report = self.check(self.make_parity())
+        populate(self)
+        report = self.check(make_parity(self))
 
         self.assertTrue(report.passed)
         self.assertTrue(report.ordering_equal)
@@ -116,15 +119,15 @@ class ParityTests(CanonicalReadFixture):
     def test_same_key_value_conflict_fails_and_names_the_weight_metric(self) -> None:
         # Wellness weight and athlete weight share one natural key on one day.
         self.intervals = intervals_snapshot(athlete_weight=True)
-        self.populate()
-        report = self.check(self.make_parity())
+        populate(self)
+        report = self.check(make_parity(self))
 
         self.assertFalse(report.passed)
         self.assertEqual(report.observations["weight"].differing, 1)
         self.assertEqual(report.observations["ftp"].differing, 0)
 
     def test_table_missing_a_legacy_activity_is_counted_as_missing(self) -> None:
-        self.populate()
+        populate(self)
         table = MappedTable(
             self.table,
             activities=lambda rows: tuple(
@@ -138,7 +141,7 @@ class ParityTests(CanonicalReadFixture):
         self.assertEqual(report.activities["intervals"].matched, 4)
 
     def test_table_serving_an_activity_absent_from_legacy_is_extra(self) -> None:
-        self.populate()
+        populate(self)
         extra = self.read(self.table.activities)[0]
         table = MappedTable(
             self.table,
@@ -150,7 +153,7 @@ class ParityTests(CanonicalReadFixture):
         self.assertEqual(report.activities["intervals"].extra_in_table, 1)
 
     def test_same_identity_with_different_served_content_is_differing(self) -> None:
-        self.populate()
+        populate(self)
         table = MappedTable(
             self.table,
             activities=lambda rows: tuple(
@@ -168,7 +171,7 @@ class ParityTests(CanonicalReadFixture):
         self.assertEqual(report.activities["intervals"].extra_in_table, 0)
 
     def test_reversed_activity_order_fails_the_ordering_check(self) -> None:
-        self.populate()
+        populate(self)
         table = MappedTable(self.table, activities=lambda rows: tuple(reversed(rows)))
         report = self.check(self.parity(table))
 
@@ -177,7 +180,7 @@ class ParityTests(CanonicalReadFixture):
         self.assertEqual(report.activities["intervals"].failures, 0)
 
     def test_table_only_observation_outside_the_legacy_range_is_history(self) -> None:
-        self.populate()
+        populate(self)
         kind = MetricKind.WEIGHT
 
         def add_old_row(metric: MetricKind, rows: tuple[Any, ...]) -> tuple[Any, ...]:
@@ -194,7 +197,7 @@ class ParityTests(CanonicalReadFixture):
         self.assertTrue(report.passed)
 
     def test_table_only_observation_inside_the_legacy_range_is_extra(self) -> None:
-        self.populate()
+        populate(self)
         kind = MetricKind.WEIGHT
 
         def add_inside_row(
@@ -212,7 +215,7 @@ class ParityTests(CanonicalReadFixture):
         self.assertFalse(report.passed)
 
     def test_legacy_observation_missing_from_the_table_is_counted(self) -> None:
-        self.populate()
+        populate(self)
         kind = MetricKind.RESTING_HR
 
         def drop_first(metric: MetricKind, rows: tuple[Any, ...]) -> tuple[Any, ...]:
@@ -225,23 +228,23 @@ class ParityTests(CanonicalReadFixture):
         self.assertFalse(report.passed)
 
     def test_changed_raw_activity_is_a_fingerprint_mismatch(self) -> None:
-        self.populate()
+        populate(self)
         self.intervals["raw_provider_data"]["activities"][0]["name"] = "Renamed run"
-        report = self.check(self.make_parity())
+        report = self.check(make_parity(self))
 
         self.assertEqual(report.fingerprint_mismatches, 1)
         self.assertEqual(report.fingerprint_checked, 5)
         self.assertFalse(report.passed)
 
     def test_fingerprint_uses_the_injected_function(self) -> None:
-        self.populate()
+        populate(self)
         report = self.check(self.parity(fingerprint=lambda activity: "same"))
 
         self.assertEqual(report.fingerprint_mismatches, 0)
         self.assertEqual(report.fingerprint_checked, 5)
 
     def test_missing_or_malformed_snapshots_check_no_fingerprints(self) -> None:
-        self.populate()
+        populate(self)
         shapes: list[Any] = [
             None,
             "not a mapping",
@@ -266,7 +269,7 @@ class ParityTests(CanonicalReadFixture):
     def test_table_only_provider_without_legacy_rows_is_extra_even_when_old(
         self,
     ) -> None:
-        self.populate()
+        populate(self)
         base = self.read(self.table.observations, MetricKind.WEIGHT)[0]
         intervals = replace(
             base, provenance=replace(base.provenance, provider=ProviderId.INTERVALS)
@@ -292,7 +295,7 @@ class ParityTests(CanonicalReadFixture):
         self.assertFalse(report.passed)
 
     def test_aged_out_activity_outside_the_legacy_range_is_history(self) -> None:
-        self.populate()
+        populate(self)
         old = replace(
             self.intervals_activity(),
             activity_id="i-act-old",
@@ -308,7 +311,7 @@ class ParityTests(CanonicalReadFixture):
     def test_activity_provider_without_legacy_rows_is_extra_even_when_old(
         self,
     ) -> None:
-        self.populate()
+        populate(self)
         intervals = self.intervals_activity()
         garmin_old = replace(
             intervals,
@@ -331,7 +334,7 @@ class ParityTests(CanonicalReadFixture):
         self.assertFalse(report.passed)
 
     def test_label_only_observation_change_fails_parity(self) -> None:
-        self.populate()
+        populate(self)
         kind = MetricKind.WEIGHT
 
         def relabel(metric: MetricKind, rows: tuple[Any, ...]) -> tuple[Any, ...]:
@@ -351,11 +354,11 @@ class ParityTests(CanonicalReadFixture):
         self.assertFalse(report.passed)
 
     def test_report_is_content_free(self) -> None:
-        self.populate()
-        report = self.check(self.make_parity()).as_dict()
+        populate(self)
+        report = self.check(make_parity(self)).as_dict()
         text = json.dumps(report, sort_keys=True)
 
-        self.assertNotIn(self.first_activity_name(), text)
+        self.assertNotIn(first_activity_name(self), text)
         for identifier in ("i-act-001", "910001", "2026-"):
             self.assertNotIn(identifier, text)
         self.assertTrue(report["passed"])

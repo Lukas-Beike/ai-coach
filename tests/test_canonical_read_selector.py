@@ -9,7 +9,10 @@ from zoneinfo import ZoneInfo
 
 from canonical_read_support import (
     CanonicalReadFixture,
+    first_activity_name,
     intervals_snapshot,
+    make_selector,
+    populate,
 )
 
 from backend.activities.detail_store import summary_fingerprint
@@ -40,7 +43,7 @@ class RaisingSnapshots:
 
 class SelectorTests(CanonicalReadFixture):
     def test_before_backfill_reads_come_from_legacy(self) -> None:
-        selector = self.make_selector()
+        selector = make_selector(self)
         summary = self.read(selector.summary)
 
         self.assertEqual(summary["serving"], "legacy")
@@ -53,8 +56,8 @@ class SelectorTests(CanonicalReadFixture):
         )
 
     def test_backfill_done_without_a_refresh_still_serves_legacy(self) -> None:
-        self.populate()
-        selector = self.make_selector()
+        populate(self)
+        selector = make_selector(self)
 
         self.assertEqual(self.read(selector.summary)["serving"], "legacy")
         self.assertEqual(
@@ -63,8 +66,8 @@ class SelectorTests(CanonicalReadFixture):
         )
 
     def test_passing_refresh_switches_reads_to_the_tables(self) -> None:
-        self.populate()
-        selector = self.make_selector()
+        populate(self)
+        selector = make_selector(self)
         self.write(selector.refresh)
 
         summary = self.read(selector.summary)
@@ -80,7 +83,7 @@ class SelectorTests(CanonicalReadFixture):
         )
 
     def test_backfill_not_complete_stores_incomplete_and_serves_legacy(self) -> None:
-        selector = self.make_selector()
+        selector = make_selector(self)
         self.write(selector.refresh)
 
         summary = self.read(selector.summary)
@@ -91,8 +94,8 @@ class SelectorTests(CanonicalReadFixture):
     def test_new_snapshot_after_a_pass_keeps_serving_tables(self) -> None:
         # Dual-write keeps the tables in step with each new snapshot, so a sync
         # alone does not switch reads back to legacy.
-        self.populate()
-        selector = self.make_selector()
+        populate(self)
+        selector = make_selector(self)
         self.write(selector.refresh)
 
         self.intervals_version = "row-2"
@@ -106,8 +109,8 @@ class SelectorTests(CanonicalReadFixture):
         )
 
     def test_mapper_version_change_after_a_pass_falls_back_to_legacy(self) -> None:
-        self.populate()
-        selector = self.make_selector()
+        populate(self)
+        selector = make_selector(self)
         self.write(selector.refresh)
 
         with patch(
@@ -122,8 +125,8 @@ class SelectorTests(CanonicalReadFixture):
         self.assertEqual(ids(activities), ids(self.read(self.projection.activities)))
 
     def test_zone_change_after_a_pass_falls_back_to_legacy(self) -> None:
-        self.populate()
-        selector = self.make_selector()
+        populate(self)
+        selector = make_selector(self)
         self.write(selector.refresh)
 
         self.zone = ZoneInfo("Asia/Tokyo")
@@ -137,8 +140,8 @@ class SelectorTests(CanonicalReadFixture):
         )
 
     def test_corrupt_backfill_status_reads_as_pending_and_keeps_legacy(self) -> None:
-        self.populate()
-        selector = self.make_selector()
+        populate(self)
+        selector = make_selector(self)
         self.write(selector.refresh)
         self.assertEqual(self.read(selector.summary)["serving"], "tables")
 
@@ -153,8 +156,8 @@ class SelectorTests(CanonicalReadFixture):
     def test_parity_failure_keeps_reads_on_legacy(self) -> None:
         # Wellness weight and athlete weight collide on the natural key by design.
         self.intervals = intervals_snapshot(athlete_weight=True)
-        self.populate()
-        selector = self.make_selector()
+        populate(self)
+        selector = make_selector(self)
         self.write(selector.refresh)
 
         summary = self.read(selector.summary)
@@ -169,8 +172,8 @@ class SelectorTests(CanonicalReadFixture):
     def test_recorded_failure_keeps_legacy_and_stores_only_the_error_class(
         self,
     ) -> None:
-        self.populate()
-        selector = self.make_selector()
+        populate(self)
+        selector = make_selector(self)
         self.write(selector.refresh)
         self.write(selector.record_failure, "RuntimeError")
 
@@ -182,11 +185,11 @@ class SelectorTests(CanonicalReadFixture):
         self.assertEqual(json.loads(stored)["source"], SOURCE_LEGACY)
 
     def test_corrupt_switch_state_is_unchecked_and_reads_stay_on_legacy(self) -> None:
-        self.populate()
-        self.write(self.make_selector().refresh)
+        populate(self)
+        self.write(make_selector(self).refresh)
         self.write(self.key_values.set, STATE_KEY, "{not json")
 
-        selector = self.make_selector()
+        selector = make_selector(self)
         summary = self.read(selector.summary)
         self.assertEqual(summary["reason"], "not_checked")
         self.assertEqual(summary["serving"], "legacy")
@@ -196,10 +199,10 @@ class SelectorTests(CanonicalReadFixture):
         )
 
     def test_a_new_selector_over_the_same_database_keeps_serving_tables(self) -> None:
-        self.populate()
-        self.write(self.make_selector().refresh)
+        populate(self)
+        self.write(make_selector(self).refresh)
 
-        restarted = self.make_selector()
+        restarted = make_selector(self)
         self.assertEqual(self.read(restarted.summary)["serving"], "tables")
         self.assertEqual(
             ids(self.read(restarted.activities)),
@@ -207,8 +210,8 @@ class SelectorTests(CanonicalReadFixture):
         )
 
     def test_tables_are_readable_without_touching_the_provider_snapshot(self) -> None:
-        self.populate()
-        self.write(self.make_selector().refresh)
+        populate(self)
+        self.write(make_selector(self).refresh)
 
         readable = build_canonical_read(
             legacy=self.projection,
@@ -220,8 +223,8 @@ class SelectorTests(CanonicalReadFixture):
         self.assertEqual(self.read(readable.summary)["serving"], "tables")
 
     def test_coverage_is_always_served_by_the_legacy_projection(self) -> None:
-        self.populate()
-        selector = self.make_selector()
+        populate(self)
+        selector = make_selector(self)
         self.write(selector.refresh)
 
         self.assertEqual(
@@ -229,8 +232,8 @@ class SelectorTests(CanonicalReadFixture):
         )
 
     def test_observations_switch_with_the_same_source(self) -> None:
-        self.populate()
-        selector = self.make_selector()
+        populate(self)
+        selector = make_selector(self)
         self.write(selector.refresh)
 
         for kind in MetricKind:
@@ -265,7 +268,7 @@ class DiagnosticsTests(CanonicalReadFixture):
         self.assertEqual(self.summarize(malformed), {"status": "unavailable"})
 
     def test_unchecked_switch_reports_no_parity_counts(self) -> None:
-        selector = self.make_selector()
+        selector = make_selector(self)
         result = self.summarize(selector)
 
         self.assertEqual(result["serving"], "legacy")
@@ -274,8 +277,8 @@ class DiagnosticsTests(CanonicalReadFixture):
         self.assertIsNone(result["parity"])
 
     def test_checked_switch_reports_counts_only(self) -> None:
-        self.populate()
-        selector = self.make_selector()
+        populate(self)
+        selector = make_selector(self)
         self.write(selector.refresh)
 
         result = self.summarize(selector)
@@ -286,7 +289,7 @@ class DiagnosticsTests(CanonicalReadFixture):
         self.assertTrue(result["parity"]["passed"])
         self.assertEqual(result["parity"]["fingerprint_mismatches"], 0)
         self.assertEqual(result["parity"]["activities"]["intervals"]["matched"], 5)
-        self.assertNotIn(self.first_activity_name(), text)
+        self.assertNotIn(first_activity_name(self), text)
         self.assertNotIn("i-act-001", text)
         self.assertNotIn("910001", text)
 
@@ -324,7 +327,7 @@ class WorkerParityTests(CanonicalReadFixture):
         )
 
     def test_completed_backfill_refreshes_parity_once(self) -> None:
-        self.populate()
+        populate(self)
         parity = self.Refresher()
         self.make_worker(parity).run_loop()
 
@@ -332,7 +335,7 @@ class WorkerParityTests(CanonicalReadFixture):
         self.assertEqual(parity.failures, [])
 
     def test_parity_error_is_logged_with_its_class_only(self) -> None:
-        self.populate()
+        populate(self)
         parity = self.Refresher(refresh_error=RuntimeError(f"token {SECRET}"))
 
         with self.assertLogs(
@@ -348,7 +351,7 @@ class WorkerParityTests(CanonicalReadFixture):
         self.assertNotIn(SECRET, record.getMessage())
 
     def test_status_write_failure_is_logged_with_its_class_only(self) -> None:
-        self.populate()
+        populate(self)
         parity = self.Refresher(
             refresh_error=RuntimeError(f"token {SECRET}"),
             record_error=ValueError(f"disk {SECRET}"),

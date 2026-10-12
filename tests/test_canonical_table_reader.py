@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from datetime import date
 
-from canonical_read_support import CanonicalReadFixture
+from canonical_read_support import (
+    CanonicalReadFixture,
+    populate,
+)
 
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.providers.canonical_plans import current_observation_mapper_versions
@@ -14,7 +17,7 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
     def test_populated_tables_serve_the_legacy_activities_in_the_same_order(
         self,
     ) -> None:
-        self.populate()
+        populate(self)
         legacy = self.read(self.projection.activities)
         table = self.read(self.table.activities)
 
@@ -25,7 +28,7 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
         )
 
     def test_populated_tables_serve_observations_with_their_legacy_values(self) -> None:
-        self.populate()
+        populate(self)
         served = 0
         for kind in MetricKind:
             legacy = self.read(self.projection.observations, kind)
@@ -40,7 +43,7 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
         self.assertGreater(served, 0)
 
     def test_activity_bounds_select_the_athlete_local_day(self) -> None:
-        self.populate()
+        populate(self)
         everything = self.read(self.table.activities)
         local_day = self.rows(
             "SELECT local_date FROM activity_records ORDER BY local_date LIMIT 1"
@@ -63,7 +66,7 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
         self.assertEqual(self.read(self.table.activities, start=date(2999, 1, 1)), ())
 
     def test_observation_sport_filter_keeps_only_that_sport(self) -> None:
-        self.populate()
+        populate(self)
         for kind in MetricKind:
             everything = self.read(self.table.observations, kind)
             for sport in Sport:
@@ -74,7 +77,7 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
                 )
 
     def test_invalid_records_and_deleted_sessions_are_not_served(self) -> None:
-        self.populate()
+        populate(self)
         before = len(self.read(self.table.activities))
         self.assertGreater(before, 1)
         self.execute(
@@ -88,7 +91,7 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
         self.assertEqual(self.read(self.table.activities), ())
 
     def test_observations_from_a_superseded_mapper_version_are_not_served(self) -> None:
-        self.populate()
+        populate(self)
         metric = MetricKind(
             self.rows("SELECT metric FROM observations LIMIT 1")[0]["metric"]
         )
@@ -103,7 +106,7 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
     def test_stored_observation_versions_match_the_current_mapper_versions(
         self,
     ) -> None:
-        self.populate()
+        populate(self)
         versions = current_observation_mapper_versions()
         stored = self.rows("SELECT DISTINCT provider, mapper_version FROM observations")
         self.assertTrue(stored)

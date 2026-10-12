@@ -116,39 +116,6 @@ class CanonicalReadFixture(unittest.TestCase):
             batch_size=DEFAULT_BATCH_SIZE,
         )
 
-    def make_parity(self) -> CanonicalParity:
-        return CanonicalParity(
-            legacy=self.projection,
-            table=self.table,
-            snapshots=LatestSnapshot(self),
-            fingerprint=summary_fingerprint,
-            zone=self.projection.zone,
-        )
-
-    def make_selector(self) -> Any:
-        return build_canonical_read(
-            legacy=self.projection,
-            key_values=self.key_values,
-            snapshots=LatestSnapshot(self),
-            fingerprint=summary_fingerprint,
-        )
-
-    def populate(self) -> CanonicalBackfill:
-        """Store the snapshot and Garmin payload, then backfill until complete."""
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
-                "VALUES (?, ?, ?, 0)",
-                (json.dumps(self.intervals), NOW, str(self.intervals["synced_at"])),
-            )
-            self.key_values.set(db, GARMIN_SNAPSHOT_KEY, json.dumps(self.garmin))
-        backfill = self.make_backfill()
-        for _ in range(MAX_BATCHES):
-            with self.manager.unit_of_work() as db:
-                if backfill.run_batch(db).done:
-                    return backfill
-        self.fail("backfill did not finish")
-
     def read(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
         with self.manager.reader() as db:
             return fn(db, *args, **kwargs)
@@ -165,5 +132,42 @@ class CanonicalReadFixture(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             db.execute(sql, params)
 
-    def first_activity_name(self) -> str:
-        return str(self.intervals["raw_provider_data"]["activities"][0]["name"])
+
+def make_parity(case: CanonicalReadFixture) -> CanonicalParity:
+    return CanonicalParity(
+        legacy=case.projection,
+        table=case.table,
+        snapshots=LatestSnapshot(case),
+        fingerprint=summary_fingerprint,
+        zone=case.projection.zone,
+    )
+
+
+def make_selector(case: CanonicalReadFixture) -> Any:
+    return build_canonical_read(
+        legacy=case.projection,
+        key_values=case.key_values,
+        snapshots=LatestSnapshot(case),
+        fingerprint=summary_fingerprint,
+    )
+
+
+def populate(case: CanonicalReadFixture) -> CanonicalBackfill:
+    """Store the snapshot and Garmin payload, then backfill until complete."""
+    with case.manager.unit_of_work() as db:
+        db.execute(
+            "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
+            "VALUES (?, ?, ?, 0)",
+            (json.dumps(case.intervals), NOW, str(case.intervals["synced_at"])),
+        )
+        case.key_values.set(db, GARMIN_SNAPSHOT_KEY, json.dumps(case.garmin))
+    backfill = case.make_backfill()
+    for _ in range(MAX_BATCHES):
+        with case.manager.unit_of_work() as db:
+            if backfill.run_batch(db).done:
+                return backfill
+    case.fail("backfill did not finish")
+
+
+def first_activity_name(case: CanonicalReadFixture) -> str:
+    return str(case.intervals["raw_provider_data"]["activities"][0]["name"])
