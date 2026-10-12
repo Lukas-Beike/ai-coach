@@ -10,6 +10,8 @@ from datetime import date, datetime
 from typing import Any
 
 from backend.athlete.local_date import LocalDate, iso_date_prefix
+from backend.canonical.stored_sports import COMPETITION_SPORT_TOKENS
+from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 
 COMPETITION_TEXT_LIMITS = {
@@ -51,6 +53,16 @@ def supported_competition_sport(value: Any) -> str | None:
     raw = str(value or "").strip().casefold()
     normalized = re.sub(r"[\s_-]+", " ", raw)
     return COMPETITION_SPORTS.get(raw) or COMPETITION_SPORTS.get(normalized)
+
+
+def competition_canonical_sport(row: dict[str, Any]) -> Sport | None:
+    """Return the canonical sport of a stored competition, or None if unknown.
+
+    The stored token is free text (``Cycling``, ``Lauf``, ``Ride`` ...). It is
+    resolved through the exact competition aliases, never by substring.
+    """
+    token = supported_competition_sport(row.get("sport"))
+    return COMPETITION_SPORT_TOKENS.get(token) if token else None
 
 
 def intervals_competition_sport(value: Any) -> str:
