@@ -268,20 +268,38 @@ def _first_performance_source(
     )
 
 
+def _canonical_or_legacy(
+    observation: Observation | None, legacy_value: Any, legacy_source: str
+) -> tuple[Any, str]:
+    """Return a canonical observation's value and label, else the legacy pair."""
+    if observation is None:
+        return legacy_value, legacy_source
+    return (
+        observation.value.value,
+        observation_source_label(observation, SourceView.CURRENT_METRIC),
+    )
+
+
 def _performance_body_metrics(
     athlete: dict[str, Any],
     latest_wellness: dict[str, Any],
     profile: dict[str, Any],
     garmin_metrics: dict[str, dict[str, Any]],
+    canonical: CanonicalCurrentInputs | None,
 ) -> dict[str, dict[str, Any]]:
     weight_value, weight_source = _first_performance_source(
         (
             (garmin_metrics["weight_kg"]["value"], GARMIN_PERFORMANCE_SOURCE),
-            (
+            _canonical_or_legacy(
+                None if canonical is None else canonical.wellness_weight,
                 _first_present(latest_wellness, ("weight",)),
                 PROVIDER_INTERVALS_WELLNESS_NAME,
             ),
-            (_first_present(athlete, ("weight",)), PROVIDER_INTERVALS_NAME),
+            _canonical_or_legacy(
+                None if canonical is None else canonical.athlete_weight,
+                _first_present(athlete, ("weight",)),
+                PROVIDER_INTERVALS_NAME,
+            ),
             (profile.get("weight_kg"), "Manuell"),
         )
     )
@@ -506,7 +524,7 @@ def current_performance_metrics(
     if garmin_metrics["running_max_hr_bpm"]["value"] is not None:
         running_max_hr = garmin_metrics["running_max_hr_bpm"]
     body_metrics = _performance_body_metrics(
-        athlete, latest_wellness, profile, garmin_metrics
+        athlete, latest_wellness, profile, garmin_metrics, canonical
     )
     threshold_metrics = _performance_threshold_metrics(
         athlete, ride, run, wellness_ride, wellness_run, garmin_metrics, canonical

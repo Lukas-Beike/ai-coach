@@ -150,7 +150,12 @@ def read_performance_inputs(
         start=min(days),
         end=latest_day,
     )
-    return replace(loaded, current=read_current_inputs(reader, db, snapshot))
+    return replace(
+        loaded,
+        current=read_current_inputs(
+            reader, db, snapshot, latest_wellness_day=latest_day
+        ),
+    )
 
 
 def _current_value(

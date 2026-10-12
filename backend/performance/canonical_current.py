@@ -11,6 +11,10 @@ the tables and never change the current values.
 threshold heart rate, which carries no sport, is taken directly from this sync's
 sport-less rows.
 
+Weight is read for the snapshot's latest wellness row (the row the legacy reader
+picks) and for the athlete record of the same sync. Garmin weight stays on the
+legacy path.
+
 A snapshot without an aware ``synced_at`` yields None, and the caller keeps the
 legacy values.
 """
@@ -39,20 +43,32 @@ class CanonicalCurrentInputs:
     athlete_threshold_hr: Observation | None
     cycling_vo2max: Observation | None
     running_vo2max: Observation | None
+    wellness_weight: Observation | None
+    athlete_weight: Observation | None
 
 
 def read_current_inputs(
     reader: ObservationReader,
     db: Any,
     snapshot: Mapping[str, Any] | None,
+    *,
+    latest_wellness_day: date | None = None,
 ) -> CanonicalCurrentInputs | None:
-    """Read the current sport thresholds and VO2max for a stored snapshot."""
+    """Read the current sport thresholds, VO2max and weight for a stored snapshot.
+
+    ``latest_wellness_day`` is the snapshot's latest wellness row. Without it no
+    wellness-row weight is selected, and the caller keeps the legacy value.
+    """
     synced = _synced_instant(snapshot)
     if synced is None:
         return None
     try:
         day = synced.astimezone(UTC).date()
         start, end = day - timedelta(days=1), day + timedelta(days=1)
+        weight_start, weight_end = start, end
+        if latest_wellness_day is not None:
+            weight_start = min(start, latest_wellness_day)
+            weight_end = max(end, latest_wellness_day)
     except OverflowError:
         return None
     thresholds = _sync_observations(
@@ -60,6 +76,9 @@ def read_current_inputs(
     )
     vo2max = _sync_observations(
         reader, db, MetricKind.VO2MAX, synced, start=start, end=end
+    )
+    weights = _sync_observations(
+        reader, db, MetricKind.WEIGHT, synced, start=weight_start, end=weight_end
     )
     inputs = CanonicalCurrentInputs(
         bike_threshold_hr=select_current(
@@ -71,6 +90,8 @@ def read_current_inputs(
         athlete_threshold_hr=_athlete_observation(thresholds),
         cycling_vo2max=select_current(vo2max, MetricKind.VO2MAX, sport=Sport.RIDE),
         running_vo2max=select_current(vo2max, MetricKind.VO2MAX, sport=Sport.RUN),
+        wellness_weight=_wellness_weight(weights, latest_wellness_day),
+        athlete_weight=_athlete_weight(weights),
     )
     values = (
         inputs.bike_threshold_hr,
@@ -78,10 +99,43 @@ def read_current_inputs(
         inputs.athlete_threshold_hr,
         inputs.cycling_vo2max,
         inputs.running_vo2max,
+        inputs.wellness_weight,
+        inputs.athlete_weight,
     )
     if all(value is None for value in values):
         return None
     return inputs
+
+
+def _wellness_weight(
+    observations: tuple[Observation, ...], day: date | None
+) -> Observation | None:
+    """Return the weight of this sync's wellness row for ``day``, if stored."""
+    if day is None:
+        return None
+    record_id = day.isoformat()
+    return next(
+        (
+            observation
+            for observation in observations
+            if observation.observed_on == day
+            and observation.provenance.source_record_id == record_id
+        ),
+        None,
+    )
+
+
+def _athlete_weight(observations: tuple[Observation, ...]) -> Observation | None:
+    """Return the weight of this sync's athlete record, if stored."""
+    return next(
+        (
+            observation
+            for observation in observations
+            if observation.provenance.source_record_id
+            != observation.observed_on.isoformat()
+        ),
+        None,
+    )
 
 
 def _sync_observations(

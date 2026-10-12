@@ -14,7 +14,15 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from canonical_consumer_parity import CASES, RETRIEVED_AT, TODAY, Case, _observations
+from canonical_consumer_parity import (
+    CASES,
+    RETRIEVED_AT,
+    TODAY,
+    Case,
+    _latest_wellness,
+    _latest_wellness_day,
+    _observations,
+)
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
 from backend.canonical.records import Observation
@@ -70,20 +78,27 @@ def _legacy(case: Case) -> dict[str, Any]:
     return current_performance_metrics(case.intervals, case.profile, garmin)
 
 
+def _read(
+    reader: ObservationStub, snapshot: dict[str, Any] | None
+) -> CanonicalCurrentInputs | None:
+    """Read a snapshot with its latest wellness day, as the assembly does."""
+    latest = _latest_wellness_day(_latest_wellness(snapshot or {}))
+    return read_current_inputs(reader, None, snapshot, latest_wellness_day=latest)
+
+
 def _canonical(case: Case, observations: tuple[Observation, ...] | None = None) -> Any:
     garmin = performance_garmin_metrics.garmin_performance_metrics(case.garmin, TODAY)
     reader = ObservationStub(
         _observations(case) if observations is None else observations
     )
-    inputs = read_current_inputs(reader, None, case.intervals)
+    inputs = _read(reader, case.intervals)
     return current_performance_metrics(
         case.intervals, case.profile, garmin, canonical=inputs
     )
 
 
 def _inputs(case: Case) -> CanonicalCurrentInputs:
-    reader = ObservationStub(_observations(case))
-    inputs = read_current_inputs(reader, None, case.intervals)
+    inputs = _read(ObservationStub(_observations(case)), case.intervals)
     assert inputs is not None
     return inputs
 
@@ -136,9 +151,7 @@ class CanonicalCurrentParityTests(unittest.TestCase):
         self.assertEqual(
             metrics["bike_threshold_hr_bpm"]["source"], "Intervals.icu (allgemein)"
         )
-        inputs = read_current_inputs(
-            ObservationStub(_observations(variant)), None, variant.intervals
-        )
+        inputs = _read(ObservationStub(_observations(variant)), variant.intervals)
         assert inputs is not None and inputs.athlete_threshold_hr is not None
         self.assertIsNone(inputs.athlete_threshold_hr.sport)
         self.assertEqual(
@@ -175,7 +188,7 @@ class CanonicalCurrentParityTests(unittest.TestCase):
             for observation in _observations(case)
             if observation.provenance.provider is ProviderId.GARMIN
         )
-        inputs = read_current_inputs(ObservationStub(garmin_only), None, case.intervals)
+        inputs = _read(ObservationStub(garmin_only), case.intervals)
         self.assertIsNone(inputs)
 
 
@@ -183,14 +196,26 @@ class CanonicalCurrentInputTests(unittest.TestCase):
     def test_reads_use_the_utc_sync_day_with_one_day_either_side(self) -> None:
         case = _case("intervals_only")
         reader = ObservationStub(_observations(case))
-        read_current_inputs(reader, None, case.intervals)
+        _read(reader, case.intervals)
         window = (SYNC_DAY - timedelta(days=1), SYNC_DAY + timedelta(days=1))
         self.assertEqual(
             reader.calls,
             [
                 (MetricKind.THRESHOLD_HR, *window, None),
                 (MetricKind.VO2MAX, *window, None),
+                (MetricKind.WEIGHT, *window, None),
             ],
+        )
+
+    def test_weight_window_extends_to_an_older_latest_wellness_day(self) -> None:
+        case = _case("intervals_only")
+        reader = ObservationStub(_observations(case))
+        read_current_inputs(
+            reader, None, case.intervals, latest_wellness_day=date(2026, 10, 1)
+        )
+        self.assertEqual(
+            reader.calls[-1],
+            (MetricKind.WEIGHT, date(2026, 10, 1), SYNC_DAY + timedelta(days=1), None),
         )
 
     def test_missing_or_unusable_sync_instant_yields_none(self) -> None:
@@ -225,10 +250,58 @@ class CanonicalCurrentInputTests(unittest.TestCase):
             **case.intervals,
             "synced_at": RETRIEVED_AT.astimezone(other_offset).isoformat(),
         }
-        inputs = read_current_inputs(
-            ObservationStub(_observations(case)), None, snapshot
-        )
+        inputs = _read(ObservationStub(_observations(case)), snapshot)
         self.assertEqual(inputs, _inputs(case))
+
+
+class CanonicalWeightTests(unittest.TestCase):
+    def test_wellness_weight_matches_the_legacy_value_and_label(self) -> None:
+        case = _case("intervals_only")
+        metrics = _canonical(case)
+        self.assertEqual(metrics["weight_kg"], _legacy(case)["weight_kg"])
+        self.assertEqual(metrics["weight_kg"]["value"], 80.6)
+        self.assertEqual(metrics["weight_kg"]["source"], "Intervals.icu Wellness")
+
+    def test_athlete_weight_is_the_fallback_with_the_intervals_label(self) -> None:
+        case = _case("sparse_profile")
+        intervals = copy.deepcopy(case.intervals)
+        del intervals["recent_wellness"][-1]["weight"]
+        variant = replace(case, intervals=intervals)
+        metrics = _canonical(variant, _observations(variant))
+        self.assertEqual(metrics["weight_kg"], _legacy(variant)["weight_kg"])
+        self.assertEqual(metrics["weight_kg"]["value"], 79.9)
+        self.assertEqual(metrics["weight_kg"]["source"], "Intervals.icu")
+
+    def test_older_wellness_day_weight_is_never_used(self) -> None:
+        case = _case("intervals_only")
+        intervals = copy.deepcopy(case.intervals)
+        del intervals["recent_wellness"][-1]["weight"]
+        variant = replace(case, intervals=intervals)
+        observations = _observations(variant)
+        inputs = _read(ObservationStub(observations), variant.intervals)
+        assert inputs is not None
+        self.assertIsNone(inputs.wellness_weight)
+        metrics = _canonical(variant, observations)
+        self.assertEqual(metrics["weight_kg"], _legacy(variant)["weight_kg"])
+        self.assertNotEqual(metrics["weight_kg"]["value"], 80.9)
+
+    def test_weight_rows_from_an_earlier_sync_never_change_the_current_weight(
+        self,
+    ) -> None:
+        case = _case("intervals_only")
+        earlier = RETRIEVED_AT - timedelta(days=1)
+        stale = tuple(
+            replace(
+                row,
+                value=replace(row.value, value=row.value.value + 5),
+                provenance=replace(row.provenance, retrieved_at=earlier),
+            )
+            for row in _observations(case)
+            if row.kind is MetricKind.WEIGHT
+        )
+        self.assertEqual(
+            _canonical(case, (*_observations(case), *stale)), _legacy(case)
+        )
 
 
 class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
