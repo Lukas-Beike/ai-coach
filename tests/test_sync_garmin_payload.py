@@ -285,6 +285,25 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertEqual(windows[-1][1], date(2026, 9, 20))
         self.assertEqual(self.service.automatic_sync_window(2), (2, None))
 
+    def test_run_covers_window_requires_the_latest_complete_read_of_the_window(self):
+        synced_at = "2026-09-20T12:00:00"
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                self.collection_payload("2026-09-18", "2026-09-20")
+            )
+        )
+        self.assertTrue(self.service.run_covers_window(3, None, synced_at))
+        self.assertTrue(self.service.run_covers_window(2, date(2026, 9, 19), synced_at))
+        self.assertFalse(self.service.run_covers_window(4, None, synced_at))
+        self.assertFalse(self.service.run_covers_window(3, None, "2026-09-19T12:00:00"))
+        self.assertFalse(self.service.run_covers_window(3, None, None))
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                self.collection_payload("2026-09-18", "2026-09-20", failed="sleep")
+            )
+        )
+        self.assertFalse(self.service.run_covers_window(3, None, synced_at))
+
     def test_gear_collection_uses_reported_stats_and_does_not_publish_partial_inventory(
         self,
     ):

@@ -433,6 +433,11 @@ class GarminSyncService:
     def automatic_sync_window(self, minimum_days: int) -> tuple[int, date | None]:
         return self._payload_service.automatic_sync_window(minimum_days)
 
+    def run_covers_window(
+        self, days: int, end_date: date | None, synced_at: str | None
+    ) -> bool:
+        return self._payload_service.run_covers_window(days, end_date, synced_at)
+
     def sync(
         self,
         days: int = 30,

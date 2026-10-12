@@ -188,7 +188,10 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         self.battery = Mock()
         self.garmin.automatic_sync_window.return_value = (3, date(2026, 10, 10))
         self.garmin.sync.return_value = {"status": "ok"}
-        self.refresh = GarminSynchronousRefresh(self.garmin, self.battery)
+        self.garmin.run_covers_window.return_value = False
+        self.refresh = GarminSynchronousRefresh(
+            self.garmin, self.battery, all_sync_days=-1
+        )
 
     def test_uses_scheduled_catch_up_window_without_requested_days(self):
         cancel_event = threading.Event()
@@ -218,6 +221,15 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         )
         self.battery.refresh.assert_called_once_with()
 
+    def test_all_history_sentinel_uses_scheduled_catch_up_window(self):
+        result = self.refresh.refresh("garmin", {"days": -1}, None)
+
+        self.assertEqual(result["activity_days"], 3)
+        self.garmin.automatic_sync_window.assert_called_once()
+        self.assertEqual(
+            self.garmin.sync.call_args.kwargs["end_date"], date(2026, 10, 10)
+        )
+
     def test_honors_requested_days_ending_today(self):
         result = self.refresh.refresh(
             "garmin", {"days": "30", "_wait_for_completion": True}, None
@@ -235,7 +247,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         )
 
     def test_rejects_invalid_or_oversized_days_before_provider_call(self):
-        for days in ("bad", 0, -1, 3661):
+        for days in ("bad", 0, -2, 3661):
             with self.subTest(days=days):
                 with self.assertRaises(AppError) as error:
                     self.refresh.refresh("garmin", {"days": days}, None)
@@ -254,19 +266,36 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         self.assertTrue(self.garmin.sync.call_args_list[0].kwargs["wait_for_existing"])
         self.assertFalse(self.garmin.sync.call_args_list[1].kwargs["wait_for_existing"])
         self.assertTrue(result["partial"])
+        self.garmin.run_covers_window.assert_called_once_with(30, None, None)
         self.battery.refresh.assert_called_once_with()
 
-    def test_busy_after_waiting_for_another_run_uses_provider_busy_error(self):
+    def test_awaited_run_covering_the_window_is_not_repeated(self):
+        self.garmin.run_covers_window.return_value = True
+        self.garmin.sync.return_value = {
+            "status": "ok",
+            "waited_for_existing": True,
+            "synced_at": "2026-10-10T06:00:00+00:00",
+        }
+
+        result = self.refresh.refresh("garmin", {"days": 30}, None)
+
+        self.garmin.sync.assert_called_once()
+        self.garmin.run_covers_window.assert_called_once_with(
+            30, None, "2026-10-10T06:00:00+00:00"
+        )
+        self.assertFalse(result["partial"])
+        self.battery.refresh.assert_called_once_with()
+
+    def test_busy_rerun_after_waiting_keeps_awaited_data_as_partial(self):
         self.garmin.sync.side_effect = [
             {"status": "ok", "waited_for_existing": True},
             {"status": "already_running"},
         ]
 
-        with self.assertRaises(AppError) as error:
-            self.refresh.refresh("garmin", {}, None)
+        result = self.refresh.refresh("garmin", {}, None)
 
-        self.assertEqual(error.exception.reason, "provider_busy")
-        self.battery.refresh.assert_not_called()
+        self.assertTrue(result["partial"])
+        self.battery.refresh.assert_called_once_with()
 
     def test_partial_sync_is_reported_and_still_refreshes_body_battery(self):
         self.garmin.sync.return_value = {"status": "partial"}
@@ -285,6 +314,8 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
 
         self.assertEqual(error.exception.status, 503)
         self.assertEqual(error.exception.reason, "provider_busy")
+        self.assertIn("Garmin", str(error.exception))
+        self.assertNotIn("garmin-", str(error.exception))
         self.battery.refresh.assert_not_called()
 
     def test_sync_failure_propagates_without_body_battery_refresh(self):

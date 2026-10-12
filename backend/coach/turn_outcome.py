@@ -45,6 +45,25 @@ class _SyncJob:
         """Whether the model could overstate a remote write it cannot confirm."""
         return self.writes_remote and (self.started_here or self.status != "completed")
 
+    def status_line(self, job_id: str) -> str:
+        prefix = f"Synchronisationsauftrag {job_id}: {self.status}."
+        if self.writes_remote:
+            confirmed = (
+                "bestätigt" if self.status == "completed" else "noch nicht bestätigt"
+            )
+            return f"{prefix} Remote-Abschluss ist {confirmed}."
+        if self.status == "partial":
+            return f"{prefix} Der Datenabruf war nur teilweise erfolgreich."
+        outcome = (
+            "läuft noch"
+            if self.status in {"queued", "running"}
+            else "ist fehlgeschlagen"
+        )
+        return (
+            f"{prefix} Der Datenabruf {outcome}; "
+            "die Antwort nutzt die bisher gespeicherten Daten."
+        )
+
 
 def _inspected_jobs(
     command_receipts: list[dict[str, Any]],
@@ -97,14 +116,15 @@ def _sync_jobs(
     return jobs
 
 
-def _partial_refresh_notes(effects: list[dict[str, Any]]) -> list[str]:
+def _partial_refresh_note(effects: list[dict[str, Any]]) -> str | None:
     """Flag a waited refresh that finished with missing data."""
-    return [
-        "Hinweis: Der Datenabruf war nur teilweise erfolgreich; einzelne Daten können fehlen."
-        for entry in effects
-        if entry.get("tool") == "start_provider_refresh"
+    if any(
+        entry.get("tool") == "start_provider_refresh"
         and (entry.get("result") or {}).get("partial")
-    ][:1]
+        for entry in effects
+    ):
+        return "Hinweis: Der Datenabruf war nur teilweise erfolgreich; einzelne Daten können fehlen."
+    return None
 
 
 def _pending_value(
@@ -202,16 +222,21 @@ def _failure_message(
 def _queued_message(
     text: str,
     question: str,
-    queued: list[str],
+    notices: list[str],
     effects: list[dict[str, Any]],
     failures: list[dict[str, Any]],
     incomplete_answer: bool,
     replace_prose: bool,
 ) -> str:
-    if not queued:
+    """Append sync notices to the answer, or rebuild it around them.
+
+    A clarifying question carries no failure or local-effect lines, so it is
+    rebuilt with them, as is an answer that could overstate a remote write.
+    """
+    if not notices:
         return text
-    if text and not replace_prose:
-        return "\n".join((text, *queued))
+    if text and not replace_prose and not question:
+        return "\n".join((text, *notices))
     lines: list[str] = []
     if failures:
         lines.extend(
@@ -235,7 +260,7 @@ def _queued_message(
             + "; ".join(coach_effect_label(entry) for entry in local_effects)
             + "."
         )
-    lines.extend(queued)
+    lines.extend(notices)
     if incomplete_answer:
         lines.append(
             "Die Antwort wurde nicht abgeschlossen. Bitte den Coach um Fortsetzung bitten."
@@ -353,12 +378,12 @@ class CoachStructuredOutcomeService:
     ) -> tuple[str, bool, bool]:
         text = question or response_text(response)
         jobs = _sync_jobs(effects, command_receipts)
-        queued = [
-            f"Synchronisationsauftrag {job_id}: {job.status}. Remote-Abschluss ist "
-            f"{'bestätigt' if job.status == 'completed' else 'noch nicht bestätigt'}."
-            for job_id, job in jobs.items()
-            if job.reported()
-        ] + _partial_refresh_notes(effects)
+        notices = [
+            job.status_line(job_id) for job_id, job in jobs.items() if job.reported()
+        ]
+        partial_note = _partial_refresh_note(effects)
+        if partial_note:
+            notices.append(partial_note)
         replace_prose = any(job.replaces_prose() for job in jobs.values())
         awaiting_approval = any(
             ((entry.get("result") or {}).get("proposed_action") or {}).get(
@@ -373,7 +398,7 @@ class CoachStructuredOutcomeService:
             text += "\nDie Antwort wurde nicht abgeschlossen. Bitte den Coach um Fortsetzung bitten."
         text = _failure_message(text, question, failures, effects)
         text = _queued_message(
-            text, question, queued, effects, failures, incomplete_answer, replace_prose
+            text, question, notices, effects, failures, incomplete_answer, replace_prose
         )
         text = _approval_message(
             text, question, awaiting_approval, effects, command_receipts

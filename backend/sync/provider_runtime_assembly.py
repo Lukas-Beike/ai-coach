@@ -177,7 +177,9 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
 
     def synchronous_refresh() -> GarminSynchronousRefresh:
         return GarminSynchronousRefresh(
-            garmin.sync_service(), garmin.morning_body_battery_service()
+            garmin.sync_service(),
+            garmin.morning_body_battery_service(),
+            all_sync_days,
         )
 
     return ProviderRuntimeBinding(

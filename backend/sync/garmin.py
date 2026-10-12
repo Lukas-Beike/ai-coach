@@ -31,6 +31,8 @@ GARMIN_CAPABILITY_FAILURE_LIMIT = 3
 GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
 GARMIN_INITIAL_SYNC_DAYS = 84
 GARMIN_CATCHUP_MAX_DAYS = 90
+# Collections every refresh window must cover before it counts as current.
+GARMIN_WINDOW_SOURCES = frozenset({"activities", "sleep", "hrv"})
 
 GARMIN_COLLECTION_SOURCES = (
     "sleep",
@@ -160,7 +162,7 @@ class GarminPayloadService:
         """Return a bounded, contiguous refresh window for the oldest collection."""
         snapshot = self.snapshot()
         freshness = snapshot.get("source_freshness") or {}
-        sources = {"activities", "sleep", "hrv"} | (
+        sources = GARMIN_WINDOW_SOURCES | (
             set(freshness) & {"daily_stats", "resting_hr", "training_status"}
         )
         today = self._local_today()
@@ -182,6 +184,38 @@ class GarminPayloadService:
             return max(minimum_days, span), None
         return GARMIN_CATCHUP_MAX_DAYS, oldest_end + timedelta(
             days=GARMIN_CATCHUP_MAX_DAYS - 1
+        )
+
+    def run_covers_window(
+        self, days: int, end_date: date | None, synced_at: str | None
+    ) -> bool:
+        """Whether the stored run from ``synced_at`` completely read the window.
+
+        Only the latest snapshot's own read counts, so merged coverage from an
+        older run cannot vouch for it; empty but complete reads still count.
+        """
+        snapshot = self.snapshot()
+        if not synced_at or snapshot.get("synced_at") != synced_at:
+            return False
+        end = end_date or self._local_today()
+        start = end - timedelta(days=days - 1)
+        try:
+            covered = (
+                date.fromisoformat(snapshot["start"]) <= start
+                and date.fromisoformat(snapshot["end"]) >= end
+            )
+        except KeyError, TypeError, ValueError:
+            return False
+        pagination = (snapshot.get("provider_sync") or {}).get("pagination") or {}
+        failed = {
+            error.get("source")
+            for error in snapshot.get("errors") or []
+            if isinstance(error, dict)
+        }
+        return covered and all(
+            source not in failed
+            and (pagination.get(source) or {}).get("complete") is True
+            for source in GARMIN_WINDOW_SOURCES
         )
 
     def prepare_fixture(self, payload: dict[str, Any]) -> dict[str, Any]:

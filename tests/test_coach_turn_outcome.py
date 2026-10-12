@@ -305,7 +305,8 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         _, text, _ = self.finalize(self.response("Take it easy today."), receipts)
         self.assertTrue(text.startswith("Take it easy today.\n"))
         self.assertIn("synthetic-refresh-2: queued", text)
-        self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
+        self.assertIn("Der Datenabruf läuft noch", text)
+        self.assertNotIn("Remote-Abschluss", text)
 
     def test_empty_answer_with_pending_refresh_falls_back_to_receipts(self):
         receipts = [
@@ -775,7 +776,65 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertEqual((status, failures), ("completed", []))
         self.assertTrue(text.startswith("Check-in saved; readiness looks good.\n"))
         self.assertIn("mixed-refresh: queued", text)
-        self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
+        self.assertIn("Der Datenabruf läuft noch", text)
+        self.assertNotIn("Remote-Abschluss", text)
+
+    def test_finished_read_only_refresh_reports_failure_or_partial_data(self):
+        def receipts(job_status):
+            return [
+                {
+                    "call_id": "refresh",
+                    "tool": "start_provider_refresh",
+                    "result": {
+                        "ok": True,
+                        "status": "queued",
+                        "sync_job_id": "synthetic-read-1",
+                    },
+                },
+                {
+                    "call_id": "inspect",
+                    "tool": "get_sync_job",
+                    "result": {
+                        "ok": True,
+                        "job": {
+                            "id": "synthetic-read-1",
+                            "type": "refresh",
+                            "status": job_status,
+                        },
+                    },
+                },
+            ]
+
+        _, failed, _ = self.finalize(self.response("Analysis."), receipts("failed"))
+        self.assertTrue(failed.startswith("Analysis.\n"))
+        self.assertIn("synthetic-read-1: failed", failed)
+        self.assertIn("Der Datenabruf ist fehlgeschlagen", failed)
+        self.assertNotIn("Remote-Abschluss", failed)
+        _, partial, _ = self.finalize(self.response("Analysis."), receipts("partial"))
+        self.assertIn("synthetic-read-1: partial", partial)
+        self.assertIn("nur teilweise erfolgreich", partial)
+        self.assertNotIn("Remote-Abschluss", partial)
+
+    def test_question_keeps_failure_and_read_only_refresh_status(self):
+        _, text, _ = self.finalize(
+            self.response("Readiness looks fine."),
+            [
+                self.failure(),
+                {
+                    "tool": "refresh_current_performance",
+                    "result": {
+                        "ok": True,
+                        "status": "queued",
+                        "sync_job_id": "question-refresh",
+                    },
+                },
+            ],
+            question="Which race date should I use?",
+        )
+
+        self.assertIn("Which race date should I use?", text)
+        self.assertIn("question-refresh: queued", text)
+        self.assertIn("Synthetic conflict", text)
 
     def test_queued_receipt_does_not_suppress_clarifying_question(self):
         _, text, _ = self.finalize(
