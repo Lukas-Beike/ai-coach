@@ -39,7 +39,8 @@ def current_performance_context(
 ) -> dict[str, Any]:
     """Compose the current performance projection from explicit inputs.
 
-    ``canonical`` replaces only CTL and ATL in the load context when given.
+    ``canonical`` replaces CTL and ATL in the load context, the sport thresholds and
+    VO2max, and the matching recovery values, when given.
     """
     if not snapshot:
         unavailable = {
@@ -75,7 +76,11 @@ def current_performance_context(
     )
 
     recovery = performance_recovery_context.performance_recovery_context(
-        garmin, latest_wellness, wellness_rows, today
+        garmin,
+        latest_wellness,
+        wellness_rows,
+        today,
+        canonical=None if canonical is None else canonical.recovery,
     )
     sleep_hours = recovery["sleep_hours"]
     sleep_source = recovery["sleep_source"]

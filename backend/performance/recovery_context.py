@@ -7,7 +7,13 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend.canonical.records import Observation
+from backend.canonical.vocabulary import ProviderId
 from backend.performance import garmin_metrics, recovery, wellness
+from backend.performance.canonical_recovery import (
+    CanonicalRecoveryInputs,
+    prefer_canonical,
+)
 
 INTERVALS_WELLNESS_SOURCE = "Intervals.icu Wellness"
 
@@ -33,12 +39,15 @@ def _as_number(value: Any) -> float | int | None:
 
 
 def _garmin_sleep_recovery(
-    garmin: dict[str, Any], latest_wellness: dict[str, Any], today: date
+    garmin: dict[str, Any],
+    latest_wellness: dict[str, Any],
+    today: date,
+    sleep_observed: Observation | None = None,
 ) -> dict[str, Any] | None:
     sleep_seconds, _ = recovery.garmin_recovery_metric(
         garmin, "sleep", ("sleepTimeSeconds", "sleepDuration")
     )
-    sleep_score, _ = recovery.garmin_recovery_metric(
+    sleep_score, sleep_score_date = recovery.garmin_recovery_metric(
         garmin,
         "sleep",
         ("sleepScore", "overallSleepScore"),
@@ -66,9 +75,16 @@ def _garmin_sleep_recovery(
             garmin, "sleep", ("sleep_hours",), 7, today
         )
     resolved_score = (
-        sleep_score
+        prefer_canonical(
+            sleep_observed, sleep_score, ProviderId.GARMIN, sleep_score_date
+        )
         if sleep_score is not None
-        else _first_present(latest_wellness, ("sleepScore",))
+        else prefer_canonical(
+            sleep_observed,
+            _first_present(latest_wellness, ("sleepScore",)),
+            ProviderId.INTERVALS,
+            latest_wellness.get("id"),
+        )
     )
     if sleep_score is not None:
         sleep_score_source = garmin_metrics.GARMIN_PERFORMANCE_SOURCE
@@ -90,6 +106,7 @@ def _intervals_sleep_recovery(
     latest_wellness: dict[str, Any],
     wellness_rows: list[dict[str, Any]],
     today: date,
+    sleep_observed: Observation | None = None,
 ) -> dict[str, Any]:
     sleep_seconds = _first_present(latest_wellness, ("sleepSecs",))
     try:
@@ -105,7 +122,12 @@ def _intervals_sleep_recovery(
         sleep_average = wellness.wellness_average(
             wellness_rows, ("sleep_hours",), 7, today
         )
-    sleep_score = _first_present(latest_wellness, ("sleepScore",))
+    sleep_score = prefer_canonical(
+        sleep_observed,
+        _first_present(latest_wellness, ("sleepScore",)),
+        ProviderId.INTERVALS,
+        latest_wellness.get("id"),
+    )
     return {
         "sleep_hours": sleep_hours,
         "sleep_source": (
@@ -125,11 +147,16 @@ def _performance_sleep_recovery(
     latest_wellness: dict[str, Any],
     wellness_rows: list[dict[str, Any]],
     today: date,
+    sleep_observed: Observation | None = None,
 ) -> dict[str, Any]:
-    garmin_recovery = _garmin_sleep_recovery(garmin, latest_wellness, today)
+    garmin_recovery = _garmin_sleep_recovery(
+        garmin, latest_wellness, today, sleep_observed
+    )
     if garmin_recovery is not None:
         return garmin_recovery
-    return _intervals_sleep_recovery(latest_wellness, wellness_rows, today)
+    return _intervals_sleep_recovery(
+        latest_wellness, wellness_rows, today, sleep_observed
+    )
 
 
 def _performance_recovery_metric(
@@ -141,6 +168,7 @@ def _performance_recovery_metric(
     fallback_keys: tuple[str, ...],
     transform: Callable[[Any], Any],
     today: date,
+    observed: Observation | None = None,
 ) -> tuple[Any, str | None, Any, str | None]:
     current, observed_date = recovery.garmin_recovery_metric(
         garmin, section, keys, transform
@@ -150,7 +178,7 @@ def _performance_recovery_metric(
             garmin, section, keys, 7, today, transform
         )
         return (
-            current,
+            prefer_canonical(observed, current, ProviderId.GARMIN, observed_date),
             garmin_metrics.GARMIN_PERFORMANCE_SOURCE,
             average,
             observed_date,
@@ -158,6 +186,9 @@ def _performance_recovery_metric(
     fallback = _first_present(latest_wellness, fallback_keys)
     average = wellness.wellness_average(wellness_rows, fallback_keys, 7, today)
     source = INTERVALS_WELLNESS_SOURCE if fallback is not None else None
+    fallback = prefer_canonical(
+        observed, fallback, ProviderId.INTERVALS, latest_wellness.get("id")
+    )
     return fallback, source, average, None
 
 
@@ -166,6 +197,7 @@ def _performance_readiness(
     latest_wellness: dict[str, Any],
     wellness_rows: list[dict[str, Any]],
     today: date,
+    observed: Observation | None = None,
 ) -> tuple[Any, str | None, Any]:
     readiness_keys = (
         "readiness",
@@ -178,11 +210,16 @@ def _performance_readiness(
         _first_present(latest_wellness, readiness_keys)
     )
     source = INTERVALS_WELLNESS_SOURCE if current is not None else None
+    if current is not None:
+        current = prefer_canonical(
+            observed, current, ProviderId.INTERVALS, latest_wellness.get("id")
+        )
     if current is None:
         current = wellness.readiness_score_value(garmin.get("readiness"))
         source = (
             garmin_metrics.GARMIN_PERFORMANCE_SOURCE if current is not None else None
         )
+        current = prefer_canonical(observed, current, ProviderId.GARMIN)
     average = wellness.wellness_average(wellness_rows, readiness_keys, 7, today)
     return current, source, average
 
@@ -192,8 +229,22 @@ def performance_recovery_context(
     latest_wellness: dict[str, Any],
     wellness_rows: list[dict[str, Any]],
     today: date,
+    *,
+    canonical: CanonicalRecoveryInputs | None = None,
 ) -> dict[str, Any]:
-    sleep = _performance_sleep_recovery(garmin, latest_wellness, wellness_rows, today)
+    """Recovery context for the snapshot; ``canonical`` replaces matching values.
+
+    Without ``canonical`` the legacy readers run unchanged. With it, the sleep score,
+    resting HR and readiness take the canonical value only when it is the record the
+    legacy reader picked. Everything else stays legacy.
+    """
+    sleep = _performance_sleep_recovery(
+        garmin,
+        latest_wellness,
+        wellness_rows,
+        today,
+        None if canonical is None else canonical.sleep_score,
+    )
     resting_hr, resting_hr_source, resting_hr_average, resting_hr_date = (
         _performance_recovery_metric(
             garmin,
@@ -204,6 +255,7 @@ def performance_recovery_context(
             ("restingHR", "resting_hr"),
             lambda value: garmin_metrics.garmin_bounded_metric(value, 30, 230),
             today,
+            None if canonical is None else canonical.resting_hr,
         )
     )
     hrv, hrv_source, hrv_average, hrv_date = _performance_recovery_metric(
@@ -217,7 +269,11 @@ def performance_recovery_context(
         today,
     )
     readiness, readiness_source, readiness_average = _performance_readiness(
-        garmin, latest_wellness, wellness_rows, today
+        garmin,
+        latest_wellness,
+        wellness_rows,
+        today,
+        None if canonical is None else canonical.readiness,
     )
     return {
         **sleep,
