@@ -145,6 +145,17 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "intervals_event_id",
         "external_id",
         "created_at",
+        "provider",
+    },
+    "remote_links": {
+        "entity_kind",
+        "local_id",
+        "provider",
+        "remote_id",
+        "remote_external_id",
+        "baseline_hash",
+        "sync_state",
+        "last_synced_at",
     },
     "training_plans": {
         "id",
@@ -405,13 +416,14 @@ CURRENT_DATABASE_INDEXES = {
     "idx_provider_records_reprojection",
     "idx_provider_refresh_area",
     "idx_provider_refresh_created_at",
+    "idx_remote_links_remote_id",
     "idx_sync_job_items_status",
     "idx_sync_jobs_status_available",
     "idx_workout_library_external_id",
 }
 
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -569,6 +581,40 @@ ACTIVITY_FEEDBACK_TABLE_SQL = """
     )"""
 
 
+# Shared by initialize_schema and the schema-version-8 migration, which rebuilds
+# the table so its stored definition matches this text exactly. The provider
+# column is NULL for rows written before provider-neutral remote links.
+COMPETITION_SYNC_TOMBSTONES_TABLE_SQL = """
+    CREATE TABLE competition_sync_tombstones (
+        id TEXT PRIMARY KEY,
+        intervals_event_id TEXT,
+        external_id TEXT,
+        created_at TEXT NOT NULL,
+        provider TEXT
+    )"""
+
+# Provider-neutral link between one local entity and its counterpart at one
+# remote provider (schema version 8). It is separate from PROVIDER_TABLES_DDL so
+# the schema-version-6 upgrade keeps creating exactly the version-6 tables. The
+# open vocabularies (entity kind, provider, state) are validated by
+# backend.db.remote_links before a row is written, like the canonical tables.
+REMOTE_LINKS_DDL = """
+    CREATE TABLE remote_links (
+        entity_kind TEXT NOT NULL CHECK (length(entity_kind) BETWEEN 1 AND 64),
+        local_id TEXT NOT NULL CHECK (length(local_id) >= 1),
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        remote_id TEXT,
+        remote_external_id TEXT,
+        baseline_hash TEXT,
+        sync_state TEXT NOT NULL CHECK (length(sync_state) BETWEEN 1 AND 64),
+        last_synced_at TEXT,
+        PRIMARY KEY (entity_kind, local_id, provider)
+    );
+    CREATE UNIQUE INDEX idx_remote_links_remote_id
+        ON remote_links(provider, entity_kind, remote_id) WHERE remote_id IS NOT NULL;
+"""
+
+
 def initialize_schema(db: Any) -> None:
     """Create the exact current schema on a new database connection."""
     db.executescript(
@@ -721,12 +767,6 @@ def initialize_schema(db: Any) -> None:
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     );
-    CREATE TABLE competition_sync_tombstones (
-        id TEXT PRIMARY KEY,
-        intervals_event_id TEXT,
-        external_id TEXT,
-        created_at TEXT NOT NULL
-    );
     CREATE TABLE training_plans (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -753,8 +793,10 @@ def initialize_schema(db: Any) -> None:
         updated_at TEXT NOT NULL
     );
     """
-    + ACTIVITY_FEEDBACK_TABLE_SQL
-    + """;
+        + ACTIVITY_FEEDBACK_TABLE_SQL
+        + ";\n"
+        + COMPETITION_SYNC_TOMBSTONES_TABLE_SQL
+        + """;
     CREATE TABLE plan_adjustments (
         id TEXT PRIMARY KEY,
         payload TEXT NOT NULL,
@@ -901,6 +943,9 @@ def initialize_schema(db: Any) -> None:
     )
 
     for statement in PROVIDER_TABLES_DDL.split(";"):
+        if statement.strip():
+            db.execute(statement)
+    for statement in REMOTE_LINKS_DDL.split(";"):
         if statement.strip():
             db.execute(statement)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")

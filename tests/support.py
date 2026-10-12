@@ -199,6 +199,7 @@ def reset_application_state(server) -> None:
         "planned_units",
         "competitions",
         "competition_sync_tombstones",
+        "remote_links",
         "athlete_checkins",
         "activity_feedback",
         "plan_adjustments",

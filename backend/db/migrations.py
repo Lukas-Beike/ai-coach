@@ -6,11 +6,18 @@ import json
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
+from backend.canonical.vocabulary import (
+    ProviderId,
+    RemoteEntityKind,
+    RemoteLinkState,
+)
 from backend.db.schema import (
     ACTIVITY_FEEDBACK_TABLE_SQL,
+    COMPETITION_SYNC_TOMBSTONES_TABLE_SQL,
     CURRENT_SCHEMA_VERSION,
     NUTRITION_PRODUCTS_DDL,
     PROVIDER_TABLES_DDL,
+    REMOTE_LINKS_DDL,
     database_schema_is_current,
     database_schema_signature,
 )
@@ -22,6 +29,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V3_V4,
     SHAPE_SCHEMA_V5,
     SHAPE_SCHEMA_V6,
+    SHAPE_SCHEMA_V7,
     released_shape,
 )
 
@@ -293,6 +301,125 @@ def _add_activity_feedback_provider(db: Any) -> None:
     db.execute("DROP TABLE activity_feedback_v6")
 
 
+_TOMBSTONE_COLUMNS = "id, intervals_event_id, external_id, created_at"
+
+
+def _json_text(column: str, key: str) -> str:
+    """SQL for a scalar string/integer JSON member, NULL for anything else.
+
+    Legacy payload columns are not CHECKed, so malformed JSON must yield NULL
+    instead of aborting the whole upgrade.
+    """
+    path = f"'$.{key}'"
+    return (
+        f"CASE WHEN json_valid({column}) THEN "
+        f"CASE WHEN json_type({column}, {path}) IN ('text', 'integer') "
+        f"THEN NULLIF(TRIM(CAST(json_extract({column}, {path}) AS TEXT)), '') "
+        "END END"
+    )
+
+
+def _text(column: str) -> str:
+    return f"NULLIF(TRIM(CAST({column} AS TEXT)), '')"
+
+
+def _backfill_remote_links(
+    db: Any,
+    *,
+    entity_kind: RemoteEntityKind,
+    table: str,
+    local_id: str,
+    remote_id: str,
+    remote_external_id: str,
+    baseline_hash: str,
+    last_synced_at: str,
+) -> None:
+    """Copy one table's legacy remote-identifier slots into remote_links.
+
+    Only rows that carry a remote slot are linked; purely local rows have no
+    counterpart yet. A remote id claimed by several rows stays with the oldest
+    row (the unique index allows one) and the others fall back to pending, so a
+    legacy duplicate can never abort the upgrade. Legacy slots remain untouched.
+    """
+    db.execute(
+        "INSERT INTO remote_links(entity_kind, local_id, provider, remote_id, "
+        "remote_external_id, baseline_hash, sync_state, last_synced_at) "
+        f"WITH slots AS (SELECT rowid AS slot_order, {local_id} AS local_id, "
+        f"{remote_id} AS remote_id, {remote_external_id} AS remote_external_id, "
+        f"{baseline_hash} AS baseline_hash, {last_synced_at} AS last_synced_at "
+        f"FROM {table}), "
+        "ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY remote_id "
+        "ORDER BY slot_order) AS claim FROM slots "
+        "WHERE remote_id IS NOT NULL OR remote_external_id IS NOT NULL) "
+        "SELECT ?, local_id, ?, CASE WHEN claim = 1 THEN remote_id END, "
+        "remote_external_id, baseline_hash, "
+        "CASE WHEN remote_id IS NOT NULL AND claim = 1 THEN ? ELSE ? END, "
+        "last_synced_at FROM ranked "
+        "WHERE local_id IS NOT NULL AND CAST(local_id AS TEXT) <> ''",
+        (
+            entity_kind.value,
+            ProviderId.INTERVALS.value,
+            RemoteLinkState.SYNCED.value,
+            RemoteLinkState.PENDING.value,
+        ),
+    )
+
+
+def _add_remote_links(db: Any) -> None:
+    """Schema version 7 -> schema version 8: provider-neutral remote links.
+
+    Creates remote_links and backfills it from every legacy remote slot, all of
+    which belong to Intervals.icu. The tombstone table is rebuilt from the live
+    definition (SQLite's ADD COLUMN would store a rewritten CREATE text) and
+    every existing tombstone is attributed to Intervals.icu. No legacy column
+    or JSON member is modified or dropped; readers switch to the links later.
+    """
+    for statement in REMOTE_LINKS_DDL.split(";"):
+        if statement.strip():
+            db.execute(statement)
+    _backfill_remote_links(
+        db,
+        entity_kind=RemoteEntityKind.LIBRARY_WORKOUT,
+        table="workout_library",
+        local_id="local_id",
+        remote_id=_json_text("payload", "remote_event_id"),
+        remote_external_id=_text("external_id"),
+        baseline_hash="NULL",
+        last_synced_at="last_synced_at",
+    )
+    _backfill_remote_links(
+        db,
+        entity_kind=RemoteEntityKind.PLANNED_UNIT,
+        table="planned_units",
+        local_id="local_id",
+        remote_id=_json_text("payload", "remote_event_id"),
+        remote_external_id=_text("external_id"),
+        baseline_hash="baseline_hash",
+        last_synced_at="last_synced_at",
+    )
+    _backfill_remote_links(
+        db,
+        entity_kind=RemoteEntityKind.COMPETITION,
+        table="competitions",
+        local_id="id",
+        remote_id=_text("intervals_event_id"),
+        remote_external_id=_text("external_id"),
+        baseline_hash="NULL",
+        last_synced_at="last_synced_at",
+    )
+    db.execute(
+        "ALTER TABLE competition_sync_tombstones "
+        "RENAME TO competition_sync_tombstones_v7"
+    )
+    db.execute(COMPETITION_SYNC_TOMBSTONES_TABLE_SQL)
+    db.execute(
+        f"INSERT INTO competition_sync_tombstones({_TOMBSTONE_COLUMNS}, provider) "
+        f"SELECT {_TOMBSTONE_COLUMNS}, ? FROM competition_sync_tombstones_v7",
+        (ProviderId.INTERVALS.value,),
+    )
+    db.execute("DROP TABLE competition_sync_tombstones_v7")
+
+
 UpgradeStep = Callable[[Any], None]
 
 # Released shape -> (shape reached after the step, step). Every released shape
@@ -302,5 +429,6 @@ UPGRADE_STEPS: Final[Mapping[str, tuple[str, UpgradeStep]]] = {
     SHAPE_SCHEMA_V2: (SHAPE_SCHEMA_V3_V4, _add_no_training_signal),
     SHAPE_SCHEMA_V3_V4: (SHAPE_SCHEMA_V5, _add_logged_time_known),
     SHAPE_SCHEMA_V5: (SHAPE_SCHEMA_V6, _add_provider_tables),
-    SHAPE_SCHEMA_V6: (SHAPE_CURRENT, _add_activity_feedback_provider),
+    SHAPE_SCHEMA_V6: (SHAPE_SCHEMA_V7, _add_activity_feedback_provider),
+    SHAPE_SCHEMA_V7: (SHAPE_CURRENT, _add_remote_links),
 }

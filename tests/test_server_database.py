@@ -804,15 +804,41 @@ class ServerDatabaseTests(ServerTestCase):
                 "upcoming_calendar": [],
             }
         )
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            db.execute(
+                "INSERT INTO remote_links(entity_kind, local_id, provider, remote_id, "
+                "sync_state) VALUES ('competition', '1', 'intervals', 'event-1', 'synced')"
+            )
+            db.execute(
+                "INSERT INTO competition_sync_tombstones(intervals_event_id, "
+                "external_id, created_at, provider) VALUES "
+                "('event-2', 'external-2', ?, 'intervals')",
+                (runtime_clock.utc_now(),),
+            )
         temporary = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
                 names = set(archive.namelist())
                 manifest = json.loads(archive.read("manifest.json"))
                 self.assertEqual(manifest["format"], "intervals-coach-privacy-export")
-                self.assertEqual(manifest["format_version"], 3)
+                self.assertEqual(manifest["format_version"], 4)
                 self.assertEqual(manifest["status"], "complete")
                 self.assertIn("snapshots.jsonl", names)
+                self.assertIn("remote_links.jsonl", names)
+                links = [
+                    json.loads(line)
+                    for line in archive.read("remote_links.jsonl").splitlines()
+                ]
+                self.assertEqual(len(links), 1)
+                self.assertEqual(links[0]["remote_id"], "event-1")
+                self.assertEqual(links[0]["provider"], "intervals")
+                tombstones = [
+                    json.loads(line)
+                    for line in archive.read(
+                        "competition_sync_tombstones.jsonl"
+                    ).splitlines()
+                ]
+                self.assertEqual(tombstones[0]["provider"], "intervals")
                 self.assertIn("profile.json", names)
                 self.assertNotIn("sessions.jsonl", names)
                 self.assertEqual(

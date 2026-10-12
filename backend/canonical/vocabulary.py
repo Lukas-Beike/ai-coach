@@ -141,3 +141,20 @@ class ActivitySessionState(StrEnum):
     HIDDEN = "hidden"
     DUPLICATE = "duplicate"
     DELETED = "deleted"
+
+
+class RemoteEntityKind(StrEnum):
+    """Kind of local entity that a provider-neutral remote link refers to."""
+
+    LIBRARY_WORKOUT = "library_workout"
+    PLANNED_UNIT = "planned_unit"
+    COMPETITION = "competition"
+
+
+class RemoteLinkState(StrEnum):
+    """Synchronization state of one local entity at one remote provider."""
+
+    # The entity has no confirmed remote identifier at this provider yet.
+    PENDING = "pending"
+    # A remote identifier is known and was reconciled with the local entity.
+    SYNCED = "synced"
