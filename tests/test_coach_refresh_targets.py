@@ -24,13 +24,21 @@ from backend.providers.descriptors import (
     DEFAULT_PROVIDER_DESCRIPTORS,
     GARMIN_ID,
     INTERVALS_ID,
+    WAHOO_ID,
     WEATHER_ID,
 )
 from backend.sync.commands import ProviderRefreshCommandService
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 USER_MESSAGE_ID = 7
-DEFAULT_TARGETS = ["local", INTERVALS_ID, GARMIN_ID, CALENDAR_ID, WEATHER_ID]
+DEFAULT_TARGETS = [
+    "local",
+    INTERVALS_ID,
+    GARMIN_ID,
+    CALENDAR_ID,
+    WEATHER_ID,
+    WAHOO_ID,
+]
 
 
 def acme_registry(*, waits: bool = False) -> ProviderRegistry:

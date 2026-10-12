@@ -47,6 +47,7 @@ from backend.runtime.ports import (
 from backend.sync.canonical_backfill import backfill_complete
 from backend.sync.canonical_coverage_store import (
     CANONICAL_COVERAGE_PROVIDERS,
+    LIVE_COVERAGE_PROVIDERS,
     CanonicalCoverageStore,
 )
 from backend.sync.canonical_parity import CanonicalParity, CanonicalReader
@@ -114,17 +115,28 @@ class CanonicalReadSelector(
         A provider without a current persisted summary (nothing ingested yet, or
         mapper versions or time zone changed since) falls back to the legacy
         projection, which is computed only when at least one provider needs it.
+        A live-ingested provider (no legacy snapshot) is appended when present.
         """
         zone = self._legacy.zone(db)
         stored = {
             provider: self._coverage_store.load(db, provider, zone=zone)
             for provider in CANONICAL_COVERAGE_PROVIDERS
         }
+        live = tuple(
+            summary
+            for provider in LIVE_COVERAGE_PROVIDERS
+            if (summary := self._coverage_store.load(db, provider, zone=zone))
+            is not None
+        )
         if all(summary is not None for summary in stored.values()):
-            return tuple(summary for summary in stored.values() if summary is not None)
-        return tuple(
-            stored.get(summary.provider) or summary
-            for summary in self._legacy.coverage(db)
+            persisted = tuple(s for s in stored.values() if s is not None)
+            return persisted + live
+        return (
+            tuple(
+                stored.get(summary.provider) or summary
+                for summary in self._legacy.coverage(db)
+            )
+            + live
         )
 
     def serves_tables(self, db: Any) -> bool:

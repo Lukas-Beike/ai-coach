@@ -42,6 +42,7 @@ PREVIOUS_STALE_SECONDS: dict[tuple[str, str], int] = {
     ("garmin", "data"): TWO_DAYS,
     ("weather", "forecast"): THREE_HOURS,
     ("calendar", "events"): TWO_DAYS,
+    ("wahoo", "activities"): TWO_DAYS,
 }
 PREVIOUS_LABELS: dict[tuple[str, str], str] = {
     ("intervals", "activities"): "Intervals.icu · Training",
@@ -50,6 +51,7 @@ PREVIOUS_LABELS: dict[tuple[str, str], str] = {
     ("garmin", "data"): "Garmin",
     ("weather", "forecast"): "Open-Meteo",
     ("calendar", "events"): "Gemeinsamer Kalender",
+    ("wahoo", "activities"): "Wahoo",
 }
 PREVIOUS_PROJECTION: list[tuple[str, str, str, bool]] = [
     ("intervals", "activities", "Intervals.icu · Training", True),
@@ -58,6 +60,7 @@ PREVIOUS_PROJECTION: list[tuple[str, str, str, bool]] = [
     ("garmin", "data", "Garmin", True),
     ("weather", "forecast", "Open-Meteo", True),
     ("calendar", "events", "Gemeinsamer Kalender", True),
+    ("wahoo", "activities", "Wahoo", True),
 ]
 
 
@@ -132,9 +135,9 @@ class DefaultDescriptorParityTests(unittest.TestCase):
         self.assertEqual(PREVIOUS_LABELS, PROVIDER_REFRESH_LABELS)
         self.assertEqual(list(PREVIOUS_LABELS), list(PROVIDER_REFRESH_LABELS))
 
-    def test_provider_order_is_intervals_garmin_weather_calendar(self) -> None:
+    def test_provider_order_is_intervals_garmin_weather_calendar_wahoo(self) -> None:
         self.assertEqual(
-            ("intervals", "garmin", "weather", "calendar"),
+            ("intervals", "garmin", "weather", "calendar", "wahoo"),
             DEFAULT_PROVIDER_REGISTRY.ids(),
         )
         self.assertEqual(
@@ -220,7 +223,7 @@ class DefaultDescriptorParityTests(unittest.TestCase):
     def test_capabilities_are_assigned_per_provider(self) -> None:
         registry = DEFAULT_PROVIDER_REGISTRY
         self.assertEqual(
-            ("intervals", "garmin"), registry.ids_with(Capability.ACTIVITIES)
+            ("intervals", "garmin", "wahoo"), registry.ids_with(Capability.ACTIVITIES)
         )
         self.assertEqual(("intervals",), registry.ids_with(Capability.WORKOUT_EXPORT))
         self.assertEqual(("intervals",), registry.ids_with(Capability.COMPETITIONS))
@@ -247,7 +250,7 @@ class RegistryContractTests(unittest.TestCase):
         registry = ProviderRegistry((*DEFAULT_PROVIDER_DESCRIPTORS, mock))
 
         self.assertEqual(
-            ("intervals", "garmin", "weather", "calendar", "wahoo-mock"),
+            ("intervals", "garmin", "weather", "calendar", "wahoo", "wahoo-mock"),
             registry.ids(),
         )
         self.assertIn("wahoo-mock", registry.ids_with(Capability.ACTIVITIES))
@@ -483,31 +486,31 @@ class OrchestrationParityTests(unittest.TestCase):
 
     def test_sync_period_defaults_match_server_table(self) -> None:
         self.assertEqual(
-            {"intervals": 84, "garmin": 84},
+            {"intervals": 84, "garmin": 84, "wahoo": 84},
             DEFAULT_PROVIDER_REGISTRY.sync_period_defaults(),
         )
 
     def test_daily_order_matches_scheduler_ranks(self) -> None:
         self.assertEqual(
-            ("weather", "calendar", "garmin", "intervals"),
+            ("weather", "calendar", "garmin", "intervals", "wahoo"),
             DEFAULT_PROVIDER_REGISTRY.daily_order(),
         )
 
     def test_startup_order_matches_scheduler_ranks(self) -> None:
         self.assertEqual(
-            ("calendar", "intervals", "garmin", "weather"),
+            ("calendar", "intervals", "garmin", "weather", "wahoo"),
             DEFAULT_PROVIDER_REGISTRY.startup_order(),
         )
 
     def test_daily_marker_ids_match_daily_marker_providers(self) -> None:
         self.assertEqual(
-            frozenset({"intervals", "garmin", "calendar"}),
+            frozenset({"intervals", "garmin", "calendar", "wahoo"}),
             DEFAULT_PROVIDER_REGISTRY.daily_marker_ids(),
         )
 
     def test_coach_refresh_targets_match_authorization_order(self) -> None:
         self.assertEqual(
-            ("intervals", "garmin", "calendar", "weather"),
+            ("intervals", "garmin", "calendar", "weather", "wahoo"),
             DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets(),
         )
 
@@ -638,20 +641,20 @@ class CustomOrchestrationDescriptorTests(unittest.TestCase):
             frozenset({"days", "reason"}), registry.refresh_fields("wahoo-mock")
         )
         self.assertEqual(
-            {"intervals": 84, "garmin": 84, "wahoo-mock": 30},
+            {"intervals": 84, "garmin": 84, "wahoo": 84, "wahoo-mock": 30},
             registry.sync_period_defaults(),
         )
         self.assertEqual(
-            ("weather", "calendar", "garmin", "intervals", "wahoo-mock"),
+            ("weather", "calendar", "garmin", "intervals", "wahoo", "wahoo-mock"),
             registry.daily_order(),
         )
         self.assertEqual(
-            ("calendar", "wahoo-mock", "intervals", "garmin", "weather"),
+            ("calendar", "wahoo-mock", "intervals", "garmin", "weather", "wahoo"),
             registry.startup_order(),
         )
         self.assertIn("wahoo-mock", registry.daily_marker_ids())
         self.assertEqual(
-            ("intervals", "garmin", "calendar", "weather", "wahoo-mock"),
+            ("intervals", "garmin", "calendar", "weather", "wahoo", "wahoo-mock"),
             registry.coach_refresh_targets(),
         )
         self.assertEqual(

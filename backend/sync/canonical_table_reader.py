@@ -45,11 +45,13 @@ from backend.db import canonical_store
 from backend.providers.canonical_plans import current_observation_mapper_versions
 from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
+from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
 from backend.runtime.ports import ActivityReader, ObservationReader
 
 _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
     ProviderId.INTERVALS: INTERVALS_LABEL,
     ProviderId.GARMIN: GARMIN_LABEL,
+    ProviderId.WAHOO: WAHOO_LABEL,
 }
 
 

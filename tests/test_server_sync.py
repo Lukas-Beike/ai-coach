@@ -747,7 +747,7 @@ class ServerSyncTests(ServerTestCase):
         # tests/test_daily_sync_scheduler.py.
         self.assertEqual(
             DEFAULT_PROVIDER_REGISTRY.daily_marker_ids(),
-            frozenset({"calendar", "garmin", "intervals"}),
+            frozenset({"calendar", "garmin", "intervals", "wahoo"}),
         )
         self.assertNotIn("import server", module_source)
         self.assertNotIn("from server", module_source)

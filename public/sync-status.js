@@ -273,6 +273,7 @@ const PROVIDER_FRESHNESS_ERRORS = {
 const PROVIDER_LABELS = {
   intervals: "Intervals.icu",
   garmin: "Garmin",
+  wahoo: "Wahoo",
   calendar: "Gemeinsamer Kalender",
   weather: "Open-Meteo",
 };

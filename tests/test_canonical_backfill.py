@@ -24,7 +24,10 @@ from backend.db.schema import initialize_schema
 from backend.diagnostics.canonical_backfill import summarize_canonical_backfill
 from backend.errors import AppError
 from backend.providers import canonical_plans
-from backend.providers.canonical_plans import intervals_snapshot_ingest_plan
+from backend.providers.canonical_plans import (
+    intervals_snapshot_ingest_plan,
+    wahoo_ingest_plan,
+)
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill import (
     DEFAULT_BATCH_SIZE,
@@ -38,6 +41,7 @@ from backend.sync.canonical_backfill import (
 )
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
+from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_snapshot_writer import GARMIN_SNAPSHOT_KEY
 
 NOW = "2026-09-20T08:00:00+00:00"
@@ -47,6 +51,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers"
 SECRET_ID = "secret-activity-42"
 INTERVALS = ProviderId.INTERVALS.value
 GARMIN = ProviderId.GARMIN.value
+WAHOO = ProviderId.WAHOO.value
 ACTIVITY_KIND = canonical_plans.ACTIVITY_RECORD_KIND
 HEALTH_KIND = canonical_plans.HEALTH_RECORD_KIND
 
@@ -794,6 +799,44 @@ class ReprojectionTests(BackfillFixture):
             self.summary(backfill)["providers"][INTERVALS]["reprojected"], 3
         )
 
+    def test_live_ingested_wahoo_rows_reproject_into_an_on_demand_counter_bucket(
+        self,
+    ) -> None:
+        # Wahoo is ingested live and is not backfilled, so its counters bucket
+        # does not exist until a bumped Wahoo mapper re-projects its raw rows.
+        payload = {
+            "synced_at": NOW,
+            "workouts": [
+                {"id": 7, "starts": "2026-09-19T06:00:00Z", "workout_type_id": 1}
+            ],
+        }
+        plan = wahoo_ingest_plan(payload, zone=ZONE)
+        with self.manager.unit_of_work() as db:
+            ingest_plan(
+                db,
+                plan,
+                retrieved_at=canonical_plans.wahoo_payload_retrieved_at(
+                    payload, zone=ZONE
+                )
+                or self.fail("retrieval time"),
+                deletion_window=None,
+            )
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+        self.assertNotIn(WAHOO, self.summary(backfill)["providers"])
+
+        key = (WAHOO, ACTIVITY_KIND)
+        bumped = {key: canonical_plans._MAPPER_VERSIONS[key] + 1}
+        with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
+            self.run_to_completion(backfill)
+            providers = self.summary(backfill)["providers"]
+
+        self.assertEqual(providers[WAHOO]["reprojected"], 1)
+        self.assertEqual(providers[WAHOO]["retired"], 0)
+        self.assertEqual(providers[INTERVALS]["reprojected"], 0)
+        self.assertEqual(providers[GARMIN]["reprojected"], 0)
+        self.assertEqual(self.count("activity_records"), 1)
+
     def test_comma_decimal_wellness_stored_at_the_previous_version_is_reprojected(
         self,
     ) -> None:
@@ -964,6 +1007,8 @@ class ReprojectionTests(BackfillFixture):
         with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
             self.run_to_completion(backfill)
             for (provider, kind), version in bumped.items():
+                if provider == WAHOO:
+                    continue  # live-ingested; this fixture stores no Wahoo rows
                 with self.subTest(provider=provider, kind=kind):
                     rows = self.rows(
                         "SELECT COUNT(*) AS n FROM provider_records WHERE provider = ? "

@@ -185,7 +185,7 @@ class RegistryDailyMarkerTests(unittest.TestCase):
     def test_daily_marker_ids_are_the_providers_with_marker_keys(self):
         self.assertEqual(
             DEFAULT_PROVIDER_REGISTRY.daily_marker_ids(),
-            frozenset({"intervals", "garmin", "calendar"}),
+            frozenset({"intervals", "garmin", "calendar", "wahoo"}),
         )
         for provider in DEFAULT_PROVIDER_REGISTRY.ids():
             with self.subTest(provider=provider):

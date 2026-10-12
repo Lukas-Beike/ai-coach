@@ -97,10 +97,10 @@ class WahooConfigTests(unittest.TestCase):
         self.assertIn("WAHOO_REDIRECT_URI", SETTINGS_VALUE_KEYS)
         self.assertNotIn("WAHOO_CLIENT_SECRET", SETTINGS_VALUE_KEYS)
 
-    def test_provider_id_exists_without_registry_entry(self):
+    def test_provider_id_is_registered_as_a_read_only_provider(self):
         from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
-        self.assertNotIn(ProviderId.WAHOO.value, DEFAULT_PROVIDER_REGISTRY.ids())
+        self.assertIn(ProviderId.WAHOO.value, DEFAULT_PROVIDER_REGISTRY.ids())
 
 
 class WahooOAuthClientTests(unittest.TestCase):
@@ -301,6 +301,17 @@ class WahooConnectionServiceTests(unittest.TestCase):
             self.service.access_token()
         self.assertEqual(caught.exception.reason, "wahoo_reconnect_required")
         self.assertNotIn(WAHOO_TOKENS_KEY, self.values.data)
+
+    def test_invalidating_the_rejected_token_drops_the_grant(self):
+        self.connect()
+        self.service.invalidate_access_token("access-1")
+        self.assertNotIn(WAHOO_TOKENS_KEY, self.values.data)
+        self.assertFalse(self.service.status()["connected"])
+
+    def test_invalidating_an_older_token_keeps_a_newer_grant(self):
+        self.connect()
+        self.service.invalidate_access_token("access-0")
+        self.assertIn(WAHOO_TOKENS_KEY, self.values.data)
 
     def test_unexpected_exchange_exception_still_ends_in_error_outcome(self):
         self.service.start_authorization()

@@ -402,13 +402,13 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). Complete the initial 
 
 ### Wahoo connection
 
-The app can connect to Wahoo through OAuth (connection only; no data sync yet).
+The app can connect to Wahoo through OAuth and reads its workouts (read-only; nothing is ever written to Wahoo).
 
 1. Register an application in the Wahoo developer portal and set its redirect URI to `https://<app-host>/api/wahoo/callback`. This must be the HTTPS URL at which you reach the app, and it must match `WAHOO_REDIRECT_URI` exactly.
 2. Set `WAHOO_CLIENT_ID`, `WAHOO_CLIENT_SECRET` and `WAHOO_REDIRECT_URI` and restart the container.
 3. An authenticated session starts the login with `POST /api/wahoo/connect`, which returns the Wahoo authorize URL. The callback `GET /api/wahoo/callback` needs no session (session cookies are SameSite=Strict); it is accepted only with the server-stored, single-use state that expires after 10 minutes, and always redirects to `/?wahoo=connected` or `/?wahoo=error`.
 4. Tokens are stored in the encrypted database, refreshed with rotation before expiry, and excluded from exports, diagnostics and coach context. `POST /api/wahoo/disconnect` revokes access at Wahoo (best effort) and deletes the local tokens. The state JSON reports only `configured`, `connected`, `scope` and `connected_at`.
-5. Wahoo is polled only; no webhooks are used.
+5. Wahoo is polled only; no webhooks are used. Once connected, the startup and daily schedulers enqueue a Wahoo refresh (default window 84 days). Workouts are stored as canonical activities with the provider `wahoo` and local dates, and the sync status shows them as "Wahoo". A disconnected account is skipped with the not-connected message; stored activities are kept.
 
 ---
 
