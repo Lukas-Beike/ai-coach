@@ -162,12 +162,12 @@ class CoachContextSelectionTests(unittest.TestCase):
                 {"date": "2026-10-15"},
             ],
             "local_planned_workouts": [{"date": "2026-10-01"}, {"date": "2026-10-15"}],
-            "intervals": {
+            "activities": {
                 "synced_at": "2026-09-30T06:00:00Z",
                 "recent_activities_by_sport": {"Run": [{"id": "new"}, {"id": "old"}]},
                 "planned_workouts": [{"id": "duplicate"}],
             },
-            "garmin": {"raw": "unused"},
+            "recovery": {"raw": "unused"},
         }
         projected = selection.project(context, "2026-09-30")
         self.assertEqual(len(projected["daily_planning_context"]), 1)
@@ -176,11 +176,11 @@ class CoachContextSelectionTests(unittest.TestCase):
         )
         self.assertEqual(len(projected["local_planned_workouts"]), 1)
         self.assertEqual(
-            len(projected["intervals"]["recent_activities_by_sport"]["Run"]), 1
+            len(projected["activities"]["recent_activities_by_sport"]["Run"]), 1
         )
-        self.assertNotIn("planned_workouts", projected["intervals"])
-        self.assertNotIn("garmin", projected)
-        self.assertIn("planned_workouts", context["intervals"])
+        self.assertNotIn("planned_workouts", projected["activities"])
+        self.assertNotIn("recovery", projected)
+        self.assertIn("planned_workouts", context["activities"])
 
     def test_dialogue_compaction_does_not_mutate_authorization_context(self):
         context = {

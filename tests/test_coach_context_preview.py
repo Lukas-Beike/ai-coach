@@ -45,7 +45,7 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
                 }
             ],
             "activity_feedback": {"note": "x" * 200},
-            "intervals": CoachIntervalsContextService().project(
+            "activities": CoachIntervalsContextService().project(
                 self.snapshot, [], date(2026, 9, 23)
             ),
         }
@@ -108,7 +108,7 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
         self.structured_context.build.assert_called_once_with()
         self.assertIs(
             preview["latest_intervals_snapshot"],
-            preview["structured_athlete_context"]["intervals"],
+            preview["structured_athlete_context"]["activities"],
         )
 
     def test_projection_bounds_and_privacy(self):
