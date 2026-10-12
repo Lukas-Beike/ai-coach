@@ -17,6 +17,7 @@ from backend.errors import (
 )
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
+from backend.providers.intervals_workouts import INTERVALS_DEFAULT_WORKOUT_TYPE
 
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 
@@ -342,13 +343,16 @@ def remote_planned_unit_payload(
     remote_external_id = str(event.get("external_id") or "").strip()
     identity = remote_external_id or f"intervals-event-{remote_id}"
     moving_time = event.get("moving_time")
+    sport_type = (
+        event.get("type") or event.get("sport") or INTERVALS_DEFAULT_WORKOUT_TYPE
+    )
     payload = {
         "date": event_date,
         "start_date_local": event.get("start_date_local")
         or event.get("start")
         or event_date + _ISO_MIDNIGHT_SUFFIX,
-        "sport": event.get("type") or event.get("sport") or "Ride",
-        "type": event.get("type") or event.get("sport") or "Ride",
+        "sport": sport_type,
+        "type": sport_type,
         "name": event.get("name") or "Intervals.icu-Einheit",
         "description": event.get("description") or "",
         "duration_minutes": _remote_planned_unit_duration(event),

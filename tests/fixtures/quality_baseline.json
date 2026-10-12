@@ -64,14 +64,6 @@
     },
     {
       "tool": "ruff",
-      "path": "backend/planning/workouts.py",
-      "line": 416,
-      "column": 47,
-      "code": "FURB162",
-      "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/performance/personal_recovery.py",
       "line": 218,
       "column": 16,
@@ -2457,7 +2449,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/planned_calendar.py",
-      "line": 431,
+      "line": 433,
       "column": 19,
       "code": "call-arg",
       "message_sha256": "442fd4cf1edef23c8e8b64550dca5e2deb6cccef376a8f46018b9e74f75cc592"
@@ -2993,7 +2985,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/planned_calendar.py",
-      "line": 341,
+      "line": 343,
       "column": 8,
       "code": "index",
       "message_sha256": "69467071d581b1ef67e8d2e3bf0c5a40d7239c3db643b55b9fafae5ce76a8114"
@@ -3265,7 +3257,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/planned_calendar.py",
-      "line": 138,
+      "line": 139,
       "column": 12,
       "code": "return-value",
       "message_sha256": "361271fe306e85e3cb67c6ae457d6158f8a2b2501683148fe34bb2cae91765ce"
@@ -3273,7 +3265,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/planned_calendar.py",
-      "line": 525,
+      "line": 527,
       "column": 12,
       "code": "return-value",
       "message_sha256": "361271fe306e85e3cb67c6ae457d6158f8a2b2501683148fe34bb2cae91765ce"
@@ -3521,7 +3513,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/planned_calendar.py",
-      "line": 344,
+      "line": 346,
       "column": 8,
       "code": "union-attr",
       "message_sha256": "3b6755d7a5dc905d0b2a9e780572db535a8a3d4867910dcfbfa4028dfb62502e"
