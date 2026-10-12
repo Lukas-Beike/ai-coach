@@ -5,6 +5,7 @@ from typing import Any
 
 from backend.athlete.local_date import LocalDate
 from backend.performance import activity_validation, body, eftp, garmin_metric_history
+from backend.performance.canonical_body import CanonicalBodyInputs
 from backend.performance.garmin_load import acute_load_value
 
 INTERVALS_SOURCE = "Intervals.icu"
@@ -148,7 +149,11 @@ def _metric_series(
 
 
 def analysis_history(
-    snapshot: dict[str, Any] | None, garmin: dict[str, Any], today: date
+    snapshot: dict[str, Any] | None,
+    garmin: dict[str, Any],
+    today: date,
+    *,
+    canonical_body: CanonicalBodyInputs | None = None,
 ) -> dict[str, Any]:
     """Use dated provider history, never backfill today's settings into the past."""
     snapshot = snapshot or {}
@@ -184,7 +189,7 @@ def analysis_history(
         },
         # PublicPerformanceStateService exposes this as performance.history.body;
         # the UI can render it in the separate Body tab without another request.
-        "body": body.body_history(snapshot, garmin, today),
+        "body": body.body_history(snapshot, garmin, today, canonical=canonical_body),
         "cycling_power_profile": {
             **(snapshot.get("cycling_power_profile") or {}),
             "points": [

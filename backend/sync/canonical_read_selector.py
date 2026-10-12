@@ -102,6 +102,10 @@ class CanonicalReadSelector(
     def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]:
         return self._legacy.coverage(db)
 
+    def serves_tables(self, db: Any) -> bool:
+        """Return True while observation and activity reads come from the tables."""
+        return self._serves_tables(db)
+
     def refresh(self, db: Any) -> None:
         """Run parity for the current digest and store the result."""
         if read_status(self._key_values, db) != BackfillStatus.COMPLETE.value:

@@ -26,7 +26,11 @@ from backend.performance.canonical_current import (
     read_current_inputs,
 )
 from backend.performance.source_policy import select_current
-from backend.runtime.ports import ObservationReader, ObservationSourceSelector
+from backend.runtime.ports import (
+    CanonicalTableServing,
+    ObservationReader,
+    ObservationSourceSelector,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,11 +52,13 @@ class CanonicalPerformanceSource:
     """Lazy accessors a consumer uses to read canonical load inputs.
 
     Both callables are resolved at read time, as the other assemblies do, so the
-    composition root can pass ``lambda: ...`` accessors.
+    composition root can pass ``lambda: ...`` accessors. ``serving`` is optional;
+    when it is None, consumers that gate table-only reads keep the legacy values.
     """
 
     database_manager: Callable[[], Any]
     observation_reader: Callable[[], ObservationReader]
+    serving: Callable[[], CanonicalTableServing] | None = None
 
 
 def snapshot_with_inputs(
@@ -81,6 +87,13 @@ def inputs_for_snapshot(
     return read_performance_inputs(source.observation_reader(), db, snapshot)
 
 
+def resolve_reader(reader: ObservationReader, db: Any) -> ObservationReader:
+    """Choose the serving source once for a unit of work when the reader selects."""
+    if isinstance(reader, ObservationSourceSelector):
+        return reader.reader_for(db)
+    return reader
+
+
 def load_performance_inputs(
     reader: ObservationReader,
     db: Any,
@@ -93,8 +106,24 @@ def load_performance_inputs(
 
     A selecting reader chooses its source once, so both reads use the same source.
     """
-    if isinstance(reader, ObservationSourceSelector):
-        reader = reader.reader_for(db)
+    return _load_resolved(
+        resolve_reader(reader, db),
+        db,
+        latest_wellness_day=latest_wellness_day,
+        start=start,
+        end=end,
+    )
+
+
+def _load_resolved(
+    reader: ObservationReader,
+    db: Any,
+    *,
+    latest_wellness_day: date,
+    start: date,
+    end: date,
+) -> CanonicalPerformanceInputs:
+    """Read CTL and ATL from an already-resolved reader."""
     return CanonicalPerformanceInputs(
         wellness_day=latest_wellness_day,
         ctl=_current_value(
@@ -144,9 +173,8 @@ def read_performance_inputs(
     if latest_day is None:
         return None
     days = [day for day in map(_row_day, rows) if day is not None]
-    if isinstance(reader, ObservationSourceSelector):
-        reader = reader.reader_for(db)
-    loaded = load_performance_inputs(
+    reader = resolve_reader(reader, db)
+    loaded = _load_resolved(
         reader,
         db,
         latest_wellness_day=latest_day,

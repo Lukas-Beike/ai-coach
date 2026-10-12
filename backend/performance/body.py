@@ -15,6 +15,11 @@ from backend.performance import (
     garmin_metric_history,
     garmin_weight,
 )
+from backend.performance.canonical_body import (
+    BODY_FAT_BOUNDS,
+    WEIGHT_BOUNDS,
+    CanonicalBodyInputs,
+)
 from backend.providers.source_labels import SourceView, provider_label
 
 INTERVALS_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY)
@@ -51,7 +56,8 @@ def _bounded_weight(value: Any) -> float | None:
             return None
         value = value.get("value", value.get("weightKg", value.get("weight")))
     number = _number(value)
-    return round(number, 2) if number is not None and 30 <= number <= 300 else None
+    lower, upper = WEIGHT_BOUNDS
+    return round(number, 2) if number is not None and lower <= number <= upper else None
 
 
 def _bounded_body_fat(value: Any) -> float | None:
@@ -61,7 +67,8 @@ def _bounded_body_fat(value: Any) -> float | None:
             return None
         value = value.get("value", value.get("percent", value.get("bodyFat")))
     number = _number(value)
-    return round(number, 2) if number is not None and 2 <= number <= 70 else None
+    lower, upper = BODY_FAT_BOUNDS
+    return round(number, 2) if number is not None and lower <= number <= upper else None
 
 
 def _sync_timestamp(payload: dict[str, Any], source: str) -> Any:
@@ -384,19 +391,52 @@ def _quotient_series(
     }
 
 
+def _stamped(
+    values: dict[date, float], synced_at: Any
+) -> dict[date, tuple[float, str, Any]]:
+    """Attach the legacy observed_at and synced_at stamps to canonical values."""
+    return {day: (value, day.isoformat(), synced_at) for day, value in values.items()}
+
+
 def body_history(
-    snapshot: dict[str, Any] | None, garmin: dict[str, Any] | None, today: date
+    snapshot: dict[str, Any] | None,
+    garmin: dict[str, Any] | None,
+    today: date,
+    *,
+    canonical: CanonicalBodyInputs | None = None,
 ) -> dict[str, Any]:
     """Return API-ready 14d/12w charts under performance.history.body.
 
     Daily points include observed_at and synced_at when measured. Derived power-
     to-weight points also retain separate FTP and weight dates, sync times, and
     weight age. Missing dates stay null; profile values are never observations.
+
+    ``canonical`` overrides only the weight and body-fat days it holds. Days it lacks
+    keep the legacy value, so values the canonical mapper does not store are not
+    dropped. When None, the legacy wellness and Garmin readers are used, as before.
     """
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     garmin = garmin if isinstance(garmin, dict) else {}
     intervals = _intervals_measurements(snapshot, today)
     garmin_values = _garmin_measurements(garmin, today)
+    if canonical is not None:
+        garmin_synced_at = _sync_timestamp(garmin, "weight")
+        intervals["weight_kg"] = {
+            **intervals["weight_kg"],
+            **_stamped(canonical.intervals_weight_kg, snapshot.get("synced_at")),
+        }
+        intervals["body_fat_pct"] = {
+            **intervals["body_fat_pct"],
+            **_stamped(canonical.intervals_body_fat_pct, snapshot.get("synced_at")),
+        }
+        garmin_values["weight_kg"] = {
+            **garmin_values["weight_kg"],
+            **_stamped(canonical.garmin_weight_kg, garmin_synced_at),
+        }
+        garmin_values["body_fat_pct"] = {
+            **garmin_values["body_fat_pct"],
+            **_stamped(canonical.garmin_body_fat_pct, garmin_synced_at),
+        }
     weights = {
         INTERVALS_SOURCE: intervals["weight_kg"],
         GARMIN_SOURCE: garmin_values["weight_kg"],

@@ -7,14 +7,17 @@ from datetime import date
 from typing import Any
 
 from backend.performance import context as performance_context
+from backend.performance.canonical_body import CanonicalBodyInputs, read_body_inputs
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
     inputs_for_snapshot,
     performance_options,
-    snapshot_with_inputs,
+    read_performance_inputs,
+    resolve_reader,
 )
 from backend.performance.chart_history import analysis_history
+from backend.runtime.ports import ObservationReader
 
 
 class PublicPerformanceStateService:
@@ -37,10 +40,20 @@ class PublicPerformanceStateService:
         self._canonical = canonical
 
     def performance_state(self) -> dict[str, Any]:
-        snapshot, canonical = snapshot_with_inputs(
-            self._canonical, self._sync_state_repository.latest_snapshot
-        )
-        return self._project(snapshot, canonical)
+        source = self._canonical
+        if source is None:
+            return self.from_snapshot(self._sync_state_repository.latest_snapshot())
+        today = self._today()
+        # One unit of work: the performance snapshot, the Garmin snapshot, and the
+        # canonical reads share one connection, so a concurrent sync cannot mix
+        # revisions. The chosen source serves both body and load reads.
+        with source.database_manager().unit_of_work() as db:
+            snapshot = self._sync_state_repository.latest_snapshot()
+            garmin = self._garmin_payload_service.snapshot_in(db)
+            reader = resolve_reader(source.observation_reader(), db)
+            canonical = read_performance_inputs(reader, db, snapshot)
+            body = _body_inputs(source, reader, db, today)
+        return self._project(snapshot, garmin, canonical, body, today)
 
     def canonical_inputs(
         self, db: Any, snapshot: Any
@@ -54,15 +67,22 @@ class PublicPerformanceStateService:
         canonical: CanonicalPerformanceInputs | None = None,
     ) -> dict[str, Any]:
         """Project a snapshot and the inputs a larger state request read with it."""
-        return self._project(snapshot, canonical)
+        return self._project(
+            snapshot,
+            self._garmin_payload_service.snapshot(),
+            canonical,
+            None,
+            self._today(),
+        )
 
     def _project(
         self,
         snapshot: dict[str, Any],
+        garmin: dict[str, Any],
         canonical: CanonicalPerformanceInputs | None,
+        body: CanonicalBodyInputs | None,
+        today: date,
     ) -> dict[str, Any]:
-        garmin = self._garmin_payload_service.snapshot()
-        today = self._today()
         performance = performance_context.current_performance_context(
             snapshot,
             garmin,
@@ -72,12 +92,24 @@ class PublicPerformanceStateService:
         )
         performance = {
             **performance,
-            "history": analysis_history(snapshot, garmin, today),
+            "history": analysis_history(snapshot, garmin, today, canonical_body=body),
         }
         return {
             "performance": performance,
             "garmin": self._garmin_projection_service.public_state(),
         }
+
+
+def _body_inputs(
+    source: CanonicalPerformanceSource,
+    reader: ObservationReader,
+    db: Any,
+    today: date,
+) -> CanonicalBodyInputs | None:
+    """Read canonical weight and body fat inside the snapshot transaction, when gated on."""
+    if source.serving is None:
+        return None
+    return read_body_inputs(reader, source.serving(), db, today)
 
 
 class PublicFeedbackStateService:

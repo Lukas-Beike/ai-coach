@@ -89,4 +89,14 @@ class CanonicalReadRefresher(Protocol):
     def record_failure(self, db: Any, error_class: str) -> None: ...
 
 
+class CanonicalTableServing(Protocol):
+    """Reports whether reads are currently served from the canonical tables.
+
+    True only when the backfill is complete and the last parity check passed for
+    the current digest. Callers read table-only data only while this holds.
+    """
+
+    def serves_tables(self, db: Any) -> bool: ...
+
+
 ProviderOperation = Callable[[], AbstractContextManager[None]]

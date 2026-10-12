@@ -142,7 +142,11 @@ class GarminPayloadService:
 
     def snapshot(self) -> dict[str, Any]:
         with self._database_manager.unit_of_work() as db:
-            serialized = self._key_value_repository.get(db, "garmin_snapshot")
+            return self.snapshot_in(db)
+
+    def snapshot_in(self, db: Any) -> dict[str, Any]:
+        """Read the stored Garmin snapshot inside the caller's transaction."""
+        serialized = self._key_value_repository.get(db, "garmin_snapshot")
         try:
             value = json.loads(serialized or "{}")
         except TypeError, ValueError:
