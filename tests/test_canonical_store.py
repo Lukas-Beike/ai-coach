@@ -91,13 +91,14 @@ def observation(
     observed_at: datetime | None = None,
     sport: Sport | None = None,
     provider: ProviderId | None = ProviderId.INTERVALS,
+    source_record_id: str | None = None,
 ) -> Observation:
     return Observation(
         kind=kind,
         value=MetricValue(value=value, unit="kg"),
         observed_on=observed_on,
         observed_at=observed_at,
-        provenance=provenance(None, provider=provider),
+        provenance=provenance(source_record_id, provider=provider),
         sport=sport,
     )
 
@@ -303,7 +304,7 @@ class ObservationStoreTests(StoreFixture):
         )
 
     def test_natural_key_uses_provider_metric_sport_and_observation_time(self) -> None:
-        by_day = observation()
+        by_day = observation(source_record_id="2026-10-01")
         self.assertEqual(
             canonical_store.observation_natural_key(by_day),
             "intervals|weight|||2026-10-01",
@@ -317,6 +318,28 @@ class ObservationStoreTests(StoreFixture):
             canonical_store.observation_natural_key(by_moment),
             "|weight|ride||2026-10-01T07:00:00+00:00",
         )
+
+    def test_athlete_profile_weight_has_its_own_series_in_either_write_order(
+        self,
+    ) -> None:
+        wellness = observation(72.5, source_record_id="2026-10-01")
+        for athlete_id in ("i12345", None):
+            athlete = observation(70.0, source_record_id=athlete_id)
+            self.assertEqual(
+                canonical_store.observation_natural_key(athlete),
+                "intervals|weight||athlete|2026-10-01",
+            )
+            self.assertNotEqual(
+                canonical_store.observation_natural_key(athlete),
+                canonical_store.observation_natural_key(wellness),
+            )
+        athlete = observation(70.0, source_record_id="i12345")
+        for first, second in ((wellness, athlete), (athlete, wellness)):
+            self.db.execute("DELETE FROM observations")
+            self.assertIs(self.write(first), WriteOutcome.WRITTEN)
+            self.assertIs(self.write(second), WriteOutcome.WRITTEN)
+            values = self.db.execute("SELECT value FROM observations").fetchall()
+            self.assertEqual(sorted(row[0] for row in values), [70.0, 72.5])
 
     def test_insert_unchanged_and_update_by_natural_key(self) -> None:
         self.assertIs(self.write(observation()), WriteOutcome.WRITTEN)

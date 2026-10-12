@@ -84,7 +84,10 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-MAPPER_VERSION: Final = 3
+# Version 4: the athlete-profile weight has its own observation key, so it no
+# longer overwrites the wellness weight of the same day. Re-projection rewrites
+# rows written at older versions.
+MAPPER_VERSION: Final = 4
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
 _DAY_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)

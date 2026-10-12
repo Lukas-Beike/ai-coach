@@ -19,6 +19,8 @@ from zoneinfo import ZoneInfo
 from canonical_read_support import (
     MAX_BATCHES,
     CanonicalReadFixture,
+    intervals_snapshot,
+    make_parity,
     make_selector,
     new_backfill,
     populate,
@@ -431,6 +433,74 @@ class ReadsAfterBackfillTests(CanonicalReadFixture):
                 if backfill.run_batch(db).done:
                     break
         self.assertTrue(self.read(selector.serves_tables))
+
+    def weights(self) -> list[tuple[str, float]]:
+        return [
+            (row["natural_key"], row["value"])
+            for row in self.rows(
+                "SELECT natural_key, value, mapper_version FROM observations "
+                "WHERE metric = 'weight' AND provider = 'intervals' "
+                "AND mapper_version = ? ORDER BY natural_key",
+                (canonical_plans.current_observation_mapper_versions()["intervals"],),
+            )
+        ]
+
+    def test_reprojection_separates_a_merged_wellness_and_athlete_weight(self) -> None:
+        self.intervals = intervals_snapshot(athlete_weight=True)
+        populate(self)
+        current = self.weights()
+        athlete_keys = [key for key, _ in current if "|athlete|" in key]
+        self.assertEqual(len(athlete_keys), 1)
+        athlete_value = dict(current)[athlete_keys[0]]
+        day = athlete_keys[0].rsplit("|", 1)[1]
+        wellness_key = f"intervals|weight|||{day}"
+        wellness_value = dict(current)[wellness_key]
+        self.assertNotEqual(wellness_value, athlete_value)
+
+        # The database as the previous mapper left it: one merged row on the
+        # wellness key holding the athlete value, at the previous version.
+        previous = (
+            canonical_plans.current_observation_mapper_versions()["intervals"] - 1
+        )
+        self.execute(
+            "DELETE FROM observations WHERE natural_key = ?", (athlete_keys[0],)
+        )
+        self.execute(
+            "UPDATE observations SET value = ? WHERE natural_key = ?",
+            (athlete_value, wellness_key),
+        )
+        self.execute(
+            "UPDATE observations SET mapper_version = ? WHERE provider = 'intervals'",
+            (previous,),
+        )
+        self.execute(
+            "UPDATE provider_records SET mapped_version = ? "
+            "WHERE provider = 'intervals' AND record_kind IN ('wellness', 'athlete')",
+            (previous,),
+        )
+        with self.manager.unit_of_work() as db:
+            state = json.loads(self.key_values.get(db, STATE_KEY) or "{}")
+            for key in ("intervals.wellness", "intervals.athlete"):
+                state["versions"][key] = previous
+            self.key_values.set(db, STATE_KEY, json.dumps(state))
+        selector = make_selector(self)
+        self.assertFalse(self.read(selector.serves_tables))
+        self.assertEqual(self.weights(), [])
+
+        backfill = new_backfill(self)
+        for _ in range(MAX_BATCHES):
+            with self.manager.unit_of_work() as db:
+                if backfill.run_batch(db).done:
+                    break
+
+        after = dict(self.weights())
+        self.assertEqual(after[wellness_key], wellness_value)
+        self.assertEqual(after[athlete_keys[0]], athlete_value)
+        self.assertEqual(sorted(after), sorted(key for key, _ in current))
+        self.assertTrue(self.read(selector.serves_tables))
+        report = self.read(make_parity(self).check)
+        self.assertTrue(report.passed)
+        self.assertEqual(report.observations["weight"].differing, 0)
 
 
 if __name__ == "__main__":

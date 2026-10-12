@@ -166,7 +166,7 @@ class IntervalsPlanTests(unittest.TestCase):
         )
         self.assertTrue(plan.observations)
         self.assertTrue(
-            all(item.mapper_version == 3 for item in plan.observations),
+            all(item.mapper_version == 4 for item in plan.observations),
         )
 
     def test_athlete_block_is_mapped_and_a_non_mapping_athlete_is_counted(self) -> None:

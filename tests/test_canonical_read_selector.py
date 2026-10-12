@@ -11,7 +11,6 @@ from canonical_read_support import (
     MAX_BATCHES,
     CanonicalReadFixture,
     first_activity_name,
-    intervals_snapshot,
     make_selector,
     new_backfill,
     populate,
@@ -263,9 +262,12 @@ class SelectorTests(CanonicalReadFixture):
                 self.assertEqual(self.read(selector.summary)["serving"], "legacy")
 
     def test_parity_mismatch_does_not_force_legacy_reads(self) -> None:
-        # Wellness weight and athlete weight collide on the natural key by design.
-        self.intervals = intervals_snapshot(athlete_weight=True)
         populate(self)
+        self.execute(
+            "UPDATE observations SET value = value + 1 WHERE natural_key = "
+            "(SELECT MAX(natural_key) FROM observations WHERE metric = 'weight' "
+            "AND provider = 'intervals')"
+        )
         selector = make_selector(self)
         self.write(selector.refresh)
 

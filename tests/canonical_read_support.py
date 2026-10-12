@@ -46,9 +46,8 @@ MAX_BATCHES = 1000
 def intervals_snapshot(*, athlete_weight: bool) -> dict[str, Any]:
     """One Intervals.icu snapshot: compact fields for the legacy and a raw section.
 
-    The athlete weight is optional. A wellness weight on the same day has the same
-    observation natural key, and the tables keep one row per key, so that data
-    conflicts with the legacy projection by design.
+    The athlete weight is optional. It falls on the same day as a wellness weight
+    and has its own observation key, so both values are kept in the tables.
     """
     athlete = load_provider_fixture("intervals/athlete.json")
     if not athlete_weight:

@@ -116,10 +116,25 @@ class ParityTests(CanonicalReadFixture):
         self.assertEqual(report.observations["weight"].matched, 5)
         self.assertEqual(report.observations["ftp"].differing, 0)
 
-    def test_same_key_value_conflict_fails_and_names_the_weight_metric(self) -> None:
-        # Wellness weight and athlete weight share one natural key on one day.
+    def test_wellness_and_athlete_weight_on_one_day_both_match(self) -> None:
+        # The athlete-profile weight has its own observation key, so neither
+        # weight overwrites the other and the tables hold what legacy holds.
         self.intervals = intervals_snapshot(athlete_weight=True)
         populate(self)
+        report = self.check(make_parity(self))
+
+        self.assertTrue(report.passed)
+        self.assertEqual(report.observations["weight"].matched, 6)
+        self.assertEqual(report.observations["weight"].differing, 0)
+        self.assertEqual(report.observations["ftp"].differing, 0)
+
+    def test_changed_table_weight_fails_and_names_the_weight_metric(self) -> None:
+        populate(self)
+        self.execute(
+            "UPDATE observations SET value = value + 1 WHERE natural_key = "
+            "(SELECT MAX(natural_key) FROM observations WHERE metric = 'weight' "
+            "AND provider = 'intervals')"
+        )
         report = self.check(make_parity(self))
 
         self.assertFalse(report.passed)
