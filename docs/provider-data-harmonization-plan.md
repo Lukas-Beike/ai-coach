@@ -1071,9 +1071,14 @@ Wert dem Legacy-Datensatz entsprechen; ohne `canonical=` läuft der Legacy-Weg.
 Nicht in dieser Session abschließbar:
 
 - **P7-G (Schema v7, `provider` in `activity_feedback`):** Implementierung liegt
-  lokal vor, braucht aber eine Anpassung in
-  `tests/test_database_restore_validation.py`, die nur mit ausdrücklicher Freigabe
-  geändert werden darf.
+  lokal vor. Laut §3 folgt die Providerspalte erst mit dem Rückbau, ist also
+  ebenfalls release-gebunden. Zusätzlich baut
+  `test_validate_migrates_supported_old_backup_before_scrubbing` in
+  `tests/test_database_restore_validation.py` sein 1.12.19-Backup aus dem
+  aktuellen Schema ab; mit der neuen Spalte passt der Fingerabdruck nicht mehr
+  (develop: `release-1.12.19`, P7-G: keine Form). Diese Datei und der
+  Tabellenmengen-Test in `tests/test_server_database.py` dürfen nur mit
+  ausdrücklicher Freigabe geändert werden.
 - **Rückbau von Legacy-Lesern, Dual-Write und Snapshot-Reduktion:** laut Phase 7 (§4) erst
   nach mehreren Releases mit stabiler Parität zulässig.
 - **Phase 8 (Wahoo):** wartet auf API-Zugang und Klärung der Nutzungsbedingungen.
