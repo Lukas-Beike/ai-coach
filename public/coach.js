@@ -1921,7 +1921,7 @@ function renderContextPreview(preview) {
     ["Dauerhaftes Profil", preview.structured_athlete_context?.durable_profile],
     ["Zielwettkämpfe", preview.structured_athlete_context?.target_competitions],
     ["Aktuelle Leistungsdaten", preview.structured_athlete_context?.current_performance],
-    ["Garmin-Kontext", preview.structured_athlete_context?.garmin],
+    ["Erholungskontext", preview.structured_athlete_context?.recovery],
     ["Gesprächskontinuität", preview.conversation],
     ["Intervals.icu-Snapshot", preview.latest_intervals_snapshot],
     ["Letzte Chat-Eingabe", preview.chat_prompt],
