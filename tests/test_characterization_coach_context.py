@@ -418,7 +418,10 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
             unavailable["garmin_training_load"]["four_week_balance"]["source"],
             GARMIN_SOURCE,
         )
-        self.assertEqual(garmin_context["recovery"], {})
+        self.assertEqual(
+            {key: value for key, value in garmin_context.items() if key != "source"},
+            {"recovery": {}},
+        )
         # The Garmin fallback performance block is only requested when no
         # Intervals.icu snapshot exists.
         self.assertEqual(

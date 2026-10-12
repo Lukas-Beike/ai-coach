@@ -186,7 +186,13 @@ class CoachDomainSectionSourceTests(unittest.TestCase):
 
     def test_source_policy_follows_the_label_table(self):
         fixture = _populated_fixture()
-        with patch("backend.coach.context.GARMIN_SOURCE_LABEL", "Test Source"):
+
+        def label_for(provider):
+            if provider == ProviderId.GARMIN:
+                return "Test Source"
+            return _label(provider)
+
+        with patch("backend.coach.context._source_label", side_effect=label_for):
             policy = fixture.service.build()["source_policy"]
         self.assertIn("Test Source", policy["recovery"])
         self.assertNotIn(_label(ProviderId.GARMIN), policy["recovery"])

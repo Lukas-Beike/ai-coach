@@ -80,7 +80,9 @@ class CoachReadToolService:
             )
         if self._context_service is None:
             raise AppError(503, "Coach-Kontext ist nicht verfügbar.")
-        requested = [canonical_section(section) for section in sections]
+        requested = list(
+            dict.fromkeys(canonical_section(section) for section in sections)
+        )
         context = self._context_service().build(
             selection=CoachContextSelection(
                 "requested_details",
