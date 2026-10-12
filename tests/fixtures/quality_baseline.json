@@ -65,7 +65,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/personal_recovery.py",
-      "line": 218,
+      "line": 228,
       "column": 16,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -1201,16 +1201,8 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 254,
+      "line": 276,
       "column": 25,
-      "code": "arg-type",
-      "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/performance/current_metrics.py",
-      "line": 253,
-      "column": 26,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
     },
@@ -1221,6 +1213,14 @@
       "column": 26,
       "code": "arg-type",
       "message_sha256": "202e95d88c01d1a85fa2f434c5a0096706c95cfdc41dcab4a22472c904bb44b0"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/current_metrics.py",
+      "line": 275,
+      "column": 26,
+      "code": "arg-type",
+      "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
     },
     {
       "tool": "mypy",
@@ -3201,7 +3201,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 257,
+      "line": 279,
       "column": 11,
       "code": "return-value",
       "message_sha256": "08428d57439c2ba1f6948ebae90f4dd207d232b2f5f44547026c8d7a08479b57"
@@ -3409,7 +3409,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 133,
+      "line": 155,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
@@ -3417,7 +3417,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 156,
+      "line": 178,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"

@@ -20,10 +20,21 @@ from backend.performance.canonical_body import (
     WEIGHT_BOUNDS,
     CanonicalBodyInputs,
 )
+from backend.performance.display_sources import preferred_providers
 from backend.providers.source_labels import SourceView, provider_label
 
 INTERVALS_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY)
 GARMIN_SOURCE = provider_label(ProviderId.GARMIN, SourceView.BODY_HISTORY)
+# Body history keys its eFTP-derived FTP series by this label, not the wellness label.
+INTERVALS_FTP_SOURCE = "Intervals.icu"
+_MEASUREMENT_SOURCES = {
+    ProviderId.INTERVALS: INTERVALS_SOURCE,
+    ProviderId.GARMIN: GARMIN_SOURCE,
+}
+_FTP_SOURCES = {
+    ProviderId.INTERVALS: INTERVALS_FTP_SOURCE,
+    ProviderId.GARMIN: GARMIN_SOURCE,
+}
 
 
 def _number(value: Any) -> float | None:
@@ -309,7 +320,7 @@ def _weekly(
 
 
 def _series(
-    source: str,
+    provider: ProviderId,
     unit: str,
     records: dict[date, tuple[float, str, Any]],
     start: date,
@@ -322,7 +333,8 @@ def _series(
         for index in range((end - start).days + 1)
     ]
     return {
-        "source": source,
+        "source": _MEASUREMENT_SOURCES[provider],
+        "source_provider": provider.value,
         "unit": unit,
         "points": points,
         "weekly": _weekly(points, start, end),
@@ -330,16 +342,16 @@ def _series(
 
 
 def _quotient_series(
-    source: str,
+    provider: ProviderId,
     method: str,
     ftp: dict[date, tuple[float, str, Any]],
-    weights: dict[str, dict[date, tuple[float, str, Any]]],
+    weights: dict[ProviderId, dict[date, tuple[float, str, Any]]],
     start: date,
     end: date,
 ) -> dict[str, Any]:
     all_weights = [
-        (day, record, provider)
-        for provider, records in weights.items()
+        (day, record, weight_provider)
+        for weight_provider, records in weights.items()
         for day, record in records.items()
     ]
     points: list[dict[str, Any]] = []
@@ -356,7 +368,7 @@ def _quotient_series(
             ]
             weight_item = max(
                 candidates,
-                key=lambda item: (item[0], item[2] == GARMIN_SOURCE),
+                key=lambda item: (item[0], item[2] is ProviderId.GARMIN),
                 default=None,
             )
             point.update(
@@ -369,13 +381,13 @@ def _quotient_series(
                 }
             )
             if weight_item is not None:
-                weight_day, weight_record, weight_source = weight_item
+                weight_day, weight_record, weight_provider = weight_item
                 weight_value = weight_record[0]
                 point.update(
                     {
                         "value": round(ftp_value / weight_value, 3),
                         "weight_kg": weight_value,
-                        "weight_source": weight_source,
+                        "weight_source": _MEASUREMENT_SOURCES[weight_provider],
                         "weight_observed_at": weight_record[1],
                         "weight_synced_at": weight_record[2],
                         "weight_age_days": (day - weight_day).days,
@@ -383,7 +395,8 @@ def _quotient_series(
                 )
         points.append(point)
     return {
-        "source": source,
+        "source": _FTP_SOURCES[provider],
+        "source_provider": provider.value,
         "power_method": method,
         "unit": "W/kg",
         "points": points,
@@ -438,8 +451,8 @@ def body_history(
             **_stamped(canonical.garmin_body_fat_pct, garmin_synced_at),
         }
     weights = {
-        INTERVALS_SOURCE: intervals["weight_kg"],
-        GARMIN_SOURCE: garmin_values["weight_kg"],
+        ProviderId.INTERVALS: intervals["weight_kg"],
+        ProviderId.GARMIN: garmin_values["weight_kg"],
     }
     intervals_ftp: dict[date, tuple[float, str, Any]] = {}
     for observed_at, value in eftp.eftp_daily_values(
@@ -460,9 +473,9 @@ def body_history(
                 observed.isoformat(),
                 snapshot.get("synced_at"),
             )
-    ftp: dict[str, dict[date, tuple[float, str, Any]]] = {
-        GARMIN_SOURCE: _garmin_ftp(garmin, today),
-        "Intervals.icu": intervals_ftp,
+    ftp: dict[ProviderId, dict[date, tuple[float, str, Any]]] = {
+        ProviderId.GARMIN: _garmin_ftp(garmin, today),
+        ProviderId.INTERVALS: intervals_ftp,
     }
     windows: dict[str, Any] = {}
     for key, days in (("14d", 14), ("12w", 84)):
@@ -473,28 +486,41 @@ def body_history(
             "days": days,
             "metrics": {
                 "weight_kg": [
-                    _series(source, "kg", values, start, today)
-                    for source, values in weights.items()
+                    _series(provider, "kg", values, start, today)
+                    for provider, values in weights.items()
                 ],
                 "body_fat_pct": [
                     _series(
-                        INTERVALS_SOURCE, "%", intervals["body_fat_pct"], start, today
+                        ProviderId.INTERVALS,
+                        "%",
+                        intervals["body_fat_pct"],
+                        start,
+                        today,
                     ),
                     _series(
-                        GARMIN_SOURCE, "%", garmin_values["body_fat_pct"], start, today
+                        ProviderId.GARMIN,
+                        "%",
+                        garmin_values["body_fat_pct"],
+                        start,
+                        today,
                     ),
                 ],
                 "cycling_w_per_kg": [
                     _quotient_series(
-                        source,
-                        "FTP" if source == GARMIN_SOURCE else "eFTP",
+                        provider,
+                        "FTP" if provider is ProviderId.GARMIN else "eFTP",
                         values,
                         weights,
                         start,
                         today,
                     )
-                    for source, values in ftp.items()
+                    for provider, values in ftp.items()
                 ],
             },
         }
-    return {"version": 1, "default_window": "12w", "windows": windows}
+    return {
+        "version": 1,
+        "default_window": "12w",
+        "windows": windows,
+        "preferred_providers": preferred_providers(),
+    }

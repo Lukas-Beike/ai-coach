@@ -200,6 +200,7 @@ class ServerPerformanceTests(ServerTestCase):
                 "value": 57.4,
                 "unit": "ml/kg/min",
                 "source": "Garmin Connect",
+                "source_provider": "garmin",
                 "note": "Garmin Connect max metrics",
                 "freshness": "unknown",
                 "fetched_at": None,

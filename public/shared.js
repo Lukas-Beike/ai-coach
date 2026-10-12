@@ -14,6 +14,13 @@ let mobileViewportInputWasFocused = false;
 
 if ("scrollRestoration" in globalThis.history) globalThis.history.scrollRestoration = "manual";
 
+// Rows carry the provider id from the payload; labels only serve rows that lack it.
+function isPreferredSource(item, preferredProvider, legacyLabel) {
+  if (!item) return false;
+  if ("source_provider" in item && preferredProvider !== undefined) return item.source_provider === preferredProvider;
+  return item.source === legacyLabel;
+}
+
 function applyAppearance(appearance = "system") {
   const selected = ["system", "light", "dark"].includes(appearance) ? appearance : "system";
   let resolved = selected;

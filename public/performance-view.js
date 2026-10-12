@@ -104,7 +104,10 @@ function comparisonText(comparison) {
   return { text: `${arrow} ${sign}${amount}${unit}`, className: comparison.color || "neutral", title: `Vergleich zum ${comparisonLabel}` };
 }
 
-function metricSourceClass(source) {
+function metricSourceClass(metricData) {
+  const provider = metricData?.source_provider;
+  if (typeof provider === "string" && /^[a-z0-9-]+$/.test(provider)) return `metric-${provider}`;
+  const source = metricData?.source;
   if (source === "Garmin Connect") return "metric-garmin";
   if (source === "Manuell") return "metric-manual";
   if (source && (source.startsWith("Intervals.icu") || source === "Aus Aktivitäten")) return "metric-intervals";
@@ -139,8 +142,7 @@ function metricSourceDetails(metricData) {
   } else if (metricData?.measurement_status === "unknown") source.textContent += " · Messdatum unbekannt";
   else if (metricData?.measurement_status === "future") source.textContent += " · Messdatum liegt in der Zukunft";
   source.title = [metricData?.note || metricData?.source || "", metricData?.fetched_at ? `Abgerufen ${formatTime(metricData.fetched_at)}` : ""].filter(Boolean).join(" · ");
-  source.className = metricSourceClass(metricData?.source);
-  if (metricData?.source === "Garmin Connect") source.className = "metric-garmin";
+  source.className = metricSourceClass(metricData);
   return source;
 }
 
@@ -193,7 +195,7 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
   else if (formatter) metric.textContent = formatter(value);
   else metric.textContent = `${value}${unit ? " " + unit : ""}`;
   caption.textContent = label;
-  for (const className of [metricSourceClass(metricData?.source), metricToneClass(label, value)]) {
+  for (const className of [metricSourceClass(metricData), metricToneClass(label, value)]) {
     if (className) item.classList.add(className);
   }
   const valueRow = document.createElement("div");
@@ -254,7 +256,8 @@ function currentPerformanceValues(metrics, history) {
   const values = { ...metrics };
   const pulse = [values.running_max_hr_bpm, values.cycling_max_hr_bpm].filter((item) => item?.value != null && Number.isFinite(Number(item.value))).sort((a, b) => Number(b.value) - Number(a.value))[0];
   values.max_hr_bpm = pulse;
-  const power = (history?.body?.windows?.["12w"]?.metrics?.cycling_w_per_kg || []).flatMap((item) => (item.points || []).filter(analysisValidPoint).map((point) => ({ ...point, source: item.source, unit: "W/kg" }))).sort((a, b) => b.date.localeCompare(a.date) || Number(b.source === "Garmin Connect") - Number(a.source === "Garmin Connect"))[0];
+  const preferred = history?.body?.preferred_providers?.cycling_w_per_kg;
+  const power = (history?.body?.windows?.["12w"]?.metrics?.cycling_w_per_kg || []).flatMap((item) => (item.points || []).filter(analysisValidPoint).map((point) => ({ ...point, source: item.source, ..."source_provider" in item ? { source_provider: item.source_provider } : {}, unit: "W/kg" }))).sort((a, b) => b.date.localeCompare(a.date) || Number(isPreferredSource(b, preferred, "Garmin Connect")) - Number(isPreferredSource(a, preferred, "Garmin Connect")))[0];
   values.cycling_w_per_kg = power;
   return values;
 }

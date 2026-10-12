@@ -691,7 +691,7 @@ function renderAnalysisHistory(history) { // NOSONAR
     ["run_threshold_pace_seconds_per_km", "Lauf · Schwellenpace", "s/km", 2],
     ["cycling_vo2max_ml_kg_min", "Rad · VO₂max", "ml/kg/min", 3],
     ["running_vo2max_ml_kg_min", "Lauf · VO₂max", "ml/kg/min", 4],
-  ].flatMap(([key, label, unit, color]) => (history.metrics?.[key] || []).filter((item) => item.source === (key === "cycling_eftp_watts" ? "Intervals.icu" : "Garmin Connect")).map((item) => ({
+  ].flatMap(([key, label, unit, color]) => (history.metrics?.[key] || []).filter((item) => isPreferredSource(item, history.preferred_providers?.[key], key === "cycling_eftp_watts" ? "Intervals.icu" : "Garmin Connect")).map((item) => ({
     label: `${label} · ${item.source}`, legendLabel: label.replace(/^Rad \u00b7 /, ""), source: item.source, unit, color,
     line: key === "cycling_eftp_watts" || key.includes("vo2max") ? "dashed" : "solid",
     cadenceDays: key === "cycling_ftp_watts" ? 1 : 7,
@@ -801,9 +801,9 @@ function bodySeriesPoints(item, window, period = bodyHistoryPeriod) {
   return period === "twelveWeeks" ? bodyWeeklyPoints(points, window.start, window.end) : points;
 }
 
-function bodyMetricChart(metric, title, unit, window, period) {
+function bodyMetricChart(metric, title, unit, window, period, preferred = {}) {
   const power = metric === "cycling_w_per_kg";
-  const entries = (window.metrics?.[metric] || []).filter((item) => power || item.source === "Garmin Connect");
+  const entries = (window.metrics?.[metric] || []).filter((item) => power || isPreferredSource(item, preferred[metric], "Garmin Connect"));
   const series = entries.map((item, index) => ({
     label: power ? [item.power_method, item.source].filter(Boolean).join(" \u00b7 ") : title,
     legendLabel: power ? item.source : title,
@@ -843,6 +843,7 @@ function renderBodyAnalysis(body) {
     ["weight_kg", "Gewicht", "kg"],
     ["body_fat_pct", "Körperfett", "%"],
   ];
+  const preferred = body?.preferred_providers || {};
   const overview = reportNode("section", null, "analysis-chart-card");
   const table = reportNode("table", null, "current-performance-table");
   table.dataset.bodyOverview = "";
@@ -850,7 +851,7 @@ function renderBodyAnalysis(body) {
   const rows = reportNode("tbody");
   for (const [metric, title, unit] of metrics) {
     const readings = Object.values(body?.windows || {}).flatMap((window) => (window.metrics?.[metric] || [])
-      .filter((item) => item.source === "Garmin Connect")
+      .filter((item) => isPreferredSource(item, preferred[metric], "Garmin Connect"))
       .flatMap((item) => (item.points || []).filter((point) => point.date >= window.start && point.date <= window.end && analysisValidPoint(point))));
     readings.sort((a, b) => (a.observed_at || a.date).localeCompare(b.observed_at || b.date));
     const latest = readings.at(-1);
@@ -872,7 +873,7 @@ function renderBodyAnalysis(body) {
     return;
   }
   for (const [metric, title, unit] of metrics) {
-    root.append(bodyMetricChart(metric, title, unit, window, bodyHistoryPeriod));
+    root.append(bodyMetricChart(metric, title, unit, window, bodyHistoryPeriod, preferred));
   }
   root.querySelectorAll("details").forEach((details) => { details.open = openDetails.has(details.querySelector("summary")?.textContent); });
 }
@@ -1034,10 +1035,11 @@ function renderAnalysisSegments(route = state.route) {
 }
 
 function selectedRecoveryBaselines(report) {
+  const preferred = report?.preferred_providers || {};
   return ["sleep", "hrv", "resting_hr"].flatMap((metric) => {
     const candidates = (report?.baselines || []).filter((item) => item.metric === metric);
     candidates.sort((a, b) => String(b.observed_at).localeCompare(String(a.observed_at))
-      || Number(b.source === "Intervals.icu") - Number(a.source === "Intervals.icu")
+      || Number(isPreferredSource(b, preferred[metric], "Intervals.icu")) - Number(isPreferredSource(a, preferred[metric], "Intervals.icu"))
       || b.history.length - a.history.length);
     return candidates.slice(0, 1);
   });

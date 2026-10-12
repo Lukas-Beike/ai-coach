@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterator
 from datetime import date
 from typing import Any
@@ -11,6 +10,8 @@ from backend.activities.identity import activity_kind
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import freshness as performance_freshness
 from backend.performance import garmin_observations, garmin_weight
+from backend.performance.current_metrics import as_number as _as_number
+from backend.performance.current_metrics import metric as _metric
 from backend.providers.garmin_fields import first_present as _first_present
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -19,28 +20,6 @@ GARMIN_PERFORMANCE_SOURCE = provider_label(
 )
 GARMIN_RUN_PREDICTION_SOURCE = "Garmin Connect Laufprognose"
 _VO2MAX_UNIT = "ml/kg/min"
-
-
-def _as_number(value: Any) -> float | int | None:
-    try:
-        number = float(str(value).replace(",", "."))
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
-
-
-def _metric(
-    value: Any, unit: str, source: str | None, note: str = ""
-) -> dict[str, Any]:
-    number = _as_number(value)
-    return {
-        "value": number,
-        "unit": unit,
-        "source": source if number is not None else None,
-        "note": note if number is not None else "",
-    }
 
 
 def _garmin_key(value: Any) -> str:
@@ -583,7 +562,9 @@ def garmin_performance_metrics(
     )
     source_keys = _garmin_performance_source_keys(profile_max_hr)
     result = {
-        key: _metric(value, unit, GARMIN_PERFORMANCE_SOURCE, note)
+        key: _metric(
+            value, unit, GARMIN_PERFORMANCE_SOURCE, note, provider=ProviderId.GARMIN
+        )
         for key, (value, unit, note) in units.items()
     }
     for kind in ("cycling", "running"):
