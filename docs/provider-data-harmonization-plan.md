@@ -485,6 +485,9 @@ Größe: groß (mehrere PRs).
 
 Größe: mittel (6.1–6.2), groß (6.3).
 
+Status: 6.1 (#1101) und 6.2 (#1102) umgesetzt; Ergebnis in Abschnitt 5.9.
+6.3 bleibt bis zu einem beauftragten zweiten Ausgabeziel offen.
+
 ### Phase 7 – Rückbau
 
 Legacy-Leser und Dual-Write entfernen, `snapshots` auf Sync-Metadaten mit
@@ -821,6 +824,41 @@ diesen Entscheidungen:
 
 Phase 6.1 (`WorkoutExportPort`) läuft parallel zu Phase 3, weil sie keine
 gemeinsamen Dateien berührt. Phase 6.2 folgt nach 6.1.
+
+### 5.9 Ergebnis Phase 6 und Phase 3 Schritt 2
+
+| Einheit | Inhalt | PR |
+|---|---|---|
+| W8-1 | `WorkoutExportPort`, Intervals-Adapter in `sync/`, REST-Aufrufe im Client | #1101 |
+| W8-2 | `PlannedWorkoutExport` (Sport, Umgebung), Intervals-Serialisierer in `providers/intervals_workouts.py` | #1102 |
+| W8-3 | Intervals-spezifische Event-Prüfungen aus `planned_calendar.py` in den Adapter | offen |
+| W6-2 | Dual-Write beim Ingest (Intervals, Garmin), ein Schreibpfad für `garmin_snapshot` | #1103 |
+
+Entscheidungen:
+
+- **Byte-Parität:** Die Intervals-Payload bleibt byte-identisch. Belegt wird
+  das durch 3991 Fälle aus `tests/workout_export_parity_matrix.py`, gepinnt per
+  Hash, Blockhashes und 51 wörtlichen Stichproben.
+- **Adapter-Platzierung:** Der Adapter liegt in `sync/`, weil `providers/`
+  nicht `sync/` importieren darf.
+- **Gespeicherte Sportwerte:** Sie bleiben im Intervals-Vokabular. Die Planung
+  übersetzt sie an der Lesegrenze (`planning/sport.py`).
+- **Exakte Typprüfungen:** Für Vorlagen, Ausdauertypen und den
+  Readback-Sportabgleich bleiben die Prüfungen auf exakten Typen. Eine
+  Umstellung auf `Sport` würde das Verhalten ändern.
+- **`steps` im Exportmodell:** Das Exportmodell trägt noch keine `steps`.
+  Intervals serialisiert den Text unverändert, und `steps` kommt erst mit einem
+  zweiten Ausgabeziel (6.3) hinzu.
+- **Löschregel:** Nur ein aktueller, nicht inkrementeller Intervals-Vollabruf
+  mit Aktivitätsliste markiert fehlende Aktivitäten als gelöscht. Er tut das nur
+  in seinem Fenster und ohne den ersten und letzten Tag, weil Abfragedatum
+  (Provider-Ortszeit) und gespeichertes Athletendatum um einen Tag abweichen
+  können. Garmin löscht nie, und historische Abrufe löschen nie. Taucht eine
+  Aktivität wieder auf, wird sie reaktiviert.
+- **Atomarität:** Legacy-Snapshot, kanonische Zeilen und die
+  Planabgleich-Reconciliation landen in derselben Transaktion. Die Cursor folgen
+  danach. Ungültige Zeilen werden übersprungen und gezählt. Rohpayloads werden
+  vor dem Speichern bereinigt (`observability.sanitized_provider_payload`).
 
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
