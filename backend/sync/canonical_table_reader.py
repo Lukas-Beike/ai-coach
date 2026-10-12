@@ -84,7 +84,8 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
     ) -> tuple[dict[str, Any], ...]:
         """Return the stored raw Intervals.icu payloads of live activities.
 
-        Ordered by activity start, then provider activity id. The stored payload
+        Newest first, like the stored snapshot (activity start, then provider
+        activity id, both descending). The stored payload
         is the ingest-sanitized one: credential-like keys and signed URLs are
         already removed. A payload that does not parse as a JSON object is
         skipped; its content is never logged.

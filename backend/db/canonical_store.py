@@ -491,8 +491,9 @@ def active_activity_payload_texts(
 
     Only active raw records whose activity record is active and whose session is
     not deleted are returned, so tombstoned activities are never served. ``start``
-    and ``end`` are inclusive ISO dates on the stored athlete-local date. Order is
-    the activity start time, then the provider activity id.
+    and ``end`` are inclusive ISO dates on the stored athlete-local date. Newest
+    first, like the stored snapshot: activity start time, then provider activity
+    id, both descending.
     """
     clauses = [
         "p.provider = ?",
@@ -520,8 +521,8 @@ def active_activity_payload_texts(
         "JOIN activity_records AS r ON r.provider = p.provider "
         "AND r.provider_activity_id = p.source_record_id "
         "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
-        f"WHERE {' AND '.join(clauses)} ORDER BY r.started_at, "
-        "r.provider_activity_id",
+        f"WHERE {' AND '.join(clauses)} ORDER BY r.started_at DESC, "
+        "r.provider_activity_id DESC",
         tuple(params),
     )
     return [str(row["payload"]) for row in rows]

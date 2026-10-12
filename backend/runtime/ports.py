@@ -47,7 +47,8 @@ class ActivityRowReader(Protocol):
     untrusted data, before any de-duplication. ``start`` and ``end`` are inclusive
     bounds on the athlete-local date of each activity, as in ``ActivityReader``.
     Deleted or tombstoned activities are never returned. The legacy source keeps
-    the snapshot order; the table source orders by activity start, then id.
+    the snapshot order (newest first); the table source orders newest first by
+    activity start, then id.
     """
 
     def activity_rows(

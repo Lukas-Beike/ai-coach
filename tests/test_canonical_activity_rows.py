@@ -30,7 +30,7 @@ class ActivityRowSourceTests(CanonicalReadFixture):
             _by_id(tuple(self.intervals["raw_provider_data"]["activities"])),
         )
 
-    def test_legacy_keeps_the_snapshot_order_and_tables_order_by_start(self) -> None:
+    def test_legacy_keeps_the_snapshot_order_and_tables_serve_newest_first(self) -> None:
         populate(self)
         snapshot_ids = [
             r["id"] for r in self.intervals["raw_provider_data"]["activities"]
@@ -47,7 +47,7 @@ class ActivityRowSourceTests(CanonicalReadFixture):
             )[0]["started_at"]
             for row in table_rows
         ]
-        self.assertEqual(starts, sorted(starts))
+        self.assertEqual(starts, sorted(starts, reverse=True))
 
     def test_legacy_falls_back_to_recent_activities_without_a_raw_block(self) -> None:
         del self.intervals["raw_provider_data"]
