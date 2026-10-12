@@ -1345,7 +1345,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_layering_contracts.py",
-      "line": 78,
+      "line": 81,
       "column": 31,
       "code": "arg-type",
       "message_sha256": "10961fea979509f4856fc0d143fd27ad84b772fbfe5853cfca5e0dc21d691ffc"
