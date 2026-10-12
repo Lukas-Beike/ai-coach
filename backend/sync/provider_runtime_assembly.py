@@ -27,7 +27,7 @@ from backend.providers.descriptors import (
     INTERVALS_ID,
     WEATHER_ID,
 )
-from backend.sync.commands import IntervalsSynchronousRefresh
+from backend.sync.commands import GarminSynchronousRefresh, IntervalsSynchronousRefresh
 from backend.sync.execution_assembly import (
     CalendarWeatherJobDependencies,
     GarminJobDependencies,
@@ -175,6 +175,11 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
             garmin_service=garmin.sync_service(), all_sync_days=all_sync_days
         )
 
+    def synchronous_refresh() -> GarminSynchronousRefresh:
+        return GarminSynchronousRefresh(
+            garmin.sync_service(), garmin.morning_body_battery_service()
+        )
+
     return ProviderRuntimeBinding(
         provider_id=GARMIN_ID,
         job_owner=job_owner,
@@ -183,6 +188,7 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
         schedule=schedule,
         freshness=DEFAULT_FRESHNESS_SOURCES[GARMIN_ID],
         full_resync=full_resync,
+        synchronous_refresh=synchronous_refresh,
     )
 
 

@@ -14,10 +14,14 @@ result's ``sync_job_id`` to its turn-local list.
 
 import threading
 import unittest
+from datetime import date
 from unittest.mock import Mock
 
 from backend.errors import AppError
-from backend.sync.commands import ProviderRefreshCommandService
+from backend.sync.commands import (
+    GarminSynchronousRefresh,
+    ProviderRefreshCommandService,
+)
 
 
 class ProviderRefreshCommandServiceTests(unittest.TestCase):
@@ -176,6 +180,134 @@ class ProviderRefreshCommandServiceTests(unittest.TestCase):
             {"reason": "fresh data"},
             requested_by="coach",
         )
+
+
+class GarminSynchronousRefreshTests(unittest.TestCase):
+    def setUp(self):
+        self.garmin = Mock()
+        self.battery = Mock()
+        self.garmin.automatic_sync_window.return_value = (3, date(2026, 10, 10))
+        self.garmin.sync.return_value = {"status": "ok"}
+        self.refresh = GarminSynchronousRefresh(self.garmin, self.battery)
+
+    def test_uses_scheduled_catch_up_window_without_requested_days(self):
+        cancel_event = threading.Event()
+
+        result = self.refresh.refresh(
+            "garmin", {"_wait_for_completion": True}, cancel_event
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "ok": True,
+                "status": "completed",
+                "provider": "garmin",
+                "activity_days": 3,
+                "partial": False,
+                "synchronous_refresh": True,
+            },
+        )
+        self.garmin.sync.assert_called_once_with(
+            days=3,
+            reason="Chat-Anfrage",
+            end_date=date(2026, 10, 10),
+            wait_for_existing=True,
+            cancel_event=cancel_event,
+            include_recovery=True,
+        )
+        self.battery.refresh.assert_called_once_with()
+
+    def test_honors_requested_days_ending_today(self):
+        result = self.refresh.refresh(
+            "garmin", {"days": "30", "_wait_for_completion": True}, None
+        )
+
+        self.assertEqual(result["activity_days"], 30)
+        self.garmin.automatic_sync_window.assert_not_called()
+        self.garmin.sync.assert_called_once_with(
+            days=30,
+            reason="Chat-Anfrage",
+            end_date=None,
+            wait_for_existing=True,
+            cancel_event=None,
+            include_recovery=True,
+        )
+
+    def test_rejects_invalid_or_oversized_days_before_provider_call(self):
+        for days in ("bad", 0, -1, 3661):
+            with self.subTest(days=days):
+                with self.assertRaises(AppError) as error:
+                    self.refresh.refresh("garmin", {"days": days}, None)
+                self.assertEqual(error.exception.reason, "invalid_refresh_request")
+        self.garmin.sync.assert_not_called()
+
+    def test_runs_own_sync_after_waiting_for_another_run(self):
+        self.garmin.sync.side_effect = [
+            {"status": "ok", "waited_for_existing": True},
+            {"status": "partial"},
+        ]
+
+        result = self.refresh.refresh("garmin", {"days": 30}, None)
+
+        self.assertEqual(self.garmin.sync.call_count, 2)
+        self.assertTrue(self.garmin.sync.call_args_list[0].kwargs["wait_for_existing"])
+        self.assertFalse(self.garmin.sync.call_args_list[1].kwargs["wait_for_existing"])
+        self.assertTrue(result["partial"])
+        self.battery.refresh.assert_called_once_with()
+
+    def test_busy_after_waiting_for_another_run_uses_provider_busy_error(self):
+        self.garmin.sync.side_effect = [
+            {"status": "ok", "waited_for_existing": True},
+            {"status": "already_running"},
+        ]
+
+        with self.assertRaises(AppError) as error:
+            self.refresh.refresh("garmin", {}, None)
+
+        self.assertEqual(error.exception.reason, "provider_busy")
+        self.battery.refresh.assert_not_called()
+
+    def test_partial_sync_is_reported_and_still_refreshes_body_battery(self):
+        self.garmin.sync.return_value = {"status": "partial"}
+
+        result = self.refresh.refresh("garmin", {}, None)
+
+        self.assertTrue(result["partial"])
+        self.assertEqual(result["status"], "completed")
+        self.battery.refresh.assert_called_once_with()
+
+    def test_busy_sync_uses_existing_provider_busy_error(self):
+        self.garmin.sync.return_value = {"status": "already_running"}
+
+        with self.assertRaises(AppError) as error:
+            self.refresh.refresh("garmin", {}, None)
+
+        self.assertEqual(error.exception.status, 503)
+        self.assertEqual(error.exception.reason, "provider_busy")
+        self.battery.refresh.assert_not_called()
+
+    def test_sync_failure_propagates_without_body_battery_refresh(self):
+        self.garmin.sync.side_effect = AppError(503, "Garmin down")
+
+        with self.assertRaises(AppError):
+            self.refresh.refresh("garmin", {}, None)
+
+        self.battery.refresh.assert_not_called()
+
+    def test_command_service_waits_through_registered_garmin_refresh(self):
+        queue = Mock()
+        service = ProviderRefreshCommandService(
+            queue,
+            Mock(),
+            all_sync_days=-1,
+            synchronous_refreshes={"garmin": self.refresh},
+        )
+
+        result = service.start("garmin", {"_wait_for_completion": True})
+
+        self.assertEqual(result["status"], "completed")
+        queue.enqueue.assert_not_called()
 
 
 if __name__ == "__main__":

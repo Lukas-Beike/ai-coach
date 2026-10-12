@@ -9,13 +9,18 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping
+from datetime import date
 from typing import Any
 
 from backend.errors import AppError
+from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.providers.descriptors import INTERVALS_ID
+from backend.sync.garmin_service import GARMIN_AUTOMATIC_SYNC_DAYS, GarminSyncService
 from backend.sync.intervals import IntervalsSyncService
 from backend.sync.provider_runtime import SynchronousRefresh
 from backend.sync.queue import SyncJobQueueService
+
+MAX_REFRESH_DAYS = 3660
 
 
 class IntervalsSynchronousRefresh:
@@ -41,7 +46,7 @@ class IntervalsSynchronousRefresh:
             wait_for_performance=True,
             **({"cancel_event": cancel_event} if cancel_event is not None else {}),
         )
-        _raise_if_busy(result)
+        _raise_if_busy(result, "Intervals.icu")
         try:
             completed_days = int(result.get("activity_days"))
         except TypeError, ValueError:
@@ -75,7 +80,10 @@ class IntervalsSynchronousRefresh:
                 "Der synchrone Aktivitätsabruf benötigt einen gültigen Zeitraum.",
                 reason="invalid_refresh_request",
             ) from exc
-        if activity_days != self._all_sync_days and not 1 <= activity_days <= 3660:
+        if (
+            activity_days != self._all_sync_days
+            and not 1 <= activity_days <= MAX_REFRESH_DAYS
+        ):
             raise AppError(
                 400,
                 "Der Synchronisationszeitraum ist zu groß.",
@@ -92,7 +100,7 @@ class IntervalsSynchronousRefresh:
             wait_for_existing=False,
             **({"cancel_event": cancel_event} if cancel_event is not None else {}),
         )
-        _raise_if_busy(result)
+        _raise_if_busy(result, "Intervals.icu")
         return result
 
     def _covers_window(self, completed_days: int, requested_days: int) -> bool:
@@ -106,13 +114,93 @@ class IntervalsSynchronousRefresh:
         )
 
 
-def _raise_if_busy(result: Mapping[str, Any]) -> None:
+def _raise_if_busy(result: Mapping[str, Any], provider_label: str) -> None:
     if result.get("status") == "already_running":
         raise AppError(
             503,
-            "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.",
+            f"Die aktuelle {provider_label}-Synchronisierung ist noch nicht abgeschlossen.",
             reason="provider_busy",
         )
+
+
+class GarminSynchronousRefresh:
+    """Runs the Garmin refresh inline for a Coach request that waits.
+
+    The Coach's ``days`` argument sets the window, as for a queued refresh;
+    without it the scheduled catch-up window applies.
+    """
+
+    def __init__(
+        self,
+        garmin_sync_service: GarminSyncService,
+        morning_body_battery_service: MorningBodyBatteryService,
+    ) -> None:
+        self._garmin_sync_service = garmin_sync_service
+        self._morning_body_battery_service = morning_body_battery_service
+
+    def refresh(
+        self,
+        provider: str,
+        arguments: Mapping[str, Any],
+        cancel_event: threading.Event | None,
+    ) -> dict[str, Any]:
+        days, end_date = self._window(arguments)
+        result = self._sync(provider, days, end_date, True, cancel_event)
+        if result.get("waited_for_existing"):
+            # The awaited run may have covered another window or ended partial.
+            result = self._sync(provider, days, end_date, False, cancel_event)
+        status = result.get("status")
+        if status in {"ok", "partial"}:
+            self._morning_body_battery_service.refresh()
+        return {
+            "ok": True,
+            "status": "completed",
+            "provider": provider,
+            "activity_days": days,
+            "partial": status == "partial",
+            "synchronous_refresh": True,
+        }
+
+    def _window(self, arguments: Mapping[str, Any]) -> tuple[int, date | None]:
+        requested_days: Any = arguments.get("days")
+        if requested_days is None:
+            return self._garmin_sync_service.automatic_sync_window(
+                GARMIN_AUTOMATIC_SYNC_DAYS
+            )
+        try:
+            days = int(requested_days)
+        except (TypeError, ValueError) as exc:
+            raise AppError(
+                400,
+                "Der Garmin-Abruf benötigt einen gültigen Zeitraum.",
+                reason="invalid_refresh_request",
+            ) from exc
+        if not 1 <= days <= MAX_REFRESH_DAYS:
+            raise AppError(
+                400,
+                "Der Synchronisationszeitraum ist zu groß.",
+                reason="invalid_refresh_request",
+            )
+        return days, None
+
+    def _sync(
+        self,
+        provider: str,
+        days: int,
+        end_date: date | None,
+        wait_for_existing: bool,
+        cancel_event: threading.Event | None,
+    ) -> dict[str, Any]:
+        result = self._garmin_sync_service.sync(
+            days=days,
+            reason="Chat-Anfrage",
+            end_date=end_date,
+            wait_for_existing=wait_for_existing,
+            cancel_event=cancel_event,
+            include_recovery=True,
+        )
+        _raise_if_busy(result, provider)
+        return result
 
 
 class ProviderRefreshCommandService:

@@ -137,7 +137,11 @@ def coach_effect_label(item: dict[str, Any]) -> str:
         item.get("tool") == "start_provider_refresh"
         and result.get("status") == "completed"
     ):
-        label = "Daten aktualisiert"
+        label = (
+            "Daten teilweise aktualisiert"
+            if result.get("partial")
+            else "Daten aktualisiert"
+        )
     count = len(
         result.get("library_entry_ids")
         or result.get("templates")

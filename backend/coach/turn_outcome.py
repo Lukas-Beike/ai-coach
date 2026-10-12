@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, NotRequired, TypedDict
+from dataclasses import dataclass
+from typing import Any
 
 from backend.coach.context_selection import infer_coach_domain, select_coach_context
 from backend.coach.outcomes import (
@@ -20,10 +21,79 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.providers.openai_responses import response_text
 
+_READ_ONLY_JOB_TYPES = frozenset(
+    {"refresh", "performance_refresh", "activity_details", "historical_backfill"}
+)
+_READ_ONLY_REFRESH_TOOLS = frozenset(
+    {"start_provider_refresh", "refresh_current_performance"}
+)
 
-class ObservedSyncJob(TypedDict):
-    id: str
-    status: NotRequired[str]
+
+@dataclass(frozen=True)
+class _SyncJob:
+    status: str
+    writes_remote: bool
+    started_here: bool
+
+    def reported(self) -> bool:
+        """Whether its authoritative status line belongs in the answer."""
+        if self.status == "completed":
+            return self.writes_remote and self.started_here
+        return True
+
+    def replaces_prose(self) -> bool:
+        """Whether the model could overstate a remote write it cannot confirm."""
+        return self.writes_remote and (self.started_here or self.status != "completed")
+
+
+def _sync_jobs(
+    effects: list[dict[str, Any]], command_receipts: list[dict[str, Any]]
+) -> dict[str, _SyncJob]:
+    """Fold queue receipts and job inspections; an inspection supersedes the queue.
+
+    Unknown job types count as remote writes, so only known data refreshes keep
+    the model's answer.
+    """
+    jobs: dict[str, _SyncJob] = {}
+    observed_types: dict[str, str] = {}
+    for entry in command_receipts:
+        observed = (entry.get("result") or {}).get("job")
+        if isinstance(observed, dict) and observed.get("id"):
+            job_id = str(observed["id"])
+            if observed.get("type"):
+                observed_types[job_id] = str(observed["type"])
+            jobs[job_id] = _SyncJob(
+                status=str(observed.get("status") or "unknown"),
+                writes_remote=observed.get("type") not in _READ_ONLY_JOB_TYPES,
+                started_here=False,
+            )
+    for entry in effects:
+        result = entry.get("result") or {}
+        if result.get("status") == "queued" and result.get("sync_job_id"):
+            job_id = str(result["sync_job_id"])
+            observed_job = jobs.get(job_id)
+            # An inspected job type is authoritative over the tool that queued it.
+            writes_remote = (
+                observed_types[job_id] not in _READ_ONLY_JOB_TYPES
+                if job_id in observed_types
+                else entry.get("tool") not in _READ_ONLY_REFRESH_TOOLS
+            )
+            jobs[job_id] = _SyncJob(
+                status=observed_job.status if observed_job else "queued",
+                writes_remote=writes_remote,
+                started_here=True,
+            )
+    return jobs
+
+
+def _partial_refresh_notes(effects: list[dict[str, Any]]) -> list[str]:
+    """Flag a waited refresh that finished with missing data."""
+    return [
+        "Hinweis: Der Datenabruf war nur teilweise erfolgreich; einzelne Daten können fehlen."
+        for entry in effects
+        if entry.get("tool") == "start_provider_refresh"
+        and (entry.get("result") or {}).get("partial")
+    ][:1]
 
 
 def _pending_value(
@@ -125,9 +195,12 @@ def _queued_message(
     effects: list[dict[str, Any]],
     failures: list[dict[str, Any]],
     incomplete_answer: bool,
+    replace_prose: bool,
 ) -> str:
     if not queued:
         return text
+    if text and not replace_prose:
+        return "\n".join((text, *queued))
     lines: list[str] = []
     if failures:
         lines.extend(
@@ -268,7 +341,14 @@ class CoachStructuredOutcomeService:
         command_receipts: list[dict[str, Any]],
     ) -> tuple[str, bool, bool]:
         text = question or response_text(response)
-        queued = CoachStructuredOutcomeService._queued_jobs(effects, command_receipts)
+        jobs = _sync_jobs(effects, command_receipts)
+        queued = [
+            f"Synchronisationsauftrag {job_id}: {job.status}. Remote-Abschluss ist "
+            f"{'bestätigt' if job.status == 'completed' else 'noch nicht bestätigt'}."
+            for job_id, job in jobs.items()
+            if job.reported()
+        ] + _partial_refresh_notes(effects)
+        replace_prose = any(job.replaces_prose() for job in jobs.values())
         awaiting_approval = any(
             ((entry.get("result") or {}).get("proposed_action") or {}).get(
                 "action_type"
@@ -282,40 +362,13 @@ class CoachStructuredOutcomeService:
             text += "\nDie Antwort wurde nicht abgeschlossen. Bitte den Coach um Fortsetzung bitten."
         text = _failure_message(text, question, failures, effects)
         text = _queued_message(
-            text, question, queued, effects, failures, incomplete_answer
+            text, question, queued, effects, failures, incomplete_answer, replace_prose
         )
         text = _approval_message(
             text, question, awaiting_approval, effects, command_receipts
         )
         text = _fallback_message(text, effects)
         return text, incomplete_answer, missing_answer
-
-    @staticmethod
-    def _queued_jobs(
-        effects: list[dict[str, Any]], command_receipts: list[dict[str, Any]]
-    ) -> list[str]:
-        jobs: dict[str, str] = {}
-        # Read-only job inspections are excluded from ``effects``. Fold their
-        # durable observations too, so a later terminal status supersedes the
-        # original queue receipt for the same job.
-        for entry in command_receipts:
-            result = entry.get("result") or {}
-            observed = result.get("job")
-            if isinstance(observed, dict) and observed.get("id"):
-                job: ObservedSyncJob = {
-                    "id": str(observed["id"]),
-                    "status": str(observed.get("status") or "unknown"),
-                }
-                jobs[job["id"]] = job.get("status", "unknown")
-        for entry in effects:
-            result = entry.get("result") or {}
-            if result.get("status") == "queued" and result.get("sync_job_id"):
-                jobs.setdefault(str(result["sync_job_id"]), "queued")
-        return [
-            f"Synchronisationsauftrag {job_id}: {status}. Remote-Abschluss ist "
-            f"{'bestätigt' if status == 'completed' else 'noch nicht bestätigt'}."
-            for job_id, status in jobs.items()
-        ]
 
     def _persist_pending(
         self,

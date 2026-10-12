@@ -161,6 +161,226 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertIn("synthetic-job-2: running", text)
         self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
 
+    def test_completed_job_observations_keep_model_analysis(self):
+        receipts = [
+            {
+                "call_id": "refresh",
+                "tool": "start_provider_refresh",
+                "result": {
+                    "ok": True,
+                    "status": "completed",
+                    "synchronous_refresh": True,
+                },
+            },
+            *(
+                {
+                    "call_id": f"inspect-{job_id}",
+                    "tool": "get_sync_job",
+                    "result": {
+                        "ok": True,
+                        "job": {"id": job_id, "status": "completed"},
+                    },
+                }
+                for job_id in ("synthetic-job-a", "synthetic-job-b")
+            ),
+        ]
+        status, text, failures = self.finalize(
+            self.response("Recovery is good; keep today's planned session."), receipts
+        )
+        self.assertEqual(status, "completed")
+        self.assertEqual(failures, [])
+        self.assertEqual(text, "Recovery is good; keep today's planned session.")
+
+    def test_completed_refresh_started_this_turn_keeps_model_analysis(self):
+        receipts = [
+            {
+                "call_id": "refresh",
+                "tool": "start_provider_refresh",
+                "result": {
+                    "ok": True,
+                    "status": "queued",
+                    "sync_job_id": "synthetic-refresh-1",
+                },
+            },
+            {
+                "call_id": "inspect",
+                "tool": "get_sync_job",
+                "result": {
+                    "ok": True,
+                    "job": {
+                        "id": "synthetic-refresh-1",
+                        "type": "refresh",
+                        "status": "completed",
+                    },
+                },
+            },
+        ]
+        status, text, failures = self.finalize(
+            self.response("Readiness is high; the planned intervals fit."), receipts
+        )
+        self.assertEqual((status, failures), ("completed", []))
+        self.assertEqual(text, "Readiness is high; the planned intervals fit.")
+
+    def test_partial_synchronous_refresh_keeps_analysis_and_flags_missing_data(self):
+        receipts = [
+            {
+                "call_id": "refresh",
+                "tool": "start_provider_refresh",
+                "result": {
+                    "ok": True,
+                    "status": "completed",
+                    "provider": "garmin",
+                    "partial": True,
+                    "synchronous_refresh": True,
+                },
+            }
+        ]
+        _, text, _ = self.finalize(self.response("Recovery looks fine."), receipts)
+        self.assertTrue(text.startswith("Recovery looks fine.\n"))
+        self.assertIn("nur teilweise erfolgreich", text)
+
+    def test_complete_synchronous_refresh_adds_no_note(self):
+        receipts = [
+            {
+                "call_id": "refresh",
+                "tool": "start_provider_refresh",
+                "result": {
+                    "ok": True,
+                    "status": "completed",
+                    "provider": "garmin",
+                    "partial": False,
+                    "synchronous_refresh": True,
+                },
+            }
+        ]
+        _, text, _ = self.finalize(self.response("Recovery looks fine."), receipts)
+        self.assertEqual(text, "Recovery looks fine.")
+
+    def test_inspected_job_type_decides_whether_a_started_job_writes_remote(self):
+        def receipts(job_type):
+            return [
+                {
+                    "call_id": "refresh",
+                    "tool": "start_provider_refresh",
+                    "result": {
+                        "ok": True,
+                        "status": "queued",
+                        "sync_job_id": "synthetic-typed-1",
+                    },
+                },
+                {
+                    "call_id": "inspect",
+                    "tool": "get_sync_job",
+                    "result": {
+                        "ok": True,
+                        "job": {
+                            "id": "synthetic-typed-1",
+                            "type": job_type,
+                            "status": "running",
+                        },
+                    },
+                },
+            ]
+
+        _, kept, _ = self.finalize(self.response("Analysis."), receipts("refresh"))
+        self.assertTrue(kept.startswith("Analysis.\n"))
+        _, replaced, _ = self.finalize(
+            self.response("Analysis."), receipts("plan_push")
+        )
+        self.assertNotIn("Analysis.", replaced)
+        self.assertIn("synthetic-typed-1: running", replaced)
+
+    def test_pending_refresh_keeps_analysis_and_appends_unconfirmed_status(self):
+        receipts = [
+            {
+                "call_id": "refresh",
+                "tool": "start_provider_refresh",
+                "result": {
+                    "ok": True,
+                    "status": "queued",
+                    "sync_job_id": "synthetic-refresh-2",
+                },
+            }
+        ]
+        _, text, _ = self.finalize(self.response("Take it easy today."), receipts)
+        self.assertTrue(text.startswith("Take it easy today.\n"))
+        self.assertIn("synthetic-refresh-2: queued", text)
+        self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
+
+    def test_empty_answer_with_pending_refresh_falls_back_to_receipts(self):
+        receipts = [
+            {
+                "call_id": "refresh",
+                "tool": "start_provider_refresh",
+                "result": {
+                    "ok": True,
+                    "status": "queued",
+                    "sync_job_id": "synthetic-refresh-3",
+                },
+            }
+        ]
+        _, text, _ = self.finalize(self.response(""), receipts)
+        self.assertIn("synthetic-refresh-3: queued", text)
+
+    def test_completed_plan_push_inspected_only_keeps_model_analysis(self):
+        receipts = [
+            {
+                "call_id": "inspect",
+                "tool": "get_sync_job",
+                "result": {
+                    "ok": True,
+                    "job": {
+                        "id": "synthetic-push-1",
+                        "type": "plan_push",
+                        "status": "completed",
+                    },
+                },
+            }
+        ]
+        _, text, _ = self.finalize(self.response("The plan is on Intervals."), receipts)
+        self.assertEqual(text, "The plan is on Intervals.")
+
+    def test_write_job_alongside_refresh_still_replaces_model_claim(self):
+        receipts = [
+            {
+                "call_id": "refresh",
+                "tool": "start_provider_refresh",
+                "result": {
+                    "ok": True,
+                    "status": "queued",
+                    "sync_job_id": "synthetic-refresh-4",
+                },
+            },
+            {
+                "call_id": "sync",
+                "tool": "start_intervals_plan_sync",
+                "result": {
+                    "ok": True,
+                    "status": "queued",
+                    "sync_job_id": "synthetic-push-2",
+                },
+            },
+        ]
+        _, text, _ = self.finalize(self.response("All synchronized."), receipts)
+        self.assertNotIn("All synchronized", text)
+        self.assertIn("synthetic-push-2: queued", text)
+
+    def test_unfinished_job_observation_still_replaces_model_claim(self):
+        receipts = [
+            {
+                "call_id": "inspect",
+                "tool": "get_sync_job",
+                "result": {
+                    "ok": True,
+                    "job": {"id": "synthetic-job-3", "status": "running"},
+                },
+            }
+        ]
+        _, text, _ = self.finalize(self.response("Everything is synced."), receipts)
+        self.assertIn("synthetic-job-3: running", text)
+        self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
+        self.assertNotIn("Everything is synced", text)
+
     def test_repaired_failure_clears_failure_text_and_sets_completed(self):
         failed = self.failure()
         repaired = {
@@ -519,7 +739,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
             [
                 self.success(),
                 {
-                    "tool": "refresh_current_performance",
+                    "tool": "start_intervals_plan_sync",
                     "result": {
                         "ok": True,
                         "status": "queued",
@@ -535,6 +755,27 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertIn("mixed-job: queued", text)
         self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
         self.assertNotIn("both complete", text)
+
+    def test_mixed_local_and_queued_refresh_keeps_model_analysis(self):
+        status, text, failures = self.finalize(
+            self.response("Check-in saved; readiness looks good."),
+            [
+                self.success(),
+                {
+                    "tool": "refresh_current_performance",
+                    "result": {
+                        "ok": True,
+                        "status": "queued",
+                        "sync_job_id": "mixed-refresh",
+                    },
+                },
+            ],
+        )
+
+        self.assertEqual((status, failures), ("completed", []))
+        self.assertTrue(text.startswith("Check-in saved; readiness looks good.\n"))
+        self.assertIn("mixed-refresh: queued", text)
+        self.assertIn("Remote-Abschluss ist noch nicht bestätigt", text)
 
     def test_queued_receipt_does_not_suppress_clarifying_question(self):
         _, text, _ = self.finalize(
@@ -562,7 +803,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
             [
                 self.success(),
                 {
-                    "tool": "refresh_current_performance",
+                    "tool": "start_intervals_plan_sync",
                     "result": {
                         "ok": True,
                         "status": "queued",

@@ -493,13 +493,13 @@ class OrchestrationParityTests(unittest.TestCase):
             DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets(),
         )
 
-    def test_only_intervals_waits_for_coach_completion(self) -> None:
+    def test_only_athlete_data_providers_wait_for_coach_completion(self) -> None:
         waiting = [
             descriptor.provider_id
             for descriptor in DEFAULT_PROVIDER_REGISTRY.all()
             if descriptor.coach_waits_for_completion
         ]
-        self.assertEqual(["intervals"], waiting)
+        self.assertEqual(["intervals", "garmin"], waiting)
 
     def test_resync_key_map_matches_full_resync_table_in_order(self) -> None:
         mapping = DEFAULT_PROVIDER_REGISTRY.resync_key_map()
