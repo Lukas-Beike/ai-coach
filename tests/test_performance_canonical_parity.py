@@ -712,3 +712,21 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         canonical = _service(self.intervals, source, self.garmin).performance_state()
         self.assertEqual(counting.calls, 2)
         self.assertEqual(_normalized_state(canonical), _normalized_state(legacy))
+
+    def test_selector_chooses_its_source_once_for_both_load_reads(self) -> None:
+        populate(self)
+        selector = make_selector(self)
+        self.write(selector.refresh)
+        source = CanonicalPerformanceSource(
+            database_manager=lambda: self.manager,
+            observation_reader=lambda: selector,
+        )
+        with patch.object(
+            selector, "_serves_tables", wraps=selector._serves_tables
+        ) as serves_tables:
+            canonical = _service(
+                self.intervals, source, self.garmin
+            ).performance_state()
+        serves_tables.assert_called_once()
+        legacy = _service(self.intervals, None, self.garmin).performance_state()
+        self.assertEqual(_normalized_state(canonical), _normalized_state(legacy))

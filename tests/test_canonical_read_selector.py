@@ -30,6 +30,7 @@ from backend.sync.canonical_read_selector import (
     SOURCE_TABLES,
     STATE_KEY,
 )
+from backend.sync.canonical_table_reader import CanonicalTableReader
 
 SECRET = "sk-test-SECRET-value-123"
 
@@ -256,6 +257,14 @@ class SelectorTests(CanonicalReadFixture):
         self.assertEqual(
             self.read(selector.coverage), self.read(self.projection.coverage)
         )
+
+    def test_reader_for_returns_the_source_that_serves_reads(self) -> None:
+        populate(self)
+        selector = make_selector(self)
+        self.assertIs(self.read(selector.reader_for), self.projection)
+
+        self.write(selector.refresh)
+        self.assertIsInstance(self.read(selector.reader_for), CanonicalTableReader)
 
     def test_observations_switch_with_the_same_source(self) -> None:
         populate(self)
