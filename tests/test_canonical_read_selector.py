@@ -17,8 +17,9 @@ from canonical_read_support import (
 )
 
 from backend.activities.detail_store import summary_fingerprint
-from backend.canonical.vocabulary import MetricKind
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.diagnostics.canonical_read import summarize_canonical_read
+from backend.providers import canonical_plans
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill import STATE_KEY as BACKFILL_STATE_KEY
 from backend.sync.canonical_backfill import read_status
@@ -124,6 +125,30 @@ class SelectorTests(CanonicalReadFixture):
         self.assertEqual(summary["serving"], "legacy")
         self.assertFalse(summary["digest_current"])
         self.assertEqual(ids(activities), ids(self.read(self.projection.activities)))
+
+    def test_intervals_wellness_mapper_bump_after_a_pass_falls_back_to_legacy(
+        self,
+    ) -> None:
+        populate(self)
+        selector = make_selector(self)
+        self.write(selector.refresh)
+
+        bumped = {
+            key: version + 1
+            if key == (ProviderId.INTERVALS.value, canonical_plans.WELLNESS_RECORD_KIND)
+            else version
+            for key, version in canonical_plans._MAPPER_VERSIONS.items()
+        }
+        with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
+            summary = self.read(selector.summary)
+            activities = self.read(selector.activities)
+
+        self.assertEqual(summary["serving"], "legacy")
+        self.assertFalse(summary["digest_current"])
+        self.assertEqual(ids(activities), ids(self.read(self.projection.activities)))
+        restored = self.read(selector.summary)
+        self.assertEqual(restored["serving"], "tables")
+        self.assertTrue(restored["digest_current"])
 
     def test_zone_change_after_a_pass_falls_back_to_legacy(self) -> None:
         populate(self)
