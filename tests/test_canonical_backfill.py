@@ -277,14 +277,18 @@ class PopulatedBackfillTests(BackfillFixture):
 
         summary = self.summary(backfill)
         self.assertEqual(summary["status"], "complete")
-        self.assertEqual(self.count("activity_records"), 5 + 1 + 2)
-        self.assertEqual(self.count("activity_sessions"), 5 + 1 + 2)
+        # The newest snapshot plans one activity, dated 2026-09-10. Of the five older
+        # fixture activities, the two dated earlier are inserted; the three dated on or
+        # after that day are superseded, because the newest snapshot no longer shows them.
+        self.assertEqual(self.count("activity_records"), 3 + 2)
+        self.assertEqual(self.count("activity_sessions"), 3 + 2)
+        self.assertEqual(summary["providers"][INTERVALS]["superseded"], 3)
         self.assertEqual(
             sum(
                 counters["sessions_created"]
                 for counters in summary["providers"].values()
             ),
-            8,
+            5,
         )
         self.assertEqual(summary["providers"][INTERVALS]["skipped_invalid"], 0)
         self.assertGreater(summary["providers"][GARMIN]["inserted"], 0)
@@ -549,8 +553,177 @@ class PopulatedBackfillTests(BackfillFixture):
             db.execute("DELETE FROM snapshots WHERE id = 2")
         self.run_to_completion(backfill)
 
-        self.assertEqual(self.count("activity_records"), 40 + 60)
+        # The newest snapshot was removed after its first batch, so its coverage is
+        # unknown and the older snapshot's activities are superseded rather than revived.
+        self.assertEqual(self.count("activity_records"), 40)
+        self.assertEqual(
+            self.summary(backfill)["providers"][INTERVALS]["superseded"], 60
+        )
         self.assertEqual(self.state()["status"], "complete")
+
+
+class CoverageTests(BackfillFixture):
+    """The newest snapshot decides which older activities may be inserted."""
+
+    def activity_ids(self, manager: DatabaseManager | None = None) -> list[str]:
+        rows = self.rows(
+            "SELECT provider_activity_id FROM activity_records ORDER BY provider_activity_id",
+            (),
+            manager,
+        )
+        return [str(row["provider_activity_id"]) for row in rows]
+
+    def raw_activity_ids(self, manager: DatabaseManager | None = None) -> list[str]:
+        rows = self.rows(
+            "SELECT source_record_id FROM provider_records WHERE record_kind = ? "
+            "ORDER BY source_record_id",
+            (ACTIVITY_KIND,),
+            manager,
+        )
+        return [str(row["source_record_id"]) for row in rows]
+
+    def test_older_activity_on_or_after_coverage_start_is_superseded_not_revived(
+        self,
+    ) -> None:
+        self.insert_snapshot(
+            self.manager,
+            intervals_snapshot(
+                [
+                    intervals_activity("gone-later", day="2026-09-15"),
+                    intervals_activity("gone-same-day", day="2026-09-10"),
+                ]
+            ),
+        )
+        self.insert_snapshot(
+            self.manager,
+            intervals_snapshot(
+                [
+                    intervals_activity("kept-first", day="2026-09-10"),
+                    intervals_activity("kept-last", day="2026-09-20"),
+                ],
+                synced_at=LATER,
+            ),
+        )
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        counters = self.summary(backfill)["providers"][INTERVALS]
+        self.assertEqual(self.activity_ids(), ["kept-first", "kept-last"])
+        self.assertEqual(self.raw_activity_ids(), ["kept-first", "kept-last"])
+        # Both older activities are on or after coverage_start, so the same-day one too.
+        self.assertEqual(counters["superseded"], 2)
+        self.assertEqual(counters["already_present"], 0)
+        self.assertEqual(counters["sessions_created"], 2)
+
+    def test_older_activity_before_coverage_start_is_inserted(self) -> None:
+        self.insert_snapshot(
+            self.manager,
+            intervals_snapshot(
+                [
+                    intervals_activity("early", day="2026-09-01"),
+                    intervals_activity("gone-later", day="2026-09-15"),
+                ]
+            ),
+        )
+        self.insert_snapshot(
+            self.manager,
+            intervals_snapshot(
+                [intervals_activity("kept", day="2026-09-10")], synced_at=LATER
+            ),
+        )
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        counters = self.summary(backfill)["providers"][INTERVALS]
+        self.assertEqual(self.activity_ids(), ["early", "kept"])
+        self.assertEqual(self.raw_activity_ids(), ["early", "kept"])
+        self.assertEqual(counters["superseded"], 1)
+        self.assertEqual(counters["sessions_created"], 2)
+
+    def test_authority_removed_before_its_turn_supersedes_every_snapshot_activity(
+        self,
+    ) -> None:
+        self.insert_snapshot(
+            self.manager,
+            intervals_snapshot([intervals_activity("old", day="2026-09-01")]),
+        )
+        self.insert_snapshot(
+            self.manager,
+            intervals_snapshot([intervals_activity("middle", day="2026-09-10")]),
+        )
+        self.insert_snapshot(
+            self.manager,
+            intervals_snapshot(
+                [intervals_activity("newest", day="2026-09-20")], synced_at=LATER
+            ),
+        )
+        # 120 weights keep the Garmin source going past the first batch, so the newest
+        # snapshot's turn has not started when it is removed.
+        self.set_garmin(self.manager, garmin_payload(weight=synthetic_weights(120)))
+        backfill = self.make_backfill(batch_size=100)
+        self.assertFalse(self.run_batch(backfill).done)
+        with self.manager.unit_of_work() as db:
+            db.execute("DELETE FROM snapshots WHERE id = 3")
+        self.run_to_completion(backfill)
+
+        # With the authority gone, neither the middle nor the old snapshot may insert.
+        self.assertEqual(self.activity_ids(), [])
+        self.assertEqual(
+            self.summary(backfill)["providers"][INTERVALS]["superseded"], 2
+        )
+
+    def test_abort_and_resume_across_the_coverage_boundary_matches_the_uninterrupted_run(
+        self,
+    ) -> None:
+        older = intervals_snapshot(
+            [intervals_activity(f"early-{i}", day="2026-09-01") for i in range(60)]
+            + [intervals_activity(f"late-{i}", day="2026-09-15") for i in range(60)]
+        )
+        newest = intervals_snapshot(
+            [intervals_activity("kept", day="2026-09-10")], synced_at=LATER
+        )
+        other = self.open_manager("resumed.db")
+        for manager in (self.manager, other):
+            self.insert_snapshot(manager, older)
+            self.insert_snapshot(manager, newest)
+        uninterrupted = self.make_backfill(batch_size=100)
+        self.run_to_completion(uninterrupted)
+
+        interrupted = self.make_backfill(batch_size=100)
+        self.run_batch(interrupted, other)
+        self.run_batch(interrupted, other)
+        # The third batch starts with covered activities. Its first coverage check fails
+        # before anything in the batch is committed.
+        with (
+            patch.object(
+                canonical_store,
+                "activity_record_exists",
+                side_effect=RuntimeError("injected failure"),
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            self.run_batch(interrupted, other)
+        with other.unit_of_work() as db:
+            interrupted.mark_failed(db)
+
+        failed = self.state(other)
+        self.assertEqual(failed["status"], "failed")
+        self.assertGreater(failed["counters"][INTERVALS]["superseded"], 0)
+        self.assertLess(failed["counters"][INTERVALS]["superseded"], 60)
+
+        resumed = self.make_backfill(batch_size=100)
+        self.run_to_completion(resumed, other)
+        self.assertEqual(self.state(other)["status"], "complete")
+        self.assertEqual(
+            self.summary(resumed, other)["providers"],
+            self.summary(uninterrupted)["providers"],
+        )
+        self.assertEqual(self.canonical_snapshot(other), self.canonical_snapshot())
+        self.assertEqual(
+            self.summary(uninterrupted)["providers"][INTERVALS]["superseded"], 60
+        )
+        self.assertEqual(self.count("activity_records"), 60 + 1)
+        self.assertEqual(self.count("activity_records", other), 60 + 1)
 
 
 class ReprojectionTests(BackfillFixture):

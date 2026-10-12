@@ -244,6 +244,11 @@ def insert_provider_record_if_absent(
     return True
 
 
+def activity_record_exists(db: Any, *, provider: str, provider_activity_id: str) -> bool:
+    """Return whether an activity record exists for the provider identity, live or deleted."""
+    return _fetch_row(db, _ACTIVITY_RECORD_EXISTS, (provider, provider_activity_id)) is not None
+
+
 def insert_activity_record_if_absent(
     db: Any,
     record: ActivityRecord,
@@ -258,7 +263,9 @@ def insert_activity_record_if_absent(
     An existing activity, live or deleted, is never changed or revived.
     """
     provider, provider_activity_id = _activity_identity(record)
-    if _fetch_row(db, _ACTIVITY_RECORD_EXISTS, (provider, provider_activity_id)) is not None:
+    if activity_record_exists(
+        db, provider=provider, provider_activity_id=provider_activity_id
+    ):
         return False
     _insert_activity(
         db,
