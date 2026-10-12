@@ -2382,7 +2382,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(refresh["status"], "completed")
         self.assertTrue(refresh["synchronous_refresh"])
         sync.assert_called_once()
-        battery.assert_called_once_with()
+        battery.assert_called_once_with(cancel_event=None)
         with server.database_manager().unit_of_work() as db:
             queued = db.execute(
                 "SELECT id FROM sync_jobs WHERE provider='garmin'"

@@ -40,19 +40,27 @@ def shared_garmin_sync_lock() -> threading.Lock:
 class MorningBatteryRefresher(Protocol):
     """Refreshes the optional morning Body Battery, swallowing its failures."""
 
-    def refresh(self) -> None: ...
+    def refresh(
+        self,
+        checkin_date: date | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> bool: ...
 
 
 def refresh_morning_battery_after_sync(
-    result: Mapping[str, Any], morning_battery: MorningBatteryRefresher
-) -> None:
+    result: Mapping[str, Any],
+    morning_battery: MorningBatteryRefresher,
+    cancel_event: threading.Event | None = None,
+) -> bool:
     """Refresh the morning Body Battery once a Garmin sync stored new data.
 
     Queued and inline refreshes share this rule; a busy or failed run leaves
-    the morning reading untouched.
+    the morning reading untouched. Returns ``False`` when a due Body Battery
+    refresh failed, was busy, or was cancelled.
     """
-    if result.get("status") in {"ok", "partial"}:
-        morning_battery.refresh()
+    if result.get("status") not in {"ok", "partial"}:
+        return True
+    return morning_battery.refresh(cancel_event=cancel_event)
 
 
 class GarminRemoteReader:

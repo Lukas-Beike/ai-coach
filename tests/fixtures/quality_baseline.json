@@ -153,7 +153,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery_service.py",
-      "line": 206,
+      "line": 218,
       "column": 31,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -233,7 +233,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery_service.py",
-      "line": 205,
+      "line": 217,
       "column": 39,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -265,7 +265,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_morning_battery_service.py",
-      "line": 24,
+      "line": 25,
       "column": 41,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -593,7 +593,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/garmin_service.py",
-      "line": 232,
+      "line": 240,
       "column": 61,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -649,7 +649,7 @@
     {
       "tool": "ruff",
       "path": "tests/test_morning_battery_service.py",
-      "line": 432,
+      "line": 449,
       "column": 66,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -2129,7 +2129,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_morning_battery_service.py",
-      "line": 372,
+      "line": 389,
       "column": 33,
       "code": "assignment",
       "message_sha256": "3e69521ecbdc340106af4a8922c3d8716e59778cac2c6660a5bfc16fa81617d6"

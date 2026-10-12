@@ -217,7 +217,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                     "garmin", "refresh", {"days": 30}
                 )
             )
-            recovery.assert_called_once_with()
+            recovery.assert_called_once_with(cancel_event=None)
             recovery.reset_mock()
             server.SYNC_JOB_EXECUTION.executor().execute(
                 server.SYNC_JOB_QUEUE.service().enqueue(

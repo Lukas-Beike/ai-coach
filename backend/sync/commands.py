@@ -156,8 +156,9 @@ class GarminSynchronousRefresh:
     backfill stays a queued job. The result flags a narrowed whole-history
     request as ``history_limited``. A catch-up window that ends before today,
     or an awaited run whose window could not be confirmed, makes the result
-    ``partial``. Only an ``ok`` or ``partial`` run counts as completed; any
-    other outcome fails the refresh.
+    ``partial``, as does a morning Body Battery refresh that failed, was busy
+    or was cancelled. Only an ``ok`` or ``partial`` run counts as completed;
+    any other outcome fails the refresh.
     """
 
     def __init__(
@@ -192,14 +193,18 @@ class GarminSynchronousRefresh:
                 f"Die {label}-Aktualisierung lieferte kein verwertbares Ergebnis.",
                 reason="provider_refresh_failed",
             )
-        refresh_morning_battery_after_sync(result, self._morning_body_battery_service)
+        battery_refreshed = refresh_morning_battery_after_sync(
+            result, self._morning_body_battery_service, cancel_event
+        )
         window_unconfirmed = bool(result.get("window_unconfirmed"))
         return {
             "ok": True,
             "status": "completed",
             "provider": provider,
             "activity_days": None if window_unconfirmed else days,
-            "partial": status == "partial" or end_date is not None,
+            "partial": status == "partial"
+            or end_date is not None
+            or not battery_refreshed,
             "history_limited": history_limited,
             "synchronous_refresh": True,
         }

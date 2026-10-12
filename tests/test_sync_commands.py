@@ -230,7 +230,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
             cancel_event=cancel_event,
             include_recovery=True,
         )
-        self.battery.refresh.assert_called_once_with()
+        self.battery.refresh.assert_called_once_with(cancel_event=cancel_event)
 
     def test_all_history_sentinel_uses_scheduled_catch_up_window(self):
         result = self.refresh.refresh("garmin", {"days": -1}, None)
@@ -291,7 +291,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         self.assertFalse(self.garmin.sync.call_args_list[1].kwargs["wait_for_existing"])
         self.assertTrue(result["partial"])
         self.garmin.awaited_run_status.assert_called_once_with(30, None, None)
-        self.battery.refresh.assert_called_once_with()
+        self.battery.refresh.assert_called_once_with(cancel_event=None)
 
     def test_awaited_run_covering_the_window_is_not_repeated(self):
         self.garmin.awaited_run_status.return_value = "ok"
@@ -308,7 +308,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
             30, None, "2026-10-10T06:00:00+00:00"
         )
         self.assertFalse(result["partial"])
-        self.battery.refresh.assert_called_once_with()
+        self.battery.refresh.assert_called_once_with(cancel_event=None)
 
     def test_awaited_run_with_failed_collection_is_reported_partial(self):
         self.garmin.awaited_run_status.return_value = "partial"
@@ -318,7 +318,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
 
         self.garmin.sync.assert_called_once()
         self.assertTrue(result["partial"])
-        self.battery.refresh.assert_called_once_with()
+        self.battery.refresh.assert_called_once_with(cancel_event=None)
 
     def test_busy_rerun_after_waiting_keeps_awaited_data_as_partial(self):
         self.garmin.sync.side_effect = [
@@ -330,7 +330,16 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
 
         self.assertTrue(result["partial"])
         self.assertIsNone(result["activity_days"])
-        self.battery.refresh.assert_called_once_with()
+        self.battery.refresh.assert_called_once_with(cancel_event=None)
+
+    def test_failed_body_battery_refresh_makes_the_result_partial(self):
+        self.battery.refresh.return_value = False
+
+        result = self.refresh.refresh("garmin", {"days": 30}, None)
+
+        self.assertTrue(result["partial"])
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["activity_days"], 30)
 
     def test_partial_sync_is_reported_and_still_refreshes_body_battery(self):
         self.garmin.sync.return_value = {"status": "partial"}
@@ -339,7 +348,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
 
         self.assertTrue(result["partial"])
         self.assertEqual(result["status"], "completed")
-        self.battery.refresh.assert_called_once_with()
+        self.battery.refresh.assert_called_once_with(cancel_event=None)
 
     def test_busy_sync_uses_existing_provider_busy_error(self):
         self.garmin.sync.return_value = {"status": "already_running"}
