@@ -30,8 +30,13 @@ boundary or a resume cannot change the outcome.
 Re-projection: when a mapper version is above the ``mapped_version`` of an active
 raw record, that record is mapped again from its stored payload and fetch time, its
 canonical rows are updated to the current projection, and its ``mapped_version`` is
-advanced. Deleted raw records are skipped. This is the only phase that updates
-existing canonical rows.
+advanced. Deleted raw records are skipped. Re-projection never revives a tombstone: a
+deleted activity or session is left as it is. An activity that the raw record owns
+(same provider and source record id) and that the new projection no longer emits is
+tombstoned in the same transaction that advances ``mapped_version``. Only activities
+have such a tombstone; observations have no state column. The cursor is bound to the
+mapper version, so a version bump during a partial run restarts that record from its
+first item. This is the only phase that updates existing canonical rows.
 
 Each batch writes at most ``batch_size`` plan items in one writer transaction. The
 cursor and the content-free counters are one kv value written in that same
@@ -85,6 +90,7 @@ COUNTER_NAMES: Final = (
     "sessions_created",
     "duplicates",
     "reprojected",
+    "retired",
 )
 
 _INGEST: Final = "ingest"
@@ -281,7 +287,7 @@ class CanonicalBackfill:
             work = self._work_for(
                 f"row:{current['id']}",
                 current,
-                str(row["payload"]),
+                f"{version}:{row['payload']}",
                 partial(_reprojection_work, row, zone),
             )
             count, finished = _drain(
@@ -432,14 +438,39 @@ def _complete_reprojection(
     version: int,
     now: str,
 ) -> None:
+    bucket = state["counters"][row["provider"]]
+    bucket["retired"] += _retire_unemitted(db, row, work, now=now)
     canonical_store.set_mapped_version(
         db, record_id=current["id"], mapper_version=version, now=now
     )
-    bucket = state["counters"][row["provider"]]
     bucket["reprojected"] += 1
     bucket["skipped_invalid"] += work.skipped_invalid
     bucket["duplicates"] += work.duplicates
     _leave_reprojection(state, current)
+
+
+def _retire_unemitted(db: Any, row: Mapping[str, Any], work: _Work, *, now: str) -> int:
+    """Tombstone the activity this raw row owns when the new projection drops it.
+
+    Ownership is the same provider and source record id. Only activity raw records
+    own a single canonical row whose tombstone exists, so every other kind retires
+    nothing. Returns 1 when an active activity was retired, otherwise 0.
+    """
+    if row["record_kind"] != ACTIVITY_RECORD_KIND:
+        return 0
+    source_id = str(row["source_record_id"])
+    emitted = {
+        item.value.record.provenance.source_record_id
+        for item in work.items
+        if isinstance(item.value, ActivityItem)
+    }
+    if source_id in emitted:
+        return 0
+    return int(
+        canonical_store.retire_unemitted_activity(
+            db, provider=row["provider"], provider_activity_id=source_id, now=now
+        )
+    )
 
 
 def _next_source(db: Any, state: dict[str, Any]) -> dict[str, Any] | None:
@@ -623,7 +654,7 @@ def _write_reprojection(db: Any, item: _Item, now: str) -> None:
     """Bring one existing canonical row up to the current projection."""
     value = item.value
     if isinstance(value, ActivityItem):
-        canonical_store.upsert_activity_record(
+        canonical_store.reproject_activity_record(
             db,
             value.record,
             local_date=value.local_date,

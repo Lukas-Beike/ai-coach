@@ -8,15 +8,16 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import nullcontext
+from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import ActivityLinkKind, ProviderId
 from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
@@ -942,6 +943,403 @@ class ReprojectionTests(BackfillFixture):
         }
 
         self.assertEqual(_reprojection_work(row, ZoneInfo("UTC")), _Work())
+
+    def plan_wrapper(self, transform: Callable[[Mapping[str, Any], Any], Any]) -> Any:
+        """Patch the plan the backfill uses; the real mapper runs, then ``transform`` edits it."""
+        real = canonical_plans.reprojection_plan
+
+        def plan(raw_row: Mapping[str, Any], *, zone: Any) -> Any:
+            result = real(raw_row, zone=zone)
+            return None if result is None else transform(raw_row, result)
+
+        return patch(
+            "backend.sync.canonical_backfill.reprojection_plan", side_effect=plan
+        )
+
+    def drop_intervals_activity(self, identifier: str) -> Any:
+        """A mapper that no longer emits one Intervals activity; its raw record is untouched."""
+
+        def transform(row: Mapping[str, Any], result: Any) -> Any:
+            owned = (row["provider"], row["record_kind"], row["source_record_id"])
+            return (
+                replace(result, activities=())
+                if owned == (INTERVALS, ACTIVITY_KIND, identifier)
+                else result
+            )
+
+        return self.plan_wrapper(transform)
+
+    def tag_observation_versions(self) -> Any:
+        """A mapper whose observations carry the version they were projected with."""
+
+        def transform(row: Mapping[str, Any], result: Any) -> Any:
+            version = canonical_plans.reprojection_mapper_version(
+                row["provider"], row["record_kind"]
+            )
+            return replace(
+                result,
+                observations=tuple(
+                    replace(item, mapper_version=version)
+                    for item in result.observations
+                ),
+            )
+
+        return self.plan_wrapper(transform)
+
+    def tombstone_intervals_activity(self, identifier: str) -> None:
+        """Delete one Intervals activity and its session, keeping its raw record active."""
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_sessions SET state = 'deleted' WHERE activity_id IN "
+                "(SELECT activity_id FROM activity_records WHERE provider = ? "
+                "AND provider_activity_id = ?)",
+                (INTERVALS, identifier),
+            )
+            db.execute(
+                "UPDATE activity_records SET state = 'deleted' "
+                "WHERE provider = ? AND provider_activity_id = ?",
+                (INTERVALS, identifier),
+            )
+
+    def intervals_activity_rows(self) -> list[dict[str, Any]]:
+        return self.rows(
+            "SELECT r.provider_activity_id, r.state, s.state AS session_state "
+            "FROM activity_records AS r "
+            "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+            "WHERE r.provider = ? ORDER BY r.provider_activity_id",
+            (INTERVALS,),
+        )
+
+    def test_reprojection_keeps_a_deleted_activity_and_its_session_deleted(
+        self,
+    ) -> None:
+        backfill = self.populate()
+        self.tombstone_intervals_activity("1")
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        with patch.dict(
+            canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
+        ):
+            self.run_to_completion(backfill)
+
+        self.assertEqual(
+            self.intervals_activity_rows(),
+            [
+                {
+                    "provider_activity_id": "0",
+                    "state": "active",
+                    "session_state": "active",
+                },
+                {
+                    "provider_activity_id": "1",
+                    "state": "deleted",
+                    "session_state": "deleted",
+                },
+                {
+                    "provider_activity_id": "2",
+                    "state": "active",
+                    "session_state": "active",
+                },
+            ],
+        )
+        self.assertEqual(
+            self.rows(
+                "SELECT DISTINCT mapped_version FROM provider_records "
+                "WHERE provider = ? AND record_kind = ?",
+                (INTERVALS, ACTIVITY_KIND),
+            ),
+            [{"mapped_version": old + 1}],
+        )
+        providers = self.summary(backfill)["providers"]
+        self.assertEqual(providers[INTERVALS]["reprojected"], 3)
+        self.assertEqual(providers[INTERVALS]["retired"], 0)
+
+    def test_reprojection_inserts_a_missing_activity_with_a_single_link_session(
+        self,
+    ) -> None:
+        backfill = self.populate()
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "DELETE FROM activity_records WHERE provider = ? AND provider_activity_id = '1'",
+                (INTERVALS,),
+            )
+            db.execute(
+                "DELETE FROM activity_sessions WHERE primary_provider = ? "
+                "AND primary_provider_activity_id = '1'",
+                (INTERVALS,),
+            )
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        with patch.dict(
+            canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
+        ):
+            self.run_to_completion(backfill)
+
+        self.assertEqual(
+            self.rows(
+                "SELECT r.state, s.state AS session_state, s.link_kind "
+                "FROM activity_records AS r JOIN activity_sessions AS s "
+                "ON s.activity_id = r.activity_id "
+                "WHERE r.provider = ? AND r.provider_activity_id = '1'",
+                (INTERVALS,),
+            ),
+            [
+                {
+                    "state": "active",
+                    "session_state": "active",
+                    "link_kind": ActivityLinkKind.SINGLE.value,
+                }
+            ],
+        )
+
+    def test_reprojection_of_an_already_current_activity_changes_nothing(self) -> None:
+        backfill = self.populate()
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        with self.manager.unit_of_work() as db:
+            # The activity columns already equal the new projection; only the raw record is behind.
+            db.execute(
+                "UPDATE activity_records SET updated_at = 'marker' WHERE provider = ?",
+                (INTERVALS,),
+            )
+        with patch.dict(
+            canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
+        ):
+            self.run_to_completion(backfill)
+
+        self.assertEqual(
+            self.rows(
+                "SELECT DISTINCT updated_at FROM activity_records WHERE provider = ?",
+                (INTERVALS,),
+            ),
+            [{"updated_at": "marker"}],
+        )
+        self.assertEqual(
+            self.summary(backfill)["providers"][INTERVALS]["reprojected"], 3
+        )
+
+    def test_reprojection_rewrites_a_stale_active_activity_and_its_session(
+        self,
+    ) -> None:
+        backfill = self.populate()
+        query = (
+            "SELECT r.name, r.state, s.started_at, s.local_date "
+            "FROM activity_records AS r JOIN activity_sessions AS s "
+            "ON s.activity_id = r.activity_id "
+            "WHERE r.provider = ? AND r.provider_activity_id = '1'"
+        )
+        projected = self.rows(query, (INTERVALS,))
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_records SET name = 'stale' "
+                "WHERE provider = ? AND provider_activity_id = '1'",
+                (INTERVALS,),
+            )
+            db.execute(
+                "UPDATE activity_sessions SET started_at = '1999-01-01T00:00:00+00:00', "
+                "local_date = '1999-01-01' WHERE activity_id IN "
+                "(SELECT activity_id FROM activity_records WHERE provider = ? "
+                "AND provider_activity_id = '1')",
+                (INTERVALS,),
+            )
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        with patch.dict(
+            canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
+        ):
+            self.run_to_completion(backfill)
+
+        self.assertEqual(self.rows(query, (INTERVALS,)), projected)
+        providers = self.summary(backfill)["providers"]
+        self.assertEqual(providers[INTERVALS]["reprojected"], 3)
+        self.assertEqual(providers[INTERVALS]["retired"], 0)
+
+    def test_activity_the_new_projection_drops_is_retired_and_the_rest_stay_active(
+        self,
+    ) -> None:
+        backfill = self.populate()
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        with (
+            self.drop_intervals_activity("1"),
+            patch.dict(
+                canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
+            ),
+        ):
+            self.run_to_completion(backfill)
+
+        self.assertEqual(
+            self.intervals_activity_rows(),
+            [
+                {
+                    "provider_activity_id": "0",
+                    "state": "active",
+                    "session_state": "active",
+                },
+                {
+                    "provider_activity_id": "1",
+                    "state": "deleted",
+                    "session_state": "deleted",
+                },
+                {
+                    "provider_activity_id": "2",
+                    "state": "active",
+                    "session_state": "active",
+                },
+            ],
+        )
+        self.assertEqual(
+            self.rows(
+                "SELECT state, mapped_version FROM provider_records "
+                "WHERE provider = ? AND record_kind = ? AND source_record_id = '1'",
+                (INTERVALS, ACTIVITY_KIND),
+            ),
+            [{"state": "active", "mapped_version": old + 1}],
+        )
+        providers = self.summary(backfill)["providers"]
+        self.assertEqual(providers[INTERVALS]["retired"], 1)
+        self.assertEqual(providers[INTERVALS]["reprojected"], 3)
+        self.assertEqual(providers[GARMIN]["retired"], 0)
+
+    def test_an_already_deleted_activity_is_not_retired_again(self) -> None:
+        backfill = self.populate()
+        self.tombstone_intervals_activity("1")
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        with (
+            self.drop_intervals_activity("1"),
+            patch.dict(
+                canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
+            ),
+        ):
+            self.run_to_completion(backfill)
+
+        self.assertEqual(
+            self.rows(
+                "SELECT state FROM activity_records "
+                "WHERE provider = ? AND provider_activity_id = '1'",
+                (INTERVALS,),
+            ),
+            [{"state": "deleted"}],
+        )
+        self.assertEqual(self.summary(backfill)["providers"][INTERVALS]["retired"], 0)
+
+    def test_retirement_keeps_a_session_that_another_active_activity_links(
+        self,
+    ) -> None:
+        backfill = self.populate()
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_records SET activity_id = (SELECT activity_id FROM "
+                "activity_records WHERE provider = ? AND provider_activity_id = '0') "
+                "WHERE provider = ? AND provider_activity_id = '1'",
+                (INTERVALS, INTERVALS),
+            )
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        with (
+            self.drop_intervals_activity("1"),
+            patch.dict(
+                canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
+            ),
+        ):
+            self.run_to_completion(backfill)
+
+        self.assertEqual(
+            self.rows(
+                "SELECT state FROM activity_records "
+                "WHERE provider = ? AND provider_activity_id = '1'",
+                (INTERVALS,),
+            ),
+            [{"state": "deleted"}],
+        )
+        self.assertEqual(
+            self.rows(
+                "SELECT state FROM activity_sessions WHERE activity_id = (SELECT "
+                "activity_id FROM activity_records WHERE provider = ? "
+                "AND provider_activity_id = '0')",
+                (INTERVALS,),
+            ),
+            [{"state": "active"}],
+        )
+        self.assertEqual(self.summary(backfill)["providers"][INTERVALS]["retired"], 1)
+
+    def test_only_activity_records_own_a_canonical_row_by_source_id(self) -> None:
+        """Ownership by kind: activities and wellness keep the raw source id; athlete and health do not.
+
+        Athlete and health observations carry their own ids (``i123``/None and
+        ``weight:<day>``), so they are never owned by their raw record and nothing is
+        retired for them. Observations have no tombstone in schema v6 either.
+        """
+        cases = {
+            ACTIVITY_KIND: (INTERVALS, "5", intervals_activity("5")),
+            canonical_plans.WELLNESS_RECORD_KIND: (
+                INTERVALS,
+                "2026-01-01",
+                synthetic_wellness(1)[0],
+            ),
+            canonical_plans.ATHLETE_RECORD_KIND: (
+                INTERVALS,
+                canonical_plans.ATHLETE_RECORD_ID,
+                {"id": "i123", "icu_ftp": 250},
+            ),
+            HEALTH_KIND: (GARMIN, "weight", {"weight": synthetic_weights(1)}),
+        }
+        owned: dict[str, bool] = {}
+        for kind, (provider, source_id, payload) in cases.items():
+            plan = canonical_plans.reprojection_plan(
+                {
+                    "provider": provider,
+                    "record_kind": kind,
+                    "source_record_id": source_id,
+                    "payload": json.dumps(payload),
+                    "fetched_at": NOW,
+                },
+                zone=ZONE,
+            )
+            assert plan is not None
+            emitted = {
+                item.record.provenance.source_record_id for item in plan.activities
+            } | {
+                item.observation.provenance.source_record_id
+                for item in plan.observations
+            }
+            self.assertTrue(emitted, kind)
+            owned[kind] = source_id in emitted
+        self.assertEqual(
+            owned,
+            {
+                ACTIVITY_KIND: True,
+                canonical_plans.WELLNESS_RECORD_KIND: True,
+                canonical_plans.ATHLETE_RECORD_KIND: False,
+                HEALTH_KIND: False,
+            },
+        )
+
+    def test_version_bump_during_a_partial_run_restarts_the_record_from_its_first_item(
+        self,
+    ) -> None:
+        backfill = self.make_backfill(batch_size=100)
+        self.set_garmin(self.manager, garmin_payload(weight=synthetic_weights(300)))
+        self.run_to_completion(backfill)
+        key = (GARMIN, HEALTH_KIND)
+        version = canonical_plans._MAPPER_VERSIONS[key]
+
+        with self.tag_observation_versions():
+            with patch.dict(canonical_plans._MAPPER_VERSIONS, {key: version + 1}):
+                self.assertFalse(self.run_batch(backfill).done)
+                self.assertGreater(self.state()["reproject_current"]["offset"], 0)
+            with patch.dict(canonical_plans._MAPPER_VERSIONS, {key: version + 2}):
+                self.run_to_completion(backfill)
+
+        self.assertEqual(
+            self.rows(
+                "SELECT DISTINCT mapper_version FROM observations WHERE provider = ?",
+                (GARMIN,),
+            ),
+            [{"mapper_version": version + 2}],
+        )
+        self.assertEqual(
+            self.rows(
+                "SELECT COUNT(*) AS n FROM provider_records WHERE provider = ? "
+                "AND record_kind = ? AND mapped_version != ?",
+                (GARMIN, HEALTH_KIND, version + 2),
+            )[0]["n"],
+            0,
+        )
 
 
 class DiagnosticsSummaryTests(BackfillFixture):

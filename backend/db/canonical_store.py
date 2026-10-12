@@ -72,6 +72,8 @@ class WriteOutcome(StrEnum):
     WRITTEN = "written"
     UPDATED = "updated"
     UNCHANGED = "unchanged"
+    # A deleted row was left as it is; only re-projection returns this.
+    PRESERVED = "preserved"
 
 
 def canonical_json(value: Mapping[str, Any]) -> str:
@@ -180,18 +182,13 @@ def upsert_activity_record(
         existing[column] == values[column] for column in _ACTIVITY_COLUMNS
     ):
         return WriteOutcome.UNCHANGED
-    assignments = ", ".join(f"{column} = ?" for column in _ACTIVITY_COLUMNS)
-    db.execute(
-        f"UPDATE activity_records SET {assignments}, fetched_at = ?, state = ?, "
-        "updated_at = ? WHERE provider = ? AND provider_activity_id = ?",
-        (
-            *(values[column] for column in _ACTIVITY_COLUMNS),
-            fetched_at,
-            ActivityRecordState.ACTIVE.value,
-            now,
-            provider,
-            provider_activity_id,
-        ),
+    _update_activity_columns(
+        db,
+        provider=provider,
+        provider_activity_id=provider_activity_id,
+        values=values,
+        fetched_at=fetched_at,
+        now=now,
     )
     db.execute(
         "UPDATE activity_sessions SET started_at = ?, local_date = ?, "
@@ -207,6 +204,107 @@ def upsert_activity_record(
         ),
     )
     return WriteOutcome.UPDATED
+
+
+def reproject_activity_record(
+    db: Any,
+    record: ActivityRecord,
+    *,
+    local_date: date,
+    mapper_version: int,
+    fetched_at: str,
+    now: str,
+) -> WriteOutcome:
+    """Project one activity for re-projection without reviving a tombstone.
+
+    A missing activity is inserted with a new single-link session. An active one is
+    updated in place, and its session is updated only while that session is active.
+    A deleted activity and its session are left untouched and return PRESERVED.
+    """
+    provider, provider_activity_id = _activity_identity(record)
+    values = _activity_values(
+        record, local_date=local_date, mapper_version=mapper_version
+    )
+    existing = _fetch_row(
+        db,
+        "SELECT activity_id, state, "
+        + ", ".join(_ACTIVITY_COLUMNS)
+        + " FROM activity_records WHERE provider = ? AND provider_activity_id = ?",
+        (provider, provider_activity_id),
+    )
+    if existing is None:
+        _insert_activity(
+            db,
+            provider=provider,
+            provider_activity_id=provider_activity_id,
+            values=values,
+            fetched_at=fetched_at,
+            now=now,
+        )
+        return WriteOutcome.WRITTEN
+    if existing["state"] != ActivityRecordState.ACTIVE.value:
+        return WriteOutcome.PRESERVED
+    if all(existing[column] == values[column] for column in _ACTIVITY_COLUMNS):
+        return WriteOutcome.UNCHANGED
+    _update_activity_columns(
+        db,
+        provider=provider,
+        provider_activity_id=provider_activity_id,
+        values=values,
+        fetched_at=fetched_at,
+        now=now,
+    )
+    db.execute(
+        "UPDATE activity_sessions SET started_at = ?, local_date = ?, updated_at = ? "
+        "WHERE activity_id = ? AND state = ?",
+        (
+            values["started_at"],
+            values["local_date"],
+            now,
+            existing["activity_id"],
+            ActivitySessionState.ACTIVE.value,
+        ),
+    )
+    return WriteOutcome.UPDATED
+
+
+def retire_unemitted_activity(
+    db: Any, *, provider: str, provider_activity_id: str, now: str
+) -> bool:
+    """Tombstone an active activity that a re-projection no longer emits; return True when retired.
+
+    The activity's session is tombstoned too, unless another active activity still
+    links to it. A row that is missing or already deleted is left untouched and
+    returns False, so it is never counted twice.
+    """
+    existing = _fetch_row(
+        db,
+        "SELECT activity_id, state FROM activity_records "
+        "WHERE provider = ? AND provider_activity_id = ?",
+        (provider, provider_activity_id),
+    )
+    if existing is None or existing["state"] != ActivityRecordState.ACTIVE.value:
+        return False
+    activity_id = existing["activity_id"]
+    db.execute(
+        "UPDATE activity_records SET state = ?, updated_at = ? "
+        "WHERE provider = ? AND provider_activity_id = ?",
+        (ActivityRecordState.DELETED.value, now, provider, provider_activity_id),
+    )
+    db.execute(
+        "UPDATE activity_sessions SET state = ?, updated_at = ? "
+        "WHERE activity_id = ? AND state = ? AND NOT EXISTS "
+        "(SELECT 1 FROM activity_records WHERE activity_id = ? AND state = ?)",
+        (
+            ActivitySessionState.DELETED.value,
+            now,
+            activity_id,
+            ActivitySessionState.ACTIVE.value,
+            activity_id,
+            ActivityRecordState.ACTIVE.value,
+        ),
+    )
+    return True
 
 
 def insert_provider_record_if_absent(
@@ -531,6 +629,31 @@ def _insert_activity(
             fetched_at,
             now,
             now,
+        ),
+    )
+
+
+def _update_activity_columns(
+    db: Any,
+    *,
+    provider: str,
+    provider_activity_id: str,
+    values: dict[str, Any],
+    fetched_at: str,
+    now: str,
+) -> None:
+    """Overwrite an activity's projected columns and make the record active again."""
+    assignments = ", ".join(f"{column} = ?" for column in _ACTIVITY_COLUMNS)
+    db.execute(
+        f"UPDATE activity_records SET {assignments}, fetched_at = ?, state = ?, "
+        "updated_at = ? WHERE provider = ? AND provider_activity_id = ?",
+        (
+            *(values[column] for column in _ACTIVITY_COLUMNS),
+            fetched_at,
+            ActivityRecordState.ACTIVE.value,
+            now,
+            provider,
+            provider_activity_id,
         ),
     )
 
