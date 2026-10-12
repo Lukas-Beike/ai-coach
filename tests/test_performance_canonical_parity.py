@@ -48,6 +48,9 @@ from backend.performance.canonical_personal_recovery import (
     CanonicalPersonalRecoveryInputs,
 )
 from backend.performance.canonical_recovery import CanonicalRecoveryInputs
+from backend.performance.canonical_recovery_averages import (
+    CanonicalRecoveryAverageInputs,
+)
 from backend.performance.load_context import performance_load_context
 from backend.providers.snapshot_projection import project_intervals_snapshot
 from backend.runtime.ports import ObservationReader
@@ -62,6 +65,7 @@ _NO_RECOVERY = CanonicalRecoveryInputs(
 _NO_PERSONAL_RECOVERY = CanonicalPersonalRecoveryInputs(
     resting_hr={ProviderId.INTERVALS: {}, ProviderId.GARMIN: {}}
 )
+_NO_RECOVERY_AVERAGES = CanonicalRecoveryAverageInputs(resting_hr=(), readiness=())
 
 
 class StubObservationReader(ObservationReader):
@@ -287,6 +291,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                 atl=60.0,
                 recovery=_NO_RECOVERY,
                 personal_recovery=_NO_PERSONAL_RECOVERY,
+                recovery_averages=_NO_RECOVERY_AVERAGES,
             ),
         )
 
@@ -362,6 +367,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                 atl=60.0,
                 recovery=_NO_RECOVERY,
                 personal_recovery=_NO_PERSONAL_RECOVERY,
+                recovery_averages=_NO_RECOVERY_AVERAGES,
             ),
         )
         self.assertEqual(reader.calls[0][1], PARITY_TODAY)
@@ -467,6 +473,7 @@ class CanonicalWiringTests(unittest.TestCase):
                 atl=60.0,
                 recovery=_NO_RECOVERY,
                 personal_recovery=_NO_PERSONAL_RECOVERY,
+                recovery_averages=_NO_RECOVERY_AVERAGES,
             ),
         )
 
@@ -654,6 +661,7 @@ class CanonicalWiringTests(unittest.TestCase):
                 atl=60.0,
                 recovery=_NO_RECOVERY,
                 personal_recovery=_NO_PERSONAL_RECOVERY,
+                recovery_averages=_NO_RECOVERY_AVERAGES,
             ),
         )
         with patch(
