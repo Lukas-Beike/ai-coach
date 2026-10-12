@@ -19,7 +19,7 @@ from typing import Any
 
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.source_policy import select_current
-from backend.runtime.ports import ObservationReader
+from backend.runtime.ports import ObservationReader, ObservationSourceSelector
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +77,12 @@ def load_performance_inputs(
     start: date,
     end: date,
 ) -> CanonicalPerformanceInputs:
-    """Read CTL and ATL once each, selected for ``latest_wellness_day``."""
+    """Read CTL and ATL once each, selected for ``latest_wellness_day``.
+
+    A selecting reader chooses its source once, so both reads use the same source.
+    """
+    if isinstance(reader, ObservationSourceSelector):
+        reader = reader.reader_for(db)
     return CanonicalPerformanceInputs(
         wellness_day=latest_wellness_day,
         ctl=_current_value(

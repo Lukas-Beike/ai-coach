@@ -40,7 +40,7 @@ from backend.providers.canonical_plans import current_mapper_versions
 from backend.runtime.ports import (
     ActivityReader,
     CanonicalReadRefresher,
-    ObservationReader,
+    ObservationSourceSelector,
     ProviderCoverageReader,
 )
 from backend.sync.canonical_backfill import BackfillStatus, read_status
@@ -54,7 +54,7 @@ SOURCE_LEGACY: Final = "legacy"
 
 class CanonicalReadSelector(
     ActivityReader,
-    ObservationReader,
+    ObservationSourceSelector,
     ProviderCoverageReader,
     CanonicalReadRefresher,
 ):
@@ -94,6 +94,10 @@ class CanonicalReadSelector(
         return self._source(db).observations(
             db, kind, start=start, end=end, sport=sport
         )
+
+    def reader_for(self, db: Any) -> CanonicalReader:
+        """Choose the serving source once for several reads in one unit of work."""
+        return self._source(db)
 
     def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]:
         return self._legacy.coverage(db)
