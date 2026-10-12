@@ -131,7 +131,8 @@ class GarminSynchronousRefresh:
     The Coach's ``days`` argument sets the window, as for a queued refresh. The
     whole-history sentinel, or no window, uses the scheduled catch-up window:
     an inline chat refresh cannot read the full history, and a historical
-    backfill stays a queued job.
+    backfill stays a queued job. The result flags a narrowed whole-history
+    request as ``history_limited``.
     """
 
     def __init__(
@@ -153,23 +154,11 @@ class GarminSynchronousRefresh:
         arguments: Mapping[str, Any],
         cancel_event: threading.Event | None,
     ) -> dict[str, Any]:
-        days, end_date = self._window(arguments)
-        provider_label = self._registry.get(provider).label
+        days, end_date, history_limited = self._window(arguments)
         result = self._sync(days, end_date, True, cancel_event)
-        _raise_if_busy(result, provider_label)
-        if result.get("waited_for_existing") and not (
-            self._garmin_sync_service.run_covers_window(
-                days, end_date, result.get("synced_at")
-            )
-        ):
-            # The awaited run read another window or ended partial.
-            rerun = self._sync(days, end_date, False, cancel_event)
-            # A run that took the lock meanwhile leaves only the awaited data.
-            result = (
-                {"status": "partial"}
-                if rerun.get("status") == "already_running"
-                else rerun
-            )
+        _raise_if_busy(result, self._registry.get(provider).label)
+        if result.get("waited_for_existing"):
+            result = self._after_waiting(result, days, end_date, cancel_event)
         status = result.get("status")
         if status in {"ok", "partial"}:
             self._morning_body_battery_service.refresh()
@@ -179,21 +168,43 @@ class GarminSynchronousRefresh:
             "provider": provider,
             "activity_days": days,
             "partial": status == "partial",
+            "history_limited": history_limited,
             "synchronous_refresh": True,
         }
 
-    def _window(self, arguments: Mapping[str, Any]) -> tuple[int, date | None]:
+    def _after_waiting(
+        self,
+        result: dict[str, Any],
+        days: int,
+        end_date: date | None,
+        cancel_event: threading.Event | None,
+    ) -> dict[str, Any]:
+        """Report the awaited run, or rerun when it did not read the window."""
+        status = self._garmin_sync_service.awaited_run_status(
+            days, end_date, result.get("synced_at")
+        )
+        if status is not None:
+            return {**result, "status": status}
+        rerun = self._sync(days, end_date, False, cancel_event)
+        # A run that took the lock meanwhile leaves only the awaited data.
+        return (
+            {"status": "partial"} if rerun.get("status") == "already_running" else rerun
+        )
+
+    def _window(self, arguments: Mapping[str, Any]) -> tuple[int, date | None, bool]:
+        """Return the window and whether it narrows a whole-history request."""
         requested_days: Any = arguments.get("days")
         days = (
-            self._all_sync_days
+            None
             if requested_days is None
             else _requested_days(requested_days, self._all_sync_days)
         )
-        if days == self._all_sync_days:
-            return self._garmin_sync_service.automatic_sync_window(
+        if days is None or days == self._all_sync_days:
+            window_days, end_date = self._garmin_sync_service.automatic_sync_window(
                 GARMIN_AUTOMATIC_SYNC_DAYS
             )
-        return days, None
+            return window_days, end_date, days is not None
+        return days, None, False
 
     def _sync(
         self,

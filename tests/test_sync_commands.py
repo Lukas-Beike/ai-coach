@@ -188,7 +188,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         self.battery = Mock()
         self.garmin.automatic_sync_window.return_value = (3, date(2026, 10, 10))
         self.garmin.sync.return_value = {"status": "ok"}
-        self.garmin.run_covers_window.return_value = False
+        self.garmin.awaited_run_status.return_value = None
         self.refresh = GarminSynchronousRefresh(
             self.garmin, self.battery, all_sync_days=-1
         )
@@ -208,6 +208,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
                 "provider": "garmin",
                 "activity_days": 3,
                 "partial": False,
+                "history_limited": False,
                 "synchronous_refresh": True,
             },
         )
@@ -225,6 +226,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         result = self.refresh.refresh("garmin", {"days": -1}, None)
 
         self.assertEqual(result["activity_days"], 3)
+        self.assertTrue(result["history_limited"])
         self.garmin.automatic_sync_window.assert_called_once()
         self.assertEqual(
             self.garmin.sync.call_args.kwargs["end_date"], date(2026, 10, 10)
@@ -236,6 +238,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         )
 
         self.assertEqual(result["activity_days"], 30)
+        self.assertFalse(result["history_limited"])
         self.garmin.automatic_sync_window.assert_not_called()
         self.garmin.sync.assert_called_once_with(
             days=30,
@@ -266,11 +269,11 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         self.assertTrue(self.garmin.sync.call_args_list[0].kwargs["wait_for_existing"])
         self.assertFalse(self.garmin.sync.call_args_list[1].kwargs["wait_for_existing"])
         self.assertTrue(result["partial"])
-        self.garmin.run_covers_window.assert_called_once_with(30, None, None)
+        self.garmin.awaited_run_status.assert_called_once_with(30, None, None)
         self.battery.refresh.assert_called_once_with()
 
     def test_awaited_run_covering_the_window_is_not_repeated(self):
-        self.garmin.run_covers_window.return_value = True
+        self.garmin.awaited_run_status.return_value = "ok"
         self.garmin.sync.return_value = {
             "status": "ok",
             "waited_for_existing": True,
@@ -280,10 +283,20 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         result = self.refresh.refresh("garmin", {"days": 30}, None)
 
         self.garmin.sync.assert_called_once()
-        self.garmin.run_covers_window.assert_called_once_with(
+        self.garmin.awaited_run_status.assert_called_once_with(
             30, None, "2026-10-10T06:00:00+00:00"
         )
         self.assertFalse(result["partial"])
+        self.battery.refresh.assert_called_once_with()
+
+    def test_awaited_run_with_failed_collection_is_reported_partial(self):
+        self.garmin.awaited_run_status.return_value = "partial"
+        self.garmin.sync.return_value = {"status": "ok", "waited_for_existing": True}
+
+        result = self.refresh.refresh("garmin", {"days": 30}, None)
+
+        self.garmin.sync.assert_called_once()
+        self.assertTrue(result["partial"])
         self.battery.refresh.assert_called_once_with()
 
     def test_busy_rerun_after_waiting_keeps_awaited_data_as_partial(self):

@@ -239,6 +239,27 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(text.startswith("Recovery looks fine.\n"))
         self.assertIn("nur teilweise erfolgreich", text)
 
+    def test_narrowed_whole_history_refresh_discloses_the_limited_window(self):
+        receipts = [
+            {
+                "call_id": "refresh",
+                "tool": "start_provider_refresh",
+                "result": {
+                    "ok": True,
+                    "status": "completed",
+                    "provider": "garmin",
+                    "activity_days": 3,
+                    "partial": False,
+                    "history_limited": True,
+                    "synchronous_refresh": True,
+                },
+            }
+        ]
+        _, text, _ = self.finalize(self.response("Recovery looks fine."), receipts)
+        self.assertTrue(text.startswith("Recovery looks fine.\n"))
+        self.assertIn("ältere Historie wurde nicht neu geladen", text)
+        self.assertNotIn("nur teilweise erfolgreich", text)
+
     def test_complete_synchronous_refresh_adds_no_note(self):
         receipts = [
             {

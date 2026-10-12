@@ -116,15 +116,30 @@ def _sync_jobs(
     return jobs
 
 
-def _partial_refresh_note(effects: list[dict[str, Any]]) -> str | None:
-    """Flag a waited refresh that finished with missing data."""
-    if any(
-        entry.get("tool") == "start_provider_refresh"
-        and (entry.get("result") or {}).get("partial")
+_REFRESH_NOTES = (
+    (
+        "partial",
+        "Hinweis: Der Datenabruf war nur teilweise erfolgreich; einzelne Daten können fehlen.",
+    ),
+    (
+        "history_limited",
+        "Hinweis: Der Datenabruf umfasste nur das aktuelle Nachholfenster; ältere Historie wurde nicht neu geladen.",
+    ),
+)
+
+
+def _refresh_notes(effects: list[dict[str, Any]]) -> list[str]:
+    """Flag a waited refresh that finished with missing or narrowed data."""
+    results = [
+        entry.get("result") or {}
         for entry in effects
-    ):
-        return "Hinweis: Der Datenabruf war nur teilweise erfolgreich; einzelne Daten können fehlen."
-    return None
+        if entry.get("tool") == "start_provider_refresh"
+    ]
+    return [
+        note
+        for flag, note in _REFRESH_NOTES
+        if any(result.get(flag) for result in results)
+    ]
 
 
 def _pending_value(
@@ -381,9 +396,7 @@ class CoachStructuredOutcomeService:
         notices = [
             job.status_line(job_id) for job_id, job in jobs.items() if job.reported()
         ]
-        partial_note = _partial_refresh_note(effects)
-        if partial_note:
-            notices.append(partial_note)
+        notices.extend(_refresh_notes(effects))
         replace_prose = any(job.replaces_prose() for job in jobs.values())
         awaiting_approval = any(
             ((entry.get("result") or {}).get("proposed_action") or {}).get(

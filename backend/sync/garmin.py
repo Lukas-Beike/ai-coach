@@ -186,17 +186,20 @@ class GarminPayloadService:
             days=GARMIN_CATCHUP_MAX_DAYS - 1
         )
 
-    def run_covers_window(
+    def awaited_run_status(
         self, days: int, end_date: date | None, synced_at: str | None
-    ) -> bool:
-        """Whether the stored run from ``synced_at`` completely read the window.
+    ) -> str | None:
+        """Return the stored run's status if it completely read the window.
 
-        Only the latest snapshot's own read counts, so merged coverage from an
-        older run cannot vouch for it; empty but complete reads still count.
+        ``None`` means the run from ``synced_at`` is no longer the latest
+        snapshot or did not completely read the window's core collections, so
+        merged coverage from an older run cannot vouch for it; empty but
+        complete reads still count. A failed collection outside the window's
+        core makes the run ``partial``.
         """
         snapshot = self.snapshot()
         if not synced_at or snapshot.get("synced_at") != synced_at:
-            return False
+            return None
         end = end_date or self._local_today()
         start = end - timedelta(days=days - 1)
         try:
@@ -205,18 +208,20 @@ class GarminPayloadService:
                 and date.fromisoformat(snapshot["end"]) >= end
             )
         except KeyError, TypeError, ValueError:
-            return False
+            return None
         pagination = (snapshot.get("provider_sync") or {}).get("pagination") or {}
         failed = {
             error.get("source")
             for error in snapshot.get("errors") or []
             if isinstance(error, dict)
         }
-        return covered and all(
+        if not covered or not all(
             source not in failed
             and (pagination.get(source) or {}).get("complete") is True
             for source in GARMIN_WINDOW_SOURCES
-        )
+        ):
+            return None
+        return "ok" if collection_complete(snapshot) else "partial"
 
     def prepare_fixture(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._prepare(payload, self.snapshot(), fixture=True)
