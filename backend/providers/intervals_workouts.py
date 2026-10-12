@@ -1,8 +1,10 @@
 """Intervals.icu workout vocabulary and event payload mapping.
 
 Provider-owned: maps stored planned-workout sport text onto Intervals.icu
-activity types and renders a provider-neutral ``PlannedWorkoutExport`` as the
-Intervals.icu event payload. Planning owns validation and the export model.
+activity types, renders a provider-neutral ``PlannedWorkoutExport`` as the
+Intervals.icu event payload, and reads remote event identity, category, and
+pairing fields. Planning owns validation and the export model; date-aware
+predicates live in the sync-layer export adapter.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ def intervals_event_payload(
         "description": export.description,
         "moving_time": export.duration_seconds,
         "target": export.target,
-        "external_id": f"{COACH_EVENT_EXTERNAL_PREFIX}{local_id}",
+        "external_id": intervals_external_id(local_id),
     }
 
 
@@ -182,3 +184,50 @@ def intervals_workout_sport(value: Any) -> str:
         if activity_type.casefold() == raw.casefold():
             return activity_type
     return "Other"
+
+
+def intervals_external_id(local_id: str) -> str:
+    """Return the external id that marks one local planned unit as coach-owned."""
+    return f"{COACH_EVENT_EXTERNAL_PREFIX}{local_id}"
+
+
+def intervals_event_identity(event: Any) -> str:
+    """Return the Intervals.icu event id as text, or "" when the event has none."""
+    return str(event.get("id") or "")
+
+
+def intervals_event_external_id(event: Any) -> str:
+    """Return the external id carried by an Intervals.icu event, or ""."""
+    return str(event.get("external_id") or "")
+
+
+def intervals_event_start_date(event: Any) -> str:
+    """Return the raw local start value of an Intervals.icu event, or ""."""
+    return str(event.get("start_date_local") or "")
+
+
+def intervals_event_is_planned(event: Any) -> bool:
+    """Return whether an Intervals.icu event is a planned workout."""
+    return event.get("category") == INTERVALS_EVENT_CATEGORY
+
+
+def intervals_event_is_paired(event: Any) -> bool:
+    """Return whether an Intervals.icu event is linked to an activity or event."""
+    return bool(event.get("paired_activity_id") or event.get("paired_event_id"))
+
+
+def intervals_event_is_namesake(event: Any, *, day: str, name: Any) -> bool:
+    """Return whether a planned event on ``day`` shares ``name`` (case and edge spaces ignored)."""
+    return (
+        intervals_event_is_planned(event)
+        and intervals_event_start_date(event).startswith(day)
+        and str(event.get("name") or "").strip().casefold()
+        == str(name or "").strip().casefold()
+    )
+
+
+def intervals_event_confirms_schedule(event: Any, *, day: str, name: Any) -> bool:
+    """Return whether a saved event starts on ``day`` and carries exactly ``name``."""
+    return intervals_event_start_date(event).startswith(day) and (
+        event.get("name") == name
+    )

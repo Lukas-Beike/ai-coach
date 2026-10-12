@@ -9,6 +9,7 @@ such as the planned-calendar sync and repair services.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, Protocol, runtime_checkable
 
 from backend.canonical.planned_workout import PlannedWorkoutExport
@@ -48,3 +49,21 @@ class WorkoutExportPort(Protocol):
 
     def verify_readback(self, workout: dict[str, Any], remote: dict[str, Any]) -> None:
         """Raise an AppError unless the saved remote event matches the local unit."""
+
+    def external_id_for(self, local_id: str) -> str:
+        """Return the external id that marks one local planned unit as coach-owned."""
+
+    def event_identity(self, event: Any) -> str:
+        """Return one remote event's target identity, or "" when it has none."""
+
+    def event_external_id(self, event: Any) -> str:
+        """Return one remote event's external identity, or ""."""
+
+    def is_unpaired_future_planned(self, event: Any, *, today: date) -> bool:
+        """Return whether a remote event is a planned unit not yet paired and not past."""
+
+    def is_namesake_on_day(self, event: Any, *, day: str, name: Any) -> bool:
+        """Return whether a remote planned event on ``day`` shares the local name."""
+
+    def confirms_planned_event(self, event: Any, *, day: str, name: Any) -> bool:
+        """Return whether a saved remote event starts on ``day`` with exactly ``name``."""
