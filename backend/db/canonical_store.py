@@ -29,10 +29,10 @@ _PROVIDER_RECORD_EXISTS: Final = (
     "SELECT 1 AS present FROM provider_records "
     "WHERE provider = ? AND record_kind = ? AND source_record_id = ?"
 )
-_ACTIVITY_RECORD_EXISTS: Final = (
-    "SELECT 1 AS present FROM activity_records WHERE provider = ? AND provider_activity_id = ?"
+_ACTIVITY_RECORD_EXISTS: Final = "SELECT 1 AS present FROM activity_records WHERE provider = ? AND provider_activity_id = ?"
+_OBSERVATION_EXISTS: Final = (
+    "SELECT 1 AS present FROM observations WHERE natural_key = ?"
 )
-_OBSERVATION_EXISTS: Final = "SELECT 1 AS present FROM observations WHERE natural_key = ?"
 
 _ACTIVITY_COLUMNS: Final = (
     "source_kind",
@@ -225,7 +225,9 @@ def insert_provider_record_if_absent(
     A row that exists, live or deleted, is never changed or revived.
     """
     if (
-        _fetch_row(db, _PROVIDER_RECORD_EXISTS, (provider, record_kind, source_record_id))
+        _fetch_row(
+            db, _PROVIDER_RECORD_EXISTS, (provider, record_kind, source_record_id)
+        )
         is not None
     ):
         return False
@@ -258,13 +260,18 @@ def insert_activity_record_if_absent(
     An existing activity, live or deleted, is never changed or revived.
     """
     provider, provider_activity_id = _activity_identity(record)
-    if _fetch_row(db, _ACTIVITY_RECORD_EXISTS, (provider, provider_activity_id)) is not None:
+    if (
+        _fetch_row(db, _ACTIVITY_RECORD_EXISTS, (provider, provider_activity_id))
+        is not None
+    ):
         return False
     _insert_activity(
         db,
         provider=provider,
         provider_activity_id=provider_activity_id,
-        values=_activity_values(record, local_date=local_date, mapper_version=mapper_version),
+        values=_activity_values(
+            record, local_date=local_date, mapper_version=mapper_version
+        ),
         fetched_at=fetched_at,
         now=now,
     )
@@ -287,7 +294,9 @@ def insert_observation_if_absent(
     return True
 
 
-def provider_records_after(db: Any, *, after_id: int, limit: int) -> list[dict[str, Any]]:
+def provider_records_after(
+    db: Any, *, after_id: int, limit: int
+) -> list[dict[str, Any]]:
     """Return active raw records after one row id, in id order, for re-projection."""
     return _fetch_all(
         db,
@@ -298,7 +307,9 @@ def provider_records_after(db: Any, *, after_id: int, limit: int) -> list[dict[s
     )
 
 
-def set_mapped_version(db: Any, *, record_id: int, mapper_version: int, now: str) -> None:
+def set_mapped_version(
+    db: Any, *, record_id: int, mapper_version: int, now: str
+) -> None:
     """Record the mapper version that the raw record was last projected with."""
     db.execute(
         "UPDATE provider_records SET mapped_version = ?, updated_at = ? WHERE id = ?",
@@ -524,8 +535,16 @@ def _insert_activity(
     )
 
 
-def _insert_observation(db: Any, *, natural_key: str, values: dict[str, Any], now: str) -> None:
-    columns = ("natural_key", *_OBSERVATION_COLUMNS, "details", "created_at", "updated_at")
+def _insert_observation(
+    db: Any, *, natural_key: str, values: dict[str, Any], now: str
+) -> None:
+    columns = (
+        "natural_key",
+        *_OBSERVATION_COLUMNS,
+        "details",
+        "created_at",
+        "updated_at",
+    )
     db.execute(
         f"INSERT INTO observations ({', '.join(columns)}) "
         f"VALUES ({', '.join('?' * len(columns))})",
