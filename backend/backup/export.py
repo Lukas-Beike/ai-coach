@@ -19,6 +19,7 @@ from backend import change_history
 from backend.errors import AppError
 from backend.observability import sanitized_provider_payload
 from backend.planning import season as planning_season
+from backend.sync.wahoo_connection import WAHOO_SECRET_KEYS
 from backend.weather import cache as weather_cache
 
 if TYPE_CHECKING:
@@ -101,7 +102,12 @@ class PrivacyArchiveExportService:
     def _application_state(db: Any) -> dict[str, Any]:
         return application_state(
             db,
-            excluded_keys={"profile", "garmin_snapshot", weather_cache.CACHE_KEY},
+            excluded_keys={
+                "profile",
+                "garmin_snapshot",
+                weather_cache.CACHE_KEY,
+                *WAHOO_SECRET_KEYS,
+            },
         )
 
     def _write_jsonl(

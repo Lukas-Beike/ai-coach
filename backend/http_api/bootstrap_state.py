@@ -10,6 +10,7 @@ from typing import Any
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.wahoo_connection import WAHOO_TOKENS_KEY, connection_status
 
 
 @dataclass(frozen=True)
@@ -270,6 +271,10 @@ class PublicBootstrapService:
                     ),
                     "external_calendar": bool(deps.config.calendar_ical_url),
                 },
+                "wahoo": connection_status(
+                    deps.config,
+                    deps.key_values.get_in_transaction(db, WAHOO_TOKENS_KEY),
+                ),
                 "usage": deps.provider_state_service().summary("openai"),
             }
 

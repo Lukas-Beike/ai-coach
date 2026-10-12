@@ -407,6 +407,10 @@ from backend.sync.selected_assembly import (
 )
 from backend.sync.snapshot_reader import SnapshotRepositoryReader
 from backend.sync.state import SyncStateRepository
+from backend.sync.wahoo_connection_assembly import (
+    WahooConnectionAssembly,
+    WahooConnectionInputs,
+)
 from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
@@ -1045,6 +1049,16 @@ PROVIDER_TRANSPORT = ProviderTransportAssembly(
             operation=INTERVALS_RESYNC_GATE.operation,
         ),
     ),
+)
+WAHOO_CONNECTION = WahooConnectionAssembly(
+    WahooConnectionInputs(
+        config=lambda: CONFIG,
+        json_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
+        database_manager=database_manager,
+        database_lock=lambda: DB_LOCK,
+        key_values=KEY_VALUE_REPOSITORY,
+        utc_now=runtime_clock.utc_now,
+    )
 )
 NUTRITION_ASSEMBLY = NutritionAssembly(
     dependencies=NutritionAssembly.Inputs(
@@ -1964,6 +1978,7 @@ HTTP_API = HttpApiAssembly(
                 intervals_sync=NUTRITION_ASSEMBLY.intervals_sync_service,
                 audio_transcription=MODEL_TRANSPORT.audio_transcription_client,
             ),
+            wahoo=WAHOO_CONNECTION.service,
         ),
     ),
 )

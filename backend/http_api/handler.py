@@ -24,7 +24,7 @@ from backend.http_api.requests import (
     read_json as read_request_json,
 )
 from backend.http_api.static_assets import StaticAssetService
-from backend.observability import http_access_log_level
+from backend.observability import http_access_log_level, redact_request_query
 from backend.runtime.socket_deadline import SocketDeadline
 
 
@@ -80,7 +80,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         self.dependencies.logger.log(
             level,
-            fmt % args,
+            redact_request_query(fmt % args),
             extra={
                 "event": "http_access",
                 "context": {
@@ -156,7 +156,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     "event": "http_unhandled_error",
                     "context": {
                         "method": "GET",
-                        "path": self.path,
+                        "path": redact_request_query(self.path),
                         "request_id": self.request_id,
                     },
                 },
@@ -188,7 +188,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     "event": "http_unhandled_error",
                     "context": {
                         "method": "POST",
-                        "path": self.path,
+                        "path": redact_request_query(self.path),
                         "request_id": self.request_id,
                     },
                 },
@@ -230,7 +230,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     "event": "http_unhandled_error",
                     "context": {
                         "method": "PUT",
-                        "path": self.path,
+                        "path": redact_request_query(self.path),
                         "request_id": self.request_id,
                     },
                 },

@@ -256,6 +256,9 @@ All configuration is loaded from container environment variables or a local `.en
 | `GARMIN_PASSWORD` | *None* | No | Garmin Connect account password. Used only during initial interactive login. |
 | `GARMINTOKENS` | `/data/garmin_tokens` | No | File path to the persisted Garmin OAuth token store. |
 | `GARMIN_FIXTURE_PATH` | *None* | No | Local mock JSON fixture path for development and testing without live Garmin credentials. |
+| `WAHOO_CLIENT_ID` | *None* | No | Wahoo Cloud API application client ID. Wahoo counts as configured only when all three `WAHOO_*` values are set. |
+| `WAHOO_CLIENT_SECRET` | *None* | No | Wahoo Cloud API application client secret. Stored server-side only and redacted from logs. |
+| `WAHOO_REDIRECT_URI` | *None* | No | Full HTTPS callback URL, `https://<app-host>/api/wahoo/callback`. Never derived from the request Host header. |
 | `CALENDAR_ICAL_URL` | *None* | No | Private read-only iCalendar (ICS) feed URL from Google Calendar, iCloud, or Outlook. |
 | `COOKIE_SECURE` | `false` | No | Set to `true` when running behind an HTTPS reverse proxy to add the `Secure` flag to cookies. |
 | `DATA_RETENTION_DAYS` | `-1` | No | Retention period in days for historical sync logs and data. `-1` retains data indefinitely. |
@@ -396,6 +399,16 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). Complete the initial 
 3. Enter the MFA code sent to your email or mobile device when prompted.
 4. The helper generates an encrypted OAuth token store saved to `/data/garmin_tokens`.
 5. Once complete, you may safely remove `GARMIN_PASSWORD` from your `.env`. Restart the `ai-coach` container, and it will authenticate automatically using the persisted tokens.
+
+### Wahoo connection
+
+The app can connect to Wahoo through OAuth (connection only; no data sync yet).
+
+1. Register an application in the Wahoo developer portal and set its redirect URI to `https://<app-host>/api/wahoo/callback`. This must be the HTTPS URL at which you reach the app, and it must match `WAHOO_REDIRECT_URI` exactly.
+2. Set `WAHOO_CLIENT_ID`, `WAHOO_CLIENT_SECRET` and `WAHOO_REDIRECT_URI` and restart the container.
+3. An authenticated session starts the login with `POST /api/wahoo/connect`, which returns the Wahoo authorize URL. The callback `GET /api/wahoo/callback` needs no session (session cookies are SameSite=Strict); it is accepted only with the server-stored, single-use state that expires after 10 minutes, and always redirects to `/?wahoo=connected` or `/?wahoo=error`.
+4. Tokens are stored in the encrypted database, refreshed with rotation before expiry, and excluded from exports, diagnostics and coach context. `POST /api/wahoo/disconnect` revokes access at Wahoo (best effort) and deletes the local tokens. The state JSON reports only `configured`, `connected`, `scope` and `connected_at`.
+5. Wahoo is polled only; no webhooks are used.
 
 ---
 

@@ -32,6 +32,7 @@ from backend.planning.revision import PlanningRevisionService
 from backend.planning.training_plans import TrainingPlanService
 from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.wahoo_connection import WAHOO_SECRET_KEYS
 from backend.weather import cache as weather_cache
 
 
@@ -115,7 +116,12 @@ class PrivacyDataExportService:
             ]
 
         application_state: dict[str, Any] = {}
-        excluded_state = {"profile", "garmin_snapshot", weather_cache.CACHE_KEY}
+        excluded_state = {
+            "profile",
+            "garmin_snapshot",
+            weather_cache.CACHE_KEY,
+            *WAHOO_SECRET_KEYS,
+        }
         for row in kv_rows:
             key = str(row["key"])
             if key in excluded_state or key.endswith(("_running", "_status")):
