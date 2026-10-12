@@ -129,6 +129,10 @@ class CoachDomainSectionSourceTests(unittest.TestCase):
                 "provider": ProviderId.INTERVALS.value,
                 "label": _label(ProviderId.INTERVALS),
                 "synced_at": SYNCED_AT,
+                "applies_to": [
+                    "recent_activities_by_sport",
+                    "activity_rollups_by_sport",
+                ],
             },
         )
         self.assertEqual(projection["source"]["label"], "Intervals.icu")
@@ -214,6 +218,10 @@ class CoachDomainSectionFullContextTests(unittest.TestCase):
                 "provider": ProviderId.INTERVALS.value,
                 "label": _label(ProviderId.INTERVALS),
                 "synced_at": fixture.snapshot["synced_at"],
+                "applies_to": [
+                    "recent_activities_by_sport",
+                    "activity_rollups_by_sport",
+                ],
             },
         )
         expected_activities = CoachIntervalsContextService().project(

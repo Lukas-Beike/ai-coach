@@ -69,6 +69,12 @@ def _section_source(provider: ProviderId, synced_at: Any) -> dict[str, Any]:
     }
 
 
+PLANNED_WORKOUTS_SOURCE = {
+    "kind": "local_planning",
+    "label": "Lokale Planung",
+}
+
+
 COACH_ACTIVITY_FIELDS = (
     "id",
     "start_date_local",
@@ -283,7 +289,13 @@ class CoachIntervalsContextService:
         source_planned = planned_units if isinstance(planned_units, list) else []
         planned = future_coach_planned_workouts(source_planned, today)
         return {
-            "source": _section_source(ProviderId.INTERVALS, snapshot.get("synced_at")),
+            "source": {
+                **_section_source(ProviderId.INTERVALS, snapshot.get("synced_at")),
+                "applies_to": [
+                    "recent_activities_by_sport",
+                    "activity_rollups_by_sport",
+                ],
+            },
             "synced_at": snapshot.get("synced_at"),
             "recent_activities_by_sport": recent_by_sport,
             "activity_rollups_by_sport": rollups_by_sport,
@@ -291,6 +303,7 @@ class CoachIntervalsContextService:
                 compact_coach_planned_event(event, select=planning_context.selected)
                 for event in planned[:COACH_PLANNED_EVENT_LIMIT]
             ],
+            "planned_workouts_source": PLANNED_WORKOUTS_SOURCE,
             "scope": "Letzte 5 abgeschlossene Einheiten je Sportart, Sportartensummen sowie zukünftige geplante Einheiten; kein vollständiger Roh-Snapshot.",
         }
 
