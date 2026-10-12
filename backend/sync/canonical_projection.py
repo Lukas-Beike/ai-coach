@@ -25,6 +25,7 @@ from typing import Any
 from backend.canonical.coverage import ProviderCoverage, count_issues
 from backend.canonical.local_time import local_date
 from backend.canonical.mapping import MappingResult
+from backend.canonical.ordering import activity_order, observation_order
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.providers.snapshot_projection import (
@@ -133,6 +134,10 @@ class CanonicalSnapshotProjection(
         projection, _zone = self._current(db)
         return projection.coverage
 
+    def zone(self, db: Any) -> tzinfo:
+        """Return the athlete's time zone, the one the projection's dates use."""
+        return self._zone(db)
+
     def _current(self, db: Any) -> tuple[_Projection, tzinfo]:
         with self._lock:
             zone = self._zone(db)
@@ -181,13 +186,13 @@ class CanonicalSnapshotProjection(
             activities=tuple(
                 sorted(
                     chain.from_iterable(s.activities.records for s in sources),
-                    key=_activity_order,
+                    key=activity_order,
                 )
             ),
             observations=tuple(
                 sorted(
                     chain.from_iterable(s.observations.records for s in sources),
-                    key=_observation_order,
+                    key=observation_order,
                 )
             ),
             coverage=tuple(_coverage(source) for source in sources),
@@ -206,24 +211,6 @@ def _or_else(value: datetime | None, fallback: datetime) -> datetime:
 
 def _in_range(day: date, start: date | None, end: date | None) -> bool:
     return (start is None or day >= start) and (end is None or day <= end)
-
-
-def _activity_order(record: ActivityRecord) -> tuple[datetime, str, str]:
-    provenance = record.provenance
-    return (
-        record.started_at,
-        str(provenance.provider or ""),
-        provenance.source_record_id or "",
-    )
-
-
-def _observation_order(observation: Observation) -> tuple[date, str, str]:
-    provenance = observation.provenance
-    return (
-        observation.observed_on,
-        str(provenance.provider or ""),
-        str(observation.kind),
-    )
 
 
 def _coverage(source: _Source) -> ProviderCoverage:

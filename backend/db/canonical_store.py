@@ -158,7 +158,9 @@ def upsert_activity_record(
     ``activity_id`` and is updated in place.
     """
     provider, provider_activity_id = _activity_identity(record)
-    values = _activity_values(record, local_date=local_date, mapper_version=mapper_version)
+    values = _activity_values(
+        record, local_date=local_date, mapper_version=mapper_version
+    )
     existing = _fetch_row(
         db,
         "SELECT activity_id, state, "
@@ -181,6 +183,12 @@ def upsert_activity_record(
     if existing["state"] == ActivityRecordState.ACTIVE.value and all(
         existing[column] == values[column] for column in _ACTIVITY_COLUMNS
     ):
+        _refresh_fetch_time(
+            db,
+            provider=provider,
+            provider_activity_id=provider_activity_id,
+            fetched_at=fetched_at,
+        )
         return WriteOutcome.UNCHANGED
     _update_activity_columns(
         db,
@@ -254,6 +262,12 @@ def reproject_activity_record(
     if existing["state"] == ActivityRecordState.ACTIVE.value and all(
         existing[column] == values[column] for column in _ACTIVITY_COLUMNS
     ):
+        _refresh_fetch_time(
+            db,
+            provider=provider,
+            provider_activity_id=provider_activity_id,
+            fetched_at=fetched_at,
+        )
         return WriteOutcome.UNCHANGED
     _update_activity_columns(
         db,
@@ -399,6 +413,121 @@ def provider_records_after(
     )
 
 
+_ACTIVITY_READ_COLUMNS: Final = (
+    "r.provider",
+    "r.provider_activity_id",
+    "r.source_kind",
+    "r.recorded_by",
+    "r.source_record_id",
+    "r.sport",
+    "r.environment",
+    "r.started_at",
+    "r.duration_s",
+    "r.distance_m",
+    "r.load",
+    "r.load_model",
+    "r.avg_hr",
+    "r.avg_power",
+    "r.name",
+    "r.fetched_at",
+)
+_OBSERVATION_READ_COLUMNS: Final = (
+    "metric",
+    "value",
+    "unit",
+    "source_kind",
+    "recorded_by",
+    "provider",
+    "source_record_id",
+    "sport",
+    "observed_on",
+    "observed_at",
+    "retrieved_at",
+    "label",
+)
+
+
+def active_activity_rows(
+    db: Any, *, start: str | None = None, end: str | None = None
+) -> list[dict[str, Any]]:
+    """Return active activity rows whose session is not deleted, by ISO local date bounds.
+
+    Invalid and deleted activity records are never returned. ``start`` and ``end``
+    are inclusive ISO dates on the stored athlete-local date.
+    """
+    clauses = ["r.state = ?", "s.state <> ?"]
+    params: list[object] = [
+        ActivityRecordState.ACTIVE.value,
+        ActivitySessionState.DELETED.value,
+    ]
+    if start is not None:
+        clauses.append("r.local_date >= ?")
+        params.append(start)
+    if end is not None:
+        clauses.append("r.local_date <= ?")
+        params.append(end)
+    return _fetch_all(
+        db,
+        f"SELECT {', '.join(_ACTIVITY_READ_COLUMNS)} FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        f"WHERE {' AND '.join(clauses)} ORDER BY r.started_at, r.provider, "
+        "r.provider_activity_id",
+        tuple(params),
+    )
+
+
+def current_observation_rows(
+    db: Any,
+    metric: str,
+    versions: Mapping[str, int],
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    sport: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return observation rows of one metric at each provider's current mapper version.
+
+    ``versions`` maps a provider value to its current observation mapper version;
+    rows of any other version, or of no provider, are not returned. Bounds are
+    inclusive ISO dates on ``observed_on``.
+    """
+    provider_clause = " OR ".join(
+        "(provider = ? AND mapper_version = ?)" for _ in versions
+    )
+    clauses = ["metric = ?", f"({provider_clause})"]
+    params: list[object] = [metric]
+    for provider, version in versions.items():
+        params.extend((provider, version))
+    if start is not None:
+        clauses.append("observed_on >= ?")
+        params.append(start)
+    if end is not None:
+        clauses.append("observed_on <= ?")
+        params.append(end)
+    if sport is not None:
+        clauses.append("sport = ?")
+        params.append(sport)
+    return _fetch_all(
+        db,
+        f"SELECT {', '.join(_OBSERVATION_READ_COLUMNS)} FROM observations "
+        f"WHERE {' AND '.join(clauses)} ORDER BY observed_on, id",
+        tuple(params),
+    )
+
+
+def active_record_payloads(
+    db: Any, *, provider: str, record_kind: str
+) -> dict[str, str]:
+    """Return the stored payload text of each active raw record, by source record id."""
+    rows = _fetch_all(
+        db,
+        "SELECT source_record_id, payload FROM provider_records "
+        "WHERE provider = ? AND record_kind = ? AND state = ?",
+        (provider, record_kind, ProviderRecordState.ACTIVE.value),
+    )
+    return {str(row["source_record_id"]): str(row["payload"]) for row in rows}
+
+
 def set_mapped_version(
     db: Any, *, record_id: int, mapper_version: int, now: str
 ) -> None:
@@ -456,7 +585,8 @@ def upsert_observation(
     values = _observation_values(observation, mapper_version=mapper_version)
     existing = _fetch_row(
         db,
-        "SELECT " + ", ".join(_OBSERVATION_COLUMNS)
+        "SELECT "
+        + ", ".join(_OBSERVATION_COLUMNS)
         + " FROM observations WHERE natural_key = ?",
         (natural_key,),
     )
@@ -627,6 +757,17 @@ def _insert_activity(
     )
 
 
+def _refresh_fetch_time(
+    db: Any, *, provider: str, provider_activity_id: str, fetched_at: str
+) -> None:
+    """Record the latest fetch time on an unchanged activity; its content is untouched."""
+    db.execute(
+        "UPDATE activity_records SET fetched_at = ? "
+        "WHERE provider = ? AND provider_activity_id = ?",
+        (fetched_at, provider, provider_activity_id),
+    )
+
+
 def _update_activity_columns(
     db: Any,
     *,
@@ -716,7 +857,9 @@ def _observation_values(
         "unit": observation.value.unit,
         "source_kind": provenance.source_kind.value,
         "recorded_by": provenance.recorded_by.value,
-        "provider": provenance.provider.value if provenance.provider is not None else None,
+        "provider": provenance.provider.value
+        if provenance.provider is not None
+        else None,
         "source_record_id": provenance.source_record_id,
         "sport": observation.sport.value if observation.sport is not None else None,
         "observed_on": observation.observed_on.isoformat(),

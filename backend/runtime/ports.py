@@ -66,4 +66,16 @@ class ProviderCoverageReader(Protocol):
     def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]: ...
 
 
+class CanonicalReadRefresher(Protocol):
+    """Re-checks which canonical source serves reads and records the result.
+
+    Both methods write only their own content-free switch state, in the caller's
+    transaction. ``record_failure`` receives the exception class name only.
+    """
+
+    def refresh(self, db: Any) -> None: ...
+
+    def record_failure(self, db: Any, error_class: str) -> None: ...
+
+
 ProviderOperation = Callable[[], AbstractContextManager[None]]

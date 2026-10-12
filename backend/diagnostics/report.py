@@ -19,6 +19,10 @@ from backend.diagnostics.canonical_backfill import (
     summarize_canonical_backfill,
 )
 from backend.diagnostics.canonical_coverage import summarize_canonical_coverage
+from backend.diagnostics.canonical_read import (
+    CanonicalReadStatusReader,
+    summarize_canonical_read,
+)
 from backend.diagnostics.history import CoachDiagnosticHistoryService
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.observability import DiagnosticCapture, Redactor
@@ -64,6 +68,7 @@ class DiagnosticReportDependencies:
     recent_logs: RecentLogEntriesService
     diagnostic_capture: DiagnosticCapture
     canonical_backfill: CanonicalBackfillStatusReader | None = None
+    canonical_read: CanonicalReadStatusReader | None = None
 
 
 class DiagnosticReportService:
@@ -188,6 +193,7 @@ class DiagnosticReportService:
                 "canonical_backfill": summarize_canonical_backfill(
                     deps.canonical_backfill, db
                 ),
+                "canonical_read": summarize_canonical_read(deps.canonical_read, db),
                 "logs": deps.recent_logs.list(),
                 "debug_capture": {
                     **diagnostic_capture_status,

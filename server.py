@@ -16,6 +16,7 @@ from pathlib import Path
 
 from backend import config as app_config
 from backend import observability
+from backend.activities.detail_store import summary_fingerprint
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -304,6 +305,7 @@ from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_projection_assembly import (
     build_canonical_snapshot_projection,
 )
+from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.command_assembly import (
     IllnessPauseDependencies,
     SyncCommandAssembly,
@@ -1765,12 +1767,20 @@ CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
     clock=ATHLETE_CLOCK.now,
 )
 
+CANONICAL_READ = build_canonical_read(
+    legacy=CANONICAL_SNAPSHOT_PROJECTION,
+    key_values=KEY_VALUE_REPOSITORY,
+    snapshots=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+    fingerprint=summary_fingerprint,
+)
+
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
     zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
     maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     clock=runtime_clock.utc_now,
+    parity=CANONICAL_READ,
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
@@ -1802,8 +1812,9 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             external_calendar_reader=EXTERNAL_CALENDAR.reader,
             morning_checkin=COACH_LOCAL.morning_checkin_state_service,
             workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
-            canonical_coverage=lambda: CANONICAL_SNAPSHOT_PROJECTION,
+            canonical_coverage=lambda: CANONICAL_READ,
             canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
+            canonical_read=lambda: CANONICAL_READ,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,

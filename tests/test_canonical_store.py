@@ -49,7 +49,9 @@ def provenance(
     return Provenance(
         provider=provider,
         source_kind=(
-            SourceKind.PROVIDER_REPORTED if provider is not None else SourceKind.ATHLETE_ENTERED
+            SourceKind.PROVIDER_REPORTED
+            if provider is not None
+            else SourceKind.ATHLETE_ENTERED
         ),
         source_record_id=source_record_id,
         recorded_by=RecordingOrigin.UNKNOWN,
@@ -184,7 +186,9 @@ class ProviderRecordStoreTests(StoreFixture):
 
     def test_changed_payload_is_updated_in_place(self) -> None:
         self.write({"name": "Ride"})
-        self.assertIs(self.write({"name": "Long ride"}, now=LATER), WriteOutcome.UPDATED)
+        self.assertIs(
+            self.write({"name": "Long ride"}, now=LATER), WriteOutcome.UPDATED
+        )
         text, digest, updated_at = self.one(
             "SELECT payload, payload_hash, updated_at FROM provider_records"
         )
@@ -223,8 +227,12 @@ class ActivityStoreTests(StoreFixture):
             "FROM activity_sessions s"
         )
         self.assertTrue(session_id.startswith(canonical_store.ACTIVITY_ID_PREFIX))
-        self.assertEqual((link, confirmed, state, local), ("single", 0, "active", "2026-06-01"))
-        record_session = self.one("SELECT activity_id, state, load FROM activity_records")
+        self.assertEqual(
+            (link, confirmed, state, local), ("single", 0, "active", "2026-06-01")
+        )
+        record_session = self.one(
+            "SELECT activity_id, state, load FROM activity_records"
+        )
         self.assertEqual(record_session, (session_id, "active", 50.0))
 
     def test_identical_activity_is_unchanged(self) -> None:
@@ -232,15 +240,33 @@ class ActivityStoreTests(StoreFixture):
         self.assertIs(self.write(activity()), WriteOutcome.UNCHANGED)
         self.assertEqual(self.count("activity_sessions"), 1)
 
+    def test_identical_resync_refreshes_the_fetch_time(self) -> None:
+        self.write(activity())
+        outcome = canonical_store.upsert_activity_record(
+            self.db,
+            activity(),
+            local_date=date(2026, 6, 1),
+            mapper_version=1,
+            fetched_at=LATER,
+            now=LATER,
+        )
+        self.assertIs(outcome, WriteOutcome.UNCHANGED)
+        self.assertEqual(self.one("SELECT fetched_at FROM activity_records")[0], LATER)
+        self.assertEqual(self.count("activity_sessions"), 1)
+
     def test_changed_activity_keeps_its_id_and_is_updated(self) -> None:
         self.write(activity())
         original_id = self.one("SELECT activity_id FROM activity_records")[0]
-        outcome = self.write(activity(name="Renamed", load=None), local=date(2026, 6, 2))
+        outcome = self.write(
+            activity(name="Renamed", load=None), local=date(2026, 6, 2)
+        )
         self.assertIs(outcome, WriteOutcome.UPDATED)
         name, load, load_model = self.one(
             "SELECT name, load, load_model FROM activity_records"
         )
-        self.assertEqual((name, load, load_model), ("Renamed", None, "intervals_training_load"))
+        self.assertEqual(
+            (name, load, load_model), ("Renamed", None, "intervals_training_load")
+        )
         self.assertEqual(
             self.one("SELECT activity_id, local_date FROM activity_sessions"),
             (original_id, "2026-06-02"),
@@ -313,9 +339,17 @@ class MarkMissingDeletedTests(StoreFixture):
     def seed(self, source_id: str, local: date, *, provider: str = "intervals") -> None:
         record = activity(source_id)
         if provider != "intervals":
-            record = replace(record, provenance=replace(record.provenance, provider=ProviderId.GARMIN))
+            record = replace(
+                record,
+                provenance=replace(record.provenance, provider=ProviderId.GARMIN),
+            )
         canonical_store.upsert_activity_record(
-            self.db, record, local_date=local, mapper_version=1, fetched_at=STAMP, now=STAMP
+            self.db,
+            record,
+            local_date=local,
+            mapper_version=1,
+            fetched_at=STAMP,
+            now=STAMP,
         )
         canonical_store.upsert_provider_record(
             self.db,
@@ -337,7 +371,9 @@ class MarkMissingDeletedTests(StoreFixture):
         ).fetchall()
         return {row[0]: (row[1], row[2], row[3]) for row in rows}
 
-    def test_missing_activity_inside_the_window_is_marked_deleted_everywhere(self) -> None:
+    def test_missing_activity_inside_the_window_is_marked_deleted_everywhere(
+        self,
+    ) -> None:
         self.seed("kept", date(2026, 6, 2))
         self.seed("gone", date(2026, 6, 3))
         self.seed("outside", date(2026, 7, 1))
@@ -410,8 +446,12 @@ class FetchRowTests(unittest.TestCase):
         self.addCleanup(db.close)
         db.execute("CREATE TABLE t (a INTEGER)")
         db.execute("INSERT INTO t VALUES (1)")
-        self.assertEqual(canonical_store._fetch_all(db, "SELECT a FROM t", ()), [{"a": 1}])
-        self.assertEqual(canonical_store._fetch_all(db, "SELECT a FROM t WHERE 0", ()), [])
+        self.assertEqual(
+            canonical_store._fetch_all(db, "SELECT a FROM t", ()), [{"a": 1}]
+        )
+        self.assertEqual(
+            canonical_store._fetch_all(db, "SELECT a FROM t WHERE 0", ()), []
+        )
         self.assertEqual(
             canonical_store._fetch_all(_MappingDb([{"a": 1}]), "SELECT a", ()),
             [{"a": 1}],
