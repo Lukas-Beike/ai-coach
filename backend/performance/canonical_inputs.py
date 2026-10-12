@@ -134,7 +134,8 @@ def read_performance_inputs(
     """Read CTL and ATL for a stored snapshot, or return None to keep legacy values.
 
     None means the snapshot has no wellness rows, or its latest row (the row the
-    legacy reader picks) has an id that is not a strict ``YYYY-MM-DD`` date.
+    legacy reader picks) has an id that is not a strict ``YYYY-MM-DD`` date. A
+    selecting reader chooses its source once for the load and current reads.
     """
     rows = _wellness_rows(snapshot)
     if not rows:
@@ -143,6 +144,8 @@ def read_performance_inputs(
     if latest_day is None:
         return None
     days = [day for day in map(_row_day, rows) if day is not None]
+    if isinstance(reader, ObservationSourceSelector):
+        reader = reader.reader_for(db)
     loaded = load_performance_inputs(
         reader,
         db,
