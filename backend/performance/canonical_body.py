@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 from typing import Any
 
 from backend.canonical.ordering import observation_order
@@ -86,7 +86,7 @@ def _daily(
 ) -> dict[date, float]:
     lower, upper = bounds
     days: dict[date, float] = {}
-    for observation in sorted(observations, key=observation_order):
+    for observation in sorted(observations, key=_recency_key):
         if observation.provenance.provider is not provider:
             continue
         if observation.observed_on > today or _athlete_level(observation):
@@ -95,6 +95,26 @@ def _daily(
         if lower <= value <= upper:
             days[observation.observed_on] = round(value, 2)
     return days
+
+
+def _recency_key(observation: Observation) -> tuple[Any, ...]:
+    """Order readings of one day as the legacy Garmin reader does.
+
+    Untimed readings sort before timed ones. Timed readings compare by UTC instant,
+    so mixed offsets order by the moment they describe, not by their text. A naive
+    timestamp is read as UTC, as the legacy reader does. Ties keep the canonical
+    order.
+    """
+    at = observation.observed_at
+    if at is None:
+        return (observation.observed_on, False, 0.0, observation_order(observation))
+    aware = at if at.tzinfo is not None else at.replace(tzinfo=UTC)
+    return (
+        observation.observed_on,
+        True,
+        aware.timestamp(),
+        observation_order(observation),
+    )
 
 
 def _athlete_level(observation: Observation) -> bool:

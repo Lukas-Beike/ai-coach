@@ -12,7 +12,7 @@ from __future__ import annotations
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import Mock
 
@@ -97,6 +97,31 @@ class ServingGate:
         return self._serving
 
 
+class SelectingReader:
+    """Chooses one source inside a unit of work, as the canonical selector does."""
+
+    def __init__(self, chosen: ObservationReader, events: list[str]) -> None:
+        self._chosen = chosen
+        self._events = events
+        self.choices = 0
+
+    def reader_for(self, db: Any) -> ObservationReader:
+        self.choices += 1
+        self._events.append("choose")
+        return self._chosen
+
+    def observations(
+        self,
+        db: Any,
+        kind: MetricKind,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        sport: Any = None,
+    ) -> tuple[Observation, ...]:
+        raise AssertionError("a selecting reader must be resolved before reading")
+
+
 class RecordingManager:
     """Records unit-of-work leases in the shared event list."""
 
@@ -146,11 +171,25 @@ def _service(
     snapshot: dict[str, Any],
     garmin: dict[str, Any],
     source: CanonicalPerformanceSource | None,
+    *,
+    events: list[str] | None = None,
 ) -> PublicPerformanceStateService:
     sync_state = Mock()
     sync_state.latest_snapshot.return_value = snapshot
+
+    def capture_garmin(_db: Any) -> dict[str, Any]:
+        if events is not None:
+            events.append("garmin")
+        return garmin
+
     garmin_payload = Mock()
+    garmin_payload.snapshot_in.side_effect = capture_garmin
     garmin_payload.snapshot.return_value = garmin
+    if events is not None:
+        # With an event log, any read outside the captured transaction fails.
+        garmin_payload.snapshot.side_effect = AssertionError(
+            "Garmin re-read outside the transaction"
+        )
     profile = Mock()
     profile.get.return_value = PROFILE
     projection = Mock()
@@ -276,6 +315,66 @@ class CanonicalBodyInputTests(unittest.TestCase):
         self.assertEqual({DAY: 13.0}, inputs.garmin_body_fat_pct)
         self.assertEqual({DAY: 80.0}, inputs.garmin_weight_kg)
 
+    def test_garmin_same_day_order_compares_instants_across_offsets(self) -> None:
+        # 23:30+02:00 is 21:30 UTC, which is earlier than 22:00+00:00. Text order
+        # would pick the 23:30 reading, so the UTC instant must decide.
+        plus_two = timezone(timedelta(hours=2))
+        observations = (
+            _measure(
+                MetricKind.WEIGHT,
+                81.0,
+                DAY,
+                provider=ProviderId.GARMIN,
+                observed_at=datetime(2026, 10, 11, 22, 0, tzinfo=UTC),
+            ),
+            _measure(
+                MetricKind.WEIGHT,
+                80.0,
+                DAY,
+                provider=ProviderId.GARMIN,
+                observed_at=datetime(2026, 10, 11, 23, 30, tzinfo=plus_two),
+            ),
+            _measure(
+                MetricKind.BODY_FAT,
+                13.0,
+                DAY,
+                provider=ProviderId.GARMIN,
+                observed_at=datetime(2026, 10, 11, 23, 30, tzinfo=plus_two),
+            ),
+            _measure(
+                MetricKind.BODY_FAT,
+                12.0,
+                DAY,
+                provider=ProviderId.GARMIN,
+                observed_at=datetime(2026, 10, 11, 22, 0, tzinfo=UTC),
+            ),
+        )
+        inputs = read_body_inputs(
+            BodyReader(observations), ServingGate(True), "db", TODAY
+        )
+        assert inputs is not None
+        self.assertEqual({DAY: 81.0}, inputs.garmin_weight_kg)
+        self.assertEqual({DAY: 12.0}, inputs.garmin_body_fat_pct)
+
+    def test_timed_garmin_reading_beats_an_untimed_one_on_the_same_day(self) -> None:
+        # The legacy reader ranks untimed readings below timed ones, whatever their
+        # traversal order, so the timed 80.0 wins even when it comes first.
+        observations = (
+            _measure(
+                MetricKind.WEIGHT,
+                80.0,
+                DAY,
+                provider=ProviderId.GARMIN,
+                observed_at=datetime(2026, 10, 11, 6, 0, tzinfo=UTC),
+            ),
+            _measure(MetricKind.WEIGHT, 79.0, DAY, provider=ProviderId.GARMIN),
+        )
+        inputs = read_body_inputs(
+            BodyReader(observations), ServingGate(True), "db", TODAY
+        )
+        assert inputs is not None
+        self.assertEqual({DAY: 80.0}, inputs.garmin_weight_kg)
+
     def test_athlete_record_values_are_not_body_measurements(self) -> None:
         observations = (
             _measure(MetricKind.BODY_FAT, 12.0, DAY, record="athlete-42"),
@@ -345,6 +444,56 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         kinds = {kind for kind, _s, _e in reader.calls}
         self.assertIn(MetricKind.BODY_FAT, kinds)
         self.assertIn(MetricKind.WEIGHT, kinds)
+
+    def test_garmin_snapshot_is_captured_once_inside_the_unit_of_work(self) -> None:
+        case = CASES[0]
+        events: list[str] = []
+        reader = BodyReader(_observations(case), events=events)
+        gate = ServingGate(True, events=events)
+        source = CanonicalPerformanceSource(
+            database_manager=lambda: RecordingManager(events),
+            observation_reader=lambda: reader,
+            serving=lambda: gate,
+        )
+        # The Garmin re-read raises, so the projection must use the captured value.
+        state = _service(
+            case.intervals, case.garmin, source, events=events
+        ).performance_state()
+        self.assertEqual(1, events.count("enter"))
+        self.assertEqual(1, events.count("exit"))
+        self.assertEqual(1, events.count("garmin"))
+        self.assertLess(events.index("enter"), events.index("garmin"))
+        self.assertLess(events.index("garmin"), events.index("exit"))
+        legacy = _service(case.intervals, case.garmin, None).from_snapshot(
+            case.intervals
+        )
+        self.assertEqual(
+            legacy["performance"]["history"]["body"],
+            state["performance"]["history"]["body"],
+        )
+
+    def test_body_and_load_reads_share_one_selected_source(self) -> None:
+        case = CASES[0]
+        events: list[str] = []
+        chosen = BodyReader(_observations(case), events=events)
+        selector = SelectingReader(chosen, events)
+        source = CanonicalPerformanceSource(
+            database_manager=lambda: RecordingManager(events),
+            observation_reader=lambda: selector,
+            serving=lambda: ServingGate(True, events=events),
+        )
+        _service(case.intervals, case.garmin, source).performance_state()
+        # One choice per unit of work, made inside the lease and before any read.
+        self.assertEqual(1, selector.choices)
+        choose = events.index("choose")
+        self.assertLess(events.index("enter"), choose)
+        self.assertLess(choose, events.index("exit"))
+        self.assertLess(choose, events.index("read"))
+        kinds = {kind for kind, _start, _end in chosen.calls}
+        self.assertTrue(
+            {MetricKind.WEIGHT, MetricKind.BODY_FAT, MetricKind.CTL, MetricKind.ATL}
+            <= kinds
+        )
 
     def test_closed_gate_keeps_body_history_legacy_and_reads_no_body_kinds(
         self,

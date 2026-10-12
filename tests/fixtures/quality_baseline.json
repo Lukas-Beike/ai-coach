@@ -17,7 +17,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/garmin.py",
-      "line": 424,
+      "line": 428,
       "column": 40,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"

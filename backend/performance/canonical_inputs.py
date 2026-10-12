@@ -87,6 +87,13 @@ def inputs_for_snapshot(
     return read_performance_inputs(source.observation_reader(), db, snapshot)
 
 
+def resolve_reader(reader: ObservationReader, db: Any) -> ObservationReader:
+    """Choose the serving source once for a unit of work when the reader selects."""
+    if isinstance(reader, ObservationSourceSelector):
+        return reader.reader_for(db)
+    return reader
+
+
 def load_performance_inputs(
     reader: ObservationReader,
     db: Any,
@@ -99,8 +106,7 @@ def load_performance_inputs(
 
     A selecting reader chooses its source once, so both reads use the same source.
     """
-    if isinstance(reader, ObservationSourceSelector):
-        reader = reader.reader_for(db)
+    reader = resolve_reader(reader, db)
     return CanonicalPerformanceInputs(
         wellness_day=latest_wellness_day,
         ctl=_current_value(
