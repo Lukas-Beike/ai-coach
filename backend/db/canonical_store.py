@@ -25,6 +25,14 @@ from backend.canonical.vocabulary import (
 
 ACTIVITY_ID_PREFIX: Final = "act_"
 OBSERVATION_DETAILS: Final = "{}"
+_PROVIDER_RECORD_EXISTS: Final = (
+    "SELECT 1 AS present FROM provider_records "
+    "WHERE provider = ? AND record_kind = ? AND source_record_id = ?"
+)
+_ACTIVITY_RECORD_EXISTS: Final = (
+    "SELECT 1 AS present FROM activity_records WHERE provider = ? AND provider_activity_id = ?"
+)
+_OBSERVATION_EXISTS: Final = "SELECT 1 AS present FROM observations WHERE natural_key = ?"
 
 _ACTIVITY_COLUMNS: Final = (
     "source_kind",
@@ -96,22 +104,16 @@ def upsert_provider_record(
         (provider, record_kind, source_record_id),
     )
     if existing is None:
-        db.execute(
-            "INSERT INTO provider_records (provider, record_kind, source_record_id, "
-            "payload, payload_hash, fetched_at, mapped_version, state, created_at, "
-            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                provider,
-                record_kind,
-                source_record_id,
-                text,
-                digest,
-                fetched_at,
-                mapper_version,
-                ProviderRecordState.ACTIVE.value,
-                now,
-                now,
-            ),
+        _insert_provider_record(
+            db,
+            provider=provider,
+            record_kind=record_kind,
+            source_record_id=source_record_id,
+            text=text,
+            digest=digest,
+            mapper_version=mapper_version,
+            fetched_at=fetched_at,
+            now=now,
         )
         return WriteOutcome.WRITTEN
     if (
@@ -165,47 +167,13 @@ def upsert_activity_record(
     started_at = values["started_at"]
     day = values["local_date"]
     if existing is None:
-        activity_id = ACTIVITY_ID_PREFIX + uuid.uuid4().hex
-        db.execute(
-            "INSERT INTO activity_sessions (activity_id, primary_provider, "
-            "primary_provider_activity_id, link_kind, athlete_confirmed, state, "
-            "started_at, local_date, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
-            (
-                activity_id,
-                provider,
-                provider_activity_id,
-                ActivityLinkKind.SINGLE.value,
-                ActivitySessionState.ACTIVE.value,
-                started_at,
-                day,
-                now,
-                now,
-            ),
-        )
-        columns = (
-            "provider",
-            "provider_activity_id",
-            "activity_id",
-            "state",
-            *_ACTIVITY_COLUMNS,
-            "fetched_at",
-            "created_at",
-            "updated_at",
-        )
-        db.execute(
-            f"INSERT INTO activity_records ({', '.join(columns)}) "
-            f"VALUES ({', '.join('?' * len(columns))})",
-            (
-                provider,
-                provider_activity_id,
-                activity_id,
-                ActivityRecordState.ACTIVE.value,
-                *(values[column] for column in _ACTIVITY_COLUMNS),
-                fetched_at,
-                now,
-                now,
-            ),
+        _insert_activity(
+            db,
+            provider=provider,
+            provider_activity_id=provider_activity_id,
+            values=values,
+            fetched_at=fetched_at,
+            now=now,
         )
         return WriteOutcome.WRITTEN
     if existing["state"] == ActivityRecordState.ACTIVE.value and all(
@@ -239,6 +207,118 @@ def upsert_activity_record(
         ),
     )
     return WriteOutcome.UPDATED
+
+
+def insert_provider_record_if_absent(
+    db: Any,
+    *,
+    provider: str,
+    record_kind: str,
+    source_record_id: str,
+    payload: Mapping[str, Any],
+    mapper_version: int,
+    fetched_at: str,
+    now: str,
+) -> bool:
+    """Insert one sanitized raw record when no row exists; return True when inserted.
+
+    A row that exists, live or deleted, is never changed or revived.
+    """
+    if (
+        _fetch_row(db, _PROVIDER_RECORD_EXISTS, (provider, record_kind, source_record_id))
+        is not None
+    ):
+        return False
+    text = canonical_json(payload)
+    _insert_provider_record(
+        db,
+        provider=provider,
+        record_kind=record_kind,
+        source_record_id=source_record_id,
+        text=text,
+        digest=payload_hash(text),
+        mapper_version=mapper_version,
+        fetched_at=fetched_at,
+        now=now,
+    )
+    return True
+
+
+def insert_activity_record_if_absent(
+    db: Any,
+    record: ActivityRecord,
+    *,
+    local_date: date,
+    mapper_version: int,
+    fetched_at: str,
+    now: str,
+) -> bool:
+    """Insert one activity with its single-link session when absent; return True when inserted.
+
+    An existing activity, live or deleted, is never changed or revived.
+    """
+    provider, provider_activity_id = _activity_identity(record)
+    if _fetch_row(db, _ACTIVITY_RECORD_EXISTS, (provider, provider_activity_id)) is not None:
+        return False
+    _insert_activity(
+        db,
+        provider=provider,
+        provider_activity_id=provider_activity_id,
+        values=_activity_values(record, local_date=local_date, mapper_version=mapper_version),
+        fetched_at=fetched_at,
+        now=now,
+    )
+    return True
+
+
+def insert_observation_if_absent(
+    db: Any, observation: Observation, *, mapper_version: int, now: str
+) -> bool:
+    """Insert one observation when its natural key is absent; return True when inserted."""
+    natural_key = observation_natural_key(observation)
+    if _fetch_row(db, _OBSERVATION_EXISTS, (natural_key,)) is not None:
+        return False
+    _insert_observation(
+        db,
+        natural_key=natural_key,
+        values=_observation_values(observation, mapper_version=mapper_version),
+        now=now,
+    )
+    return True
+
+
+def provider_records_after(db: Any, *, after_id: int, limit: int) -> list[dict[str, Any]]:
+    """Return active raw records after one row id, in id order, for re-projection."""
+    return _fetch_all(
+        db,
+        "SELECT id, provider, record_kind, source_record_id, payload, fetched_at, "
+        "mapped_version FROM provider_records WHERE id > ? AND state = ? "
+        "ORDER BY id LIMIT ?",
+        (after_id, ProviderRecordState.ACTIVE.value, limit),
+    )
+
+
+def set_mapped_version(db: Any, *, record_id: int, mapper_version: int, now: str) -> None:
+    """Record the mapper version that the raw record was last projected with."""
+    db.execute(
+        "UPDATE provider_records SET mapped_version = ?, updated_at = ? WHERE id = ?",
+        (mapper_version, now, record_id),
+    )
+
+
+def count_unresolved_feedback(db: Any, provider: str) -> int:
+    """Count feedback rows whose activity has no activity row of the given provider.
+
+    Feedback rows are only read here and are never changed.
+    """
+    row = _fetch_row(
+        db,
+        "SELECT COUNT(*) AS count FROM activity_feedback AS feedback WHERE NOT EXISTS "
+        "(SELECT 1 FROM activity_records AS record WHERE record.provider = ? "
+        "AND record.provider_activity_id = feedback.activity_id)",
+        (provider,),
+    )
+    return int(row["count"]) if row is not None else 0
 
 
 def observation_natural_key(observation: Observation) -> str:
@@ -278,18 +358,7 @@ def upsert_observation(
         (natural_key,),
     )
     if existing is None:
-        columns = ("natural_key", *_OBSERVATION_COLUMNS, "details", "created_at", "updated_at")
-        db.execute(
-            f"INSERT INTO observations ({', '.join(columns)}) "
-            f"VALUES ({', '.join('?' * len(columns))})",
-            (
-                natural_key,
-                *(values[column] for column in _OBSERVATION_COLUMNS),
-                OBSERVATION_DETAILS,
-                now,
-                now,
-            ),
-        )
+        _insert_observation(db, natural_key=natural_key, values=values, now=now)
         return WriteOutcome.WRITTEN
     if all(existing[column] == values[column] for column in _OBSERVATION_COLUMNS):
         return WriteOutcome.UNCHANGED
@@ -368,6 +437,106 @@ def mark_missing_deleted(
         )
         deleted += 1
     return deleted
+
+
+def _insert_provider_record(
+    db: Any,
+    *,
+    provider: str,
+    record_kind: str,
+    source_record_id: str,
+    text: str,
+    digest: str,
+    mapper_version: int,
+    fetched_at: str,
+    now: str,
+) -> None:
+    db.execute(
+        "INSERT INTO provider_records (provider, record_kind, source_record_id, "
+        "payload, payload_hash, fetched_at, mapped_version, state, created_at, "
+        "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            provider,
+            record_kind,
+            source_record_id,
+            text,
+            digest,
+            fetched_at,
+            mapper_version,
+            ProviderRecordState.ACTIVE.value,
+            now,
+            now,
+        ),
+    )
+
+
+def _insert_activity(
+    db: Any,
+    *,
+    provider: str,
+    provider_activity_id: str,
+    values: dict[str, Any],
+    fetched_at: str,
+    now: str,
+) -> None:
+    """Insert an activity with a new single-link session. The caller checked absence."""
+    activity_id = ACTIVITY_ID_PREFIX + uuid.uuid4().hex
+    db.execute(
+        "INSERT INTO activity_sessions (activity_id, primary_provider, "
+        "primary_provider_activity_id, link_kind, athlete_confirmed, state, "
+        "started_at, local_date, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
+        (
+            activity_id,
+            provider,
+            provider_activity_id,
+            ActivityLinkKind.SINGLE.value,
+            ActivitySessionState.ACTIVE.value,
+            values["started_at"],
+            values["local_date"],
+            now,
+            now,
+        ),
+    )
+    columns = (
+        "provider",
+        "provider_activity_id",
+        "activity_id",
+        "state",
+        *_ACTIVITY_COLUMNS,
+        "fetched_at",
+        "created_at",
+        "updated_at",
+    )
+    db.execute(
+        f"INSERT INTO activity_records ({', '.join(columns)}) "
+        f"VALUES ({', '.join('?' * len(columns))})",
+        (
+            provider,
+            provider_activity_id,
+            activity_id,
+            ActivityRecordState.ACTIVE.value,
+            *(values[column] for column in _ACTIVITY_COLUMNS),
+            fetched_at,
+            now,
+            now,
+        ),
+    )
+
+
+def _insert_observation(db: Any, *, natural_key: str, values: dict[str, Any], now: str) -> None:
+    columns = ("natural_key", *_OBSERVATION_COLUMNS, "details", "created_at", "updated_at")
+    db.execute(
+        f"INSERT INTO observations ({', '.join(columns)}) "
+        f"VALUES ({', '.join('?' * len(columns))})",
+        (
+            natural_key,
+            *(values[column] for column in _OBSERVATION_COLUMNS),
+            OBSERVATION_DETAILS,
+            now,
+            now,
+        ),
+    )
 
 
 def _activity_identity(record: ActivityRecord) -> tuple[str, str]:

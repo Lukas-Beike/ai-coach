@@ -13,6 +13,7 @@ with the payload's latest sync time.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, tzinfo
@@ -45,6 +46,7 @@ from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
 )
+from backend.providers.snapshot_projection import stored_retrieved_at
 
 ACTIVITY_RECORD_KIND: Final = "activity"
 WELLNESS_RECORD_KIND: Final = "wellness"
@@ -250,20 +252,19 @@ def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         section_at = garmin_section_retrieved_at(payload, name, zone=zone)
         if section_at is None:
             continue
-        value = payload.get(name)
-        if value is not None:
+        sections = _health_sections(payload, name)
+        if any(value is not None for value in sections.values()):
+            # The stored record is the exact mapper input, so re-projection can rebuild the rows.
             raw_records.append(
                 RawRecord(
                     HEALTH_RECORD_KIND,
                     name,
-                    {"data": value},
+                    sections,
                     GARMIN_HEALTH_VERSION,
                     retrieved_at=section_at,
                 )
             )
-        health = map_garmin_health(
-            _health_sections(payload, name), zone=zone, retrieved_at=section_at
-        )
+        health = map_garmin_health(sections, zone=zone, retrieved_at=section_at)
         observations.extend(
             ObservationItem(observation, GARMIN_HEALTH_VERSION)
             for observation in health.records
@@ -276,6 +277,144 @@ def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         present_activity_ids=frozenset(present),
         skipped_invalid=skipped,
     )
+
+
+def intervals_snapshot_ingest_plan(snapshot: Mapping[str, Any], *, zone: tzinfo) -> IngestPlan:
+    """Plan the Intervals.icu rows of one stored snapshot for the backfill.
+
+    A snapshot without a sync time or without a ``raw_provider_data`` block has no
+    mapper input. Its ``recent_activities`` fallback is a compact read model, so it
+    is not mapped and counts as one invalid row.
+    """
+    retrieved_at = stored_retrieved_at(snapshot, zone=zone)
+    raw = snapshot.get("raw_provider_data")
+    if retrieved_at is None or not isinstance(raw, Mapping):
+        return IngestPlan(provider=ProviderId.INTERVALS, skipped_invalid=1)
+    return intervals_ingest_plan(raw, zone=zone, retrieved_at=retrieved_at)
+
+
+_MAPPER_VERSIONS: Final[dict[tuple[str, str], int]] = {
+    (ProviderId.INTERVALS.value, ACTIVITY_RECORD_KIND): INTERVALS_ACTIVITY_VERSION,
+    (ProviderId.INTERVALS.value, WELLNESS_RECORD_KIND): INTERVALS_WELLNESS_VERSION,
+    (ProviderId.INTERVALS.value, ATHLETE_RECORD_KIND): INTERVALS_WELLNESS_VERSION,
+    (ProviderId.GARMIN.value, ACTIVITY_RECORD_KIND): GARMIN_ACTIVITY_VERSION,
+    (ProviderId.GARMIN.value, HEALTH_RECORD_KIND): GARMIN_HEALTH_VERSION,
+}
+
+
+def reprojection_mapper_version(provider: str, record_kind: str) -> int | None:
+    """Return the current mapper version of one raw record kind, or None when it has no mapper."""
+    return _MAPPER_VERSIONS.get((provider, record_kind))
+
+
+def current_mapper_versions() -> dict[str, int]:
+    """Return every current mapper version, keyed by ``provider.record_kind``."""
+    return {
+        f"{provider}.{kind}": version
+        for (provider, kind), version in sorted(_MAPPER_VERSIONS.items())
+    }
+
+
+def reprojection_plan(raw_row: Mapping[str, Any], *, zone: tzinfo) -> IngestPlan | None:
+    """Plan the canonical rows that one stored raw record projects to today.
+
+    The stored payload and its fetch time are the only inputs, so the result equals
+    what the original ingest produced under the same mapper version. Returns None
+    when the record kind has no mapper. A row whose payload or fetch time is unusable
+    counts as one invalid row.
+    """
+    provider = ProviderId(raw_row["provider"])
+    kind = str(raw_row["record_kind"])
+    if reprojection_mapper_version(provider.value, kind) is None:
+        return None
+    fetched = parse_provider_datetime(raw_row["fetched_at"], zone)
+    payload = _stored_payload(raw_row["payload"])
+    if fetched is None or payload is None:
+        return IngestPlan(provider=provider, skipped_invalid=1)
+    if kind == ACTIVITY_RECORD_KIND:
+        return _reprojected_activities(provider, payload, zone=zone, fetched=fetched)
+    if kind == WELLNESS_RECORD_KIND:
+        wellness = map_intervals_wellness([payload], retrieved_at=fetched)
+        return IngestPlan(
+            provider=provider,
+            observations=tuple(
+                ObservationItem(observation, INTERVALS_WELLNESS_VERSION)
+                for observation in wellness.records
+            ),
+        )
+    if kind == ATHLETE_RECORD_KIND:
+        thresholds = map_intervals_athlete_thresholds(
+            payload, observed_on=local_date(fetched, zone), retrieved_at=fetched
+        )
+        return IngestPlan(
+            provider=provider,
+            observations=tuple(
+                ObservationItem(observation, INTERVALS_WELLNESS_VERSION)
+                for observation in thresholds.records
+            ),
+        )
+    return _reprojected_health(
+        provider, str(raw_row["source_record_id"]), payload, zone, fetched
+    )
+
+
+def _reprojected_activities(
+    provider: ProviderId, payload: Mapping[str, Any], *, zone: tzinfo, fetched: datetime
+) -> IngestPlan:
+    """Re-map one stored activity row with the same mapper and fetch time as its ingest."""
+    if provider is ProviderId.INTERVALS:
+        items, _raw, skipped, _present = _activity_batch(
+            [payload],
+            id_key=INTERVALS_ACTIVITY_ID_KEY,
+            mapper=lambda rows: map_intervals_activities(
+                rows, zone=zone, retrieved_at=fetched
+            ),
+            mapper_version=INTERVALS_ACTIVITY_VERSION,
+            zone=zone,
+            retrieved_at=fetched,
+        )
+    else:
+        items, _raw, skipped, _present = _activity_batch(
+            [payload],
+            id_key=GARMIN_ACTIVITY_ID_KEY,
+            mapper=lambda rows: map_garmin_activities(rows, zone=zone, retrieved_at=fetched),
+            mapper_version=GARMIN_ACTIVITY_VERSION,
+            zone=zone,
+            retrieved_at=fetched,
+        )
+    return IngestPlan(provider=provider, activities=tuple(items), skipped_invalid=skipped)
+
+
+def _reprojected_health(
+    provider: ProviderId,
+    section_name: str,
+    payload: Mapping[str, Any],
+    zone: tzinfo,
+    fetched: datetime,
+) -> IngestPlan:
+    """Re-map one stored health record. Legacy shapes without the section read as invalid."""
+    sections = _health_sections(payload, section_name)
+    if not sections:
+        return IngestPlan(provider=provider, skipped_invalid=1)
+    health = map_garmin_health(sections, zone=zone, retrieved_at=fetched)
+    return IngestPlan(
+        provider=provider,
+        observations=tuple(
+            ObservationItem(observation, GARMIN_HEALTH_VERSION)
+            for observation in health.records
+        ),
+    )
+
+
+def _stored_payload(text: object) -> dict[str, Any] | None:
+    """Decode a stored canonical JSON payload; only an object is a usable record."""
+    if not isinstance(text, str):
+        return None
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def _health_sections(payload: Mapping[str, Any], name: str) -> dict[str, Any]:

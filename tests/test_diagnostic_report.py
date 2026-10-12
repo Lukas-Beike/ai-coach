@@ -172,6 +172,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "morning_checkin",
                 "database",
                 "canonical_coverage",
+                "canonical_backfill",
                 "logs",
                 "debug_capture",
                 "note",
@@ -180,6 +181,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.assertEqual(
             report["canonical_coverage"], {"status": "available", "providers": []}
         )
+        self.assertEqual(report["canonical_backfill"], {"status": "unavailable"})
         self.assertEqual(
             report["sync"]["snapshot_counts"],
             {
