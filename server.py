@@ -709,6 +709,7 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
             local_date=lambda: ATHLETE_CLOCK.now().date(),
             calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
             checkin_text_limit=CHECKIN_TEXT_LIMITS["illness"],
+            observation_reader=lambda: CANONICAL_READ,
         ),
         runtime=PlanningRuntime(
             sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),

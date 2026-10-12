@@ -313,6 +313,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
                 "activity_feedback_service",
                 "today",
                 "calendar_window_days",
+                "canonical_reader",
             ],
         )
         self.assertFalse(
