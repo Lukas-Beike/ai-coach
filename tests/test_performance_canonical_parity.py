@@ -283,11 +283,17 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         reader = StubObservationReader(_observations(snapshot))
         read_performance_inputs(reader, "db", snapshot)
         earliest = date(2026, 9, 19)
+        # Current sport values are read for the sync day of the snapshot, +/- 1 day.
+        sync_window = (date(2026, 10, 9), date(2026, 10, 11))
         self.assertEqual(
             reader.calls,
             [
                 (MetricKind.CTL, earliest, PARITY_TODAY),
                 (MetricKind.ATL, earliest, PARITY_TODAY),
+                (MetricKind.THRESHOLD_HR, *sync_window),
+                (MetricKind.VO2MAX, *sync_window),
+                # Weight also reaches back to the latest wellness day it selects.
+                (MetricKind.WEIGHT, PARITY_TODAY, sync_window[1]),
             ],
         )
 
@@ -421,8 +427,10 @@ class CanonicalWiringTests(unittest.TestCase):
             return_value={},
         ) as project:
             service.performance_state()
-        self.assertEqual(manager.events, ["enter", "read", "read", "exit"])
-        self.assertEqual(reader.db_seen, ["db", "db"])
+        self.assertEqual(
+            manager.events, ["enter", "read", "read", "read", "read", "read", "exit"]
+        )
+        self.assertEqual(reader.db_seen, ["db"] * 5)
         self.assertEqual(
             project.call_args.kwargs["canonical"],
             CanonicalPerformanceInputs(wellness_day=PARITY_TODAY, ctl=50.0, atl=60.0),
@@ -473,7 +481,7 @@ class CanonicalWiringTests(unittest.TestCase):
         )
         read_snapshot, canonical = service._performance_inputs()
         self.assertIs(read_snapshot, snapshot)
-        self.assertEqual(reader.db_seen, ["db", "db"])
+        self.assertEqual(reader.db_seen, ["db"] * 5)
         self.assertEqual(_present(canonical).ctl, 50.0)
 
     def test_activity_performance_inputs_without_a_source_read_nothing_extra(
@@ -543,7 +551,10 @@ class CanonicalWiringTests(unittest.TestCase):
 
         read, canonical = coach.read_snapshot(read_snapshot)
         self.assertIs(read, snapshot)
-        self.assertEqual(manager.events, ["enter", "snapshot", "read", "read", "exit"])
+        self.assertEqual(
+            manager.events,
+            ["enter", "snapshot", "read", "read", "read", "read", "read", "exit"],
+        )
         with (
             patch(
                 "backend.coach.context.performance_context.current_performance_context",
@@ -600,7 +611,9 @@ class CanonicalWiringTests(unittest.TestCase):
             ),
         )
         prelude = _prelude(snapshot, manager, service.canonical_inputs).read(True)
-        self.assertEqual(manager.events, ["enter", "read", "read", "exit"])
+        self.assertEqual(
+            manager.events, ["enter", "read", "read", "read", "read", "read", "exit"]
+        )
         self.assertEqual(
             prelude.performance_inputs,
             CanonicalPerformanceInputs(wellness_day=PARITY_TODAY, ctl=50.0, atl=60.0),
@@ -710,7 +723,7 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         )
         legacy = _service(self.intervals, None, self.garmin).performance_state()
         canonical = _service(self.intervals, source, self.garmin).performance_state()
-        self.assertEqual(counting.calls, 2)
+        self.assertEqual(counting.calls, 5)
         self.assertEqual(_normalized_state(canonical), _normalized_state(legacy))
 
     def test_selector_chooses_its_source_once_for_both_load_reads(self) -> None:

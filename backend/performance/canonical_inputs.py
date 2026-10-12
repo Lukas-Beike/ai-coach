@@ -1,10 +1,13 @@
-"""Canonical performance inputs: CTL and ATL read through the observation port.
+"""Canonical performance inputs read through the observation port.
 
-The reader decides which source serves the values. Each value is selected by
-``select_current`` pinned to the snapshot's latest wellness day, which is the row
-the legacy load context reads. The read window spans the snapshot's own wellness
-rows and never extends past its latest day, so older or newer canonical history
-cannot change the current load.
+CTL and ATL: the reader decides which source serves the values. Each value is
+selected by ``select_current`` pinned to the snapshot's latest wellness day, which
+is the row the legacy load context reads. The read window spans the snapshot's own
+wellness rows and never extends past its latest day, so older or newer canonical
+history cannot change the current load.
+
+Current sport thresholds and VO2max come from the same snapshot's sync, see
+``backend.performance.canonical_current``.
 
 A snapshot without a usable wellness day yields no inputs, and the caller keeps
 the legacy values.
@@ -18,17 +21,26 @@ from datetime import date
 from typing import Any
 
 from backend.canonical.vocabulary import MetricKind
+from backend.performance.canonical_current import (
+    CanonicalCurrentInputs,
+    read_current_inputs,
+)
 from backend.performance.source_policy import select_current
 from backend.runtime.ports import ObservationReader, ObservationSourceSelector
 
 
 @dataclass(frozen=True, slots=True)
 class CanonicalPerformanceInputs:
-    """CTL and ATL for the wellness day that the legacy load context reads."""
+    """CTL and ATL for the wellness day that the legacy load context reads.
+
+    ``current`` holds the sport thresholds and VO2max of the same snapshot, or None
+    when they were not read.
+    """
 
     wellness_day: date
     ctl: float | None
     atl: float | None
+    current: CanonicalCurrentInputs | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +134,8 @@ def read_performance_inputs(
     """Read CTL and ATL for a stored snapshot, or return None to keep legacy values.
 
     None means the snapshot has no wellness rows, or its latest row (the row the
-    legacy reader picks) has an id that is not a strict ``YYYY-MM-DD`` date.
+    legacy reader picks) has an id that is not a strict ``YYYY-MM-DD`` date. A
+    selecting reader chooses its source once for the load and current reads.
     """
     rows = _wellness_rows(snapshot)
     if not rows:
@@ -131,12 +144,22 @@ def read_performance_inputs(
     if latest_day is None:
         return None
     days = [day for day in map(_row_day, rows) if day is not None]
-    return load_performance_inputs(
+    if isinstance(reader, ObservationSourceSelector):
+        reader = reader.reader_for(db)
+    loaded = load_performance_inputs(
         reader,
         db,
         latest_wellness_day=latest_day,
         start=min(days),
         end=latest_day,
+    )
+    return CanonicalPerformanceInputs(
+        wellness_day=loaded.wellness_day,
+        ctl=loaded.ctl,
+        atl=loaded.atl,
+        current=read_current_inputs(
+            reader, db, snapshot, latest_wellness_day=latest_day
+        ),
     )
 
 
