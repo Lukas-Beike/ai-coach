@@ -441,6 +441,9 @@ Backfill-Tests mit Fixture-Daten einschließlich Abbruch und Wiederaufnahme,
 Atomaritätstest (Persistenzfehler setzt weder Snapshot noch Cursor),
 Resolver-Tests mit alten IDs und Cursorn, `docker build`. Größe: groß.
 
+Status: Schritte 1 (#1100), 2 (#1103), 3 (#1105) und 4 (#1106) umgesetzt;
+Ergebnis in Abschnitt 5.10. Schritt 5 folgt als W6-5.
+
 ### Phase 4 – Provider-Register und Orchestrierung
 
 Umsetzung nach Abschnitt 3.6. Kann nach Phase 1 parallel zu den Phasen 2, 3 und
@@ -864,6 +867,50 @@ Entscheidungen:
   Ein aus einem früheren Abruf erhaltener Abschnitt behält also seine ältere
   Zeit. Die Legacy-Projektion stempelt weiter `synced_at`; die Paritätsprüfung
   in Phase 3 Schritt 5 behandelt diese Abweichung als gewollt.
+
+### 5.10 Ergebnis Phase 3 Schritte 3 und 4
+
+| Einheit | Inhalt | PR |
+|---|---|---|
+| W6-3 | Backfill aus Legacy-Snapshots und Neuprojektion bei Mapper-Wechsel | #1105 |
+| W6-4 | Referenz-Resolver für lokale und alte Provider-IDs, `activity_id` in der API | #1106 |
+
+Entscheidungen:
+
+- **Backfill nur einfügend:** Der Backfill schreibt nur fehlende Zeilen und
+  überschreibt nie, was der Dual-Write bereits geschrieben hat. Er arbeitet
+  vom neuesten Snapshot zu den älteren. Aktivitäten fügt nur der neueste
+  Snapshot ein; ältere Snapshots zählen ihre Aktivitäten als `superseded`.
+  Beobachtungen älterer Snapshots werden eingefügt, wenn sie fehlen. Die
+  Tabellen können deshalb mehr Beobachtungshistorie enthalten als der neueste
+  Snapshot.
+- **Wiederaufnahme:** Der Cursor steht in `sync_state` und trägt je Quelle
+  einen Fingerprint und einen Offset. Ändert sich die Quelle, beginnt sie bei
+  Offset 0. Der Fingerprint der Neuprojektion enthält die Mapper-Version, damit
+  ein Versionswechsel mitten im Batch nicht mit altem Offset fortsetzt.
+- **Neuprojektion und Tombstones:** Bei einer höheren Mapper-Version werden
+  Rohdatensätze neu projiziert. Gelöschte Aktivitätsdatensätze und Datensätze
+  gelöschter Sitzungen bleiben erhalten (`preserved`) und werden nicht wieder
+  belebt. Aktive und ungültige Zeilen werden aktualisiert. Sitzungsdaten
+  ändern sich nur für aktive Sitzungen.
+- **Vom Mapper nicht mehr erzeugte Aktivitäten:** Sie werden `invalid`
+  (Zähler `retired`). Die Sitzung bleibt unverändert, auch wenn ihr einziger
+  Datensatz ungültig ist; der Resolver kann sie dann weiter auflösen.
+  Beobachtungen haben in v6 keine Statusspalte und werden nicht stillgelegt.
+  Der Tabellenleser liefert deshalb nur Beobachtungen, deren `mapper_version`
+  der aktuellen Version ihres Mappers entspricht. Eine Statusspalte für
+  Beobachtungen ist ein Kandidat für Phase 7.
+- **Alte Garmin-Rohform:** Garmin-Gesundheits-Rohdatensätze in der Form vor
+  #1103 werden als `skipped_invalid` gezählt, bis der nächste Garmin-Sync sie
+  in aktueller Form schreibt.
+- **Resolver:** Er löst `act_`-IDs, alte Provider-IDs und Duplikat-IDs auf.
+  Auch die Duplikatlöschung (lokal und als Remote-Write-Vorschlag) löst beide
+  IDs vor der Prüfung und dem Freigabemanifest auf. Offener Punkt: `save()`
+  kann eine nicht auflösbare `act_`-ID unverändert speichern.
+- **Diagnose:** Sie zeigt je Provider nur Zähler (`inserted`,
+  `already_present`, `superseded`, `skipped_invalid`, `sessions_created`,
+  `duplicates`, `reprojected`, `retired`), keine Athleteninhalte.
+- **Qualitätsbaseline:** 460 Einträge gegen `base` `e4d51d75`.
 
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
