@@ -1052,7 +1052,7 @@ kanonische Modell sie nicht abbildet: eFTP, TSB/Form, Rampenrate, W′,
 Rennprognosen, Trainingsstatus, HRV-Wochenmittel, Aktivitätslisten und -details,
 Energieverbrauch, Ausrüstung, FTP-Verlauf und Freshness aus `retrieved_at`.
 
-### 5.12 Ergebnis Phase 5 Stufen 3–4 und Phase 7 (Stand 2026-10-12)
+### 5.12 Ergebnis Phase 5 Stufen 3–4 und Phase 7 (alle gemergt, Stand 2026-10-12)
 
 | Einheit | PR | Inhalt |
 |---|---|---|
@@ -1062,8 +1062,8 @@ Energieverbrauch, Ausrüstung, FTP-Verlauf und Freshness aus `retrieved_at`.
 | P7-D | #1124 | Körperverlauf in `/api/state` und Coach-Lesewerkzeugen kanonisch |
 | P7-B | #1126 | Planungs- und Tageserholung kanonisch; Garmin-Snapshot-Parser fängt `RecursionError` ab |
 | P7-F | #1123 | Gespeicherte Wettkampf-Sportarten über `COMPETITION_SPORT_TOKENS` in kanonische `Sport` übersetzt |
-| P7-C | offen | 7-Tage-Mittel von Ruhepuls und Readiness aus kanonischen Beobachtungen (`canonical_recovery_averages.py`) |
-| P7-E | offen | Persönliche Erholung: Ruhepuls kanonisch, `SourceView.PERSONAL_RECOVERY` mit byte-gleichen Labels |
+| P7-C | #1128 | 7-Tage-Mittel von Ruhepuls und Readiness aus kanonischen Beobachtungen (`canonical_recovery_averages.py`), nur bei gleicher Tagesmenge und gleichem gerundetem Mittel |
+| P7-E | #1129 | Persönliche Erholung: Ruhepuls je Provider und Tag kanonisch (`canonical_personal_recovery.py`); Labels laufen bereits über `ProviderId` und `DAILY_HEALTH`, eine eigene Label-Ansicht war nicht mehr nötig |
 
 Gemeinsame Regel wie in Phase 5: kanonische Werte nur, wenn Provider, Tag und
 Wert dem Legacy-Datensatz entsprechen; ohne `canonical=` läuft der Legacy-Weg.
