@@ -119,6 +119,11 @@ class CoachIntervalsContextTests(unittest.TestCase):
         self.assertEqual(
             result,
             {
+                "source": {
+                    "provider": "intervals",
+                    "label": "Intervals.icu",
+                    "synced_at": None,
+                },
                 "synced_at": None,
                 "recent_activities_by_sport": {},
                 "activity_rollups_by_sport": {},
