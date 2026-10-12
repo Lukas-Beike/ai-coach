@@ -176,7 +176,7 @@ class WahooSyncCase(unittest.TestCase):
             for table in ("provider_records", "activity_records", "activity_sessions")
         )
 
-    def refresh_statuses(self) -> list[str]:
+    def _refresh_statuses(self) -> list[str]:
         return [
             row["status"]
             for row in self.rows(

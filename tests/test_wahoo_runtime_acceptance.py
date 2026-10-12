@@ -273,7 +273,7 @@ class WahooAcceptanceTests(WahooOrchestrationCase):
             ["2026-10-12", "2026-10-10"], [row["local_date"] for row in rows]
         )
         self.assertIsNotNone(self._marker())
-        self.assertEqual(["success"], self.refresh_statuses())
+        self.assertEqual(["success"], self._refresh_statuses())
 
         entry = self._wahoo_freshness()
         self.assertEqual("fresh", entry["state"])
@@ -342,7 +342,7 @@ class WahooAcceptanceTests(WahooOrchestrationCase):
             self.executor.execute(self._jobs()[-1]),
         )
         self.assertEqual(calls_before, len(self.transport.calls))
-        self.assertEqual("skipped", self.refresh_statuses()[-1])
+        self.assertEqual("skipped", self._refresh_statuses()[-1])
         self.assertEqual("not_configured", self._wahoo_freshness()["state"])
 
     def test_the_owner_never_writes_to_wahoo(self) -> None:

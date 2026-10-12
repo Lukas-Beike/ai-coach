@@ -41,7 +41,7 @@ class IngestTests(WahooSyncCase):
         self.assertFalse(self._value(LAST_ERROR_KEY))
         self.assertIsNotNone(self._marker())
         self.assertIsNotNone(self._value(coverage_key(ProviderId.WAHOO)))
-        self.assertEqual(["success"], self.refresh_statuses())
+        self.assertEqual(["success"], self._refresh_statuses())
 
     def test_resync_is_idempotent(self) -> None:
         self.source.fetch = WahooWorkoutFetch((workout(1, EARLIER_UTC),))
@@ -89,7 +89,7 @@ class FailureTests(WahooSyncCase):
         self.assertEqual("wahoo_sync_failed", raised.exception.reason)
         self.assertNothingPersisted()
         self.assertEqual(SYNC_FAILED_MESSAGE, self._value(LAST_ERROR_KEY))
-        self.assertEqual(["error"], self.refresh_statuses())
+        self.assertEqual(["error"], self._refresh_statuses())
 
     def test_coverage_failure_rolls_the_whole_ingest_back(self) -> None:
         self.source.fetch = WahooWorkoutFetch((workout(1, EARLIER_UTC),))
