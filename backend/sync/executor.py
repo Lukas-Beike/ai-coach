@@ -18,7 +18,11 @@ from backend.providers.descriptors import (
 from backend.sync.competitions import CompetitionSyncService
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.garmin import GarminFixtureLoader
-from backend.sync.garmin_service import GARMIN_AUTOMATIC_SYNC_DAYS, GarminSyncService
+from backend.sync.garmin_service import (
+    GARMIN_AUTOMATIC_SYNC_DAYS,
+    GarminSyncService,
+    refresh_morning_battery_after_sync,
+)
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.intervals import IntervalsSyncService
 from backend.sync.job_outcomes import SyncJobOutcomeService
@@ -267,12 +271,10 @@ class GarminSyncJobOwner:
         if historical_end is not None and self._garmin_fixture_loader.path() is None:
             sync_kwargs["end_date"] = historical_end
         result = self._garmin_sync_service.sync(**sync_kwargs)
-        if (
-            historical_end is None
-            and days != self._all_sync_days
-            and result.get("status") in {"ok", "partial"}
-        ):
-            self._morning_body_battery_service.refresh()
+        if historical_end is None and days != self._all_sync_days:
+            refresh_morning_battery_after_sync(
+                result, self._morning_body_battery_service
+            )
         if job_type == "historical_backfill":
             self._historical_sync.add_next_end(result, historical_end, days)
         return result

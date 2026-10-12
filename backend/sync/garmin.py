@@ -31,6 +31,8 @@ GARMIN_CAPABILITY_FAILURE_LIMIT = 3
 GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
 GARMIN_INITIAL_SYNC_DAYS = 84
 GARMIN_CATCHUP_MAX_DAYS = 90
+# Collections every refresh window must cover before it counts as current.
+GARMIN_WINDOW_SOURCES = frozenset({"activities", "sleep", "hrv"})
 
 GARMIN_COLLECTION_SOURCES = (
     "sleep",
@@ -160,7 +162,7 @@ class GarminPayloadService:
         """Return a bounded, contiguous refresh window for the oldest collection."""
         snapshot = self.snapshot()
         freshness = snapshot.get("source_freshness") or {}
-        sources = {"activities", "sleep", "hrv"} | (
+        sources = GARMIN_WINDOW_SOURCES | (
             set(freshness) & {"daily_stats", "resting_hr", "training_status"}
         )
         today = self._local_today()
@@ -184,6 +186,46 @@ class GarminPayloadService:
             days=GARMIN_CATCHUP_MAX_DAYS - 1
         )
 
+    def awaited_run_status(
+        self, days: int, end_date: date | None, synced_at: str | None
+    ) -> str | None:
+        """Return the stored run's status if it completely read the window.
+
+        ``None`` means the run from ``synced_at`` is no longer the latest
+        snapshot or did not completely read the window's core collections. The
+        run's own ``read_window`` is checked, not the merged snapshot range, so
+        coverage from an older run cannot vouch for it; empty but complete
+        reads still count. A failed collection outside the window's core makes
+        the run ``partial``.
+        """
+        snapshot = self.snapshot()
+        if not synced_at or snapshot.get("synced_at") != synced_at:
+            return None
+        end = end_date or self._local_today()
+        start = end - timedelta(days=days - 1)
+        provider_sync = snapshot.get("provider_sync") or {}
+        read_window = provider_sync.get("read_window") or {}
+        try:
+            covered = (
+                date.fromisoformat(read_window["start"]) <= start
+                and date.fromisoformat(read_window["end"]) >= end
+            )
+        except KeyError, TypeError, ValueError:
+            return None
+        pagination = provider_sync.get("pagination") or {}
+        failed = {
+            error.get("source")
+            for error in snapshot.get("errors") or []
+            if isinstance(error, dict)
+        }
+        if not covered or not all(
+            source not in failed
+            and (pagination.get(source) or {}).get("complete") is True
+            for source in GARMIN_WINDOW_SOURCES
+        ):
+            return None
+        return "ok" if collection_complete(snapshot) else "partial"
+
     def prepare_fixture(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._prepare(payload, self.snapshot(), fixture=True)
 
@@ -197,6 +239,11 @@ class GarminPayloadService:
         *,
         fixture: bool,
     ) -> dict[str, Any]:
+        # Merging widens ``start`` to older runs; keep this run's own window.
+        payload.setdefault("provider_sync", {})["read_window"] = {
+            "start": payload.get("start"),
+            "end": payload.get("end"),
+        }
         merge_sources(payload, previous)
         if not fixture:
             payload["activities"] = deduplicate_api_records(
@@ -208,15 +255,13 @@ class GarminPayloadService:
         )
         payload["activity_matches"] = self._activity_matches(payload)
         if fixture:
-            payload.setdefault(
-                "provider_sync",
+            payload["provider_sync"].setdefault(
+                "pagination",
                 {
-                    "pagination": {
-                        "fixture": {
-                            "windows": 1,
-                            "records": len(payload.get("activities") or []),
-                            "complete": True,
-                        }
+                    "fixture": {
+                        "windows": 1,
+                        "records": len(payload.get("activities") or []),
+                        "complete": True,
                     }
                 },
             )

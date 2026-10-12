@@ -16,6 +16,7 @@ from backend.weather import history as weather_history
 
 MORNING_RETRY_SECONDS = 15 * 60
 MORNING_MAX_ATTEMPTS = 3
+MORNING_LOCK_POLL_SECONDS = 1
 
 MORNING_BATTERY_HISTORY_KEY = "morning_body_battery_history"
 _GARMIN_SNAPSHOT_KEY = "garmin_snapshot"
@@ -185,8 +186,19 @@ class MorningBatteryExecutionGate:
             yield
 
     @contextmanager
-    def shared_lock(self) -> Iterator[bool]:
-        acquired = self._lock.acquire(timeout=self._wait_seconds)
+    def shared_lock(
+        self, cancel_event: threading.Event | None = None
+    ) -> Iterator[bool]:
+        """Wait for the shared lock; a set ``cancel_event`` stops the wait."""
+        if cancel_event is None:
+            acquired = self._lock.acquire(timeout=self._wait_seconds)
+        else:
+            acquired = False
+            remaining = float(self._wait_seconds)
+            while not acquired and remaining > 0 and not cancel_event.is_set():
+                step = min(MORNING_LOCK_POLL_SECONDS, remaining)
+                acquired = self._lock.acquire(timeout=step)
+                remaining -= step
         try:
             yield acquired
         finally:
@@ -261,14 +273,25 @@ class MorningBodyBatteryService:
         self._events = events
         self._retry_policy = retry_policy
 
-    def sync(self, checkin_date: date) -> dict[str, Any]:
-        """Return a cached result or fetch and persist this sleep window."""
+    def sync(
+        self, checkin_date: date, cancel_event: threading.Event | None = None
+    ) -> dict[str, Any]:
+        """Return a cached result or fetch and persist this sleep window.
+
+        A set ``cancel_event`` stops the wait for the shared lock and skips the
+        provider request; the result is then ``cancelled``.
+        """
         with self._execution_gate.operation():
             existing = self.current()
             cached = self._cached_result(existing, checkin_date)
             if cached:
                 return cached
-            with self._execution_gate.shared_lock() as acquired:
+            with self._execution_gate.shared_lock(cancel_event) as acquired:
+                if cancel_event is not None and cancel_event.is_set():
+                    return {
+                        "status": "cancelled",
+                        "sleep_date": checkin_date.isoformat(),
+                    }
                 if not acquired:
                     return {
                         "status": "already_running",
@@ -276,17 +299,31 @@ class MorningBodyBatteryService:
                     }
                 return self._sync_locked(checkin_date)
 
-    def refresh(self, checkin_date: date | None = None) -> None:
-        """Refresh optional recovery after 05:00, swallowing refresh failures."""
+    def refresh(
+        self,
+        checkin_date: date | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> bool:
+        """Refresh optional recovery after 05:00, swallowing refresh failures.
+
+        Returns ``False`` when a due refresh failed, found the reading busy, or
+        was cancelled; a refresh that is not due or not configured returns
+        ``True``.
+        """
         now = self._clock.local_now()
         if checkin_date is None and now.hour < 5:
-            return
+            return True
         if not (self.source.fixture_available() or self.source.configured()):
-            return
+            return True
         try:
-            self.sync(checkin_date or now.date())
+            result = self.sync(checkin_date or now.date(), cancel_event)
         except Exception as exc:  # noqa: BLE001 - optional refresh failures are logged and swallowed
             self._events.refresh_failed(self.source.safe_provider_error(exc))
+            return False
+        return not (
+            result.get("failed")
+            or result.get("status") in {"already_running", "cancelled"}
+        )
 
     def _sync_locked(self, checkin_date: date) -> dict[str, Any]:
         existing = self.current()
@@ -323,6 +360,8 @@ class MorningBodyBatteryService:
 
         result = self.store.persist(checkin_date, existing, record, records)
         self._events.provider_updated(record)
+        if record.get("error"):
+            result["failed"] = True
         return result
 
     def _cached_result(

@@ -346,6 +346,8 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         default_sync_days=_GARMIN_DEFAULT_SYNC_DAYS,
         schedule=SchedulePolicy(daily_rank=2, startup_rank=2, daily_marker=True),
         coach_rank=2,
+        # Coach waits for this refresh so a check-in never reads stale recovery data.
+        coach_waits_for_completion=True,
         not_configured_message=_GARMIN_NOT_CONFIGURED_MESSAGE,
         manual_sync=ManualSyncRoute(
             path="/api/garmin/sync",

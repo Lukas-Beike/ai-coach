@@ -55,8 +55,8 @@ class SyncStateRepository:
             raise ValueError(
                 "The synchronization period must be a whole number."
             ) from exc
-        maximum = self._registry.max_sync_days(source)
-        if days != all_days and not 1 <= days <= maximum:
+        if not self._registry.accepts_sync_days(source, days, all_days):
+            maximum = self._registry.max_sync_days(source)
             raise ValueError(
                 f"The period for {source} must be {all_days} or between 1 and {maximum} days."
             )

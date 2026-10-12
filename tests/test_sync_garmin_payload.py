@@ -285,6 +285,57 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertEqual(windows[-1][1], date(2026, 9, 20))
         self.assertEqual(self.service.automatic_sync_window(2), (2, None))
 
+    def test_awaited_run_status_requires_the_latest_complete_read_of_the_window(
+        self,
+    ):
+        synced_at = "2026-09-20T12:00:00"
+        status = self.service.awaited_run_status
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                self.collection_payload("2026-09-18", "2026-09-20")
+            )
+        )
+        self.assertEqual(status(3, None, synced_at), "ok")
+        self.assertEqual(status(2, date(2026, 9, 19), synced_at), "ok")
+        self.assertIsNone(status(4, None, synced_at))
+        self.assertIsNone(status(3, None, "2026-09-19T12:00:00"))
+        self.assertIsNone(status(3, None, None))
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                self.collection_payload("2026-09-18", "2026-09-20", failed="sleep")
+            )
+        )
+        self.assertIsNone(status(3, None, synced_at))
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                self.collection_payload("2026-09-18", "2026-09-20", failed="resting_hr")
+            )
+        )
+        self.assertEqual(status(3, None, synced_at), "partial")
+
+    def test_awaited_run_status_ignores_start_merged_from_an_older_run(self):
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                self.collection_payload("2026-06-29", "2026-09-19")
+            )
+        )
+        short = self.service.prepare_remote(
+            self.collection_payload("2026-09-19", "2026-09-20")
+        )
+        self.store_garmin_snapshot(short)
+
+        self.assertEqual(short["start"], "2026-06-29")
+        self.assertEqual(
+            short["provider_sync"]["read_window"],
+            {"start": "2026-09-19", "end": "2026-09-20"},
+        )
+        self.assertEqual(
+            self.service.awaited_run_status(2, None, "2026-09-20T12:00:00"), "ok"
+        )
+        self.assertIsNone(
+            self.service.awaited_run_status(84, None, "2026-09-20T12:00:00")
+        )
+
     def test_gear_collection_uses_reported_stats_and_does_not_publish_partial_inventory(
         self,
     ):
@@ -546,7 +597,12 @@ class GarminPayloadServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             payload["provider_sync"],
-            {"pagination": {"fixture": {"windows": 1, "records": 2, "complete": True}}},
+            {
+                "read_window": {"start": "2026-09-15", "end": "2026-09-20"},
+                "pagination": {
+                    "fixture": {"windows": 1, "records": 2, "complete": True}
+                },
+            },
         )
 
     def test_remote_deduplicates_external_ids_before_max_hr_and_keeps_match_ids(self):

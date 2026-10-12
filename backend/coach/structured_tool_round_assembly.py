@@ -30,8 +30,6 @@ class StructuredToolRoundRuntime:
 class StructuredToolRoundContract:
     tool_names: Callable[[], Iterable[str]]
     read_only_tools: Callable[[], Iterable[str]]
-    sync_period_defaults: Any
-    all_sync_days: int
     limits: Callable[[], CoachStructuredToolRoundLimits]
 
 
@@ -83,8 +81,6 @@ class CoachStructuredToolRoundAssembly:
         self._logger = runtime.logger
         self._tool_names = contract.tool_names
         self._read_only_tools = contract.read_only_tools
-        self._sync_period_defaults = contract.sync_period_defaults
-        self._all_sync_days = contract.all_sync_days
         self._tool_round_limits = contract.limits
         self._clarification_service = services.clarification_service
         self._training_patch_service = services.training_patch_service
@@ -127,11 +123,8 @@ class CoachStructuredToolRoundAssembly:
     def preparation_service(self) -> CoachStructuredToolPreparationService:
         return CoachStructuredToolPreparationService(
             self._dialogue_action_service(),
-            self._sync_state_repository(),
             self._planning_authority_service(),
             frozenset(self._read_only_tools()),
-            self._sync_period_defaults,
-            self._all_sync_days,
         )
 
     def service(self) -> CoachStructuredToolRoundService:

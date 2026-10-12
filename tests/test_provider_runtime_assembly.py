@@ -224,7 +224,9 @@ class BuiltinBindingTests(unittest.TestCase):
 
         self.assertEqual(set(runtime.job_owners()), BUILTIN_IDS)
         self.assertEqual(set(runtime.resync_handlers()), {INTERVALS_ID, GARMIN_ID})
-        self.assertEqual(set(runtime.synchronous_refreshes()), {INTERVALS_ID})
+        self.assertEqual(
+            set(runtime.synchronous_refreshes()), {INTERVALS_ID, GARMIN_ID}
+        )
         self.assertEqual(set(runtime.running_probes()), {INTERVALS_ID})
 
     def test_builtin_schedules_follow_registry_order(self) -> None:

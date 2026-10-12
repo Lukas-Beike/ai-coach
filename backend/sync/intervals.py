@@ -741,6 +741,10 @@ class IntervalsSyncService:
     def running(self) -> bool:
         return self._runtime.running(self._status)
 
+    def sync_period(self) -> int:
+        """Return the stored activity window a sync uses without ``activity_days``."""
+        return self._workflow.sync_period()
+
     def sync(
         self,
         reason: str = "manual",

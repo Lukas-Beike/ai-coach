@@ -2354,22 +2354,57 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             ).fetchone()
         self.assertEqual(row["conversation_id"], "synthetic-conversation")
 
-    def test_garmin_refresh_and_job_read_use_current_tool_results(self):
+    def test_garmin_refresh_waits_for_completion_without_queueing(self):
+        with (
+            patch(
+                "backend.sync.garmin_service.GarminSyncService.sync",
+                return_value={"status": "ok"},
+            ) as sync,
+            patch(
+                "backend.performance.morning_battery_service."
+                "MorningBodyBatteryService.refresh"
+            ) as battery,
+        ):
+            result, _ = self.turn(
+                "Bitte Garmin aktualisieren",
+                [
+                    lambda _: self.call(
+                        "start_provider_refresh",
+                        {"days": 3},
+                        ["garmin_refresh"],
+                        target="garmin",
+                    ),
+                    {"output_text": "Die Garmin-Daten sind aktuell."},
+                ],
+            )
+        self.assertEqual(result["status"], "completed")
+        refresh = result["command_receipts"][0]["result"]
+        self.assertEqual(refresh["status"], "completed")
+        self.assertTrue(refresh["synchronous_refresh"])
+        sync.assert_called_once()
+        battery.assert_called_once_with(cancel_event=None)
+        with server.database_manager().unit_of_work() as db:
+            queued = db.execute(
+                "SELECT id FROM sync_jobs WHERE provider='garmin'"
+            ).fetchall()
+        self.assertEqual(queued, [])
+
+    def test_queued_refresh_and_job_read_use_current_tool_results(self):
         def job(_):
             with server.database_manager().unit_of_work() as db:
                 row = db.execute(
-                    "SELECT id FROM sync_jobs WHERE provider='garmin'"
+                    "SELECT id FROM sync_jobs WHERE provider='calendar'"
                 ).fetchone()
             return self.call("get_sync_job", {"job_id": row["id"]})
 
         result, _ = self.turn(
-            "Bitte Garmin aktualisieren",
+            "Bitte Kalender aktualisieren",
             [
                 lambda _: self.call(
                     "start_provider_refresh",
-                    {"days": 3},
-                    ["garmin_refresh"],
-                    target="garmin",
+                    {},
+                    ["calendar_refresh"],
+                    target="calendar",
                 ),
                 job,
                 {"output_text": "Der Abruf ist beauftragt."},

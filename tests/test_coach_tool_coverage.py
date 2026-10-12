@@ -702,10 +702,28 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             self.assertEqual(result["status"], "completed")
             sync.assert_called_once()
             self.assertEqual(sync.call_args.kwargs["activity_days"], 7)
-        for provider in ("garmin", "calendar", "weather"):
+        with (
+            patch(
+                "backend.sync.garmin_service.GarminSyncService.sync",
+                return_value={"status": "ok"},
+            ) as garmin_sync,
+            patch(
+                "backend.performance.morning_battery_service."
+                "MorningBodyBatteryService.refresh"
+            ),
+        ):
             result = self.run_tool(
                 "start_provider_refresh",
-                {"days": 7} if provider == "garmin" else {},
+                {"days": 7},
+                ["garmin_refresh"],
+                target="garmin",
+            )
+            self.assertEqual(result["status"], "completed")
+            garmin_sync.assert_called_once()
+        for provider in ("calendar", "weather"):
+            result = self.run_tool(
+                "start_provider_refresh",
+                {},
                 [provider + "_refresh"],
                 target=provider,
             )
