@@ -8,6 +8,8 @@ from collections.abc import Callable
 from typing import Any
 
 from backend import change_history
+from backend.canonical.vocabulary import RemoteEntityKind
+from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, AppError
 from backend.planning import library, workouts
 from backend.providers.intervals_workouts import (
@@ -15,6 +17,7 @@ from backend.providers.intervals_workouts import (
     INTERVALS_TEMPLATE_WORKOUT_TYPES,
 )
 
+_REMOTE_LINKS = RemoteLinkRepository()
 INSERT_LIBRARY_SQL = (
     "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, "
     "sync_state, sync_error, last_synced_at, updated_at) "
@@ -51,6 +54,9 @@ class WorkoutLibraryService:
         """Restore a history snapshot using the caller's transaction."""
         if target is None:
             db.execute("DELETE FROM workout_library WHERE local_id=?", (entity_id,))
+            _REMOTE_LINKS.delete_for_entity(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, entity_id
+            )
             return None
 
         if current is None:
@@ -68,6 +74,9 @@ class WorkoutLibraryService:
                     json.dumps(restored, ensure_ascii=False),
                     self._now(),
                 ),
+            )
+            _REMOTE_LINKS.refresh_from_slots(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, entity_id
             )
             return restored
 
@@ -89,6 +98,9 @@ class WorkoutLibraryService:
         db.execute(
             UPDATE_LIBRARY_SQL,
             (json.dumps(restored, ensure_ascii=False), self._now(), entity_id),
+        )
+        _REMOTE_LINKS.refresh_from_slots(
+            db, RemoteEntityKind.LIBRARY_WORKOUT, entity_id
         )
         return {**restored, "sync_status": "local"}
 
@@ -121,6 +133,9 @@ class WorkoutLibraryService:
                         self._now(),
                         normalized_id,
                     ),
+                )
+                _REMOTE_LINKS.refresh_from_slots(
+                    db, RemoteEntityKind.LIBRARY_WORKOUT, normalized_id
                 )
                 change_history.record_change(
                     db,
@@ -173,6 +188,7 @@ class WorkoutLibraryService:
                 "Synchronisierte Bibliothekseinheiten können nicht lokal gelöscht werden. Archiviere sie stattdessen.",
             )
         db.execute("DELETE FROM workout_library WHERE local_id=?", (local_id,))
+        _REMOTE_LINKS.delete_for_entity(db, RemoteEntityKind.LIBRARY_WORKOUT, local_id)
         change_history.record_change(
             db, "workout_library", local_id, "delete", before, None
         )
@@ -212,6 +228,7 @@ class WorkoutLibraryService:
             INSERT_LIBRARY_SQL,
             (local_id, local_id, json.dumps(entry, ensure_ascii=False), updated_at),
         )
+        _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.LIBRARY_WORKOUT, local_id)
         change_history.record_change(
             db, "workout_library", local_id, "create", None, entry
         )

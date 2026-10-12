@@ -3,6 +3,8 @@ import sqlite3
 import unittest
 from contextlib import contextmanager
 
+from remote_link_fixtures import create_remote_links_table
+
 from backend.athlete.context import AthleteContextService
 from backend.athlete.profile import ProfileService, normalize_profile
 from backend.db.repositories import (
@@ -80,6 +82,7 @@ class AthleteContextServiceTests(unittest.TestCase):
             );
             """
         )
+        create_remote_links_table(self.db)
         self.key_values = KeyValueRepository(lambda: "2026-09-20T12:00:00+00:00")
         self.profile_service = ProfileService(
             _Manager(self.db),

@@ -1,0 +1,182 @@
+"""Library sync keeps remote links and legacy slots in step on an upgraded database."""
+
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from datetime import date
+from pathlib import Path
+from typing import Any
+from unittest.mock import Mock
+
+from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
+from backend.config import Config
+from backend.db import row_factory
+from backend.db.manager import DatabaseManager
+from backend.db.migrations import migrate_schema
+from backend.db.repositories import KeyValueRepository
+from backend.db.schema import (
+    CURRENT_SCHEMA_VERSION,
+    configure_cipher,
+    database_schema_is_current,
+)
+from backend.observability import Redactor
+from backend.sync.library import (
+    WorkoutLibrarySyncService,
+    WorkoutLibrarySyncStateService,
+)
+
+try:
+    from sqlcipher3 import dbapi2 as cipher_backend
+except ImportError:
+    cipher_backend = None
+
+SCHEMA_V7 = Path(__file__).with_name("fixtures") / "schema_v7.sql.txt"
+NOW = "2026-10-12T08:00:00+00:00"
+SYNCED_ID = "12345678-1234-5678-1234-567812345678"
+LOCAL_ID = "87654321-4321-8765-4321-876543218765"
+INTERVALS = ProviderId.INTERVALS.value
+LIBRARY = RemoteEntityKind.LIBRARY_WORKOUT.value
+
+
+def workout(name: str) -> dict[str, Any]:
+    return {
+        "sport": "WeightTraining",
+        "type": "WeightTraining",
+        "name": name,
+        "description": "Three sets of ten.",
+        "duration_minutes": 30,
+    }
+
+
+@unittest.skipIf(
+    cipher_backend is None, "SQLCipher requires the Docker runtime on Windows"
+)
+class RemoteLinkLibrarySyncEndToEndTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = tempfile.TemporaryDirectory()
+        self.addCleanup(self.root.cleanup)
+        self.path = Path(self.root.name) / "encrypted.db"
+
+    def open(self) -> DatabaseManager:
+        manager = DatabaseManager(
+            self.path,
+            cipher_backend,
+            password="synthetic-e2e-test-key",
+            configure=configure_cipher,
+            row_factory=row_factory,
+        )
+        self.addCleanup(manager.close)
+        return manager
+
+    @staticmethod
+    def service(manager: DatabaseManager, client: Mock) -> WorkoutLibrarySyncService:
+        config = Config(
+            port=8090,
+            openai_api_key="",
+            openai_base_url="",
+            openai_model="",
+            intervals_api_key="fake-key",
+            intervals_athlete_id="0",
+            garmin_email="",
+            garmin_password="",
+            garmin_tokenstore="",
+            garmin_fixture_path="",
+            calendar_ical_url="",
+            app_password="x" * 12,
+            secure_cookies=False,
+            data_retention_days=-1,
+        )
+        state = WorkoutLibrarySyncStateService(
+            manager,
+            Redactor(lambda: config),
+            KeyValueRepository(lambda: NOW),
+            lambda: NOW,
+        )
+        return WorkoutLibrarySyncService(config, lambda: client, state, None)
+
+    @staticmethod
+    def state(db: Any) -> dict[str, Any]:
+        slots = {
+            row["local_id"]: row["external_id"]
+            for row in db.execute(
+                "SELECT local_id, external_id FROM workout_library"
+            ).fetchall()
+        }
+        links = {
+            row["local_id"]: (row["remote_external_id"], row["sync_state"])
+            for row in db.execute(
+                "SELECT local_id, remote_external_id, sync_state FROM remote_links "
+                "WHERE provider=? AND entity_kind=?",
+                (INTERVALS, LIBRARY),
+            ).fetchall()
+        }
+        return {"slots": slots, "links": links}
+
+    def test_upgraded_database_keeps_slot_and_link_in_one_transaction(self) -> None:
+        manager = self.open()
+        with manager.unit_of_work() as db:
+            db.executescript(SCHEMA_V7.read_text(encoding="utf-8"))
+            for local_id, external_id, name in (
+                (SYNCED_ID, "ext-old", "Strength A"),
+                (LOCAL_ID, None, "Strength B"),
+            ):
+                db.execute(
+                    "INSERT INTO workout_library(id, local_id, external_id, payload, "
+                    "sync_dirty, sync_state, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+                    (
+                        f"workout-{local_id}",
+                        local_id,
+                        external_id,
+                        json.dumps(workout(name)),
+                        "sync_error" if external_id else "local",
+                        NOW,
+                    ),
+                )
+        with manager.unit_of_work() as db:
+            migrate_schema(db)
+            self.assertTrue(database_schema_is_current(db))
+            self.assertEqual(
+                db.execute("PRAGMA user_version").fetchone()["user_version"],
+                CURRENT_SCHEMA_VERSION,
+            )
+            upgraded = self.state(db)
+        self.assertEqual(upgraded["links"], {SYNCED_ID: ("ext-old", "pending")})
+
+        # A failing provider call changes neither slot nor link.
+        client = Mock()
+        client.local_today.return_value = date(2026, 10, 12)
+        client.update_library_workout.side_effect = RuntimeError("provider down")
+        service = self.service(manager, client)
+        with self.assertRaisesRegex(RuntimeError, "provider down"):
+            service.sync_entry(SYNCED_ID)
+        with manager.reader() as db:
+            self.assertEqual(self.state(db), upgraded)
+
+        # A sync that assigns a new remote id updates slot and link together.
+        client.get_workout_library.return_value = []
+        client.create_library_workouts.return_value = [
+            {**workout("Strength B"), "id": "ext-new"}
+        ]
+        service.sync_entry(LOCAL_ID)
+        with manager.reader() as db:
+            after_create = self.state(db)
+        self.assertEqual(after_create["slots"][LOCAL_ID], "ext-new")
+        self.assertEqual(after_create["links"][LOCAL_ID][0], "ext-new")
+        self.assertEqual(after_create["slots"][SYNCED_ID], "ext-old")
+        self.assertEqual(after_create["links"][SYNCED_ID][0], "ext-old")
+        manager.close()
+
+        # Re-opening neither duplicates nor changes any link.
+        reopened = self.open()
+        with reopened.unit_of_work() as db:
+            migrate_schema(db)
+            final = self.state(db)
+            count = db.execute("SELECT COUNT(*) AS n FROM remote_links").fetchone()["n"]
+        self.assertEqual(final, after_create)
+        self.assertEqual(count, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -7,7 +7,8 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
+from backend.db.remote_links import RemoteLinkRepository
 
 
 class NutritionTemplateRepository:
@@ -292,6 +293,9 @@ class ProfileRepository:
 class CompetitionRepository:
     """Read local competitions without owning a database connection."""
 
+    def __init__(self, remote_links: RemoteLinkRepository | None = None) -> None:
+        self._remote_links = remote_links or RemoteLinkRepository()
+
     _LIST_FIELDS = (
         "id, name, event_date, start_date_local, sport, priority, category, distance, target, "
         "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
@@ -385,6 +389,9 @@ class CompetitionRepository:
 
     def delete(self, db: Any, competition_id: str) -> None:
         db.execute("DELETE FROM competitions WHERE id=?", (competition_id,))
+        self._remote_links.delete_for_entity(
+            db, RemoteEntityKind.COMPETITION, competition_id
+        )
 
     def unlink_public_event_candidate(
         self, db: Any, competition_id: str, now: str
@@ -422,6 +429,9 @@ class CompetitionRepository:
                 now,
                 competition_id,
             ),
+        )
+        self._remote_links.refresh_from_slots(
+            db, RemoteEntityKind.COMPETITION, competition_id
         )
 
     def resolve_keep_local(self, db: Any, competition_id: str, now: str) -> None:

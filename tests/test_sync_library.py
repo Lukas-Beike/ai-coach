@@ -11,10 +11,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
+from remote_link_fixtures import create_remote_links_table
+
+from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
 from backend.config import Config
 from backend.db import DatabaseManager, row_factory
+from backend.db.remote_links import RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, INVALID_LIBRARY_ID_ERROR, AppError
 from backend.planning import workouts as planning_workouts
@@ -71,6 +75,7 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
                 "payload TEXT NOT NULL, sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL, "
                 "sync_error TEXT, last_synced_at TEXT, updated_at TEXT NOT NULL)"
             )
+            create_remote_links_table(db)
             db.execute(
                 "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL)"
             )
@@ -160,6 +165,7 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
                         "payload TEXT NOT NULL, sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL, "
                         "sync_error TEXT, last_synced_at TEXT, updated_at TEXT NOT NULL)"
                     )
+                    create_remote_links_table(db)
                     db.execute(
                         "CREATE TABLE planned_units (local_id TEXT PRIMARY KEY, external_id TEXT, "
                         "payload TEXT NOT NULL, sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL)"
@@ -591,6 +597,7 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
                 "payload TEXT NOT NULL, sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL, "
                 "sync_error TEXT, last_synced_at TEXT, updated_at TEXT NOT NULL)"
             )
+            create_remote_links_table(db)
             db.execute(
                 "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL)"
             )
@@ -715,6 +722,94 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         )
         self.assertEqual(synced["external_id"], "remote-created")
         self.assertEqual(self.library_row()["sync_state"], "synced")
+
+    def remote_link(self, local_id=LIBRARY_ID):
+        with self.database_manager.reader() as db:
+            return db.execute(
+                "SELECT remote_external_id, sync_state FROM remote_links "
+                "WHERE entity_kind=? AND local_id=? AND provider=?",
+                (
+                    RemoteEntityKind.LIBRARY_WORKOUT.value,
+                    local_id,
+                    ProviderId.INTERVALS.value,
+                ),
+            ).fetchone()
+
+    def test_sync_entry_assigns_and_changes_the_remote_link_with_the_slot(self):
+        self.add_entry()
+        self.assertIsNone(self.remote_link())
+        self.client.get_workout_library.return_value = []
+        self.client.create_library_workouts.return_value = [
+            {**self.workout(), "id": "remote-created"}
+        ]
+        self.service.sync_entry(LIBRARY_ID)
+        self.assertEqual(self.library_row()["external_id"], "remote-created")
+        self.assertEqual(self.remote_link()["remote_external_id"], "remote-created")
+
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE workout_library SET sync_state='remote_missing', "
+                "sync_dirty=1 WHERE local_id=?",
+                (LIBRARY_ID,),
+            )
+        self.client.get_workout_library.return_value = [
+            {**self.workout(), "id": "remote-recovered"}
+        ]
+        self.service.sync_entry(LIBRARY_ID)
+        self.assertEqual(self.library_row()["external_id"], "remote-recovered")
+        self.assertEqual(self.remote_link()["remote_external_id"], "remote-recovered")
+
+    def test_failed_sync_leaves_slot_and_remote_link_unchanged(self):
+        self.add_entry(state="sync_error", external_id="remote-old")
+        with self.database_manager.unit_of_work() as db:
+            RemoteLinkRepository().refresh_from_slots(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, LIBRARY_ID
+            )
+        self.client.update_library_workout.side_effect = RuntimeError("provider down")
+
+        with self.assertRaisesRegex(RuntimeError, "provider down"):
+            self.service.sync_entry(LIBRARY_ID)
+
+        self.assertEqual(self.library_row()["external_id"], "remote-old")
+        self.assertEqual(self.remote_link()["remote_external_id"], "remote-old")
+
+    def test_failed_finish_keeps_slot_and_remote_link_consistent(self):
+        self.add_entry()
+        self.client.get_workout_library.return_value = []
+        self.client.create_library_workouts.return_value = [
+            {**self.workout(), "id": "remote-created"}
+        ]
+        with (
+            patch.object(
+                WorkoutLibrarySyncStateService,
+                "finish",
+                side_effect=RuntimeError("finish failed"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "finish failed"),
+        ):
+            self.service.sync_entry(LIBRARY_ID)
+
+        row = self.library_row()
+        link = self.remote_link()
+        self.assertEqual(
+            row["external_id"],
+            link["remote_external_id"] if link else None,
+        )
+
+    def test_load_for_sync_prefers_the_remote_link_over_the_legacy_slot(self):
+        self.add_entry(external_id="remote-slot")
+        with self.database_manager.unit_of_work() as db:
+            RemoteLinkRepository().refresh_from_slots(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, LIBRARY_ID
+            )
+            db.execute(
+                "UPDATE remote_links SET remote_external_id='remote-link' "
+                "WHERE local_id=?",
+                (LIBRARY_ID,),
+            )
+        _, loaded, _ = self.state_service.load_for_sync(LIBRARY_ID)
+        self.assertEqual(loaded["external_id"], "remote-link")
+        self.assertEqual(self.library_row()["external_id"], "remote-slot")
 
     def test_sync_entry_already_synced_is_idempotent(self):
         workout = {"sport": "Run", "description": "incomplete"}
@@ -964,6 +1059,7 @@ class WorkoutLibraryRemoteReconcilerTests(unittest.TestCase):
                 "sync_state TEXT NOT NULL DEFAULT 'local', sync_error TEXT, last_synced_at TEXT, "
                 "updated_at TEXT NOT NULL)"
             )
+            create_remote_links_table(db)
         self.ids = iter(
             (
                 "11111111-1111-4111-8111-111111111111",
