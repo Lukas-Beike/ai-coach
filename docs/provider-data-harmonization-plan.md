@@ -831,7 +831,7 @@ gemeinsamen Dateien berührt. Phase 6.2 folgt nach 6.1.
 |---|---|---|
 | W8-1 | `WorkoutExportPort`, Intervals-Adapter in `sync/`, REST-Aufrufe im Client | #1101 |
 | W8-2 | `PlannedWorkoutExport` (Sport, Umgebung), Intervals-Serialisierer in `providers/intervals_workouts.py` | #1102 |
-| W8-3 | Intervals-spezifische Event-Prüfungen aus `planned_calendar.py` in den Adapter | offen |
+| W8-3 | Intervals-spezifische Event-Prüfungen aus `planned_calendar.py` in den Adapter | #1104 |
 | W6-2 | Dual-Write beim Ingest (Intervals, Garmin), ein Schreibpfad für `garmin_snapshot` | #1103 |
 
 Entscheidungen:
@@ -859,6 +859,11 @@ Entscheidungen:
   Planabgleich-Reconciliation landen in derselben Transaktion. Die Cursor folgen
   danach. Ungültige Zeilen werden übersprungen und gezählt. Rohpayloads werden
   vor dem Speichern bereinigt (`observability.sanitized_provider_payload`).
+- **Abrufzeit je Garmin-Abschnitt:** Jede kanonische Garmin-Zeile trägt die
+  Abrufzeit ihres eigenen Abschnitts (`source_freshness`, Morgen-Body-Battery).
+  Ein aus einem früheren Abruf erhaltener Abschnitt behält also seine ältere
+  Zeit. Die Legacy-Projektion stempelt weiter `synced_at`; die Paritätsprüfung
+  in Phase 3 Schritt 5 behandelt diese Abweichung als gewollt.
 
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
