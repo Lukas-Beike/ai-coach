@@ -46,6 +46,26 @@ OLD_RELEASE_ABSENT_PROVIDER_TABLES = (
     "provider_records",
 )
 
+# The released activity_feedback table predates the schema v7 provider column.
+# DROP COLUMN would leave different stored SQL text than a released schema, so
+# the empty table is recreated with its released DDL.
+RELEASED_ACTIVITY_FEEDBACK_SQL = """
+    CREATE TABLE activity_feedback (
+        activity_id TEXT PRIMARY KEY,
+        activity_name TEXT NOT NULL DEFAULT '',
+        activity_date TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        session_rpe REAL CHECK (session_rpe IS NULL OR (session_rpe >= 0 AND session_rpe <= 10)),
+        deviation_reason TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )"""
+
+
+def restore_released_activity_feedback(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE activity_feedback")
+    connection.execute(RELEASED_ACTIVITY_FEEDBACK_SQL)
+
 
 class DatabaseRestoreValidationTests(unittest.TestCase):
     def test_stage_enforces_payload_boundary_and_uses_uuid_filename(self) -> None:
@@ -160,6 +180,7 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 connection.execute(
                     "ALTER TABLE nutrition_logs DROP COLUMN logged_time_known"
                 )
+                restore_released_activity_feedback(connection)
                 for table in OLD_RELEASE_ABSENT_PROVIDER_TABLES:
                     connection.execute(f"DROP TABLE {table}")
                 connection.execute("PRAGMA user_version = 1")
@@ -360,6 +381,7 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 connection.execute(
                     "ALTER TABLE nutrition_logs DROP COLUMN logged_time_known"
                 )
+                restore_released_activity_feedback(connection)
                 for table in OLD_RELEASE_ABSENT_PROVIDER_TABLES:
                     connection.execute(f"DROP TABLE {table}")
                 connection.execute("PRAGMA user_version = 1")
