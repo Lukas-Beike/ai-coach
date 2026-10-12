@@ -63,19 +63,46 @@ def _canonical_metric(observation: Observation, unit: str) -> dict[str, Any]:
     )
 
 
+def _matching_observation(
+    candidates: tuple[Observation, ...], legacy_value: Any
+) -> Observation | None:
+    """Return the sport candidate whose value equals the legacy-selected value.
+
+    The legacy reader takes the first matching sport setting, which is not known
+    here, so any candidate with that same number carries the same value and label.
+    Without a legacy value, or without a matching candidate, the caller keeps the
+    legacy path.
+    """
+    if not legacy_value:
+        return None
+    number = _as_number(legacy_value)
+    if number is None:
+        return None
+    return next(
+        (
+            candidate
+            for candidate in candidates
+            if _as_number(candidate.value.value) == number
+        ),
+        None,
+    )
+
+
 def _threshold_hr_metric(
-    canonical_sport: Observation | None,
+    canonical_sport: tuple[Observation, ...],
     sport_value: Any,
     canonical_athlete: Observation | None,
     athlete_value: Any,
 ) -> dict[str, Any]:
     """Sport threshold HR, then the athlete-wide value, canonical before legacy.
 
-    The legacy sport value (sport setting, then wellness row) and the legacy
-    athlete value stay as fallbacks for values that canonical mapping leaves out.
+    A canonical sport candidate is used only when its value equals the legacy sport
+    value (sport setting, then wellness row). The athlete-wide value is a single
+    athlete field, so its canonical row is unambiguous.
     """
-    if canonical_sport is not None:
-        return _canonical_metric(canonical_sport, "bpm")
+    matched = _matching_observation(canonical_sport, sport_value)
+    if matched is not None:
+        return _canonical_metric(matched, "bpm")
     if sport_value:
         return _metric(sport_value, "bpm", PROVIDER_INTERVALS_NAME)
     if canonical_athlete is not None:
@@ -84,11 +111,12 @@ def _threshold_hr_metric(
 
 
 def _vo2max_metric(
-    canonical_sport: Observation | None, sport_value: Any, athlete_value: Any
+    canonical_sport: tuple[Observation, ...], sport_value: Any, athlete_value: Any
 ) -> dict[str, Any]:
-    """Sport VO2max, canonical first, then the legacy sport and athlete values."""
-    if canonical_sport is not None:
-        return _canonical_metric(canonical_sport, VO2MAX_UNIT)
+    """Sport VO2max: a canonical candidate matching the legacy sport value, else legacy."""
+    matched = _matching_observation(canonical_sport, sport_value)
+    if matched is not None:
+        return _canonical_metric(matched, VO2MAX_UNIT)
     return _metric(sport_value or athlete_value, VO2MAX_UNIT, PROVIDER_INTERVALS_NAME)
 
 
@@ -417,7 +445,7 @@ def _performance_threshold_metrics(
             garmin_metrics,
             "bike_threshold_hr_bpm",
             _threshold_hr_metric(
-                None if canonical is None else canonical.bike_threshold_hr,
+                () if canonical is None else canonical.bike_threshold_hr,
                 bike_lthr,
                 canonical_athlete,
                 generic_lthr,
@@ -427,7 +455,7 @@ def _performance_threshold_metrics(
             garmin_metrics,
             "run_threshold_hr_bpm",
             _threshold_hr_metric(
-                None if canonical is None else canonical.run_threshold_hr,
+                () if canonical is None else canonical.run_threshold_hr,
                 run_lthr,
                 canonical_athlete,
                 generic_lthr,
@@ -462,7 +490,7 @@ def _performance_vo2_and_prediction_metrics(
             garmin_metrics,
             "cycling_vo2max_ml_kg_min",
             _vo2max_metric(
-                None if canonical is None else canonical.cycling_vo2max,
+                () if canonical is None else canonical.cycling_vo2max,
                 cycling_sport_vo2,
                 cycling_athlete_vo2,
             ),
@@ -471,7 +499,7 @@ def _performance_vo2_and_prediction_metrics(
             garmin_metrics,
             "running_vo2max_ml_kg_min",
             _vo2max_metric(
-                None if canonical is None else canonical.running_vo2max,
+                () if canonical is None else canonical.running_vo2max,
                 running_sport_vo2,
                 running_athlete_vo2,
             ),

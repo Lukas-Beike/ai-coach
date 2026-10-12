@@ -12,7 +12,7 @@ import copy
 import unittest
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Final
 
 from canonical_consumer_parity import (
     CASES,
@@ -103,6 +103,37 @@ def _inputs(case: Case) -> CanonicalCurrentInputs:
     return inputs
 
 
+# (sport, Intervals type, legacy metric key, sport-setting field, kind, value)
+SPORT_METRICS: Final = (
+    (Sport.RIDE, "Ride", "bike_threshold_hr_bpm", "lthr", MetricKind.THRESHOLD_HR, 175),
+    (Sport.RUN, "Run", "run_threshold_hr_bpm", "lthr", MetricKind.THRESHOLD_HR, 180),
+    (Sport.RIDE, "Ride", "cycling_vo2max_ml_kg_min", "vo2max", MetricKind.VO2MAX, 55.5),
+    (Sport.RUN, "Run", "running_vo2max_ml_kg_min", "vo2max", MetricKind.VO2MAX, 53.5),
+)
+
+
+def _setting(entry_id: int, sport_type: str, **fields: float) -> dict[str, Any]:
+    return {"id": entry_id, "types": [sport_type], **fields}
+
+
+def _with_sport_settings(settings: list[dict[str, Any]]) -> Case:
+    case = _case("intervals_only")
+    intervals = copy.deepcopy(case.intervals)
+    intervals["athlete"]["sport_settings"] = settings
+    return replace(case, intervals=intervals)
+
+
+def _sync_sport_values(case: Case, sport: Sport, kind: MetricKind) -> list[float]:
+    """Values of this sync's Intervals observations of ``kind`` for ``sport``."""
+    return [
+        observation.value.value
+        for observation in _observations(case)
+        if observation.kind is kind
+        and observation.sport is sport
+        and observation.provenance.provider is ProviderId.INTERVALS
+    ]
+
+
 def _sensor_rows(case: Case, *, retrieved_at: datetime) -> tuple[Observation, ...]:
     """Intervals threshold and VO2max rows of ``case``, re-stamped to ``retrieved_at``."""
     return tuple(
@@ -122,19 +153,14 @@ class CanonicalCurrentParityTests(unittest.TestCase):
             with self.subTest(case=case.name):
                 self.assertEqual(_canonical(case), _legacy(case))
 
-    def test_sport_values_come_from_canonical_observations_when_legacy_lacks_them(
-        self,
-    ) -> None:
+    def test_sport_values_missing_from_the_legacy_snapshot_stay_legacy(self) -> None:
         case = _case("intervals_only")
         without_sport_lthr = copy.deepcopy(case.intervals)
         for setting in without_sport_lthr["athlete"]["sport_settings"]:
             setting.pop("lthr", None)
         variant = replace(case, intervals=without_sport_lthr)
         metrics = _canonical(variant, _observations(case))
-        self.assertEqual(metrics["bike_threshold_hr_bpm"]["value"], 168)
-        self.assertEqual(metrics["bike_threshold_hr_bpm"]["source"], "Intervals.icu")
-        self.assertEqual(metrics["run_threshold_hr_bpm"]["value"], 172)
-        self.assertEqual(metrics["run_threshold_hr_bpm"]["source"], "Intervals.icu")
+        self.assertEqual(metrics, _legacy(variant))
 
     def test_athlete_wide_threshold_is_the_fallback_with_the_general_label(
         self,
@@ -163,9 +189,8 @@ class CanonicalCurrentParityTests(unittest.TestCase):
 
     def test_sport_labels_match_the_legacy_view(self) -> None:
         inputs = _inputs(_case("intervals_only"))
-        assert inputs.bike_threshold_hr is not None
-        assert inputs.cycling_vo2max is not None
-        for observation in (inputs.bike_threshold_hr, inputs.cycling_vo2max):
+        assert inputs.bike_threshold_hr and inputs.cycling_vo2max
+        for observation in (inputs.bike_threshold_hr[0], inputs.cycling_vo2max[0]):
             self.assertEqual(
                 observation_source_label(observation, SourceView.CURRENT_METRIC),
                 "Intervals.icu",
@@ -190,6 +215,46 @@ class CanonicalCurrentParityTests(unittest.TestCase):
         )
         inputs = _read(ObservationStub(garmin_only), case.intervals)
         self.assertIsNone(inputs)
+
+
+class CanonicalSportMatchTests(unittest.TestCase):
+    """A canonical sport value is used only when it equals the legacy-selected value."""
+
+    def test_first_entry_without_the_metric_keeps_the_legacy_value(self) -> None:
+        for _sport, sport_type, key, field, _kind, value in SPORT_METRICS:
+            with self.subTest(key=key):
+                case = _with_sport_settings(
+                    [_setting(1, sport_type), _setting(2, sport_type, **{field: value})]
+                )
+                self.assertEqual(_canonical(case), _legacy(case))
+
+    def test_first_matching_entry_wins_over_a_later_different_value(self) -> None:
+        for sport, sport_type, key, field, kind, value in SPORT_METRICS:
+            with self.subTest(key=key):
+                first, second = value, value + 7
+                case = _with_sport_settings(
+                    [
+                        _setting(1, sport_type, **{field: first}),
+                        _setting(2, sport_type, **{field: second}),
+                    ]
+                )
+                metrics = _canonical(case)
+                self.assertEqual(metrics, _legacy(case))
+                self.assertEqual(metrics[key]["value"], first)
+                self.assertEqual(metrics[key]["source"], "Intervals.icu")
+                self.assertEqual(
+                    sorted(_sync_sport_values(case, sport, kind)), [first, second]
+                )
+
+    def test_single_entry_takes_the_canonical_label_and_value(self) -> None:
+        for sport, sport_type, key, field, kind, value in SPORT_METRICS:
+            with self.subTest(key=key):
+                case = _with_sport_settings([_setting(1, sport_type, **{field: value})])
+                metrics = _canonical(case)
+                self.assertEqual(metrics, _legacy(case))
+                self.assertEqual(metrics[key]["value"], value)
+                self.assertEqual(metrics[key]["source"], "Intervals.icu")
+                self.assertEqual(_sync_sport_values(case, sport, kind), [value])
 
 
 class CanonicalCurrentInputTests(unittest.TestCase):

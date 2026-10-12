@@ -7,9 +7,11 @@ therefore keeps only Intervals rows whose ``retrieved_at`` equals the snapshot's
 athlete-local day always lies inside that window). Rows from older syncs stay in
 the tables and never change the current values.
 
-``select_current`` requires a sport for sport-scoped kinds, so the athlete-wide
-threshold heart rate, which carries no sport, is taken directly from this sync's
-sport-less rows.
+Sport-scoped values keep every candidate of this sync for that sport, because the
+legacy reader takes the first matching sport setting and the caller must match that
+value rather than a canonical pick. The athlete-wide threshold heart rate has no
+sport and comes from the single athlete ``lthr`` field, so this sync stores at most
+one such row and it is taken directly.
 
 Weight is read for the snapshot's latest wellness row (the row the legacy reader
 picks) and for the athlete record of the same sync. Garmin weight stays on the
@@ -28,7 +30,6 @@ from typing import Any, Final
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
-from backend.performance.source_policy import select_current
 from backend.runtime.ports import ObservationReader
 
 _SYNCED_AT: Final = "synced_at"
@@ -36,13 +37,18 @@ _SYNCED_AT: Final = "synced_at"
 
 @dataclass(frozen=True, slots=True)
 class CanonicalCurrentInputs:
-    """The Intervals observations of one sync; None where that sync stored none."""
+    """The Intervals observations of one sync.
 
-    bike_threshold_hr: Observation | None
-    run_threshold_hr: Observation | None
+    Sport-scoped fields hold every observation of this sync for that sport, so the
+    caller can match the legacy-selected sport setting by value. The athlete-wide
+    and weight fields hold one observation or None.
+    """
+
+    bike_threshold_hr: tuple[Observation, ...]
+    run_threshold_hr: tuple[Observation, ...]
     athlete_threshold_hr: Observation | None
-    cycling_vo2max: Observation | None
-    running_vo2max: Observation | None
+    cycling_vo2max: tuple[Observation, ...]
+    running_vo2max: tuple[Observation, ...]
     wellness_weight: Observation | None
     athlete_weight: Observation | None
 
@@ -81,30 +87,35 @@ def read_current_inputs(
         reader, db, MetricKind.WEIGHT, synced, start=weight_start, end=weight_end
     )
     inputs = CanonicalCurrentInputs(
-        bike_threshold_hr=select_current(
-            thresholds, MetricKind.THRESHOLD_HR, sport=Sport.RIDE
-        ),
-        run_threshold_hr=select_current(
-            thresholds, MetricKind.THRESHOLD_HR, sport=Sport.RUN
-        ),
+        bike_threshold_hr=_sport_candidates(thresholds, Sport.RIDE),
+        run_threshold_hr=_sport_candidates(thresholds, Sport.RUN),
         athlete_threshold_hr=_athlete_observation(thresholds),
-        cycling_vo2max=select_current(vo2max, MetricKind.VO2MAX, sport=Sport.RIDE),
-        running_vo2max=select_current(vo2max, MetricKind.VO2MAX, sport=Sport.RUN),
+        cycling_vo2max=_sport_candidates(vo2max, Sport.RIDE),
+        running_vo2max=_sport_candidates(vo2max, Sport.RUN),
         wellness_weight=_wellness_weight(weights, latest_wellness_day),
         athlete_weight=_athlete_weight(weights),
     )
     values = (
-        inputs.bike_threshold_hr,
-        inputs.run_threshold_hr,
+        *inputs.bike_threshold_hr,
+        *inputs.run_threshold_hr,
         inputs.athlete_threshold_hr,
-        inputs.cycling_vo2max,
-        inputs.running_vo2max,
+        *inputs.cycling_vo2max,
+        *inputs.running_vo2max,
         inputs.wellness_weight,
         inputs.athlete_weight,
     )
     if all(value is None for value in values):
         return None
     return inputs
+
+
+def _sport_candidates(
+    observations: tuple[Observation, ...], sport: Sport
+) -> tuple[Observation, ...]:
+    """Return every observation of this sync for ``sport``, in reader order."""
+    return tuple(
+        observation for observation in observations if observation.sport is sport
+    )
 
 
 def _wellness_weight(
