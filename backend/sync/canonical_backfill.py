@@ -137,8 +137,16 @@ class _Work:
     superseded: int = 0
 
 
+# Wahoo has no canonical ingest yet, so persisted backfill counters stay limited
+# to the providers that are actually backfilled.
+_BACKFILL_PROVIDERS = (ProviderId.INTERVALS, ProviderId.GARMIN)
+
+
 def _empty_counters() -> dict[str, dict[str, int]]:
-    return {provider.value: dict.fromkeys(COUNTER_NAMES, 0) for provider in ProviderId}
+    return {
+        provider.value: dict.fromkeys(COUNTER_NAMES, 0)
+        for provider in _BACKFILL_PROVIDERS
+    }
 
 
 def _provider_of(source: str) -> str:

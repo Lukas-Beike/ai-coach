@@ -22,6 +22,7 @@ from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.privacy_restore_post import PrivacyRestorePostRoutes
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.transcribe_post import TranscribePostRoutes
+from backend.http_api.wahoo import WahooPostRoutes
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +42,7 @@ class HttpAuthenticatedPostRoutes:
     nutrition: NutritionPostRoutes
     analysis: AnalysisRoutes | None = None
     equipment: EquipmentPostRoutes | None = None
+    wahoo: WahooPostRoutes | None = None
 
 
 class HttpPostDispatcher:
@@ -69,6 +71,7 @@ class HttpPostDispatcher:
         self._nutrition = authenticated_routes.nutrition
         self._analysis = authenticated_routes.analysis
         self._equipment = authenticated_routes.equipment
+        self._wahoo = authenticated_routes.wahoo
 
     def handle_before_auth(self, handler: Any, path: str) -> bool:
         return self._auth_routes.handle(handler, path) or self._restore_route.handle(
@@ -109,5 +112,7 @@ class HttpPostDispatcher:
         if self._nutrition.handle(handler, path):
             return
         if self._equipment and self._equipment.handle(handler, path):
+            return
+        if self._wahoo and self._wahoo.handle(handler, path):
             return
         raise AppError(404, NOT_FOUND_ERROR)

@@ -571,6 +571,7 @@ class ServerDatabaseTests(ServerTestCase):
                 intervals_api_key="",
                 openai_api_key="",
                 calendar_ical_url="",
+                wahoo_configured=False,
             ),
             settings=settings,
             coach_messages=owner(list=[]),

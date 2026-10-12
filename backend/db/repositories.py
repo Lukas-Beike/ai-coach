@@ -170,6 +170,9 @@ class KeyValueRepository:
             (key, value, self._now()),
         )
 
+    def delete(self, db: Any, key: str) -> None:
+        db.execute("DELETE FROM kv WHERE key = ?", (key,))
+
 
 class SessionRepository:
     """Persist authentication sessions without owning their transaction."""

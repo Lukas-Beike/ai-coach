@@ -748,6 +748,7 @@ class ServerHttpTests(ServerTestCase):
                 "model",
                 "thinking_level",
                 "configured",
+                "wahoo",
                 "usage",
             ],
         )

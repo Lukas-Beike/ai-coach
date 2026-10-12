@@ -10,6 +10,7 @@ from typing import Final
 class ProviderId(StrEnum):
     INTERVALS = "intervals"
     GARMIN = "garmin"
+    WAHOO = "wahoo"
 
 
 class SourceKind(StrEnum):

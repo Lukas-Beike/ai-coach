@@ -30,6 +30,8 @@ REDACTED_URL_QUERY_KEYS = frozenset(
         "apikey",
         "auth",
         "authorization",
+        "client_secret",
+        "code",
         "credential",
         "key",
         "password",
@@ -37,6 +39,7 @@ REDACTED_URL_QUERY_KEYS = frozenset(
         "secret",
         "signature",
         "sig",
+        "state",
         "token",
     }
 )
@@ -267,6 +270,25 @@ def _redact_url(match: re.Match[str]) -> str:
         return "[REDACTED_URL]" + trailing
 
 
+_QUERY_PARAM_RE = re.compile(r"([?&])([^=&\s\"'#]+)=([^&\s\"'#]*)")
+
+
+def redact_request_query(value: str) -> str:
+    """Mask credential-bearing query values in a request target or request line.
+
+    Unlike ``redact_text`` this also handles relative targets such as the OAuth
+    callback path, which never carry a scheme or host.
+    """
+
+    def _mask(match: re.Match[str]) -> str:
+        key = unquote(match.group(2)).casefold().replace("-", "_")
+        if key in REDACTED_URL_QUERY_KEYS:
+            return f"{match.group(1)}{match.group(2)}={_REDACTED}"
+        return match.group(0)
+
+    return _QUERY_PARAM_RE.sub(_mask, str(value or ""))
+
+
 _CREDENTIAL_KEY_MARKERS = (
     "token",
     "secret",
@@ -355,6 +377,7 @@ class Redactor:
             getattr(config, "garmin_tokenstore", ""),
             getattr(config, "garmin_fixture_path", ""),
             getattr(config, "app_password", ""),
+            getattr(config, "wahoo_client_secret", ""),
         )
         for secret_value in secret_values:
             for variant in sorted(
@@ -405,6 +428,7 @@ def _encoded_diagnostic_secrets(config: Config) -> tuple[str, ...]:
         "garmin_email",
         "garmin_password",
         "app_password",
+        "wahoo_client_secret",
         "calendar_ical_url",
     )
     secrets: set[str] = set()

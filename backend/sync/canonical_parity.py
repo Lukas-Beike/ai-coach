@@ -292,7 +292,10 @@ def _compare_activities(
     table: Sequence[ActivityRecord],
     zone: tzinfo,
 ) -> tuple[dict[str, ComparisonCounts], bool]:
-    counts = {provider.value: ComparisonCounts() for provider in ProviderId}
+    counts = {
+        provider.value: ComparisonCounts()
+        for provider in (ProviderId.INTERVALS, ProviderId.GARMIN)
+    }
     legacy_groups = _group(legacy, _activity_key)
     table_groups = _group(table, _activity_key)
     ranges = _ranges(
