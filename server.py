@@ -1721,6 +1721,7 @@ PUBLIC_STATE = PublicStateAssembly(
             key_values=lambda: KEY_VALUE_REPOSITORY,
             key_value_service=key_value_service,
             observation_reader=lambda: CANONICAL_READ,
+            canonical_serving=lambda: CANONICAL_READ,
         ),
         owners=PublicStateOwnerAssemblies(
             snapshot_repository=SNAPSHOT_REPOSITORY,

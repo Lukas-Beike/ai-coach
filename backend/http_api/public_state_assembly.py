@@ -23,7 +23,7 @@ from backend.http_api.state_prelude import (
 )
 from backend.http_api.state_versions import StateVersionService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
-from backend.runtime.ports import ObservationReader
+from backend.runtime.ports import CanonicalTableServing, ObservationReader
 from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.status import SyncPublicStateService
 
@@ -41,6 +41,9 @@ class PublicStateCoreInputs:
     key_value_service: Callable[[], Any]
     # When set, the performance endpoint reads CTL and ATL from canonical observations.
     observation_reader: Callable[[], ObservationReader] | None = None
+    # When set, body history reads weight and body fat from canonical tables while
+    # the tables serve reads.
+    canonical_serving: Callable[[], CanonicalTableServing] | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +126,7 @@ class PublicStateAssembly:
         self._key_values = core.key_values
         self._key_value_service = core.key_value_service
         self._observation_reader = core.observation_reader
+        self._canonical_serving = core.canonical_serving
         self._snapshot_repository = owners.snapshot_repository
         self._sync_persistence = owners.sync_persistence
         self._planning_data = owners.planning_data
@@ -178,7 +182,9 @@ class PublicStateAssembly:
         if self._observation_reader is None:
             return None
         return CanonicalPerformanceSource(
-            self._database_manager, self._observation_reader
+            self._database_manager,
+            self._observation_reader,
+            serving=self._canonical_serving,
         )
 
     def state_version_service(self) -> StateVersionService:

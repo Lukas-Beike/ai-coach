@@ -26,7 +26,11 @@ from backend.performance.canonical_current import (
     read_current_inputs,
 )
 from backend.performance.source_policy import select_current
-from backend.runtime.ports import ObservationReader, ObservationSourceSelector
+from backend.runtime.ports import (
+    CanonicalTableServing,
+    ObservationReader,
+    ObservationSourceSelector,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,11 +52,13 @@ class CanonicalPerformanceSource:
     """Lazy accessors a consumer uses to read canonical load inputs.
 
     Both callables are resolved at read time, as the other assemblies do, so the
-    composition root can pass ``lambda: ...`` accessors.
+    composition root can pass ``lambda: ...`` accessors. ``serving`` is optional;
+    when it is None, consumers that gate table-only reads keep the legacy values.
     """
 
     database_manager: Callable[[], Any]
     observation_reader: Callable[[], ObservationReader]
+    serving: Callable[[], CanonicalTableServing] | None = None
 
 
 def snapshot_with_inputs(
