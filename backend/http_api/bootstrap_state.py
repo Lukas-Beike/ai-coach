@@ -180,6 +180,10 @@ class PublicBootstrapService:
                 ),
                 "provider_freshness": freshness,
                 "provider_states": bootstrap_provider_states(freshness),
+                "provider_labels": {
+                    descriptor.provider_id: descriptor.label
+                    for descriptor in registry.all()
+                },
                 "garmin_sync": {
                     "running": deps.garmin_sync_service().running(),
                     "status": deps.key_values.get_in_transaction(

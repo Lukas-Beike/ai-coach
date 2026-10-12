@@ -32,13 +32,20 @@ def _as_number(value: Any) -> float | int | None:
 
 
 def _metric(
-    value: Any, unit: str, source: str | None, note: str = ""
+    value: Any,
+    unit: str,
+    source: str | None,
+    note: str = "",
+    provider: ProviderId | None = None,
 ) -> dict[str, Any]:
     number = _as_number(value)
     return {
         "value": number,
         "unit": unit,
         "source": source if number is not None else None,
+        "source_provider": (
+            provider.value if provider is not None and number is not None else None
+        ),
         "note": note if number is not None else "",
     }
 
@@ -583,7 +590,9 @@ def garmin_performance_metrics(
     )
     source_keys = _garmin_performance_source_keys(profile_max_hr)
     result = {
-        key: _metric(value, unit, GARMIN_PERFORMANCE_SOURCE, note)
+        key: _metric(
+            value, unit, GARMIN_PERFORMANCE_SOURCE, note, provider=ProviderId.GARMIN
+        )
         for key, (value, unit, note) in units.items()
     }
     for kind in ("cycling", "running"):

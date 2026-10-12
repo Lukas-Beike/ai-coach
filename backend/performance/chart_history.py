@@ -4,8 +4,10 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.vocabulary import ProviderId
 from backend.performance import activity_validation, body, eftp, garmin_metric_history
 from backend.performance.canonical_body import CanonicalBodyInputs
+from backend.performance.display_sources import preferred_providers
 from backend.performance.garmin_load import acute_load_value
 
 INTERVALS_SOURCE = "Intervals.icu"
@@ -131,6 +133,7 @@ def _metric_series(
 ) -> list[dict[str, Any]]:
     if key == "cycling_eftp_watts":
         source = INTERVALS_SOURCE
+        provider = ProviderId.INTERVALS
         observations = eftp.eftp_daily_values(
             list(wellness.values()),
             _rows(raw.get("activities")) + _rows(snapshot.get("recent_activities")),
@@ -139,10 +142,12 @@ def _metric_series(
         )
     else:
         source = "Garmin Connect"
+        provider = ProviderId.GARMIN
         observations = _garmin_values(key, garmin, start, today)
     return [
         {
             "source": source,
+            "source_provider": provider.value,
             "points": [{"date": day, "value": observations.get(day)} for day in dates],
         }
     ]
@@ -203,6 +208,7 @@ def analysis_history(
         },
         "provider_metrics": _provider_metrics(garmin, start, today),
         "metrics": series,
+        "preferred_providers": preferred_providers(),
     }
 
 

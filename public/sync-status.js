@@ -280,7 +280,7 @@ const PROVIDER_LABELS = {
 
 function coachProviderLabel(provider) {
   const key = String(provider || "").trim().toLowerCase();
-  return PROVIDER_LABELS[key] || "Provider";
+  return state.data?.provider_labels?.[key] || PROVIDER_LABELS[key] || "Provider";
 }
 
 
