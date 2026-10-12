@@ -6,6 +6,7 @@ are synthetic and mocked; no account, network or real data directory is used.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -28,6 +29,8 @@ from backend.sync import canonical_ingest as ingest
 
 ZONE = ZoneInfo("Europe/Berlin")
 NOW = "2026-09-20T08:00:00+00:00"
+EARLIER_SYNC = "2026-09-19T08:00:00+00:00"
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers"
 TODAY = date(2026, 9, 20)
 EARLIEST = date(2026, 9, 1)
 RETRIEVED_AT = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
@@ -87,6 +90,24 @@ def observation(value: float) -> Observation:
     )
 
 
+def activity_states(db: sqlite3.Connection) -> dict[str, str]:
+    return dict(
+        db.execute(
+            "SELECT provider_activity_id, state FROM activity_records"
+        ).fetchall()
+    )
+
+
+def stored_payload_text(db: sqlite3.Connection) -> str:
+    return "\n".join(
+        row[0] for row in db.execute("SELECT payload FROM provider_records")
+    )
+
+
+def fixture(provider: str, name: str) -> Any:
+    return json.loads((FIXTURES / provider / name).read_text(encoding="utf-8"))
+
+
 class IngestFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -98,18 +119,6 @@ class IngestFixture(unittest.TestCase):
 
     def count(self, table: str) -> int:
         return int(self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-
-    def states(self) -> dict[str, str]:
-        return dict(
-            self.db.execute(
-                "SELECT provider_activity_id, state FROM activity_records"
-            ).fetchall()
-        )
-
-    def stored_text(self) -> str:
-        return "\n".join(
-            row[0] for row in self.db.execute("SELECT payload FROM provider_records")
-        )
 
 
 class CounterTests(unittest.TestCase):
@@ -202,7 +211,7 @@ class IntervalsIngestTests(IngestFixture):
         self.ingest(intervals_snapshot([intervals_row("i-1"), intervals_row("i-2")]), 3)
         counters = self.ingest(intervals_snapshot([intervals_row("i-1")]), None)
         self.assertEqual(counters.deleted, 0)
-        self.assertEqual(self.states(), {"i-1": "active", "i-2": "active"})
+        self.assertEqual(activity_states(self.db), {"i-1": "active", "i-2": "active"})
 
     def test_incremental_fetch_never_deletes(self) -> None:
         self.ingest(intervals_snapshot([intervals_row("i-1"), intervals_row("i-2")]), 3)
@@ -210,7 +219,7 @@ class IntervalsIngestTests(IngestFixture):
             intervals_snapshot([intervals_row("i-1")], incremental=True), 3
         )
         self.assertEqual(counters.deleted, 0)
-        self.assertEqual(self.states(), {"i-1": "active", "i-2": "active"})
+        self.assertEqual(activity_states(self.db), {"i-1": "active", "i-2": "active"})
 
     def test_full_fetch_deletes_only_missing_activities_inside_its_window(self) -> None:
         self.ingest(intervals_snapshot([intervals_row("old", day="2026-08-20")]), None)
@@ -218,7 +227,8 @@ class IntervalsIngestTests(IngestFixture):
         counters = self.ingest(intervals_snapshot([intervals_row("i-1")]), 3)
         self.assertEqual(counters.deleted, 1)
         self.assertEqual(
-            self.states(), {"old": "active", "i-1": "active", "i-2": "deleted"}
+            activity_states(self.db),
+            {"old": "active", "i-1": "active", "i-2": "deleted"},
         )
 
     def test_full_fetch_never_deletes_on_the_edge_days_of_its_window(self) -> None:
@@ -230,18 +240,19 @@ class IntervalsIngestTests(IngestFixture):
         counters = self.ingest(intervals_snapshot([intervals_row("i-1")]), 3)
         self.assertEqual(counters.deleted, 0)
         self.assertEqual(
-            self.states(), {"i-1": "active", "first": "active", "today": "active"}
+            activity_states(self.db),
+            {"i-1": "active", "first": "active", "today": "active"},
         )
 
     def test_full_fetch_without_an_activity_list_never_deletes(self) -> None:
         self.ingest(intervals_snapshot([intervals_row("i-1")]), 3)
         counters = self.ingest({"synced_at": NOW, "raw_provider_data": {}}, 3)
         self.assertEqual(counters.deleted, 0)
-        self.assertEqual(self.states(), {"i-1": "active"})
+        self.assertEqual(activity_states(self.db), {"i-1": "active"})
 
     def test_secrets_are_not_stored_in_raw_records(self) -> None:
         self.ingest(intervals_snapshot([intervals_row("i-1")]), 3)
-        text = self.stored_text()
+        text = stored_payload_text(self.db)
         self.assertNotIn(SECRET, text)
         self.assertNotIn("X-Amz-Signature", text)
         self.assertIn("i-1", text)
@@ -267,7 +278,7 @@ class GarminIngestTests(IngestFixture):
             self.db, {"synced_at": NOW, "activities": [garmin_row(1)]}, zone=ZONE
         )
         self.assertEqual(counters.deleted, 0)
-        self.assertEqual(self.states(), {"1": "active", "2": "active"})
+        self.assertEqual(activity_states(self.db), {"1": "active", "2": "active"})
 
     def test_secrets_are_removed_from_garmin_raw_records(self) -> None:
         payload = {
@@ -276,10 +287,35 @@ class GarminIngestTests(IngestFixture):
             "sleep": {"apiKey": SECRET, "hours": 7, "download": SIGNED_URL},
         }
         ingest.ingest_garmin_payload(self.db, payload, zone=ZONE)
-        text = self.stored_text()
+        text = stored_payload_text(self.db)
         self.assertNotIn(SECRET, text)
         self.assertNotIn("X-Amz-Signature", text)
         self.assertIn("910010", text)
+
+    def test_a_partial_refresh_keeps_the_fetch_time_of_retained_sections(
+        self,
+    ) -> None:
+        hrv = fixture("garmin", "hrv.json")
+        first = {"synced_at": EARLIER_SYNC, "hrv": hrv, "activities": [garmin_row()]}
+        ingest.ingest_garmin_payload(self.db, first, zone=ZONE)
+        # A later read failed for HRV and activities: both sections are retained.
+        retained = {
+            **first,
+            "synced_at": NOW,
+            "source_freshness": {
+                "hrv": {"freshness": "stale", "fetched_at": EARLIER_SYNC},
+                "activities": {"freshness": "stale", "fetched_at": EARLIER_SYNC},
+            },
+        }
+        counters = ingest.ingest_garmin_payload(self.db, retained, zone=ZONE)
+        self.assertEqual((counters.written, counters.updated), (0, 0))
+        self.assertGreater(counters.unchanged, 0)
+        times = {
+            row[0] for row in self.db.execute("SELECT retrieved_at FROM observations")
+        } | {
+            row[0] for row in self.db.execute("SELECT fetched_at FROM provider_records")
+        }
+        self.assertEqual(times, {EARLIER_SYNC})
 
 
 class PlanObservationTests(IngestFixture):

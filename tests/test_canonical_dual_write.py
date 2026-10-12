@@ -35,7 +35,9 @@ SIGNED_URL = "https://files.invalid/ride.fit?X-Amz-Signature=synthetic-signature
 ZONE = ZoneInfo("Europe/Berlin")
 
 
-def activity(identifier: str, *, kind: str = "Ride", day: str = "2026-09-10") -> dict[str, Any]:
+def activity(
+    identifier: str, *, kind: str = "Ride", day: str = "2026-09-10"
+) -> dict[str, Any]:
     return {
         "id": identifier,
         "start_date_local": f"{day}T07:00:00",
@@ -88,12 +90,31 @@ class FakePlannedReconciler:
         return {"imported": 0, "updated": 0, "conflicts": 0}
 
 
+def activity_states(manager: DatabaseManager) -> dict[str, str]:
+    with manager.reader() as db:
+        return {
+            row["provider_activity_id"]: row["state"]
+            for row in db.execute(
+                "SELECT provider_activity_id, state FROM activity_records"
+            ).fetchall()
+        }
+
+
+def provider_payload_text(manager: DatabaseManager) -> str:
+    with manager.reader() as db:
+        return "\n".join(
+            row["payload"] for row in db.execute("SELECT payload FROM provider_records")
+        )
+
+
 class DualWriteFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.database_path = Path(self.temporary.name) / "dual.db"
-        self.manager = DatabaseManager(self.database_path, sqlite3, row_factory=row_factory)
+        self.manager = DatabaseManager(
+            self.database_path, sqlite3, row_factory=row_factory
+        )
         self.addCleanup(self.close_manager)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.sync_state = SyncStateRepository(
@@ -112,21 +133,6 @@ class DualWriteFixture(unittest.TestCase):
     def value(self, key: str) -> str | None:
         with self.manager.reader() as db:
             return self.key_values.get(db, key)
-
-    def activity_states(self) -> dict[str, str]:
-        with self.manager.reader() as db:
-            return {
-                row["provider_activity_id"]: row["state"]
-                for row in db.execute(
-                    "SELECT provider_activity_id, state FROM activity_records"
-                ).fetchall()
-            }
-
-    def provider_payload_text(self) -> str:
-        with self.manager.reader() as db:
-            return "\n".join(
-                row["payload"] for row in db.execute("SELECT payload FROM provider_records")
-            )
 
 
 class IntervalsDualWriteTests(DualWriteFixture):
@@ -155,9 +161,12 @@ class IntervalsDualWriteTests(DualWriteFixture):
     def test_failure_in_a_canonical_write_rolls_back_the_legacy_snapshot(self) -> None:
         for function in ("upsert_provider_record", "upsert_activity_record"):
             with self.subTest(function=function):
-                with patch.object(
-                    canonical_store, function, side_effect=RuntimeError("boom")
-                ), self.assertRaises(RuntimeError):
+                with (
+                    patch.object(
+                        canonical_store, function, side_effect=RuntimeError("boom")
+                    ),
+                    self.assertRaises(RuntimeError),
+                ):
                     self.service.store_snapshot(
                         intervals_snapshot([activity("i-1")]), 3, None
                     )
@@ -224,7 +233,7 @@ class IntervalsDualWriteTests(DualWriteFixture):
 
     def test_secrets_never_reach_the_provider_records(self) -> None:
         self.service.store_snapshot(intervals_snapshot([activity("i-1")]), 3, None)
-        text = self.provider_payload_text()
+        text = provider_payload_text(self.manager)
         self.assertNotIn(SECRET, text)
         self.assertNotIn("X-Amz-Signature", text)
 
@@ -236,20 +245,24 @@ class IntervalsDualWriteTests(DualWriteFixture):
         self.service.store_snapshot(
             intervals_snapshot([activity("kept")], incremental=True), 3, None
         )
-        self.assertEqual(self.activity_states()["gone"], "active")
+        self.assertEqual(activity_states(self.manager)["gone"], "active")
 
         self.service.store_snapshot(
             intervals_snapshot([activity("kept")]), 3, date(2026, 9, 10)
         )
-        self.assertEqual(self.activity_states()["gone"], "active")
+        self.assertEqual(activity_states(self.manager)["gone"], "active")
 
         self.service.store_snapshot(intervals_snapshot([activity("kept")]), 3, None)
-        self.assertEqual(self.activity_states(), {"kept": "active", "gone": "deleted"})
+        self.assertEqual(
+            activity_states(self.manager), {"kept": "active", "gone": "deleted"}
+        )
 
     def test_restart_with_a_new_manager_keeps_the_canonical_rows(self) -> None:
         self.service.store_snapshot(intervals_snapshot([activity("i-1")]), 3, None)
         self.manager.close()
-        restarted = DatabaseManager(self.database_path, sqlite3, row_factory=row_factory)
+        restarted = DatabaseManager(
+            self.database_path, sqlite3, row_factory=row_factory
+        )
         self.addCleanup(restarted.close)
         # Same-build startup runs the application bootstrap on the populated file.
         with restarted.unit_of_work() as db:
@@ -265,10 +278,16 @@ class IntervalsDualWriteTests(DualWriteFixture):
             )
         with restarted.reader() as db:
             self.assertEqual(
-                db.execute("SELECT COUNT(*) AS n FROM activity_records").fetchone()["n"], 1
+                db.execute("SELECT COUNT(*) AS n FROM activity_records").fetchone()[
+                    "n"
+                ],
+                1,
             )
             self.assertEqual(
-                db.execute("SELECT COUNT(*) AS n FROM provider_records").fetchone()["n"], 1
+                db.execute("SELECT COUNT(*) AS n FROM provider_records").fetchone()[
+                    "n"
+                ],
+                1,
             )
 
 
@@ -289,9 +308,14 @@ class GarminDualWriteTests(DualWriteFixture):
         )
 
     def test_failure_in_a_canonical_write_rolls_back_the_garmin_snapshot(self) -> None:
-        with patch.object(
-            canonical_store, "upsert_activity_record", side_effect=RuntimeError("boom")
-        ), self.assertRaises(RuntimeError):
+        with (
+            patch.object(
+                canonical_store,
+                "upsert_activity_record",
+                side_effect=RuntimeError("boom"),
+            ),
+            self.assertRaises(RuntimeError),
+        ):
             self.service.persist_payload(
                 garmin_payload(garmin_activity(1)), None, date(2026, 9, 20)
             )
@@ -300,14 +324,18 @@ class GarminDualWriteTests(DualWriteFixture):
         self.assertEqual(self.count("provider_records"), 0)
 
     def test_successful_sync_writes_snapshot_and_canonical_rows_together(self) -> None:
-        self.service.persist_payload(garmin_payload(garmin_activity(1)), None, date(2026, 9, 20))
+        self.service.persist_payload(
+            garmin_payload(garmin_activity(1)), None, date(2026, 9, 20)
+        )
         self.assertIsNotNone(self.value(GARMIN_SNAPSHOT_KEY))
         self.assertEqual(self.value("last_garmin_sync_at"), NOW)
         self.assertEqual(self.count("activity_records"), 1)
 
     def test_garmin_secrets_never_reach_the_provider_records(self) -> None:
-        self.service.persist_payload(garmin_payload(garmin_activity(1)), None, date(2026, 9, 20))
-        text = self.provider_payload_text()
+        self.service.persist_payload(
+            garmin_payload(garmin_activity(1)), None, date(2026, 9, 20)
+        )
+        text = provider_payload_text(self.manager)
         self.assertNotIn(SECRET, text)
 
     def test_sync_and_body_battery_share_one_garmin_write_function(self) -> None:
@@ -324,7 +352,11 @@ class GarminDualWriteTests(DualWriteFixture):
             store.persist(
                 date(2026, 9, 19),
                 None,
-                {"status": "ready", "sleep_date": "2026-09-19", "morning": {"value": 75}},
+                {
+                    "status": "ready",
+                    "sleep_date": "2026-09-19",
+                    "morning": {"value": 75},
+                },
                 None,
             )
         self.assertEqual(spy.call_count, 2)

@@ -18,6 +18,7 @@ from backend.canonical.mapping import MappingResult
 from backend.canonical.records import ActivityRecord
 from backend.canonical.vocabulary import ProviderId
 from backend.providers import canonical_plans as plans
+from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.providers.intervals_activity_mapping import map_intervals_activities
 
 ZONE = ZoneInfo("Europe/Berlin")
@@ -194,22 +195,21 @@ class IntervalsPlanTests(unittest.TestCase):
 
 class GarminPlanTests(unittest.TestCase):
     def test_non_mapping_payload_yields_an_empty_plan(self) -> None:
-        plan = plans.garmin_ingest_plan(
-            ["not", "a", "mapping"], zone=ZONE, retrieved_at=RETRIEVED_AT
-        )
+        plan = plans.garmin_ingest_plan(["not", "a", "mapping"], zone=ZONE)
         self.assertEqual(plan, plans.IngestPlan(provider=ProviderId.GARMIN))
 
     def test_activities_are_planned_by_activity_id_and_invalid_ones_counted(
         self,
     ) -> None:
         payload = {
+            "synced_at": RETRIEVED_AT.isoformat(),
             "activities": [
                 garmin_row(),
                 {"activityName": "no identifier"},
                 "junk",
-            ]
+            ],
         }
-        plan = plans.garmin_ingest_plan(payload, zone=ZONE, retrieved_at=RETRIEVED_AT)
+        plan = plans.garmin_ingest_plan(payload, zone=ZONE)
         self.assertEqual(
             [item.record.provenance.source_record_id for item in plan.activities],
             ["910010"],
@@ -219,14 +219,19 @@ class GarminPlanTests(unittest.TestCase):
 
     def test_non_list_activities_are_ignored(self) -> None:
         plan = plans.garmin_ingest_plan(
-            {"activities": None}, zone=ZONE, retrieved_at=RETRIEVED_AT
+            {"synced_at": RETRIEVED_AT.isoformat(), "activities": None}, zone=ZONE
         )
         self.assertEqual(plan.activities, ())
         self.assertEqual(plan.skipped_invalid, 0)
 
     def test_health_sections_become_one_raw_record_each(self) -> None:
-        payload = {"sleep": {"hours": 7}, "hrv": None, "resting_hr": [49]}
-        plan = plans.garmin_ingest_plan(payload, zone=ZONE, retrieved_at=RETRIEVED_AT)
+        payload = {
+            "synced_at": RETRIEVED_AT.isoformat(),
+            "sleep": {"hours": 7},
+            "hrv": None,
+            "resting_hr": [49],
+        }
+        plan = plans.garmin_ingest_plan(payload, zone=ZONE)
         health = [
             (item.source_record_id, dict(item.payload))
             for item in plan.raw_records
@@ -240,3 +245,124 @@ class GarminPlanTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+EARLIER = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
+MORNING = datetime(2026, 10, 11, 5, 30, tzinfo=UTC)
+
+
+def garmin_health_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = {"synced_at": RETRIEVED_AT.isoformat()}
+    for name in plans.GARMIN_HEALTH_SECTION_NAMES:
+        path = FIXTURES / "garmin" / f"{name}.json"
+        if path.exists():
+            payload[name] = fixture("garmin", f"{name}.json")
+    return payload
+
+
+class GarminSectionTimeTests(unittest.TestCase):
+    def test_sections_mapped_one_by_one_match_one_whole_payload_mapping(self) -> None:
+        payload = garmin_health_payload()
+        whole = map_garmin_health(payload, zone=ZONE, retrieved_at=RETRIEVED_AT)
+        plan = plans.garmin_ingest_plan(payload, zone=ZONE)
+        self.assertGreater(len(whole.records), 0)
+        self.assertEqual(
+            [item.observation for item in plan.observations], list(whole.records)
+        )
+
+    def test_a_retained_section_keeps_the_time_of_the_read_that_fetched_it(
+        self,
+    ) -> None:
+        payload = garmin_health_payload()
+        payload["source_freshness"] = {
+            "hrv": {"freshness": "stale", "fetched_at": EARLIER.isoformat()},
+            "sleep": {"freshness": "current", "fetched_at": RETRIEVED_AT.isoformat()},
+        }
+        payload["activities"] = [garmin_row()]
+        plan = plans.garmin_ingest_plan(payload, zone=ZONE)
+        raw_times = {
+            item.source_record_id: item.retrieved_at for item in plan.raw_records
+        }
+        self.assertEqual(raw_times["hrv"], EARLIER)
+        self.assertEqual(raw_times["sleep"], RETRIEVED_AT)
+        self.assertEqual(raw_times["910010"], RETRIEVED_AT)
+        self.assertEqual(plan.activities[0].retrieved_at, RETRIEVED_AT)
+        hrv = [
+            item.observation.provenance.retrieved_at
+            for item in plan.observations
+            if item.observation.kind.value.startswith("hrv")
+        ]
+        self.assertTrue(hrv)
+        self.assertEqual(set(hrv), {EARLIER})
+
+    def test_a_successful_morning_refresh_stamps_body_battery_only(self) -> None:
+        payload = {
+            "synced_at": EARLIER.isoformat(),
+            "body_battery": fixture("garmin", "body_battery.json"),
+            "sleep": fixture("garmin", "sleep.json"),
+            "morning_body_battery": {"attempted_at": MORNING.isoformat()},
+        }
+        self.assertEqual(
+            plans.garmin_section_retrieved_at(payload, "body_battery", zone=ZONE),
+            MORNING,
+        )
+        self.assertEqual(
+            plans.garmin_section_retrieved_at(payload, "sleep", zone=ZONE), EARLIER
+        )
+        self.assertEqual(plans.garmin_payload_retrieved_at(payload, zone=ZONE), MORNING)
+
+    def test_an_older_or_failed_morning_attempt_does_not_restamp_body_battery(
+        self,
+    ) -> None:
+        older = {
+            "synced_at": RETRIEVED_AT.isoformat(),
+            "morning_body_battery": {"attempted_at": EARLIER.isoformat()},
+        }
+        failed = {
+            "synced_at": EARLIER.isoformat(),
+            "morning_body_battery": {
+                "attempted_at": MORNING.isoformat(),
+                "error": "unavailable",
+            },
+        }
+        unparsable = {
+            "synced_at": EARLIER.isoformat(),
+            "morning_body_battery": {"attempted_at": "not a time"},
+        }
+        for payload, expected in (
+            (older, RETRIEVED_AT),
+            (failed, EARLIER),
+            (unparsable, EARLIER),
+        ):
+            with self.subTest(expected=expected):
+                self.assertEqual(
+                    plans.garmin_section_retrieved_at(
+                        payload, "body_battery", zone=ZONE
+                    ),
+                    expected,
+                )
+
+    def test_a_payload_without_any_sync_time_keeps_only_dated_sections(self) -> None:
+        payload = {
+            "activities": [garmin_row()],
+            "sleep": fixture("garmin", "sleep.json"),
+            "body_battery": fixture("garmin", "body_battery.json"),
+            "morning_body_battery": {"attempted_at": MORNING.isoformat()},
+        }
+        plan = plans.garmin_ingest_plan(payload, zone=ZONE)
+        self.assertEqual(plan.activities, ())
+        self.assertEqual(
+            [item.source_record_id for item in plan.raw_records], ["body_battery"]
+        )
+        self.assertEqual(plan.raw_records[0].retrieved_at, MORNING)
+        # Body Battery maps to no observation, and the undated sleep section is left out.
+        self.assertEqual(plan.observations, ())
+        self.assertEqual(plans.garmin_payload_retrieved_at(payload, zone=ZONE), MORNING)
+
+    def test_no_fetch_time_at_all_gives_none(self) -> None:
+        self.assertIsNone(plans.garmin_payload_retrieved_at({}, zone=ZONE))
+        self.assertIsNone(plans.garmin_payload_retrieved_at(["junk"], zone=ZONE))
+        self.assertEqual(
+            plans.garmin_ingest_plan({"sleep": {"hours": 7}}, zone=ZONE),
+            plans.IngestPlan(provider=ProviderId.GARMIN),
+        )

@@ -5,6 +5,10 @@ record is skipped and counted, so one malformed row never blocks the rest of a
 payload. Raw records keep the provider rows as fetched; the sync layer sanitizes
 them before they are stored. Activities are mapped from the full raw rows, not
 from the compact read model used by the legacy snapshot projection.
+
+A Garmin payload keeps sections from earlier reads when a refresh fails or skips
+them. Each Garmin section is therefore stamped with the time it was fetched, not
+with the payload's latest sync time.
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, tzinfo
 from typing import Any, Final
 
-from backend.canonical.local_time import local_date
+from backend.canonical.local_time import local_date, parse_provider_datetime
 from backend.canonical.mapping import MappingResult
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import ProviderId
@@ -29,6 +33,7 @@ from backend.providers.garmin_health_mapping import (
 from backend.providers.garmin_health_mapping import (
     MAPPER_VERSION as GARMIN_HEALTH_VERSION,
 )
+from backend.providers.garmin_weight_walk import WEIGHT_SECTIONS
 from backend.providers.intervals_activity_mapping import (
     MAPPER_VERSION as INTERVALS_ACTIVITY_VERSION,
 )
@@ -52,6 +57,16 @@ INTERVALS_ACTIVITY_ID_KEY: Final = "id"
 INTERVALS_WELLNESS_ID_KEY: Final = "id"
 GARMIN_ACTIVITY_ID_KEY: Final = "activityId"
 
+GARMIN_SYNCED_AT_KEY: Final = "synced_at"
+GARMIN_FRESHNESS_KEY: Final = "source_freshness"
+GARMIN_FETCHED_AT_KEY: Final = "fetched_at"
+GARMIN_ACTIVITIES_SECTION: Final = "activities"
+GARMIN_WEIGHT_SECTION: Final = "weight"
+GARMIN_BODY_BATTERY_SECTION: Final = "body_battery"
+GARMIN_MORNING_BATTERY_KEY: Final = "morning_body_battery"
+GARMIN_MORNING_ATTEMPTED_AT_KEY: Final = "attempted_at"
+GARMIN_MORNING_ERROR_KEY: Final = "error"
+
 
 @dataclass(frozen=True, slots=True)
 class RawRecord:
@@ -61,6 +76,8 @@ class RawRecord:
     source_record_id: str
     payload: Mapping[str, Any]
     mapper_version: int
+    # When the row was fetched; None means the ingest's own retrieval time.
+    retrieved_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +87,8 @@ class ActivityItem:
     record: ActivityRecord
     local_date: date
     mapper_version: int
+    # When the row was fetched; None means the ingest's own retrieval time.
+    retrieved_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +146,10 @@ def intervals_ingest_plan(
     if isinstance(athlete, dict):
         raw_records.append(
             RawRecord(
-                ATHLETE_RECORD_KIND, ATHLETE_RECORD_ID, athlete, INTERVALS_WELLNESS_VERSION
+                ATHLETE_RECORD_KIND,
+                ATHLETE_RECORD_ID,
+                athlete,
+                INTERVALS_WELLNESS_VERSION,
             )
         )
         thresholds = map_intervals_athlete_thresholds(
@@ -151,39 +173,119 @@ def intervals_ingest_plan(
     )
 
 
-def garmin_ingest_plan(
-    payload: object, *, zone: tzinfo, retrieved_at: datetime
-) -> IngestPlan:
-    """Plan the canonical rows of one stored Garmin payload."""
+def garmin_section_retrieved_at(
+    payload: Mapping[str, Any], section: str, *, zone: tzinfo
+) -> datetime | None:
+    """Return when one Garmin section was fetched, or None when that is unknown.
+
+    The section's own source-freshness time wins over the payload's sync time,
+    so a section retained from an earlier read keeps that read's time. Body
+    Battery also takes the morning refresh, which merges new records without
+    advancing the payload's sync time; a failed morning attempt does not count.
+    """
+    freshness = _mapping(_mapping(payload.get(GARMIN_FRESHNESS_KEY)).get(section))
+    section_time = parse_provider_datetime(
+        freshness.get(GARMIN_FETCHED_AT_KEY), zone
+    ) or parse_provider_datetime(payload.get(GARMIN_SYNCED_AT_KEY), zone)
+    if section != GARMIN_BODY_BATTERY_SECTION:
+        return section_time
+    morning = _mapping(payload.get(GARMIN_MORNING_BATTERY_KEY))
+    if GARMIN_MORNING_ERROR_KEY in morning:
+        return section_time
+    attempted = parse_provider_datetime(
+        morning.get(GARMIN_MORNING_ATTEMPTED_AT_KEY), zone
+    )
+    if attempted is None or (section_time is not None and section_time >= attempted):
+        return section_time
+    return attempted
+
+
+def garmin_payload_retrieved_at(payload: object, *, zone: tzinfo) -> datetime | None:
+    """Return the latest time any part of a stored Garmin payload was fetched."""
+    if not isinstance(payload, Mapping):
+        return None
+    sections = (GARMIN_ACTIVITIES_SECTION, *GARMIN_HEALTH_SECTION_NAMES)
+    times = [
+        time
+        for time in (
+            parse_provider_datetime(payload.get(GARMIN_SYNCED_AT_KEY), zone),
+            *(
+                garmin_section_retrieved_at(payload, section, zone=zone)
+                for section in sections
+            ),
+        )
+        if time is not None
+    ]
+    return max(times, default=None)
+
+
+def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
+    """Plan the canonical rows of one stored Garmin payload.
+
+    Every section is mapped with its own fetch time. A section whose fetch time
+    is unknown is left out.
+    """
     if not isinstance(payload, Mapping):
         return IngestPlan(provider=ProviderId.GARMIN)
-    activity_rows, raw_records, skipped, present = _activity_batch(
-        payload.get("activities"),
-        id_key=GARMIN_ACTIVITY_ID_KEY,
-        mapper=lambda rows: map_garmin_activities(
-            rows, zone=zone, retrieved_at=retrieved_at
-        ),
-        mapper_version=GARMIN_ACTIVITY_VERSION,
-        zone=zone,
+    activity_rows: list[ActivityItem] = []
+    raw_records: list[RawRecord] = []
+    skipped = 0
+    present: set[str] = set()
+    activities_at = garmin_section_retrieved_at(
+        payload, GARMIN_ACTIVITIES_SECTION, zone=zone
     )
+    if activities_at is not None:
+        activity_rows, raw_records, skipped, present = _activity_batch(
+            payload.get(GARMIN_ACTIVITIES_SECTION),
+            id_key=GARMIN_ACTIVITY_ID_KEY,
+            mapper=lambda rows: map_garmin_activities(
+                rows, zone=zone, retrieved_at=activities_at
+            ),
+            mapper_version=GARMIN_ACTIVITY_VERSION,
+            zone=zone,
+            retrieved_at=activities_at,
+        )
+    observations: list[ObservationItem] = []
     for name in GARMIN_HEALTH_SECTION_NAMES:
+        section_at = garmin_section_retrieved_at(payload, name, zone=zone)
+        if section_at is None:
+            continue
         value = payload.get(name)
         if value is not None:
             raw_records.append(
-                RawRecord(HEALTH_RECORD_KIND, name, {"data": value}, GARMIN_HEALTH_VERSION)
+                RawRecord(
+                    HEALTH_RECORD_KIND,
+                    name,
+                    {"data": value},
+                    GARMIN_HEALTH_VERSION,
+                    retrieved_at=section_at,
+                )
             )
-    health = map_garmin_health(payload, zone=zone, retrieved_at=retrieved_at)
+        health = map_garmin_health(
+            _health_sections(payload, name), zone=zone, retrieved_at=section_at
+        )
+        observations.extend(
+            ObservationItem(observation, GARMIN_HEALTH_VERSION)
+            for observation in health.records
+        )
     return IngestPlan(
         provider=ProviderId.GARMIN,
         raw_records=tuple(raw_records),
         activities=tuple(activity_rows),
-        observations=tuple(
-            ObservationItem(observation, GARMIN_HEALTH_VERSION)
-            for observation in health.records
-        ),
+        observations=tuple(observations),
         present_activity_ids=frozenset(present),
         skipped_invalid=skipped,
     )
+
+
+def _health_sections(payload: Mapping[str, Any], name: str) -> dict[str, Any]:
+    """Return the payload sections the health mapper reads for one section name."""
+    names = WEIGHT_SECTIONS if name == GARMIN_WEIGHT_SECTION else (name,)
+    return {key: payload[key] for key in names if key in payload}
+
+
+def _mapping(value: object) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
 
 
 def _activity_batch(
@@ -193,6 +295,7 @@ def _activity_batch(
     mapper: Callable[[list[Any]], MappingResult[ActivityRecord]],
     mapper_version: int,
     zone: tzinfo,
+    retrieved_at: datetime | None = None,
 ) -> tuple[list[ActivityItem], list[RawRecord], int, set[str]]:
     """Map activity rows one by one so each invalid row is counted on its own.
 
@@ -217,12 +320,21 @@ def _activity_batch(
             continue
         record = mapped[0]
         present.add(source_id)
-        raw_records.append(RawRecord(ACTIVITY_RECORD_KIND, source_id, row, mapper_version))
+        raw_records.append(
+            RawRecord(
+                ACTIVITY_RECORD_KIND,
+                source_id,
+                row,
+                mapper_version,
+                retrieved_at=retrieved_at,
+            )
+        )
         items.append(
             ActivityItem(
                 record=record,
                 local_date=local_date(record.started_at, zone),
                 mapper_version=mapper_version,
+                retrieved_at=retrieved_at,
             )
         )
     return items, raw_records, skipped, present

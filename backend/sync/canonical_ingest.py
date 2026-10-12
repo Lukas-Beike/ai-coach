@@ -25,6 +25,7 @@ from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
     IngestPlan,
     garmin_ingest_plan,
+    garmin_payload_retrieved_at,
     intervals_ingest_plan,
 )
 from backend.providers.snapshot_projection import stored_retrieved_at
@@ -135,11 +136,15 @@ def ingest_intervals_snapshot(
 def ingest_garmin_payload(
     db: Any, payload: Mapping[str, Any], *, zone: tzinfo
 ) -> CanonicalIngestCounters:
-    """Write one stored Garmin payload. Garmin never deletes, so no window is passed."""
-    retrieved_at = stored_retrieved_at(payload, zone=zone)
+    """Write one stored Garmin payload. Garmin never deletes, so no window is passed.
+
+    Rows keep the fetch time of their own section; the latest fetch time of the
+    payload is the write time. A payload without any fetch time writes nothing.
+    """
+    retrieved_at = garmin_payload_retrieved_at(payload, zone=zone)
     if retrieved_at is None:
         return CanonicalIngestCounters()
-    plan = garmin_ingest_plan(payload, zone=zone, retrieved_at=retrieved_at)
+    plan = garmin_ingest_plan(payload, zone=zone)
     return ingest_plan(db, plan, retrieved_at=retrieved_at, deletion_window=None)
 
 
@@ -162,7 +167,7 @@ def ingest_plan(
             source_record_id=raw.source_record_id,
             payload=sanitized_provider_payload(raw.payload),
             mapper_version=raw.mapper_version,
-            fetched_at=stamp,
+            fetched_at=_fetched_at(raw.retrieved_at, stamp),
             now=stamp,
         )
     for activity in plan.activities:
@@ -172,7 +177,7 @@ def ingest_plan(
                 activity.record,
                 local_date=activity.local_date,
                 mapper_version=activity.mapper_version,
-                fetched_at=stamp,
+                fetched_at=_fetched_at(activity.retrieved_at, stamp),
                 now=stamp,
             )
         )
@@ -200,3 +205,8 @@ def ingest_plan(
             now=stamp,
         )
     return counters
+
+
+def _fetched_at(row_time: datetime | None, stamp: str) -> str:
+    """Return a row's own fetch time, or the ingest stamp when it has none."""
+    return stamp if row_time is None else row_time.isoformat()
