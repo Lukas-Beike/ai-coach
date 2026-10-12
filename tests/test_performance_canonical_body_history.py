@@ -413,6 +413,12 @@ class CanonicalBodyInputTests(unittest.TestCase):
         )
 
 
+# The body-history windows. Current-metric reads also read WEIGHT (U5) over other
+# windows, so the closed-gate assertions check these exact body windows.
+BODY_WEIGHT_WINDOW = (MetricKind.WEIGHT, TODAY - timedelta(days=90), TODAY)
+BODY_FAT_WINDOW = (MetricKind.BODY_FAT, TODAY - timedelta(days=83), TODAY)
+
+
 class CanonicalBodyPublicStateTests(unittest.TestCase):
     def test_body_history_reads_inside_the_unit_of_work(self) -> None:
         case = CASES[0]
@@ -513,9 +519,9 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
             legacy["performance"]["history"]["body"],
             state["performance"]["history"]["body"],
         )
-        kinds = {kind for kind, _start, _end in reader.calls}
-        self.assertNotIn(MetricKind.WEIGHT, kinds)
-        self.assertNotIn(MetricKind.BODY_FAT, kinds)
+        self.assertNotIn(BODY_FAT_WINDOW, reader.calls)
+        self.assertNotIn(BODY_WEIGHT_WINDOW, reader.calls)
+        self.assertNotIn(MetricKind.BODY_FAT, {kind for kind, _s, _e in reader.calls})
 
     def test_source_without_serving_never_reads_body_kinds(self) -> None:
         case = CASES[0]
@@ -525,9 +531,9 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
             observation_reader=lambda: reader,
         )
         _service(case.intervals, case.garmin, source).performance_state()
-        kinds = {kind for kind, _start, _end in reader.calls}
-        self.assertNotIn(MetricKind.WEIGHT, kinds)
-        self.assertNotIn(MetricKind.BODY_FAT, kinds)
+        self.assertNotIn(BODY_FAT_WINDOW, reader.calls)
+        self.assertNotIn(BODY_WEIGHT_WINDOW, reader.calls)
+        self.assertNotIn(MetricKind.BODY_FAT, {kind for kind, _s, _e in reader.calls})
 
 
 class CanonicalBodyFallbackTests(unittest.TestCase):

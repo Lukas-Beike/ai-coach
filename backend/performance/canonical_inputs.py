@@ -106,7 +106,24 @@ def load_performance_inputs(
 
     A selecting reader chooses its source once, so both reads use the same source.
     """
-    reader = resolve_reader(reader, db)
+    return _load_resolved(
+        resolve_reader(reader, db),
+        db,
+        latest_wellness_day=latest_wellness_day,
+        start=start,
+        end=end,
+    )
+
+
+def _load_resolved(
+    reader: ObservationReader,
+    db: Any,
+    *,
+    latest_wellness_day: date,
+    start: date,
+    end: date,
+) -> CanonicalPerformanceInputs:
+    """Read CTL and ATL from an already-resolved reader."""
     return CanonicalPerformanceInputs(
         wellness_day=latest_wellness_day,
         ctl=_current_value(
@@ -156,9 +173,8 @@ def read_performance_inputs(
     if latest_day is None:
         return None
     days = [day for day in map(_row_day, rows) if day is not None]
-    if isinstance(reader, ObservationSourceSelector):
-        reader = reader.reader_for(db)
-    loaded = load_performance_inputs(
+    reader = resolve_reader(reader, db)
+    loaded = _load_resolved(
         reader,
         db,
         latest_wellness_day=latest_day,
