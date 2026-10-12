@@ -14,7 +14,7 @@ keeps its existing not-found or validation response.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 from backend.canonical.vocabulary import ActivitySessionState, ProviderId
 from backend.db import canonical_store
@@ -52,6 +52,23 @@ class ActivityReferences(ActivityReferenceResolver):
             return canonical_store.activity_local_ids(
                 db, ProviderId.INTERVALS.value, ids
             )
+
+
+DUPLICATE_ID_FIELDS: Final = ("canonical_id", "duplicate_id")
+
+
+def resolve_duplicate_ids(payload: Any, references: ActivityReferenceResolver) -> Any:
+    """Return a duplicate-deletion payload with both activity ids resolved."""
+    if not isinstance(payload, dict):
+        return payload
+    return {
+        **payload,
+        **{
+            key: references.resolve(payload[key])
+            for key in DUPLICATE_ID_FIELDS
+            if key in payload
+        },
+    }
 
 
 class NoActivityReferences(ActivityReferenceResolver):

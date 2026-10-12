@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from backend.activities.activity_reference import ActivityReferences
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.proposal_execution import CoachProposalExecutionService
@@ -80,14 +81,16 @@ class CoachProposalAssembly:
         return CoachProposalReadService(self._database_manager(), now=self._now)
 
     def creation_service(self) -> CoachProposalCreationService:
+        manager = self._database_manager()
         return CoachProposalCreationService(
-            self._database_manager(),
+            manager,
             self._sync_state_repository(),
             now=self._now,
             utc_now=self._utc_now,
             uuid_factory=self._uuid_factory,
             nutrition_diary_service=self._nutrition_diary_service,
             nutrition_meal_library_service=self._nutrition_meal_library_service,
+            references=ActivityReferences(manager),
         )
 
     def confirmation_service(self) -> CoachProposalConfirmationService:

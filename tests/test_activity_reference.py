@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, Mock, patch
 from backend.activities.activity_reference import (
     ActivityReferences,
     NoActivityReferences,
+    resolve_duplicate_ids,
 )
 from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.duplicate_service import DuplicateActivityService
@@ -161,6 +162,25 @@ class ActivityReferenceResolverTests(_Fixture):
         references = NoActivityReferences()
         self.assertEqual("act_x", references.resolve("act_x"))
         self.assertEqual({}, references.local_ids(["ride-1"]))
+
+
+class DuplicateIdResolutionTests(unittest.TestCase):
+    def test_resolves_only_present_duplicate_fields(self) -> None:
+        references = Mock()
+        references.resolve.side_effect = lambda value: f"resolved-{value}"
+
+        self.assertEqual(
+            resolve_duplicate_ids(
+                {"canonical_id": "act_a", "snapshot_synced_at": "t"}, references
+            ),
+            {"canonical_id": "resolved-act_a", "snapshot_synced_at": "t"},
+        )
+
+    def test_non_mapping_payload_is_returned_unchanged(self) -> None:
+        references = Mock()
+
+        self.assertIsNone(resolve_duplicate_ids(None, references))
+        references.resolve.assert_not_called()
 
 
 class ActivityReadReferenceTests(_Fixture):

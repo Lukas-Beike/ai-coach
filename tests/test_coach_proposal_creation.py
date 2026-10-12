@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 from uuid import UUID
 
@@ -20,6 +21,18 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.nutrition.food_database import FoodDatabaseService
+
+_LOCAL_IDS = {"act_wahoo": "wahoo-1", "act_garmin": "garmin-1"}
+
+
+class _LocalIds:
+    def resolve(self, reference: object) -> object:
+        if not isinstance(reference, str):
+            return reference
+        return _LOCAL_IDS.get(reference, reference)
+
+    def local_ids(self, provider_activity_ids: object) -> dict[str, str]:
+        return {}
 
 
 class CoachProposalCreationTests(unittest.TestCase):
@@ -38,8 +51,8 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.database_manager.close()
         self.temporary_directory.cleanup()
 
-    def _service(self, **overrides: object) -> CoachProposalCreationService:
-        options = {
+    def _service(self, **overrides: Any) -> CoachProposalCreationService:
+        options: dict[str, Any] = {
             "now": lambda: 100.0,
             "utc_now": lambda: "2026-09-23T10:11:12+00:00",
             "uuid_factory": lambda: UUID("abc12345-6789-4abc-8def-0123456789ab"),
@@ -628,6 +641,71 @@ class CoachProposalCreationTests(unittest.TestCase):
         )
         self.assertEqual(len(self._rows()), 1)
         self.sync_state_repository.latest_snapshot.assert_called_once_with()
+
+    def test_duplicate_delete_resolves_local_ids_before_validation(self) -> None:
+        current_time = "2026-08-29T10:00:00+00:00"
+        self.sync_state_repository.latest_snapshot.return_value = (
+            self._duplicate_snapshot(current_time)
+        )
+        values = self._delete_duplicate(current_time)
+        values["payload"] = {
+            "canonical_id": "act_wahoo",
+            "duplicate_id": "act_garmin",
+            "snapshot_synced_at": current_time,
+        }
+
+        self._service(references=_LocalIds()).create(values, "session")
+
+        payload = json.loads(str(self._rows()[0]["payload"]))
+        self.assertEqual(
+            (payload["canonical_id"], payload["duplicate_id"]),
+            ("wahoo-1", "garmin-1"),
+        )
+
+    def test_duplicate_remote_write_resolves_local_ids_before_manifest(self) -> None:
+        self.sync_state_repository.latest_snapshot.return_value = (
+            self._duplicate_snapshot("2026-08-29T10:00:00+00:00")
+        )
+        intent = {
+            "operation": "delete_duplicate_intervals_activity",
+            "intent": "remote_delete",
+            "target_system": "intervals",
+            "authorization_scope": ["intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [8]},
+        }
+
+        self._service(references=_LocalIds()).create_remote_write(
+            "delete_duplicate_intervals_activity",
+            {"canonical_id": "act_wahoo", "duplicate_id": "act_garmin"},
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+
+        arguments = json.loads(str(self._rows()[0]["payload"]))["arguments"]
+        self.assertEqual(
+            (arguments["canonical_id"], arguments["duplicate_id"]),
+            ("wahoo-1", "garmin-1"),
+        )
+        self.assertEqual(arguments["_approval_manifest"]["duplicate_id"], "garmin-1")
+
+    def test_unresolved_local_duplicate_id_still_conflicts(self) -> None:
+        self.sync_state_repository.latest_snapshot.return_value = (
+            self._duplicate_snapshot("2026-08-29T10:00:00+00:00")
+        )
+        with self.assertRaises(AppError) as error:
+            self._service(references=_LocalIds()).create_remote_write(
+                "delete_duplicate_intervals_activity",
+                {"canonical_id": "act_unknown", "duplicate_id": "garmin-1"},
+                {"request": {"remote_write": True, "source_message_ids": [8]}},
+                conversation_id="conversation-1",
+                client_turn_id="turn-1",
+                session_csrf_hash="session-1",
+            )
+
+        self.assertEqual(error.exception.status, 409)
+        self.assertEqual(self._rows(), [])
 
     def test_stale_duplicate_snapshot_rejects_before_id_clock_or_insert(self) -> None:
         self.sync_state_repository.latest_snapshot.return_value = (

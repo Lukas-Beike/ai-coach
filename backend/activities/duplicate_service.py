@@ -7,6 +7,7 @@ from typing import Any
 from backend.activities.activity_reference import (
     ActivityReferenceResolver,
     NoActivityReferences,
+    resolve_duplicate_ids,
 )
 from backend.activities.duplicates import (
     latest_wahoo_garmin_duplicate,
@@ -39,22 +40,10 @@ class DuplicateActivityService:
         with self._database_manager.unit_of_work() as db:
             return self._snapshot_reader.latest_snapshot(db)
 
-    def _resolved_payload(self, payload: Any) -> Any:
-        if not isinstance(payload, dict):
-            return payload
-        return {
-            **payload,
-            **{
-                key: self._references.resolve(payload[key])
-                for key in ("canonical_id", "duplicate_id")
-                if key in payload
-            },
-        }
-
     def delete(self, payload: Any, intervals_client: Any) -> dict[str, Any]:
         """Delete the confirmed Garmin copy and retain the Wahoo activity."""
         current = latest_wahoo_garmin_duplicate(self._latest_snapshot() or {})
-        payload = self._resolved_payload(payload)
+        payload = resolve_duplicate_ids(payload, self._references)
         canonical_id, duplicate_id = validate_duplicate_delete(payload, current)
 
         intervals_client.delete_activity(duplicate_id)

@@ -9,6 +9,11 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from backend.activities.activity_reference import (
+    ActivityReferenceResolver,
+    NoActivityReferences,
+    resolve_duplicate_ids,
+)
 from backend.activities.duplicates import (
     latest_wahoo_garmin_duplicate,
     validate_duplicate_delete,
@@ -57,8 +62,10 @@ class CoachProposalCreationService:
         uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
         nutrition_diary_service: Callable[[], Any] | None = None,
         nutrition_meal_library_service: Callable[[], Any] | None = None,
+        references: ActivityReferenceResolver | None = None,
     ) -> None:
         self._database_manager = database_manager
+        self._references = NoActivityReferences() if references is None else references
         self._sync_state_repository = sync_state_repository
         self._ttl_seconds = ttl_seconds
         self._now = now
@@ -72,6 +79,7 @@ class CoachProposalCreationService:
             validated_coach_action_preview_input(values)
         )
         if action_type == "delete_duplicate_intervals_activity":
+            payload = resolve_duplicate_ids(payload, self._references)
             validate_duplicate_delete(
                 payload,
                 latest_wahoo_garmin_duplicate(
@@ -150,6 +158,7 @@ class CoachProposalCreationService:
             database_manager=self._database_manager,
             sync_state_repository=self._sync_state_repository,
             nutrition_diary_service=self._nutrition_diary_service,
+            references=self._references,
         )
         approval_manifest = payload["arguments"].get("_approval_manifest")
         approval_details = _remote_write_approval_details(
@@ -310,6 +319,7 @@ def _approved_remote_arguments(
     database_manager: DatabaseManager,
     sync_state_repository: Any,
     nutrition_diary_service: Callable[[], Any] | None,
+    references: ActivityReferenceResolver,
 ) -> dict[str, Any]:
     if tool == "start_intervals_plan_sync":
         return _approved_plan_sync_arguments(arguments, intent, database_manager)
@@ -317,7 +327,9 @@ def _approved_remote_arguments(
         with database_manager.reader() as db:
             return {**arguments, "_approval_manifest": competition_push_manifest(db)}
     if tool == "delete_duplicate_intervals_activity":
-        return _duplicate_approval_arguments(arguments, sync_state_repository)
+        return _duplicate_approval_arguments(
+            resolve_duplicate_ids(arguments, references), sync_state_repository
+        )
     if tool == "sync_nutrition":
         return _nutrition_approval_arguments(arguments, nutrition_diary_service)
     return dict(arguments)

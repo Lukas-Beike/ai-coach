@@ -992,38 +992,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_coach_proposal_creation.py",
-      "line": 51,
-      "column": 14,
-      "code": "arg-type",
-      "message_sha256": "5c694b94f94f64a449a7688ad3095d23cc6e96359cd912ff5f31eada43ad0c6d"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_proposal_creation.py",
-      "line": 51,
-      "column": 14,
-      "code": "arg-type",
-      "message_sha256": "8d91fddf4c913f90b6748793f46129418b55406915baa41b989816b5fb70fa94"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_proposal_creation.py",
-      "line": 51,
-      "column": 14,
-      "code": "arg-type",
-      "message_sha256": "e695dcbde391551d0554e7acca0f050bedaa1249875dc53f63aefa35747ced8d"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_proposal_creation.py",
-      "line": 51,
-      "column": 14,
-      "code": "arg-type",
-      "message_sha256": "f2c589a91333dc6f1f20cd241cd4090296284b88b4eca94e9c0f585539f9933a"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_coach_tool_dispatch.py",
       "line": 58,
       "column": 14,
@@ -1221,14 +1189,6 @@
       "column": 23,
       "code": "arg-type",
       "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_proposal_creation.py",
-      "line": 47,
-      "column": 23,
-      "code": "arg-type",
-      "message_sha256": "47f4f2417dfb37eea2676d37df989d48b129047fb180c24cc564bb16a041c84a"
     },
     {
       "tool": "mypy",
