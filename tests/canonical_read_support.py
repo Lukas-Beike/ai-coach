@@ -108,14 +108,6 @@ class CanonicalReadFixture(unittest.TestCase):
         )
         self.table = CanonicalTableReader()
 
-    def make_backfill(self) -> CanonicalBackfill:
-        return CanonicalBackfill(
-            key_values=self.key_values,
-            zone_provider=lambda: ZONE,
-            clock=lambda: NOW,
-            batch_size=DEFAULT_BATCH_SIZE,
-        )
-
     def read(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
         with self.manager.reader() as db:
             return fn(db, *args, **kwargs)
@@ -161,7 +153,12 @@ def populate(case: CanonicalReadFixture) -> CanonicalBackfill:
             (json.dumps(case.intervals), NOW, str(case.intervals["synced_at"])),
         )
         case.key_values.set(db, GARMIN_SNAPSHOT_KEY, json.dumps(case.garmin))
-    backfill = case.make_backfill()
+    backfill = CanonicalBackfill(
+        key_values=case.key_values,
+        zone_provider=lambda: ZONE,
+        clock=lambda: NOW,
+        batch_size=DEFAULT_BATCH_SIZE,
+    )
     for _ in range(MAX_BATCHES):
         with case.manager.unit_of_work() as db:
             if backfill.run_batch(db).done:
