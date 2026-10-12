@@ -142,7 +142,7 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
                 "activity_id TEXT PRIMARY KEY, activity_name TEXT NOT NULL, "
                 "activity_date TEXT NOT NULL, notes TEXT NOT NULL, "
                 "session_rpe REAL, deviation_reason TEXT NOT NULL DEFAULT '', "
-                "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+                "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, provider TEXT)"
             )
             db.execute(
                 "CREATE TABLE snapshots ("
@@ -272,8 +272,8 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
 
     def test_write_failure_after_sql_rolls_back(self) -> None:
         class FailingUpsertRepository(ActivityFeedbackRepository):
-            def upsert(self, db, feedback):
-                super().upsert(db, feedback)
+            def upsert(self, db, feedback, *, provider=None):
+                super().upsert(db, feedback, provider=provider)
                 raise RuntimeError("write failure")
 
         service = ActivityFeedbackService(

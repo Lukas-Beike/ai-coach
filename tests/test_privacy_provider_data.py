@@ -260,6 +260,33 @@ class PrivacyExportProviderTests(ProviderDataFixture):
                 with self.subTest(name=name):
                     self.assertEqual(archive.read(name), b"")
 
+    def test_feedback_archive_keeps_the_released_columns_without_provider(self):
+        self.db.execute(
+            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, "
+            "notes, session_rpe, deviation_reason, created_at, updated_at, provider) "
+            "VALUES ('act_1', 'Synthetic ride', '2026-10-01', 'felt good', 5, '', ?, ?, "
+            "'intervals')",
+            (STAMP, STAMP),
+        )
+        self.db.commit()
+        with self.export() as archive:
+            rows = self.lines(archive, "activity_feedback.jsonl")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            set(rows[0]),
+            {
+                "activity_id",
+                "activity_name",
+                "activity_date",
+                "notes",
+                "session_rpe",
+                "deviation_reason",
+                "created_at",
+                "updated_at",
+            },
+        )
+        self.assertEqual(rows[0]["notes"], "felt good")
+
 
 class SanitizedProviderPayloadTests(unittest.TestCase):
     def test_credential_like_keys_are_removed_at_every_depth(self):

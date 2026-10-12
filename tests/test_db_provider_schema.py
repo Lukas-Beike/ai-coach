@@ -127,12 +127,12 @@ class ProviderSchemaTests(unittest.TestCase):
     def count(self, db, table):
         return db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
-    def test_fresh_database_is_schema_v6_with_empty_provider_tables(self):
+    def test_fresh_database_is_current_schema_with_empty_provider_tables(self):
         db = self.fresh()
         self.assertEqual(
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
         )
-        self.assertEqual(CURRENT_SCHEMA_VERSION, 6)
+        self.assertEqual(CURRENT_SCHEMA_VERSION, 7)
         self.assertTrue(database_schema_is_current(db))
         for table in PROVIDER_TABLES:
             with self.subTest(table=table):

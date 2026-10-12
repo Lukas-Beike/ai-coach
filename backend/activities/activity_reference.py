@@ -14,14 +14,29 @@ keeps its existing not-found or validation response.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
 from backend.canonical.vocabulary import ActivitySessionState, ProviderId
 from backend.db import canonical_store
 
 
+@dataclass(frozen=True)
+class ActivityReference:
+    """A resolved activity id and the provider that owns it, when known.
+
+    ``provider`` is None for an id that passed through unresolved, because the
+    caller did not name a provider and no local session confirmed one.
+    """
+
+    activity_id: Any
+    provider: str | None = None
+
+
 class ActivityReferenceResolver(Protocol):
     def resolve(self, reference: Any) -> Any: ...
+
+    def resolve_reference(self, reference: Any) -> ActivityReference: ...
 
     def local_ids(self, provider_activity_ids: Iterable[str]) -> dict[str, str]: ...
 
@@ -34,14 +49,20 @@ class ActivityReferences(ActivityReferenceResolver):
 
     def resolve(self, reference: Any) -> Any:
         """Return the Intervals.icu provider id for a local id, or the input unchanged."""
+        return self.resolve_reference(reference).activity_id
+
+    def resolve_reference(self, reference: Any) -> ActivityReference:
+        """Return the reference with its owning provider when a local session confirms it."""
         if not isinstance(reference, str):
-            return reference
+            return ActivityReference(reference)
         candidate = reference.strip()
         if not candidate.startswith(canonical_store.ACTIVITY_ID_PREFIX):
-            return reference
+            return ActivityReference(reference)
         with self._database_manager.reader() as db:
             provider_activity_id = _intervals_provider_activity_id(db, candidate)
-        return reference if provider_activity_id is None else provider_activity_id
+        if provider_activity_id is None:
+            return ActivityReference(reference)
+        return ActivityReference(provider_activity_id, ProviderId.INTERVALS.value)
 
     def local_ids(self, provider_activity_ids: Iterable[str]) -> dict[str, str]:
         """Return local ids for provider ids that have a canonical record."""
@@ -76,6 +97,9 @@ class NoActivityReferences(ActivityReferenceResolver):
 
     def resolve(self, reference: Any) -> Any:
         return reference
+
+    def resolve_reference(self, reference: Any) -> ActivityReference:
+        return ActivityReference(reference)
 
     def local_ids(self, provider_activity_ids: Iterable[str]) -> dict[str, str]:
         return {}
