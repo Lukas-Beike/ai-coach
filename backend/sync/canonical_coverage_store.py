@@ -40,6 +40,9 @@ COVERAGE_KEY_PREFIX: Final = "canonical_coverage:"
 # The providers whose ingest persists a coverage summary. A provider without a
 # canonical ingest is absent here, so it never blocks the persisted path.
 CANONICAL_COVERAGE_PROVIDERS: Final = (ProviderId.INTERVALS, ProviderId.GARMIN)
+# Providers ingested live without a legacy snapshot. Their persisted summary is
+# reported when present and never decides between the persisted and legacy path.
+LIVE_COVERAGE_PROVIDERS: Final = (ProviderId.WAHOO,)
 
 
 def coverage_key(provider: ProviderId) -> str:

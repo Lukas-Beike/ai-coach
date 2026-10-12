@@ -36,10 +36,12 @@ from backend.providers import canonical_plans
 from backend.sync.canonical_backfill import STATE_KEY, backfill_complete
 from backend.sync.canonical_coverage_store import (
     CANONICAL_COVERAGE_PROVIDERS,
+    LIVE_COVERAGE_PROVIDERS,
     CanonicalCoverageStore,
     coverage_key,
     garmin_payload_coverage,
     intervals_snapshot_coverage,
+    wahoo_payload_coverage,
 )
 from backend.sync.canonical_ingest import ingest_intervals_snapshot
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
@@ -304,8 +306,34 @@ class PersistedCoverageTests(CanonicalReadFixture):
         with patch.object(CanonicalCoverageStore, "load", spy):
             result = self.read(self.selector().coverage)
 
-        self.assertEqual(tuple(loaded), CANONICAL_COVERAGE_PROVIDERS)
+        self.assertEqual(
+            tuple(loaded), CANONICAL_COVERAGE_PROVIDERS + LIVE_COVERAGE_PROVIDERS
+        )
         self.assertEqual(result, expected)
+
+    def test_a_live_provider_summary_is_appended_without_gating(self) -> None:
+        self.assertEqual(LIVE_COVERAGE_PROVIDERS, (ProviderId.WAHOO,))
+        expected = self.read(self.projection.coverage)
+        self.store()
+        wahoo = wahoo_payload_coverage(
+            {
+                canonical_plans.WAHOO_SYNCED_AT_KEY: "2026-10-01T08:00:00+00:00",
+                canonical_plans.WAHOO_WORKOUTS_KEY: [],
+            },
+            zone=ZONE,
+        )
+        self.assertIsNotNone(wahoo)
+        with self.manager.unit_of_work() as db:
+            CanonicalCoverageStore(self.key_values).persist(db, wahoo, zone=ZONE)
+
+        result = self.read(self.selector().coverage)
+
+        self.assertEqual(result, (*expected, wahoo))
+        with self.manager.unit_of_work() as db:
+            self.key_values.set(db, coverage_key(ProviderId.INTERVALS), "{not json")
+        fallback = self.read(self.selector().coverage)
+        self.assertEqual(fallback[-1], wahoo)
+        self.assertEqual(len(fallback), len(expected) + 1)
 
     def test_persisted_value_holds_counts_only(self) -> None:
         self.store()
