@@ -30,6 +30,8 @@ from backend.sync.canonical_backfill import (
     STATE_KEY,
     BatchReport,
     CanonicalBackfill,
+    _Item,
+    _write_reprojection,
 )
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
@@ -103,6 +105,14 @@ def synthetic_weights(count: int) -> list[dict[str, Any]]:
     return [
         dict(template, calendarDate=(start + timedelta(days=i)).isoformat())
         for i in range(count)
+    ]
+
+
+def synthetic_wellness(days: int) -> list[dict[str, Any]]:
+    template = load_fixture("intervals", "wellness.json")[0]
+    start = date(2026, 1, 1)
+    return [
+        dict(template, id=(start + timedelta(days=i)).isoformat()) for i in range(days)
     ]
 
 
@@ -277,18 +287,17 @@ class PopulatedBackfillTests(BackfillFixture):
 
         summary = self.summary(backfill)
         self.assertEqual(summary["status"], "complete")
-        # The newest snapshot plans one activity, dated 2026-09-10. Of the five older
-        # fixture activities, the two dated earlier are inserted; the three dated on or
-        # after that day are superseded, because the newest snapshot no longer shows them.
-        self.assertEqual(self.count("activity_records"), 3 + 2)
-        self.assertEqual(self.count("activity_sessions"), 3 + 2)
-        self.assertEqual(summary["providers"][INTERVALS]["superseded"], 3)
+        # Only the newest snapshot inserts activities. Its one activity is kept, and all
+        # five older fixture activities are superseded. Garmin's two activities are kept.
+        self.assertEqual(self.count("activity_records"), 1 + 2)
+        self.assertEqual(self.count("activity_sessions"), 1 + 2)
+        self.assertEqual(summary["providers"][INTERVALS]["superseded"], 5)
         self.assertEqual(
             sum(
                 counters["sessions_created"]
                 for counters in summary["providers"].values()
             ),
-            5,
+            3,
         )
         self.assertEqual(summary["providers"][INTERVALS]["skipped_invalid"], 0)
         self.assertGreater(summary["providers"][GARMIN]["inserted"], 0)
@@ -553,8 +562,8 @@ class PopulatedBackfillTests(BackfillFixture):
             db.execute("DELETE FROM snapshots WHERE id = 2")
         self.run_to_completion(backfill)
 
-        # The newest snapshot was removed after its first batch, so its coverage is
-        # unknown and the older snapshot's activities are superseded rather than revived.
+        # The newest snapshot was removed after its first batch. The older snapshot cannot
+        # take its place as authority, so its activities are superseded rather than revived.
         self.assertEqual(self.count("activity_records"), 40)
         self.assertEqual(
             self.summary(backfill)["providers"][INTERVALS]["superseded"], 60
@@ -562,8 +571,8 @@ class PopulatedBackfillTests(BackfillFixture):
         self.assertEqual(self.state()["status"], "complete")
 
 
-class CoverageTests(BackfillFixture):
-    """The newest snapshot decides which older activities may be inserted."""
+class SupersessionTests(BackfillFixture):
+    """Only the newest snapshot may insert activities; older snapshots never do."""
 
     def activity_ids(self, manager: DatabaseManager | None = None) -> list[str]:
         rows = self.rows(
@@ -582,15 +591,14 @@ class CoverageTests(BackfillFixture):
         )
         return [str(row["source_record_id"]) for row in rows]
 
-    def test_older_activity_on_or_after_coverage_start_is_superseded_not_revived(
-        self,
-    ) -> None:
+    def test_older_activities_are_superseded_whatever_their_date(self) -> None:
         self.insert_snapshot(
             self.manager,
             intervals_snapshot(
                 [
-                    intervals_activity("gone-later", day="2026-09-15"),
+                    intervals_activity("early", day="2026-09-01"),
                     intervals_activity("gone-same-day", day="2026-09-10"),
+                    intervals_activity("gone-later", day="2026-09-15"),
                 ]
             ),
         )
@@ -610,37 +618,34 @@ class CoverageTests(BackfillFixture):
         counters = self.summary(backfill)["providers"][INTERVALS]
         self.assertEqual(self.activity_ids(), ["kept-first", "kept-last"])
         self.assertEqual(self.raw_activity_ids(), ["kept-first", "kept-last"])
-        # Both older activities are on or after coverage_start, so the same-day one too.
-        self.assertEqual(counters["superseded"], 2)
+        # The early activity lies before the newest snapshot's earliest one. It is still
+        # superseded, because only the newest snapshot may insert activities.
+        self.assertEqual(counters["superseded"], 3)
         self.assertEqual(counters["already_present"], 0)
         self.assertEqual(counters["sessions_created"], 2)
 
-    def test_older_activity_before_coverage_start_is_inserted(self) -> None:
+    def test_older_snapshot_still_inserts_wellness_and_observations(self) -> None:
         self.insert_snapshot(
             self.manager,
             intervals_snapshot(
-                [
-                    intervals_activity("early", day="2026-09-01"),
-                    intervals_activity("gone-later", day="2026-09-15"),
-                ]
+                [intervals_activity("gone")], wellness=synthetic_wellness(2)
             ),
         )
         self.insert_snapshot(
             self.manager,
-            intervals_snapshot(
-                [intervals_activity("kept", day="2026-09-10")], synced_at=LATER
-            ),
+            intervals_snapshot([intervals_activity("kept")], synced_at=LATER),
         )
         backfill = self.make_backfill()
         self.run_to_completion(backfill)
 
         counters = self.summary(backfill)["providers"][INTERVALS]
-        self.assertEqual(self.activity_ids(), ["early", "kept"])
-        self.assertEqual(self.raw_activity_ids(), ["early", "kept"])
+        self.assertEqual(self.activity_ids(), ["kept"])
         self.assertEqual(counters["superseded"], 1)
-        self.assertEqual(counters["sessions_created"], 2)
+        self.assertGreater(counters["inserted"], 0)
+        # The only observations come from the older snapshot's wellness.
+        self.assertGreater(self.count("observations"), 0)
 
-    def test_authority_removed_before_its_turn_supersedes_every_snapshot_activity(
+    def test_removed_authority_supersedes_every_remaining_snapshot_activity(
         self,
     ) -> None:
         self.insert_snapshot(
@@ -666,18 +671,19 @@ class CoverageTests(BackfillFixture):
             db.execute("DELETE FROM snapshots WHERE id = 3")
         self.run_to_completion(backfill)
 
-        # With the authority gone, neither the middle nor the old snapshot may insert.
+        # With the authority gone, every remaining snapshot is older and inserts nothing.
         self.assertEqual(self.activity_ids(), [])
+        self.assertEqual(self.raw_activity_ids(), [])
         self.assertEqual(
             self.summary(backfill)["providers"][INTERVALS]["superseded"], 2
         )
 
-    def test_abort_and_resume_across_the_coverage_boundary_matches_the_uninterrupted_run(
+    def test_abort_and_resume_across_older_writes_matches_the_uninterrupted_run(
         self,
     ) -> None:
         older = intervals_snapshot(
-            [intervals_activity(f"early-{i}", day="2026-09-01") for i in range(60)]
-            + [intervals_activity(f"late-{i}", day="2026-09-15") for i in range(60)]
+            [intervals_activity(f"old-{i}", day="2026-09-01") for i in range(60)],
+            wellness=synthetic_wellness(40),
         )
         newest = intervals_snapshot(
             [intervals_activity("kept", day="2026-09-10")], synced_at=LATER
@@ -687,29 +693,45 @@ class CoverageTests(BackfillFixture):
             self.insert_snapshot(manager, older)
             self.insert_snapshot(manager, newest)
         uninterrupted = self.make_backfill(batch_size=100)
-        self.run_to_completion(uninterrupted)
+        # The older snapshot's wellness rows span several batches.
+        self.assertGreater(len(self.run_to_completion(uninterrupted)), 3)
 
         interrupted = self.make_backfill(batch_size=100)
-        self.run_batch(interrupted, other)
-        self.run_batch(interrupted, other)
-        # The third batch starts with covered activities. Its first coverage check fails
-        # before anything in the batch is committed.
+        armed = {"on": False}
+
+        def failing(write: Callable[..., Any]) -> Callable[..., Any]:
+            def guarded(*args: Any, **kwargs: Any) -> Any:
+                if armed["on"]:
+                    raise RuntimeError("injected failure")
+                return write(*args, **kwargs)
+
+            return guarded
+
         with (
             patch.object(
                 canonical_store,
-                "activity_record_exists",
-                side_effect=RuntimeError("injected failure"),
+                "insert_provider_record_if_absent",
+                side_effect=failing(canonical_store.insert_provider_record_if_absent),
             ),
-            self.assertRaises(RuntimeError),
+            patch.object(
+                canonical_store,
+                "insert_observation_if_absent",
+                side_effect=failing(canonical_store.insert_observation_if_absent),
+            ),
         ):
             self.run_batch(interrupted, other)
+            self.run_batch(interrupted, other)
+            # The third batch fails on its first write, so nothing in it is committed.
+            armed["on"] = True
+            with self.assertRaises(RuntimeError):
+                self.run_batch(interrupted, other)
         with other.unit_of_work() as db:
             interrupted.mark_failed(db)
 
         failed = self.state(other)
         self.assertEqual(failed["status"], "failed")
-        self.assertGreater(failed["counters"][INTERVALS]["superseded"], 0)
-        self.assertLess(failed["counters"][INTERVALS]["superseded"], 60)
+        # The older snapshot has not finished, so its superseded count is not added yet.
+        self.assertEqual(failed["counters"][INTERVALS]["superseded"], 0)
 
         resumed = self.make_backfill(batch_size=100)
         self.run_to_completion(resumed, other)
@@ -722,8 +744,8 @@ class CoverageTests(BackfillFixture):
         self.assertEqual(
             self.summary(uninterrupted)["providers"][INTERVALS]["superseded"], 60
         )
-        self.assertEqual(self.count("activity_records"), 60 + 1)
-        self.assertEqual(self.count("activity_records", other), 60 + 1)
+        self.assertEqual(self.activity_ids(), ["kept"])
+        self.assertEqual(self.activity_ids(other), ["kept"])
 
 
 class ReprojectionTests(BackfillFixture):
@@ -897,6 +919,16 @@ class ReprojectionTests(BackfillFixture):
                     self.assertGreater(rows[0]["n"], 0)
 
         self.assertEqual(self.canonical_snapshot(), original)
+
+    def test_reprojection_items_must_be_activities_or_observations(self) -> None:
+        raw = canonical_plans.RawRecord(
+            record_kind=ACTIVITY_KIND,
+            source_record_id="7",
+            payload={},
+            mapper_version=1,
+        )
+        with self.assertRaises(TypeError):
+            _write_reprojection(Mock(), _Item(raw, NOW), NOW)
 
 
 class DiagnosticsSummaryTests(BackfillFixture):

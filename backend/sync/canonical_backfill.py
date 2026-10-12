@@ -12,19 +12,20 @@ never deletes. A snapshot without ``raw_provider_data`` is not mapped, because i
 ``recent_activities`` fallback is a compact read model with no mapper; such a
 snapshot counts as ``skipped_invalid``.
 
-Coverage: the newest snapshot present when the run starts is the authority for
-activities. Its planned activities give ``coverage_start``, their earliest local date.
-Null applies when the authority plans none, cannot be read, or is removed during the
-run; then every older snapshot activity is treated as covered. Each older snapshot
-inserts an activity only
-when its local date is strictly before ``coverage_start``. An absent activity on or
-after it is superseded: skipped, counted as ``superseded`` rather than
-``already_present``, and its raw ``activity`` record is skipped without a counter.
-Null covers every older activity, so none of them is inserted. Observations, wellness
-and athlete records keep insert-if-absent for every snapshot, and the newest snapshot
-is never restricted. A covered row is decided by whether its canonical activity
-already exists; backfill never changes such an activity, so a batch boundary cannot
-split an activity from its raw record or change the outcome.
+Supersession: the newest snapshot present when the run starts is the only one that
+may insert activities. Its activities and their raw ``activity`` records are inserted
+when absent, as usual. Every older snapshot inserts no activity and no raw ``activity``
+record: each of its activities is skipped and counted as ``superseded``, not as
+``already_present``. The newest snapshot already carries every activity that still
+exists upstream within the synced range (an incremental sync merges with the previous
+snapshot, and a full sync replaces it), so an activity that only an older snapshot
+shows was deleted upstream or lies outside the configured range, and must not become
+canonical. If the newest snapshot is removed during the run, every remaining snapshot
+is older and supersedes its activities the same way. Older ``snapshots`` rows are
+never modified or deleted, so no stored data is lost. Observations, wellness and
+athlete records from older snapshots keep insert-if-absent. Whether an activity is
+inserted depends only on its snapshot's id, not on canonical state, so a batch
+boundary or a resume cannot change the outcome.
 
 Re-projection: when a mapper version is above the ``mapped_version`` of an active
 raw record, that record is mapped again from its stored payload and fetch time, its
@@ -47,7 +48,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, tzinfo
+from datetime import UTC, datetime, tzinfo
 from enum import StrEnum
 from typing import Any, Final
 
@@ -110,15 +111,6 @@ class BatchReport:
 class _Item:
     value: RawRecord | ActivityItem | ObservationItem
     fetched_at: str
-    # Provider id of a covered activity, or of its raw record; None for everything else.
-    coverage_id: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class _Coverage:
-    """The newest snapshot's coverage. A ``start`` of None covers every older activity."""
-
-    start: date | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +120,7 @@ class _Work:
     items: tuple[_Item, ...] = ()
     skipped_invalid: int = 0
     duplicates: int = 0
-    earliest: date | None = None
+    superseded: int = 0
 
 
 def _empty_counters() -> dict[str, dict[str, int]]:
@@ -236,7 +228,10 @@ class CanonicalBackfill:
             work = self._cached_work(key, fingerprint)
             if work is None:
                 work = _ingest_work(
-                    current["source"], text, zone, _coverage_for(state, current)
+                    current["source"],
+                    text,
+                    zone,
+                    _may_insert_activities(state, current),
                 )
                 self._remember(key, fingerprint, work)
             provider = _provider_of(current["source"])
@@ -343,8 +338,6 @@ class CanonicalBackfill:
             "garmin_done": False,
             "snapshot_before": int(row["next_id"]),
             "newest_id": int(row["next_id"]) - 1,
-            "coverage_resolved": False,
-            "coverage_start": None,
             "current": None,
             "reproject_after": 0,
             "reproject_current": None,
@@ -379,34 +372,23 @@ def _finish_source(
     bucket = counters[_provider_of(current["source"])]
     bucket["skipped_invalid"] += work.skipped_invalid
     bucket["duplicates"] += work.duplicates
+    bucket["superseded"] += work.superseded
     if current["source"] == _GARMIN:
         state["garmin_done"] = True
     else:
-        if not state["coverage_resolved"]:
-            # Only the authority sets coverage. If it is gone, the first snapshot processed
-            # is not the authority and coverage stays null, so nothing older is revived.
-            is_authority = current["id"] == state["newest_id"]
-            start = work.earliest if is_authority else None
-            state.update(
-                coverage_resolved=True,
-                coverage_start=None if start is None else start.isoformat(),
-            )
         state["snapshot_before"] = current["id"]
     state["current"] = None
 
 
-def _coverage_for(
+def _may_insert_activities(
     state: Mapping[str, Any], current: Mapping[str, Any]
-) -> _Coverage | None:
-    """Return the coverage that decides a snapshot's activities; None for Garmin and the authority."""
-    if current["source"] == _GARMIN or current["id"] == state["newest_id"]:
-        return None
-    start = state["coverage_start"]
-    return _Coverage(start=None if start is None else date.fromisoformat(start))
+) -> bool:
+    """Garmin and the newest Intervals snapshot may insert activities; older snapshots may not."""
+    return current["source"] == _GARMIN or current["id"] == state["newest_id"]
 
 
 def _ingest_work(
-    source: str, text: str, zone: tzinfo, coverage: _Coverage | None
+    source: str, text: str, zone: tzinfo, may_insert_activities: bool
 ) -> _Work:
     payload = json.loads(text)
     if not isinstance(payload, dict):
@@ -415,70 +397,59 @@ def _ingest_work(
         fetched = garmin_payload_retrieved_at(payload, zone=zone)
         if fetched is None:
             return _Work(skipped_invalid=1)
-        return _work_from_plan(garmin_ingest_plan(payload, zone=zone), fetched)
+        return _work_from_plan(
+            garmin_ingest_plan(payload, zone=zone),
+            fetched,
+            may_insert_activities=True,
+        )
     return _work_from_plan(
         intervals_snapshot_ingest_plan(payload, zone=zone),
         stored_retrieved_at(payload, zone=zone),
-        coverage,
+        may_insert_activities=may_insert_activities,
     )
 
 
 def _reprojection_work(row: Mapping[str, Any], zone: tzinfo) -> _Work:
     plan = reprojection_plan(row, zone=zone)
-    return _Work() if plan is None else _work_from_plan(plan, None)
-
-
-def _covered_ids(plan: IngestPlan, coverage: _Coverage | None) -> frozenset[str]:
-    """Provider ids of the plan's activities that the newest snapshot decides."""
-    if coverage is None:
-        return frozenset()
-    return frozenset(
-        activity.record.provenance.source_record_id or ""
-        for activity in plan.activities
-        if coverage.start is None or activity.local_date >= coverage.start
-    )
+    if plan is None:
+        return _Work()
+    return _work_from_plan(plan, None, may_insert_activities=True)
 
 
 def _work_from_plan(
-    plan: IngestPlan, fetched: datetime | None, coverage: _Coverage | None = None
+    plan: IngestPlan, fetched: datetime | None, *, may_insert_activities: bool
 ) -> _Work:
-    """Flatten a plan into ordered items, dropping repeats within the same source."""
+    """Flatten a plan into ordered items, dropping repeats within the same source.
+
+    When the source may not insert activities, its activities and their raw records are
+    left out, and each distinct activity is counted once as superseded.
+    """
     stamp = fetched.isoformat() if fetched is not None else ""
-    covered = _covered_ids(plan, coverage)
     items: list[_Item] = []
     seen_raw: set[tuple[str, str]] = set()
     seen_activities: set[str] = set()
     seen_observations: set[str] = set()
     duplicates = 0
+    superseded = 0
     for raw in plan.raw_records:
         key = (raw.record_kind, raw.source_record_id)
         if key in seen_raw:
             duplicates += 1
             continue
         seen_raw.add(key)
-        is_covered = (
-            raw.record_kind == ACTIVITY_RECORD_KIND and raw.source_record_id in covered
-        )
-        items.append(
-            _Item(
-                raw,
-                _fetched_at(raw.retrieved_at, stamp),
-                raw.source_record_id if is_covered else None,
-            )
-        )
+        if raw.record_kind == ACTIVITY_RECORD_KIND and not may_insert_activities:
+            continue
+        items.append(_Item(raw, _fetched_at(raw.retrieved_at, stamp)))
     for activity in plan.activities:
         source_id = activity.record.provenance.source_record_id or ""
         if source_id in seen_activities:
             duplicates += 1
             continue
         seen_activities.add(source_id)
-        items.append(
-            _Item(
-                activity,
-                _fetched_at(activity.retrieved_at, stamp),
-                source_id if source_id in covered else None,
-            )
-        )
+        if not may_insert_activities:
+            superseded += 1
+            continue
+        items.append(_Item(activity, _fetched_at(activity.retrieved_at, stamp)))
     for observation in plan.observations:
         natural_key = canonical_store.observation_natural_key(observation.observation)
         if natural_key in seen_observations:
@@ -490,7 +461,7 @@ def _work_from_plan(
         items=tuple(items),
         skipped_invalid=plan.skipped_invalid,
         duplicates=duplicates,
-        earliest=min((a.local_date for a in plan.activities), default=None),
+        superseded=superseded,
     )
 
 
@@ -504,13 +475,6 @@ def _write_ingest(
     """Insert one item when absent. Existing rows are never changed."""
     value = item.value
     bucket = counters[provider]
-    if item.coverage_id is not None and not canonical_store.activity_record_exists(
-        db, provider=provider, provider_activity_id=item.coverage_id
-    ):
-        # The newest snapshot decides this activity and no longer shows it: never revive it.
-        if isinstance(value, ActivityItem):
-            bucket["superseded"] += 1
-        return
     if isinstance(value, RawRecord):
         inserted = canonical_store.insert_provider_record_if_absent(
             db,
@@ -555,12 +519,13 @@ def _write_reprojection(db: Any, item: _Item, now: str) -> None:
             fetched_at=item.fetched_at,
             now=now,
         )
-    else:
-        # Re-projection plans carry activities and observations, never raw records.
-        assert isinstance(value, ObservationItem)
+    elif isinstance(value, ObservationItem):
         canonical_store.upsert_observation(
             db, value.observation, mapper_version=value.mapper_version, now=now
         )
+    else:
+        # Re-projection plans carry activities and observations, never raw records.
+        raise TypeError("re-projection items must be activities or observations")
 
 
 def _raw_row_at(db: Any, record_id: int) -> dict[str, Any] | None:
