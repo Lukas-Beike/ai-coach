@@ -180,12 +180,15 @@ class CanonicalBodyLedgerCaseTests(unittest.TestCase):
 
 
 class CanonicalBodyInputTests(unittest.TestCase):
-    def test_reads_body_fat_for_the_84_day_window_ending_today(self) -> None:
+    def test_reads_weight_and_body_fat_for_their_windows_ending_today(self) -> None:
         reader = BodyReader()
         read_body_inputs(reader, ServingGate(True), "db", TODAY)
-        # Weight is not read: it stays on the legacy reader (see canonical_body).
+        # Weight looks back 7 extra days for the quotient; body fat covers the chart.
         self.assertEqual(
-            [(MetricKind.BODY_FAT, TODAY - timedelta(days=83), TODAY)],
+            [
+                (MetricKind.WEIGHT, TODAY - timedelta(days=90), TODAY),
+                (MetricKind.BODY_FAT, TODAY - timedelta(days=83), TODAY),
+            ],
             reader.calls,
         )
 
@@ -206,6 +209,10 @@ class CanonicalBodyInputTests(unittest.TestCase):
             _measure(MetricKind.BODY_FAT, 69.996, days[2]),
             _measure(MetricKind.BODY_FAT, 70.01, days[3]),
             _measure(MetricKind.BODY_FAT, 14.456, days[4]),
+            _measure(MetricKind.WEIGHT, 29.99, days[0]),
+            _measure(MetricKind.WEIGHT, 30.0, days[1]),
+            _measure(MetricKind.WEIGHT, 300.004, days[2]),
+            _measure(MetricKind.WEIGHT, 299.996, days[3]),
         )
         inputs = read_body_inputs(
             BodyReader(observations), ServingGate(True), "db", TODAY
@@ -215,6 +222,10 @@ class CanonicalBodyInputTests(unittest.TestCase):
         self.assertEqual(
             {days[1]: 2.0, days[2]: 70.0, days[4]: 14.46},
             inputs.intervals_body_fat_pct,
+        )
+        self.assertEqual(
+            {days[1]: 30.0, days[3]: 300.0},
+            inputs.intervals_weight_kg,
         )
 
     def test_last_in_bounds_observation_wins_per_day(self) -> None:
@@ -242,6 +253,20 @@ class CanonicalBodyInputTests(unittest.TestCase):
                 provider=ProviderId.GARMIN,
                 observed_at=evening + timedelta(hours=1),
             ),
+            _measure(
+                MetricKind.WEIGHT,
+                80.0,
+                DAY,
+                provider=ProviderId.GARMIN,
+                observed_at=morning,
+            ),
+            _measure(
+                MetricKind.WEIGHT,
+                350.0,
+                DAY,
+                provider=ProviderId.GARMIN,
+                observed_at=evening,
+            ),
         )
         inputs = read_body_inputs(
             BodyReader(observations), ServingGate(True), "db", TODAY
@@ -249,6 +274,7 @@ class CanonicalBodyInputTests(unittest.TestCase):
         self.assertIsNotNone(inputs)
         assert inputs is not None
         self.assertEqual({DAY: 13.0}, inputs.garmin_body_fat_pct)
+        self.assertEqual({DAY: 80.0}, inputs.garmin_weight_kg)
 
     def test_athlete_record_values_are_not_body_measurements(self) -> None:
         observations = (
@@ -267,6 +293,8 @@ class CanonicalBodyInputTests(unittest.TestCase):
         observations = (
             _measure(MetricKind.BODY_FAT, 15.0, tomorrow),
             _measure(MetricKind.BODY_FAT, 16.0, tomorrow, provider=ProviderId.GARMIN),
+            _measure(MetricKind.WEIGHT, 75.0, tomorrow),
+            _measure(MetricKind.WEIGHT, 76.0, tomorrow, provider=ProviderId.GARMIN),
         )
         # The reader here ignores its window, so the module's own guard is tested.
         inputs = read_body_inputs(
@@ -277,7 +305,9 @@ class CanonicalBodyInputTests(unittest.TestCase):
         )
         self.assertEqual(
             CanonicalBodyInputs(
+                intervals_weight_kg={},
                 intervals_body_fat_pct={},
+                garmin_weight_kg={},
                 garmin_body_fat_pct={},
             ),
             inputs,
@@ -314,7 +344,7 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         )
         kinds = {kind for kind, _s, _e in reader.calls}
         self.assertIn(MetricKind.BODY_FAT, kinds)
-        self.assertNotIn(MetricKind.WEIGHT, kinds)
+        self.assertIn(MetricKind.WEIGHT, kinds)
 
     def test_closed_gate_keeps_body_history_legacy_and_reads_no_body_kinds(
         self,
@@ -355,9 +385,18 @@ class CanonicalBodyFallbackTests(unittest.TestCase):
     """Days the canonical inputs lack keep the legacy value; canonical days override."""
 
     @staticmethod
-    def _fat_values(output: dict[str, Any]) -> list[Any]:
-        series = output["windows"]["14d"]["metrics"]["body_fat_pct"]
+    def _values(output: dict[str, Any], metric: str) -> list[Any]:
+        series = output["windows"]["14d"]["metrics"][metric]
         return [point.get("value") for entry in series for point in entry["points"]]
+
+    @staticmethod
+    def _empty() -> CanonicalBodyInputs:
+        return CanonicalBodyInputs(
+            intervals_weight_kg={},
+            intervals_body_fat_pct={},
+            garmin_weight_kg={},
+            garmin_body_fat_pct={},
+        )
 
     def test_comma_decimal_day_keeps_the_legacy_value(self) -> None:
         # The canonical mapper stores dot decimals only, so a comma day is absent
@@ -368,26 +407,45 @@ class CanonicalBodyFallbackTests(unittest.TestCase):
                 "wellness": [{"id": DAY.isoformat(), "bodyFat": "14,5"}]
             },
         }
-        empty = CanonicalBodyInputs(intervals_body_fat_pct={}, garmin_body_fat_pct={})
         legacy = body_history(snapshot, None, TODAY)
-        self.assertIn(14.5, self._fat_values(legacy))
-        self.assertEqual(legacy, body_history(snapshot, None, TODAY, canonical=empty))
+        self.assertIn(14.5, self._values(legacy, "body_fat_pct"))
+        self.assertEqual(
+            legacy,
+            body_history(snapshot, None, TODAY, canonical=self._empty()),
+        )
+
+    def test_comma_decimal_weight_keeps_the_legacy_value(self) -> None:
+        snapshot = {
+            "synced_at": "2026-10-11T06:00:00+00:00",
+            "raw_provider_data": {
+                "wellness": [{"id": DAY.isoformat(), "weight": "70,4"}]
+            },
+        }
+        legacy = body_history(snapshot, None, TODAY)
+        self.assertIn(70.4, self._values(legacy, "weight_kg"))
+        self.assertEqual(
+            legacy,
+            body_history(snapshot, None, TODAY, canonical=self._empty()),
+        )
 
     def test_canonical_value_overrides_the_legacy_value_for_the_same_day(self) -> None:
         snapshot = {
             "synced_at": "2026-10-11T06:00:00+00:00",
             "raw_provider_data": {
-                "wellness": [{"id": DAY.isoformat(), "bodyFat": 14.0}]
+                "wellness": [{"id": DAY.isoformat(), "bodyFat": 14.0, "weight": 70.0}]
             },
         }
         canonical = CanonicalBodyInputs(
-            intervals_body_fat_pct={DAY: 15.0}, garmin_body_fat_pct={}
+            intervals_weight_kg={DAY: 71.0},
+            intervals_body_fat_pct={DAY: 15.0},
+            garmin_weight_kg={},
+            garmin_body_fat_pct={},
         )
-        values = self._fat_values(
-            body_history(snapshot, None, TODAY, canonical=canonical)
-        )
-        self.assertIn(15.0, values)
-        self.assertNotIn(14.0, values)
+        output = body_history(snapshot, None, TODAY, canonical=canonical)
+        self.assertIn(15.0, self._values(output, "body_fat_pct"))
+        self.assertNotIn(14.0, self._values(output, "body_fat_pct"))
+        self.assertIn(71.0, self._values(output, "weight_kg"))
+        self.assertNotIn(70.0, self._values(output, "weight_kg"))
 
 
 class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
@@ -418,6 +476,14 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
                 date(2026, 10, 10): 16.0,
             },
             inputs.intervals_body_fat_pct,
+        )
+        self.assertEqual(
+            {
+                date(2026, 10, 8): 70.4,
+                date(2026, 10, 9): 70.2,
+                date(2026, 10, 10): 70.1,
+            },
+            inputs.intervals_weight_kg,
         )
         self.assertEqual(
             body_history(self.intervals, self.garmin, today),

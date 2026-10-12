@@ -1,17 +1,15 @@
-"""Canonical body-fat history inputs read through the observation port.
+"""Canonical body weight and body-fat inputs read through the observation port.
 
-Only body fat is read here. Weight stays on the legacy readers because the
-consumer parity ledger records a comma-decimal Intervals weight ("80,4") that the
-canonical mapper does not produce. Reading canonical weight would drop that day
-from the chart, so ``body_weight_kg_series`` is not switched.
-
-``body_history`` overrides only the days this module returns; days it lacks keep
-the legacy value, so a value the mapper does not store is never dropped.
+The consumer parity ledger marks ``body_weight_kg_series`` and
+``body_fat_pct_series`` switchable, so both series are read here.
 
 Reads are served only while the canonical tables serve reads (see
 ``CanonicalTableServing``). Otherwise ``read_body_inputs`` returns None and the
 caller keeps the legacy values. The legacy projection holds only the compact
 wellness rows, so switching without this gate would drop older raw-only days.
+
+``body_history`` overrides only the days this module returns. Days it lacks keep
+the legacy value, so a value the canonical mapper does not store is never dropped.
 
 Per provider and day, the last observation inside the legacy plausibility bounds
 wins, as the consumer parity ledger does. Intervals athlete-record observations,
@@ -32,15 +30,20 @@ from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.runtime.ports import CanonicalTableServing, ObservationReader
 
 WINDOW_DAYS = 84
-READ_DAYS = WINDOW_DAYS - 1
+BODY_FAT_READ_DAYS = WINDOW_DAYS - 1
+# The weight quotient looks back 7 days before the chart window.
+WEIGHT_READ_DAYS = BODY_FAT_READ_DAYS + 7
+WEIGHT_BOUNDS = (30.0, 300.0)
 BODY_FAT_BOUNDS = (2.0, 70.0)
 
 
 @dataclass(frozen=True, slots=True)
 class CanonicalBodyInputs:
-    """Per-day body-fat values for each provider, bounded and rounded."""
+    """Per-day weight and body-fat values for each provider, bounded and rounded."""
 
+    intervals_weight_kg: dict[date, float]
     intervals_body_fat_pct: dict[date, float]
+    garmin_weight_kg: dict[date, float]
     garmin_body_fat_pct: dict[date, float]
 
 
@@ -50,25 +53,38 @@ def read_body_inputs(
     db: Any,
     today: date,
 ) -> CanonicalBodyInputs | None:
-    """Read body-fat values up to ``today``, or None while legacy serves reads."""
+    """Read weight and body fat up to ``today``, or None while legacy serves reads."""
     if not serving.serves_tables(db):
         return None
-    observations = reader.observations(
+    weights = reader.observations(
+        db,
+        MetricKind.WEIGHT,
+        start=today - timedelta(days=WEIGHT_READ_DAYS),
+        end=today,
+    )
+    body_fat = reader.observations(
         db,
         MetricKind.BODY_FAT,
-        start=today - timedelta(days=READ_DAYS),
+        start=today - timedelta(days=BODY_FAT_READ_DAYS),
         end=today,
     )
     return CanonicalBodyInputs(
-        intervals_body_fat_pct=_daily(observations, ProviderId.INTERVALS, today),
-        garmin_body_fat_pct=_daily(observations, ProviderId.GARMIN, today),
+        intervals_weight_kg=_daily(weights, ProviderId.INTERVALS, today, WEIGHT_BOUNDS),
+        intervals_body_fat_pct=_daily(
+            body_fat, ProviderId.INTERVALS, today, BODY_FAT_BOUNDS
+        ),
+        garmin_weight_kg=_daily(weights, ProviderId.GARMIN, today, WEIGHT_BOUNDS),
+        garmin_body_fat_pct=_daily(body_fat, ProviderId.GARMIN, today, BODY_FAT_BOUNDS),
     )
 
 
 def _daily(
-    observations: Sequence[Observation], provider: ProviderId, today: date
+    observations: Sequence[Observation],
+    provider: ProviderId,
+    today: date,
+    bounds: tuple[float, float],
 ) -> dict[date, float]:
-    lower, upper = BODY_FAT_BOUNDS
+    lower, upper = bounds
     days: dict[date, float] = {}
     for observation in sorted(observations, key=observation_order):
         if observation.provenance.provider is not provider:
