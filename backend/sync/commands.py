@@ -25,8 +25,6 @@ from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRe
 from backend.sync.provider_runtime import SynchronousRefresh
 from backend.sync.queue import SyncJobQueueService
 
-MAX_REFRESH_DAYS = 3660
-
 
 class IntervalsSynchronousRefresh:
     """Waits for the running Intervals.icu sync or starts one for a Coach request.
@@ -90,9 +88,7 @@ class IntervalsSynchronousRefresh:
         if requested_days is None:
             return self._intervals_sync_service.sync_period()
         return _requested_days(
-            requested_days,
-            self._all_sync_days,
-            self._registry.max_sync_days(provider, MAX_REFRESH_DAYS),
+            requested_days, provider, self._all_sync_days, self._registry
         )
 
     def _retry_intervals_refresh(
@@ -118,11 +114,12 @@ class IntervalsSynchronousRefresh:
         )
 
 
-def _requested_days(requested_days: Any, all_sync_days: int, max_days: int) -> int:
+def _requested_days(
+    requested_days: Any, provider: str, all_sync_days: int, registry: ProviderRegistry
+) -> int:
     """Validate a Coach refresh window; ``all_sync_days`` marks the whole history.
 
-    ``max_days`` is the provider's sync-window limit, which a queued refresh
-    enforces as well.
+    The registry's rule is the one a stored sync period must satisfy as well.
     """
     try:
         days = int(requested_days)
@@ -132,7 +129,7 @@ def _requested_days(requested_days: Any, all_sync_days: int, max_days: int) -> i
             "Der synchrone Datenabruf benötigt einen gültigen Zeitraum.",
             reason="invalid_refresh_request",
         ) from exc
-    if days != all_sync_days and not 1 <= days <= min(max_days, MAX_REFRESH_DAYS):
+    if not registry.accepts_sync_days(provider, days, all_sync_days):
         raise AppError(
             400,
             "Der Synchronisationszeitraum ist zu groß.",
@@ -157,8 +154,10 @@ class GarminSynchronousRefresh:
     whole-history sentinel, or no window, uses the scheduled catch-up window:
     an inline chat refresh cannot read the full history, and a historical
     backfill stays a queued job. The result flags a narrowed whole-history
-    request as ``history_limited``. Only an ``ok`` or ``partial`` run counts as
-    completed; any other outcome fails the refresh.
+    request as ``history_limited``. A catch-up window that ends before today,
+    or an awaited run whose window could not be confirmed, makes the result
+    ``partial``. Only an ``ok`` or ``partial`` run counts as completed; any
+    other outcome fails the refresh.
     """
 
     def __init__(
@@ -194,12 +193,13 @@ class GarminSynchronousRefresh:
                 reason="provider_refresh_failed",
             )
         refresh_morning_battery_after_sync(result, self._morning_body_battery_service)
+        window_unconfirmed = bool(result.get("window_unconfirmed"))
         return {
             "ok": True,
             "status": "completed",
             "provider": provider,
-            "activity_days": days,
-            "partial": status == "partial",
+            "activity_days": None if window_unconfirmed else days,
+            "partial": status == "partial" or end_date is not None,
             "history_limited": history_limited,
             "synchronous_refresh": True,
         }
@@ -218,10 +218,11 @@ class GarminSynchronousRefresh:
         if status is not None:
             return {**result, "status": status}
         rerun = self._sync(days, end_date, False, cancel_event)
-        # A run that took the lock meanwhile leaves only the awaited data.
-        return (
-            {"status": "partial"} if rerun.get("status") == "already_running" else rerun
-        )
+        # A run that took the lock meanwhile leaves only the awaited data, whose
+        # window is unknown.
+        if rerun.get("status") == "already_running":
+            return {"status": "partial", "window_unconfirmed": True}
+        return rerun
 
     def _window(
         self, provider: str, arguments: Mapping[str, Any]
@@ -232,9 +233,7 @@ class GarminSynchronousRefresh:
             None
             if requested_days is None
             else _requested_days(
-                requested_days,
-                self._all_sync_days,
-                self._registry.max_sync_days(provider, MAX_REFRESH_DAYS),
+                requested_days, provider, self._all_sync_days, self._registry
             )
         )
         if days is None or days == self._all_sync_days:

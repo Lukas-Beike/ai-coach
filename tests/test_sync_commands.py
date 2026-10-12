@@ -196,7 +196,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
     def setUp(self):
         self.garmin = Mock()
         self.battery = Mock()
-        self.garmin.automatic_sync_window.return_value = (3, date(2026, 10, 10))
+        self.garmin.automatic_sync_window.return_value = (3, None)
         self.garmin.sync.return_value = {"status": "ok"}
         self.garmin.awaited_run_status.return_value = None
         self.refresh = GarminSynchronousRefresh(
@@ -225,7 +225,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         self.garmin.sync.assert_called_once_with(
             days=3,
             reason="Chat-Anfrage",
-            end_date=date(2026, 10, 10),
+            end_date=None,
             wait_for_existing=True,
             cancel_event=cancel_event,
             include_recovery=True,
@@ -237,9 +237,20 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
 
         self.assertEqual(result["activity_days"], 3)
         self.assertTrue(result["history_limited"])
+        self.assertFalse(result["partial"])
         self.garmin.automatic_sync_window.assert_called_once()
+        self.assertIsNone(self.garmin.sync.call_args.kwargs["end_date"])
+
+    def test_catch_up_window_ending_before_today_is_reported_partial(self):
+        self.garmin.automatic_sync_window.return_value = (90, date(2026, 7, 1))
+
+        result = self.refresh.refresh("garmin", {"_wait_for_completion": True}, None)
+
+        self.assertTrue(result["partial"])
+        self.assertFalse(result["history_limited"])
+        self.assertEqual(result["activity_days"], 90)
         self.assertEqual(
-            self.garmin.sync.call_args.kwargs["end_date"], date(2026, 10, 10)
+            self.garmin.sync.call_args.kwargs["end_date"], date(2026, 7, 1)
         )
 
     def test_honors_requested_days_ending_today(self):
@@ -318,6 +329,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         result = self.refresh.refresh("garmin", {}, None)
 
         self.assertTrue(result["partial"])
+        self.assertIsNone(result["activity_days"])
         self.battery.refresh.assert_called_once_with()
 
     def test_partial_sync_is_reported_and_still_refreshes_body_battery(self):

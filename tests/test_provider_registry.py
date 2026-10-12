@@ -183,6 +183,24 @@ class DefaultDescriptorParityTests(unittest.TestCase):
                     expected, DEFAULT_PROVIDER_REGISTRY.max_sync_days(provider_id)
                 )
 
+    def test_accepts_sync_days_within_limit_or_whole_history(self) -> None:
+        cases = {
+            ("garmin", 1): True,
+            ("garmin", 90): True,
+            ("garmin", 91): False,
+            ("garmin", 0): False,
+            ("garmin", -2): False,
+            ("garmin", -1): True,
+            ("intervals", 365): True,
+            ("intervals", 366): False,
+        }
+        for (provider_id, days), expected in cases.items():
+            with self.subTest(provider_id=provider_id, days=days):
+                self.assertEqual(
+                    expected,
+                    DEFAULT_PROVIDER_REGISTRY.accepts_sync_days(provider_id, days, -1),
+                )
+
     def test_resync_keys_match_full_resync_table(self) -> None:
         for provider_id in ("intervals", "garmin"):
             with self.subTest(provider_id=provider_id):
