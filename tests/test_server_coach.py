@@ -728,8 +728,8 @@ class ServerCoachTests(ServerTestCase):
             }
         )
 
-        self.assertNotIn("performance", context["garmin"])
-        self.assertNotIn("activities", context["garmin"])
+        self.assertNotIn("performance", context["recovery"])
+        self.assertNotIn("activities", context["recovery"])
         self.assertEqual(
             context["current_performance"]["metrics"]["running_vo2max_ml_kg_min"][
                 "value"

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import ProviderId
 
 CONTEXT_SECTIONS = frozenset(
     {
@@ -21,9 +22,9 @@ CONTEXT_SECTIONS = frozenset(
         "local_planned_workouts",
         "calendar",
         "external_calendar",
-        "intervals",
+        "activities",
         "current_performance",
-        "garmin",
+        "recovery",
         "weather",
         "daily_planning_context",
         "source_policy",
@@ -36,12 +37,25 @@ BASE_SECTIONS = frozenset(
         "local_feedback",
         "activity_feedback",
         "local_planned_workouts",
-        "intervals",
+        "activities",
         "current_performance",
         "daily_planning_context",
         "source_policy",
     }
 )
+# Provider-named section names from before the domain grouping. They stay accepted
+# on input (tool arguments, persisted selections) and resolve to one canonical name.
+SECTION_ALIASES: Mapping[str, str] = {
+    ProviderId.INTERVALS.value: "activities",
+    ProviderId.GARMIN.value: "recovery",
+}
+
+
+def canonical_section(name: str) -> str:
+    """Return the canonical section name; unknown names are returned unchanged."""
+    return SECTION_ALIASES.get(name, name)
+
+
 PROFILE_KEYWORDS = (
     (
         "provider_refresh_or_sync",
@@ -128,6 +142,13 @@ class CoachContextSelection:
     retain_dialogue: bool = False
     retain_pending_request: bool = True
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "sections",
+            frozenset(canonical_section(name) for name in self.sections),
+        )
+
     def project(self, context: dict[str, Any], local_date: str = "") -> dict[str, Any]:
         result = {key: value for key, value in context.items() if key in self.sections}
         if self.horizon_days is None:
@@ -139,19 +160,19 @@ class CoachContextSelection:
         for key in ("local_planned_workouts", "calendar", "daily_planning_context"):
             if key in result:
                 result[key] = self.dated_items(result[key], today)
-        intervals = result.get("intervals")
-        if isinstance(intervals, dict):
-            intervals = dict(intervals)
-            intervals.pop("planned_workouts", None)
-            recent = intervals.get("recent_activities_by_sport")
+        activities = result.get("activities")
+        if isinstance(activities, dict):
+            activities = dict(activities)
+            activities.pop("planned_workouts", None)
+            recent = activities.get("recent_activities_by_sport")
             if isinstance(recent, dict):
-                intervals["recent_activities_by_sport"] = {
+                activities["recent_activities_by_sport"] = {
                     sport: rows[: self.activity_limit]
                     if isinstance(rows, list)
                     else rows
                     for sport, rows in recent.items()
                 }
-            result["intervals"] = intervals
+            result["activities"] = activities
         performance = result.get("current_performance")
         if isinstance(performance, dict) and self.name not in {
             "activity_analysis",

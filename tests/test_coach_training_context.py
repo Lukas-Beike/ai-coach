@@ -49,7 +49,7 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
                 }
             ],
             "planning": {"status": "ready"},
-            "intervals": {
+            "activities": {
                 "recent_activities_by_sport": {"Run": [{"id": "a1"}]},
                 "planned_workouts": [{"id": "event-1"}],
             },
@@ -88,7 +88,7 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
             },
             "local_planned_workouts": compacted_plans,
             "planning": {"status": "ready"},
-            "intervals": {
+            "activities": {
                 "recent_activities_by_sport": {"Run": [{"id": "a1"}]},
                 "planned_workouts": [{"id": "event-1"}],
             },
@@ -121,8 +121,8 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
             "scope": "synthetic full intervals projection",
         }
         service = self.make_service(
-            {"intervals": intervals, "local_planned_workouts": []},
-            section_limits={"intervals": 100_000},
+            {"activities": intervals, "local_planned_workouts": []},
+            section_limits={"activities": 100_000},
         )
 
         result = service.build()
@@ -134,13 +134,13 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
             structured_start,
         )
         parsed = json.loads(result[structured_start:structured_end])
-        self.assertEqual(parsed["intervals"], intervals)
+        self.assertEqual(parsed["activities"], intervals)
         self.assertEqual(
-            len(parsed["intervals"]["recent_activities_by_sport"]["Run"]), 6
+            len(parsed["activities"]["recent_activities_by_sport"]["Run"]), 6
         )
-        self.assertEqual(len(parsed["intervals"]["planned_workouts"]), 51)
+        self.assertEqual(len(parsed["activities"]["planned_workouts"]), 51)
         self.assertEqual(
-            parsed["projection"]["section_characters"]["intervals"],
+            parsed["projection"]["section_characters"]["activities"],
             len(json.dumps(intervals, ensure_ascii=False, separators=(",", ":"))),
         )
         self.structured.build.assert_called_once_with()

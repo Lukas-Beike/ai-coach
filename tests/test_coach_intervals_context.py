@@ -119,10 +119,23 @@ class CoachIntervalsContextTests(unittest.TestCase):
         self.assertEqual(
             result,
             {
+                "source": {
+                    "provider": "intervals",
+                    "label": "Intervals.icu",
+                    "synced_at": None,
+                    "applies_to": [
+                        "recent_activities_by_sport",
+                        "activity_rollups_by_sport",
+                    ],
+                },
                 "synced_at": None,
                 "recent_activities_by_sport": {},
                 "activity_rollups_by_sport": {},
                 "planned_workouts": [],
+                "planned_workouts_source": {
+                    "kind": "local_planning",
+                    "label": "Lokale Planung",
+                },
                 "scope": "Letzte 5 abgeschlossene Einheiten je Sportart, Sportartensummen sowie zukünftige geplante Einheiten; kein vollständiger Roh-Snapshot.",
             },
         )

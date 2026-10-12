@@ -353,10 +353,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 self.assertEqual(self.athlete_state(), before)
         result = self.run_tool(
             "read_coach_context",
-            {"sections": ["garmin"]},
+            {"sections": ["recovery"]},
             message="Zeig Garmin-Kontext.",
         )
-        self.assertEqual(set(result["context"]), {"garmin"})
+        self.assertEqual(set(result["context"]), {"recovery"})
         self.assertEqual(self.athlete_state(), before)
 
     @covers(
