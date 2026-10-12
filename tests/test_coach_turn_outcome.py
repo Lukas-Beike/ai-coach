@@ -836,6 +836,37 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertIn("nur teilweise erfolgreich", partial)
         self.assertNotIn("Remote-Abschluss", partial)
 
+    def test_partial_job_line_and_partial_refresh_state_the_fact_once(self):
+        receipts = [
+            {
+                "call_id": "waited",
+                "tool": "start_provider_refresh",
+                "result": {
+                    "ok": True,
+                    "status": "completed",
+                    "partial": True,
+                    "synchronous_refresh": True,
+                },
+            },
+            {
+                "call_id": "inspect",
+                "tool": "get_sync_job",
+                "result": {
+                    "ok": True,
+                    "job": {
+                        "id": "synthetic-read-2",
+                        "type": "refresh",
+                        "status": "partial",
+                    },
+                },
+            },
+        ]
+
+        _, text, _ = self.finalize(self.response("Analysis."), receipts)
+
+        self.assertIn("synthetic-read-2: partial", text)
+        self.assertEqual(1, text.count("nur teilweise erfolgreich"))
+
     def test_question_keeps_failure_and_read_only_refresh_status(self):
         _, text, _ = self.finalize(
             self.response("Readiness looks fine."),

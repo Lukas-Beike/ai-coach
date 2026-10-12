@@ -192,24 +192,27 @@ class GarminPayloadService:
         """Return the stored run's status if it completely read the window.
 
         ``None`` means the run from ``synced_at`` is no longer the latest
-        snapshot or did not completely read the window's core collections, so
-        merged coverage from an older run cannot vouch for it; empty but
-        complete reads still count. A failed collection outside the window's
-        core makes the run ``partial``.
+        snapshot or did not completely read the window's core collections. The
+        run's own ``read_window`` is checked, not the merged snapshot range, so
+        coverage from an older run cannot vouch for it; empty but complete
+        reads still count. A failed collection outside the window's core makes
+        the run ``partial``.
         """
         snapshot = self.snapshot()
         if not synced_at or snapshot.get("synced_at") != synced_at:
             return None
         end = end_date or self._local_today()
         start = end - timedelta(days=days - 1)
+        provider_sync = snapshot.get("provider_sync") or {}
+        read_window = provider_sync.get("read_window") or {}
         try:
             covered = (
-                date.fromisoformat(snapshot["start"]) <= start
-                and date.fromisoformat(snapshot["end"]) >= end
+                date.fromisoformat(read_window["start"]) <= start
+                and date.fromisoformat(read_window["end"]) >= end
             )
         except KeyError, TypeError, ValueError:
             return None
-        pagination = (snapshot.get("provider_sync") or {}).get("pagination") or {}
+        pagination = provider_sync.get("pagination") or {}
         failed = {
             error.get("source")
             for error in snapshot.get("errors") or []
@@ -236,6 +239,11 @@ class GarminPayloadService:
         *,
         fixture: bool,
     ) -> dict[str, Any]:
+        # Merging widens ``start`` to older runs; keep this run's own window.
+        payload.setdefault("provider_sync", {})["read_window"] = {
+            "start": payload.get("start"),
+            "end": payload.get("end"),
+        }
         merge_sources(payload, previous)
         if not fixture:
             payload["activities"] = deduplicate_api_records(
@@ -247,15 +255,13 @@ class GarminPayloadService:
         )
         payload["activity_matches"] = self._activity_matches(payload)
         if fixture:
-            payload.setdefault(
-                "provider_sync",
+            payload["provider_sync"].setdefault(
+                "pagination",
                 {
-                    "pagination": {
-                        "fixture": {
-                            "windows": 1,
-                            "records": len(payload.get("activities") or []),
-                            "complete": True,
-                        }
+                    "fixture": {
+                        "windows": 1,
+                        "records": len(payload.get("activities") or []),
+                        "complete": True,
                     }
                 },
             )

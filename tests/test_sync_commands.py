@@ -152,6 +152,7 @@ class ProviderRefreshCommandServiceTests(unittest.TestCase):
     def test_rejects_invalid_or_oversized_sync_windows_before_provider_call(self):
         for arguments in (
             {"days": "bad", "_wait_for_completion": True},
+            {"days": 366, "_wait_for_completion": True},
             {"days": 3661, "_wait_for_completion": True},
         ):
             with self.subTest(arguments=arguments):
@@ -159,6 +160,15 @@ class ProviderRefreshCommandServiceTests(unittest.TestCase):
                     self.service.start("intervals", arguments)
                 self.assertEqual(error.exception.reason, "invalid_refresh_request")
         self.intervals.sync.assert_not_called()
+
+    def test_waiting_refresh_without_days_uses_the_stored_sync_period(self):
+        self.intervals.sync_period.return_value = 90
+        self.intervals.sync.return_value = {"status": "ok", "activity_days": 90}
+
+        result = self.service.start("intervals", {"_wait_for_completion": True})
+
+        self.assertEqual(result["activity_days"], 90)
+        self.assertEqual(self.intervals.sync.call_args.kwargs["activity_days"], 90)
 
     def test_sync_refresh_for_other_provider_is_rejected(self):
         with self.assertRaises(AppError) as error:
@@ -250,7 +260,7 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         )
 
     def test_rejects_invalid_or_oversized_days_before_provider_call(self):
-        for days in ("bad", 0, -2, 3661):
+        for days in ("bad", 0, -2, 91, 3661):
             with self.subTest(days=days):
                 with self.assertRaises(AppError) as error:
                     self.refresh.refresh("garmin", {"days": days}, None)
@@ -329,6 +339,16 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         self.assertEqual(error.exception.reason, "provider_busy")
         self.assertIn("Garmin", str(error.exception))
         self.assertNotIn("garmin-", str(error.exception))
+        self.battery.refresh.assert_not_called()
+
+    def test_unrecognized_sync_status_fails_without_body_battery_refresh(self):
+        self.garmin.sync.return_value = {"status": "cancelled"}
+
+        with self.assertRaises(AppError) as error:
+            self.refresh.refresh("garmin", {}, None)
+
+        self.assertEqual(error.exception.status, 503)
+        self.assertEqual(error.exception.reason, "provider_refresh_failed")
         self.battery.refresh.assert_not_called()
 
     def test_sync_failure_propagates_without_body_battery_refresh(self):

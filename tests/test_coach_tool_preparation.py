@@ -10,24 +10,17 @@ from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.errors import AppError
 from backend.sync.authority import PlanningAuthorityService
-from backend.sync.state import SyncStateRepository
 
 
 class StructuredToolPreparationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.dialogue_action = Mock(spec=CoachDialogueActionService)
-        self.sync_state = Mock(spec=SyncStateRepository)
         self.planning_authority = Mock(spec=PlanningAuthorityService)
-        self.defaults = {"intervals": 90, "garmin": 30}
-        self.all_sync_days = -1
         self.read_only_tools = frozenset({"get_profile", "get_sync_job"})
         self.service = CoachStructuredToolPreparationService(
             self.dialogue_action,
-            self.sync_state,
             self.planning_authority,
             self.read_only_tools,
-            self.defaults,
-            self.all_sync_days,
         )
 
     @staticmethod
@@ -173,12 +166,12 @@ class StructuredToolPreparationTests(unittest.TestCase):
                 allow_mutations=True,
             ),
         )
-        self.sync_state.sync_period.assert_not_called()
         self.planning_authority.pending_plan_push_entries.assert_not_called()
 
-    def test_intervals_refresh_gets_wait_flag_and_default_period(self) -> None:
+    def test_intervals_refresh_gets_wait_flag_without_inventing_a_period(
+        self,
+    ) -> None:
         self.dialogue_action.classify.return_value = {"target_system": "intervals"}
-        self.sync_state.sync_period.return_value = 75
         arguments: dict[str, Any] = {}
         result = self.service.prepare(
             self.metadata("start_provider_refresh", arguments),
@@ -188,15 +181,10 @@ class StructuredToolPreparationTests(unittest.TestCase):
             context={},
             allow_mutations=True,
         )
-        self.assertEqual(arguments, {"_wait_for_completion": True, "days": 75})
+        self.assertEqual(arguments, {"_wait_for_completion": True})
         self.assertEqual(result["target_system"], "intervals")
-        self.sync_state.sync_period.assert_called_once_with(
-            "intervals", self.defaults, self.all_sync_days
-        )
 
-    def test_intervals_refresh_preserves_selected_period_but_still_reads_default(
-        self,
-    ) -> None:
+    def test_intervals_refresh_preserves_selected_period(self) -> None:
         self.dialogue_action.classify.return_value = {"target_system": "intervals"}
         arguments = {"days": 12}
         self.service.prepare(
@@ -208,9 +196,6 @@ class StructuredToolPreparationTests(unittest.TestCase):
             allow_mutations=True,
         )
         self.assertEqual(arguments, {"days": 12, "_wait_for_completion": True})
-        self.sync_state.sync_period.assert_called_once_with(
-            "intervals", self.defaults, self.all_sync_days
-        )
 
     def test_get_sync_job_receives_object_scope_without_reclassification(self) -> None:
         action = {"authorization_scope": ["old"]}
