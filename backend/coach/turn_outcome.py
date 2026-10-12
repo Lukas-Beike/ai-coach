@@ -119,7 +119,7 @@ def _sync_jobs(
 _REFRESH_NOTES = (
     (
         "partial",
-        "Hinweis: Der Datenabruf war nur teilweise erfolgreich; einzelne Daten können fehlen.",
+        "Hinweis: Der direkte Datenabruf vor dieser Antwort war unvollständig; einzelne Daten können fehlen.",
     ),
     (
         "history_limited",
@@ -128,12 +128,11 @@ _REFRESH_NOTES = (
 )
 
 
-def _refresh_notes(
-    effects: list[dict[str, Any]], reported_flags: frozenset[str]
-) -> list[str]:
+def _refresh_notes(effects: list[dict[str, Any]]) -> list[str]:
     """Flag a waited refresh that finished with missing or narrowed data.
 
-    ``reported_flags`` are already stated by a sync job line and are skipped.
+    The wording names the direct refresh, so it does not repeat a queued job's
+    partial status line.
     """
     results = [
         entry.get("result") or {}
@@ -143,7 +142,7 @@ def _refresh_notes(
     return [
         note
         for flag, note in _REFRESH_NOTES
-        if flag not in reported_flags and any(result.get(flag) for result in results)
+        if any(result.get(flag) for result in results)
     ]
 
 
@@ -398,17 +397,10 @@ class CoachStructuredOutcomeService:
     ) -> tuple[str, bool, bool]:
         text = question or response_text(response)
         jobs = _sync_jobs(effects, command_receipts)
-        reported = {job_id: job for job_id, job in jobs.items() if job.reported()}
-        notices = [job.status_line(job_id) for job_id, job in reported.items()]
-        partial_reported = any(
-            job.status == "partial" and not job.writes_remote
-            for job in reported.values()
-        )
-        notices.extend(
-            _refresh_notes(
-                effects, frozenset({"partial"}) if partial_reported else frozenset()
-            )
-        )
+        notices = [
+            job.status_line(job_id) for job_id, job in jobs.items() if job.reported()
+        ]
+        notices.extend(_refresh_notes(effects))
         replace_prose = any(job.replaces_prose() for job in jobs.values())
         awaiting_approval = any(
             ((entry.get("result") or {}).get("proposed_action") or {}).get(

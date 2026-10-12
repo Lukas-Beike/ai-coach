@@ -32,7 +32,8 @@ class IntervalsSynchronousRefresh:
     """Waits for the running Intervals.icu sync or starts one for a Coach request.
 
     Without a ``days`` argument the refresh reads the stored sync period, as a
-    queued refresh does. The provider's sync-window limit bounds the window.
+    queued refresh does; that period is clamped when it is stored. The
+    provider's sync-window limit bounds an explicit ``days`` argument.
     """
 
     def __init__(

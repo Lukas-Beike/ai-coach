@@ -237,7 +237,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         ]
         _, text, _ = self.finalize(self.response("Recovery looks fine."), receipts)
         self.assertTrue(text.startswith("Recovery looks fine.\n"))
-        self.assertIn("nur teilweise erfolgreich", text)
+        self.assertIn("direkte Datenabruf vor dieser Antwort war unvollständig", text)
 
     def test_narrowed_whole_history_refresh_discloses_the_limited_window(self):
         receipts = [
@@ -258,7 +258,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         _, text, _ = self.finalize(self.response("Recovery looks fine."), receipts)
         self.assertTrue(text.startswith("Recovery looks fine.\n"))
         self.assertIn("ältere Historie wurde nicht neu geladen", text)
-        self.assertNotIn("nur teilweise erfolgreich", text)
+        self.assertNotIn("direkte Datenabruf vor dieser Antwort", text)
 
     def test_complete_synchronous_refresh_adds_no_note(self):
         receipts = [
@@ -836,7 +836,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertIn("nur teilweise erfolgreich", partial)
         self.assertNotIn("Remote-Abschluss", partial)
 
-    def test_partial_job_line_and_partial_refresh_state_the_fact_once(self):
+    def test_partial_job_line_and_partial_direct_refresh_are_each_named(self):
         receipts = [
             {
                 "call_id": "waited",
@@ -866,6 +866,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
 
         self.assertIn("synthetic-read-2: partial", text)
         self.assertEqual(1, text.count("nur teilweise erfolgreich"))
+        self.assertEqual(1, text.count("direkte Datenabruf vor dieser Antwort"))
 
     def test_question_keeps_failure_and_read_only_refresh_status(self):
         _, text, _ = self.finalize(

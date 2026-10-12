@@ -17,7 +17,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/garmin.py",
-      "line": 428,
+      "line": 473,
       "column": 40,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -593,7 +593,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/garmin_service.py",
-      "line": 214,
+      "line": 232,
       "column": 61,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -1001,7 +1001,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 101,
+      "line": 105,
       "column": 15,
       "code": "arg-type",
       "message_sha256": "01a4b33e9317a99c5507566b8e6bfae3dc12d7213e6274566ec7a68a005c15c8"
@@ -1009,7 +1009,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 101,
+      "line": 105,
       "column": 15,
       "code": "arg-type",
       "message_sha256": "5c99e03c0b7482fef0eb1fd152f5eeacad63c96c9362eabe614b1e39e0f6b0c0"
@@ -1017,7 +1017,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 101,
+      "line": 105,
       "column": 15,
       "code": "arg-type",
       "message_sha256": "c1a535fc787bf4ddd136d75c148e48f96a4ba980cbd2cd66b7844c24bb4d5af4"
@@ -1025,7 +1025,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 47,
+      "line": 62,
       "column": 15,
       "code": "arg-type",
       "message_sha256": "84c087c3edc1fdc2670002e0a2d344c006de6737fa58730960658598df1aa4c3"
@@ -1033,7 +1033,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 47,
+      "line": 62,
       "column": 15,
       "code": "arg-type",
       "message_sha256": "afed839adb87afaffef924126bec2f2edff23d1990be88ea86df4f8d09249830"
@@ -1385,7 +1385,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/commands.py",
-      "line": 51,
+      "line": 66,
       "column": 33,
       "code": "arg-type",
       "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
@@ -1857,7 +1857,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/executor.py",
-      "line": 229,
+      "line": 233,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "530a51c91fbfa215c0ccd47e2a7f8f0c30332690eab03333160b2ba27982b6cf"
@@ -1865,7 +1865,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/executor.py",
-      "line": 229,
+      "line": 233,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "54675efae78d2298f72fc6821d8a0ee9fcd38848c5c0d8e889716a8795435a11"
@@ -1873,7 +1873,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/executor.py",
-      "line": 229,
+      "line": 233,
       "column": 59,
       "code": "arg-type",
       "message_sha256": "6944204e882f524b4a6db9a03ee284dd02193846f03f0d550e312366fc422eca"
@@ -2529,7 +2529,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1621,
+      "line": 1619,
       "column": 30,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -2593,7 +2593,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1625,
+      "line": 1623,
       "column": 37,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2601,7 +2601,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1653,
+      "line": 1651,
       "column": 38,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2737,7 +2737,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_tool_preparation.py",
-      "line": 277,
+      "line": 262,
       "column": 16,
       "code": "index",
       "message_sha256": "c137d8e31a4faf360fc543a5a1e758f33b869db1645f246e1d09e86fb7a7d940"
@@ -2865,7 +2865,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_tool_preparation.py",
-      "line": 275,
+      "line": 260,
       "column": 25,
       "code": "index",
       "message_sha256": "c137d8e31a4faf360fc543a5a1e758f33b869db1645f246e1d09e86fb7a7d940"
