@@ -20,10 +20,13 @@ from backend.canonical.vocabulary import (
     ActivityLinkKind,
     ActivityRecordState,
     ActivitySessionState,
+    MetricKind,
+    ProviderId,
     ProviderRecordState,
 )
 
 ACTIVITY_ID_PREFIX: Final = "act_"
+ATHLETE_SERIES: Final = "athlete"
 OBSERVATION_DETAILS: Final = "{}"
 _PROVIDER_RECORD_EXISTS: Final = (
     "SELECT 1 AS present FROM provider_records "
@@ -554,10 +557,11 @@ def count_unresolved_feedback(db: Any, provider: str) -> int:
 
 
 def observation_natural_key(observation: Observation) -> str:
-    """Return provider|metric|sport|method|(observed_at or observed_on).
+    """Return provider|metric|sport|series|(observed_at or observed_on).
 
-    NULL parts are empty strings. Canonical observations carry no method, so that
-    part is always empty.
+    NULL parts are empty strings. The series part is empty except for a weight
+    that the Intervals.icu athlete profile reports (see ``_observation_series``),
+    which therefore never shares a key with the wellness weight of the same day.
     """
     provider = observation.provenance.provider
     sport = observation.sport
@@ -571,10 +575,28 @@ def observation_natural_key(observation: Observation) -> str:
             provider.value if provider is not None else "",
             observation.kind.value,
             sport.value if sport is not None else "",
-            "",
+            _observation_series(observation),
             when,
         )
     )
+
+
+def _observation_series(observation: Observation) -> str:
+    """Return ``athlete`` for an Intervals.icu athlete-profile weight, else empty.
+
+    A wellness row is identified by its ISO day, so a weight whose source record
+    is anything else comes from the athlete record. The consumers tell the two
+    apart by the same rule. Both values are kept: the current-metrics reader
+    shows the wellness weight first and the athlete weight as its fallback.
+    """
+    provenance = observation.provenance
+    if (
+        provenance.provider is ProviderId.INTERVALS
+        and observation.kind is MetricKind.WEIGHT
+        and provenance.source_record_id != observation.observed_on.isoformat()
+    ):
+        return ATHLETE_SERIES
+    return ""
 
 
 def upsert_observation(

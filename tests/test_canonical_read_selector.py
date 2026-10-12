@@ -1,4 +1,4 @@
-"""Canonical read selector: the parity-gated switch, its persisted state and diagnostics."""
+"""Canonical read selector: the backfill-gated switch, its diagnostic state and diagnostics."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from canonical_read_support import (
+    MAX_BATCHES,
     CanonicalReadFixture,
     first_activity_name,
-    intervals_snapshot,
     make_selector,
     new_backfill,
     populate,
@@ -50,7 +50,7 @@ class SelectorTests(CanonicalReadFixture):
         summary = self.read(selector.summary)
 
         self.assertEqual(summary["serving"], "legacy")
-        self.assertEqual(summary["reason"], "not_checked")
+        self.assertEqual(summary["reason"], "backfill_pending")
         self.assertFalse(summary["digest_current"])
         self.assertIsNone(summary["parity"])
         self.assertEqual(
@@ -58,24 +58,28 @@ class SelectorTests(CanonicalReadFixture):
             ids(self.read(self.projection.activities)),
         )
 
-    def test_backfill_done_without_a_refresh_still_serves_legacy(self) -> None:
+    def test_completed_backfill_serves_tables_without_a_refresh(self) -> None:
         populate(self)
         selector = make_selector(self)
 
-        self.assertEqual(self.read(selector.summary)["serving"], "legacy")
+        summary = self.read(selector.summary)
+        self.assertEqual(summary["serving"], "tables")
+        self.assertEqual(summary["reason"], "backfill_complete")
+        self.assertIsNone(summary["parity"])
+        self.assertTrue(self.read(selector.serves_tables))
         self.assertEqual(
             ids(self.read(selector.activities)),
-            ids(self.read(self.projection.activities)),
+            ids(self.read(self.table.activities)),
         )
 
-    def test_passing_refresh_switches_reads_to_the_tables(self) -> None:
+    def test_refresh_records_parity_counts_and_serves_the_tables(self) -> None:
         populate(self)
         selector = make_selector(self)
         self.write(selector.refresh)
 
         summary = self.read(selector.summary)
         self.assertEqual(summary["serving"], "tables")
-        self.assertEqual(summary["reason"], "parity_passed")
+        self.assertEqual(summary["reason"], "backfill_complete")
         self.assertTrue(summary["digest_current"])
         self.assertTrue(summary["parity"]["passed"])
         stored = json.loads(self.read(self.key_values.get, STATE_KEY))
@@ -90,7 +94,7 @@ class SelectorTests(CanonicalReadFixture):
         self.write(selector.refresh)
 
         summary = self.read(selector.summary)
-        self.assertEqual(summary["reason"], "backfill_incomplete")
+        self.assertEqual(summary["reason"], "backfill_pending")
         self.assertEqual(summary["serving"], "legacy")
         self.assertIsNone(summary["parity"])
 
@@ -116,9 +120,15 @@ class SelectorTests(CanonicalReadFixture):
         selector = make_selector(self)
         self.write(selector.refresh)
 
-        with patch(
-            "backend.sync.canonical_read_selector.current_mapper_versions",
-            return_value={"changed": 1},
+        with (
+            patch(
+                "backend.sync.canonical_read_selector.current_mapper_versions",
+                return_value={"changed": 1},
+            ),
+            patch(
+                "backend.sync.canonical_backfill.current_mapper_versions",
+                return_value={"changed": 1},
+            ),
         ):
             summary = self.read(selector.summary)
             activities = self.read(selector.activities)
@@ -151,20 +161,91 @@ class SelectorTests(CanonicalReadFixture):
         self.assertEqual(restored["serving"], "tables")
         self.assertTrue(restored["digest_current"])
 
-    def test_zone_change_after_a_pass_falls_back_to_legacy(self) -> None:
-        populate(self)
+    def session_dates(self) -> list[str]:
+        return [
+            row["local_date"]
+            for row in self.rows(
+                "SELECT local_date FROM activity_sessions ORDER BY started_at"
+            )
+        ]
+
+    def test_zone_change_serves_legacy_until_reprojection_finishes(self) -> None:
+        backfill = populate(self)
         selector = make_selector(self)
         self.write(selector.refresh)
+        before = self.session_dates()
+        # Stale dates stand in for rows written in the old zone.
+        self.execute("UPDATE activity_sessions SET local_date = '1999-01-01'")
 
-        self.zone = ZoneInfo("Asia/Tokyo")
+        self.zone = ZoneInfo("America/Los_Angeles")
         summary = self.read(selector.summary)
-
         self.assertEqual(summary["serving"], "legacy")
         self.assertFalse(summary["digest_current"])
+        self.assertIs(self.read(selector.reader_for), self.projection)
+
+        # One batch starts the re-projection; reads stay on legacy until it is done.
+        with self.manager.unit_of_work() as db:
+            report = backfill.run_batch(db)
+        if not report.done:
+            self.assertEqual(self.read(selector.summary)["serving"], "legacy")
+        for _ in range(MAX_BATCHES):
+            if report.done:
+                break
+            with self.manager.unit_of_work() as db:
+                report = backfill.run_batch(db)
+        self.assertTrue(report.done)
+
+        self.assertEqual(self.read(selector.summary)["serving"], "tables")
+        self.assertEqual(self.session_dates(), before)
         self.assertEqual(
             ids(self.read(selector.activities)),
             ids(self.read(self.projection.activities)),
         )
+
+    def test_state_without_a_stored_zone_reprojects_once(self) -> None:
+        backfill = populate(self)
+        selector = make_selector(self)
+        with self.manager.unit_of_work() as db:
+            state = json.loads(self.key_values.get(db, BACKFILL_STATE_KEY) or "{}")
+            del state["zone"]
+            self.key_values.set(db, BACKFILL_STATE_KEY, json.dumps(state))
+        self.assertEqual(self.read(selector.summary)["serving"], "legacy")
+
+        with self.manager.unit_of_work() as db:
+            report = backfill.run_batch(db)
+        while not report.done:
+            with self.manager.unit_of_work() as db:
+                report = backfill.run_batch(db)
+
+        self.assertEqual(self.read(selector.summary)["serving"], "tables")
+        stored = json.loads(self.read(self.key_values.get, BACKFILL_STATE_KEY))
+        self.assertEqual(stored["zone"], str(self.zone))
+        self.assertFalse(stored["reproject_all"])
+        with self.manager.unit_of_work() as db:
+            self.assertEqual(backfill.run_batch(db).items, 0)
+
+    def set_backfill_status(self, status: str) -> None:
+        with self.manager.unit_of_work() as db:
+            state = json.loads(self.key_values.get(db, BACKFILL_STATE_KEY) or "{}")
+            self.key_values.set(
+                db, BACKFILL_STATE_KEY, json.dumps({**state, "status": status})
+            )
+
+    def test_failed_or_running_backfill_serves_legacy(self) -> None:
+        populate(self)
+        selector = make_selector(self)
+        for status in ("failed", "running", "pending"):
+            with self.subTest(status=status):
+                self.set_backfill_status(status)
+                summary = self.read(selector.summary)
+                self.assertEqual(summary["serving"], "legacy")
+                self.assertEqual(summary["reason"], "backfill_pending")
+                self.assertFalse(self.read(selector.serves_tables))
+                self.assertIs(self.read(selector.reader_for), self.projection)
+                self.assertEqual(
+                    ids(self.read(selector.activities)),
+                    ids(self.read(self.projection.activities)),
+                )
 
     def test_corrupt_backfill_status_reads_as_pending_and_keeps_legacy(self) -> None:
         populate(self)
@@ -180,23 +261,26 @@ class SelectorTests(CanonicalReadFixture):
                     self.assertEqual(read_status(self.key_values, db), "pending")
                 self.assertEqual(self.read(selector.summary)["serving"], "legacy")
 
-    def test_parity_failure_keeps_reads_on_legacy(self) -> None:
-        # Wellness weight and athlete weight collide on the natural key by design.
-        self.intervals = intervals_snapshot(athlete_weight=True)
+    def test_parity_mismatch_does_not_force_legacy_reads(self) -> None:
         populate(self)
+        self.execute(
+            "UPDATE observations SET value = value + 1 WHERE natural_key = "
+            "(SELECT MAX(natural_key) FROM observations WHERE metric = 'weight' "
+            "AND provider = 'intervals')"
+        )
         selector = make_selector(self)
         self.write(selector.refresh)
 
         summary = self.read(selector.summary)
-        self.assertEqual(summary["reason"], "parity_failed")
-        self.assertEqual(summary["serving"], "legacy")
+        self.assertEqual(summary["reason"], "backfill_complete")
+        self.assertEqual(summary["serving"], "tables")
         self.assertFalse(summary["parity"]["passed"])
         self.assertEqual(
             ids(self.read(selector.activities)),
-            ids(self.read(self.projection.activities)),
+            ids(self.read(self.table.activities)),
         )
 
-    def test_recorded_failure_keeps_legacy_and_stores_only_the_error_class(
+    def test_recorded_failure_reports_error_and_stores_only_the_error_class(
         self,
     ) -> None:
         populate(self)
@@ -205,24 +289,25 @@ class SelectorTests(CanonicalReadFixture):
         self.write(selector.record_failure, "RuntimeError")
 
         summary = self.read(selector.summary)
-        self.assertEqual(summary["reason"], "error")
-        self.assertEqual(summary["serving"], "legacy")
+        self.assertEqual(summary["reason"], "backfill_complete")
+        self.assertEqual(summary["serving"], "tables")
         stored = self.read(self.key_values.get, STATE_KEY)
         self.assertEqual(json.loads(stored)["error_class"], "RuntimeError")
         self.assertEqual(json.loads(stored)["source"], SOURCE_LEGACY)
 
-    def test_corrupt_switch_state_is_unchecked_and_reads_stay_on_legacy(self) -> None:
+    def test_corrupt_switch_state_does_not_change_the_serving_source(self) -> None:
         populate(self)
         self.write(make_selector(self).refresh)
         self.write(self.key_values.set, STATE_KEY, "{not json")
 
         selector = make_selector(self)
         summary = self.read(selector.summary)
-        self.assertEqual(summary["reason"], "not_checked")
-        self.assertEqual(summary["serving"], "legacy")
+        self.assertEqual(summary["reason"], "backfill_complete")
+        self.assertEqual(summary["serving"], "tables")
+        self.assertIsNone(summary["parity"])
         self.assertEqual(
             ids(self.read(selector.activities)),
-            ids(self.read(self.projection.activities)),
+            ids(self.read(self.table.activities)),
         )
 
     def test_a_new_selector_over_the_same_database_keeps_serving_tables(self) -> None:
@@ -249,7 +334,9 @@ class SelectorTests(CanonicalReadFixture):
         self.assertTrue(self.read(readable.activities))
         self.assertEqual(self.read(readable.summary)["serving"], "tables")
 
-    def test_coverage_is_always_served_by_the_legacy_projection(self) -> None:
+    def test_coverage_without_persisted_summaries_is_the_legacy_projection(
+        self,
+    ) -> None:
         populate(self)
         selector = make_selector(self)
         self.write(selector.refresh)
@@ -261,10 +348,13 @@ class SelectorTests(CanonicalReadFixture):
     def test_reader_for_returns_the_source_that_serves_reads(self) -> None:
         populate(self)
         selector = make_selector(self)
-        self.assertIs(self.read(selector.reader_for), self.projection)
-
-        self.write(selector.refresh)
         self.assertIsInstance(self.read(selector.reader_for), CanonicalTableReader)
+
+        with patch(
+            "backend.sync.canonical_backfill.current_mapper_versions",
+            return_value={"changed": 1},
+        ):
+            self.assertIs(self.read(selector.reader_for), self.projection)
 
     def test_observations_switch_with_the_same_source(self) -> None:
         populate(self)
@@ -307,7 +397,7 @@ class DiagnosticsTests(CanonicalReadFixture):
         result = self.summarize(selector)
 
         self.assertEqual(result["serving"], "legacy")
-        self.assertEqual(result["reason"], "not_checked")
+        self.assertEqual(result["reason"], "backfill_pending")
         self.assertFalse(result["digest_current"])
         self.assertIsNone(result["parity"])
 

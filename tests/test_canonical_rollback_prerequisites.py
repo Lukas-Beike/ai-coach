@@ -16,7 +16,15 @@ from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 from zoneinfo import ZoneInfo
 
-from canonical_read_support import CanonicalReadFixture, make_selector, populate
+from canonical_read_support import (
+    MAX_BATCHES,
+    CanonicalReadFixture,
+    intervals_snapshot,
+    make_parity,
+    make_selector,
+    new_backfill,
+    populate,
+)
 from support import load_provider_fixture
 
 from backend.canonical.vocabulary import ProviderId
@@ -27,6 +35,7 @@ from backend.db.schema import initialize_schema
 from backend.providers import canonical_plans
 from backend.sync.canonical_backfill import STATE_KEY, backfill_complete
 from backend.sync.canonical_coverage_store import (
+    CANONICAL_COVERAGE_PROVIDERS,
     CanonicalCoverageStore,
     coverage_key,
     garmin_payload_coverage,
@@ -35,6 +44,7 @@ from backend.sync.canonical_coverage_store import (
 from backend.sync.canonical_ingest import ingest_intervals_snapshot
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
 from backend.sync.canonical_read_selector import CanonicalReadSelector
+from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.performance import PerformanceRefreshService
 from backend.sync.state import SyncStateRepository
 
@@ -273,6 +283,30 @@ class PersistedCoverageTests(CanonicalReadFixture):
             self.key_values.set(db, coverage_key(ProviderId.INTERVALS), "{not json")
         self.assertNotEqual(self.read(self.selector().coverage)[0], expected[0])
 
+    def test_only_the_ingested_providers_are_consulted(self) -> None:
+        self.assertEqual(
+            CANONICAL_COVERAGE_PROVIDERS, (ProviderId.INTERVALS, ProviderId.GARMIN)
+        )
+        expected = self.read(self.projection.coverage)
+        self.store()
+        self.strip_legacy_inputs()
+        self.garmin.clear()
+
+        loaded: list[ProviderId] = []
+        original = CanonicalCoverageStore.load
+
+        def spy(
+            store: CanonicalCoverageStore, db: Any, provider: ProviderId, **kw: Any
+        ) -> Any:
+            loaded.append(provider)
+            return original(store, db, provider, **kw)
+
+        with patch.object(CanonicalCoverageStore, "load", spy):
+            result = self.read(self.selector().coverage)
+
+        self.assertEqual(tuple(loaded), CANONICAL_COVERAGE_PROVIDERS)
+        self.assertEqual(result, expected)
+
     def test_persisted_value_holds_counts_only(self) -> None:
         self.store()
         text = self.read(self.key_values.get, coverage_key(ProviderId.INTERVALS))
@@ -295,7 +329,21 @@ class PersistedCoverageTests(CanonicalReadFixture):
 
 class BackfillCompleteTests(CanonicalReadFixture):
     def complete(self) -> bool:
-        return self.read(lambda db: backfill_complete(self.key_values, db))
+        return self.read(
+            lambda db: backfill_complete(self.key_values, db, zone=self.zone)
+        )
+
+    def test_false_for_another_zone_or_a_state_without_a_zone(self) -> None:
+        populate(self)
+        self.assertTrue(self.complete())
+        self.zone = ZoneInfo("America/Los_Angeles")
+        self.assertFalse(self.complete())
+        self.zone = ZONE
+        with self.manager.unit_of_work() as db:
+            state = json.loads(self.key_values.get(db, STATE_KEY) or "{}")
+            del state["zone"]
+            self.key_values.set(db, STATE_KEY, json.dumps(state))
+        self.assertFalse(self.complete())
 
     def test_false_before_and_true_after_the_backfill(self) -> None:
         self.assertFalse(self.complete())
@@ -330,6 +378,129 @@ class BackfillCompleteTests(CanonicalReadFixture):
             return_value=bumped,
         ):
             self.assertFalse(self.complete())
+
+
+class ReadsAfterBackfillTests(CanonicalReadFixture):
+    """Ingest, backfill complete, parity mismatch, then a mapper change."""
+
+    def ids(self, records: Any) -> list[tuple[str, str]]:
+        return [(r.activity_id, r.provenance.provider.value) for r in records]
+
+    def test_tables_serve_despite_a_parity_mismatch_until_mappers_change(self) -> None:
+        self.assertIs(self.read(make_selector(self).reader_for), self.projection)
+
+        populate(self)  # ingests the snapshots and completes the backfill
+        mismatch = {
+            "source": "legacy",
+            "reason": "parity_failed",
+            "digest": "stale",
+            "parity": {"passed": False},
+        }
+        with self.manager.unit_of_work() as db:
+            self.key_values.set(db, "canonical_read_state", json.dumps(mismatch))
+        selector = make_selector(self)
+
+        self.assertTrue(self.read(selector.serves_tables))
+        self.assertIsInstance(self.read(selector.reader_for), CanonicalTableReader)
+        self.assertEqual(
+            self.ids(self.read(selector.activities)),
+            self.ids(self.read(self.table.activities)),
+        )
+
+        bumped = {
+            key: version + 1
+            for key, version in canonical_plans.current_mapper_versions().items()
+        }
+        with patch(
+            "backend.sync.canonical_backfill.current_mapper_versions",
+            return_value=bumped,
+        ):
+            self.assertFalse(self.read(selector.serves_tables))
+            self.assertIs(self.read(selector.reader_for), self.projection)
+            self.assertEqual(
+                self.ids(self.read(selector.activities)),
+                self.ids(self.read(self.projection.activities)),
+            )
+
+        # A zone change also sends reads back to legacy until re-projection ends.
+        self.assertTrue(self.read(selector.serves_tables))
+        self.zone = ZoneInfo("America/Los_Angeles")
+        self.assertFalse(self.read(selector.serves_tables))
+        self.assertIs(self.read(selector.reader_for), self.projection)
+        backfill = new_backfill(self)
+        for _ in range(MAX_BATCHES):
+            with self.manager.unit_of_work() as db:
+                if backfill.run_batch(db).done:
+                    break
+        self.assertTrue(self.read(selector.serves_tables))
+
+    def weights(self) -> list[tuple[str, float]]:
+        return [
+            (row["natural_key"], row["value"])
+            for row in self.rows(
+                "SELECT natural_key, value, mapper_version FROM observations "
+                "WHERE metric = 'weight' AND provider = 'intervals' "
+                "AND mapper_version = ? ORDER BY natural_key",
+                (canonical_plans.current_observation_mapper_versions()["intervals"],),
+            )
+        ]
+
+    def test_reprojection_separates_a_merged_wellness_and_athlete_weight(self) -> None:
+        self.intervals = intervals_snapshot(athlete_weight=True)
+        populate(self)
+        current = self.weights()
+        athlete_keys = [key for key, _ in current if "|athlete|" in key]
+        self.assertEqual(len(athlete_keys), 1)
+        athlete_value = dict(current)[athlete_keys[0]]
+        day = athlete_keys[0].rsplit("|", 1)[1]
+        wellness_key = f"intervals|weight|||{day}"
+        wellness_value = dict(current)[wellness_key]
+        self.assertNotEqual(wellness_value, athlete_value)
+
+        # The database as the previous mapper left it: one merged row on the
+        # wellness key holding the athlete value, at the previous version.
+        previous = (
+            canonical_plans.current_observation_mapper_versions()["intervals"] - 1
+        )
+        self.execute(
+            "DELETE FROM observations WHERE natural_key = ?", (athlete_keys[0],)
+        )
+        self.execute(
+            "UPDATE observations SET value = ? WHERE natural_key = ?",
+            (athlete_value, wellness_key),
+        )
+        self.execute(
+            "UPDATE observations SET mapper_version = ? WHERE provider = 'intervals'",
+            (previous,),
+        )
+        self.execute(
+            "UPDATE provider_records SET mapped_version = ? "
+            "WHERE provider = 'intervals' AND record_kind IN ('wellness', 'athlete')",
+            (previous,),
+        )
+        with self.manager.unit_of_work() as db:
+            state = json.loads(self.key_values.get(db, STATE_KEY) or "{}")
+            for key in ("intervals.wellness", "intervals.athlete"):
+                state["versions"][key] = previous
+            self.key_values.set(db, STATE_KEY, json.dumps(state))
+        selector = make_selector(self)
+        self.assertFalse(self.read(selector.serves_tables))
+        self.assertEqual(self.weights(), [])
+
+        backfill = new_backfill(self)
+        for _ in range(MAX_BATCHES):
+            with self.manager.unit_of_work() as db:
+                if backfill.run_batch(db).done:
+                    break
+
+        after = dict(self.weights())
+        self.assertEqual(after[wellness_key], wellness_value)
+        self.assertEqual(after[athlete_keys[0]], athlete_value)
+        self.assertEqual(sorted(after), sorted(key for key, _ in current))
+        self.assertTrue(self.read(selector.serves_tables))
+        report = self.read(make_parity(self).check)
+        self.assertTrue(report.passed)
+        self.assertEqual(report.observations["weight"].differing, 0)
 
 
 if __name__ == "__main__":

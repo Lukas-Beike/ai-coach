@@ -32,6 +32,9 @@ from backend.providers.snapshot_projection import (
 )
 
 COVERAGE_KEY_PREFIX: Final = "canonical_coverage:"
+# The providers whose ingest persists a coverage summary. A provider without a
+# canonical ingest is absent here, so it never blocks the persisted path.
+CANONICAL_COVERAGE_PROVIDERS: Final = (ProviderId.INTERVALS, ProviderId.GARMIN)
 
 
 def coverage_key(provider: ProviderId) -> str:
