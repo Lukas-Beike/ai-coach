@@ -7,12 +7,21 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import ProviderId
 from backend.performance import recovery as performance_recovery
 from backend.performance import wellness as performance_wellness
+from backend.performance.canonical_recovery import (
+    CanonicalDailyRecovery,
+    prefer_canonical,
+)
 
 GARMIN_SOURCE = "Garmin Connect"
 INTERVALS_WELLNESS_SOURCE = "Intervals.icu Wellness"
 UTC_OFFSET_SUFFIX = "+00:00"
+_PROVIDER_BY_SOURCE: dict[str, ProviderId] = {
+    GARMIN_SOURCE: ProviderId.GARMIN,
+    INTERVALS_WELLNESS_SOURCE: ProviderId.INTERVALS,
+}
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -254,4 +263,30 @@ def planning_recovery_by_date(
     _add_morning_battery_recovery(
         recovery_by_date, morning_battery_history, morning_body_battery
     )
+    return recovery_by_date
+
+
+def with_canonical_recovery(
+    recovery_by_date: dict[str, dict[str, Any]],
+    canonical: CanonicalDailyRecovery,
+) -> dict[str, dict[str, Any]]:
+    """Replace switched legacy values with the matching canonical observation.
+
+    A value changes only when the canonical observation of that day comes from the
+    provider the legacy view named for the value, and carries the same number. The
+    legacy value keeps its Python type. Source labels are never changed. Every other
+    field, and every day without a match, stays legacy.
+    """
+    observations_by_field = canonical.by_field()
+    for day, recovery in recovery_by_date.items():
+        sources = recovery.get("sources", {})
+        for field, observations in observations_by_field.items():
+            if field not in recovery:
+                continue
+            provider = _PROVIDER_BY_SOURCE.get(sources.get(field))
+            if provider is None:
+                continue
+            recovery[field] = prefer_canonical(
+                observations.get(day), recovery[field], provider, day
+            )
     return recovery_by_date

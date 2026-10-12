@@ -1193,7 +1193,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/daily_context_service.py",
-      "line": 100,
+      "line": 129,
       "column": 25,
       "code": "arg-type",
       "message_sha256": "1cca5932710be19613824e2d3c53f41de079c408bc0856c9317ac05eaf388d2c"
@@ -2481,7 +2481,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1001,
+      "line": 1002,
       "column": 16,
       "code": "has-type",
       "message_sha256": "c53b9e646657d76e58ce4a8d414022143183888c840336c5e976cccc80e9fdda"
@@ -2497,7 +2497,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 716,
+      "line": 717,
       "column": 16,
       "code": "has-type",
       "message_sha256": "e020f47cf690127bbfb4750cbe0b93f382fe80b2ac32f84d93c47d3cdb2e0192"
@@ -2505,7 +2505,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 998,
+      "line": 999,
       "column": 16,
       "code": "has-type",
       "message_sha256": "c3827639903091a4321d0e0848e6289e336e994114e1a16099bebc3274bf7946"
@@ -2513,7 +2513,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1059,
+      "line": 1060,
       "column": 20,
       "code": "has-type",
       "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
@@ -2521,7 +2521,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 977,
+      "line": 978,
       "column": 28,
       "code": "has-type",
       "message_sha256": "6aa98648523c886c38d6ec5ff2cba0b9a86a5cb9fe5f9593e07c2251a0075a22"
@@ -2529,7 +2529,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1619,
+      "line": 1620,
       "column": 30,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -2537,7 +2537,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 809,
+      "line": 810,
       "column": 30,
       "code": "has-type",
       "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
@@ -2553,7 +2553,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 810,
+      "line": 811,
       "column": 31,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -2561,7 +2561,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 775,
+      "line": 776,
       "column": 34,
       "code": "has-type",
       "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
@@ -2569,7 +2569,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 811,
+      "line": 812,
       "column": 35,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -2577,7 +2577,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1292,
+      "line": 1293,
       "column": 36,
       "code": "has-type",
       "message_sha256": "480057763c1b5347f5e8f0a61c7f20c6cec2d3a6e24f1e8563bd5b76f2138cc4"
@@ -2593,7 +2593,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1623,
+      "line": 1624,
       "column": 37,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2601,7 +2601,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1651,
+      "line": 1652,
       "column": 38,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2617,7 +2617,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1323,
+      "line": 1324,
       "column": 42,
       "code": "has-type",
       "message_sha256": "6b3bf53c953464ae5eca5af23f6ee4aa9b3fe9f5856d07f358d76bd3a8dee02e"
@@ -2625,7 +2625,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 714,
+      "line": 715,
       "column": 43,
       "code": "has-type",
       "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
@@ -2641,7 +2641,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 763,
+      "line": 764,
       "column": 45,
       "code": "has-type",
       "message_sha256": "9076d7668e920f937d99a8809d7222f870ef1d895bef707f657887bd19ded42e"

@@ -151,7 +151,7 @@ class GarminPayloadService:
         serialized = self._key_value_repository.get(db, "garmin_snapshot")
         try:
             value = json.loads(serialized or "{}")
-        except TypeError, ValueError:
+        except TypeError, ValueError, RecursionError:
             return {}
         return value if isinstance(value, dict) else {}
 

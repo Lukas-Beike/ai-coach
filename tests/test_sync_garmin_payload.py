@@ -506,6 +506,8 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertEqual(self.service.snapshot(), {})
         self.store_garmin_snapshot("[]")
         self.assertEqual(self.service.snapshot(), {})
+        self.store_garmin_snapshot("[" * 100_000 + "]" * 100_000)
+        self.assertEqual(self.service.snapshot(), {})
 
     def test_fixture_merges_partial_history_and_preserves_raw_records(self):
         intervals = {
