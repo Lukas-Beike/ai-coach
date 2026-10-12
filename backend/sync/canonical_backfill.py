@@ -143,8 +143,8 @@ class _Work:
     superseded: int = 0
 
 
-# Wahoo has no canonical ingest yet, so persisted backfill counters stay limited
-# to the providers that are actually backfilled.
+# Wahoo is ingested live and has no legacy snapshot to backfill, so persisted
+# backfill counters stay limited to the providers that are actually backfilled.
 _BACKFILL_PROVIDERS = (ProviderId.INTERVALS, ProviderId.GARMIN)
 
 
@@ -514,7 +514,10 @@ def _complete_reprojection(
     version: int,
     now: str,
 ) -> None:
-    bucket = state["counters"][row["provider"]]
+    # Wahoo rows are ingested live, not backfilled, so its bucket appears on demand.
+    bucket = state["counters"].setdefault(
+        row["provider"], dict.fromkeys(COUNTER_NAMES, 0)
+    )
     bucket["retired"] += _retire_unemitted(db, row, work, now=now)
     canonical_store.set_mapped_version(
         db, record_id=current["id"], mapper_version=version, now=now

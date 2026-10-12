@@ -27,6 +27,7 @@ from backend.providers.descriptors import (
     CALENDAR_ID,
     GARMIN_ID,
     INTERVALS_ID,
+    WAHOO_ID,
     WEATHER_ID,
 )
 from backend.sync.garmin_service import GarminSyncService
@@ -120,6 +121,39 @@ class IntervalsSchedulePolicy:
     def refresh_payload(self, _trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
         days = self._sync_state.sync_period(
             INTERVALS_ID, self._sync_period_defaults, self._all_sync_days
+        )
+        return {"days": days, "reason": reason}
+
+
+class WahooSchedulePolicy:
+    """Scheduled once Wahoo is configured and the athlete connected it.
+
+    The window is the stored Wahoo sync period, clamped by the owner to the
+    descriptor limits.
+    """
+
+    def __init__(
+        self,
+        *,
+        configured: Callable[[], bool],
+        sync_state: SyncStateRepository,
+        sync_period_defaults: Mapping[str, int],
+        all_sync_days: int,
+    ) -> None:
+        self._configured = configured
+        self._sync_state = sync_state
+        self._sync_period_defaults = sync_period_defaults
+        self._all_sync_days = all_sync_days
+
+    def configured(self) -> bool:
+        return self._configured()
+
+    def blocked(self) -> bool:
+        return False
+
+    def refresh_payload(self, _trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
+        days = self._sync_state.sync_period(
+            WAHOO_ID, self._sync_period_defaults, self._all_sync_days
         )
         return {"days": days, "reason": reason}
 

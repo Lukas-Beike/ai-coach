@@ -383,6 +383,7 @@ from backend.sync.provider_resync_assembly import (
 from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.provider_runtime_assembly import (
     ProviderRuntimeDependencies,
+    WahooRuntimeDependencies,
     build_provider_runtime,
     builtin_bindings,
 )
@@ -411,6 +412,7 @@ from backend.sync.wahoo_connection_assembly import (
     WahooConnectionAssembly,
     WahooConnectionInputs,
 )
+from backend.sync.wahoo_sync_assembly import WahooSyncAssembly, WahooSyncInputs
 from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
@@ -559,6 +561,7 @@ def provider_runtime() -> ProviderRuntimeRegistry:
                 intervals=jobs.intervals,
                 garmin=jobs.garmin,
                 calendar_weather=jobs.calendar_weather,
+                wahoo=WahooRuntimeDependencies(sync_service=WAHOO_SYNC.sync_service),
             )
         ),
     )
@@ -1058,6 +1061,22 @@ WAHOO_CONNECTION = WahooConnectionAssembly(
         database_lock=lambda: DB_LOCK,
         key_values=KEY_VALUE_REPOSITORY,
         utc_now=runtime_clock.utc_now,
+    )
+)
+WAHOO_SYNC = WahooSyncAssembly(
+    WahooSyncInputs(
+        config=lambda: CONFIG,
+        connection=WAHOO_CONNECTION.service,
+        json_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
+        database_manager=database_manager,
+        database_lock=DB_LOCK,
+        key_values=KEY_VALUE_REPOSITORY,
+        daily_markers=sync_daily_markers,
+        observer=lambda: PROVIDER_SYNC.operation_observer(),
+        registry=DEFAULT_PROVIDER_REGISTRY,
+        zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
+        now=lambda: datetime.now(UTC),
+        logger=LOGGER,
     )
 )
 NUTRITION_ASSEMBLY = NutritionAssembly(

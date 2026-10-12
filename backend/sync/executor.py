@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
@@ -398,6 +398,35 @@ class GarminJobAdapter:
     ) -> dict[str, Any]:
         _reject_plan_push(job_type)
         return self._jobs.execute(job, payload, reason)
+
+
+class WahooSyncJobOwner(Protocol):
+    """Runs one Wahoo read synchronization."""
+
+    def sync(
+        self,
+        days: object = None,
+        reason: str = "manual",
+        operation_id: str | None = None,
+    ) -> dict[str, Any]: ...
+
+
+class WahooJobAdapter:
+    """Refuse plan pushes, then run the read-only Wahoo sync."""
+
+    def __init__(self, *, sync: WahooSyncJobOwner) -> None:
+        self._sync = sync
+
+    def execute(
+        self,
+        job: Mapping[str, Any],
+        payload: dict[str, Any],
+        reason: str,
+        *,
+        job_type: str,
+    ) -> dict[str, Any]:
+        _reject_plan_push(job_type)
+        return self._sync.sync(payload.get("days"), reason, operation_id=job["id"])
 
 
 class CalendarWeatherJobAdapter:

@@ -21,15 +21,20 @@ from datetime import date, datetime, tzinfo
 from typing import Any, Final
 
 from backend.canonical.coverage import ProviderCoverage, summarize_provider
-from backend.canonical.mapping import IssueReason
+from backend.canonical.mapping import IssueReason, MappingResult
 from backend.canonical.vocabulary import ProviderId
 from backend.db.repositories import KeyValueRepository
-from backend.providers.canonical_plans import current_mapper_versions
+from backend.providers.canonical_plans import (
+    WAHOO_WORKOUTS_KEY,
+    current_mapper_versions,
+    wahoo_payload_retrieved_at,
+)
 from backend.providers.snapshot_projection import (
     project_garmin_snapshot,
     project_intervals_snapshot,
     stored_retrieved_at,
 )
+from backend.providers.wahoo_activity_mapping import map_wahoo_activities
 
 COVERAGE_KEY_PREFIX: Final = "canonical_coverage:"
 # The providers whose ingest persists a coverage summary. A provider without a
@@ -65,6 +70,20 @@ def garmin_payload_coverage(
         payload, zone=zone, retrieved_at=stored_at
     )
     return summarize_provider(ProviderId.GARMIN, stored_at, activities, observations)
+
+
+def wahoo_payload_coverage(payload: object, *, zone: tzinfo) -> ProviderCoverage | None:
+    """Summarize a fetched Wahoo payload, or None without a usable fetch time.
+
+    Wahoo contributes activities only, so the observation result stays empty.
+    """
+    stored_at = wahoo_payload_retrieved_at(payload, zone=zone)
+    if stored_at is None or not isinstance(payload, Mapping):
+        return None
+    activities = map_wahoo_activities(
+        payload.get(WAHOO_WORKOUTS_KEY), zone=zone, retrieved_at=stored_at
+    )
+    return summarize_provider(ProviderId.WAHOO, stored_at, activities, MappingResult())
 
 
 class CanonicalCoverageStore:

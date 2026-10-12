@@ -10,6 +10,7 @@ from backend.providers.descriptors import (
     CALENDAR_ID,
     GARMIN_ID,
     INTERVALS_ID,
+    WAHOO_ID,
     WEATHER_ID,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
@@ -21,7 +22,7 @@ class ProductionProviderWiringTests(unittest.TestCase):
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, SQLCIPHER_SKIP_REASON)
     def test_runtime_binds_each_builtin_provider_once_in_descriptor_order(self) -> None:
         runtime = server.provider_runtime()
-        expected = (INTERVALS_ID, GARMIN_ID, WEATHER_ID, CALENDAR_ID)
+        expected = (INTERVALS_ID, GARMIN_ID, WEATHER_ID, CALENDAR_ID, WAHOO_ID)
 
         self.assertEqual(expected, tuple(runtime.job_owners()))
         self.assertEqual(expected, tuple(runtime.freshness_sources()))
@@ -33,11 +34,11 @@ class ProductionProviderWiringTests(unittest.TestCase):
         policies = server.provider_runtime().schedule_policies()
 
         self.assertEqual(
-            (WEATHER_ID, CALENDAR_ID, GARMIN_ID, INTERVALS_ID),
+            (WEATHER_ID, CALENDAR_ID, GARMIN_ID, INTERVALS_ID, WAHOO_ID),
             tuple(policies["daily"]),
         )
         self.assertEqual(
-            (CALENDAR_ID, INTERVALS_ID, GARMIN_ID, WEATHER_ID),
+            (CALENDAR_ID, INTERVALS_ID, GARMIN_ID, WEATHER_ID, WAHOO_ID),
             tuple(policies["startup"]),
         )
         self.assertEqual(
@@ -48,7 +49,7 @@ class ProductionProviderWiringTests(unittest.TestCase):
         )
 
     def test_sync_period_defaults_are_derived_from_the_registry(self) -> None:
-        self.assertEqual({"intervals": 84, "garmin": 84}, server.SYNC_PERIOD_DEFAULTS)
+        self.assertEqual({"intervals": 84, "garmin": 84, "wahoo": 84}, server.SYNC_PERIOD_DEFAULTS)
         self.assertEqual(
             DEFAULT_PROVIDER_REGISTRY.sync_period_defaults(),
             server.SYNC_PERIOD_DEFAULTS,

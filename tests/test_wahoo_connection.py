@@ -97,10 +97,10 @@ class WahooConfigTests(unittest.TestCase):
         self.assertIn("WAHOO_REDIRECT_URI", SETTINGS_VALUE_KEYS)
         self.assertNotIn("WAHOO_CLIENT_SECRET", SETTINGS_VALUE_KEYS)
 
-    def test_provider_id_exists_without_registry_entry(self):
+    def test_provider_id_is_registered_as_a_read_only_provider(self):
         from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
-        self.assertNotIn(ProviderId.WAHOO.value, DEFAULT_PROVIDER_REGISTRY.ids())
+        self.assertIn(ProviderId.WAHOO.value, DEFAULT_PROVIDER_REGISTRY.ids())
 
 
 class WahooOAuthClientTests(unittest.TestCase):

@@ -247,6 +247,21 @@ class WahooConnectionService:
         with self._refresh_lock:
             return self._access_token_locked()
 
+    def refresh_access_token(self, rejected_token: str | None = None) -> str:
+        """Force a refresh after Wahoo rejected the access token with a 401.
+
+        When another thread already rotated the tokens while this one waited,
+        the newer access token is returned instead of spending the refresh
+        token a second time.
+        """
+        with self._refresh_lock:
+            tokens = self._stored_tokens()
+            if tokens is None:
+                raise AppError(409, NOT_CONNECTED_MESSAGE, reason="wahoo_not_connected")
+            if rejected_token is not None and tokens["access_token"] != rejected_token:
+                return str(tokens["access_token"])
+            return str(self._refresh(tokens)["access_token"])
+
     def _access_token_locked(self) -> str:
         # Another thread may have refreshed while this one waited.
         tokens = self._stored_tokens()

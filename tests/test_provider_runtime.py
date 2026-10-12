@@ -206,7 +206,7 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
 
     def test_static_registry_and_binding_lookup(self) -> None:
         self.assertEqual(
-            ("intervals", "garmin", "weather", "calendar", ACME_ID, BETA_ID),
+            ("intervals", "garmin", "weather", "calendar", "wahoo", ACME_ID, BETA_ID),
             self.registry.static.ids(),
         )
         self.assertIs(self.acme, self.registry.binding(ACME_ID))
