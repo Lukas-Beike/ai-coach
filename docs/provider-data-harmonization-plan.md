@@ -225,8 +225,8 @@ umgeschlüsselt, sondern über einen Resolver aufgelöst: lokale `activity_id` �
 Primäraufzeichnung bzw. alte Provider-ID → `(provider, provider_activity_id)` →
 Sitzung. Für `activity_feedback` ist keine Schemaänderung nötig, weil die
 bestehenden IDs Intervals-IDs aus der Aktivitätsliste sind; der Backfill prüft
-das und zählt nicht auflösbare Feedbackzeilen, die erhalten bleiben. Eine
-Providerspalte folgt erst mit dem Rückbau. Die Cursor in `provider_sync_cursors`
+das und zählt nicht auflösbare Feedbackzeilen, die erhalten bleiben. Die
+Providerspalte kam vorgezogen mit Schema v7 (#1130, P7-G). Die Cursor in `provider_sync_cursors`
 – heute liest nur der Scheduler den `historical`-Cursor – werden zur
 tatsächlichen Abdeckung je `(provider, Datenbereich)`.
 
@@ -1064,21 +1064,13 @@ Energieverbrauch, Ausrüstung, FTP-Verlauf und Freshness aus `retrieved_at`.
 | P7-F | #1123 | Gespeicherte Wettkampf-Sportarten über `COMPETITION_SPORT_TOKENS` in kanonische `Sport` übersetzt |
 | P7-C | #1128 | 7-Tage-Mittel von Ruhepuls und Readiness aus kanonischen Beobachtungen (`canonical_recovery_averages.py`), nur bei gleicher Tagesmenge und gleichem gerundetem Mittel |
 | P7-E | #1129 | Persönliche Erholung: Ruhepuls je Provider und Tag kanonisch (`canonical_personal_recovery.py`); Labels laufen bereits über `ProviderId` und `DAILY_HEALTH`, eine eigene Label-Ansicht war nicht mehr nötig |
+| P7-G | #1130 | Schema v7: nullable `provider` in `activity_feedback`, gesetzt nur bei über eine lokale Sitzung aufgelöster `act_`-ID; Bestandszeilen bleiben NULL; Datenschutz-Export Formatversion 3 enthält die Spalte |
 
 Gemeinsame Regel wie in Phase 5: kanonische Werte nur, wenn Provider, Tag und
 Wert dem Legacy-Datensatz entsprechen; ohne `canonical=` läuft der Legacy-Weg.
 
 Nicht in dieser Session abschließbar:
 
-- **P7-G (Schema v7, `provider` in `activity_feedback`):** Implementierung liegt
-  lokal vor. Laut §3 folgt die Providerspalte erst mit dem Rückbau, ist also
-  ebenfalls release-gebunden. Zusätzlich baut
-  `test_validate_migrates_supported_old_backup_before_scrubbing` in
-  `tests/test_database_restore_validation.py` sein 1.12.19-Backup aus dem
-  aktuellen Schema ab; mit der neuen Spalte passt der Fingerabdruck nicht mehr
-  (develop: `release-1.12.19`, P7-G: keine Form). Diese Datei und der
-  Tabellenmengen-Test in `tests/test_server_database.py` dürfen nur mit
-  ausdrücklicher Freigabe geändert werden.
 - **Rückbau von Legacy-Lesern, Dual-Write und Snapshot-Reduktion:** laut Phase 7 (§4) erst
   nach mehreren Releases mit stabiler Parität zulässig.
 - **Phase 8 (Wahoo):** wartet auf API-Zugang und Klärung der Nutzungsbedingungen.
