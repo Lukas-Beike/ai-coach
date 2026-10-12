@@ -35,6 +35,7 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.db import DatabaseManager, canonical_store, row_factory
+from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.feedback_post import FeedbackPostRoutes
@@ -316,6 +317,7 @@ class ActivityCallerResolutionTests(_Fixture):
         self.assertEqual("ride-1", repository.get.call_args.args[1])
         self.assertEqual("ride-1", repository.upsert.call_args.args[1]["activity_id"])
 
+
     def test_coach_feedback_route_accepts_local_id(self) -> None:
         local = self.seed("ride-1")
         snapshot_reader = Mock(
@@ -466,6 +468,84 @@ class ActivityCallerResolutionTests(_Fixture):
         service.refresh(local)
         self.assertEqual("/activity/ride-1", api.get.call_args_list[0].args[0])
         self.assertIsNotNone(ActivityDetailStore(self.manager).get("ride-1"))
+
+
+
+class ActivityFeedbackProviderColumnTests(_Fixture):
+    """Feedback rows record the provider of the resolved activity reference."""
+
+    def _service(self, activities: list[dict[str, object]] | None = None):
+        snapshot_reader = Mock(
+            latest_snapshot=Mock(
+                return_value={"recent_activities": activities or []}
+            )
+        )
+        return ActivityFeedbackService(
+            self.manager,
+            ActivityFeedbackRepository(lambda: STAMP),
+            snapshot_reader,
+            references=ActivityReferences(self.manager),
+        )
+
+    def _provider_of(self, activity_id: str):
+        with self.manager.unit_of_work() as db:
+            row = db.execute(
+                "SELECT provider FROM activity_feedback WHERE activity_id = ?",
+                (activity_id,),
+            ).fetchone()
+        return row["provider"]
+
+    def test_local_id_records_the_intervals_provider(self) -> None:
+        local = self.seed("ride-1")
+        self._service().save(local, {"session_rpe": 6})
+        self.assertEqual("intervals", self._provider_of("ride-1"))
+
+    def test_unresolved_id_records_no_provider(self) -> None:
+        self._service().save("ride-unknown", {"notes": "passthrough"})
+        self.assertIsNone(self._provider_of("ride-unknown"))
+
+    def test_null_reference_resolver_records_no_provider(self) -> None:
+        service = ActivityFeedbackService(
+            self.manager,
+            ActivityFeedbackRepository(lambda: STAMP),
+            Mock(),
+            references=NoActivityReferences(),
+        )
+        service.save("ride-1", {"notes": "no resolver"})
+        self.assertIsNone(self._provider_of("ride-1"))
+
+    def test_update_without_resolved_provider_keeps_existing_provider(self) -> None:
+        local = self.seed("ride-1")
+        service = self._service()
+        service.save(local, {"session_rpe": 5})
+        service.save("ride-1", {"notes": "later edit by provider id"})
+        self.assertEqual("intervals", self._provider_of("ride-1"))
+
+    def test_coach_save_records_the_intervals_provider(self) -> None:
+        local = self.seed("ride-1")
+        service = self._service([{"id": "ride-1"}])
+        result = service.save_coach(local, {"session_rpe": 4})
+        self.assertEqual("ride-1", result["activity_feedback"]["activity_id"])
+        self.assertEqual("intervals", self._provider_of("ride-1"))
+
+    def test_api_feedback_json_keeps_the_released_keys(self) -> None:
+        local = self.seed("ride-1")
+        service = self._service()
+        saved = service.save(local, {"notes": "felt good", "session_rpe": 3})
+        self.assertEqual(
+            {
+                "activity_id",
+                "activity_name",
+                "activity_date",
+                "notes",
+                "session_rpe",
+                "deviation_reason",
+                "created_at",
+                "updated_at",
+            },
+            set(saved["activity_feedback"]),
+        )
+        self.assertEqual(saved["activity_feedback"], service.list()[0])
 
 
 if __name__ == "__main__":

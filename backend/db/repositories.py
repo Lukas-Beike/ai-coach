@@ -689,13 +689,17 @@ class ActivityFeedbackRepository:
             "DELETE FROM activity_feedback WHERE activity_id = ?", (activity_id,)
         )
 
-    def upsert(self, db: Any, feedback: dict[str, Any]) -> None:
+    def upsert(
+        self, db: Any, feedback: dict[str, Any], *, provider: str | None = None
+    ) -> None:
+        """Write feedback; a write without a resolved provider keeps the stored one."""
         now = self._now()
         db.execute(
-            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at, provider) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(activity_id) DO UPDATE SET activity_name=excluded.activity_name, "
-            "activity_date=excluded.activity_date, notes=excluded.notes, session_rpe=excluded.session_rpe, deviation_reason=excluded.deviation_reason, updated_at=excluded.updated_at",
+            "activity_date=excluded.activity_date, notes=excluded.notes, session_rpe=excluded.session_rpe, deviation_reason=excluded.deviation_reason, updated_at=excluded.updated_at, "
+            "provider=COALESCE(excluded.provider, activity_feedback.provider)",
             (
                 feedback["activity_id"],
                 feedback["activity_name"],
@@ -705,6 +709,7 @@ class ActivityFeedbackRepository:
                 feedback.get("deviation_reason", ""),
                 now,
                 now,
+                provider,
             ),
         )
 

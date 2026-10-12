@@ -180,6 +180,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "deviation_reason",
         "created_at",
         "updated_at",
+        "provider",
     },
     "plan_adjustments": {"id", "payload", "status", "created_at", "applied_at"},
     "coach_action_proposals": {
@@ -410,7 +411,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -550,6 +551,22 @@ NUTRITION_PRODUCTS_DDL = """
     CREATE INDEX idx_nutrition_products_name ON nutrition_products(name COLLATE NOCASE);
     CREATE INDEX idx_nutrition_products_status ON nutrition_products(status, updated_at DESC);
 """
+
+
+# Shared by initialize_schema and the schema-version-7 migration, which rebuilds
+# the table so its stored definition matches this text exactly.
+ACTIVITY_FEEDBACK_TABLE_SQL = """
+    CREATE TABLE activity_feedback (
+        activity_id TEXT PRIMARY KEY,
+        activity_name TEXT NOT NULL DEFAULT '',
+        activity_date TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        session_rpe REAL CHECK (session_rpe IS NULL OR (session_rpe >= 0 AND session_rpe <= 10)),
+        deviation_reason TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        provider TEXT
+    )"""
 
 
 def initialize_schema(db: Any) -> None:
@@ -735,16 +752,9 @@ def initialize_schema(db: Any) -> None:
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     );
-    CREATE TABLE activity_feedback (
-        activity_id TEXT PRIMARY KEY,
-        activity_name TEXT NOT NULL DEFAULT '',
-        activity_date TEXT NOT NULL DEFAULT '',
-        notes TEXT NOT NULL DEFAULT '',
-        session_rpe REAL CHECK (session_rpe IS NULL OR (session_rpe >= 0 AND session_rpe <= 10)),
-        deviation_reason TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    );
+    """
+    + ACTIVITY_FEEDBACK_TABLE_SQL
+    + """;
     CREATE TABLE plan_adjustments (
         id TEXT PRIMARY KEY,
         payload TEXT NOT NULL,

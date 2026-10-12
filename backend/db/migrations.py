@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Final
 
 from backend.db.schema import (
+    ACTIVITY_FEEDBACK_TABLE_SQL,
     CURRENT_SCHEMA_VERSION,
     NUTRITION_PRODUCTS_DDL,
     PROVIDER_TABLES_DDL,
@@ -20,6 +21,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V2,
     SHAPE_SCHEMA_V3_V4,
     SHAPE_SCHEMA_V5,
+    SHAPE_SCHEMA_V6,
     released_shape,
 )
 
@@ -268,6 +270,29 @@ def _add_provider_tables(db: Any) -> None:
             db.execute(statement)
 
 
+_ACTIVITY_FEEDBACK_COLUMNS = (
+    "activity_id, activity_name, activity_date, notes, session_rpe, "
+    "deviation_reason, created_at, updated_at"
+)
+
+
+def _add_activity_feedback_provider(db: Any) -> None:
+    """Schema version 6 -> schema version 7: nullable provider of feedback rows.
+
+    Existing rows stay NULL. Their provider cannot be derived deterministically
+    from the stored activity id alone, so no backfill guesses one. SQLite's
+    ADD COLUMN would store a rewritten CREATE text, so the table is rebuilt from
+    the live definition instead, keeping every row.
+    """
+    db.execute("ALTER TABLE activity_feedback RENAME TO activity_feedback_v6")
+    db.execute(ACTIVITY_FEEDBACK_TABLE_SQL)
+    db.execute(
+        f"INSERT INTO activity_feedback({_ACTIVITY_FEEDBACK_COLUMNS}) "
+        f"SELECT {_ACTIVITY_FEEDBACK_COLUMNS} FROM activity_feedback_v6"
+    )
+    db.execute("DROP TABLE activity_feedback_v6")
+
+
 UpgradeStep = Callable[[Any], None]
 
 # Released shape -> (shape reached after the step, step). Every released shape
@@ -276,5 +301,6 @@ UPGRADE_STEPS: Final[Mapping[str, tuple[str, UpgradeStep]]] = {
     SHAPE_RELEASE_1_12_19: (SHAPE_SCHEMA_V2, _add_nutrition_products),
     SHAPE_SCHEMA_V2: (SHAPE_SCHEMA_V3_V4, _add_no_training_signal),
     SHAPE_SCHEMA_V3_V4: (SHAPE_SCHEMA_V5, _add_logged_time_known),
-    SHAPE_SCHEMA_V5: (SHAPE_CURRENT, _add_provider_tables),
+    SHAPE_SCHEMA_V5: (SHAPE_SCHEMA_V6, _add_provider_tables),
+    SHAPE_SCHEMA_V6: (SHAPE_CURRENT, _add_activity_feedback_provider),
 }

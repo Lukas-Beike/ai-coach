@@ -33,7 +33,8 @@ PayloadDecoder = Callable[[Any], Any]
 Clock = Callable[[], float]
 TimeoutErrorFactory = Callable[[], Exception]
 
-PRIVACY_EXPORT_FORMAT_VERSION = 2
+# Version 3 adds activity_feedback.provider (schema v7) to activity_feedback.jsonl.
+PRIVACY_EXPORT_FORMAT_VERSION = 3
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",

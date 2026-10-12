@@ -31,7 +31,31 @@ class DatabaseBootstrapTests(unittest.TestCase):
         return connection
 
     def drop_provider_tables(self, db):
-        # Released schemas predate the schema v6 provider tables; children first.
+        # Released schemas predate the schema v6 provider tables and the schema
+        # v7 activity_feedback.provider column; children first. The column is
+        # removed by rebuilding the table with its released DDL, because
+        # DROP COLUMN leaves different stored SQL text than a released schema.
+        db.execute("ALTER TABLE activity_feedback RENAME TO activity_feedback_v7")
+        db.execute(
+            """
+            CREATE TABLE activity_feedback (
+                activity_id TEXT PRIMARY KEY,
+                activity_name TEXT NOT NULL DEFAULT '',
+                activity_date TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                session_rpe REAL CHECK (session_rpe IS NULL OR (session_rpe >= 0 AND session_rpe <= 10)),
+                deviation_reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+        db.execute(
+            "INSERT INTO activity_feedback SELECT activity_id, activity_name, "
+            "activity_date, notes, session_rpe, deviation_reason, created_at, "
+            "updated_at FROM activity_feedback_v7"
+        )
+        db.execute("DROP TABLE activity_feedback_v7")
         for table in (
             "observations",
             "activity_records",
