@@ -267,25 +267,17 @@ class CanonicalBackfill:
         written = 0
         scanned = 0
         while True:
-            current = state["reproject_current"]
-            if current is None:
+            if state["reproject_current"] is None:
                 if scanned >= budget:
                     return written, False
                 scanned += 1
-                row = _start_reprojection(db, state)
-                if row is None:
+                if _start_reprojection(db, state) is None:
                     return written, True
-                current = state["reproject_current"]
-            else:
-                row = _raw_row_at(db, current["id"])
-                if row is None:
-                    # Deleted or gone since the last batch: nothing left to project.
-                    _leave_reprojection(state, current)
-                    continue
-            version = reprojection_mapper_version(row["provider"], row["record_kind"])
-            if version is None or int(row["mapped_version"]) >= version:
-                _leave_reprojection(state, current)
+            pending = _pending_reprojection(db, state)
+            if pending is None:
                 continue
+            current = state["reproject_current"]
+            row, version = pending
             work = self._work_for(
                 f"row:{current['id']}",
                 current,
@@ -403,6 +395,27 @@ def _start_reprojection(db: Any, state: dict[str, Any]) -> dict[str, Any] | None
     row = found[0]
     state["reproject_current"] = {"id": int(row["id"]), "fingerprint": "", "offset": 0}
     return row
+
+
+def _pending_reprojection(
+    db: Any, state: dict[str, Any]
+) -> tuple[dict[str, Any], int] | None:
+    """Return the current raw row and its mapper version when it needs re-projection.
+
+    A row that was deleted or removed since the last batch, has no mapper, or is
+    already current is left, and None is returned.
+    """
+    current = state["reproject_current"]
+    row = _raw_row_at(db, current["id"])
+    version = (
+        None
+        if row is None
+        else reprojection_mapper_version(row["provider"], row["record_kind"])
+    )
+    if row is None or version is None or int(row["mapped_version"]) >= version:
+        _leave_reprojection(state, current)
+        return None
+    return row, version
 
 
 def _leave_reprojection(state: dict[str, Any], current: Mapping[str, Any]) -> None:
