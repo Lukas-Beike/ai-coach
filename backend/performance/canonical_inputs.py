@@ -7,7 +7,8 @@ wellness rows and never extends past its latest day, so older or newer canonical
 history cannot change the current load.
 
 Current sport thresholds and VO2max come from the same snapshot's sync, see
-``backend.performance.canonical_current``.
+``backend.performance.canonical_current``. The current sleep score, resting HR and
+readiness come from ``backend.performance.canonical_recovery``.
 
 A snapshot without a usable wellness day yields no inputs, and the caller keeps
 the legacy values.
@@ -24,6 +25,10 @@ from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_current import (
     CanonicalCurrentInputs,
     read_current_inputs,
+)
+from backend.performance.canonical_recovery import (
+    CanonicalRecoveryInputs,
+    read_recovery_inputs,
 )
 from backend.performance.source_policy import select_current
 from backend.runtime.ports import (
@@ -45,6 +50,7 @@ class CanonicalPerformanceInputs:
     ctl: float | None
     atl: float | None
     current: CanonicalCurrentInputs | None = None
+    recovery: CanonicalRecoveryInputs | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +193,9 @@ def read_performance_inputs(
         atl=loaded.atl,
         current=read_current_inputs(
             reader, db, snapshot, latest_wellness_day=latest_day
+        ),
+        recovery=read_recovery_inputs(
+            reader, db, latest_wellness_day=latest_day, start=min(days)
         ),
     )
 
