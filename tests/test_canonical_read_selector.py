@@ -12,6 +12,7 @@ from canonical_read_support import (
     first_activity_name,
     intervals_snapshot,
     make_selector,
+    new_backfill,
     populate,
 )
 
@@ -319,7 +320,7 @@ class WorkerParityTests(CanonicalReadFixture):
 
     def make_worker(self, parity: Any) -> CanonicalBackfillWorker:
         return CanonicalBackfillWorker(
-            backfill=self.make_backfill(),
+            backfill=new_backfill(self),
             database=lambda: self.manager,
             maintenance_gate=MaintenanceGate(),
             poll_seconds=0,

@@ -144,6 +144,15 @@ def make_selector(case: CanonicalReadFixture) -> Any:
     )
 
 
+def new_backfill(case: CanonicalReadFixture) -> CanonicalBackfill:
+    return CanonicalBackfill(
+        key_values=case.key_values,
+        zone_provider=lambda: ZONE,
+        clock=lambda: NOW,
+        batch_size=DEFAULT_BATCH_SIZE,
+    )
+
+
 def populate(case: CanonicalReadFixture) -> CanonicalBackfill:
     """Store the snapshot and Garmin payload, then backfill until complete."""
     with case.manager.unit_of_work() as db:
@@ -153,12 +162,7 @@ def populate(case: CanonicalReadFixture) -> CanonicalBackfill:
             (json.dumps(case.intervals), NOW, str(case.intervals["synced_at"])),
         )
         case.key_values.set(db, GARMIN_SNAPSHOT_KEY, json.dumps(case.garmin))
-    backfill = CanonicalBackfill(
-        key_values=case.key_values,
-        zone_provider=lambda: ZONE,
-        clock=lambda: NOW,
-        batch_size=DEFAULT_BATCH_SIZE,
-    )
+    backfill = new_backfill(case)
     for _ in range(MAX_BATCHES):
         with case.manager.unit_of_work() as db:
             if backfill.run_batch(db).done:
