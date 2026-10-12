@@ -196,12 +196,12 @@ class PrivacyExportProviderTests(ProviderDataFixture):
     def lines(archive, name):
         return [json.loads(line) for line in archive.read(name).splitlines() if line]
 
-    def test_format_version_two_lists_the_provider_files(self):
-        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 2)
+    def test_format_version_three_lists_the_provider_files(self):
+        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 3)
         self.assertLessEqual(set(PROVIDER_FILES), PRIVACY_EXPORT_JSONL_FILES)
         with self.export() as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(manifest["format_version"], 2)
+            self.assertEqual(manifest["format_version"], 3)
             self.assertLessEqual(set(PROVIDER_FILES), set(manifest["jsonl_files"]))
             self.assertLessEqual(set(PROVIDER_FILES), set(archive.namelist()))
 
@@ -260,7 +260,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
                 with self.subTest(name=name):
                     self.assertEqual(archive.read(name), b"")
 
-    def test_feedback_archive_keeps_the_released_columns_without_provider(self):
+    def test_feedback_archive_includes_the_feedback_provider(self):
         self.db.execute(
             "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, "
             "notes, session_rpe, deviation_reason, created_at, updated_at, provider) "
@@ -283,9 +283,11 @@ class PrivacyExportProviderTests(ProviderDataFixture):
                 "deviation_reason",
                 "created_at",
                 "updated_at",
+                "provider",
             },
         )
         self.assertEqual(rows[0]["notes"], "felt good")
+        self.assertEqual(rows[0]["provider"], "intervals")
 
 
 class SanitizedProviderPayloadTests(unittest.TestCase):

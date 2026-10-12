@@ -810,7 +810,7 @@ class ServerDatabaseTests(ServerTestCase):
                 names = set(archive.namelist())
                 manifest = json.loads(archive.read("manifest.json"))
                 self.assertEqual(manifest["format"], "intervals-coach-privacy-export")
-                self.assertEqual(manifest["format_version"], 2)
+                self.assertEqual(manifest["format_version"], 3)
                 self.assertEqual(manifest["status"], "complete")
                 self.assertIn("snapshots.jsonl", names)
                 self.assertIn("profile.json", names)

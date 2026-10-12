@@ -33,31 +33,8 @@ PayloadDecoder = Callable[[Any], Any]
 Clock = Callable[[], float]
 TimeoutErrorFactory = Callable[[], Exception]
 
-PRIVACY_EXPORT_FORMAT_VERSION = 2
-# Tables whose archive rows keep the released column set. Columns added by later
-# schema versions (activity_feedback.provider) remain in the database backup and
-# are left out here so the archive JSON shape stays byte-identical.
-_ARCHIVE_COLUMNS = {
-    "activity_feedback": (
-        "activity_id",
-        "activity_name",
-        "activity_date",
-        "notes",
-        "session_rpe",
-        "deviation_reason",
-        "created_at",
-        "updated_at",
-    ),
-}
-
-
-def _archive_select(table: str) -> str:
-    columns = _ARCHIVE_COLUMNS.get(table)
-    if columns is None:
-        return f"SELECT * FROM {table}"
-    return f"SELECT {', '.join(columns)} FROM {table}"
-
-
+# Version 3 adds activity_feedback.provider (schema v7) to activity_feedback.jsonl.
+PRIVACY_EXPORT_FORMAT_VERSION = 3
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
@@ -353,7 +330,7 @@ class PrivacyArchiveExportService:
                     self._write_jsonl(
                         archive,
                         table + ".jsonl",
-                        (dict(row) for row in db.execute(_archive_select(table))),
+                        (dict(row) for row in db.execute(f"SELECT * FROM {table}")),
                         deadline,
                     )
                 self._write_jsonl(
