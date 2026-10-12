@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date
 from enum import StrEnum
 from typing import Any, Final
@@ -452,3 +452,51 @@ def _fetch_all(db: Any, sql: str, params: tuple[object, ...]) -> list[dict[str, 
         return [dict(row) for row in rows]
     names = [column[0] for column in cursor.description]
     return [dict(zip(names, row, strict=True)) for row in rows]
+
+
+_READ_CHUNK_SIZE: Final = 500
+
+
+def activity_sessions_by_ids(
+    db: Any, activity_ids: Sequence[str]
+) -> dict[str, dict[str, Any]]:
+    """Return session rows keyed by local activity id; unknown ids are absent."""
+    rows: dict[str, dict[str, Any]] = {}
+    for chunk in _chunked(activity_ids):
+        for row in _fetch_all(
+            db,
+            "SELECT activity_id, primary_provider, primary_provider_activity_id, "
+            "state, merged_into FROM activity_sessions "
+            f"WHERE activity_id IN ({_placeholders(chunk)})",
+            tuple(chunk),
+        ):
+            rows[row["activity_id"]] = row
+    return rows
+
+
+def activity_local_ids(
+    db: Any, provider: str, provider_activity_ids: Sequence[str]
+) -> dict[str, str]:
+    """Map provider activity ids to the local session id of their record."""
+    local_ids: dict[str, str] = {}
+    for chunk in _chunked(provider_activity_ids):
+        for row in _fetch_all(
+            db,
+            "SELECT provider_activity_id, activity_id FROM activity_records "
+            f"WHERE provider = ? AND provider_activity_id IN ({_placeholders(chunk)})",
+            (provider, *chunk),
+        ):
+            local_ids[row["provider_activity_id"]] = row["activity_id"]
+    return local_ids
+
+
+def _chunked(values: Sequence[str]) -> list[list[str]]:
+    unique = list(dict.fromkeys(value for value in values if value))
+    return [
+        unique[start : start + _READ_CHUNK_SIZE]
+        for start in range(0, len(unique), _READ_CHUNK_SIZE)
+    ]
+
+
+def _placeholders(values: Sequence[object]) -> str:
+    return ", ".join("?" * len(values))

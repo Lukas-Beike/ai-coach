@@ -8,6 +8,7 @@ from datetime import datetime
 from threading import Event
 from typing import Any
 
+from backend.activities.activity_reference import ActivityReferences
 from backend.db.manager import DatabaseManager
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
@@ -93,6 +94,7 @@ class SyncJobQueueAssembly:
             self._all_sync_days,
             self._daily_sync_marker_service(),
             registry=self._registry,
+            references=ActivityReferences(self._database_manager()),
         )
 
     def outcome_service(self) -> job_outcomes.SyncJobOutcomeService:

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.activities.activity_reference import (
+    ActivityReferenceResolver,
+    NoActivityReferences,
+    resolve_duplicate_ids,
+)
 from backend.activities.duplicates import (
     latest_wahoo_garmin_duplicate,
     remove_activity_from_snapshot,
@@ -22,12 +27,14 @@ class DuplicateActivityService:
         snapshot_reader: ProviderSnapshotReader,
         clock: Any,
         event_buffer: Any,
+        references: ActivityReferenceResolver | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._snapshot_repository = snapshot_repository
         self._snapshot_reader = snapshot_reader
         self._clock = clock
         self._event_buffer = event_buffer
+        self._references = NoActivityReferences() if references is None else references
 
     def _latest_snapshot(self) -> dict[str, Any] | None:
         with self._database_manager.unit_of_work() as db:
@@ -36,6 +43,7 @@ class DuplicateActivityService:
     def delete(self, payload: Any, intervals_client: Any) -> dict[str, Any]:
         """Delete the confirmed Garmin copy and retain the Wahoo activity."""
         current = latest_wahoo_garmin_duplicate(self._latest_snapshot() or {})
+        payload = resolve_duplicate_ids(payload, self._references)
         canonical_id, duplicate_id = validate_duplicate_delete(payload, current)
 
         intervals_client.delete_activity(duplicate_id)
