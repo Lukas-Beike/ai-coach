@@ -87,11 +87,13 @@ class FakeWahooSource:
         self.fetch = WahooWorkoutFetch(())
         self.error: BaseException | None = None
         self.windows: list[datetime] = []
+        self.upper_bounds: list[datetime | None] = []
 
     def list_workouts(
         self, *, since: datetime, until: datetime | None = None
     ) -> WahooWorkoutFetch:
         self.windows.append(since)
+        self.upper_bounds.append(until)
         if self.error is not None:
             raise self.error
         return self.fetch

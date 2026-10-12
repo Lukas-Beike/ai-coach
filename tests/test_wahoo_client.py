@@ -45,10 +45,12 @@ class ClientCase(unittest.TestCase):
     def setUp(self) -> None:
         self.request = Mock()
         self.refresh = Mock(return_value=REFRESHED)
+        self.invalidate = Mock()
         self.client = WahooClient(
             request=self.request,
             access_token=lambda: ACCESS,
             refresh_access_token=self.refresh,
+            invalidate_access_token=self.invalidate,
         )
 
     def assertSecretFree(self, error: BaseException) -> None:
@@ -186,6 +188,7 @@ class TokenRefreshTests(ClientCase):
         self.assertEqual(409, raised.exception.status)
         self.assertEqual("wahoo_reconnect_required", raised.exception.reason)
         self.assertEqual(1, self.refresh.call_count)
+        self.invalidate.assert_called_once_with(REFRESHED)
         self.assertSecretFree(raised.exception)
 
     def test_a_rejected_refresh_surfaces_the_connection_error(self) -> None:

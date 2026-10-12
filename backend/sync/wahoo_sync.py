@@ -160,7 +160,9 @@ class WahooSyncService:
     def _sync_locked(self, days: int) -> dict[str, Any]:
         zone = self._zone_provider() or UTC
         synced_at = self._now()
-        fetch = self._source().list_workouts(since=synced_at - timedelta(days=days))
+        fetch = self._source().list_workouts(
+            since=synced_at - timedelta(days=days), until=synced_at
+        )
         payload = {
             WAHOO_SYNCED_AT_KEY: synced_at.isoformat(),
             WAHOO_WORKOUTS_KEY: list(fetch.workouts),

@@ -124,9 +124,11 @@ class WahooClient:
         request: JsonRequest,
         access_token: Callable[[], str],
         refresh_access_token: Callable[[str], str],
+        invalidate_access_token: Callable[[str], None] | None = None,
     ) -> None:
         self._request = request
         self._access_token = access_token
+        self._invalidate_access_token = invalidate_access_token
         self._refresh_access_token = refresh_access_token
 
     def list_workouts(
@@ -189,6 +191,10 @@ class WahooClient:
             return self._send(url, token)
         except AppError as exc:
             if exc.upstream_status == 401:
+                # A freshly refreshed token was rejected too: drop the grant so
+                # scheduled jobs stop retrying until the athlete reconnects.
+                if self._invalidate_access_token is not None:
+                    self._invalidate_access_token(token)
                 raise WahooReconnectRequiredError from None
             raise _translated(exc) from None
 

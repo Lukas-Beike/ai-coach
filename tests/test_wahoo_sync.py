@@ -67,6 +67,11 @@ class IngestTests(WahooSyncCase):
         self.assertEqual(7, self.service.sync(days=7)["window_days"])
         self.assertLessEqual(self.service.sync(days=10**6)["window_days"], 3650)
 
+    def test_the_fetch_ends_at_the_synchronization_time(self) -> None:
+        self.service.sync()
+
+        self.assertEqual([self.now], self.source.upper_bounds)
+
 
 class FailureTests(WahooSyncCase):
     def assertNothingPersisted(self) -> None:

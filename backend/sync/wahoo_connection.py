@@ -262,6 +262,17 @@ class WahooConnectionService:
                 return str(tokens["access_token"])
             return str(self._refresh(tokens)["access_token"])
 
+    def invalidate_access_token(self, rejected_token: str) -> None:
+        """Drop the stored grant after Wahoo rejected a freshly refreshed token.
+
+        A grant another thread stored meanwhile carries a different access token
+        and is kept.
+        """
+        with self._refresh_lock:
+            tokens = self._stored_tokens()
+            if tokens is not None and tokens["access_token"] == rejected_token:
+                self._delete(WAHOO_TOKENS_KEY)
+
     def _access_token_locked(self) -> str:
         # Another thread may have refreshed while this one waited.
         tokens = self._stored_tokens()

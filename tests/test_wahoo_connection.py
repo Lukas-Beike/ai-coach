@@ -302,6 +302,17 @@ class WahooConnectionServiceTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "wahoo_reconnect_required")
         self.assertNotIn(WAHOO_TOKENS_KEY, self.values.data)
 
+    def test_invalidating_the_rejected_token_drops_the_grant(self):
+        self.connect()
+        self.service.invalidate_access_token("access-1")
+        self.assertNotIn(WAHOO_TOKENS_KEY, self.values.data)
+        self.assertFalse(self.service.status()["connected"])
+
+    def test_invalidating_an_older_token_keeps_a_newer_grant(self):
+        self.connect()
+        self.service.invalidate_access_token("access-0")
+        self.assertIn(WAHOO_TOKENS_KEY, self.values.data)
+
     def test_unexpected_exchange_exception_still_ends_in_error_outcome(self):
         self.service.start_authorization()
         self.request.side_effect = TimeoutError("slow")

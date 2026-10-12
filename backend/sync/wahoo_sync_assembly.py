@@ -52,6 +52,7 @@ class WahooSyncAssembly:
             request=inputs.json_request(),
             access_token=connection.access_token,
             refresh_access_token=connection.refresh_access_token,
+            invalidate_access_token=connection.invalidate_access_token,
         )
 
     def sync_service(self) -> WahooSyncService:
