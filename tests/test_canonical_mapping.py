@@ -14,6 +14,7 @@ from backend.canonical.mapping import (
     IssueReason,
     MappingIssue,
     MappingResult,
+    coerce_comma_decimal_number,
     coerce_number,
 )
 
@@ -173,6 +174,33 @@ class CoerceNumberTests(unittest.TestCase):
     def test_rejects_text_longer_than_the_bound(self) -> None:
         self.assertIsNone(coerce_number("1" * (MAX_NUMBER_TEXT_LENGTH + 1)))
         self.assertIsNone(coerce_number("1" * 65 + ".0"))
+
+
+class CommaDecimalNumberTests(unittest.TestCase):
+    def test_comma_text_reads_the_comma_as_the_decimal_mark(self) -> None:
+        cases: tuple[tuple[str, float], ...] = (
+            ("80,4", 80.4),
+            ("58,2", 58.2),
+            (" 70,5 ", 70.5),
+            ("-0,5", -0.5),
+            ("1,5e1", 15.0),
+        )
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(expected, coerce_comma_decimal_number(text))
+
+    def test_text_that_is_still_malformed_after_the_swap_is_rejected(self) -> None:
+        for text in ("1,2,3", ",", "", "abc", "nan", "1_0,5", "1,5x", "1" * 65):
+            with self.subTest(text=text):
+                self.assertIsNone(coerce_comma_decimal_number(text))
+
+    def test_other_values_follow_coerce_number(self) -> None:
+        for value in (72, 72.5, True, None, math.nan, b"1,5", [1.5]):
+            with self.subTest(value=repr(value)[:40]):
+                self.assertEqual(
+                    coerce_comma_decimal_number(untyped(value)),
+                    coerce_number(untyped(value)),
+                )
 
 
 if __name__ == "__main__":

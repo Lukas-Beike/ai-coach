@@ -8,7 +8,11 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from backend.canonical.mapping import IssueReason, MappingResult
+from backend.canonical.mapping import (
+    IssueReason,
+    MappingResult,
+    coerce_comma_decimal_number,
+)
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import (
     MetricKind,
@@ -17,6 +21,7 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
+from backend.performance.body import _number as legacy_weight_number
 from backend.providers.intervals_wellness_mapping import (
     MAPPER_VERSION,
     map_intervals_athlete_thresholds,
@@ -85,7 +90,7 @@ def sport_records(
 
 class ModuleContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 2)
+        self.assertEqual(MAPPER_VERSION, 3)
 
     def test_naive_retrieved_at_is_a_programming_error_for_both_mappers(self) -> None:
         naive_time = naive("2026-10-11T08:00:00")
@@ -217,6 +222,72 @@ class WellnessFieldTests(unittest.TestCase):
     def test_numeric_text_with_dot_decimal_is_accepted(self) -> None:
         result = wellness([row(weight=" 70.4 ")])
         self.assertEqual(only_value(result), 70.4)
+
+
+class CommaDecimalTests(unittest.TestCase):
+    def test_comma_decimal_wellness_values_are_read_as_the_readers_read_them(
+        self,
+    ) -> None:
+        result = wellness([row(weight="80,4", ctl="58,2")])
+        self.assertEqual(result.issues, ())
+        self.assertEqual(kinds(result), {MetricKind.WEIGHT: 80.4, MetricKind.CTL: 58.2})
+
+    def test_comma_decimal_athlete_weight_and_ftp_are_accepted(self) -> None:
+        result = thresholds(
+            {
+                "id": ATHLETE_ID,
+                "weight": "81,5",
+                "sportSettings": [{"types": ["Ride"], "ftp": "260,5"}],
+            }
+        )
+        self.assertEqual(result.issues, ())
+        self.assertEqual(
+            sport_records(result),
+            {(MetricKind.WEIGHT, None, 81.5), (MetricKind.FTP, Sport.RIDE, 260.5)},
+        )
+
+    def test_comma_decimal_zero_is_unset_like_dot_decimal_zero(self) -> None:
+        for zero in (0, "0.0", "0,0"):
+            with self.subTest(zero=zero):
+                result = thresholds(
+                    {
+                        "id": ATHLETE_ID,
+                        "icu_ftp": 250,
+                        "sportSettings": [{"types": ["Ride"], "ftp": zero}],
+                    }
+                )
+                self.assertEqual(result.issues, ())
+                self.assertEqual(
+                    sport_records(result), {(MetricKind.FTP, Sport.RIDE, 250)}
+                )
+
+    def test_comma_decimal_text_parses_like_the_legacy_weight_reader(
+        self,
+    ) -> None:
+        for text in (
+            "80,4",
+            "58,2",
+            "80.4",
+            " 81,5 ",
+            "1,5e1",
+            "1,2,3",
+            "abc",
+            "",
+            "nan",
+            "inf",
+            ",",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(
+                    coerce_comma_decimal_number(text), legacy_weight_number(text)
+                )
+        self.assertEqual(legacy_weight_number("80,4"), 80.4)
+        self.assertIsNone(legacy_weight_number("1,2,3"))
+        # Shared legacy rule, kept for parity: grouped thousands read as decimals.
+        self.assertEqual(coerce_comma_decimal_number("1,200"), 1.2)
+        # Known deviation: underscore separators are a coerce_number rejection.
+        self.assertEqual(legacy_weight_number("1_0,5"), 10.5)
+        self.assertIsNone(coerce_comma_decimal_number("1_0,5"))
 
 
 class WellnessAliasPrecedenceTests(unittest.TestCase):
@@ -364,7 +435,7 @@ class WellnessGarbageTests(unittest.TestCase):
             (True, IssueReason.INVALID_TYPE),
             ([70], IssueReason.INVALID_TYPE),
             ({"value": 70}, IssueReason.INVALID_TYPE),
-            ("70,4", IssueReason.INVALID_NUMBER),
+            ("70,4,1", IssueReason.INVALID_NUMBER),
             ("abc", IssueReason.INVALID_NUMBER),
             (float("nan"), IssueReason.INVALID_NUMBER),
             (float("inf"), IssueReason.INVALID_NUMBER),
@@ -812,7 +883,7 @@ class SportSettingValueTests(unittest.TestCase):
                 "sportSettings": [
                     {
                         "types": ["Ride"],
-                        "ftp": "260,5",
+                        "ftp": "260,5,1",
                         "lthr": True,
                         "max_hr": 300,
                         "indoor_ftp": None,
@@ -920,11 +991,7 @@ class AthleteWeightAndThresholdTests(unittest.TestCase):
         self.assertEqual(record.value.unit, MetricKind.WEIGHT.unit)
         self.assertEqual(record.provenance.source_record_id, "a1")
 
-    def test_comma_decimal_and_out_of_range_athlete_weight_are_rejected(self) -> None:
-        self.assertEqual(
-            issue_tuples(thresholds({"id": "a1", "weight": "81,5"})),
-            [("a1", "weight", IssueReason.INVALID_NUMBER)],
-        )
+    def test_out_of_range_athlete_weight_is_rejected(self) -> None:
         result = thresholds({"id": "a1", "weight": 500})
         self.assertEqual(result.records, ())
         self.assertEqual(

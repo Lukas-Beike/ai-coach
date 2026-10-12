@@ -9,8 +9,8 @@ Alias precedence follows the readers in ``backend.performance`` and
 ``backend.planning``. For each canonical field the first alias whose value is
 neither ``None`` nor an empty string is used, even when that value is invalid.
 A rejected value is never replaced by a later alias, so an invalid ``ctl``
-does not fall back to ``ctLoad``. Numbers follow ``coerce_number``, which
-rejects comma decimals as malformed even though the readers accept them.
+does not fall back to ``ctLoad``. Numbers follow ``coerce_comma_decimal_number``,
+so text such as ``"80,4"`` is read as 80.4, as the readers read it.
 
 Wellness rows
     ``id`` is the ISO calendar date (``YYYY-MM-DD``) and is required. Each
@@ -52,7 +52,8 @@ Athlete record
     Known deviations from the readers, pinned in ``tests/test_intervals_mapping_parity.py``:
     a zero athlete-wide lthr is 0 bpm in ``current_metrics`` but unset here;
     a rejected sport value lets the athlete-wide fallback apply, as the top-level
-    FTP does; a comma-decimal athlete weight is rejected as malformed. Athlete-wide
+    FTP does. Text with underscore digit separators or non-ASCII digits is
+    rejected by ``coerce_number``'s rules, though the readers accept it. Athlete-wide
     VO2max, athlete body fat, activity-derived max HR and wellness ``sportInfo``
     are not mapped.
 """
@@ -70,7 +71,7 @@ from backend.canonical.mapping import (
     IssueReason,
     MappingIssue,
     MappingResult,
-    coerce_number,
+    coerce_comma_decimal_number,
 )
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.sports import classify_sport_text
@@ -83,7 +84,7 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-MAPPER_VERSION: Final = 2
+MAPPER_VERSION: Final = 3
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
 _DAY_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
@@ -355,7 +356,7 @@ def _add_field(
     if found is None:
         return
     name, value = found
-    if kind in _UNSET_WHEN_ZERO and coerce_number(value) == 0:
+    if kind in _UNSET_WHEN_ZERO and coerce_comma_decimal_number(value) == 0:
         return
     number = _canonical_number(kind, value)
     if isinstance(number, IssueReason):
@@ -395,7 +396,7 @@ def _canonical_number(kind: MetricKind, value: object) -> float | IssueReason:
 def _raw_number(value: object) -> float | IssueReason:
     if isinstance(value, bool) or not isinstance(value, int | float | str):
         return IssueReason.INVALID_TYPE
-    number = coerce_number(value)
+    number = coerce_comma_decimal_number(value)
     return IssueReason.INVALID_NUMBER if number is None else number
 
 

@@ -17,7 +17,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
-from backend.canonical.vocabulary import ActivityLinkKind, ProviderId
+from backend.canonical.vocabulary import ActivityLinkKind, MetricKind, ProviderId
 from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
@@ -792,6 +792,57 @@ class ReprojectionTests(BackfillFixture):
         self.run_to_completion(backfill)
         self.assertEqual(
             self.summary(backfill)["providers"][INTERVALS]["reprojected"], 3
+        )
+
+    def test_comma_decimal_wellness_stored_at_the_previous_version_is_reprojected(
+        self,
+    ) -> None:
+        # The previous mapper rejected "80,4", so its stored row has no weight yet.
+        current = canonical_plans.current_mapper_versions()[
+            f"{INTERVALS}.{canonical_plans.WELLNESS_RECORD_KIND}"
+        ]
+        with self.manager.unit_of_work() as db:
+            canonical_store.upsert_provider_record(
+                db,
+                provider=INTERVALS,
+                record_kind=canonical_plans.WELLNESS_RECORD_KIND,
+                source_record_id="2026-10-08",
+                payload={"id": "2026-10-08", "weight": "80,4", "ctl": "58,2"},
+                mapper_version=current - 1,
+                fetched_at=NOW,
+                now=NOW,
+            )
+        self.assertEqual(self.count("observations"), 0)
+
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        self.assertEqual(
+            self.summary(backfill)["providers"][INTERVALS]["reprojected"], 1
+        )
+        self.assertEqual(
+            self.rows(
+                "SELECT metric, value, mapper_version FROM observations ORDER BY metric"
+            ),
+            [
+                {
+                    "metric": MetricKind.CTL.value,
+                    "value": 58.2,
+                    "mapper_version": current,
+                },
+                {
+                    "metric": MetricKind.WEIGHT.value,
+                    "value": 80.4,
+                    "mapper_version": current,
+                },
+            ],
+        )
+        self.assertEqual(
+            self.rows(
+                "SELECT mapped_version FROM provider_records WHERE record_kind = ?",
+                (canonical_plans.WELLNESS_RECORD_KIND,),
+            ),
+            [{"mapped_version": current}],
         )
 
     def test_deleted_raw_records_are_skipped(self) -> None:

@@ -487,18 +487,12 @@ class WellnessParityTests(unittest.TestCase):
             ]
         )
 
-    # Known deviation, named so that it stays visible.
-
-    def test_comma_decimal_is_strict_in_the_mapper_and_accepted_by_legacy(self) -> None:
-        # Deviation: coerce_number rejects "70,1" as malformed. The legacy readers
-        # replace the comma with a dot and accept the value.
+    def test_comma_decimal_weight_is_accepted_by_mapper_and_legacy(self) -> None:
+        # Both the mapper and the legacy readers replace the comma with a dot.
         row = {"id": LATEST_DAY, "weight": "70,1"}
         result = map_wellness([row])
-        self.assertIsNone(first_value(result, MetricKind.WEIGHT))
-        self.assertEqual(
-            [(issue.field, issue.reason) for issue in result.issues],
-            [("weight", IssueReason.INVALID_NUMBER)],
-        )
+        self.assertEqual(first_value(result, MetricKind.WEIGHT), 70.1)
+        self.assertEqual(result.issues, ())
         legacy = legacy_metrics(
             {"athlete": {}, "recent_wellness": [row], "recent_activities": []}
         )
