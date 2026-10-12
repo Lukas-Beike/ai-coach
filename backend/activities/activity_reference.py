@@ -52,7 +52,15 @@ class ActivityReferences(ActivityReferenceResolver):
         return self.resolve_reference(reference).activity_id
 
     def resolve_reference(self, reference: Any) -> ActivityReference:
-        """Return the reference with its owning provider when a local session confirms it."""
+        """Return the reference with its owning provider when a local session confirms it.
+
+        Only local ``act_`` ids carry a provider. Raw provider ids (for example
+        the Intervals.icu id posted by the activity detail view) pass through
+        with provider None: mapping them would need a provider-id lookup that
+        the existing helpers do not offer for writes, and the stored key must
+        stay the id the client sent. Feedback written that way keeps NULL
+        provider until the client posts the local id.
+        """
         if not isinstance(reference, str):
             return ActivityReference(reference)
         candidate = reference.strip()
