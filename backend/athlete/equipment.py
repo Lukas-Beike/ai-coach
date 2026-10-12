@@ -23,6 +23,7 @@ class EquipmentService:
         today: Callable[[], date],
         utc_now: Callable[[], str],
         canonical_rows: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], int]],
+        resolve_activity: Callable[[Any], Any] | None = None,
     ):
         self._manager, self._read_snapshot, self._today, self._utc_now = (
             manager,
@@ -31,6 +32,11 @@ class EquipmentService:
             utc_now,
         )
         self._canonical_rows = canonical_rows
+        self._resolve_activity = (
+            (lambda reference: reference)
+            if resolve_activity is None
+            else resolve_activity
+        )
 
     def _records(self, db: Any, prefix: str, limit: int) -> list[dict[str, Any]]:
         return [
@@ -212,9 +218,10 @@ class EquipmentService:
             "equipment_id",
         }:
             raise AppError(400, "Aktivität und Ausrüstung sind erforderlich.")
+        activity_id = str(self._resolve_activity(payload["activity_id"]))
         rows, _ = self._canonical_rows(self._read_snapshot() or {})
         row = next(
-            (row for row in rows if str(row.get("id")) == str(payload["activity_id"])),
+            (row for row in rows if str(row.get("id")) == activity_id),
             None,
         )
         if row is None:

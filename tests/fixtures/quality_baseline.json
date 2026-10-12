@@ -3505,7 +3505,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/queue.py",
-      "line": 73,
+      "line": 79,
       "column": 25,
       "code": "valid-type",
       "message_sha256": "e544e9bb666fd02cbac8c6d513743b7609ad210eee16d21cef00ba879ce33aba"

@@ -5,6 +5,10 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+from backend.activities.activity_reference import (
+    ActivityReferenceResolver,
+    NoActivityReferences,
+)
 from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
@@ -34,6 +38,7 @@ class SyncJobQueueService:
         daily_sync_markers: DailySyncMarkerService,
         *,
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
+        references: ActivityReferenceResolver | None = None,
     ) -> None:
         self._store = store
         self._publisher = publisher
@@ -42,6 +47,7 @@ class SyncJobQueueService:
         self._all_sync_days = all_sync_days
         self._daily_sync_markers = daily_sync_markers
         self._registry = registry
+        self._references = NoActivityReferences() if references is None else references
 
     def state(self, job_id: str) -> dict[str, Any]:
         """Return one job or the existing localized not-found error."""
@@ -75,6 +81,7 @@ class SyncJobQueueService:
     ) -> dict[str, Any]:
         """Validate and persist a job while maintenance drains all side effects."""
         with self._maintenance_gate.operation():
+            payload = self._resolve_activity_reference(job_type, payload)
             try:
                 envelope = normalize_sync_job_request(
                     provider,
@@ -105,6 +112,19 @@ class SyncJobQueueService:
             ):
                 self._daily_sync_markers.mark_attempt(envelope["provider"])
             return result
+
+    def _resolve_activity_reference(self, job_type: str, payload: Any) -> Any:
+        """Store activity jobs under the provider id so duplicates coalesce."""
+        if (
+            job_type != "activity_details"
+            or not isinstance(payload, dict)
+            or "activity_id" not in payload
+        ):
+            return payload
+        return {
+            **payload,
+            "activity_id": self._references.resolve(payload["activity_id"]),
+        }
 
     def resume_interrupted(self) -> int:
         """Make interrupted jobs eligible and wake the worker only when needed."""

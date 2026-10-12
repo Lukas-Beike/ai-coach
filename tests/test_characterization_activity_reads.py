@@ -136,25 +136,35 @@ class ActivityPageCharacterizationTests(_StorageCase):
         )
         return service.page(today=TODAY, **kwargs)
 
-    def test_cursor_is_unpadded_urlsafe_json_of_last_page_key(self) -> None:
-        # The 28-byte payload needs base64 padding, so the unpadded form is pinned.
+    def test_cursor_is_unpadded_urlsafe_versioned_json_of_last_page_key(self) -> None:
+        # The 44-byte payload needs one base64 padding character, so the unpadded
+        # form is pinned.
         result = self._page(
             [_activity("bc", DAY), _activity("a", PREVIOUS_DAY)], limit=1
         )
         self.assertEqual(["bc"], _ids(result["activities"]))
         self.assertEqual(
-            "WyIyMDI2LTA1LTA0VDA4OjAwOjAwIiwiYmMiXQ", result["next_cursor"]
+            "eyJ2IjoyLCJhZnRlciI6WyIyMDI2LTA1LTA0VDA4OjAwOjAwIiwiYmMiXX0",
+            result["next_cursor"],
         )
-        self.assertEqual([DAY, "bc"], _decode(result["next_cursor"]))
+        self.assertEqual({"v": 2, "after": [DAY, "bc"]}, _decode(result["next_cursor"]))
 
     def test_cursor_round_trips_non_ascii_ids(self) -> None:
         result = self._page(
             [_activity("Rad-Ä", DAY), _activity("a", PREVIOUS_DAY)], limit=1
         )
         self.assertEqual(
-            "WyIyMDI2LTA1LTA0VDA4OjAwOjAwIiwiUmFkLcOEIl0", result["next_cursor"]
+            "eyJ2IjoyLCJhZnRlciI6WyIyMDI2LTA1LTA0VDA4OjAwOjAwIiwiUmFkLcOEIl19",
+            result["next_cursor"],
         )
-        self.assertEqual([DAY, "Rad-Ä"], _decode(result["next_cursor"]))
+        self.assertEqual(
+            {"v": 2, "after": [DAY, "Rad-Ä"]}, _decode(result["next_cursor"])
+        )
+
+    def test_legacy_unversioned_cursor_still_resumes_after_its_key(self) -> None:
+        rows = [_activity("b", DAY), _activity("a", PREVIOUS_DAY)]
+        result = self._page(rows, cursor=_encode([DAY, "b"]), limit=1)
+        self.assertEqual(["a"], _ids(result["activities"]))
 
     def test_cursor_skips_rows_whose_sort_key_equals_the_cursor_key(self) -> None:
         # Quirk pinned: resumption is strictly "less than" the cursor key, so a
@@ -203,7 +213,10 @@ class ActivityPageCharacterizationTests(_StorageCase):
             {"id": "empty-local", "start_date_local": "", "start_date": DAY},
         ]
         result = self._page(rows)
-        self.assertEqual([rows[2], rows[1], rows[0]], result["activities"])
+        expected = [
+            {**row, "local_activity_id": None} for row in (rows[2], rows[1], rows[0])
+        ]
+        self.assertEqual(expected, result["activities"])
 
     def test_sort_key_date_is_truncated_to_forty_characters(self) -> None:
         # Quirk pinned: only the first 40 characters of the start string sort.
@@ -211,7 +224,7 @@ class ActivityPageCharacterizationTests(_StorageCase):
         result = self._page(
             [_activity("a", long_start), _activity("b", long_start)], limit=1
         )
-        self.assertEqual(long_start[:40], _decode(result["next_cursor"])[0])
+        self.assertEqual(long_start[:40], _decode(result["next_cursor"])["after"][0])
 
     def test_malformed_or_unexpected_cursors_restart_from_first_page(self) -> None:
         rows = [_activity("b", DAY), _activity("a", PREVIOUS_DAY)]
@@ -220,6 +233,10 @@ class ActivityPageCharacterizationTests(_StorageCase):
             _encode({"key": 1}),
             _encode([DAY]),
             _encode([DAY, "b", "extra"]),
+            _encode({"v": 3, "after": [DAY, "b"]}),
+            _encode({"v": 2, "after": [DAY]}),
+            _encode({"v": 2, "after": [DAY, "b", "extra"]}),
+            _encode({"v": 2}),
         ):
             with self.subTest(cursor=cursor):
                 result = self._page(rows, cursor=cursor, limit=1)

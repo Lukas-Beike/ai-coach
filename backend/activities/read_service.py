@@ -8,6 +8,10 @@ from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
 
+from backend.activities.activity_reference import (
+    ActivityReferenceResolver,
+    NoActivityReferences,
+)
 from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.matching import record_date
 from backend.runtime.ports import ProviderSnapshotReader
@@ -15,6 +19,7 @@ from backend.runtime.ports import ProviderSnapshotReader
 ALL_DAYS = -1
 PAGE_DEFAULT = 100
 PAGE_MAX = 250
+PAGE_CURSOR_VERSION = 2
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -51,6 +56,24 @@ def _decode_cursor(value: Any) -> Any | None:
         return None
 
 
+def _encode_page_cursor(key: tuple[str, str]) -> str:
+    return _encode_cursor({"v": PAGE_CURSOR_VERSION, "after": list(key)})
+
+
+def _decode_page_cursor(value: Any) -> tuple[str, str] | None:
+    """Accept the versioned cursor and the unversioned list cursor of older clients."""
+    decoded = _decode_cursor(value)
+    if isinstance(decoded, dict) and decoded.get("v") == PAGE_CURSOR_VERSION:
+        after = decoded.get("after")
+    elif isinstance(decoded, list):
+        after = decoded
+    else:
+        return None
+    if isinstance(after, list) and len(after) == 2:
+        return (str(after[0]), str(after[1]))
+    return None
+
+
 def _page_limit(raw: Any) -> int:
     try:
         return max(1, min(int(raw), PAGE_MAX))
@@ -69,12 +92,14 @@ class ActivityReadService:
         detail_store: ActivityDetailStore | None = None,
         *,
         read_equipment: Callable[[], dict[str, Any]] = dict,
+        references: ActivityReferenceResolver | None = None,
     ):
         self._database_manager = database_manager
         self._snapshot_reader = snapshot_reader
         self._feedback_service = feedback_service
         self._detail_store = detail_store
         self._read_equipment = read_equipment
+        self._references = NoActivityReferences() if references is None else references
 
     def _snapshot(self) -> dict[str, Any]:
         with self._database_manager.unit_of_work() as db:
@@ -89,6 +114,12 @@ class ActivityReadService:
             if isinstance(values, list)
             else []
         )
+
+    def _with_local_ids(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        local_ids = self._references.local_ids(_page_key(item)[1] for item in items)
+        for item in items:
+            item["local_activity_id"] = local_ids.get(_page_key(item)[1])
+        return items
 
     def page(
         self,
@@ -112,16 +143,18 @@ class ActivityReadService:
                 if record_date(_page_key(item)[0]) >= cutoff.isoformat()
             ]
         activities.sort(key=_page_key, reverse=True)
-        decoded = _decode_cursor(cursor)
-        if isinstance(decoded, list) and len(decoded) == 2:
-            after = (str(decoded[0]), str(decoded[1]))
+        after = _decode_page_cursor(cursor)
+        if after is not None:
             activities = [item for item in activities if _page_key(item) < after]
         page_size = _page_limit(limit)
         page = activities[:page_size]
+        attached = self._with_local_ids(
+            self._feedback_service.attach_to_activities(page)
+        )
         return {
             "snapshot_synced_at": snapshot.get("synced_at"),
-            "activities": self._feedback_service.attach_to_activities(page),
-            "next_cursor": _encode_cursor(_page_key(page[-1]))
+            "activities": attached,
+            "next_cursor": _encode_page_cursor(_page_key(page[-1]))
             if len(activities) > len(page) and page
             else None,
             "limit": page_size,
@@ -146,8 +179,10 @@ class ActivityReadService:
             ]
         return {
             "snapshot_synced_at": snapshot.get("synced_at"),
-            "activities": self._feedback_service.attach_to_activities(
-                activities[: max(1, min(int(limit), 500))]
+            "activities": self._with_local_ids(
+                self._feedback_service.attach_to_activities(
+                    activities[: max(1, min(int(limit), 500))]
+                )
             ),
             "days": days,
         }

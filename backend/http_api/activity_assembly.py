@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from typing import Any
 
+from backend.activities.activity_reference import ActivityReferences
 from backend.activities.detail_store import ActivityDetailStore
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.runtime.ports import ProviderSnapshotReader
@@ -29,4 +30,5 @@ class ActivityReadAssembly:
             self._feedback_service(),
             ActivityDetailStore(manager),
             read_equipment=self._read_equipment,
+            references=ActivityReferences(manager),
         )

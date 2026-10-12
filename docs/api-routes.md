@@ -15,6 +15,27 @@ session cookie; `CSRF` means that session plus the `X-CSRF-Token` header.
 | POST | `/api/login` | Create a session | Public |
 | POST | `/api/logout` | End the current session | CSRF |
 
+## Activity identifiers
+
+Activity routes accept either the local canonical activity ID (`act_...`) or the
+legacy Intervals.icu provider ID. The server resolves a local ID once, at the
+entry point, to the provider ID; every stored key and provider request stays
+provider-keyed.
+
+- `GET /api/activities` items and `GET /api/activities/{id}` responses carry
+  `activity_id` (the provider ID) and `local_activity_id` (the local ID, or
+  `null` when no canonical record exists yet).
+- The list `cursor` is versioned: `{"v": 2, "after": [sort_date, provider_id]}`,
+  base64url-encoded. Unversioned cursors issued before this change are still
+  accepted. Unrecognized cursors return the first page.
+- `POST /api/activities/{id}/feedback`, equipment assignment, duplicate
+  deletion and the Coach activity tools accept either form. Only Intervals.icu
+  primary, non-deleted sessions resolve; each resolves to its own provider ID,
+  including a duplicate. Any other `act_` reference (unknown, Garmin-primary or
+  deleted) is passed through unchanged and receives the route's existing
+  not-found or validation response.
+- `activity_details` sync jobs are stored under the provider ID at enqueue time.
+
 ## Reads
 
 | Method | Path | Purpose | Requirement |

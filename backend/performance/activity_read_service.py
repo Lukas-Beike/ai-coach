@@ -27,6 +27,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                 "Die Aktivität konnte nicht eindeutig zugeordnet werden.",
                 reason="invalid_activity_request",
             )
+        normalized_id = str(self._references.resolve(normalized_id))
         snapshot = self._snapshot()
         activity = _raw_activity(snapshot, normalized_id)
         cached = self._detail_store.get(normalized_id) if self._detail_store else None
@@ -49,6 +50,7 @@ class ActivityAnalysisReadService(ActivityReadService):
             snapshot, garmin_snapshot, profile, today
         )
         equipment = _activity_equipment(self._read_equipment(), normalized_id)
+        local_ids = self._references.local_ids([normalized_id])
         return {
             "ok": True,
             "snapshot_synced_at": snapshot.get("synced_at"),
@@ -64,6 +66,7 @@ class ActivityAnalysisReadService(ActivityReadService):
             if cached and not stale
             else {},
             "activity_id": normalized_id,
+            "local_activity_id": local_ids.get(normalized_id),
             "detail_data": _detail_metadata(cached, stale, activity),
             "data_scope": "bounded sanitized detail projection of exactly one Intervals.icu activity",
         }
