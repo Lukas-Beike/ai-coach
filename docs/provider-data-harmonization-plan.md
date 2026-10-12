@@ -989,6 +989,25 @@ Ergebnis P5-U4 (#1111):
 - **Kompatibilität:** `/api/state` liest das neue Prelude-Feld tolerant, weil
   Testdoubles das Prelude ohne dieses Feld nachbilden.
 
+Ergebnis P5-U5 (#1114):
+
+- **Aktuelle Kennzahlen:** Schwellenpuls Rad/Lauf, VO2max Rad/Lauf und das
+  aktuelle Gewicht kommen aus den kanonischen Beobachtungen des Syncs, dessen
+  `retrieved_at` dem `synced_at` des Snapshots entspricht
+  (`backend/performance/canonical_current.py`). Gewicht: zuerst die Zeile des
+  letzten Wellness-Tags, dann der Athletendatensatz; Garmin hat weiter Vorrang,
+  das Profil bleibt letzter Rückfall.
+- **Eintragsreihenfolge:** Bei mehreren passenden Sport-Einstellungen nimmt der
+  Legacy-Reader den ersten Eintrag. Kanonische Beobachtungen tragen keine
+  Eintragsidentität, deshalb wird ein kanonischer Kandidat nur genutzt, wenn sein
+  Wert dem Legacy-gewählten Wert entspricht; sonst läuft der Legacy-Weg. Kanonisch
+  füllt keinen Sportwert auf, den der Legacy-Snapshot leer lässt.
+- **Eine Quelle je Abruf:** `read_performance_inputs` wählt die Lesequelle einmal
+  (`reader_for`, #1116) für Last- und Kennzahlen-Reads.
+- **Offen:** naives `synced_at` und Snapshots ohne nutzbare Wellness-Zeile behalten
+  die Legacy-Werte; Typklassifikation der Sport-Einstellungen (`types[0]` im Mapper
+  gegenüber Teilstring-Suche im Legacy-Reader) wird in Phase 7 angeglichen.
+
 Aufteilung Phase 5 (Stufen):
 
 | Stufe | Einheiten |
