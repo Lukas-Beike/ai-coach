@@ -1201,7 +1201,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 182,
+      "line": 226,
       "column": 25,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -1209,7 +1209,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 181,
+      "line": 225,
       "column": 26,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -3201,7 +3201,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 185,
+      "line": 229,
       "column": 11,
       "code": "return-value",
       "message_sha256": "08428d57439c2ba1f6948ebae90f4dd207d232b2f5f44547026c8d7a08479b57"
@@ -3409,23 +3409,23 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 61,
+      "line": 105,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
     },
     {
       "tool": "mypy",
-      "path": "backend/performance/trends.py",
-      "line": 82,
+      "path": "backend/performance/current_metrics.py",
+      "line": 128,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
     },
     {
       "tool": "mypy",
-      "path": "backend/performance/current_metrics.py",
-      "line": 84,
+      "path": "backend/performance/trends.py",
+      "line": 82,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"

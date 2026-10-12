@@ -92,6 +92,7 @@ def current_performance_context(
         snapshot,
         profile,
         performance_garmin_metrics.garmin_performance_metrics(garmin, today),
+        canonical=None if canonical is None else canonical.current,
     )
     load_context = performance_load_context.performance_load_context(
         activities, wellness_rows, latest_wellness, today, canonical=canonical
