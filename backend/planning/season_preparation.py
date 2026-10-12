@@ -10,6 +10,10 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
+from backend.performance.canonical_season_load import (
+    CanonicalSeasonLoad,
+    served_atl,
+)
 from backend.performance.training_report import activity_day, canonical_rows
 from backend.planning.competitions import supported_competition_sport
 from backend.planning.season import season_plan_summary
@@ -210,6 +214,7 @@ def load_scenarios(
     today: date,
     values: dict[str, Any],
     timezone: str = "UTC",
+    canonical: CanonicalSeasonLoad | None = None,
 ) -> dict[str, Any]:
     end, scale, taper = _scenario_values(values, today)
     wellness = [
@@ -218,12 +223,13 @@ def load_scenarios(
         if str(row.get("id") or "").startswith((today - timedelta(days=1)).isoformat())
     ]
     latest = wellness[-1] if wellness else {}
-    ctl, atl = number(latest.get("ctl")), number(latest.get("atl"))
+    ctl, legacy_atl = number(latest.get("ctl")), number(latest.get("atl"))
+    atl, source = served_atl(canonical, legacy_atl)
     basis = {
         "as_of": (today - timedelta(days=1)).isoformat(),
         "ctl": ctl,
         "atl": atl,
-        "source": provider_label(ProviderId.INTERVALS, SourceView.SEASON_PREPARATION),
+        "source": source,
     }
     activities, _ = canonical_rows(snapshot)
     completed_today = [

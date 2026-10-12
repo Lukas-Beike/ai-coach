@@ -1916,6 +1916,7 @@ HTTP_API = HttpApiAssembly(
                 performance_state=PUBLIC_STATE.performance_state_service,
                 feedback_state=PUBLIC_STATE.feedback_state_service,
                 sync_state=PUBLIC_STATE.sync_public_state_service,
+                canonical_performance_source=PUBLIC_STATE.canonical_performance_source,
             ),
             athlete=HttpAthleteServices(
                 profile=ATHLETE_DATA.profile,

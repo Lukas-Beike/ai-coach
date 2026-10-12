@@ -13,6 +13,11 @@ from backend.activities.detail_store import ActivityDetailStore, summary_fingerp
 from backend.activities.identity import intervals_activity_device_source
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.canonical_season_load import (
+    season_load_options,
+    snapshot_with_season_load,
+)
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.tag_impact import tag_impact
 from backend.performance.training_report import canonical_rows, training_report
@@ -278,6 +283,7 @@ class TrainingReportReadService:
         read_feedback: Callable[[], list[dict[str, Any]]],
         today: Callable[[], date],
         load_scenarios: Callable[..., dict[str, Any]],
+        canonical: CanonicalPerformanceSource | None = None,
     ) -> None:
         self._read_snapshot = read_snapshot
         self._read_plan = read_plan
@@ -285,18 +291,24 @@ class TrainingReportReadService:
         self._read_feedback = read_feedback
         self._today = today
         self._load_scenarios = load_scenarios
+        self._canonical = canonical
 
     def scenarios(
         self, values: dict[str, Any], timezone: str = "UTC"
     ) -> dict[str, Any]:
         if not isinstance(values, dict):
             raise AppError(400, "Das Szenario muss ein Objekt sein.")
+        today = self._today()
+        snapshot, canonical = snapshot_with_season_load(
+            self._canonical, self._read_snapshot, today - timedelta(days=1)
+        )
         return self._load_scenarios(
-            self._read_snapshot() or {},
+            snapshot or {},
             self._read_plan() or {},
-            self._today(),
+            today,
             values,
             timezone,
+            **season_load_options(canonical),
         )
 
     def read(self, values: dict[str, Any], timezone: str = "UTC") -> dict[str, Any]:
