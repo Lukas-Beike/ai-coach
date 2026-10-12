@@ -58,9 +58,12 @@ class CanonicalIngestCounters:
         }
 
 
+DELETION_EDGE_MARGIN = timedelta(days=1)
+
+
 @dataclass(frozen=True, slots=True)
 class DeletionWindow:
-    """Inclusive athlete-local date range that a full fetch replaced."""
+    """Inclusive athlete-local date range in which a full fetch may delete."""
 
     start: date
     end: date
@@ -69,12 +72,22 @@ class DeletionWindow:
 def intervals_deletion_window(
     *, today: date, activity_days: int, all_sync_days: int, earliest_date: date
 ) -> DeletionWindow:
-    """Return the window a full Intervals.icu fetch covers, matching split_date_windows."""
+    """Return the days a full Intervals.icu fetch covers with certainty.
+
+    The fetch window follows split_date_windows on the provider's local start
+    date, while stored rows carry the athlete-local date. Both can differ by a
+    day (travel, offset fallback around midnight), so the first and last day are
+    excluded: a deletion there might hit an activity the fetch never asked for,
+    and an edge day can fall out of every later window. A deletion on those days
+    is picked up by a later, wider full fetch instead.
+    """
     if activity_days == all_sync_days:
         start = earliest_date
     else:
         start = today - timedelta(days=max(1, activity_days) - 1)
-    return DeletionWindow(start=start, end=today)
+    return DeletionWindow(
+        start=start + DELETION_EDGE_MARGIN, end=today - DELETION_EDGE_MARGIN
+    )
 
 
 def _has_activity_list(raw: object) -> bool:

@@ -35,7 +35,9 @@ SECRET = "synthetic-secret-value"
 SIGNED_URL = "https://files.invalid/ride.fit?X-Amz-Signature=synthetic-signature"
 
 
-def intervals_row(identifier: str, day: str = "2026-09-10", kind: str = "Ride") -> dict[str, Any]:
+def intervals_row(
+    identifier: str, day: str = "2026-09-10", kind: str = "Ride"
+) -> dict[str, Any]:
     return {
         "id": identifier,
         "start_date_local": f"{day}T07:00:00",
@@ -119,33 +121,49 @@ class CounterTests(unittest.TestCase):
         counters.count(WriteOutcome.UNCHANGED)
         self.assertEqual(
             counters.as_dict(),
-            {"written": 1, "updated": 1, "unchanged": 2, "skipped_invalid": 0, "deleted": 0},
+            {
+                "written": 1,
+                "updated": 1,
+                "unchanged": 2,
+                "skipped_invalid": 0,
+                "deleted": 0,
+            },
         )
 
 
 class DeletionWindowTests(unittest.TestCase):
-    def test_full_fetch_covers_the_earliest_date_through_today(self) -> None:
+    def test_full_fetch_covers_the_inner_days_from_the_earliest_date(self) -> None:
         window = ingest.intervals_deletion_window(
             today=TODAY, activity_days=3, all_sync_days=3, earliest_date=EARLIEST
         )
-        self.assertEqual(window, ingest.DeletionWindow(start=EARLIEST, end=TODAY))
+        self.assertEqual(
+            window,
+            ingest.DeletionWindow(start=date(2026, 9, 2), end=date(2026, 9, 19)),
+        )
 
-    def test_partial_fetch_covers_the_requested_days_back_to_today(self) -> None:
+    def test_partial_fetch_excludes_both_edge_days(self) -> None:
         window = ingest.intervals_deletion_window(
             today=TODAY, activity_days=14, all_sync_days=3, earliest_date=EARLIEST
         )
-        self.assertEqual(window.start, date(2026, 9, 7))
-        self.assertEqual(window.end, TODAY)
+        self.assertEqual(window.start, date(2026, 9, 8))
+        self.assertEqual(window.end, date(2026, 9, 19))
 
-    def test_zero_days_still_covers_today(self) -> None:
-        window = ingest.intervals_deletion_window(
-            today=TODAY, activity_days=0, all_sync_days=3, earliest_date=EARLIEST
-        )
-        self.assertEqual(window.start, TODAY)
+    def test_one_or_zero_days_leave_an_empty_window(self) -> None:
+        for days in (0, 1, 2):
+            with self.subTest(days=days):
+                window = ingest.intervals_deletion_window(
+                    today=TODAY,
+                    activity_days=days,
+                    all_sync_days=3,
+                    earliest_date=EARLIEST,
+                )
+                self.assertGreater(window.start, window.end)
 
 
 class IntervalsIngestTests(IngestFixture):
-    def ingest(self, snapshot: dict[str, Any], activity_days: int | None) -> ingest.CanonicalIngestCounters:
+    def ingest(
+        self, snapshot: dict[str, Any], activity_days: int | None
+    ) -> ingest.CanonicalIngestCounters:
         return ingest.ingest_intervals_snapshot(
             self.db,
             snapshot,
@@ -203,6 +221,18 @@ class IntervalsIngestTests(IngestFixture):
             self.states(), {"old": "active", "i-1": "active", "i-2": "deleted"}
         )
 
+    def test_full_fetch_never_deletes_on_the_edge_days_of_its_window(self) -> None:
+        edges = [
+            intervals_row("first", day="2026-09-01"),
+            intervals_row("today", day="2026-09-20"),
+        ]
+        self.ingest(intervals_snapshot([intervals_row("i-1"), *edges]), 3)
+        counters = self.ingest(intervals_snapshot([intervals_row("i-1")]), 3)
+        self.assertEqual(counters.deleted, 0)
+        self.assertEqual(
+            self.states(), {"i-1": "active", "first": "active", "today": "active"}
+        )
+
     def test_full_fetch_without_an_activity_list_never_deletes(self) -> None:
         self.ingest(intervals_snapshot([intervals_row("i-1")]), 3)
         counters = self.ingest({"synced_at": NOW, "raw_provider_data": {}}, 3)
@@ -225,9 +255,13 @@ class GarminIngestTests(IngestFixture):
         self.assertEqual(counters, ingest.CanonicalIngestCounters())
         self.assertEqual(self.count("provider_records"), 0)
 
-    def test_garmin_never_deletes_an_activity_missing_from_a_later_payload(self) -> None:
+    def test_garmin_never_deletes_an_activity_missing_from_a_later_payload(
+        self,
+    ) -> None:
         ingest.ingest_garmin_payload(
-            self.db, {"synced_at": NOW, "activities": [garmin_row(1), garmin_row(2)]}, zone=ZONE
+            self.db,
+            {"synced_at": NOW, "activities": [garmin_row(1), garmin_row(2)]},
+            zone=ZONE,
         )
         counters = ingest.ingest_garmin_payload(
             self.db, {"synced_at": NOW, "activities": [garmin_row(1)]}, zone=ZONE
