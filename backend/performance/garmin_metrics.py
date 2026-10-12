@@ -8,11 +8,15 @@ from datetime import date
 from typing import Any
 
 from backend.activities.identity import activity_kind
+from backend.canonical.vocabulary import ProviderId
 from backend.performance import freshness as performance_freshness
 from backend.performance import garmin_observations, garmin_weight
 from backend.providers.garmin_fields import first_present as _first_present
+from backend.providers.source_labels import SourceView, provider_label
 
-GARMIN_PERFORMANCE_SOURCE = "Garmin Connect"
+GARMIN_PERFORMANCE_SOURCE = provider_label(
+    ProviderId.GARMIN, SourceView.PERFORMANCE_NOTE
+)
 GARMIN_RUN_PREDICTION_SOURCE = "Garmin Connect Laufprognose"
 _VO2MAX_UNIT = "ml/kg/min"
 

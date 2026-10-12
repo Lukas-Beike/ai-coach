@@ -762,7 +762,7 @@
       "rule": "provider_literal",
       "path": "backend/activities/duplicates.py",
       "token": "garmin",
-      "count": 2
+      "count": 1
     },
     {
       "rule": "provider_literal",

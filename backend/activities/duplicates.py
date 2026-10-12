@@ -12,7 +12,9 @@ from backend.activities.identity import (
     intervals_activity_device_source,
 )
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
+from backend.providers.source_labels import SourceView, provider_label
 
 _DUPLICATE_DELETE_STALE_ERROR = (
     "Das Wahoo-/Garmin-Duplikat ist nicht mehr aktuell. "
@@ -46,7 +48,7 @@ def duplicate_delete_action(pair: dict[str, Any]) -> dict[str, Any]:
                 "id": pair["duplicate_id"],
                 "name": pair["duplicate_name"],
                 "date": iso_date_prefix(str(pair.get("start_date_local") or "")),
-                "source": "Garmin",
+                "source": provider_label(ProviderId.GARMIN, SourceView.DUPLICATE),
                 "kept_source": "Wahoo",
             }
         ],

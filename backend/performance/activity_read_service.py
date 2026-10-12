@@ -6,9 +6,11 @@ from typing import Any
 from backend.activities import detail_projection
 from backend.activities.detail_store import summary_fingerprint
 from backend.activities.read_service import ActivityReadService, _first_present
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.performance.activity_validation import activity_performance_validation
 from backend.performance.context import current_performance_context
+from backend.providers.source_labels import SourceView, provider_label
 
 
 class ActivityAnalysisReadService(ActivityReadService):
@@ -107,7 +109,7 @@ def _detail_metadata(
     cached: dict | None, stale: bool, activity: dict
 ) -> dict[str, Any]:
     return {
-        "source": "Intervals.icu",
+        "source": provider_label(ProviderId.INTERVALS, SourceView.ACTIVITY_DETAIL),
         "observed_at": cached.get("observed_at") if cached else None,
         "full_resolution": bool(cached and cached.get("full_resolution")),
         "stale": stale,
