@@ -31,6 +31,8 @@ from backend.sync.canonical_backfill import (
     BatchReport,
     CanonicalBackfill,
     _Item,
+    _reprojection_work,
+    _Work,
     _write_reprojection,
 )
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
@@ -929,6 +931,17 @@ class ReprojectionTests(BackfillFixture):
         )
         with self.assertRaises(TypeError):
             _write_reprojection(Mock(), _Item(raw, NOW), NOW)
+
+    def test_raw_row_without_a_mapper_projects_nothing(self) -> None:
+        row = {
+            "provider": INTERVALS,
+            "record_kind": "unmapped",
+            "source_record_id": "7",
+            "payload": "{}",
+            "fetched_at": NOW,
+        }
+
+        self.assertEqual(_reprojection_work(row, ZoneInfo("UTC")), _Work())
 
 
 class DiagnosticsSummaryTests(BackfillFixture):

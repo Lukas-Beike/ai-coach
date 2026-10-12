@@ -46,10 +46,11 @@ already written then count as ``already_present``.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, tzinfo
 from enum import StrEnum
+from functools import partial
 from typing import Any, Final
 
 from backend.canonical.vocabulary import ProviderId
@@ -211,45 +212,58 @@ class CanonicalBackfill:
         counters = state["counters"]
         written = 0
         while True:
-            current = state["current"]
+            current = _ingest_cursor(db, state)
             if current is None:
-                current = _next_source(db, state)
-                if current is None:
-                    return written, True
-                state["current"] = current
-            text = self._source_text(db, current)
-            if text is None:
+                return written, True
+            work = self._ingest_source_work(db, state, current, zone)
+            if work is None:
                 _finish_source(state, current, _Work(), counters)
                 continue
-            fingerprint = canonical_store.payload_hash(text)
-            if current["fingerprint"] != fingerprint:
-                current.update(fingerprint=fingerprint, offset=0)
-            key = _source_key(current)
-            work = self._cached_work(key, fingerprint)
-            if work is None:
-                work = _ingest_work(
-                    current["source"],
-                    text,
-                    zone,
-                    _may_insert_activities(state, current),
-                )
-                self._remember(key, fingerprint, work)
-            provider = _provider_of(current["source"])
-            while current["offset"] < len(work.items):
-                if written >= budget:
-                    return written, False
-                _write_ingest(
-                    db, work.items[current["offset"]], provider, now, counters
-                )
-                current["offset"] += 1
-                written += 1
+            count, finished = _drain(
+                work,
+                current,
+                budget - written,
+                partial(
+                    _write_ingest,
+                    db,
+                    provider=_provider_of(current["source"]),
+                    now=now,
+                    counters=counters,
+                ),
+            )
+            written += count
+            if not finished:
+                return written, False
             _finish_source(state, current, work, counters)
+
+    def _ingest_source_work(
+        self,
+        db: Any,
+        state: Mapping[str, Any],
+        current: dict[str, Any],
+        zone: tzinfo,
+    ) -> _Work | None:
+        """Return the items of the current source, or None when it no longer exists."""
+        text = self._source_text(db, current)
+        if text is None:
+            return None
+        return self._work_for(
+            _source_key(current),
+            current,
+            text,
+            partial(
+                _ingest_work,
+                current["source"],
+                text,
+                zone,
+                _may_insert_activities(state, current),
+            ),
+        )
 
     def _reproject_step(
         self, db: Any, state: dict[str, Any], *, zone: tzinfo, now: str, budget: int
     ) -> tuple[int, bool]:
         """Re-project up to ``budget`` items; return (items written, backfill finished)."""
-        counters = state["counters"]
         written = 0
         scanned = 0
         while True:
@@ -258,47 +272,55 @@ class CanonicalBackfill:
                 if scanned >= budget:
                     return written, False
                 scanned += 1
-                found = canonical_store.provider_records_after(
-                    db, after_id=state["reproject_after"], limit=1
-                )
-                if not found:
+                row = _start_reprojection(db, state)
+                if row is None:
                     return written, True
-                row = found[0]
-                current = {"id": int(row["id"]), "fingerprint": "", "offset": 0}
-                state["reproject_current"] = current
+                current = state["reproject_current"]
             else:
-                reloaded = _raw_row_at(db, current["id"])
-                if reloaded is None:
+                row = _raw_row_at(db, current["id"])
+                if row is None:
                     # Deleted or gone since the last batch: nothing left to project.
-                    state.update(reproject_after=current["id"], reproject_current=None)
+                    _leave_reprojection(state, current)
                     continue
-                row = reloaded
             version = reprojection_mapper_version(row["provider"], row["record_kind"])
             if version is None or int(row["mapped_version"]) >= version:
-                state.update(reproject_after=current["id"], reproject_current=None)
+                _leave_reprojection(state, current)
                 continue
-            fingerprint = canonical_store.payload_hash(str(row["payload"]))
-            if current["fingerprint"] != fingerprint:
-                current.update(fingerprint=fingerprint, offset=0)
-            key = f"row:{current['id']}"
-            work = self._cached_work(key, fingerprint)
-            if work is None:
-                work = _reprojection_work(row, zone)
-                self._remember(key, fingerprint, work)
-            while current["offset"] < len(work.items):
-                if written >= budget:
-                    return written, False
-                _write_reprojection(db, work.items[current["offset"]], now)
-                current["offset"] += 1
-                written += 1
-            canonical_store.set_mapped_version(
-                db, record_id=current["id"], mapper_version=version, now=now
+            work = self._work_for(
+                f"row:{current['id']}",
+                current,
+                str(row["payload"]),
+                partial(_reprojection_work, row, zone),
             )
-            bucket = counters[row["provider"]]
-            bucket["reprojected"] += 1
-            bucket["skipped_invalid"] += work.skipped_invalid
-            bucket["duplicates"] += work.duplicates
-            state.update(reproject_after=current["id"], reproject_current=None)
+            count, finished = _drain(
+                work,
+                current,
+                budget - written,
+                partial(_write_reprojection, db, now=now),
+            )
+            written += count
+            if not finished:
+                return written, False
+            _complete_reprojection(
+                db, state, current, row, work, version=version, now=now
+            )
+
+    def _work_for(
+        self,
+        key: str,
+        current: dict[str, Any],
+        text: str,
+        build: Callable[[], _Work],
+    ) -> _Work:
+        """Return the cached items of a source; a changed source restarts at offset 0."""
+        fingerprint = canonical_store.payload_hash(text)
+        if current["fingerprint"] != fingerprint:
+            current.update(fingerprint=fingerprint, offset=0)
+        work = self._cached_work(key, fingerprint)
+        if work is None:
+            work = build()
+            self._remember(key, fingerprint, work)
+        return work
 
     def _source_text(self, db: Any, current: Mapping[str, Any]) -> str | None:
         if current["source"] == _GARMIN:
@@ -345,6 +367,66 @@ class CanonicalBackfill:
             "counters": _empty_counters(),
             "versions": {},
         }
+
+
+def _ingest_cursor(db: Any, state: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the source in progress, starting the next one when none is."""
+    if state["current"] is None:
+        state["current"] = _next_source(db, state)
+    return state["current"]
+
+
+def _drain(
+    work: _Work,
+    current: dict[str, Any],
+    budget: int,
+    write: Callable[[_Item], None],
+) -> tuple[int, bool]:
+    """Write items from the cursor offset; return (items written, source finished)."""
+    written = 0
+    while current["offset"] < len(work.items):
+        if written >= budget:
+            return written, False
+        write(work.items[current["offset"]])
+        current["offset"] += 1
+        written += 1
+    return written, True
+
+
+def _start_reprojection(db: Any, state: dict[str, Any]) -> dict[str, Any] | None:
+    """Move the re-projection cursor to the next active raw row, or return None."""
+    found = canonical_store.provider_records_after(
+        db, after_id=state["reproject_after"], limit=1
+    )
+    if not found:
+        return None
+    row = found[0]
+    state["reproject_current"] = {"id": int(row["id"]), "fingerprint": "", "offset": 0}
+    return row
+
+
+def _leave_reprojection(state: dict[str, Any], current: Mapping[str, Any]) -> None:
+    state.update(reproject_after=current["id"], reproject_current=None)
+
+
+def _complete_reprojection(
+    db: Any,
+    state: dict[str, Any],
+    current: Mapping[str, Any],
+    row: Mapping[str, Any],
+    work: _Work,
+    *,
+    version: int,
+    now: str,
+) -> None:
+    canonical_store.set_mapped_version(
+        db, record_id=current["id"], mapper_version=version, now=now
+    )
+    bucket = state["counters"][row["provider"]]
+    bucket["reprojected"] += 1
+    bucket["skipped_invalid"] += work.skipped_invalid
+    bucket["duplicates"] += work.duplicates
+    _leave_reprojection(state, current)
 
 
 def _next_source(db: Any, state: dict[str, Any]) -> dict[str, Any] | None:
@@ -394,18 +476,25 @@ def _ingest_work(
     if not isinstance(payload, dict):
         return _Work(skipped_invalid=1)
     if source == _GARMIN:
-        fetched = garmin_payload_retrieved_at(payload, zone=zone)
-        if fetched is None:
-            return _Work(skipped_invalid=1)
-        return _work_from_plan(
-            garmin_ingest_plan(payload, zone=zone),
-            fetched,
-            may_insert_activities=True,
-        )
+        return _garmin_work(payload, zone)
     return _work_from_plan(
         intervals_snapshot_ingest_plan(payload, zone=zone),
         stored_retrieved_at(payload, zone=zone),
         may_insert_activities=may_insert_activities,
+    )
+
+
+def _garmin_work(payload: dict[str, Any], zone: tzinfo) -> _Work:
+    """Plan a stored Garmin payload; one without any fetch time is skipped as invalid."""
+    fetched = garmin_payload_retrieved_at(payload, zone=zone)
+    return (
+        _Work(skipped_invalid=1)
+        if fetched is None
+        else _work_from_plan(
+            garmin_ingest_plan(payload, zone=zone),
+            fetched,
+            may_insert_activities=True,
+        )
     )
 
 
@@ -425,21 +514,12 @@ def _work_from_plan(
     left out, and each distinct activity is counted once as superseded.
     """
     stamp = fetched.isoformat() if fetched is not None else ""
-    items: list[_Item] = []
-    seen_raw: set[tuple[str, str]] = set()
+    items, duplicates = _raw_items(
+        plan.raw_records, stamp, may_insert_activities=may_insert_activities
+    )
     seen_activities: set[str] = set()
     seen_observations: set[str] = set()
-    duplicates = 0
     superseded = 0
-    for raw in plan.raw_records:
-        key = (raw.record_kind, raw.source_record_id)
-        if key in seen_raw:
-            duplicates += 1
-            continue
-        seen_raw.add(key)
-        if raw.record_kind == ACTIVITY_RECORD_KIND and not may_insert_activities:
-            continue
-        items.append(_Item(raw, _fetched_at(raw.retrieved_at, stamp)))
     for activity in plan.activities:
         source_id = activity.record.provenance.source_record_id or ""
         if source_id in seen_activities:
@@ -463,6 +543,25 @@ def _work_from_plan(
         duplicates=duplicates,
         superseded=superseded,
     )
+
+
+def _raw_items(
+    raw_records: Sequence[RawRecord], stamp: str, *, may_insert_activities: bool
+) -> tuple[list[_Item], int]:
+    """Return the distinct raw records to write and the number of repeats."""
+    items: list[_Item] = []
+    seen: set[tuple[str, str]] = set()
+    duplicates = 0
+    for raw in raw_records:
+        key = (raw.record_kind, raw.source_record_id)
+        if key in seen:
+            duplicates += 1
+            continue
+        seen.add(key)
+        if raw.record_kind == ACTIVITY_RECORD_KIND and not may_insert_activities:
+            continue
+        items.append(_Item(raw, _fetched_at(raw.retrieved_at, stamp)))
+    return items, duplicates
 
 
 def _fetched_at(row_time: datetime | None, stamp: str) -> str:
