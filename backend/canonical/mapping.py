@@ -86,3 +86,18 @@ def coerce_number(value: object) -> float | None:
         except OverflowError:
             return None
     return number if math.isfinite(number) else None
+
+
+def coerce_comma_decimal_number(value: object) -> float | None:
+    """Return ``coerce_number`` of a value whose text may use a comma as decimal mark.
+
+    Text has every comma read as a dot before the ``coerce_number`` rules apply, so
+    ``"80,4"`` is 80.4 and ``"1,2,3"`` is still rejected. This is how the legacy
+    readers in ``backend.performance`` parse provider text, so grouped thousands such
+    as ``"1,200"`` read as 1.2 here too. Numbers, booleans and every other type follow
+    ``coerce_number`` unchanged. Only providers whose readers accept comma decimals
+    should use it; ``coerce_number`` stays strict for the rest.
+    """
+    if isinstance(value, str):
+        return coerce_number(value.replace(",", "."))
+    return coerce_number(value)

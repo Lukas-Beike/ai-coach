@@ -97,6 +97,7 @@ from backend.canonical.mapping import (
     IssueReason,
     MappingIssue,
     MappingResult,
+    coerce_comma_decimal_number,
     coerce_number,
 )
 from backend.canonical.records import MetricValue, Observation, Provenance
@@ -422,9 +423,7 @@ def _observed_at(record: Mapping[str, object]) -> datetime | None:
 
 def _decimal(value: object) -> float | None:
     """Finite number from a number or text, with a comma accepted as decimal."""
-    if isinstance(value, str):
-        value = value.replace(",", ".")
-    return coerce_number(value)
+    return coerce_comma_decimal_number(value)
 
 
 def _weight_number(value: object) -> float | None:

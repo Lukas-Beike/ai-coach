@@ -10,9 +10,9 @@
   "fields": {
     "weight_kg": {
       "compared": 4,
-      "matched": 3,
-      "rows": 1,
-      "switchable": false
+      "matched": 4,
+      "rows": 0,
+      "switchable": true
     },
     "body_fat_pct": {
       "compared": 4,
@@ -118,9 +118,9 @@
     },
     "body_weight_kg_series": {
       "compared": 784,
-      "matched": 12,
-      "rows": 2,
-      "switchable": false
+      "matched": 14,
+      "rows": 0,
+      "switchable": true
     },
     "body_fat_pct_series": {
       "compared": 784,
@@ -230,24 +230,10 @@
     },
     {
       "case": "sparse_profile",
-      "field": "body_weight_kg_series",
-      "point": "12w:intervals:2026-10-11",
-      "legacy": 80.4,
-      "canonical": null
-    },
-    {
-      "case": "sparse_profile",
-      "field": "body_weight_kg_series",
-      "point": "14d:intervals:2026-10-11",
-      "legacy": 80.4,
-      "canonical": null
-    },
-    {
-      "case": "sparse_profile",
       "field": "ctl",
       "point": "current",
       "legacy": "58,2",
-      "canonical": null
+      "canonical": 58.2
     },
     {
       "case": "sparse_profile",
@@ -262,13 +248,6 @@
       "point": "current",
       "legacy": 0.0,
       "canonical": null
-    },
-    {
-      "case": "sparse_profile",
-      "field": "weight_kg",
-      "point": "current",
-      "legacy": 80.4,
-      "canonical": 79.9
     }
   ],
   "labels": [
