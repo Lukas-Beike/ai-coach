@@ -133,7 +133,13 @@ def current_performance_context(
     )
     return {
         "available": True,
-        "personal_recovery": personal_recovery(wellness_rows, garmin, profile, today),
+        "personal_recovery": personal_recovery(
+            wellness_rows,
+            garmin,
+            profile,
+            today,
+            canonical=None if canonical is None else canonical.personal_recovery,
+        ),
         "garmin_training_load": garmin_projection.garmin_training_load_projection(
             garmin, today
         ),

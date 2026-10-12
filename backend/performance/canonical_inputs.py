@@ -18,13 +18,17 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_current import (
     CanonicalCurrentInputs,
     read_current_inputs,
+)
+from backend.performance.canonical_personal_recovery import (
+    CanonicalPersonalRecoveryInputs,
+    read_personal_recovery_inputs,
 )
 from backend.performance.canonical_recovery import (
     CanonicalRecoveryInputs,
@@ -43,7 +47,8 @@ class CanonicalPerformanceInputs:
     """CTL and ATL for the wellness day that the legacy load context reads.
 
     ``current`` holds the sport thresholds and VO2max of the same snapshot, or None
-    when they were not read.
+    when they were not read. ``personal_recovery`` holds the daily resting HR of the
+    personal recovery baselines, or None when it was not read.
     """
 
     wellness_day: date
@@ -51,6 +56,7 @@ class CanonicalPerformanceInputs:
     atl: float | None
     current: CanonicalCurrentInputs | None = None
     recovery: CanonicalRecoveryInputs | None = None
+    personal_recovery: CanonicalPersonalRecoveryInputs | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +202,9 @@ def read_performance_inputs(
         ),
         recovery=read_recovery_inputs(
             reader, db, latest_wellness_day=latest_day, start=min(days)
+        ),
+        personal_recovery=read_personal_recovery_inputs(
+            reader, db, start=latest_day - timedelta(days=83)
         ),
     )
 
