@@ -21,7 +21,9 @@ from backend.db.schema import (
     configure_cipher,
     database_schema_is_current,
 )
+from backend.errors import AppError
 from backend.observability import Redactor
+from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.library import (
     WorkoutLibrarySyncService,
     WorkoutLibrarySyncStateService,
@@ -94,7 +96,9 @@ class RemoteLinkLibrarySyncEndToEndTests(unittest.TestCase):
             KeyValueRepository(lambda: NOW),
             lambda: NOW,
         )
-        return WorkoutLibrarySyncService(config, lambda: client, state, None)
+        return WorkoutLibrarySyncService(
+            config, IntervalsWorkoutExport(lambda: client), state, None
+        )
 
     @staticmethod
     def state(db: Any) -> dict[str, Any]:
@@ -176,6 +180,89 @@ class RemoteLinkLibrarySyncEndToEndTests(unittest.TestCase):
             count = db.execute("SELECT COUNT(*) AS n FROM remote_links").fetchone()["n"]
         self.assertEqual(final, after_create)
         self.assertEqual(count, 2)
+
+    def test_explicit_sync_edit_resync_and_readback_on_a_migrated_database(
+        self,
+    ) -> None:
+        manager = self.open()
+        with manager.unit_of_work() as db:
+            db.executescript(SCHEMA_V7.read_text(encoding="utf-8"))
+            db.execute(
+                "INSERT INTO workout_library(id, local_id, external_id, payload, "
+                "sync_dirty, sync_state, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', ?)",
+                (
+                    f"workout-{LOCAL_ID}",
+                    LOCAL_ID,
+                    json.dumps(workout("Strength B")),
+                    NOW,
+                ),
+            )
+            migrate_schema(db)
+        client = Mock()
+        client.local_today.return_value = date(2026, 10, 12)
+        client.get_workout_library.return_value = []
+        client.create_library_workouts.return_value = [
+            {**workout("Strength B"), "id": "ext-1"}
+        ]
+        service = self.service(manager, client)
+
+        # Nothing reaches the provider before the explicit sync action.
+        client.create_library_workouts.assert_not_called()
+
+        # Create: the remote id lands in slot, payload and link together.
+        service.sync_entry(LOCAL_ID)
+        client.create_library_workouts.assert_called_once()
+        with manager.reader() as db:
+            created = self.state(db)
+        self.assertEqual(created["slots"][LOCAL_ID], "ext-1")
+        self.assertEqual(created["links"][LOCAL_ID], ("ext-1", "pending"))
+
+        # Edit: a local edit reopens the entry; the resync updates the same id.
+        edited = workout("Strength B edited")
+        with manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE workout_library SET payload=?, sync_dirty=1, "
+                "sync_state='local' WHERE local_id=?",
+                (json.dumps({**edited, "external_id": "ext-1"}), LOCAL_ID),
+            )
+        client.update_library_workout.return_value = {**edited, "id": "ignored"}
+        service.sync_entry(LOCAL_ID)
+        client.update_library_workout.assert_called_once()
+        self.assertEqual(client.update_library_workout.call_args.args[0], "ext-1")
+        client.create_library_workouts.assert_called_once()
+        with manager.reader() as db:
+            resynced = self.state(db)
+            row = db.execute(
+                "SELECT sync_state, sync_dirty, payload FROM workout_library "
+                "WHERE local_id=?",
+                (LOCAL_ID,),
+            ).fetchone()
+        self.assertEqual(resynced, created)
+        self.assertEqual((row["sync_state"], row["sync_dirty"]), ("synced", 0))
+        self.assertEqual(json.loads(row["payload"])["name"], "Strength B edited")
+
+        # Readback: a wrongly confirmed sport keeps the identity and flags the error.
+        with manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE workout_library SET sync_dirty=1, sync_state='local' "
+                "WHERE local_id=?",
+                (LOCAL_ID,),
+            )
+        client.update_library_workout.return_value = {**edited, "type": "Run"}
+        with self.assertRaises(AppError) as mismatch:
+            service.sync_entry(LOCAL_ID)
+        self.assertEqual(mismatch.exception.status, 502)
+        with manager.reader() as db:
+            failed = self.state(db)
+            state = db.execute(
+                "SELECT sync_state FROM workout_library WHERE local_id=?", (LOCAL_ID,)
+            ).fetchone()["sync_state"]
+        self.assertEqual(state, "sync_error")
+        self.assertEqual(failed, created)
+
+        # The flow never deletes remotely.
+        client.delete.assert_not_called()
+        client.delete_event.assert_not_called()
 
 
 if __name__ == "__main__":

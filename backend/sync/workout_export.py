@@ -8,6 +8,7 @@ such as the planned-calendar sync and repair services.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Protocol, runtime_checkable
@@ -67,3 +68,50 @@ class WorkoutExportPort(Protocol):
 
     def confirms_planned_event(self, event: Any, *, day: str, name: Any) -> bool:
         """Return whether a saved remote event starts on ``day`` with exactly ``name``."""
+
+
+@runtime_checkable
+class WorkoutLibraryExportPort(Protocol):
+    """Target-neutral operations of the explicit workout-library synchronization.
+
+    A target offers this family only when ``capabilities.library`` is set. Like
+    the planned-event operations, none of these methods decides when a remote
+    write happens: callers reach ``library_create``, ``library_update`` and
+    ``library_plan`` only from the athlete's explicit library-sync action.
+    """
+
+    @property
+    def capabilities(self) -> WorkoutExportCapabilities:
+        """Declare which local record families this target can export."""
+
+    def serialize_library(self, workout: dict[str, Any]) -> dict[str, Any]:
+        """Render one local library entry as the target's payload (pure local work)."""
+
+    def library_list(
+        self, *, cancel_event: threading.Event | None = None
+    ) -> list[dict[str, Any]]:
+        """Read the target's workout library; ``cancel_event`` aborts the read."""
+
+    def library_create(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Create library entries remotely and return the saved remote entries."""
+
+    def library_update(self, remote_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Update one existing remote library entry and return the saved entry."""
+
+    def library_plan(
+        self,
+        remote_id: str,
+        workout: dict[str, Any],
+        plan_date: str,
+        *,
+        today: date | None = None,
+    ) -> dict[str, Any]:
+        """Schedule one remote library entry on ``plan_date``; return the saved event.
+
+        ``today`` defaults to the target's own local date.
+        """
+
+    def verify_library_readback(
+        self, workout: dict[str, Any], remote: dict[str, Any]
+    ) -> None:
+        """Raise an AppError unless the saved remote entry matches the local entry."""

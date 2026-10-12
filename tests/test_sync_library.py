@@ -22,6 +22,7 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, INVALID_LIBRARY_ID_ERROR, AppError
 from backend.planning import workouts as planning_workouts
+from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.library import (
     WorkoutLibraryRefreshService,
     WorkoutLibraryRemoteReconciler,
@@ -33,6 +34,7 @@ from backend.sync.library import (
 
 NOW = "2026-09-20T12:00:00+00:00"
 LIBRARY_ID = "12345678-1234-5678-1234-567812345678"
+VERIFY_READBACK = IntervalsWorkoutExport(Mock()).verify_library_readback
 
 
 class TestRedactor:
@@ -265,7 +267,11 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
         self.service.store_remote_identity(LIBRARY_ID, local_workout, remote_workout)
 
         synced = self.service.finish(
-            LIBRARY_ID, "remote-strength", local_workout, remote_workout
+            LIBRARY_ID,
+            "remote-strength",
+            local_workout,
+            remote_workout,
+            verify_readback=VERIFY_READBACK,
         )
 
         row = self.library_row(LIBRARY_ID)
@@ -306,7 +312,13 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
             LIBRARY_ID, local_workout, invalid_remote
         )
         with self.assertRaises(AppError) as validation:
-            self.service.finish(LIBRARY_ID, external_id, local_workout, invalid_remote)
+            self.service.finish(
+                LIBRARY_ID,
+                external_id,
+                local_workout,
+                invalid_remote,
+                verify_readback=VERIFY_READBACK,
+            )
 
         row = self.library_row(LIBRARY_ID)
         self.assertEqual(validation.exception.status, 502)
@@ -350,7 +362,11 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
 
         with self.assertRaises(sqlite3.IntegrityError):
             self.service.finish(
-                LIBRARY_ID, "remote-strength", local_workout, remote_workout
+                LIBRARY_ID,
+                "remote-strength",
+                local_workout,
+                remote_workout,
+                verify_readback=VERIFY_READBACK,
             )
 
         row = self.library_row(LIBRARY_ID)
@@ -635,7 +651,7 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         kwargs = {"_lock": lock} if lock is not None else {}
         return WorkoutLibrarySyncService(
             config or self.config,
-            lambda: client or self.client,
+            IntervalsWorkoutExport(lambda: client or self.client),
             self.state_service,
             calendar_conflicts,
             **kwargs,
@@ -1317,7 +1333,7 @@ class WorkoutLibraryRefreshServiceTests(unittest.TestCase):
         return WorkoutLibraryRefreshService(
             config or self.config,
             self.database_manager,
-            self.provider_factory,
+            IntervalsWorkoutExport(self.provider_factory),
             self.reconciler,
             self.workout_library,
             self.sync_state,

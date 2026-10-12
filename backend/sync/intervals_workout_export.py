@@ -8,6 +8,7 @@ never open the transport.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from datetime import date
 from typing import Any
@@ -34,7 +35,7 @@ PLANNED_WINDOW_COLLECTION = "repair_workouts"
 
 
 class IntervalsWorkoutExport:
-    capabilities = WorkoutExportCapabilities(planned_events=True)
+    capabilities = WorkoutExportCapabilities(planned_events=True, library=True)
 
     def __init__(self, client_factory: Callable[[], IntervalsClient]) -> None:
         self._client_factory = client_factory
@@ -83,3 +84,42 @@ class IntervalsWorkoutExport:
 
     def confirms_planned_event(self, event: Any, *, day: str, name: Any) -> bool:
         return intervals_event_confirms_schedule(event, day=day, name=name)
+
+    def serialize_library(self, workout: dict[str, Any]) -> dict[str, Any]:
+        return planning_workouts.library_workout_payload(workout)
+
+    def library_list(
+        self, *, cancel_event: threading.Event | None = None
+    ) -> list[dict[str, Any]]:
+        client = self._client_factory()
+        if cancel_event is None:
+            return client.get_workout_library()
+        return client.get_workout_library(cancel_event=cancel_event)
+
+    def library_create(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return self._client_factory().create_library_workouts([*payloads])
+
+    def library_update(self, remote_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._client_factory().update_library_workout(remote_id, payload)
+
+    def library_plan(
+        self,
+        remote_id: str,
+        workout: dict[str, Any],
+        plan_date: str,
+        *,
+        today: date | None = None,
+    ) -> dict[str, Any]:
+        client = self._client_factory()
+        payload = planning_workouts.library_workout_event_payload(
+            remote_id,
+            workout,
+            plan_date,
+            today=today if today is not None else client.local_today(),
+        )
+        return client.plan_library_workout(payload)
+
+    def verify_library_readback(
+        self, workout: dict[str, Any], remote: dict[str, Any]
+    ) -> None:
+        planning_workouts.validate_intervals_workout_result(workout, remote)

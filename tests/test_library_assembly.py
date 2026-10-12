@@ -3,7 +3,9 @@
 import unittest
 from unittest.mock import Mock, patch
 
+from backend.canonical.vocabulary import ProviderId
 from backend.sync import library_assembly as assembly_module
+from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.library_assembly import (
     WorkoutLibraryProvider,
     WorkoutLibraryState,
@@ -65,8 +67,30 @@ class WorkoutLibrarySyncAssemblyTests(unittest.TestCase):
         self.assertIsNotNone(service)
         self.assertIsNotNone(next_service)
         self.assertEqual(state_type.call_count, 2)
-        self.assertIs(sync_type.call_args.args[1], callbacks["intervals_client"])
+        self._assert_deferred_intervals_port(sync_type.call_args.args[1], callbacks)
         self.assertEqual(sync_type.call_count, 2)
+
+    def _assert_deferred_intervals_port(self, port, callbacks):
+        self.assertIsInstance(port, IntervalsWorkoutExport)
+        self.assertTrue(port.capabilities.library)
+        callbacks["intervals_client"].assert_not_called()
+        port.library_list()
+        callbacks["intervals_client"].assert_called_once_with()
+        callbacks[
+            "intervals_client"
+        ].return_value.get_workout_library.assert_called_once_with()
+
+    def test_export_port_selects_registered_target_only(self):
+        callbacks = self._callbacks()
+        assembly = self._assembly(callbacks)
+
+        self.assertIsInstance(
+            assembly.export_port(ProviderId.INTERVALS), IntervalsWorkoutExport
+        )
+        self.assertIsInstance(assembly.export_port(), IntervalsWorkoutExport)
+        with self.assertRaises(ValueError):
+            assembly.export_port(ProviderId.WAHOO)
+        callbacks["intervals_client"].assert_not_called()
 
     def test_refresh_composes_library_and_remote_reconciliation_owners(self):
         callbacks = self._callbacks()
@@ -80,7 +104,7 @@ class WorkoutLibrarySyncAssemblyTests(unittest.TestCase):
         self.assertIsNotNone(refresh)
         self.assertEqual(refresh_type.call_args.args[0], "current config")
         self.assertEqual(refresh_type.call_args.args[4], "local library")
-        self.assertIs(refresh_type.call_args.args[2], callbacks["intervals_client"])
+        self._assert_deferred_intervals_port(refresh_type.call_args.args[2], callbacks)
         self.assertEqual(callbacks["workout_library_service"].call_count, 1)
 
 
