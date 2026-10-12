@@ -217,19 +217,23 @@ def reproject_activity_record(
 ) -> WriteOutcome:
     """Project one activity for re-projection without reviving a tombstone.
 
-    A missing activity is inserted with a new single-link session. An active one is
-    updated in place, and its session is updated only while that session is active.
-    A deleted activity and its session are left untouched and return PRESERVED.
+    A missing activity is inserted with a new single-link session. A deleted activity,
+    or one whose session is deleted, is left untouched and returns PRESERVED. An active
+    or invalid activity is updated in place and becomes active again; its session dates
+    are updated only while that session is active, and its state is never changed here.
     """
     provider, provider_activity_id = _activity_identity(record)
     values = _activity_values(
         record, local_date=local_date, mapper_version=mapper_version
     )
+    columns = ", ".join(_ACTIVITY_COLUMNS)
     existing = _fetch_row(
         db,
         "SELECT activity_id, state, "
-        + ", ".join(_ACTIVITY_COLUMNS)
-        + " FROM activity_records WHERE provider = ? AND provider_activity_id = ?",
+        "(SELECT state FROM activity_sessions "
+        "WHERE activity_sessions.activity_id = activity_records.activity_id) "
+        f"AS session_state, {columns} FROM activity_records "
+        "WHERE provider = ? AND provider_activity_id = ?",
         (provider, provider_activity_id),
     )
     if existing is None:
@@ -242,9 +246,14 @@ def reproject_activity_record(
             now=now,
         )
         return WriteOutcome.WRITTEN
-    if existing["state"] != ActivityRecordState.ACTIVE.value:
+    if (
+        existing["state"] == ActivityRecordState.DELETED.value
+        or existing["session_state"] == ActivitySessionState.DELETED.value
+    ):
         return WriteOutcome.PRESERVED
-    if all(existing[column] == values[column] for column in _ACTIVITY_COLUMNS):
+    if existing["state"] == ActivityRecordState.ACTIVE.value and all(
+        existing[column] == values[column] for column in _ACTIVITY_COLUMNS
+    ):
         return WriteOutcome.UNCHANGED
     _update_activity_columns(
         db,
@@ -271,38 +280,23 @@ def reproject_activity_record(
 def retire_unemitted_activity(
     db: Any, *, provider: str, provider_activity_id: str, now: str
 ) -> bool:
-    """Tombstone an active activity that a re-projection no longer emits; return True when retired.
+    """Mark an active activity that a re-projection no longer emits as invalid.
 
-    The activity's session is tombstoned too, unless another active activity still
-    links to it. A row that is missing or already deleted is left untouched and
-    returns False, so it is never counted twice.
+    Only the activity record changes. Its session keeps its state, because the session
+    state has no mapper-owned value and must not be confused with deletion. A missing,
+    deleted, or already invalid record is left untouched and returns False.
     """
     existing = _fetch_row(
         db,
-        "SELECT activity_id, state FROM activity_records "
-        "WHERE provider = ? AND provider_activity_id = ?",
+        "SELECT state FROM activity_records WHERE provider = ? AND provider_activity_id = ?",
         (provider, provider_activity_id),
     )
     if existing is None or existing["state"] != ActivityRecordState.ACTIVE.value:
         return False
-    activity_id = existing["activity_id"]
     db.execute(
         "UPDATE activity_records SET state = ?, updated_at = ? "
         "WHERE provider = ? AND provider_activity_id = ?",
-        (ActivityRecordState.DELETED.value, now, provider, provider_activity_id),
-    )
-    db.execute(
-        "UPDATE activity_sessions SET state = ?, updated_at = ? "
-        "WHERE activity_id = ? AND state = ? AND NOT EXISTS "
-        "(SELECT 1 FROM activity_records WHERE activity_id = ? AND state = ?)",
-        (
-            ActivitySessionState.DELETED.value,
-            now,
-            activity_id,
-            ActivitySessionState.ACTIVE.value,
-            activity_id,
-            ActivityRecordState.ACTIVE.value,
-        ),
+        (ActivityRecordState.INVALID.value, now, provider, provider_activity_id),
     )
     return True
 

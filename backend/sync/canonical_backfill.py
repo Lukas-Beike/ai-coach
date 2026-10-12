@@ -29,14 +29,21 @@ boundary or a resume cannot change the outcome.
 
 Re-projection: when a mapper version is above the ``mapped_version`` of an active
 raw record, that record is mapped again from its stored payload and fetch time, its
-canonical rows are updated to the current projection, and its ``mapped_version`` is
+canonical rows are brought to the current projection, and its ``mapped_version`` is
 advanced. Deleted raw records are skipped. Re-projection never revives a tombstone: a
-deleted activity or session is left as it is. An activity that the raw record owns
-(same provider and source record id) and that the new projection no longer emits is
-tombstoned in the same transaction that advances ``mapped_version``. Only activities
-have such a tombstone; observations have no state column. The cursor is bound to the
-mapper version, so a version bump during a partial run restarts that record from its
-first item. This is the only phase that updates existing canonical rows.
+deleted activity, or an activity whose session is deleted, is left as it is. An
+activity that the raw record owns (same provider and source record id) and that the new
+projection no longer emits becomes ``invalid`` in the same transaction that advances
+``mapped_version``; its session keeps its state. A later version that emits it again
+makes it ``active`` with the same ``activity_id``. An unusable stored payload emits
+nothing, so the activity it owns is marked ``invalid`` as well, and a later mapper fix
+restores it. Observations have no state column and no exact ownership for athlete and
+health records, so observations that an upgraded mapper no longer emits are not retired;
+they keep their old ``mapper_version``. The table reader that follows this phase serves
+only observations whose ``mapper_version`` equals the current version of their mapper,
+so stale observations are never served as current. The cursor is bound to the mapper
+version, so a version bump during a partial run restarts that record from its first
+item. This is the only phase that updates existing canonical rows.
 
 Each batch writes at most ``batch_size`` plan items in one writer transaction. The
 cursor and the content-free counters are one kv value written in that same
@@ -450,11 +457,11 @@ def _complete_reprojection(
 
 
 def _retire_unemitted(db: Any, row: Mapping[str, Any], work: _Work, *, now: str) -> int:
-    """Tombstone the activity this raw row owns when the new projection drops it.
+    """Mark the activity this raw row owns invalid when the new projection drops it.
 
-    Ownership is the same provider and source record id. Only activity raw records
-    own a single canonical row whose tombstone exists, so every other kind retires
-    nothing. Returns 1 when an active activity was retired, otherwise 0.
+    Ownership is the same provider and source record id. Only activity raw records are
+    retired; observations keep their old mapper version instead (see the module
+    docstring). Returns 1 when an active activity was marked invalid, otherwise 0.
     """
     if row["record_kind"] != ACTIVITY_RECORD_KIND:
         return 0
