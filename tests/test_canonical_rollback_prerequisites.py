@@ -16,7 +16,13 @@ from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 from zoneinfo import ZoneInfo
 
-from canonical_read_support import CanonicalReadFixture, make_selector, populate
+from canonical_read_support import (
+    MAX_BATCHES,
+    CanonicalReadFixture,
+    make_selector,
+    new_backfill,
+    populate,
+)
 from support import load_provider_fixture
 
 from backend.canonical.vocabulary import ProviderId
@@ -321,7 +327,21 @@ class PersistedCoverageTests(CanonicalReadFixture):
 
 class BackfillCompleteTests(CanonicalReadFixture):
     def complete(self) -> bool:
-        return self.read(lambda db: backfill_complete(self.key_values, db))
+        return self.read(
+            lambda db: backfill_complete(self.key_values, db, zone=self.zone)
+        )
+
+    def test_false_for_another_zone_or_a_state_without_a_zone(self) -> None:
+        populate(self)
+        self.assertTrue(self.complete())
+        self.zone = ZoneInfo("America/Los_Angeles")
+        self.assertFalse(self.complete())
+        self.zone = ZONE
+        with self.manager.unit_of_work() as db:
+            state = json.loads(self.key_values.get(db, STATE_KEY) or "{}")
+            del state["zone"]
+            self.key_values.set(db, STATE_KEY, json.dumps(state))
+        self.assertFalse(self.complete())
 
     def test_false_before_and_true_after_the_backfill(self) -> None:
         self.assertFalse(self.complete())
@@ -399,6 +419,18 @@ class ReadsAfterBackfillTests(CanonicalReadFixture):
                 self.ids(self.read(selector.activities)),
                 self.ids(self.read(self.projection.activities)),
             )
+
+        # A zone change also sends reads back to legacy until re-projection ends.
+        self.assertTrue(self.read(selector.serves_tables))
+        self.zone = ZoneInfo("America/Los_Angeles")
+        self.assertFalse(self.read(selector.serves_tables))
+        self.assertIs(self.read(selector.reader_for), self.projection)
+        backfill = new_backfill(self)
+        for _ in range(MAX_BATCHES):
+            with self.manager.unit_of_work() as db:
+                if backfill.run_batch(db).done:
+                    break
+        self.assertTrue(self.read(selector.serves_tables))
 
 
 if __name__ == "__main__":

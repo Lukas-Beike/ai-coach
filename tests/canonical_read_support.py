@@ -147,7 +147,7 @@ def make_selector(case: CanonicalReadFixture) -> Any:
 def new_backfill(case: CanonicalReadFixture) -> CanonicalBackfill:
     return CanonicalBackfill(
         key_values=case.key_values,
-        zone_provider=lambda: ZONE,
+        zone_provider=lambda: case.zone,
         clock=lambda: NOW,
         batch_size=DEFAULT_BATCH_SIZE,
     )

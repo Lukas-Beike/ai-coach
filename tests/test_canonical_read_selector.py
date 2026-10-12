@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from canonical_read_support import (
+    MAX_BATCHES,
     CanonicalReadFixture,
     first_activity_name,
     intervals_snapshot,
@@ -161,22 +162,68 @@ class SelectorTests(CanonicalReadFixture):
         self.assertEqual(restored["serving"], "tables")
         self.assertTrue(restored["digest_current"])
 
-    def test_zone_change_after_a_pass_only_marks_the_recorded_parity_stale(
-        self,
-    ) -> None:
-        populate(self)
+    def session_dates(self) -> list[str]:
+        return [
+            row["local_date"]
+            for row in self.rows(
+                "SELECT local_date FROM activity_sessions ORDER BY started_at"
+            )
+        ]
+
+    def test_zone_change_serves_legacy_until_reprojection_finishes(self) -> None:
+        backfill = populate(self)
         selector = make_selector(self)
         self.write(selector.refresh)
+        before = self.session_dates()
+        # Stale dates stand in for rows written in the old zone.
+        self.execute("UPDATE activity_sessions SET local_date = '1999-01-01'")
 
-        self.zone = ZoneInfo("Asia/Tokyo")
+        self.zone = ZoneInfo("America/Los_Angeles")
         summary = self.read(selector.summary)
-
-        self.assertEqual(summary["serving"], "tables")
+        self.assertEqual(summary["serving"], "legacy")
         self.assertFalse(summary["digest_current"])
+        self.assertIs(self.read(selector.reader_for), self.projection)
+
+        # One batch starts the re-projection; reads stay on legacy until it is done.
+        with self.manager.unit_of_work() as db:
+            report = backfill.run_batch(db)
+        if not report.done:
+            self.assertEqual(self.read(selector.summary)["serving"], "legacy")
+        for _ in range(MAX_BATCHES):
+            if report.done:
+                break
+            with self.manager.unit_of_work() as db:
+                report = backfill.run_batch(db)
+        self.assertTrue(report.done)
+
+        self.assertEqual(self.read(selector.summary)["serving"], "tables")
+        self.assertEqual(self.session_dates(), before)
         self.assertEqual(
             ids(self.read(selector.activities)),
-            ids(self.read(self.table.activities)),
+            ids(self.read(self.projection.activities)),
         )
+
+    def test_state_without_a_stored_zone_reprojects_once(self) -> None:
+        backfill = populate(self)
+        selector = make_selector(self)
+        with self.manager.unit_of_work() as db:
+            state = json.loads(self.key_values.get(db, BACKFILL_STATE_KEY) or "{}")
+            del state["zone"]
+            self.key_values.set(db, BACKFILL_STATE_KEY, json.dumps(state))
+        self.assertEqual(self.read(selector.summary)["serving"], "legacy")
+
+        with self.manager.unit_of_work() as db:
+            report = backfill.run_batch(db)
+        while not report.done:
+            with self.manager.unit_of_work() as db:
+                report = backfill.run_batch(db)
+
+        self.assertEqual(self.read(selector.summary)["serving"], "tables")
+        stored = json.loads(self.read(self.key_values.get, BACKFILL_STATE_KEY))
+        self.assertEqual(stored["zone"], str(self.zone))
+        self.assertFalse(stored["reproject_all"])
+        with self.manager.unit_of_work() as db:
+            self.assertEqual(backfill.run_batch(db).items, 0)
 
     def set_backfill_status(self, status: str) -> None:
         with self.manager.unit_of_work() as db:

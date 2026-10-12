@@ -1,10 +1,11 @@
 """Choose the canonical read source: the legacy projection or the canonical tables.
 
 The tables serve reads if and only if ``backfill_complete`` is True at read time:
-the backfill status is ``complete`` and its stored mapper versions equal the
-current ones. Nothing else gates the switch. A mapper upgrade makes the backfill
-incomplete again until the worker re-projects, and reads fall back to the legacy
-projection meanwhile; a pending, running or failed backfill does the same.
+the backfill status is ``complete`` and its stored mapper versions and time zone
+equal the current ones (the tables hold local dates computed in the zone of the
+write). Nothing else gates the switch. A mapper upgrade or a zone change makes the
+backfill incomplete again until the worker re-projects, and reads fall back to the
+legacy projection meanwhile; a pending, running or failed backfill does the same.
 
 Tables keep serving after a sync, because the ingest writes each new snapshot
 into the tables in the same transaction.
@@ -132,7 +133,7 @@ class CanonicalReadSelector(
 
     def refresh(self, db: Any) -> None:
         """Record the diagnostic parity counts; the result never gates reads."""
-        if not backfill_complete(self._key_values, db):
+        if not self._serves_tables(db):
             self._store(db, {"source": SOURCE_LEGACY, "reason": REASON_PENDING})
             return
         digest = self._digest(db)
@@ -172,7 +173,7 @@ class CanonicalReadSelector(
         return self._table if self._serves_tables(db) else self._legacy
 
     def _serves_tables(self, db: Any) -> bool:
-        return backfill_complete(self._key_values, db)
+        return backfill_complete(self._key_values, db, zone=self._legacy.zone(db))
 
     def _digest(self, db: Any) -> str:
         """Digest of the inputs a recorded parity result describes: mappers and zone."""
