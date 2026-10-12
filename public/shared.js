@@ -17,7 +17,7 @@ if ("scrollRestoration" in globalThis.history) globalThis.history.scrollRestorat
 // Rows carry the provider id from the payload; labels only serve rows that lack it.
 function isPreferredSource(item, preferredProvider, legacyLabel) {
   if (!item) return false;
-  if ("source_provider" in item) return item.source_provider === preferredProvider;
+  if ("source_provider" in item && preferredProvider !== undefined) return item.source_provider === preferredProvider;
   return item.source === legacyLabel;
 }
 

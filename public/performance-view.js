@@ -257,7 +257,7 @@ function currentPerformanceValues(metrics, history) {
   const pulse = [values.running_max_hr_bpm, values.cycling_max_hr_bpm].filter((item) => item?.value != null && Number.isFinite(Number(item.value))).sort((a, b) => Number(b.value) - Number(a.value))[0];
   values.max_hr_bpm = pulse;
   const preferred = history?.body?.preferred_providers?.cycling_w_per_kg;
-  const power = (history?.body?.windows?.["12w"]?.metrics?.cycling_w_per_kg || []).flatMap((item) => (item.points || []).filter(analysisValidPoint).map((point) => ({ ...point, source: item.source, source_provider: item.source_provider, unit: "W/kg" }))).sort((a, b) => b.date.localeCompare(a.date) || Number(isPreferredSource(b, preferred, "Garmin Connect")) - Number(isPreferredSource(a, preferred, "Garmin Connect")))[0];
+  const power = (history?.body?.windows?.["12w"]?.metrics?.cycling_w_per_kg || []).flatMap((item) => (item.points || []).filter(analysisValidPoint).map((point) => ({ ...point, source: item.source, ..."source_provider" in item ? { source_provider: item.source_provider } : {}, unit: "W/kg" }))).sort((a, b) => b.date.localeCompare(a.date) || Number(isPreferredSource(b, preferred, "Garmin Connect")) - Number(isPreferredSource(a, preferred, "Garmin Connect")))[0];
   values.cycling_w_per_kg = power;
   return values;
 }
