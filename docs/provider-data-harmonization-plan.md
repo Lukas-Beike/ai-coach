@@ -1058,8 +1058,8 @@ Energieverbrauch, Ausrüstung, FTP-Verlauf und Freshness aus `retrieved_at`.
 |---|---|---|
 | P5-U9 | #1127 | PWA filtert und gestaltet Kennzahlen über `source_provider` statt Labelvergleich; Fallbacks für W/kg-Punkte und nicht zugeordnete Kennzahlen bleiben |
 | P5-U10 | #1122 | Strukturierter Coach-Kontext nach Fachbereich statt nach Provider gruppiert |
-| P7-A | #1125 | Restliche Provider-Literale in Verbrauchern über ID-Konstanten |
-| P7-D | #1124 | Körperverlauf in `/api/state` und Coach-Lesewerkzeugen kanonisch |
+| P7-A | #1125 | Trainingslast der Saisonvorbereitung aus kanonischen Beobachtungen (`canonical_season_load.py`) |
+| P7-D | #1124 | Tests für kanonische Eingaben im Coach-Werkzeug für Aktivitätsdetails |
 | P7-B | #1126 | Planungs- und Tageserholung kanonisch; Garmin-Snapshot-Parser fängt `RecursionError` ab |
 | P7-F | #1123 | Gespeicherte Wettkampf-Sportarten über `COMPETITION_SPORT_TOKENS` in kanonische `Sport` übersetzt |
 | P7-C | #1128 | 7-Tage-Mittel von Ruhepuls und Readiness aus kanonischen Beobachtungen (`canonical_recovery_averages.py`), nur bei gleicher Tagesmenge und gleichem gerundetem Mittel |
