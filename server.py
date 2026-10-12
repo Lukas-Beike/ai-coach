@@ -221,6 +221,7 @@ from backend.nutrition.assembly import (
     NutritionRuntime,
 )
 from backend.nutrition.photo import NutritionPhotoExtractionService
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.morning_battery_service import (
     MORNING_BODY_BATTERY_SERVICE_CACHE,
     MorningBatteryClock,
@@ -306,6 +307,7 @@ from backend.sync.canonical_projection_assembly import (
     build_canonical_snapshot_projection,
 )
 from backend.sync.canonical_read_assembly import build_canonical_read
+from backend.sync.canonical_read_selector import CanonicalReadSelector
 from backend.sync.command_assembly import (
     IllnessPauseDependencies,
     SyncCommandAssembly,
@@ -643,11 +645,15 @@ ATHLETE_DATA = AthleteDataAssembly(
 ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
     database_manager_runtime.DATABASE_MANAGER_CACHE
 )
+# Declared ahead of its first lambda reference; assigned by build_canonical_read below.
+CANONICAL_READ: CanonicalReadSelector
+
 ACTIVITY_READS = ActivityReadAssembly(
     database_manager,
     SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
     ATHLETE_DATA.activity_feedback,
     lambda: ATHLETE_DATA.equipment().read(),
+    observation_reader=lambda: CANONICAL_READ,
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
@@ -1240,6 +1246,10 @@ COACH_CONTEXT = CoachContextAssembly(
             today=lambda: ATHLETE_CLOCK.now().date(),
             local_date=lambda: ATHLETE_CLOCK.now().date(),
             utc_now=lambda: datetime.now(UTC),
+            canonical=CanonicalPerformanceSource(
+                database_manager=lambda: database_manager(),
+                observation_reader=lambda: CANONICAL_READ,
+            ),
         ),
         planning=CoachContextPlanningSources(
             checkin_service=ATHLETE_DATA.checkin,
@@ -1710,6 +1720,7 @@ PUBLIC_STATE = PublicStateAssembly(
             app_version=APP_VERSION,
             key_values=lambda: KEY_VALUE_REPOSITORY,
             key_value_service=key_value_service,
+            observation_reader=lambda: CANONICAL_READ,
         ),
         owners=PublicStateOwnerAssemblies(
             snapshot_repository=SNAPSHOT_REPOSITORY,

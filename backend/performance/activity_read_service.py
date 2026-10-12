@@ -1,19 +1,63 @@
 """Completed-activity analysis combining activity reads and performance context."""
 
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
 from backend.activities import detail_projection
-from backend.activities.detail_store import summary_fingerprint
+from backend.activities.activity_reference import ActivityReferenceResolver
+from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.read_service import ActivityReadService, _first_present
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.performance.activity_validation import activity_performance_validation
+from backend.performance.canonical_inputs import (
+    CanonicalPerformanceInputs,
+    CanonicalPerformanceSource,
+    performance_options,
+    read_performance_inputs,
+)
 from backend.performance.context import current_performance_context
 from backend.providers.source_labels import SourceView, provider_label
+from backend.runtime.ports import ProviderSnapshotReader
 
 
 class ActivityAnalysisReadService(ActivityReadService):
+    def __init__(
+        self,
+        database_manager: Any,
+        snapshot_reader: ProviderSnapshotReader,
+        feedback_service: Any,
+        detail_store: ActivityDetailStore | None = None,
+        *,
+        read_equipment: Callable[[], dict[str, Any]] = dict,
+        references: ActivityReferenceResolver | None = None,
+        canonical: CanonicalPerformanceSource | None = None,
+    ) -> None:
+        super().__init__(
+            database_manager,
+            snapshot_reader,
+            feedback_service,
+            detail_store,
+            read_equipment=read_equipment,
+            references=references,
+        )
+        self._canonical = canonical
+
+    def _performance_inputs(
+        self,
+    ) -> tuple[dict[str, Any], CanonicalPerformanceInputs | None]:
+        """Read the snapshot, and CTL and ATL in the same unit of work when configured."""
+        source = self._canonical
+        if source is None:
+            return self._snapshot(), None
+        with source.database_manager().unit_of_work() as db:
+            snapshot = self._snapshot()
+            canonical = read_performance_inputs(
+                source.observation_reader(), db, snapshot
+            )
+        return snapshot, canonical
+
     def detail(
         self,
         activity_id: Any,
@@ -30,7 +74,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                 reason="invalid_activity_request",
             )
         normalized_id = str(self._references.resolve(normalized_id))
-        snapshot = self._snapshot()
+        snapshot, canonical = self._performance_inputs()
         activity = _raw_activity(snapshot, normalized_id)
         cached = self._detail_store.get(normalized_id) if self._detail_store else None
         stale = bool(
@@ -49,7 +93,11 @@ class ActivityAnalysisReadService(ActivityReadService):
             None,
         )
         performance = current_performance_context(
-            snapshot, garmin_snapshot, profile, today
+            snapshot,
+            garmin_snapshot,
+            profile,
+            today,
+            **performance_options(canonical),
         )
         equipment = _activity_equipment(self._read_equipment(), normalized_id)
         local_ids = self._references.local_ids([normalized_id])

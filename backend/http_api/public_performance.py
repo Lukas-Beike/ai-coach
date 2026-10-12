@@ -7,6 +7,13 @@ from datetime import date
 from typing import Any
 
 from backend.performance import context as performance_context
+from backend.performance.canonical_inputs import (
+    CanonicalPerformanceInputs,
+    CanonicalPerformanceSource,
+    inputs_for_snapshot,
+    performance_options,
+    snapshot_with_inputs,
+)
 from backend.performance.chart_history import analysis_history
 
 
@@ -20,22 +27,48 @@ class PublicPerformanceStateService:
         profile_service: Any,
         garmin_projection_service: Any,
         today: Callable[[], date],
+        canonical: CanonicalPerformanceSource | None = None,
     ) -> None:
         self._sync_state_repository = sync_state_repository
         self._garmin_payload_service = garmin_payload_service
         self._profile_service = profile_service
         self._garmin_projection_service = garmin_projection_service
         self._today = today
+        self._canonical = canonical
 
     def performance_state(self) -> dict[str, Any]:
-        return self.from_snapshot(self._sync_state_repository.latest_snapshot())
+        snapshot, canonical = snapshot_with_inputs(
+            self._canonical, self._sync_state_repository.latest_snapshot
+        )
+        return self._project(snapshot, canonical)
 
-    def from_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
-        """Project a snapshot already read by a larger state request."""
+    def canonical_inputs(
+        self, db: Any, snapshot: Any
+    ) -> CanonicalPerformanceInputs | None:
+        """Read the load inputs inside the transaction that read ``snapshot``."""
+        return inputs_for_snapshot(self._canonical, db, snapshot)
+
+    def from_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        canonical: CanonicalPerformanceInputs | None = None,
+    ) -> dict[str, Any]:
+        """Project a snapshot and the inputs a larger state request read with it."""
+        return self._project(snapshot, canonical)
+
+    def _project(
+        self,
+        snapshot: dict[str, Any],
+        canonical: CanonicalPerformanceInputs | None,
+    ) -> dict[str, Any]:
         garmin = self._garmin_payload_service.snapshot()
         today = self._today()
         performance = performance_context.current_performance_context(
-            snapshot, garmin, self._profile_service.get(), today
+            snapshot,
+            garmin,
+            self._profile_service.get(),
+            today,
+            **performance_options(canonical),
         )
         performance = {
             **performance,

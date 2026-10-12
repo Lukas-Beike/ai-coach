@@ -14,6 +14,7 @@ from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import load as performance_load
 from backend.performance import load_context as performance_load_context
 from backend.performance import recovery_context as performance_recovery_context
+from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.training_focus import training_focus
 
@@ -33,8 +34,13 @@ def current_performance_context(
     garmin: dict[str, Any],
     profile: dict[str, Any],
     today: date,
+    *,
+    canonical: CanonicalPerformanceInputs | None = None,
 ) -> dict[str, Any]:
-    """Compose the current performance projection from explicit inputs."""
+    """Compose the current performance projection from explicit inputs.
+
+    ``canonical`` replaces only CTL and ATL in the load context when given.
+    """
     if not snapshot:
         unavailable = {
             "available": False,
@@ -88,7 +94,7 @@ def current_performance_context(
         performance_garmin_metrics.garmin_performance_metrics(garmin, today),
     )
     load_context = performance_load_context.performance_load_context(
-        activities, wellness_rows, latest_wellness, today
+        activities, wellness_rows, latest_wellness, today, canonical=canonical
     )
     load = load_context["load"]
     last_7 = load_context["last_7"]

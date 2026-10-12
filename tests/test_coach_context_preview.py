@@ -105,7 +105,7 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
         self.assertEqual(preview["context_text"], "exact assembled context")
         self.sync_state.latest_snapshot.assert_called_once_with()
         self.messages.list.assert_called_once_with()
-        self.structured_context.build.assert_called_once_with(self.snapshot)
+        self.structured_context.build.assert_called_once_with()
         self.assertIs(
             preview["latest_intervals_snapshot"],
             preview["structured_athlete_context"]["intervals"],
