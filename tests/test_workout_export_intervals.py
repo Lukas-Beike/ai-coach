@@ -146,6 +146,82 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
         export.delete("event-1")
         factory.assert_called_once_with()
 
+    def test_event_identity_and_external_id_read_intervals_keys(self):
+        self.assertEqual(self.export.event_identity({"id": "event-1"}), "event-1")
+        self.assertEqual(self.export.event_identity({}), "")
+        self.assertEqual(
+            self.export.event_external_id({"external_id": "ext-1"}), "ext-1"
+        )
+        self.assertEqual(self.export.event_external_id({}), "")
+
+    def test_external_id_for_matches_serialized_payload_identity(self):
+        payload = self.export.serialize(
+            LOCAL_ID, build_planned_workout_export(workout(), today=TODAY)
+        )
+        self.assertEqual(self.export.external_id_for(LOCAL_ID), payload["external_id"])
+        self.assertEqual(
+            self.export.external_id_for(LOCAL_ID), f"intervals-coach-{LOCAL_ID}"
+        )
+
+    def test_unpaired_future_planned_needs_workout_category_no_pairing_and_not_past(
+        self,
+    ):
+        planned = {"category": "WORKOUT", "start_date_local": "2026-09-20T06:00:00"}
+        self.assertTrue(self.export.is_unpaired_future_planned(planned, today=TODAY))
+        self.assertFalse(
+            self.export.is_unpaired_future_planned(
+                {**planned, "start_date_local": "2026-09-19T06:00:00"}, today=TODAY
+            )
+        )
+        self.assertFalse(
+            self.export.is_unpaired_future_planned(
+                {**planned, "category": "RACE_A"}, today=TODAY
+            )
+        )
+        self.assertFalse(
+            self.export.is_unpaired_future_planned(
+                {**planned, "paired_activity_id": "activity-1"}, today=TODAY
+            )
+        )
+        self.assertFalse(
+            self.export.is_unpaired_future_planned(
+                {**planned, "paired_event_id": "event-2"}, today=TODAY
+            )
+        )
+
+    def test_namesake_matches_same_day_planned_name_ignoring_case_and_edges(self):
+        event = {
+            "category": "WORKOUT",
+            "start_date_local": "2026-09-20T06:00:00",
+            "name": "  strength ",
+        }
+        self.assertTrue(
+            self.export.is_namesake_on_day(event, day="2026-09-20", name="Strength")
+        )
+        self.assertFalse(
+            self.export.is_namesake_on_day(event, day="2026-09-21", name="Strength")
+        )
+        self.assertFalse(
+            self.export.is_namesake_on_day(event, day="2026-09-20", name="Other")
+        )
+        self.assertFalse(
+            self.export.is_namesake_on_day(
+                {**event, "category": "RACE_A"}, day="2026-09-20", name="Strength"
+            )
+        )
+
+    def test_confirms_planned_event_needs_day_prefix_and_exact_name(self):
+        event = {"start_date_local": "2026-09-20T06:00:00", "name": "Strength"}
+        self.assertTrue(
+            self.export.confirms_planned_event(event, day="2026-09-20", name="Strength")
+        )
+        self.assertFalse(
+            self.export.confirms_planned_event(event, day="2026-09-20", name="strength")
+        )
+        self.assertFalse(
+            self.export.confirms_planned_event(event, day="2026-09-21", name="Strength")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

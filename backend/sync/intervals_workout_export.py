@@ -9,14 +9,24 @@ never open the transport.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.planned_workout import PlannedWorkoutExport
 from backend.planning import workouts as planning_workouts
 from backend.providers.intervals_client import IntervalsClient
 from backend.providers.intervals_workouts import (
     INTERVALS_EVENT_CATEGORY,
+    intervals_event_confirms_schedule,
+    intervals_event_external_id,
+    intervals_event_identity,
+    intervals_event_is_namesake,
+    intervals_event_is_paired,
+    intervals_event_is_planned,
     intervals_event_payload,
+    intervals_event_start_date,
+    intervals_external_id,
 )
 from backend.sync.workout_export import WorkoutExportCapabilities
 
@@ -51,3 +61,25 @@ class IntervalsWorkoutExport:
 
     def verify_readback(self, workout: dict[str, Any], remote: dict[str, Any]) -> None:
         planning_workouts.validate_intervals_workout_result(workout, remote)
+
+    def external_id_for(self, local_id: str) -> str:
+        return intervals_external_id(local_id)
+
+    def event_identity(self, event: Any) -> str:
+        return intervals_event_identity(event)
+
+    def event_external_id(self, event: Any) -> str:
+        return intervals_event_external_id(event)
+
+    def is_unpaired_future_planned(self, event: Any, *, today: date) -> bool:
+        return (
+            intervals_event_is_planned(event)
+            and not intervals_event_is_paired(event)
+            and iso_date_prefix(intervals_event_start_date(event)) >= today.isoformat()
+        )
+
+    def is_namesake_on_day(self, event: Any, *, day: str, name: Any) -> bool:
+        return intervals_event_is_namesake(event, day=day, name=name)
+
+    def confirms_planned_event(self, event: Any, *, day: str, name: Any) -> bool:
+        return intervals_event_confirms_schedule(event, day=day, name=name)

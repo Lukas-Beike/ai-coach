@@ -87,6 +87,36 @@ class FakeExportTarget:
     def verify_readback(self, workout, remote):
         self.calls.append("verify_readback")
 
+    # Remote-event interpretation is pure and never recorded as a remote call.
+    def external_id_for(self, local_id):
+        return f"intervals-coach-{local_id}"
+
+    def event_identity(self, event):
+        return str(event.get("id") or "")
+
+    def event_external_id(self, event):
+        return str(event.get("external_id") or "")
+
+    def is_unpaired_future_planned(self, event, *, today):
+        return (
+            event.get("category") == "WORKOUT"
+            and not (event.get("paired_activity_id") or event.get("paired_event_id"))
+            and str(event.get("start_date_local") or "")[:10] >= today.isoformat()
+        )
+
+    def is_namesake_on_day(self, event, *, day, name):
+        return (
+            event.get("category") == "WORKOUT"
+            and str(event.get("start_date_local") or "").startswith(day)
+            and str(event.get("name") or "").strip().casefold()
+            == str(name or "").strip().casefold()
+        )
+
+    def confirms_planned_event(self, event, *, day, name):
+        return str(event.get("start_date_local") or "").startswith(day) and (
+            event.get("name") == name
+        )
+
 
 class WorkoutExportPortOrchestrationTests(unittest.TestCase):
     def setUp(self) -> None:
