@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from remote_link_fixtures import create_remote_links_table
+
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository, PlanningStateRepository
 from backend.planning.revision import PlanningRevisionService
@@ -68,6 +70,7 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
             )
             db.execute(
                 "CREATE TABLE competitions (id TEXT PRIMARY KEY, intervals_event_id TEXT, "
+                "external_id TEXT, last_synced_at TEXT, "
                 "sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL, "
                 "sync_conflict TEXT NOT NULL, updated_at TEXT NOT NULL)"
             )
@@ -75,6 +78,7 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
                 "CREATE TABLE competition_sync_tombstones (id TEXT PRIMARY KEY, "
                 "intervals_event_id TEXT, external_id TEXT, created_at TEXT NOT NULL)"
             )
+            create_remote_links_table(db)
 
     def tearDown(self) -> None:
         self.database_manager.close()

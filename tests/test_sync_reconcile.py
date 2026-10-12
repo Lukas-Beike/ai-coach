@@ -5,6 +5,8 @@ import json
 import sqlite3
 import unittest
 
+from remote_link_fixtures import create_remote_links_table
+
 from backend.db import row_factory
 from backend.db.repositories import PlanningStateRepository
 from backend.planning.planned_units import planned_unit_payload_hash
@@ -31,6 +33,7 @@ class SyncReconcileTests(unittest.TestCase):
             "sync_dirty INTEGER, sync_state TEXT, sync_error TEXT, sync_conflict TEXT, "
             "external_id TEXT, baseline_hash TEXT, last_synced_at TEXT, updated_at TEXT)"
         )
+        create_remote_links_table(self.db)
         self.db.execute(
             "CREATE TABLE planning_state (id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, "
             "updated_at TEXT NOT NULL)"

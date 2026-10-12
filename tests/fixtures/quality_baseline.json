@@ -881,7 +881,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_authority.py",
-      "line": 40,
+      "line": 42,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "49f1a564222f8bb28fcad7a83e0c6474ebe6d561a9f0fdb4f884433334a2a6b1"
@@ -1177,7 +1177,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_authority.py",
-      "line": 230,
+      "line": 234,
       "column": 23,
       "code": "arg-type",
       "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
@@ -1185,7 +1185,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_authority.py",
-      "line": 252,
+      "line": 256,
       "column": 23,
       "code": "arg-type",
       "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
@@ -1513,7 +1513,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_planned_calendar.py",
-      "line": 111,
+      "line": 114,
       "column": 49,
       "code": "arg-type",
       "message_sha256": "3e5ab9bbce4618175b6dfd6dca49546741a6333d2306a6891f3c1755531b9f97"
@@ -1729,7 +1729,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_authority.py",
-      "line": 270,
+      "line": 274,
       "column": 51,
       "code": "arg-type",
       "message_sha256": "474e2ccff57aa4b467626591d044a8636c41541249ea662e31e58ad73d10d325"
@@ -2065,7 +2065,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_planned_calendar.py",
-      "line": 111,
+      "line": 114,
       "column": 65,
       "code": "arg-type",
       "message_sha256": "67a23cbd9410f306da2960b552efb8b98e596674f8f448bcdfb691411841ca0d"
@@ -2113,7 +2113,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/planned_units.py",
-      "line": 236,
+      "line": 249,
       "column": 25,
       "code": "assignment",
       "message_sha256": "dba98398c39cd0ff1435335902a01d5f29b460bda4a9b76372949d59895222c1"
@@ -2121,7 +2121,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/planned_units.py",
-      "line": 232,
+      "line": 245,
       "column": 27,
       "code": "assignment",
       "message_sha256": "dba98398c39cd0ff1435335902a01d5f29b460bda4a9b76372949d59895222c1"
@@ -3065,7 +3065,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_authority.py",
-      "line": 167,
+      "line": 171,
       "column": 8,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3625,18 +3625,10 @@
     {
       "tool": "mypy",
       "path": "tests/test_sync_planned_calendar.py",
-      "line": 47,
-      "column": 8,
-      "code": "var-annotated",
-      "message_sha256": "971f8b933791aa8c6acee5ea47c503a064113c78285a9dc7b15cc2d553517b01"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_planned_calendar.py",
       "line": 49,
       "column": 8,
       "code": "var-annotated",
-      "message_sha256": "9710df7244a3c90f48188a2e33cfd8c302d5a75abe3a278c6d119c8747714ba1"
+      "message_sha256": "971f8b933791aa8c6acee5ea47c503a064113c78285a9dc7b15cc2d553517b01"
     },
     {
       "tool": "mypy",
@@ -3645,6 +3637,14 @@
       "column": 8,
       "code": "var-annotated",
       "message_sha256": "c9109e7a789ff07480f61264ff9ebcc7b4ab58d2883dfaa9cf7c4e1a844d5b0e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_planned_calendar.py",
+      "line": 51,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "9710df7244a3c90f48188a2e33cfd8c302d5a75abe3a278c6d119c8747714ba1"
     },
     {
       "tool": "mypy",

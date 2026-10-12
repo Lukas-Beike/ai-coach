@@ -10,6 +10,8 @@ from datetime import date
 from pathlib import Path
 from urllib.error import HTTPError
 
+from remote_link_fixtures import create_remote_links_table
+
 from backend.config import Config
 from backend.db import DatabaseManager, row_factory
 from backend.errors import AppError
@@ -107,6 +109,7 @@ class PlannedCalendarSyncTests(unittest.TestCase):
                 "sync_error TEXT, sync_conflict TEXT NOT NULL DEFAULT '', external_id TEXT, "
                 "baseline_hash TEXT, last_synced_at TEXT, created_at TEXT, updated_at TEXT)"
             )
+            create_remote_links_table(db)
         self.revisions = RevisionCounter()
         self.writer = PlannedUnitSyncStateWriter(self.revisions, TestRedactor())
         self.client = FakeIntervalsClient()

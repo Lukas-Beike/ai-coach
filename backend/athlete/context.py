@@ -4,8 +4,11 @@ from collections.abc import Callable
 from typing import Any
 
 from backend import change_history
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
+from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import AppError
+
+_REMOTE_LINKS = RemoteLinkRepository()
 
 
 class AthleteContextService:
@@ -132,6 +135,9 @@ class AthleteContextService:
                 now,
             ),
         )
+        _REMOTE_LINKS.refresh_from_slots(
+            db, RemoteEntityKind.COMPETITION, competition["id"]
+        )
         change_history.record_change(
             db,
             "competition",
@@ -150,6 +156,9 @@ class AthleteContextService:
     ) -> None:
         for removed_id, row in existing.items():
             if removed_id not in retained_ids:
+                _REMOTE_LINKS.delete_for_entity(
+                    db, RemoteEntityKind.COMPETITION, removed_id
+                )
                 change_history.record_change(
                     db, "competition", removed_id, "delete", dict(row), None
                 )

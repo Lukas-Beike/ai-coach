@@ -12,8 +12,10 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import RemoteEntityKind
 from backend.config import Config
 from backend.db import DatabaseManager
+from backend.db.remote_links import RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import (
     COACH_ABORTED_ERROR,
@@ -30,6 +32,7 @@ from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import maintenance_operation
 from backend.sync.gates import intervals_operation
 
+_REMOTE_LINKS = RemoteLinkRepository()
 _OPEN_SYNC_STATES = ("local", "sync_error", "remote_missing", "conflict")
 _WORKOUT_LIBRARY_SYNC_LOCK = threading.Lock()
 _REMOTE_LIBRARY_METADATA_FIELDS = (
@@ -170,6 +173,7 @@ class WorkoutLibraryRemoteReconciler:
                 now,
             ),
         )
+        _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.LIBRARY_WORKOUT, local_id)
         return entry
 
     @classmethod
@@ -392,6 +396,17 @@ class WorkoutLibrarySyncStateService:
                 "FROM workout_library WHERE local_id = ?",
                 (normalized_id,),
             ).fetchone()
+            if row:
+                # Prefer the remote link; the legacy slot is the fallback.
+                row = {
+                    **row,
+                    "external_id": _REMOTE_LINKS.resolve_remote_external_id(
+                        db,
+                        RemoteEntityKind.LIBRARY_WORKOUT,
+                        normalized_id,
+                        row.get("external_id"),
+                    ),
+                }
         if not row:
             raise AppError(404, "Lokale Bibliothekseinheit nicht gefunden.")
         try:
@@ -423,6 +438,9 @@ class WorkoutLibrarySyncStateService:
                     ),
                     local_id,
                 ),
+            )
+            _REMOTE_LINKS.refresh_from_slots(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
             )
         return external_id
 
@@ -456,6 +474,9 @@ class WorkoutLibrarySyncStateService:
                     local_id,
                 ),
             )
+            _REMOTE_LINKS.refresh_from_slots(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
+            )
             self._key_value_repository.set(db, "last_library_sync_at", now)
             self._key_value_repository.set(db, "last_library_sync_error", "")
         return synced
@@ -477,6 +498,9 @@ class WorkoutLibrarySyncStateService:
             db.execute(
                 "UPDATE workout_library SET payload=?, updated_at=? WHERE local_id=?",
                 (json.dumps(payload, ensure_ascii=False), self._now(), local_id),
+            )
+            _REMOTE_LINKS.refresh_from_slots(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
             )
         return True
 
