@@ -9,6 +9,7 @@ database served through the real selector.
 
 from __future__ import annotations
 
+import json
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -39,6 +40,7 @@ from backend.performance.canonical_body import (
 )
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.runtime.ports import ObservationReader
+from backend.sync.canonical_backfill import STATE_KEY as BACKFILL_STATE_KEY
 
 PROFILE = {"timezone": "Europe/Berlin"}
 DAY = TODAY - timedelta(days=1)
@@ -645,8 +647,13 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
             body_history(self.intervals, self.garmin, today, canonical=inputs),
         )
 
-    def test_unchecked_switch_serves_no_body_inputs(self) -> None:
+    def test_incomplete_backfill_serves_no_body_inputs(self) -> None:
         populate(self)
+        with self.manager.unit_of_work() as db:
+            state = json.loads(self.key_values.get(db, BACKFILL_STATE_KEY) or "{}")
+            self.key_values.set(
+                db, BACKFILL_STATE_KEY, json.dumps({**state, "status": "running"})
+            )
         selector = make_selector(self)
         with self.manager.reader() as db:
             self.assertIsNone(read_body_inputs(selector, selector, db, CLOCK_AT.date()))

@@ -27,6 +27,7 @@ from backend.db.schema import initialize_schema
 from backend.providers import canonical_plans
 from backend.sync.canonical_backfill import STATE_KEY, backfill_complete
 from backend.sync.canonical_coverage_store import (
+    CANONICAL_COVERAGE_PROVIDERS,
     CanonicalCoverageStore,
     coverage_key,
     garmin_payload_coverage,
@@ -35,6 +36,7 @@ from backend.sync.canonical_coverage_store import (
 from backend.sync.canonical_ingest import ingest_intervals_snapshot
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
 from backend.sync.canonical_read_selector import CanonicalReadSelector
+from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.performance import PerformanceRefreshService
 from backend.sync.state import SyncStateRepository
 
@@ -273,6 +275,30 @@ class PersistedCoverageTests(CanonicalReadFixture):
             self.key_values.set(db, coverage_key(ProviderId.INTERVALS), "{not json")
         self.assertNotEqual(self.read(self.selector().coverage)[0], expected[0])
 
+    def test_only_the_ingested_providers_are_consulted(self) -> None:
+        self.assertEqual(
+            CANONICAL_COVERAGE_PROVIDERS, (ProviderId.INTERVALS, ProviderId.GARMIN)
+        )
+        expected = self.read(self.projection.coverage)
+        self.store()
+        self.strip_legacy_inputs()
+        self.garmin.clear()
+
+        loaded: list[ProviderId] = []
+        original = CanonicalCoverageStore.load
+
+        def spy(
+            store: CanonicalCoverageStore, db: Any, provider: ProviderId, **kw: Any
+        ) -> Any:
+            loaded.append(provider)
+            return original(store, db, provider, **kw)
+
+        with patch.object(CanonicalCoverageStore, "load", spy):
+            result = self.read(self.selector().coverage)
+
+        self.assertEqual(tuple(loaded), CANONICAL_COVERAGE_PROVIDERS)
+        self.assertEqual(result, expected)
+
     def test_persisted_value_holds_counts_only(self) -> None:
         self.store()
         text = self.read(self.key_values.get, coverage_key(ProviderId.INTERVALS))
@@ -330,6 +356,49 @@ class BackfillCompleteTests(CanonicalReadFixture):
             return_value=bumped,
         ):
             self.assertFalse(self.complete())
+
+
+class ReadsAfterBackfillTests(CanonicalReadFixture):
+    """Ingest, backfill complete, parity mismatch, then a mapper change."""
+
+    def ids(self, records: Any) -> list[tuple[str, str]]:
+        return [(r.activity_id, r.provenance.provider.value) for r in records]
+
+    def test_tables_serve_despite_a_parity_mismatch_until_mappers_change(self) -> None:
+        self.assertIs(self.read(make_selector(self).reader_for), self.projection)
+
+        populate(self)  # ingests the snapshots and completes the backfill
+        mismatch = {
+            "source": "legacy",
+            "reason": "parity_failed",
+            "digest": "stale",
+            "parity": {"passed": False},
+        }
+        with self.manager.unit_of_work() as db:
+            self.key_values.set(db, "canonical_read_state", json.dumps(mismatch))
+        selector = make_selector(self)
+
+        self.assertTrue(self.read(selector.serves_tables))
+        self.assertIsInstance(self.read(selector.reader_for), CanonicalTableReader)
+        self.assertEqual(
+            self.ids(self.read(selector.activities)),
+            self.ids(self.read(self.table.activities)),
+        )
+
+        bumped = {
+            key: version + 1
+            for key, version in canonical_plans.current_mapper_versions().items()
+        }
+        with patch(
+            "backend.sync.canonical_backfill.current_mapper_versions",
+            return_value=bumped,
+        ):
+            self.assertFalse(self.read(selector.serves_tables))
+            self.assertIs(self.read(selector.reader_for), self.projection)
+            self.assertEqual(
+                self.ids(self.read(selector.activities)),
+                self.ids(self.read(self.projection.activities)),
+            )
 
 
 if __name__ == "__main__":

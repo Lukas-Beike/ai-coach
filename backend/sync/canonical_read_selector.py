@@ -1,30 +1,28 @@
 """Choose the canonical read source: the legacy projection or the canonical tables.
 
-The tables serve reads only when all of these hold at read time:
+The tables serve reads if and only if ``backfill_complete`` is True at read time:
+the backfill status is ``complete`` and its stored mapper versions equal the
+current ones. Nothing else gates the switch. A mapper upgrade makes the backfill
+incomplete again until the worker re-projects, and reads fall back to the legacy
+projection meanwhile; a pending, running or failed backfill does the same.
 
-- the canonical backfill status is ``complete``;
-- the last parity check passed; and
-- the digest it checked equals the current digest. The digest covers only the
-  activity and observation mapper versions and the athlete's time zone. A
-  mapper upgrade or a zone change therefore falls back to legacy until the next
-  parity check.
+Tables keep serving after a sync, because the ingest writes each new snapshot
+into the tables in the same transaction.
 
-A new snapshot does not change the digest. Tables keep serving after a sync,
-because the ingest writes each new snapshot into the tables in the same
-transaction. The parity check is not re-run after every sync. It runs when the
-backfill completes and at startup (the worker calls ``refresh``), so a
-divergence that the dual-write did not catch is found at the next check, not
-immediately.
+Parity is diagnostic only. The worker calls ``refresh`` when the backfill
+completes and at startup; it records the parity counts, but a mismatch never
+forces legacy reads.
 
-Otherwise reads come from the legacy projection, which is always correct. Coverage
-is served from the summary each ingest persists (``canonical_coverage:<provider>``,
-see ``canonical_coverage_store``), because mapping issue counts are not stored in
-the tables. A provider without a current summary falls back to the legacy
-projection.
+Coverage is served from the summary each ingest persists
+(``canonical_coverage:<provider>``, see ``canonical_coverage_store``), because
+mapping issue counts are not stored in the tables. A provider without a current
+summary falls back to the legacy projection. Only the providers the ingest
+writes coverage for are consulted.
 
-The switch state is a content-free record in the ``canonical_read_state`` key. It
-holds the source, a reason word, the digest, the parity counts and, on failure,
-only an exception class name. A corrupt record is treated as unchecked.
+The record in the ``canonical_read_state`` key is content-free and diagnostic:
+the last source, a reason word, the digest, the parity counts and, on failure,
+only an exception class name. A corrupt record reads as empty and never changes
+which source serves.
 """
 
 from __future__ import annotations
@@ -36,7 +34,7 @@ from typing import Any, Final
 
 from backend.canonical.coverage import ProviderCoverage
 from backend.canonical.records import ActivityRecord, Observation
-from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
+from backend.canonical.vocabulary import MetricKind, Sport
 from backend.db.repositories import KeyValueRepository
 from backend.providers.canonical_plans import current_mapper_versions
 from backend.runtime.ports import (
@@ -45,14 +43,20 @@ from backend.runtime.ports import (
     ObservationSourceSelector,
     ProviderCoverageReader,
 )
-from backend.sync.canonical_backfill import BackfillStatus, read_status
-from backend.sync.canonical_coverage_store import CanonicalCoverageStore
+from backend.sync.canonical_backfill import backfill_complete
+from backend.sync.canonical_coverage_store import (
+    CANONICAL_COVERAGE_PROVIDERS,
+    CanonicalCoverageStore,
+)
 from backend.sync.canonical_parity import CanonicalParity, CanonicalReader
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
 
 STATE_KEY: Final = "canonical_read_state"
 SOURCE_TABLES: Final = "tables"
 SOURCE_LEGACY: Final = "legacy"
+REASON_COMPLETE: Final = "backfill_complete"
+REASON_PENDING: Final = "backfill_pending"
+REASON_ERROR: Final = "error"
 
 
 class CanonicalReadSelector(
@@ -61,7 +65,7 @@ class CanonicalReadSelector(
     ProviderCoverageReader,
     CanonicalReadRefresher,
 ):
-    """Serves reads from the tables after a passing parity check, else from legacy."""
+    """Serves reads from the tables once the backfill is complete, else from legacy."""
 
     def __init__(
         self,
@@ -113,7 +117,7 @@ class CanonicalReadSelector(
         zone = self._legacy.zone(db)
         stored = {
             provider: self._coverage_store.load(db, provider, zone=zone)
-            for provider in ProviderId
+            for provider in CANONICAL_COVERAGE_PROVIDERS
         }
         if all(summary is not None for summary in stored.values()):
             return tuple(summary for summary in stored.values() if summary is not None)
@@ -127,18 +131,17 @@ class CanonicalReadSelector(
         return self._serves_tables(db)
 
     def refresh(self, db: Any) -> None:
-        """Run parity for the current digest and store the result."""
-        if read_status(self._key_values, db) != BackfillStatus.COMPLETE.value:
-            self._store(db, {"source": SOURCE_LEGACY, "reason": "backfill_incomplete"})
+        """Record the diagnostic parity counts; the result never gates reads."""
+        if not backfill_complete(self._key_values, db):
+            self._store(db, {"source": SOURCE_LEGACY, "reason": REASON_PENDING})
             return
         digest = self._digest(db)
         report = self._parity.check(db)
-        passed = report.passed
         self._store(
             db,
             {
-                "source": SOURCE_TABLES if passed else SOURCE_LEGACY,
-                "reason": "parity_passed" if passed else "parity_failed",
+                "source": SOURCE_TABLES,
+                "reason": REASON_COMPLETE,
                 "digest": digest,
                 "parity": report.as_dict(),
             },
@@ -147,15 +150,20 @@ class CanonicalReadSelector(
     def record_failure(self, db: Any, error_class: str) -> None:
         self._store(
             db,
-            {"source": SOURCE_LEGACY, "reason": "error", "error_class": error_class},
+            {
+                "source": SOURCE_LEGACY,
+                "reason": REASON_ERROR,
+                "error_class": error_class,
+            },
         )
 
     def summary(self, db: Any) -> dict[str, Any]:
         """Return the content-free switch state for diagnostics."""
         state = self._state(db)
+        serving = self._serves_tables(db)
         return {
-            "serving": "tables" if self._serves_tables(db) else "legacy",
-            "reason": str(state.get("reason", "not_checked")),
+            "serving": "tables" if serving else "legacy",
+            "reason": REASON_COMPLETE if serving else REASON_PENDING,
             "digest_current": state.get("digest") == self._digest(db),
             "parity": state.get("parity"),
         }
@@ -164,15 +172,10 @@ class CanonicalReadSelector(
         return self._table if self._serves_tables(db) else self._legacy
 
     def _serves_tables(self, db: Any) -> bool:
-        state = self._state(db)
-        return (
-            state.get("source") == SOURCE_TABLES
-            and state.get("digest") == self._digest(db)
-            and read_status(self._key_values, db) == BackfillStatus.COMPLETE.value
-        )
+        return backfill_complete(self._key_values, db)
 
     def _digest(self, db: Any) -> str:
-        """Digest of the inputs a parity result is only valid for: mappers and zone."""
+        """Digest of the inputs a recorded parity result describes: mappers and zone."""
         payload = {
             "mapper_versions": current_mapper_versions(),
             "zone": str(self._legacy.zone(db)),

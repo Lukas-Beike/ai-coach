@@ -1,8 +1,9 @@
 """Counts-only summary of the canonical read switch for diagnostics.
 
-The summary names the serving source, the reason word, whether the stored check is
-for the current digest, and the parity counts. It never carries ids, dates, names,
-values, digests or exception text.
+The summary names the serving source, the reason word (``backfill_complete`` while
+the tables serve, ``backfill_pending`` while legacy serves), whether the recorded parity is for the current digest, and the
+diagnostic parity counts. Parity never decides the serving source. It never carries
+ids, dates, names, values, digests or exception text.
 """
 
 from __future__ import annotations

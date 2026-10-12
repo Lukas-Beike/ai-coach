@@ -87,7 +87,7 @@ class CanonicalBackfillWorker:
             return self._backfill.run_batch(db)
 
     def _refresh_parity(self) -> None:
-        """Re-check the read source once the backfill is done. Failure keeps legacy reads."""
+        """Record diagnostic parity once the backfill is done. Failure never gates reads."""
         if self._parity is None:
             return
         try:
