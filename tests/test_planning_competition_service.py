@@ -244,13 +244,15 @@ class CompetitionServiceTests(unittest.TestCase):
         self.assertEqual(deleted["competitions"], [])
         with self.manager.reader() as db:
             tombstone = db.execute(
-                "SELECT intervals_event_id, external_id FROM competition_sync_tombstones"
+                "SELECT intervals_event_id, external_id, provider "
+                "FROM competition_sync_tombstones"
             ).fetchone()
             candidate = db.execute(
                 "SELECT imported_competition_id FROM public_event_candidates"
             ).fetchone()
         self.assertEqual(tombstone["intervals_event_id"], "42")
         self.assertEqual(tombstone["external_id"], "ai-coach:competition:test")
+        self.assertEqual(tombstone["provider"], "intervals")
         self.assertIsNone(candidate["imported_competition_id"])
 
     def test_conflict_resolution_preserves_both_strategies(self):

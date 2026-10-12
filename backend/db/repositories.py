@@ -7,6 +7,8 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from backend.canonical.vocabulary import ProviderId
+
 
 class NutritionTemplateRepository:
     """Persist reusable meals separately from consumed nutrition records."""
@@ -365,8 +367,17 @@ class CompetitionRepository:
         now: str,
     ) -> None:
         db.execute(
-            "INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) VALUES (?, ?, ?, ?)",
-            (tombstone_id, intervals_event_id, external_id, now),
+            "INSERT INTO competition_sync_tombstones"
+            "(id, intervals_event_id, external_id, created_at, provider) "
+            "VALUES (?, ?, ?, ?, ?)",
+            # Competition remote slots are Intervals.icu event ids.
+            (
+                tombstone_id,
+                intervals_event_id,
+                external_id,
+                now,
+                ProviderId.INTERVALS.value,
+            ),
         )
 
     def delete(self, db: Any, competition_id: str) -> None:
