@@ -95,6 +95,23 @@ class CanonicalConsumerParityLedgerTests(unittest.TestCase):
         current = _ledger([_row("weight_kg")])
         self.assertEqual(ledger_refusals(baseline, current), [])
 
+    def test_refuses_rows_removed_with_their_field(self) -> None:
+        baseline = _ledger([_row("weight_kg"), _row("ctl")])
+        current = _ledger([_row("weight_kg")])
+        del current["fields"]["ctl"]
+        self.assertEqual(len(ledger_refusals(baseline, current)), 1)
+
+    def test_refuses_fewer_compared_values(self) -> None:
+        baseline = _ledger([_row("weight_kg")], compared=2)
+        current = _ledger([_row("weight_kg")], compared=2)
+        current["fields"]["ctl"]["compared"] = 1
+        self.assertEqual(len(ledger_refusals(baseline, current)), 1)
+
+    def test_refuses_removed_case(self) -> None:
+        baseline = {**_ledger([]), "cases": ["complete", "garmin_only"]}
+        current = {**_ledger([]), "cases": ["complete"]}
+        self.assertEqual(len(ledger_refusals(baseline, current)), 1)
+
     def test_refuses_empty_comparison(self) -> None:
         self.assertNotEqual(ledger_refusals(None, _ledger([], compared=0)), [])
 

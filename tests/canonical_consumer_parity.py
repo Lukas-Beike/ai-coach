@@ -652,21 +652,42 @@ def _rows_by_key(
     return {_row_key(row): dict(row) for row in ledger.get("rows", [])}
 
 
+def _coverage_refusals(
+    baseline: Mapping[str, Any], current: Mapping[str, Any]
+) -> list[str]:
+    """Return one refusal per case or field whose coverage shrank."""
+    refusals = [
+        f"refusing to record lost coverage: case {name} was removed"
+        for name in baseline.get("cases", [])
+        if name not in current.get("cases", [])
+    ]
+    fields = current["fields"]
+    for name, summary in baseline["fields"].items():
+        compared = fields.get(name, {}).get("compared", 0)
+        if compared < summary["compared"]:
+            refusals.append(
+                f"refusing to record lost coverage: field {name} compared "
+                f"{compared} values, the recorded ledger {summary['compared']}"
+            )
+    return refusals
+
+
 def ledger_refusals(
     baseline: Mapping[str, Any] | None, current: Mapping[str, Any]
 ) -> list[str]:
     """Return why a snapshot must not be recorded; an empty list means allowed.
 
     A ``None`` baseline means the committed file does not exist yet, which is only
-    the bootstrap case. Once a baseline exists, new or changed rows are refused.
-    Removed rows are allowed.
+    the bootstrap case. Once a baseline exists, new or changed rows are refused,
+    and so is lost coverage: a removed case or field, or fewer compared values.
+    Removed rows are allowed only while coverage stays the same.
     """
     if not any(summary["compared"] for summary in current["fields"].values()):
         return ["the ledger compared no fields; refusing to record an empty ledger"]
     if baseline is None:
         return []
     recorded = _rows_by_key(baseline)
-    refusals: list[str] = []
+    refusals = _coverage_refusals(baseline, current)
     for row in current["rows"]:
         previous = recorded.get(_row_key(row))
         if previous is None:
