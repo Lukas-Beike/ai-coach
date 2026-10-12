@@ -267,6 +267,46 @@ def _redact_url(match: re.Match[str]) -> str:
         return "[REDACTED_URL]" + trailing
 
 
+_CREDENTIAL_KEY_MARKERS = (
+    "token",
+    "secret",
+    "password",
+    "credential",
+    "authorization",
+    "cookie",
+    "api_key",
+    "apikey",
+)
+_SIGNED_URL_MARKERS = ("signature=", "x-amz-signature", "token=")
+REDACTED_VALUE = "[redacted]"
+
+
+def _is_signed_url(text: str) -> bool:
+    lowered = text.lower()
+    return "http" in lowered and any(
+        marker in lowered for marker in _SIGNED_URL_MARKERS
+    )
+
+
+def sanitized_provider_payload(value: Any) -> Any:
+    """Remove credential-like keys and signed download URLs from provider data.
+
+    Pure and dependency-free so that both the backup export and the canonical
+    ingest can share it without importing each other.
+    """
+    if isinstance(value, dict):
+        return {
+            key: sanitized_provider_payload(item)
+            for key, item in value.items()
+            if not any(marker in str(key).lower() for marker in _CREDENTIAL_KEY_MARKERS)
+        }
+    if isinstance(value, list):
+        return [sanitized_provider_payload(item) for item in value]
+    if isinstance(value, str) and _is_signed_url(value):
+        return REDACTED_VALUE
+    return value
+
+
 class Redactor:
     """Redact secrets and sensitive provider metadata from values and errors."""
 

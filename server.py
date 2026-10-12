@@ -335,6 +335,7 @@ from backend.sync.garmin_service import (
     GarminMorningRemoteReader,
     shared_garmin_sync_lock,
 )
+from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
@@ -584,7 +585,11 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
     return MORNING_BODY_BATTERY_SERVICE_CACHE.get(
         manager,
         config_id,
-        MorningBatteryStore(manager, KEY_VALUE_REPOSITORY),
+        MorningBatteryStore(
+            manager,
+            KEY_VALUE_REPOSITORY,
+            GarminSnapshotWriter(KEY_VALUE_REPOSITORY, lambda: ATHLETE_CLOCK.now().tzinfo),
+        ),
         MorningBatterySource(
             GARMIN_ASSEMBLY.fixture_loader(),
             GarminMorningRemoteReader(

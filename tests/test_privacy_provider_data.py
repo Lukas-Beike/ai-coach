@@ -15,12 +15,11 @@ from unittest.mock import patch
 from backend.backup.export import (
     PRIVACY_EXPORT_FORMAT_VERSION,
     PRIVACY_EXPORT_JSONL_FILES,
-    REDACTED_VALUE,
     PrivacyArchiveExportConfig,
     PrivacyArchiveExportService,
-    sanitized_provider_payload,
 )
 from backend.db.schema import initialize_schema
+from backend.observability import REDACTED_VALUE, sanitized_provider_payload
 from backend.privacy import (
     PRIVACY_DELETE_SCOPE,
     PrivacyDeleteDependencies,

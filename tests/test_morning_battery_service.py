@@ -99,6 +99,11 @@ class Harness:
         self.trace.append(f"write:{key}")
         self.values[key] = value
 
+    def write(self, db: object, payload: object) -> None:
+        # Stands in for GarminSnapshotWriter, which the composition root injects.
+        # Only the legacy snapshot value is stored here, matching the old behavior.
+        self.set(db, "garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+
     def unit_of_work(self):
         @contextmanager
         def transaction():
@@ -148,7 +153,7 @@ class Harness:
     def make_service(self, **overrides: object) -> MorningBodyBatteryService:
         fixture_loader = overrides.get("fixture_loader", self)
         return MorningBodyBatteryService(
-            MorningBatteryStore(self, self),
+            MorningBatteryStore(self, self, self),
             MorningBatterySource(
                 fixture_loader,
                 self,

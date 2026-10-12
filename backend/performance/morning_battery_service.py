@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -22,12 +22,21 @@ _GARMIN_SNAPSHOT_KEY = "garmin_snapshot"
 _GARMIN_ERROR_KEY = "last_garmin_error"
 
 
+class GarminSnapshotSink(Protocol):
+    """Stores a Garmin snapshot and its canonical rows on the given connection."""
+
+    def write(self, db: Any, payload: Mapping[str, Any]) -> object: ...
+
+
 class MorningBatteryStore:
     """Own Garmin snapshot, morning history, and Body Battery error state."""
 
-    def __init__(self, manager: Any, key_values: Any) -> None:
+    def __init__(
+        self, manager: Any, key_values: Any, garmin_snapshots: GarminSnapshotSink
+    ) -> None:
         self._manager = manager
         self._key_values = key_values
+        self._garmin_snapshots = garmin_snapshots
 
     def current(self) -> dict[str, Any] | None:
         value = self._read_snapshot().get("morning_body_battery")
@@ -55,11 +64,7 @@ class MorningBatteryStore:
                     records, current.get("body_battery")
                 )
             current["morning_body_battery"] = record
-            self._key_values.set(
-                db,
-                _GARMIN_SNAPSHOT_KEY,
-                json.dumps(current, ensure_ascii=False, separators=(",", ":")),
-            )
+            self._garmin_snapshots.write(db, current)
             history = weather_history.decode_history(
                 self._key_values.get(db, MORNING_BATTERY_HISTORY_KEY)
             )

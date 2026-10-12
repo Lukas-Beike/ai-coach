@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from backend import change_history
 from backend.errors import AppError
+from backend.observability import sanitized_provider_payload
 from backend.planning import season as planning_season
 from backend.weather import cache as weather_cache
 
@@ -474,42 +475,6 @@ def decode_payload(value: Any) -> Any:
         return json.loads(value)
     except TypeError, ValueError:
         return {}
-
-
-_CREDENTIAL_KEY_MARKERS = (
-    "token",
-    "secret",
-    "password",
-    "credential",
-    "authorization",
-    "cookie",
-    "api_key",
-    "apikey",
-)
-_SIGNED_URL_MARKERS = ("signature=", "x-amz-signature", "token=")
-REDACTED_VALUE = "[redacted]"
-
-
-def _is_signed_url(text: str) -> bool:
-    lowered = text.lower()
-    return "http" in lowered and any(
-        marker in lowered for marker in _SIGNED_URL_MARKERS
-    )
-
-
-def sanitized_provider_payload(value: Any) -> Any:
-    """Remove credential-like keys and signed download URLs before export."""
-    if isinstance(value, dict):
-        return {
-            key: sanitized_provider_payload(item)
-            for key, item in value.items()
-            if not any(marker in str(key).lower() for marker in _CREDENTIAL_KEY_MARKERS)
-        }
-    if isinstance(value, list):
-        return [sanitized_provider_payload(item) for item in value]
-    if isinstance(value, str) and _is_signed_url(value):
-        return REDACTED_VALUE
-    return value
 
 
 def sanitized_provider_row(

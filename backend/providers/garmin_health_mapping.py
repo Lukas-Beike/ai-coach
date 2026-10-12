@@ -319,6 +319,8 @@ _SECTION_ORDER: Final = (
     "daily_training_status",
     "training_load_balance",
 )
+# Public name for the canonical plan, which keeps one raw record per section.
+GARMIN_HEALTH_SECTION_NAMES: Final = _SECTION_ORDER
 
 
 def _named_value(
