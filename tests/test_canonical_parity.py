@@ -72,6 +72,9 @@ class FixedReader:
     def activities(self, db: Any, **kwargs: Any) -> tuple[Any, ...]:
         return self._activities
 
+    def activity_rows(self, db: Any, **kwargs: Any) -> tuple[dict[str, Any], ...]:
+        return ()
+
     def observations(self, db: Any, kind: MetricKind, **kwargs: Any) -> tuple[Any, ...]:
         return self._observations.get(kind, ())
 

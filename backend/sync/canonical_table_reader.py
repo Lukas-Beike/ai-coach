@@ -6,6 +6,7 @@ would return for the same data:
 
 - activities: ``active`` activity records whose session is not ``deleted``. Invalid
   and deleted records are never served.
+- activity rows: the stored raw Intervals.icu payloads of those same activities.
 - observations: rows whose ``mapper_version`` equals the current version of their
   provider. Observations have no state column, so a row that an upgraded mapper no
   longer emits is recognised by its old version and is not served.
@@ -21,6 +22,7 @@ the legacy projection.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import date, datetime
 from typing import Any, Final
@@ -42,11 +44,14 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.db import canonical_store
-from backend.providers.canonical_plans import current_observation_mapper_versions
+from backend.providers.canonical_plans import (
+    ACTIVITY_RECORD_KIND,
+    current_observation_mapper_versions,
+)
 from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
-from backend.runtime.ports import ActivityReader, ObservationReader
+from backend.runtime.ports import ActivityReader, ActivityRowReader, ObservationReader
 
 _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
     ProviderId.INTERVALS: INTERVALS_LABEL,
@@ -55,8 +60,8 @@ _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
 }
 
 
-class CanonicalTableReader(ActivityReader, ObservationReader):
-    """Serves canonical activities and observations from the stored tables."""
+class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader):
+    """Serves canonical activities, raw activity rows and observations from the tables."""
 
     def activities(
         self,
@@ -69,6 +74,31 @@ class CanonicalTableReader(ActivityReader, ObservationReader):
             db, start=_iso(start), end=_iso(end)
         )
         return tuple(sorted((_activity(row) for row in rows), key=activity_order))
+
+    def activity_rows(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return the stored raw Intervals.icu payloads of live activities.
+
+        Newest first, like the stored snapshot (activity start, then provider
+        activity id, both descending). The stored payload
+        is the ingest-sanitized one: credential-like keys and signed URLs are
+        already removed. A payload that does not parse as a JSON object is
+        skipped; its content is never logged.
+        """
+        texts = canonical_store.active_activity_payload_texts(
+            db,
+            provider=ProviderId.INTERVALS.value,
+            record_kind=ACTIVITY_RECORD_KIND,
+            start=_iso(start),
+            end=_iso(end),
+        )
+        parsed = (_payload_object(text) for text in texts)
+        return tuple(row for row in parsed if row is not None)
 
     def observations(
         self,
@@ -88,6 +118,14 @@ class CanonicalTableReader(ActivityReader, ObservationReader):
             sport=None if sport is None else sport.value,
         )
         return tuple(sorted((_observation(row) for row in rows), key=observation_order))
+
+
+def _payload_object(text: str) -> dict[str, Any] | None:
+    try:
+        loaded = json.loads(text)
+    except ValueError, RecursionError:
+        return None
+    return loaded if isinstance(loaded, dict) else None
 
 
 def _iso(day: date | None) -> str | None:

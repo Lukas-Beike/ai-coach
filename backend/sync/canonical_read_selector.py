@@ -7,6 +7,8 @@ write). Nothing else gates the switch. A mapper upgrade or a zone change makes t
 backfill incomplete again until the worker re-projects, and reads fall back to the
 legacy projection meanwhile; a pending, running or failed backfill does the same.
 
+Raw activity rows (``activity_rows``) follow the same decision as ``activities``.
+
 Tables keep serving after a sync, because the ingest writes each new snapshot
 into the tables in the same transaction.
 
@@ -40,6 +42,7 @@ from backend.db.repositories import KeyValueRepository
 from backend.providers.canonical_plans import current_mapper_versions
 from backend.runtime.ports import (
     ActivityReader,
+    ActivityRowReader,
     CanonicalReadRefresher,
     ObservationSourceSelector,
     ProviderCoverageReader,
@@ -63,6 +66,7 @@ REASON_ERROR: Final = "error"
 
 class CanonicalReadSelector(
     ActivityReader,
+    ActivityRowReader,
     ObservationSourceSelector,
     ProviderCoverageReader,
     CanonicalReadRefresher,
@@ -91,6 +95,23 @@ class CanonicalReadSelector(
         end: date | None = None,
     ) -> tuple[ActivityRecord, ...]:
         return self._source(db).activities(db, start=start, end=end)
+
+    def activity_rows(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return raw activity rows from the same source as ``activities``.
+
+        A snapshot that lists activities only in compact form stays on legacy: the
+        backfill cannot map those rows, so the tables would serve none of them.
+        """
+        source: CanonicalReader = self._source(db)
+        if source is self._table and self._legacy.has_only_compact_activity_rows(db):
+            source = self._legacy
+        return source.activity_rows(db, start=start, end=end)
 
     def observations(
         self,
