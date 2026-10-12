@@ -8,12 +8,16 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.performance.training_report import activity_day, canonical_rows
 from backend.planning.competitions import supported_competition_sport
 from backend.planning.season import season_plan_summary
+from backend.providers.source_labels import SourceView, provider_label
 
-ACTIVITY_SOURCE = "Intervals.icu recorded activities"
+ACTIVITY_SOURCE = provider_label(
+    ProviderId.INTERVALS, SourceView.SEASON_PREPARATION_ACTIVITY
+)
 PREPARATION_WEEKS = 12
 PLANNED_LOAD_ESTIMATE_SOURCE = (
     "estimated from planned duration and icu_intensity (hours x IF^2 x 100)"
@@ -219,7 +223,7 @@ def load_scenarios(
         "as_of": (today - timedelta(days=1)).isoformat(),
         "ctl": ctl,
         "atl": atl,
-        "source": "Intervals.icu recorded wellness",
+        "source": provider_label(ProviderId.INTERVALS, SourceView.SEASON_PREPARATION),
     }
     activities, _ = canonical_rows(snapshot)
     completed_today = [

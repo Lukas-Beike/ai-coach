@@ -985,7 +985,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 263,
+      "line": 265,
       "column": 14,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1089,22 +1089,6 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 264,
-      "column": 17,
-      "code": "arg-type",
-      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/activities/duplicates.py",
-      "line": 265,
-      "column": 17,
-      "code": "arg-type",
-      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/activities/duplicates.py",
       "line": 266,
       "column": 17,
       "code": "arg-type",
@@ -1112,6 +1096,22 @@
     },
     {
       "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 267,
+      "column": 17,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 268,
+      "column": 17,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_sync_freshness.py",
       "line": 44,
       "column": 20,
@@ -1161,7 +1161,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 271,
+      "line": 273,
       "column": 22,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1169,7 +1169,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 273,
+      "line": 275,
       "column": 22,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1201,7 +1201,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 177,
+      "line": 182,
       "column": 25,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -1209,7 +1209,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 176,
+      "line": 181,
       "column": 26,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -1297,7 +1297,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 272,
+      "line": 274,
       "column": 30,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1305,7 +1305,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 274,
+      "line": 276,
       "column": 30,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -3113,7 +3113,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 270,
+      "line": 272,
       "column": 13,
       "code": "operator",
       "message_sha256": "23273601c5c51787d946c1da6b8228da0c07d81888006e0784614430d67afe3a"
@@ -3121,7 +3121,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 270,
+      "line": 272,
       "column": 13,
       "code": "operator",
       "message_sha256": "c1d0e13f8fec43a85c14183cf4bb2ae4fd6e3829c26f9cb1b0a76ecd474ee9cb"
@@ -3201,7 +3201,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 180,
+      "line": 185,
       "column": 11,
       "code": "return-value",
       "message_sha256": "08428d57439c2ba1f6948ebae90f4dd207d232b2f5f44547026c8d7a08479b57"
@@ -3409,23 +3409,23 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 56,
+      "line": 61,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
     },
     {
       "tool": "mypy",
-      "path": "backend/performance/current_metrics.py",
-      "line": 79,
+      "path": "backend/performance/trends.py",
+      "line": 82,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
     },
     {
       "tool": "mypy",
-      "path": "backend/performance/trends.py",
-      "line": 82,
+      "path": "backend/performance/current_metrics.py",
+      "line": 84,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
@@ -3441,7 +3441,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 367,
+      "line": 369,
       "column": 39,
       "code": "union-attr",
       "message_sha256": "a1ca1e63c0bac33dcc656c50b9b25dd3c80961d1ede0a22e13285c83107b6a0b"

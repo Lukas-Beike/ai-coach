@@ -5,11 +5,13 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import ProviderId
 from backend.performance import freshness as performance_freshness
 from backend.performance import recovery as performance_recovery
 from backend.providers.garmin_fields import first_present as _first_present
+from backend.providers.source_labels import SourceView, provider_label
 
-GARMIN_PERFORMANCE_SOURCE = "Garmin Connect"
+GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.DAILY_HEALTH)
 
 GARMIN_DAILY_HEALTH_FIELDS = {
     "steps": ("totalSteps", "total_steps", "steps", "stepCount", "step_count"),

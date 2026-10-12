@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import ProviderId
 from backend.providers.garmin_fields import (
     GARMIN_BODY_FAT_ALIASES,
     GARMIN_WEIGHT_UNIT_ALIASES,
@@ -20,9 +21,10 @@ from backend.providers.garmin_weight_walk import (
     walk_records,
     weight_payload,
 )
+from backend.providers.source_labels import SourceView, provider_label
 
 UTC_OFFSET_SUFFIX = "+00:00"
-GARMIN_PERFORMANCE_SOURCE = "Garmin Connect"
+GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.BODY_HISTORY)
 # (day, value, timestamp, traversal ordinal) of one accepted weight or body-fat value.
 _Accepted = tuple[str | None, float, float | None, int]
 

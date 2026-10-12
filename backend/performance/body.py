@@ -8,15 +8,17 @@ from statistics import median
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.vocabulary import ProviderId
 from backend.performance import (
     activity_validation,
     eftp,
     garmin_metric_history,
     garmin_weight,
 )
+from backend.providers.source_labels import SourceView, provider_label
 
-INTERVALS_SOURCE = "Intervals.icu Wellness"
-GARMIN_SOURCE = "Garmin Connect"
+INTERVALS_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY)
+GARMIN_SOURCE = provider_label(ProviderId.GARMIN, SourceView.BODY_HISTORY)
 
 
 def _number(value: Any) -> float | None:
