@@ -442,7 +442,7 @@ Atomaritätstest (Persistenzfehler setzt weder Snapshot noch Cursor),
 Resolver-Tests mit alten IDs und Cursorn, `docker build`. Größe: groß.
 
 Status: Schritte 1 (#1100), 2 (#1103), 3 (#1105) und 4 (#1106) umgesetzt;
-Ergebnis in Abschnitt 5.10. Schritt 5 folgt als W6-5.
+Ergebnis in Abschnitt 5.10. Schritt 5 (#1107) umgesetzt; Ergebnis in Abschnitt 5.11.
 
 ### Phase 4 – Provider-Register und Orchestrierung
 
@@ -911,6 +911,68 @@ Entscheidungen:
   `already_present`, `superseded`, `skipped_invalid`, `sessions_created`,
   `duplicates`, `reprojected`, `retired`), keine Athleteninhalte.
 - **Qualitätsbaseline:** 460 Einträge gegen `base` `e4d51d75`.
+
+### 5.11 Ergebnis Phase 3 Schritt 5 und Vorbereitung Phase 5
+
+| Einheit | Inhalt | PR |
+|---|---|---|
+| W6-5 | Tabellenleser für die Leseports mit paritätsgesicherter Umschaltung | #1107 |
+| P5-U1 | Paritäts-Ledger: welche Ausgabefelder der kanonische Weg exakt reproduziert | #1108 |
+
+Entscheidungen W6-5:
+
+- **Umschaltung nur mit Nachweis:** `CanonicalReadSelector` liefert Aktivitäten
+  und Beobachtungen nur dann aus den Tabellen, wenn der Backfill `complete` ist,
+  die Paritätsprüfung bestanden hat und ihr Digest noch gilt. Der Digest umfasst
+  die aktuellen Mapper-Versionen und die Athletenzeitzone. Jede Mapper-Änderung
+  führt deshalb bis zur nächsten Prüfung zurück auf die Legacy-Projektion.
+  Coverage kommt immer aus der Legacy-Projektion.
+- **Paritätsprüfung:** Sie läuft nach jedem abgeschlossenen Backfill, also bei
+  jedem Start. Aktivitäten außerhalb des Legacy-Datumsbereichs ihres Providers
+  zählen als Tabellenhistorie, nicht als Abweichung; ohne Legacy-Bereich
+  scheitert die Prüfung. Verglichen werden alle Inhaltsfelder, bei Beobachtungen
+  zusätzlich Label, `source_kind` und `recorded_by`. Die Garmin-Abrufzeit je
+  Abschnitt ist eine gewollte Abweichung und wird ignoriert.
+- **Gelieferte Zeilen:** nur aktive Aktivitätsdatensätze nicht gelöschter
+  Sitzungen und nur Beobachtungen der aktuellen Mapper-Version.
+- **Bekannte Einschränkung:** Der natürliche Schlüssel
+  `provider|metric|sport|method|when` kann zwei Werte derselben Metrik am selben
+  Tag aus unterschiedlichen Quellen eines Providers nicht halten (z. B.
+  Intervals-Wellness- und Athletengewicht). Weichen sie ab, scheitert die
+  Paritätsprüfung und die App bleibt auf der Legacy-Projektion. Das ist sicher,
+  verhindert aber voraussichtlich die Umschaltung bei echten Daten. Behebung in
+  Phase 7: Methodenteil des Schlüssels befüllen und Mapper-Version anheben.
+
+Ergebnis P5-U1 (Ledger über vier synthetische Fälle):
+
+- **Umstellbar ohne Abweichung:** Schwellenpuls Rad/Lauf, VO2max Rad/Lauf,
+  Schlafscore, Ruhepuls, Readiness, ATL, Körperfett-Serie.
+- **Nur Einheitenunterschied:** Schlafdauer (Sekunden statt Stunden),
+  Schwellenpace (m/s statt s/km); umrechnen beim Verbraucher.
+- **Kommazahlen:** Gewicht, Gewichtsserie und CTL scheitern an Werten wie
+  `"80,4"`, die der Legacy-Weg akzeptiert (P5-U3). CTL gibt der Legacy-Weg
+  zusätzlich als Rohtext aus.
+- **Bleiben auf Legacy:** Rad-FTP (FTP-Verlauf statt Abschnitt `cycling_ftp`),
+  Lauf-Schwellenleistung (Garmin-Laufleistung kanonisch nicht abbildbar),
+  Maximalpuls (Rückfall auf Aktivitätswerte), Ruhepuls-Datum beim
+  Intervals-Rückfall, Körperfett aus dem Profil.
+
+Aufteilung Phase 5 (Stufen):
+
+| Stufe | Einheiten |
+|---|---|
+| 0 | U1 Ledger, U2 Label-Tabelle `providers/source_labels.py`, U3 Kommazahlen im Intervals-Mapping |
+| 1 | U4 CTL/ATL, U5 aktuelle Kennzahlen über `select_current`, U6 Erholung über `select_daily`, U7 Gewichts- und Körperfettverlauf |
+| 2 | U8 Aktivitäts- und Planungslabels aus der Label-Tabelle |
+| 3 | U9 PWA: Provider und Labels aus dem Bootstrap statt Labelvergleichen |
+| 4 | U10 Coach-Kontext nach Fachbereich |
+
+Regel: Die Legacy-Builder bleiben das Orakel. Verbraucher erhalten kanonische
+Eingaben über einen optionalen Parameter; ohne ihn läuft der Legacy-Weg, und die
+Charakterisierungstests bleiben unverändert. Nach Phase 7 verschoben, weil das
+kanonische Modell sie nicht abbildet: eFTP, TSB/Form, Rampenrate, W′,
+Rennprognosen, Trainingsstatus, HRV-Wochenmittel, Aktivitätslisten und -details,
+Energieverbrauch, Ausrüstung, FTP-Verlauf und Freshness aus `retrieved_at`.
 
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
