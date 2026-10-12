@@ -10,7 +10,9 @@ value is kept.
 
 Source labels stay the legacy strings. The label table has no recovery view, so
 the legacy reader keeps naming the source. Sleep hours, sleep date, HRV, the
-resting HR date and all averages stay on the legacy path.
+resting HR date and the sleep and HRV averages stay on the legacy path. The
+resting HR and readiness 7-day averages come from
+``backend.performance.canonical_recovery_averages``.
 
 The reader window starts at the snapshot's earliest wellness day and has no upper
 bound, because Garmin records may be newer than the latest wellness row. Garmin

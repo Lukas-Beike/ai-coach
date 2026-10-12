@@ -8,7 +8,9 @@ history cannot change the current load.
 
 Current sport thresholds and VO2max come from the same snapshot's sync, see
 ``backend.performance.canonical_current``. The current sleep score, resting HR and
-readiness come from ``backend.performance.canonical_recovery``.
+readiness come from ``backend.performance.canonical_recovery``. The 7-day resting HR
+and readiness averages come from ``backend.performance.canonical_recovery_averages``
+and replace the legacy average only when both cover the same days with equal values.
 
 A snapshot without a usable wellness day yields no inputs, and the caller keeps
 the legacy values.
@@ -34,6 +36,10 @@ from backend.performance.canonical_recovery import (
     CanonicalRecoveryInputs,
     read_recovery_inputs,
 )
+from backend.performance.canonical_recovery_averages import (
+    CanonicalRecoveryAverageInputs,
+    read_recovery_average_inputs,
+)
 from backend.performance.source_policy import select_current
 from backend.runtime.ports import (
     CanonicalTableServing,
@@ -57,6 +63,7 @@ class CanonicalPerformanceInputs:
     current: CanonicalCurrentInputs | None = None
     recovery: CanonicalRecoveryInputs | None = None
     personal_recovery: CanonicalPersonalRecoveryInputs | None = None
+    recovery_averages: CanonicalRecoveryAverageInputs | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +174,24 @@ def performance_options(
     return {} if canonical is None else {"canonical": canonical}
 
 
+class _ReadOnceReader:
+    """Serve identical reads of one snapshot unit from memory.
+
+    The recovery inputs and the recovery averages ask for the same resting HR and
+    readiness rows, so each distinct read reaches the database once per call.
+    """
+
+    def __init__(self, reader: ObservationReader) -> None:
+        self._reader = reader
+        self._rows: dict[tuple[Any, ...], tuple[Any, ...]] = {}
+
+    def observations(self, db: Any, kind: MetricKind, **kwargs: Any) -> tuple[Any, ...]:
+        key = (kind, kwargs.get("start"), kwargs.get("end"), kwargs.get("sport"))
+        if key not in self._rows:
+            self._rows[key] = tuple(self._reader.observations(db, kind, **kwargs))
+        return self._rows[key]
+
+
 def read_performance_inputs(
     reader: ObservationReader,
     db: Any,
@@ -185,7 +210,7 @@ def read_performance_inputs(
     if latest_day is None:
         return None
     days = [day for day in map(_row_day, rows) if day is not None]
-    reader = resolve_reader(reader, db)
+    reader = _ReadOnceReader(resolve_reader(reader, db))
     loaded = _load_resolved(
         reader,
         db,
@@ -206,6 +231,7 @@ def read_performance_inputs(
         personal_recovery=read_personal_recovery_inputs(
             reader, db, start=latest_day - timedelta(days=83)
         ),
+        recovery_averages=read_recovery_average_inputs(reader, db, start=min(days)),
     )
 
 

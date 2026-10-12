@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.performance.recovery import rounded_average
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -29,16 +30,16 @@ def _as_number(value: Any) -> float | int | None:
     return int(number) if number.is_integer() else round(number, 2)
 
 
-def wellness_average(
+def wellness_window_values(
     rows: list[dict[str, Any]],
     keys: tuple[str, ...],
     days: int,
     end_date: date,
     divisor: float = 1.0,
-) -> float | None:
-    """Average a wellness field over the inclusive, anchored date window."""
+) -> list[tuple[date, float]]:
+    """Dated numbers of the inclusive, anchored window behind the wellness average."""
     cutoff = end_date - timedelta(days=days - 1)
-    values: list[float] = []
+    values: list[tuple[date, float]] = []
     for row in rows:
         try:
             row_date = date.fromisoformat(
@@ -50,8 +51,20 @@ def wellness_average(
             continue
         value = _as_number(_first_present(row, keys))
         if value is not None:
-            values.append(float(value) / divisor)
-    return round(sum(values) / len(values), 2) if values else None
+            values.append((row_date, float(value) / divisor))
+    return values
+
+
+def wellness_average(
+    rows: list[dict[str, Any]],
+    keys: tuple[str, ...],
+    days: int,
+    end_date: date,
+    divisor: float = 1.0,
+) -> float | None:
+    """Average a wellness field over the inclusive, anchored date window."""
+    values = wellness_window_values(rows, keys, days, end_date, divisor)
+    return rounded_average([value for _, value in values])
 
 
 def comparison_value(

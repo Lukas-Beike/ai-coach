@@ -81,6 +81,7 @@ def current_performance_context(
         wellness_rows,
         today,
         canonical=None if canonical is None else canonical.recovery,
+        averages=None if canonical is None else canonical.recovery_averages,
     )
     sleep_hours = recovery["sleep_hours"]
     sleep_source = recovery["sleep_source"]
