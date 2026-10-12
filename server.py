@@ -300,6 +300,7 @@ from backend.sync.assembly import (
     ProviderSyncPersistence,
     ProviderSyncRuntime,
 )
+from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_projection_assembly import (
     build_canonical_snapshot_projection,
 )
@@ -1764,6 +1765,14 @@ CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
     clock=ATHLETE_CLOCK.now,
 )
 
+CANONICAL_BACKFILL = build_canonical_backfill(
+    database=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    clock=runtime_clock.utc_now,
+)
+
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
     dependencies=DiagnosticsAssembly.Inputs(
         runtime=DiagnosticRuntimeDependencies(
@@ -1794,6 +1803,7 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             morning_checkin=COACH_LOCAL.morning_checkin_state_service,
             workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
             canonical_coverage=lambda: CANONICAL_SNAPSHOT_PROJECTION,
+            canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,
@@ -1972,6 +1982,7 @@ def main() -> None:
         )
         sync_worker = sync_job_worker()
         sync_worker.start()
+        CANONICAL_BACKFILL.worker.start()
         COACH_JOB_WORKER.start(
             COACH_BACKGROUND_JOBS.job_store,
             COACH_BACKGROUND_JOBS.background_job_runner,
@@ -1997,12 +2008,14 @@ def main() -> None:
         if sync_worker is not None:
             sync_worker.stop()
         COACH_JOB_WORKER.stop()
+        CANONICAL_BACKFILL.worker.stop()
         server.server_close()
         if daily_thread is not None:
             daily_thread.join(timeout=5)
         if sync_worker is not None:
             sync_worker.join(timeout=5)
         COACH_JOB_WORKER.join(timeout=5)
+        CANONICAL_BACKFILL.worker.join(timeout=5)
 
 
 if __name__ == "__main__":

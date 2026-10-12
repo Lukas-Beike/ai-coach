@@ -14,6 +14,10 @@ from backend.coach.morning import MorningCheckinStateService
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.diagnostics.canonical_backfill import (
+    CanonicalBackfillStatusReader,
+    summarize_canonical_backfill,
+)
 from backend.diagnostics.canonical_coverage import summarize_canonical_coverage
 from backend.diagnostics.history import CoachDiagnosticHistoryService
 from backend.diagnostics.logs import RecentLogEntriesService
@@ -59,6 +63,7 @@ class DiagnosticReportDependencies:
     canonical_coverage: ProviderCoverageReader
     recent_logs: RecentLogEntriesService
     diagnostic_capture: DiagnosticCapture
+    canonical_backfill: CanonicalBackfillStatusReader | None = None
 
 
 class DiagnosticReportService:
@@ -179,6 +184,9 @@ class DiagnosticReportService:
                 },
                 "canonical_coverage": summarize_canonical_coverage(
                     deps.canonical_coverage, db
+                ),
+                "canonical_backfill": summarize_canonical_backfill(
+                    deps.canonical_backfill, db
                 ),
                 "logs": deps.recent_logs.list(),
                 "debug_capture": {

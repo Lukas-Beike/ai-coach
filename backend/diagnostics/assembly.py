@@ -50,6 +50,7 @@ class DiagnosticLocalProjections:
     morning_checkin: Callable[[], Any]
     workout_library_sync_state: Callable[[], Any]
     canonical_coverage: Callable[[], Any]
+    canonical_backfill: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ class DiagnosticsAssembly:
         self._morning_checkin = local.morning_checkin
         self._workout_library_sync_state = local.workout_library_sync_state
         self._canonical_coverage = local.canonical_coverage
+        self._canonical_backfill = local.canonical_backfill
         self._diagnostic_capture = report.diagnostic_capture
         self._log_path = report.log_path
         self._receipt_parser = report.receipt_parser
@@ -145,5 +147,10 @@ class DiagnosticsAssembly:
                 canonical_coverage=self._canonical_coverage(),
                 recent_logs=self.recent_log_entries_service(),
                 diagnostic_capture=self._diagnostic_capture,
+                canonical_backfill=(
+                    self._canonical_backfill()
+                    if self._canonical_backfill is not None
+                    else None
+                ),
             )
         )

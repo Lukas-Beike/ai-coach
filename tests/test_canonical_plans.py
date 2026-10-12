@@ -237,9 +237,10 @@ class GarminPlanTests(unittest.TestCase):
             for item in plan.raw_records
             if item.record_kind == plans.HEALTH_RECORD_KIND
         ]
+        # The raw record holds the sections the health mapper reads, so re-projection can rebuild it.
         self.assertEqual(
             health,
-            [("sleep", {"data": {"hours": 7}}), ("resting_hr", {"data": [49]})],
+            [("sleep", {"sleep": {"hours": 7}}), ("resting_hr", {"resting_hr": [49]})],
         )
 
 
