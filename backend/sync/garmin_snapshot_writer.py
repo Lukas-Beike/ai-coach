@@ -14,6 +14,10 @@ from datetime import UTC, tzinfo
 from typing import Any, Final
 
 from backend.db.repositories import KeyValueRepository
+from backend.sync.canonical_coverage_store import (
+    CanonicalCoverageStore,
+    garmin_payload_coverage,
+)
 from backend.sync.canonical_ingest import CanonicalIngestCounters, ingest_garmin_payload
 
 GARMIN_SNAPSHOT_KEY: Final = "garmin_snapshot"
@@ -26,11 +30,16 @@ class GarminSnapshotWriter:
         zone_provider: Callable[[], tzinfo | None],
     ) -> None:
         self._key_values = key_values
+        self._coverage = CanonicalCoverageStore(key_values)
         self._zone_provider = zone_provider
 
     def write(self, db: Any, payload: Mapping[str, Any]) -> CanonicalIngestCounters:
         """Write canonical rows and the legacy snapshot value on the same connection."""
-        counters = ingest_garmin_payload(db, payload, zone=self._zone_provider() or UTC)
+        zone = self._zone_provider() or UTC
+        counters = ingest_garmin_payload(db, payload, zone=zone)
+        self._coverage.persist(
+            db, garmin_payload_coverage(payload, zone=zone), zone=zone
+        )
         self._key_values.set(
             db,
             GARMIN_SNAPSHOT_KEY,

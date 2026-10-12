@@ -622,6 +622,7 @@ class GarminSyncStateServiceTests(unittest.TestCase):
         self.assertEqual(
             events,
             [
+                "canonical_coverage:garmin",
                 "garmin_snapshot",
                 "last_garmin_sync_at",
                 "last_garmin_error",

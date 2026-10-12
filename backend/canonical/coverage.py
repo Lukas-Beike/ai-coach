@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from types import MappingProxyType
 
-from backend.canonical.mapping import IssueReason, MappingIssue
+from backend.canonical.mapping import IssueReason, MappingIssue, MappingResult
+from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.validation import (
     optional_aware_datetime,
     require_date,
@@ -73,6 +74,25 @@ class ProviderCoverage:
         _require_count(self.observation_count, "observation_count")
         object.__setattr__(self, "issue_counts", _copy_issue_counts(self.issue_counts))
         _validate_observed_range(self.first_observed_on, self.last_observed_on)
+
+
+def summarize_provider(
+    provider: ProviderId,
+    stored_at: datetime | None,
+    activities: MappingResult[ActivityRecord],
+    observations: MappingResult[Observation],
+) -> ProviderCoverage:
+    """Summarize one provider's mapped records and mapping issues as counts."""
+    days = [observation.observed_on for observation in observations.records]
+    return ProviderCoverage(
+        provider=provider,
+        retrieved_at=stored_at,
+        activity_count=len(activities.records),
+        observation_count=len(observations.records),
+        issue_counts=count_issues((*activities.issues, *observations.issues)),
+        first_observed_on=min(days, default=None),
+        last_observed_on=max(days, default=None),
+    )
 
 
 def count_issues(issues: Iterable[MappingIssue]) -> Mapping[IssueReason, int]:

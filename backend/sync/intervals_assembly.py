@@ -164,6 +164,7 @@ class IntervalsSyncAssembly:
             self._logger,
             self._operation_observer(),
             self._intervals_resync_gate,
+            zone_provider=lambda: self._athlete_clock().now().tzinfo,
         )
 
     def snapshot_reader(self) -> IntervalsSnapshotReader:

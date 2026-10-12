@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from datetime import UTC, tzinfo
 from typing import Any
 
 from backend.config import Config
@@ -14,6 +15,11 @@ from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import COACH_ABORTED_ERROR, INTERVALS_API_KEY_ERROR, AppError
 from backend.providers.descriptors import INTERVALS_ID
+from backend.sync.canonical_coverage_store import (
+    CanonicalCoverageStore,
+    intervals_snapshot_coverage,
+)
+from backend.sync.canonical_ingest import ingest_intervals_partial_snapshot
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.queue import SyncJobQueueService
@@ -40,7 +46,11 @@ class PerformanceRefreshService:
         observer: SyncOperationObserver,
         provider_resync_gate: ProviderResyncGate,
         lock: Any = _PERFORMANCE_REFRESH_LOCK,
+        *,
+        zone_provider: Callable[[], tzinfo | None],
     ):
+        self._zone_provider = zone_provider
+        self._coverage = CanonicalCoverageStore(key_value_repository)
         self._config = config
         self._database_manager = database_manager
         self._sync_state_repository = sync_state_repository
@@ -82,6 +92,13 @@ class PerformanceRefreshService:
                 )
                 self._sync_state_repository.save_snapshot(
                     merged, update_full_sync=False
+                )
+                # The refreshed wellness/athlete rows reach the canonical tables in
+                # the same transaction. This window is partial, so it never deletes.
+                zone = self._zone_provider() or UTC
+                ingest_intervals_partial_snapshot(db, provider_snapshot, zone=zone)
+                self._coverage.persist(
+                    db, intervals_snapshot_coverage(merged, zone=zone), zone=zone
                 )
                 self._key_value_repository.set(db, "last_performance_error", "")
 
