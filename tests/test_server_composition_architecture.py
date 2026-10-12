@@ -553,8 +553,27 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             )
         )
         self.assertIn(
-            "canonical_coverage=lambda: CANONICAL_SNAPSHOT_PROJECTION",
+            "canonical_coverage=lambda: CANONICAL_READ",
             ast.unparse(diagnostics.value),
+        )
+        self.assertIn(
+            "canonical_read=lambda: CANONICAL_READ",
+            ast.unparse(diagnostics.value),
+        )
+
+        read_selector = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "CANONICAL_READ"
+                for target in node.targets
+            )
+        )
+        assert isinstance(read_selector.value, ast.Call)
+        self.assertEqual(
+            "build_canonical_read",
+            ast.unparse(read_selector.value.func),
         )
 
     def test_weather_service_cache_is_owned_by_weather_service_module(self) -> None:

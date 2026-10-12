@@ -145,6 +145,20 @@ def _provider_of(source: str) -> str:
     return ProviderId.GARMIN.value if source == _GARMIN else ProviderId.INTERVALS.value
 
 
+def read_status(key_values: KeyValueRepository, db: Any) -> str:
+    """Return the stored backfill status word, or ``pending`` before the first batch."""
+    raw = key_values.get(db, STATE_KEY)
+    if raw is None:
+        return BackfillStatus.PENDING.value
+    try:
+        state = json.loads(raw)
+    except ValueError:
+        # A corrupt backfill record reads as not started, so the switch stays on legacy.
+        return BackfillStatus.PENDING.value
+    status = state.get("status") if isinstance(state, dict) else None
+    return status if isinstance(status, str) else BackfillStatus.PENDING.value
+
+
 class CanonicalBackfill:
     """Runs the backfill one batch at a time. The caller owns the transaction."""
 

@@ -315,6 +315,24 @@ def current_mapper_versions() -> dict[str, int]:
     }
 
 
+_OBSERVATION_RECORD_KINDS: Final = frozenset(
+    {WELLNESS_RECORD_KIND, ATHLETE_RECORD_KIND, HEALTH_RECORD_KIND}
+)
+
+
+def current_observation_mapper_versions() -> dict[str, int]:
+    """Return the current mapper version of each provider's observations, by provider.
+
+    Observations carry no state column, so a table row is current only when its
+    ``mapper_version`` equals the version returned here for its provider.
+    """
+    versions: dict[str, int] = {}
+    for (provider, kind), version in sorted(_MAPPER_VERSIONS.items()):
+        if kind in _OBSERVATION_RECORD_KINDS:
+            versions[provider] = version
+    return versions
+
+
 def reprojection_plan(raw_row: Mapping[str, Any], *, zone: tzinfo) -> IngestPlan | None:
     """Plan the canonical rows that one stored raw record projects to today.
 

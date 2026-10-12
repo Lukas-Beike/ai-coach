@@ -15,6 +15,7 @@ from typing import Any, Final
 
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
+from backend.runtime.ports import CanonicalReadRefresher
 from backend.sync.canonical_backfill import BatchReport, CanonicalBackfill
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,11 +31,13 @@ class CanonicalBackfillWorker:
         maintenance_gate: MaintenanceGate,
         poll_seconds: float = DEFAULT_POLL_SECONDS,
         thread_factory: Callable[..., threading.Thread] | None = None,
+        parity: CanonicalReadRefresher | None = None,
     ) -> None:
         self._backfill = backfill
         self._database = database
         self._maintenance_gate = maintenance_gate
         self._poll_seconds = poll_seconds
+        self._parity = parity
         self._thread_factory = thread_factory or threading.Thread
         self._stop_event = threading.Event()
         self._start_lock = threading.Lock()
@@ -76,11 +79,44 @@ class CanonicalBackfillWorker:
                 self._fail(exc)
                 return
             if report.done:
+                self._refresh_parity()
                 return
 
     def _run_batch(self) -> BatchReport:
         with self._maintenance_gate.operation(), self._database().unit_of_work() as db:
             return self._backfill.run_batch(db)
+
+    def _refresh_parity(self) -> None:
+        """Re-check the read source once the backfill is done. Failure keeps legacy reads."""
+        if self._parity is None:
+            return
+        try:
+            with self._maintenance_gate.operation(), self._database().unit_of_work() as db:
+                self._parity.refresh(db)
+        except Exception as exc:  # noqa: BLE001 - a failed check is recorded, not raised
+            _LOGGER.error(
+                "Canonical parity check failed",
+                extra={
+                    "event": "canonical_parity_failed",
+                    "error_class": type(exc).__name__,
+                },
+            )
+            self._record_parity_failure(exc)
+
+    def _record_parity_failure(self, exc: BaseException) -> None:
+        if self._parity is None:
+            return
+        try:
+            with self._maintenance_gate.operation(), self._database().unit_of_work() as db:
+                self._parity.record_failure(db, type(exc).__name__)
+        except Exception as status_exc:  # noqa: BLE001 - logging only, no content
+            _LOGGER.error(
+                "Canonical parity failure could not be recorded",
+                extra={
+                    "event": "canonical_parity_status_failed",
+                    "error_class": type(status_exc).__name__,
+                },
+            )
 
     def _fail(self, exc: BaseException) -> None:
         _LOGGER.error(
