@@ -23,7 +23,7 @@ EQUIPMENT_SPORT_TOKENS: Final[Mapping[str, Sport]] = {
     "Other": Sport.OTHER,
 }
 
-# Every canonical competition token produced by the competition sport aliases.
+# Every Intervals.icu competition token the competition sport aliases resolve to.
 COMPETITION_SPORT_TOKENS: Final[Mapping[str, Sport]] = {
     "Ride": Sport.RIDE,
     "VirtualRide": Sport.RIDE,
@@ -41,8 +41,3 @@ def _lookup(table: Mapping[str, Sport], token: Any) -> Sport | None:
 def equipment_canonical_sport(record: Mapping[str, Any]) -> Sport | None:
     """Return the canonical sport of a stored equipment record, or None if unknown."""
     return _lookup(EQUIPMENT_SPORT_TOKENS, record.get("sport"))
-
-
-def competition_canonical_sport(row: Mapping[str, Any]) -> Sport | None:
-    """Return the canonical sport of a stored competition row, or None if unknown."""
-    return _lookup(COMPETITION_SPORT_TOKENS, row.get("sport"))

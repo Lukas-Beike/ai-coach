@@ -1337,7 +1337,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/competitions.py",
-      "line": 266,
+      "line": 278,
       "column": 31,
       "code": "arg-type",
       "message_sha256": "d59123485b6c5a4fa5b5c286400256fd3f11b7d960c13a09b097918eac088be5"

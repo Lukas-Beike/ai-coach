@@ -9,11 +9,14 @@ from backend.athlete.equipment import EQUIPMENT_SPORTS
 from backend.canonical.stored_sports import (
     COMPETITION_SPORT_TOKENS,
     EQUIPMENT_SPORT_TOKENS,
-    competition_canonical_sport,
     equipment_canonical_sport,
 )
 from backend.canonical.vocabulary import Sport
-from backend.planning.competitions import COMPETITION_SPORTS
+from backend.planning.competitions import (
+    COMPETITION_SPORTS,
+    competition_canonical_sport,
+    competition_normalized_text_fields,
+)
 
 
 def untyped(value: object) -> Any:
@@ -98,17 +101,32 @@ class StoredCompetitionSportTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIs(competition_canonical_sport({"sport": token}), sport)
 
-    def test_competition_accessor_does_not_guess_from_aliases_or_substrings(
-        self,
-    ) -> None:
+    def test_competition_accessor_resolves_locally_stored_aliases(self) -> None:
+        stored = {
+            "Cycling": Sport.RIDE,
+            "Rad": Sport.RIDE,
+            "Virtual Ride": Sport.RIDE,
+            "rad indoor": Sport.RIDE,
+            "Running": Sport.RUN,
+            "Lauf": Sport.RUN,
+            "Strength": Sport.STRENGTH,
+            "Krafttraining": Sport.STRENGTH,
+        }
+        for token, sport in stored.items():
+            with self.subTest(token=token):
+                self.assertIs(competition_canonical_sport({"sport": token}), sport)
+
+    def test_default_competition_sport_translates(self) -> None:
+        stored = competition_normalized_text_fields({})
+        self.assertEqual(stored["sport"], "Cycling")
+        self.assertIs(competition_canonical_sport(stored), Sport.RIDE)
+
+    def test_competition_accessor_does_not_guess_from_substrings(self) -> None:
         unknown: list[Any] = [
             None,
-            "Cycling",
-            "cycling",
-            "Lauf",
+            "",
             "Swim",
             "Other",
-            "Virtual Ride",
             "Weight Training",
             "Running race",
             untyped(7),
