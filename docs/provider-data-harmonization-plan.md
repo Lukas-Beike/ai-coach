@@ -1052,6 +1052,32 @@ kanonische Modell sie nicht abbildet: eFTP, TSB/Form, Rampenrate, W′,
 Rennprognosen, Trainingsstatus, HRV-Wochenmittel, Aktivitätslisten und -details,
 Energieverbrauch, Ausrüstung, FTP-Verlauf und Freshness aus `retrieved_at`.
 
+### 5.12 Ergebnis Phase 5 Stufen 3–4 und Phase 7 (Stand 2026-10-12)
+
+| Einheit | PR | Inhalt |
+|---|---|---|
+| P5-U9 | #1127 | PWA filtert und gestaltet Kennzahlen über `source_provider` statt Labelvergleich; Fallbacks für W/kg-Punkte und nicht zugeordnete Kennzahlen bleiben |
+| P5-U10 | #1122 | Strukturierter Coach-Kontext nach Fachbereich statt nach Provider gruppiert |
+| P7-A | #1125 | Restliche Provider-Literale in Verbrauchern über ID-Konstanten |
+| P7-D | #1124 | Körperverlauf in `/api/state` und Coach-Lesewerkzeugen kanonisch |
+| P7-B | #1126 | Planungs- und Tageserholung kanonisch; Garmin-Snapshot-Parser fängt `RecursionError` ab |
+| P7-F | #1123 | Gespeicherte Wettkampf-Sportarten über `COMPETITION_SPORT_TOKENS` in kanonische `Sport` übersetzt |
+| P7-C | offen | 7-Tage-Mittel von Ruhepuls und Readiness aus kanonischen Beobachtungen (`canonical_recovery_averages.py`) |
+| P7-E | offen | Persönliche Erholung: Ruhepuls kanonisch, `SourceView.PERSONAL_RECOVERY` mit byte-gleichen Labels |
+
+Gemeinsame Regel wie in Phase 5: kanonische Werte nur, wenn Provider, Tag und
+Wert dem Legacy-Datensatz entsprechen; ohne `canonical=` läuft der Legacy-Weg.
+
+Nicht in dieser Session abschließbar:
+
+- **P7-G (Schema v7, `provider` in `activity_feedback`):** Implementierung liegt
+  lokal vor, braucht aber eine Anpassung in
+  `tests/test_database_restore_validation.py`, die nur mit ausdrücklicher Freigabe
+  geändert werden darf.
+- **Rückbau von Legacy-Lesern, Dual-Write und Snapshot-Reduktion:** laut Phase 7 (§4) erst
+  nach mehreren Releases mit stabiler Parität zulässig.
+- **Phase 8 (Wahoo):** wartet auf API-Zugang und Klärung der Nutzungsbedingungen.
+
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
 - Eingefrorenes Fixture des zuletzt veröffentlichten Schemas mit Daten; direkte
