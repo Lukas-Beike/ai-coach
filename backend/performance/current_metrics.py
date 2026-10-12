@@ -32,7 +32,8 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
     return None
 
 
-def _as_number(value: Any) -> float | int | None:
+def as_number(value: Any) -> float | int | None:
+    """Return a finite number parsed from a provider value, or None."""
     try:
         number = float(str(value).replace(",", "."))
     except TypeError, ValueError:
@@ -42,14 +43,15 @@ def _as_number(value: Any) -> float | int | None:
     return int(number) if number.is_integer() else round(number, 2)
 
 
-def _metric(
+def metric(
     value: Any,
     unit: str,
     source: str | None,
     note: str = "",
     provider: ProviderId | None = None,
 ) -> dict[str, Any]:
-    number = _as_number(value)
+    """Return a metric entry whose source fields are set only for a value."""
+    number = as_number(value)
     return {
         "value": number,
         "unit": unit,
@@ -63,7 +65,7 @@ def _metric(
 
 def _canonical_metric(observation: Observation, unit: str) -> dict[str, Any]:
     """Return a metric for a canonical observation, labelled as the legacy view."""
-    return _metric(
+    return metric(
         observation.value.value,
         unit,
         observation_source_label(observation, SourceView.CURRENT_METRIC),
@@ -83,14 +85,14 @@ def _matching_observation(
     """
     if not legacy_value:
         return None
-    number = _as_number(legacy_value)
+    number = as_number(legacy_value)
     if number is None:
         return None
     return next(
         (
             candidate
             for candidate in candidates
-            if _as_number(candidate.value.value) == number
+            if as_number(candidate.value.value) == number
         ),
         None,
     )
@@ -112,12 +114,12 @@ def _threshold_hr_metric(
     if matched is not None:
         return _canonical_metric(matched, "bpm")
     if sport_value:
-        return _metric(
+        return metric(
             sport_value, "bpm", PROVIDER_INTERVALS_NAME, provider=ProviderId.INTERVALS
         )
     if canonical_athlete is not None:
         return _canonical_metric(canonical_athlete, "bpm")
-    return _metric(
+    return metric(
         athlete_value,
         "bpm",
         "Intervals.icu (allgemein)",
@@ -132,7 +134,7 @@ def _vo2max_metric(
     matched = _matching_observation(canonical_sport, sport_value)
     if matched is not None:
         return _canonical_metric(matched, VO2MAX_UNIT)
-    return _metric(
+    return metric(
         sport_value or athlete_value,
         VO2MAX_UNIT,
         PROVIDER_INTERVALS_NAME,
@@ -211,21 +213,21 @@ def _intervals_max_hr_metric(
     for activity in activities:
         if activity_kind(activity) != sport:
             continue
-        value = _as_number(_first_present(activity, max_hr_keys))
+        value = as_number(_first_present(activity, max_hr_keys))
         if value is not None and 80 <= float(value) <= 260:
             activity_values.append(value)
     if activity_values:
         candidates.append((max(activity_values), PROVIDER_INTERVALS_NAME))
     candidates.extend([(_first_present(athlete, max_hr_keys), PROVIDER_INTERVALS_NAME)])
     for value, source in candidates:
-        number = _as_number(value)
+        number = as_number(value)
         if number is not None and 80 <= float(number) <= 260:
-            return _metric(number, "bpm", source, provider=ProviderId.INTERVALS)
-    return _metric(None, "bpm", None)
+            return metric(number, "bpm", source, provider=ProviderId.INTERVALS)
+    return metric(None, "bpm", None)
 
 
 def _threshold_pace_seconds(value: Any) -> float | int | None:
-    number = _as_number(value)
+    number = as_number(value)
     if number is None or number <= 0:
         return None
     return round(1000 / number) if number < 20 else number
@@ -237,7 +239,7 @@ def _zone2_pace_seconds(value: Any) -> float | int | None:
 
 
 def _height_in_cm(value: Any) -> float | int | None:
-    number = _as_number(value)
+    number = as_number(value)
     if number is not None and 1.2 <= float(number) <= 2.5:
         return round(float(number) * 100, 1)
     return number
@@ -314,7 +316,7 @@ def _first_performance_source(
         (
             (value, source, provider)
             for value, source, provider in sources
-            if _as_number(value) is not None
+            if as_number(value) is not None
         ),
         (None, None, None),
     )
@@ -393,14 +395,14 @@ def _performance_body_metrics(
     weight_metric = (
         garmin_metrics["weight_kg"]
         if weight_source == GARMIN_PERFORMANCE_SOURCE
-        else _metric(weight_value, "kg", weight_source, provider=weight_provider)
+        else metric(weight_value, "kg", weight_source, provider=weight_provider)
     )
     return {
         "weight_kg": weight_metric,
-        "body_fat_pct": _metric(
+        "body_fat_pct": metric(
             body_fat_value, "%", body_fat_source, provider=body_fat_provider
         ),
-        "height_cm": _metric(
+        "height_cm": metric(
             _height_in_cm(height_value),
             "cm",
             height_source,
@@ -456,7 +458,7 @@ def _performance_threshold_metrics(
         "cycling_ftp_watts": _preferred_performance_metric(
             garmin_metrics,
             "cycling_ftp_watts",
-            _metric(
+            metric(
                 _first_present(ride, ("ftp", "indoor_ftp"))
                 or _first_present(wellness_ride, ("ftp", "indoor_ftp"))
                 or _first_present(athlete, ("icu_ftp",)),
@@ -468,7 +470,7 @@ def _performance_threshold_metrics(
         "run_threshold_watts": _preferred_performance_metric(
             garmin_metrics,
             "run_threshold_watts",
-            _metric(
+            metric(
                 _first_present(run, ("ftp", "indoor_ftp"))
                 or _first_present(wellness_run, ("ftp", "indoor_ftp")),
                 "W",
@@ -479,7 +481,7 @@ def _performance_threshold_metrics(
         "run_threshold_pace_seconds_per_km": _preferred_performance_metric(
             garmin_metrics,
             "run_threshold_pace_seconds_per_km",
-            _metric(
+            metric(
                 _threshold_pace_seconds(
                     _first_present(run, ("threshold_pace",))
                     or _first_present(wellness_run, ("threshold_pace",))
@@ -489,7 +491,7 @@ def _performance_threshold_metrics(
                 provider=ProviderId.INTERVALS,
             ),
         ),
-        "run_zone2_pace_seconds_per_km": _metric(
+        "run_zone2_pace_seconds_per_km": metric(
             _zone2_pace_seconds(run_zone2_pace),
             "s/km",
             PROVIDER_INTERVALS_NAME,
@@ -560,7 +562,7 @@ def _performance_vo2_and_prediction_metrics(
         ),
         **{
             key: _preferred_performance_metric(
-                garmin_metrics, key, _metric(None, "s", None)
+                garmin_metrics, key, metric(None, "s", None)
             )
             for key in (
                 "run_5k_seconds",
@@ -615,7 +617,7 @@ def current_performance_metrics(
     return {
         **body_metrics,
         **threshold_metrics,
-        "cycling_eftp_watts": _metric(
+        "cycling_eftp_watts": metric(
             current_ride_eftp or latest_ride_eftp,
             "W",
             PROVIDER_INTERVALS_NAME,
