@@ -1022,6 +1022,19 @@ Ergebnis P5-U7 (#1115):
   Körperverlauf noch über Legacy; Gleichstände untimed Garmin-Messungen folgen der
   kanonischen statt der Traversierungsreihenfolge.
 
+Ergebnis P5-U6 (#1121):
+
+- **Erholungswerte:** `sleep_score`, `resting_hr` und `readiness` im
+  Erholungskontext kommen aus kanonischen Beobachtungen
+  (`backend/performance/canonical_recovery.py`). Ein Kandidat wird nur genutzt,
+  wenn Provider, Tag und Wert dem Legacy-gewählten Datensatz entsprechen; sonst
+  bleibt der Legacy-Wert. Labels bleiben die Legacy-Texte.
+- **Nicht umgestellt:** `resting_hr_date`, `sleep_hours` und HRV (Ledger
+  `switchable: false`), `personal_recovery.py`, `planning_recovery.py` und die
+  Garmin-Projektion.
+- **Offen (Phase 7):** Recovery-Ansicht in `source_labels`, kanonische
+  persönliche und Planungs-Erholung; pro Abruf drei zusätzliche Lesezugriffe.
+
 Aufteilung Phase 5 (Stufen):
 
 | Stufe | Einheiten |
