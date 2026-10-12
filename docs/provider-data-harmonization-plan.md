@@ -1008,6 +1008,20 @@ Ergebnis P5-U5 (#1114):
   die Legacy-Werte; Typklassifikation der Sport-Einstellungen (`types[0]` im Mapper
   gegenüber Teilstring-Suche im Legacy-Reader) wird in Phase 7 angeglichen.
 
+Ergebnis P5-U7 (#1115):
+
+- **Körperverlauf:** Gewichts- und Körperfettverlauf (Intervals und Garmin) für
+  `/api/performance` und die Analyse-Historie kommen aus kanonischen Beobachtungen
+  (`backend/performance/canonical_body.py`), Werte, Daten und `synced_at` wie im
+  Legacy-Verlauf. Garmin-Messungen eines Tages werden wie im Legacy-Reader
+  geordnet: ohne Zeit zuerst, sonst nach UTC-Zeitpunkt.
+- **Konsistenz:** `performance_state()` liest Leistungs-Snapshot, Garmin-Snapshot
+  und alle kanonischen Eingaben in einer `unit_of_work` und wählt die Lesequelle
+  einmal (`resolve_reader`).
+- **Offen (Phase 7):** `/api/state` und `coach/activity_read_tools.py` lesen den
+  Körperverlauf noch über Legacy; Gleichstände untimed Garmin-Messungen folgen der
+  kanonischen statt der Traversierungsreihenfolge.
+
 Aufteilung Phase 5 (Stufen):
 
 | Stufe | Einheiten |
