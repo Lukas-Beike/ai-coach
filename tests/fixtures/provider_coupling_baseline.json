@@ -21,18 +21,6 @@
       "count": 6
     },
     {
-      "rule": "garmin_wire_key",
-      "path": "backend/sync/garmin.py",
-      "token": "calendarDate",
-      "count": 2
-    },
-    {
-      "rule": "garmin_wire_key",
-      "path": "backend/sync/garmin.py",
-      "token": "summaryDate",
-      "count": 2
-    },
-    {
       "rule": "icu_identifier",
       "path": "backend/activities/calendar_projection.py",
       "token": "icu_intensity",
@@ -250,24 +238,6 @@
     },
     {
       "rule": "icu_identifier",
-      "path": "backend/sync/activity_details.py",
-      "token": "icu_intervals",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/sync/reconcile.py",
-      "token": "icu_intensity",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/sync/reconcile.py",
-      "token": "icu_training_load",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
       "path": "public/activity-details.js",
       "token": "icu_training_load",
       "count": 2
@@ -442,44 +412,8 @@
     },
     {
       "rule": "provider_literal",
-      "path": "backend/sync/activity_details.py",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/garmin.py",
-      "token": "garmin",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/garmin_service.py",
-      "token": "garmin",
-      "count": 4
-    },
-    {
-      "rule": "provider_literal",
       "path": "backend/sync/gates.py",
       "token": "garmin",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/intervals.py",
-      "token": "intervals",
-      "count": 6
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/performance.py",
-      "token": "intervals",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/plan_commands.py",
-      "token": "intervals",
       "count": 1
     },
     {

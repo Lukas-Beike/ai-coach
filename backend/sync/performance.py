@@ -73,7 +73,7 @@ class PerformanceRefreshService:
 
     def refresh(self) -> dict[str, Any]:
         with (
-            self._observer.observe("intervals", "performance") as scope,
+            self._observer.observe(INTERVALS_ID, "performance") as scope,
             self._provider_resync_gate.operation(),
         ):
             result = self._refresh_inner()
@@ -139,7 +139,7 @@ class PerformanceRefreshService:
             self._key_value_repository.set(db, key, value)
 
     def _publish_ready(self) -> None:
-        payload = {"provider": "intervals", "area": "performance", "status": "ready"}
+        payload = {"provider": INTERVALS_ID, "area": "performance", "status": "ready"}
         publish = getattr(self._event_publisher, "publish", None)
         if publish is not None:
             publish("provider", payload)
@@ -198,7 +198,7 @@ class PerformanceRefreshFollowupService:
             return None
         try:
             return self._queue_service.enqueue(
-                "intervals",
+                INTERVALS_ID,
                 "performance_refresh",
                 {
                     "reason": "Automatische Folgeaktualisierung nach "
