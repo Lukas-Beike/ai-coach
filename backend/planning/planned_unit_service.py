@@ -10,7 +10,7 @@ from typing import Any
 from backend import change_history
 from backend.athlete.local_date import LocalDate
 from backend.calendar.canonical import canonical_planned_workouts
-from backend.canonical.vocabulary import RemoteEntityKind
+from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_PLANNING_ERROR, AppError
 from backend.planning import calendar as planning_calendar
@@ -304,7 +304,7 @@ class PlannedUnitService:
         local = self.list(limit, future_only=True)
         return {
             "local": local,
-            "intervals": [],
+            ProviderId.INTERVALS.value: [],
             "canonical": canonical_planned_workouts([], local, limit),
             "source": "local",
         }

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.vocabulary import ProviderId
 from backend.coach.proposal_models import (
     COACH_ACTION_TYPES,
     LOCAL_COACH_WRITE_TOOLS,
@@ -25,7 +26,7 @@ def validated_coach_action_preview_input(
     if action_type not in COACH_ACTION_TYPES:
         raise AppError(400, "Unbekannter Coach-Aktionstyp.")
     target_system = str(values.get("target_system") or "").strip()
-    if target_system not in {"local", "intervals", "local+intervals"}:
+    if target_system not in {"local", ProviderId.INTERVALS, "local+intervals"}:
         raise AppError(400, "Die Aktionsvorschau benötigt ein gültiges Zielsystem.")
     object_ids = values.get("object_ids")
     diff = values.get("diff")
@@ -39,7 +40,7 @@ def validated_coach_action_preview_input(
             400, "Die Aktionsvorschau benötigt Objekt-IDs, Diff und Payload."
         )
     expected_target = (
-        "intervals"
+        ProviderId.INTERVALS.value
         if action_type
         in {
             "delete_duplicate_intervals_activity",
@@ -84,7 +85,7 @@ def _validate_remote_coach_write(payload: dict[str, Any]) -> None:
         or not isinstance(arguments, dict)
         or not isinstance(intent, dict)
         or intent.get("operation") != tool
-        or intent.get("target_system") != "intervals"
+        or intent.get("target_system") != ProviderId.INTERVALS
         or not isinstance(request, dict)
         or request.get("remote_write") is not True
         or not source_ids_ok

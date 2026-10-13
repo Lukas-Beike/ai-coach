@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.activities.workout_text import canonical_workout_zones
 from backend.athlete.local_date import LocalDate, iso_date_prefix
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
     INVALID_PLANNING_DATE_ERROR,
@@ -19,6 +20,7 @@ from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
 from backend.planning.sport import apply_sport_update
 from backend.providers.intervals_workouts import (
+    DERIVED_WORKOUT_KEYS,
     INTERVALS_DEFAULT_WORKOUT_TYPE,
     intervals_record_type,
 )
@@ -30,7 +32,10 @@ def adopt_normalized_remote_planned_unit(
     remote: dict[str, Any],
 ) -> tuple[dict[str, Any], str] | None:
     """Validate a persisted normalized snapshot without treating its local ID as remote."""
-    if remote.get("source") != "intervals" or remote.get("category") != "WORKOUT":
+    if (
+        remote.get("source") != ProviderId.INTERVALS
+        or remote.get("category") != "WORKOUT"
+    ):
         return None
     remote_id = str(remote.get("remote_event_id") or "").strip()
     event_date = str(remote.get("date") or "").strip()
@@ -262,7 +267,7 @@ def _reconcile_updated_planned_workout_content(
         key in values
         for key in ("description", "duration_minutes", "target", "type", "sport")
     ):
-        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+        for key in DERIVED_WORKOUT_KEYS:
             normalized.pop(key, None)
 
 
@@ -363,8 +368,8 @@ def remote_planned_unit_payload(
         "duration_minutes": _remote_planned_unit_duration(event),
         "moving_time": moving_time,
         "target": event.get("target") or "AUTO",
-        "source": "intervals",
-        "origin": "intervals",
+        "source": ProviderId.INTERVALS.value,
+        "origin": ProviderId.INTERVALS.value,
         "category": "WORKOUT",
         "paired_event_id": event.get("paired_event_id") or event.get("pairedEventId"),
         "remote_event_id": remote_id,

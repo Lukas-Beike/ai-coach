@@ -801,7 +801,7 @@
     {
       "tool": "mypy",
       "path": "backend/coach/sync_tools.py",
-      "line": 211,
+      "line": 212,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "0778ca98903ed91e44ad3e87190c7b73b748aa2e62691a925a5ef32bc54954cf"
@@ -1225,7 +1225,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/library.py",
-      "line": 178,
+      "line": 182,
       "column": 28,
       "code": "arg-type",
       "message_sha256": "b99b36ea488d466a65f1ebd5b90d5a128b23cbc7f5f56e2da5766f6080c1dbb5"
@@ -1345,7 +1345,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/library.py",
-      "line": 217,
+      "line": 221,
       "column": 32,
       "code": "arg-type",
       "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
@@ -1361,7 +1361,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/library.py",
-      "line": 172,
+      "line": 176,
       "column": 33,
       "code": "arg-type",
       "message_sha256": "b99b36ea488d466a65f1ebd5b90d5a128b23cbc7f5f56e2da5766f6080c1dbb5"
@@ -2065,7 +2065,7 @@
     {
       "tool": "mypy",
       "path": "backend/coach/sync_tools.py",
-      "line": 207,
+      "line": 208,
       "column": 19,
       "code": "assignment",
       "message_sha256": "cb2357b99c309c537809d43ffaf4b1309fff836eca0d891ffc25beaff5976314"
@@ -2169,7 +2169,7 @@
     {
       "tool": "mypy",
       "path": "backend/coach/dialogue_action.py",
-      "line": 119,
+      "line": 120,
       "column": 12,
       "code": "attr-defined",
       "message_sha256": "232127bf16e88c0f176ed8e1807960579ac815dba69fc4f319f1bda2d31b8622"
@@ -3145,7 +3145,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/library.py",
-      "line": 423,
+      "line": 427,
       "column": 48,
       "code": "operator",
       "message_sha256": "134b0ed0f4e67b8fe989af28654f6632e4aeeb5d4fcc408f45c84be9069c1f5a"

@@ -472,7 +472,7 @@ class AdaptiveReplanApplyService:
         }
         if not replacement.get("archived") and not replacement.get("local_deleted"):
             planning_workouts.validate_workout_description(replacement)
-            for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+            for key in planning_workouts.DERIVED_WORKOUT_KEYS:
                 replacement.pop(key, None)
         db.execute(
             PLANNED_UNIT_UPDATE_SQL,

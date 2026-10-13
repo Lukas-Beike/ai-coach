@@ -17,6 +17,7 @@ from backend.activities.activity_reference import (
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicates import validate_duplicate_delete
 from backend.athlete.local_date import LocalDate
+from backend.canonical.vocabulary import ProviderId
 from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
     _preview_nutrient,
@@ -160,7 +161,7 @@ class CoachProposalCreationService:
         return self.create(
             {
                 "action_type": "remote_coach_write",
-                "target_system": "intervals",
+                "target_system": ProviderId.INTERVALS.value,
                 "object_ids": {"operation": tool, "targets": targets},
                 "diff": remote_coach_write_diff(
                     tool, arguments, intent, approval_manifest, approval_details

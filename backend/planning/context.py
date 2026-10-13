@@ -7,7 +7,14 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.vocabulary import ProviderId
 from backend.providers.intervals_activity_fields import ACTIVITY_FIELDS, selected
+from backend.providers.intervals_performance_fields import (
+    CONFIGURED_FTP,
+    INTENSITY,
+    TRAINING_LOAD,
+    W_PRIME,
+)
 
 UTC_OFFSET_SUFFIX = "+00:00"
 
@@ -179,8 +186,8 @@ EVENT_FIELDS = (
     "moving_time",
     "elapsed_time",
     "distance",
-    "icu_training_load",
-    "icu_intensity",
+    TRAINING_LOAD,
+    INTENSITY,
     "target",
     "external_id",
 )
@@ -194,8 +201,8 @@ ATHLETE_FIELDS = (
     "bodyFat",
     "body_fat",
     "dob",
-    "icu_ftp",
-    "icu_w_prime",
+    CONFIGURED_FTP,
+    W_PRIME,
     "max_hr",
     "maxHR",
     "maxHeartRate",
@@ -291,7 +298,7 @@ def local_calendar_library_entries(
         if isinstance(entry, dict) and entry.get("source") in {
             "coach",
             "library",
-            "intervals",
+            ProviderId.INTERVALS,
         }:
             entries.append({**entry, "local_id": local_id})
     return entries

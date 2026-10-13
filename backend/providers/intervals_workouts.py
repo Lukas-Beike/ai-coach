@@ -24,8 +24,13 @@ from backend.canonical.stored_sports import (
     workout_sport_from_record,
 )
 from backend.canonical.vocabulary import Environment
+from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 
 INTERVALS_EVENT_CATEGORY = "WORKOUT"
+# Workout payload field holding structured interval text.
+WORKOUT_INTERVALS_FIELD = "intervals"
+# Remote-derived fields that stop being valid once a local workout is edited.
+DERIVED_WORKOUT_KEYS = ("workout_doc", TRAINING_LOAD, INTENSITY)
 INTERVALS_DEFAULT_WORKOUT_TYPE = DEFAULT_WORKOUT_SPORT_TOKEN
 INTERVALS_TEMPLATE_WORKOUT_TYPES = frozenset(
     {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining"}

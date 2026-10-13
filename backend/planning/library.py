@@ -12,7 +12,11 @@ from backend.canonical.stored_sports import workout_sport_from_record
 from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
 from backend.planning.sport import apply_sport_update
-from backend.providers.intervals_workouts import intervals_record_type
+from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
+from backend.providers.intervals_workouts import (
+    DERIVED_WORKOUT_KEYS,
+    intervals_record_type,
+)
 
 PAYLOAD_HASH_PATTERN = r"[0-9a-f]{64}"
 LIBRARY_BULK_MAX_ENTRIES = 100
@@ -29,8 +33,8 @@ LIBRARY_WORKOUT_FIELDS = {
     "distance",
     "target",
     "workout_doc",
-    "icu_training_load",
-    "icu_intensity",
+    TRAINING_LOAD,
+    INTENSITY,
     "indoor",
     "tags",
     "folder_id",
@@ -426,7 +430,7 @@ def _reconcile_updated_library_workout_content(
         key in values
         for key in ("description", "duration_minutes", "target", "type", "sport")
     ):
-        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+        for key in DERIVED_WORKOUT_KEYS:
             normalized.pop(key, None)
 
 
