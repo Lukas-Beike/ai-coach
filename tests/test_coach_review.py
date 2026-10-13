@@ -244,8 +244,11 @@ class CoachReviewTests(unittest.TestCase):
         entries = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [self.workout(i, sport) for i, sport in enumerate(sports)]
         )
-        self.assertEqual([entry["sport"] for entry in entries], sports)
-        self.assertEqual([entry["type"] for entry in entries], sports)
+        stored = ["run", "swim", "strength", "ride", "ride"]
+        environments = ["unknown", "unknown", "unknown", "virtual", "unknown"]
+        self.assertEqual([entry["sport"] for entry in entries], stored)
+        self.assertEqual([entry["environment"] for entry in entries], environments)
+        self.assertTrue(all("type" not in entry for entry in entries))
         self.assertEqual(
             [
                 entry["sport"]
@@ -253,7 +256,7 @@ class CoachReviewTests(unittest.TestCase):
                     server.PLANNING_DATA.planned_unit().list(), key=lambda x: x["date"]
                 )
             ],
-            sports,
+            stored,
         )
         self.assertEqual(
             [

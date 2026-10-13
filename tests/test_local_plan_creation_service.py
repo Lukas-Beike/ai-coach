@@ -149,7 +149,7 @@ class LocalPlanCreationServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(len(created), 1)
-        self.assertEqual(created[0]["sport"], "Ride")
+        self.assertEqual(created[0]["sport"], "ride")
         self.assertEqual(created[0]["duration_minutes"], 30)
         self.assertEqual(created[0]["moving_time"], 1800)
         self.assertEqual(created[0]["target"], "AUTO")

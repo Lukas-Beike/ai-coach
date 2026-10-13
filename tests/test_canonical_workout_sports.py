@@ -9,8 +9,7 @@ from typing import Any
 from backend.canonical.stored_sports import (
     WORKOUT_SPORT_ALIASES,
     WORKOUT_SPORT_TOKENS,
-    workout_canonical_sport,
-    workout_sport_environment,
+    resolve_workout_sport,
     workout_stored_token,
 )
 from backend.canonical.vocabulary import Environment, Sport
@@ -149,8 +148,11 @@ class WorkoutSportParityTest(unittest.TestCase):
             with self.subTest(alias=alias):
                 self.assertEqual(workout_stored_token(alias), token)
                 self.assertEqual(intervals_workout_sport(alias), token)
+                resolved = resolve_workout_sport(alias)
+                assert resolved is not None
                 self.assertEqual(
-                    workout_canonical_sport(alias), WORKOUT_SPORT_TOKENS[token][0]
+                    (resolved.sport, resolved.environment),
+                    WORKOUT_SPORT_TOKENS[token],
                 )
 
     def test_environment_matches_legacy_activity_table(self) -> None:
@@ -159,21 +161,24 @@ class WorkoutSportParityTest(unittest.TestCase):
                 legacy = INTERVALS_ACTIVITY_TYPES.get(
                     legacy_wire_type(value), (Sport.OTHER, Environment.UNKNOWN)
                 )
-                self.assertEqual(planned_sport_environment(value), legacy)
+                self.assertEqual(planned_sport_environment({"type": value}), legacy)
 
     def test_unknown_text_is_none_and_wires_as_other(self) -> None:
         self.assertIsNone(workout_stored_token("Curling"))
-        self.assertIsNone(workout_canonical_sport("Curling"))
-        self.assertIsNone(workout_sport_environment("Curling"))
+        self.assertIsNone(resolve_workout_sport("Curling"))
         self.assertEqual(intervals_workout_sport("Curling"), "Other")
 
     def test_blank_defaults_to_ride(self) -> None:
-        self.assertEqual(workout_canonical_sport(None), Sport.RIDE)
-        self.assertEqual(workout_canonical_sport(""), Sport.RIDE)
+        for blank in (None, ""):
+            resolved = resolve_workout_sport(blank)
+            assert resolved is not None
+            self.assertEqual(resolved.sport, Sport.RIDE)
 
     def test_generic_tokens_are_other(self) -> None:
         for token in ("Workout", "Other", "Golf"):
-            self.assertEqual(workout_canonical_sport(token), Sport.OTHER)
+            resolved = resolve_workout_sport(token)
+            assert resolved is not None
+            self.assertEqual(resolved.sport, Sport.OTHER)
 
 
 if __name__ == "__main__":

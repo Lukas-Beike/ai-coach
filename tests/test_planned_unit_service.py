@@ -151,8 +151,8 @@ class PlannedUnitServiceTests(unittest.TestCase):
 
         planned, history, revision = self.state()
         self.assertEqual(created["id"], str(self.id))
-        self.assertEqual(created["sport"], "Run")
-        self.assertEqual(created["type"], "Run")
+        self.assertEqual(created["sport"], "run")
+        self.assertNotIn("type", created)
         self.assertEqual(created["duration_minutes"], 30)
         self.assertEqual(planned[0]["id"], str(self.id))
         self.assertEqual(planned[0]["local_id"], str(self.id))

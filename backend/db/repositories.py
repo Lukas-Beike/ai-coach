@@ -231,7 +231,7 @@ class LibraryPageRepository:
             params.extend(cursor)
         return db.execute(
             "WITH templates AS ("
-            "SELECT id, payload, lower(COALESCE(json_extract(payload, '$.type'), '')) AS sport_key, "
+            "SELECT id, payload, lower(COALESCE(json_extract(payload, '$.sport'), '')) AS sport_key, "
             "lower(COALESCE(json_extract(payload, '$.name'), '')) AS name_key "
             "FROM workout_library WHERE json_valid(payload) AND json_type(payload)='object' "
             "AND json_extract(payload, '$.date') IS NULL AND COALESCE(json_extract(payload, '$.archived'), 0)=0) "
@@ -297,7 +297,7 @@ class CompetitionRepository:
         self._remote_links = remote_links or RemoteLinkRepository()
 
     _LIST_FIELDS = (
-        "id, name, event_date, start_date_local, sport, priority, category, distance, target, "
+        "id, name, event_date, start_date_local, sport, environment, sport_detail, priority, category, distance, target, "
         "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
         "sync_state, sync_conflict, last_synced_at"
     )
@@ -323,13 +323,15 @@ class CompetitionRepository:
 
     def create_local(self, db: Any, competition: dict[str, Any], now: str) -> None:
         db.execute(
-            "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, 'local', '', ?, ?)",
+            "INSERT INTO competitions(id, name, event_date, sport, environment, sport_detail, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, 'local', '', ?, ?)",
             (
                 competition["id"],
                 competition["name"],
                 competition["event_date"],
                 competition["sport"],
+                competition.get("environment"),
+                competition.get("sport_detail"),
                 competition["priority"],
                 competition["distance"],
                 competition["target"],
@@ -346,11 +348,13 @@ class CompetitionRepository:
 
     def update_local(self, db: Any, competition: dict[str, Any], now: str) -> None:
         db.execute(
-            "UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?",
+            "UPDATE competitions SET name=?, event_date=?, sport=?, environment=?, sport_detail=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?",
             (
                 competition["name"],
                 competition["event_date"],
                 competition["sport"],
+                competition.get("environment"),
+                competition.get("sport_detail"),
                 competition["priority"],
                 competition["distance"],
                 competition["target"],
@@ -410,12 +414,14 @@ class CompetitionRepository:
         now: str,
     ) -> None:
         db.execute(
-            "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
+            "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, environment=?, sport_detail=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
             (
                 data["name"],
                 data["event_date"],
                 data["start_date_local"],
                 data["sport"],
+                data.get("environment"),
+                data.get("sport_detail"),
                 data["priority"],
                 data["category"],
                 data["distance"],

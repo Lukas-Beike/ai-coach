@@ -84,6 +84,37 @@ def restore_released_remote_links(connection: sqlite3.Connection) -> None:
     connection.execute(RELEASED_TOMBSTONES_SQL)
 
 
+def restore_released_competitions(connection: sqlite3.Connection) -> None:
+    # Schema v9 added competitions.environment and sport_detail.
+    connection.execute("DROP TABLE competitions")
+    connection.execute(
+        """
+        CREATE TABLE competitions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            event_date TEXT NOT NULL,
+            sport TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            distance TEXT NOT NULL,
+            target TEXT NOT NULL,
+            course_profile TEXT NOT NULL,
+            notes TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'RACE_B',
+            start_date_local TEXT,
+            description TEXT NOT NULL DEFAULT '',
+            moving_time INTEGER,
+            intervals_event_id TEXT,
+            external_id TEXT,
+            sync_dirty INTEGER NOT NULL DEFAULT 1,
+            sync_state TEXT NOT NULL DEFAULT 'local',
+            sync_conflict TEXT NOT NULL DEFAULT '',
+            last_synced_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+
+
 class DatabaseRestoreValidationTests(unittest.TestCase):
     def test_stage_enforces_payload_boundary_and_uses_uuid_filename(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -199,6 +230,7 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 )
                 restore_released_activity_feedback(connection)
                 restore_released_remote_links(connection)
+                restore_released_competitions(connection)
                 for table in OLD_RELEASE_ABSENT_PROVIDER_TABLES:
                     connection.execute(f"DROP TABLE {table}")
                 connection.execute("PRAGMA user_version = 1")
@@ -229,6 +261,7 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
             with closing(sqlite3.connect(path)) as connection:
                 initialize_schema(connection)
                 restore_released_remote_links(connection)
+                restore_released_competitions(connection)
                 connection.execute("PRAGMA user_version = 7")
                 connection.execute(
                     "INSERT INTO competitions(id, name, event_date, sport, priority, "
@@ -460,6 +493,7 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 )
                 restore_released_activity_feedback(connection)
                 restore_released_remote_links(connection)
+                restore_released_competitions(connection)
                 for table in OLD_RELEASE_ABSENT_PROVIDER_TABLES:
                     connection.execute(f"DROP TABLE {table}")
                 connection.execute("PRAGMA user_version = 1")

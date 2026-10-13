@@ -146,8 +146,9 @@ function calendarBadgeRow(specs) {
   return row;
 }
 
-function competitionSportLabel(sport) {
-  return ({ Cycling: "Radfahren", Ride: "Radfahren", VirtualRide: "Rad indoor", Running: "Laufen", Run: "Laufen", Swim: "Schwimmen", Strength: "Krafttraining" })[sport] || sport || "–";
+function competitionSportLabel(sport, environment) {
+  if (sport === "ride" && environment === "virtual") return "Rad indoor";
+  return ({ Cycling: "Radfahren", Ride: "Radfahren", ride: "Radfahren", VirtualRide: "Rad indoor", Running: "Laufen", Run: "Laufen", run: "Laufen", Swim: "Schwimmen", swim: "Schwimmen", Strength: "Krafttraining", strength: "Krafttraining", other: "Andere" })[sport] || sport || "–";
 }
 
 function competitionFact(labelText, value) {
@@ -927,7 +928,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     facts.className = "competition-card-facts";
     facts.append(
       competitionFact("Datum", competition.event_date ? dateLabel(competition.event_date) : ""),
-      competitionFact("Sportart", competitionSportLabel(competition.sport)),
+      competitionFact("Sportart", competitionSportLabel(competition.sport, competition.environment)),
       competitionFact("Distanz", distanceLabel(competition.distance)),
       competitionFact("Zielpace / Zielzeit", competition.target)
     );

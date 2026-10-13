@@ -11,6 +11,7 @@ from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
 from backend.planning.conflicts import calendar_items_conflict
+from backend.planning.sport import planned_stored_sport
 
 
 class LocalTrainingPlanCreationService:
@@ -150,7 +151,11 @@ class LocalTrainingPlanCreationService:
             match_duration = planning_library.library_workout_duration_minutes(match)
             stored = {
                 **workout,
-                "sport": match.get("type") or workout["sport"],
+                **(
+                    planned_stored_sport(match).fields()
+                    if match.get("sport") or match.get("type")
+                    else {"sport": workout["sport"]}
+                ),
                 "name": match.get("name") or workout["name"],
                 "description": match.get("description") or workout["description"],
                 "duration_minutes": (

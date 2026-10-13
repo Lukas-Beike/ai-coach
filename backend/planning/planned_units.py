@@ -17,7 +17,11 @@ from backend.errors import (
 )
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
-from backend.providers.intervals_workouts import INTERVALS_DEFAULT_WORKOUT_TYPE
+from backend.planning.sport import apply_sport_update
+from backend.providers.intervals_workouts import (
+    INTERVALS_DEFAULT_WORKOUT_TYPE,
+    intervals_record_type,
+)
 
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 
@@ -53,6 +57,14 @@ def planned_unit_payload_hash(payload: Any) -> str:
         for key, value in payload.items()
         if key not in {"id", "sync_status", "sync_conflict", "origin", "local_marked"}
     }
+    if "sport" in comparable or "type" in comparable:
+        # The hash is representation-invariant: a payload stored with the
+        # canonical sport and environment hashes like the legacy provider token
+        # payload it replaced, so recorded baselines stay valid across schemas.
+        token = intervals_record_type(comparable)
+        comparable.pop("environment", None)
+        comparable.pop("sport_detail", None)
+        comparable["sport"] = comparable["type"] = token
     serialized = json.dumps(
         comparable,
         sort_keys=True,
@@ -67,10 +79,6 @@ def _planned_unit_metadata(
     workout: dict[str, Any], normalized: dict[str, Any]
 ) -> dict[str, Any]:
     metadata = {
-        "sport": normalized.get("type")
-        or planning_workouts.intervals_workout_sport(
-            workout.get("sport") or workout.get("type")
-        ),
         "origin": str(workout.get("origin") or workout.get("source") or "coach")[:40],
     }
     metadata["source"] = str(workout.get("source") or metadata["origin"])[:40]
@@ -109,7 +117,6 @@ def normalize_planned_unit(
     normalized = planning_library.normalize_library_workout(
         {
             **workout,
-            "type": planning_workouts.intervals_workout_sport(workout["sport"]),
             "date": iso_date_prefix(
                 str(workout.get("date") or workout.get("start_date_local") or "")
             ),
@@ -172,7 +179,7 @@ def _apply_planned_workout_update(
             values["start_date_local"], str(candidate.get("date") or "")
         )
     if "type" in values or "sport" in values:
-        candidate["sport"] = values.get("sport") or values.get("type")
+        apply_sport_update(candidate, values)
 
 
 def prepare_planned_workout_date(
@@ -244,7 +251,7 @@ def _reconcile_updated_planned_workout_content(
     if "description" in values:
         normalized["description"] = canonical_workout_zones(
             normalized["description"],
-            endurance=planning_workouts.intervals_workout_sport(normalized.get("sport"))
+            endurance=intervals_record_type(normalized)
             in planning_workouts.INTERVALS_ENDURANCE_WORKOUT_TYPES,
         )
     seconds = planning_workouts.validate_workout_description(normalized)

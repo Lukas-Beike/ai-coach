@@ -726,9 +726,7 @@ def coach_workout_library(
     for workout in items:
         if not isinstance(workout, dict) or workout.get("date"):
             continue
-        workout_type = planning_library.workout_library_type(
-            workout.get("type") or workout.get("sport")
-        )
+        workout_type = planning_library.workout_library_type(workout)
         by_type.setdefault(workout_type, []).append(workout)
 
     chosen: list[dict[str, Any]] = []

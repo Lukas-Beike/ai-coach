@@ -6,6 +6,8 @@ import json
 from datetime import date
 from typing import Any
 
+from backend.planning.sport import with_activity_type
+
 
 def planned_unit_rows(
     db: Any,
@@ -45,6 +47,7 @@ def planned_unit_payload(row: Any, include_archived: bool) -> dict[str, Any] | N
         not include_archived and payload.get("archived")
     ):
         return None
+    with_activity_type(payload)
     payload["id"] = str(row["local_id"] or payload.get("id") or "")
     payload["local_id"] = payload["id"]
     payload["sync_status"] = str(

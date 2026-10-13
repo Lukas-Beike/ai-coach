@@ -42,6 +42,8 @@ automatically adds the missing nutrition-product table and indexes before
 workers start, retaining existing records and SQLCipher encryption. A failed
 migration rolls back; do not replace or reset the data directory to resolve it.
 
+Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. Startup rewrites the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`) in one transaction; the step is idempotent and older backups are migrated before a restore. The HTTP API and coach tools keep accepting the old tokens, and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types.
+
 ---
 
 ## Features
@@ -529,7 +531,7 @@ When a database restore is initiated:
 5. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss.
 
 ### Privacy Export & Data Purge
-- **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history. Export format version 4 also includes the canonical provider tables (provider records, activity sessions and records, observations) as JSON Lines, the owning provider of each activity note, when known, and the remote links that map local workouts, planned units and competitions to their provider counterparts (including the provider of each competition sync tombstone); credential-like keys are removed from provider payloads before export, and signed download URLs are replaced with a `[redacted]` marker.
+- **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history. Export format version 5 also includes the canonical provider tables (provider records, activity sessions and records, observations) as JSON Lines, the owning provider of each activity note, when known, and the remote links that map local workouts, planned units and competitions to their provider counterparts (including the provider of each competition sync tombstone). Stored sports are exported in the canonical vocabulary (`sport`, `environment` and a lossless `sport_detail`); credential-like keys are removed from provider payloads before export, and signed download URLs are replaced with a `[redacted]` marker.
 - **Local Data Purge**: Completely wipes all local athlete records from the database, including canonical provider data. To prevent accidental loss, the action requires entering the exact confirmation phrase `LOKALE DATEN LÖSCHEN`. External accounts (Intervals.icu and Garmin) remain untouched.
 
 ### Operational Logging & Diagnostics

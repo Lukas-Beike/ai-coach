@@ -33,24 +33,27 @@ def workout(**overrides):
 class PlannedSportEnvironmentTests(unittest.TestCase):
     def test_known_intervals_types_map_to_canonical_sport_and_environment(self):
         self.assertEqual(
-            planned_sport_environment("VirtualRide"), (Sport.RIDE, Environment.VIRTUAL)
+            planned_sport_environment({"type": "VirtualRide"}),
+            (Sport.RIDE, Environment.VIRTUAL),
         )
         self.assertEqual(
-            planned_sport_environment("TrailRun"), (Sport.RUN, Environment.OUTDOOR)
+            planned_sport_environment({"type": "TrailRun"}),
+            (Sport.RUN, Environment.OUTDOOR),
         )
         self.assertEqual(
-            planned_sport_environment("WeightTraining"),
+            planned_sport_environment({"type": "WeightTraining"}),
             (Sport.STRENGTH, Environment.UNKNOWN),
         )
 
     def test_missing_sport_defaults_to_ride_like_the_provider_payload(self):
         self.assertEqual(
-            planned_sport_environment(None), (Sport.RIDE, Environment.UNKNOWN)
+            planned_sport_environment({}), (Sport.RIDE, Environment.UNKNOWN)
         )
 
     def test_unknown_sport_falls_back_to_other(self):
         self.assertEqual(
-            planned_sport_environment("Curling"), (Sport.OTHER, Environment.UNKNOWN)
+            planned_sport_environment({"type": "Curling"}),
+            (Sport.OTHER, Environment.UNKNOWN),
         )
 
 

@@ -14,7 +14,7 @@ from backend.activities.workout_text import WorkoutTextError, structured_duratio
 from backend.errors import AppError
 from backend.providers.intervals_workouts import (
     INTERVALS_ENDURANCE_WORKOUT_TYPES,
-    intervals_workout_sport,
+    intervals_record_type,
 )
 
 WORKOUT_STEP_QUANTITY = re.compile(r"\d+(?:[.,]\d+)?\s*(?P<unit>[A-Za-z'\"]+)")
@@ -150,7 +150,7 @@ def _as_number(value: Any) -> float | int | None:
 
 def validate_workout_description(workout: dict[str, Any]) -> float | None:
     """Require quantity-first endurance steps; never guess intent from prose."""
-    sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
+    sport = intervals_record_type(workout)
     if sport not in INTERVALS_ENDURANCE_WORKOUT_TYPES:
         return None
     description = str(workout.get("description") or "")[:12000]

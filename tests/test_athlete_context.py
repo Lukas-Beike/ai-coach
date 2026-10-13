@@ -63,7 +63,8 @@ class AthleteContextServiceTests(unittest.TestCase):
             CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE TABLE competitions (
                 id TEXT PRIMARY KEY, name TEXT NOT NULL, event_date TEXT NOT NULL,
-                sport TEXT NOT NULL, priority TEXT NOT NULL, distance TEXT NOT NULL,
+                sport TEXT NOT NULL, environment TEXT, sport_detail TEXT,
+                priority TEXT NOT NULL, distance TEXT NOT NULL,
                 target TEXT NOT NULL, course_profile TEXT NOT NULL, notes TEXT NOT NULL,
                 category TEXT NOT NULL, start_date_local TEXT, description TEXT NOT NULL,
                 moving_time INTEGER, intervals_event_id TEXT, external_id TEXT,

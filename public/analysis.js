@@ -1,7 +1,10 @@
 const ANALYSIS_SVG_NS = "http://www.w3.org/2000/svg";
 
 const KIND_LABELS = { bike: "Fahrrad", component: "Komponente", shoes: "Schuhe", other: "Sonstiges" };
-const SPORT_LABELS = { Ride: "Rad", VirtualRide: "Indoor-Rad", Run: "Laufen", Swim: "Schwimmen", Walk: "Gehen" };
+const SPORT_LABELS = { Ride: "Rad", VirtualRide: "Indoor-Rad", Run: "Laufen", Swim: "Schwimmen", Walk: "Gehen", ride: "Rad", run: "Laufen", swim: "Schwimmen", walk: "Gehen", strength: "Kraft", other: "Andere" };
+const equipmentSportLabel = (item) => (item.sport === "ride" && item.environment === "virtual" ? "Indoor-Rad" : SPORT_LABELS[item.sport] || item.sport);
+const isRideEquipment = (item) => ["Ride", "VirtualRide", "ride"].includes(item.sport);
+const isRunEquipment = (item) => ["Run", "run"].includes(item.sport);
 function analysisSvg(tag, attributes = {}, content = "") {
   const node = document.createElementNS(ANALYSIS_SVG_NS, tag);
   Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, String(value)));
@@ -903,10 +906,10 @@ async function renderTrainingRecords() { // NOSONAR
     const archivedLocalItems = localItems.filter(isArchivedEquipment);
     const activeGarminItems = items.filter((item) => item.status !== "archived");
     const archivedGarminItems = items.filter((item) => item.status === "archived");
-    const bikeItems = activeLocalItems.filter((item) => ["Ride", "VirtualRide"].includes(item.sport) || item.kind === "bike" || item.kind === "component");
-    const runItems = activeLocalItems.filter((item) => item.sport === "Run" || item.kind === "shoes");
-    const archivedBikeItems = archivedLocalItems.filter((item) => ["Ride", "VirtualRide"].includes(item.sport) || item.kind === "bike" || item.kind === "component");
-    const archivedRunItems = archivedLocalItems.filter((item) => item.sport === "Run" || item.kind === "shoes");
+    const bikeItems = activeLocalItems.filter((item) => isRideEquipment(item) || item.kind === "bike" || item.kind === "component");
+    const runItems = activeLocalItems.filter((item) => isRunEquipment(item) || item.kind === "shoes");
+    const archivedBikeItems = archivedLocalItems.filter((item) => isRideEquipment(item) || item.kind === "bike" || item.kind === "component");
+    const archivedRunItems = archivedLocalItems.filter((item) => isRunEquipment(item) || item.kind === "shoes");
     const uncategorizedItems = activeLocalItems.filter((item) => !bikeItems.includes(item) && !runItems.includes(item));
     const archivedUncategorizedItems = archivedLocalItems.filter((item) => !archivedBikeItems.includes(item) && !archivedRunItems.includes(item));
     const groups = {
@@ -1142,7 +1145,7 @@ function localEquipmentCard(item) {
   const card = reportNode("section", null, "garmin-equipment-card");
   const usage = item.usage || {};
   card.append(reportNode("h4", item.name));
-  card.append(reportNode("p", [KIND_LABELS[item.kind] || item.kind, item.sport_pending ? "Sportart offen" : (SPORT_LABELS[item.sport] || item.sport), item.parent_pending ? "Fahrrad offen" : "", item.status === "archived" ? "ausgemustert" : "aktiv"].filter(Boolean).join(" \u00b7 ")));
+  card.append(reportNode("p", [KIND_LABELS[item.kind] || item.kind, item.sport_pending ? "Sportart offen" : equipmentSportLabel(item), item.parent_pending ? "Fahrrad offen" : "", item.status === "archived" ? "ausgemustert" : "aktiv"].filter(Boolean).join(" \u00b7 ")));
   card.append(reportNode("p", `${analysisValue(usage.distance_km, "km")} \u00b7 ${analysisValue(usage.hours, "h")} \u00b7 ${analysisCountLabel(usage.assigned_sessions, "zugeordnete Einheit", "zugeordnete Einheiten")}`));
   const garminStatus = String(item.garmin_status || "").trim();
   if (garminStatus && normalizeEquipmentStatus(garminStatus) !== item.status) {

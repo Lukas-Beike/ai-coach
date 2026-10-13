@@ -14,7 +14,7 @@ from backend.errors import (
     INVALID_PLANNING_DATE_ERROR,
     AppError,
 )
-from backend.providers.intervals_workouts import INTERVALS_DEFAULT_WORKOUT_TYPE
+from backend.planning.sport import planned_stored_sport
 
 SELECT_LIBRARY_PAYLOAD_SQL = "SELECT payload FROM workout_library WHERE local_id = ?"
 
@@ -139,9 +139,7 @@ class WorkoutLibraryPlanService:
             local_entry = self._planned_unit_service.create(
                 {
                     "date": request["date"],
-                    "sport": source.get("type")
-                    or source.get("sport")
-                    or INTERVALS_DEFAULT_WORKOUT_TYPE,
+                    **planned_stored_sport(source).fields(),
                     "name": source.get("name") or "Bibliotheks-Einheit",
                     "description": source.get("description") or "",
                     "duration_minutes": source.get("duration_minutes")
