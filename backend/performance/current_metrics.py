@@ -7,6 +7,7 @@ from backend.activities.identity import activity_kind
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import ProviderId
 from backend.performance.canonical_current import CanonicalCurrentInputs
+from backend.providers import intervals_performance_fields as intervals_perf_fields
 from backend.providers.source_labels import (
     SourceView,
     observation_source_label,
@@ -465,7 +466,9 @@ def _performance_threshold_metrics(
             metric(
                 _first_present(ride, ("ftp", "indoor_ftp"))
                 or _first_present(wellness_ride, ("ftp", "indoor_ftp"))
-                or _first_present(athlete, ("icu_ftp",)),
+                or _first_present(
+                    athlete, intervals_perf_fields.CONFIGURED_FTP_ALIASES
+                ),
                 "W",
                 PROVIDER_INTERVALS_NAME,
                 provider=ProviderId.INTERVALS,
@@ -598,7 +601,7 @@ def current_performance_metrics(
     )
     latest_ride_activity = _latest_ride_activity(activities)
     latest_ride_eftp = _first_present(
-        latest_ride_activity, ("icu_eftp", "eftp", "eFTP")
+        latest_ride_activity, intervals_perf_fields.ESTIMATED_FTP_ALIASES
     )
     current_ride_eftp = _intervals_eftp_value(ride) or _intervals_eftp_value(
         wellness_ride

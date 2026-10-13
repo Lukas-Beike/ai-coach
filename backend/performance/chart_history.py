@@ -10,6 +10,7 @@ from backend.performance.canonical_body import CanonicalBodyInputs
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.display_sources import preferred_providers
 from backend.performance.garmin_load import acute_load_value
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 INTERVALS_SOURCE = "Intervals.icu"
 
@@ -42,7 +43,7 @@ def _rows(value: Any) -> list[dict[str, Any]]:
 
 
 def _garmin_day(row: dict[str, Any]) -> date | None:
-    for field in ("calendarDate", "summaryDate", "date"):
+    for field in garmin_perf_fields.RECORD_DATE_KEYS:
         if (day := _day(row.get(field))) is not None:
             return day
     return None

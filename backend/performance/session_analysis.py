@@ -6,6 +6,8 @@ import math
 import re
 from typing import Any
 
+from backend.providers import intervals_performance_fields as intervals_perf_fields
+
 METHOD = "time-weighted-session-analysis-v1"
 
 
@@ -206,7 +208,7 @@ def _numeric_target(
     if step.get("kind") == "power":
         sensor, unit = "watts", "W"
         if "%" in text:
-            ftp = _number(basis.get("icu_ftp"))
+            ftp = _number(basis.get(intervals_perf_fields.CONFIGURED_FTP))
             if ftp is None or ftp <= 0:
                 return None
             values = [value * ftp / 100 for value in values]

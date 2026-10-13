@@ -13,6 +13,7 @@ from backend.performance import garmin_observations, garmin_weight
 from backend.performance.current_metrics import as_number as _as_number
 from backend.performance.current_metrics import metric as _metric
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.garmin_fields import first_present as _first_present
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -201,7 +202,7 @@ def garmin_profile_max_hr(snapshot: dict[str, Any]) -> dict[str, float | int]:
     values: dict[str, list[float | int]] = {"cycling": [], "running": [], "generic": []}
     for item in _garmin_mapping_nodes(snapshot.get("heart_rate_zones")):
         max_hr = _as_number(
-            _first_present(item, ("maxHeartRateUsed", "maxHeartRate", "maxHR"))
+            _first_present(item, garmin_perf_fields.MAX_HEART_RATE_ALIASES)
         )
         if max_hr is not None and 80 <= float(max_hr) <= 260:
             values[

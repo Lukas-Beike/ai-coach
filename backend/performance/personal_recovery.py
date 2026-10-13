@@ -19,6 +19,7 @@ from backend.performance.recovery import (
     dated_garmin_recovery_records,
     garmin_recovery_metric,
 )
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.source_labels import SourceView, provider_label
 
 
@@ -202,9 +203,9 @@ def _add_garmin_records(
     garmin: dict, history_start: str, current_day: str, add: Any
 ) -> None:
     specifications = (
-        ("sleep", "sleep", "sleepTimeSeconds", 3600),
-        ("resting_hr", "resting_hr", "restingHeartRate", 1),
-        ("hrv", "hrv", "lastNightAvg", 1),
+        ("sleep", "sleep", garmin_perf_fields.SLEEP_SECONDS, 3600),
+        ("resting_hr", "resting_hr", garmin_perf_fields.RESTING_HEART_RATE, 1),
+        ("hrv", "hrv", garmin_perf_fields.HRV_NIGHT_AVERAGE, 1),
     )
     for section, metric, field, scale in specifications:
         for day, record in sorted(

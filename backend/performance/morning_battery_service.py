@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Protocol
 
+from backend.canonical.vocabulary import ProviderId
 from backend.performance import garmin_projection, morning_battery
 from backend.providers.garmin_morning import merge_garmin_records
 from backend.weather import history as weather_history
@@ -237,7 +238,7 @@ class MorningBatteryEvents:
         self._publish_event(
             "provider",
             {
-                "provider": "garmin",
+                "provider": ProviderId.GARMIN,
                 "area": "performance",
                 "status": "ready" if record["status"] == "ready" else "degraded",
             },

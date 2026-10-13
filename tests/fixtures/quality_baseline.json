@@ -49,7 +49,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/training_report.py",
-      "line": 52,
+      "line": 54,
       "column": 46,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -65,7 +65,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/personal_recovery.py",
-      "line": 250,
+      "line": 251,
       "column": 16,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -153,7 +153,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery_service.py",
-      "line": 218,
+      "line": 219,
       "column": 31,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -233,7 +233,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery_service.py",
-      "line": 217,
+      "line": 218,
       "column": 39,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -601,7 +601,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/garmin_observations.py",
-      "line": 33,
+      "line": 25,
       "column": 61,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -1201,7 +1201,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 280,
+      "line": 281,
       "column": 25,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -1217,7 +1217,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 279,
+      "line": 280,
       "column": 26,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -1721,7 +1721,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/activity_validation.py",
-      "line": 177,
+      "line": 187,
       "column": 51,
       "code": "arg-type",
       "message_sha256": "9f15d58ebcfeea6d361abc404047086f7c68383c4d8b4778eecf645cb9c98ca4"
@@ -3217,7 +3217,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 283,
+      "line": 284,
       "column": 11,
       "code": "return-value",
       "message_sha256": "d2d361e1e19a2a5feedd3f4f61895c083eb513533d6fff273ee9cb1e7758c57b"
@@ -3417,7 +3417,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 155,
+      "line": 156,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
@@ -3425,7 +3425,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 178,
+      "line": 179,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"

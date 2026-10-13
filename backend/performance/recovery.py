@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 UTC_OFFSET_SUFFIX = "+00:00"
 AVERAGE_DAYS = 7
@@ -72,9 +73,7 @@ def dated_garmin_recovery_records(value: Any) -> list[tuple[str, dict[str, Any]]
         visited += 1
         if isinstance(current, dict):
             record_date = _planning_context_date(
-                _first_present(
-                    current, ("calendarDate", "summaryDate", "date", "timestamp", "id")
-                )
+                _first_present(current, garmin_perf_fields.RECORD_IDENTITY_KEYS)
             )
             if record_date:
                 records.append((record_date, current))

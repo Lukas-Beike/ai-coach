@@ -8,17 +8,9 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 
-_OBSERVATION_DATE_FIELDS = (
-    "calendarDate",
-    "summaryDate",
-    "date",
-    "measurementDate",
-    "timestampGMT",
-    "timestamp",
-    "startTimeLocal",
-    "startTimeGMT",
-)
+_OBSERVATION_DATE_FIELDS = garmin_perf_fields.OBSERVATION_DATE_FIELDS
 
 
 def _garmin_record_date(value: Any) -> str | None:
