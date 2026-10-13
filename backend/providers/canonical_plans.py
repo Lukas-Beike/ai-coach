@@ -53,7 +53,10 @@ from backend.providers.snapshot_projection import (
 from backend.providers.wahoo_activity_mapping import (
     MAPPER_VERSION as WAHOO_ACTIVITY_VERSION,
 )
-from backend.providers.wahoo_activity_mapping import map_wahoo_activities
+from backend.providers.wahoo_activity_mapping import (
+    map_wahoo_activities,
+    raw_workout_for_storage,
+)
 
 ACTIVITY_RECORD_KIND: Final = "activity"
 WELLNESS_RECORD_KIND: Final = "wellness"
@@ -315,6 +318,7 @@ def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         mapper_version=WAHOO_ACTIVITY_VERSION,
         zone=zone,
         retrieved_at=retrieved_at,
+        stored=raw_workout_for_storage,
     )
     return IngestPlan(
         provider=ProviderId.WAHOO,
@@ -535,12 +539,14 @@ def _activity_batch(
     mapper_version: int,
     zone: tzinfo,
     retrieved_at: datetime | None = None,
+    stored: Callable[[Any], Any] | None = None,
 ) -> tuple[list[ActivityItem], list[RawRecord], int, set[str]]:
     """Map activity rows one by one so each invalid row is counted on its own.
 
     Every row with a usable identifier is reported as present, even when it does
     not map, so a full-window deletion never removes a record that the provider
-    still returned.
+    still returned. ``stored`` turns a row into the payload kept in the raw record;
+    the mapping itself always reads the unchanged row.
     """
     if not isinstance(rows, list):
         return [], [], 0, set()
@@ -563,7 +569,7 @@ def _activity_batch(
             RawRecord(
                 ACTIVITY_RECORD_KIND,
                 source_id,
-                row,
+                row if stored is None else stored(row),
                 mapper_version,
                 retrieved_at=retrieved_at,
             )

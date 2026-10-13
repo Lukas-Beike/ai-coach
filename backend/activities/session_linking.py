@@ -121,6 +121,11 @@ def _record(row: dict[str, Any]) -> ActivityRecord:
         avg_hr=row["avg_hr"],
         avg_power=row["avg_power"],
         name=row["name"],
+        moving_duration_s=row["moving_duration_s"],
+        elevation_gain_m=row["elevation_gain_m"],
+        normalized_power=row["normalized_power"],
+        avg_cadence=row["avg_cadence"],
+        energy_kj=row["energy_kj"],
     )
 
 
