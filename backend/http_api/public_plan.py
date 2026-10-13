@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.calendar import canonical as calendar_canonical
+from backend.canonical.public_metrics import neutral_calendar_entries
 from backend.db.manager import DatabaseManager
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
@@ -116,6 +117,10 @@ class PublicPlanStateService:
             provider_window=calendar_window,
             default_name=self._default_workout_name,
         )
+        if "training_calendar" in calendar_projection:
+            calendar_projection["training_calendar"] = neutral_calendar_entries(
+                calendar_projection["training_calendar"]
+            )
         return {
             "plans": self._training_plans.list(limit=30),
             **calendar_projection,

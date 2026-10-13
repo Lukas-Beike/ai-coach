@@ -733,6 +733,7 @@ class ServerHttpTests(ServerTestCase):
                 "intervals",
                 "provider_freshness",
                 "provider_states",
+                "provider_ids",
                 "provider_labels",
                 "garmin_sync",
                 "provider_resync",
@@ -784,6 +785,10 @@ class ServerHttpTests(ServerTestCase):
         )
         self.assertEqual(bootstrap["provider_labels"]["intervals"], "Intervals.icu")
         self.assertEqual(bootstrap["provider_labels"]["garmin"], "Garmin")
+        self.assertEqual(
+            bootstrap["provider_ids"],
+            {"intervals": "intervals", "garmin": "garmin", "wahoo": "wahoo"},
+        )
 
     def test_state_events_report_missed_retention_and_redact_content(self):
         runtime_events.STATE_EVENT_BUFFER.clear()

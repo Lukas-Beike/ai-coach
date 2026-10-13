@@ -1065,7 +1065,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/bootstrap_calendar.py",
-      "line": 85,
+      "line": 86,
       "column": 16,
       "code": "arg-type",
       "message_sha256": "1f0507db8f39955b7380d5ccd6ca09cdc2a0398a644e3e54cd387a5169d01c1a"

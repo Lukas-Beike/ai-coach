@@ -750,7 +750,7 @@ function garminConnectionLabel(garmin, running) {
 function renderConnectionsSummary(openaiHealthy, intervalsHealthy, garminConfigured, weatherConfigured, wahoo) {
   const connections = $("#connectionsSummary");
   if (!connections) return;
-  const values = [["OpenAI", openaiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garminConfigured], [wahoo.label, wahoo.connected], ["Open-Meteo", weatherConfigured]];
+  const values = [["OpenAI", openaiHealthy], [providerShortLabel(providerIds().intervals), intervalsHealthy], [providerShortLabel(providerIds().garmin), garminConfigured], [wahoo.label, wahoo.connected], ["Open-Meteo", weatherConfigured]];
   connections.textContent = values.map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
 }
 

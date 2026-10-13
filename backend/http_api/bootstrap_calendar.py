@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.athlete.checkins import CheckinService
 from backend.calendar.external import ExternalCalendarReader
+from backend.canonical.public_metrics import neutral_calendar_entries
 from backend.planning import calendar_read_model
 from backend.planning.competition_service import CompetitionService
 from backend.planning.daily_context_service import DailyPlanningContextService
@@ -90,6 +91,10 @@ class PublicStateCalendarProjection:
             provider_window=calendar_window,
             default_name=self._default_workout_name,
         )
+        if "training_calendar" in calendar_projection:
+            calendar_projection["training_calendar"] = neutral_calendar_entries(
+                calendar_projection["training_calendar"]
+            )
         return PublicStateCalendarData(
             checkins,
             competitions,

@@ -8,6 +8,7 @@ from datetime import date
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
+from backend.canonical.public_metrics import neutral_activity_metrics
 from backend.http_api.auth import SessionAuthService
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.sync.queue import SyncJobQueueService
@@ -56,6 +57,8 @@ class SyncGetRoutes:
             )
             # Performance validation belongs to the Coach's complete context.
             payload.pop("activity_validation", None)
+            if isinstance(payload.get("activity"), dict):
+                payload["activity"] = neutral_activity_metrics(payload["activity"])
         elif job_match:
             payload = self._sync_job_queue_service().state(job_match.group(1))
         elif path == "/api/sync/status":

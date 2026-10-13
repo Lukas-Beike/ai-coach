@@ -111,7 +111,7 @@ function changedSyncAreas(nextVersions) {
   const areaMap = {
     activities: ["plan", "performance"],
     performance: ["performance", "plan"],
-    garmin: ["performance", "plan"],
+    [providerIds().garmin]: ["performance", "plan"],
     chat: ["chat"],
     library: ["library", "plan"],
     checkins: ["feedback", "plan"],
@@ -270,18 +270,21 @@ const PROVIDER_FRESHNESS_ERRORS = {
 };
 
 
-const PROVIDER_LABELS = {
-  intervals: "Intervals.icu",
-  garmin: "Garmin",
-  wahoo: "Wahoo",
-  calendar: "Gemeinsamer Kalender",
-  weather: "Open-Meteo",
-};
+// Provider ids and labels come from the bootstrap JSON, never from literals here.
+function providerIds() {
+  return state.data?.provider_ids || {};
+}
 
 
 function coachProviderLabel(provider) {
   const key = String(provider || "").trim().toLowerCase();
-  return state.data?.provider_labels?.[key] || PROVIDER_LABELS[key] || "Provider";
+  return state.data?.provider_labels?.[key] || "Provider";
+}
+
+
+// Short name of a provider as shown in compact summaries: "Intervals.icu" -> "Intervals".
+function providerShortLabel(provider) {
+  return coachProviderLabel(provider).split(".")[0];
 }
 
 
@@ -359,23 +362,23 @@ function renderConnectionsSyncProgress(data) {
       sync.message || sync.status || "Intervals.icu-Synchronisierung wird gestartet…",
       progressPercentage(sync.progress),
     ));
-    activeProviders.add("intervals");
+    activeProviders.add(providerIds().intervals);
   }
   const garminSync = data.garmin_sync || {};
   const garminRunning = Boolean(garminSync.running || state.localSync.garmin);
   if (garminRunning) {
     const message = garminSync.status || "Garmin-Synchronisierung wird gestartet…";
-    entries.push(connectionProgressEntry("Garmin", message, garminWindowProgress(message)));
-    activeProviders.add("garmin");
+    entries.push(connectionProgressEntry(coachProviderLabel(providerIds().garmin), message, garminWindowProgress(message)));
+    activeProviders.add(providerIds().garmin);
   }
   const resyncs = data.provider_resync || {};
   [
-    ["intervals", "Intervals.icu", state.localSync.intervalsFull],
-    ["garmin", "Garmin", state.localSync.garminFull],
-  ].forEach(([provider, label, localRunning]) => {
+    [providerIds().intervals, state.localSync.intervalsFull],
+    [providerIds().garmin, state.localSync.garminFull],
+  ].forEach(([provider, localRunning]) => {
     const resync = resyncs[provider] || {};
     if (!resync.running && !localRunning) return;
-    entries.push(connectionProgressEntry(label, resync.status || "Lokale Daten werden vollständig neu geladen…"));
+    entries.push(connectionProgressEntry(coachProviderLabel(provider), resync.status || "Lokale Daten werden vollständig neu geladen…"));
     activeProviders.add(provider);
   });
   if (data.external_calendar?.running || state.localSync.externalCalendar) {
@@ -483,8 +486,8 @@ function renderProviderFreshness(data) {
 async function retryProvider(provider, button) {
   if (button) button.disabled = true;
   try {
-    if (provider === "intervals") await syncNow({ currentTarget: $("#systemIntervalsSyncButton") });
-    else if (provider === "garmin") await syncGarmin();
+    if (provider === providerIds().intervals) await syncNow({ currentTarget: $("#systemIntervalsSyncButton") });
+    else if (provider === providerIds().garmin) await syncGarmin();
     else if (provider === "weather") await syncWeather();
     else if (provider === "calendar") await syncExternalCalendar();
   } finally {

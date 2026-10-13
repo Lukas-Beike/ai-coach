@@ -68,7 +68,7 @@ function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGenerati
   payload.state_versions = { ...state.data?.state_versions };
   for (const area of appliedAreas) {
     if (area === "chat" && chatGeneration !== state.chatGeneration) continue;
-    const versionKeys = { feedback: ["checkins", "activity_feedback"], performance: ["performance", "garmin", "activities"] }[area] || [area];
+    const versionKeys = { feedback: ["checkins", "activity_feedback"], performance: ["performance", providerIds().garmin, "activities"].filter(Boolean) }[area] || [area];
     for (const key of versionKeys) {
       if (bootstrap.state_versions?.[key] !== undefined) payload.state_versions[key] = bootstrap.state_versions[key];
     }
@@ -88,7 +88,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     if (sessionGeneration !== state.sessionGeneration) return;
     const existing = state.data || {};
     const payload = { ...existing, ...bootstrap };
-    ["messages", "messages_next_cursor", "library", "library_next_cursor", "plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", "garmin", "checkins", "local_feedback", "activity_feedback"].forEach((key) => {
+    ["messages", "messages_next_cursor", "library", "library_next_cursor", "plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", providerIds().garmin, "checkins", "local_feedback", "activity_feedback"].filter(Boolean).forEach((key) => {
       if (existing[key] !== undefined) payload[key] = existing[key];
     });
     const areas = new Set(requestedAreas || ["chat", "plan", "library", "performance", "feedback", "profile"]);
