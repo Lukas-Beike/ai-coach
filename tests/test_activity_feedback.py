@@ -111,6 +111,18 @@ class ActivityFeedbackNormalizationTests(unittest.TestCase):
         self.assertEqual(value, original)
 
 
+class ParameterRecordingConnection:
+    """Delegate to a connection while recording each statement's parameter count."""
+
+    def __init__(self, db):
+        self._db = db
+        self.parameter_counts: list[int] = []
+
+    def execute(self, sql, parameters=()):
+        self.parameter_counts.append(len(parameters))
+        return self._db.execute(sql, parameters)
+
+
 class ActivityFeedbackServiceTests(unittest.TestCase):
     def test_rpe_only_preserves_notes_and_explicit_clear_deletes(self):
         self.service.save(
@@ -168,6 +180,15 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
     def save_snapshot(self, payload: dict) -> None:
         with self.manager.unit_of_work() as db:
             self.snapshot_repository.save(db, payload, "2026-09-20T12:00:00+00:00")
+
+    def insert_feedback_rows(self, rows: list[tuple[str, str]]) -> None:
+        with self.manager.unit_of_work() as db:
+            for activity_id, updated_at in rows:
+                db.execute(
+                    "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at, provider) "
+                    "VALUES (?, '', '2026-09-20', 'note', NULL, '', ?, ?, NULL)",
+                    (activity_id, updated_at, updated_at),
+                )
 
     def test_list_limit_is_clamped(self) -> None:
         for activity_id in ("one", "two", "three"):
@@ -254,6 +275,54 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["activity_feedback"]["notes"], "note")
         self.assertEqual(self.service.attach_to_activities("not a list"), [])
+
+    def test_attach_finds_feedback_older_than_the_newest_500_rows(self) -> None:
+        rows = [("oldest", "2026-09-20T00:00:00+00:00")] + [
+            (
+                f"newer-{index}",
+                f"2026-09-21T00:{index // 60:02d}:{index % 60:02d}+00:00",
+            )
+            for index in range(600)
+        ]
+        self.insert_feedback_rows(rows)
+        self.assertNotIn(
+            "oldest", [item["activity_id"] for item in self.service.list(500)]
+        )
+
+        result = self.service.attach_to_activities(
+            [{"id": "oldest"}, {"id": "newer-0"}, {"id": "missing"}, {"id": ""}]
+        )
+
+        self.assertEqual(result[0]["activity_feedback"]["activity_id"], "oldest")
+        self.assertEqual(result[1]["activity_feedback"]["activity_id"], "newer-0")
+        self.assertNotIn("activity_feedback", result[2])
+        self.assertNotIn("activity_feedback", result[3])
+
+    def test_for_activity_ids_queries_in_bounded_chunks(self) -> None:
+        self.insert_feedback_rows(
+            [
+                (f"activity-{index}", "2026-09-20T00:00:00+00:00")
+                for index in range(1200)
+            ]
+        )
+        requested = [f"activity-{index}" for index in range(1200)] + [
+            "missing",
+            "activity-0",
+            "",
+        ]
+
+        with self.manager.unit_of_work() as db:
+            recorder = ParameterRecordingConnection(db)
+            rows = self.feedback_repository.for_activity_ids(recorder, requested)
+            empty = self.feedback_repository.for_activity_ids(recorder, [""])
+            no_ids = self.feedback_repository.for_activity_ids(recorder, [])
+
+        self.assertEqual(len(rows), 1200)
+        self.assertEqual(
+            {row["activity_id"] for row in rows}, set(requested) - {"", "missing"}
+        )
+        self.assertEqual(recorder.parameter_counts, [500, 500, 201])
+        self.assertEqual((empty, no_ids), ([], []))
 
     def test_failed_read_after_upsert_keeps_committed_row(self) -> None:
         class FailingListRepository(ActivityFeedbackRepository):

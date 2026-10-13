@@ -305,6 +305,33 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(len(bounded), 1)
         self.assertEqual(len(bounded_with_archived), 2)
 
+    def test_limited_list_keeps_newest_rows_while_future_list_keeps_earliest(self):
+        rows = (
+            ("2026-09-18", "Past 1"),
+            ("2026-09-19", "Past 2"),
+            ("2026-09-21", "Future 1"),
+            ("2026-09-24", "Future 2"),
+            ("2026-09-28", "Future 3"),
+            ("2026-10-02", "Future 4"),
+        )
+        for index, (day, name) in enumerate(rows):
+            self.id = uuid.UUID(f"{index + 1}2345678-1234-5678-1234-567812345678")
+            self.service.create(self.workout(date=day, name=name))
+        self.id = uuid.UUID("72345678-1234-5678-1234-567812345678")
+        self.service.create(
+            self.workout(date="2026-10-05", name="Archived", archived=True)
+        )
+
+        newest = self.service.list(3)
+        upcoming = self.service.list(3, future_only=True)
+
+        self.assertEqual(
+            [item["name"] for item in newest], ["Future 2", "Future 3", "Future 4"]
+        )
+        self.assertEqual(
+            [item["name"] for item in upcoming], ["Future 1", "Future 2", "Future 3"]
+        )
+
     def test_list_for_coach_returns_canonical_future_local_units_with_limit(self):
         self.service.create(self.workout(date="2026-09-19", name="Past"))
         self.id = uuid.UUID("22345678-1234-5678-1234-567812345678")

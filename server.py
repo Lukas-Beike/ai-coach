@@ -856,7 +856,6 @@ def initialise_database() -> None:
             default_profile_json=json.dumps(DEFAULT_PROFILE),
             provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
             retention_days=int(getattr(CONFIG, "data_retention_days", -1)),
-            all_sync_days=ALL_SYNC_DAYS,
         )
 
 

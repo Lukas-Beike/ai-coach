@@ -28,5 +28,8 @@ class StateEventsGetRoutes:
             send_headers=handler.send_sse_headers,
             send_event=handler.send_sse_event,
             set_connection_timeout=handler.connection.settimeout,
+            session_is_active=lambda: (
+                self._session_auth_service().authenticated_session(handler) is not None
+            ),
         )
         return True

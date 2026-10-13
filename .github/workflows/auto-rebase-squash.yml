@@ -55,10 +55,19 @@ jobs:
             exit 0
           fi
 
+          failed=0
           for pull_request in "${pull_requests[@]}"; do
             IFS=$'\t' read -r pull_request_number head_ref <<< "$pull_request"
             echo "Rebasing PR #$pull_request_number ($head_ref) onto develop."
-            gh pr update-branch "$pull_request_number" \
+            if ! gh pr update-branch "$pull_request_number" \
               --repo "$REPOSITORY" \
-              --rebase
+              --rebase; then
+              echo "::warning::Could not rebase PR #$pull_request_number ($head_ref)."
+              failed=$((failed + 1))
+            fi
           done
+
+          if ((failed > 0)); then
+            echo "Could not rebase $failed pull request(s); see the warnings above."
+            exit 1
+          fi

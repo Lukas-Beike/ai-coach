@@ -319,11 +319,16 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
             {
                 "id": "2026-09-24",
                 "kcalConsumed": 2200,
-                "carbs": 250.0,
+                "carbohydrates": 250.0,
                 "protein": 130.0,
-                "fat": 65.0,
+                "fatTotal": 65.0,
             },
         )
+        sent_payload = mock_api.put.call_args.args[1]
+        self.assertNotIn("carbs", sent_payload)
+        self.assertNotIn("fat", sent_payload)
+        self.assertEqual(result["synced_summary"]["carbs"], 250.0)
+        self.assertEqual(result["synced_summary"]["fat"], 65.0)
         mock_nutrition.mark_date_synced.assert_called_once_with("2026-09-24", 4)
 
     def test_sync_keeps_date_pending_when_meal_changes_during_remote_write(
@@ -353,9 +358,9 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
             {
                 "id": "2026-09-24",
                 "kcalConsumed": 500,
-                "carbs": 0,
+                "carbohydrates": 0,
                 "protein": 0,
-                "fat": 0,
+                "fatTotal": 0,
             },
         )
         nutrition.mark_date_synced.assert_called_once_with("2026-09-24", 7)
@@ -383,7 +388,7 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
         self.assertTrue(result["pending"])
         self.assertEqual(
             api.put.call_args.args[1],
-            {"id": "2026-09-24", "kcalConsumed": 500, "protein": 20, "fat": 10},
+            {"id": "2026-09-24", "kcalConsumed": 500, "protein": 20, "fatTotal": 10},
         )
         nutrition.mark_date_synced.assert_not_called()
 

@@ -130,7 +130,6 @@ class DatabaseBootstrapTests(unittest.TestCase):
                 {"running": "garmin_resync_running", "status": "garmin_resync_status"},
             ),
             retention_days=retention_days,
-            all_sync_days=-1,
         )
 
     def test_empty_database_gets_schema_defaults_and_transient_markers(self):
@@ -420,6 +419,68 @@ class DatabaseBootstrapTests(unittest.TestCase):
 
         self.assertEqual(db.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 1)
         self.assertEqual(db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0], 1)
+
+    def test_non_positive_retention_values_keep_old_messages_and_snapshots(self):
+        for retention_days in (0, -5):
+            with self.subTest(retention_days=retention_days):
+                db = self.make_connection()
+                self.addCleanup(db.close)
+                self.bootstrap(db)
+                old = (self.current_time - timedelta(days=4000)).isoformat()
+                db.execute(
+                    "INSERT INTO messages(role, content, created_at) VALUES ('user', 'old', ?)",
+                    (old,),
+                )
+                db.execute(
+                    "INSERT INTO snapshots(payload, created_at) VALUES ('old', ?)",
+                    (old,),
+                )
+
+                self.bootstrap(db, retention_days=retention_days)
+
+                self.assertEqual(
+                    db.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 1
+                )
+                self.assertEqual(
+                    db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0], 1
+                )
+
+    def test_positive_retention_purges_rows_older_than_clamped_window(self):
+        db = self.make_connection()
+        self.addCleanup(db.close)
+        self.bootstrap(db)
+        old = (self.current_time - timedelta(days=31)).isoformat()
+        recent = (self.current_time - timedelta(days=29)).isoformat()
+        db.executemany(
+            "INSERT INTO messages(role, content, created_at) VALUES ('user', ?, ?)",
+            [("old", old), ("recent", recent)],
+        )
+        db.executemany(
+            "INSERT INTO snapshots(payload, created_at) VALUES (?, ?)",
+            [("old", old), ("recent", recent)],
+        )
+
+        with self.assertLogs("intervals_coach", level="INFO") as logs:
+            self.bootstrap(db, retention_days=10)
+
+        self.assertEqual(
+            [row["content"] for row in db.execute("SELECT content FROM messages")],
+            ["recent"],
+        )
+        self.assertEqual(
+            [row["payload"] for row in db.execute("SELECT payload FROM snapshots")],
+            ["recent"],
+        )
+        (record,) = logs.records
+        self.assertEqual(record.event, "data_retention_purged")
+        self.assertEqual(
+            record.context,
+            {
+                "retention_days": 30,
+                "messages_deleted": 1,
+                "snapshots_deleted": 1,
+            },
+        )
 
     def test_import_has_no_database_side_effects(self):
         with tempfile.TemporaryDirectory() as root:

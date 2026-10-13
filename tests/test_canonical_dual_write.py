@@ -273,8 +273,7 @@ class IntervalsDualWriteTests(DualWriteFixture):
                 current_time=datetime(2026, 9, 20, 8, tzinfo=UTC),
                 default_profile_json="{}",
                 provider_resync_keys=(),
-                retention_days=3,
-                all_sync_days=3,
+                retention_days=-1,
             )
         with restarted.reader() as db:
             self.assertEqual(

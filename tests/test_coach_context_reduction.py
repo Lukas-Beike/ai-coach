@@ -240,3 +240,54 @@ class CoachContextReductionTests(unittest.TestCase):
             parsed["target_competitions"], structured["target_competitions"]
         )
         library.list.assert_not_called()
+
+    def test_total_budget_fallback_reports_omitted_sections_in_projection(self):
+        structured = {
+            "durable_profile": {"constraints": "synthetic constraint"},
+            "recovery": {"history": "synthetic " * 1000},
+            "weather": {"history": "synthetic weather " * 100},
+            "source_policy": {"intervals": "synthetic policy"},
+        }
+        repository, structured_service, library = Mock(), Mock(), Mock()
+        repository.latest_snapshot.return_value = {}
+        structured_service.build.return_value = structured
+        library.list.return_value = []
+        total_limit = 18_000
+        service = CoachTrainingContextService(
+            repository,
+            structured_service,
+            library,
+            local_planned_limit=50,
+            library_limit=12,
+            library_description_limit=1500,
+            section_limits={},
+            total_char_limit=total_limit,
+            activity_limit_per_sport=5,
+            planned_event_limit=50,
+        )
+        with self.assertLogs("intervals_coach", level="WARNING") as captured:
+            result = service.build()
+        self.assertLessEqual(len(result), total_limit)
+        marker = "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"
+        start = result.index(marker) + len(marker)
+        parsed = json.loads(
+            result[start : result.index("\nLOCAL TRAINING LIBRARY", start)]
+        )
+        self.assertEqual(next(iter(parsed)), "projection")
+        projection = parsed["projection"]
+        self.assertTrue(projection["total_budget_applied"])
+        self.assertEqual(
+            projection["total_budget_omitted_sections"],
+            ["local_planned_workouts", "recovery", "source_policy", "weather"],
+        )
+        self.assertIsInstance(projection["total_budget_truncated_sections"], list)
+        for section in projection["total_budget_omitted_sections"]:
+            self.assertNotIn(section, parsed)
+        self.assertEqual(parsed["durable_profile"], structured["durable_profile"])
+        record = captured.records[-1]
+        self.assertEqual(record.event, "coach_context_budget_applied")
+        self.assertEqual(
+            record.omitted_section_count,
+            len(projection["total_budget_omitted_sections"]),
+        )
+        self.assertNotIn("synthetic constraint", str(record.__dict__))

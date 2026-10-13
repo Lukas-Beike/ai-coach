@@ -104,7 +104,7 @@ def _weather_interval_summary(
         "rain_total": sum(rain),
         "temperature_average": sum(value for value in temperatures if value is not None)
         / max(1, len([value for value in temperatures if value is not None])),
-        "gust_maximum": max(gusts) if gusts else 0,
+        "gust_maximum": max((value for value in gusts if value is not None), default=0),
         "wind_speed_average": sum(value for value in wind_speeds if value is not None)
         / max(1, len([value for value in wind_speeds if value is not None])),
         "wind_direction_average": (

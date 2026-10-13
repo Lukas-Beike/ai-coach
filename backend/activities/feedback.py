@@ -87,6 +87,12 @@ class ActivityFeedbackService:
         with self._database_manager.unit_of_work() as db:
             return self._feedback_repository.list(db, bounded_limit)
 
+    def for_activity_ids(
+        self, activity_ids: builtins.list[str]
+    ) -> builtins.list[dict[str, Any]]:
+        with self._database_manager.unit_of_work() as db:
+            return self._feedback_repository.for_activity_ids(db, activity_ids)
+
     def save(self, activity_id: Any, value: Any) -> dict[str, Any]:
         return self._save(self._references.resolve_reference(activity_id), value)
 
@@ -153,9 +159,17 @@ class ActivityFeedbackService:
         }
 
     def attach_to_activities(self, activities: Any) -> builtins.list[dict[str, Any]]:
-        feedback_by_activity = {item["activity_id"]: item for item in self.list(500)}
+        activity_items = activities if isinstance(activities, list) else []
+        activity_ids: builtins.list[str] = []
+        for activity in activity_items:
+            activity_id = _activity_id(activity)
+            if activity_id not in (None, ""):
+                activity_ids.append(str(activity_id))
+        feedback_by_activity = {
+            item["activity_id"]: item for item in self.for_activity_ids(activity_ids)
+        }
         result = []
-        for activity in activities if isinstance(activities, list) else []:
+        for activity in activity_items:
             if not isinstance(activity, dict):
                 continue
             activity_copy = dict(activity)
