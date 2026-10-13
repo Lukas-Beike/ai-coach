@@ -59,14 +59,15 @@ def link_activity_sessions(
         start=(min(touched_dates) - LINK_MARGIN).isoformat(),
         end=(max(touched_dates) + LINK_MARGIN).isoformat(),
     )
-    if not rows:
+    records = _linkable_records(rows)
+    if not records:
         return 0
     session_of = {
         (str(row["provider"]), str(row["provider_activity_id"])): str(row["session_id"])
         for row in rows
     }
     sessions = _Sessions(db, set(session_of.values()))
-    bundles = bundle_sessions((_record(row) for row in rows), zone=zone)
+    bundles = bundle_sessions(records, zone=zone)
     linked = 0
     for bundle in bundles:
         for primary_id, duplicate_id, kind in _pairs(bundle, session_of):
@@ -81,6 +82,21 @@ def _pairs(
     primary_id = session_of[_key(bundle.primary)]
     for duplicate, kind in zip(bundle.duplicates, bundle.link_kinds, strict=True):
         yield primary_id, session_of[_key(duplicate)], kind
+
+
+def _linkable_records(rows: Iterable[dict[str, Any]]) -> list[ActivityRecord]:
+    """Map the stored rows that carry a known vocabulary; skip the others.
+
+    A row from a provider or with a value this build does not know (for example a
+    row written by a newer build) is never linked, and it never fails the ingest.
+    """
+    records = []
+    for row in rows:
+        try:
+            records.append(_record(row))
+        except TypeError, ValueError:
+            continue
+    return records
 
 
 def _record(row: dict[str, Any]) -> ActivityRecord:
