@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
+import backend.errors
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.providers.descriptors import WAHOO_NOT_CONFIGURED_MESSAGE, Capability
@@ -16,7 +17,8 @@ from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 WORKOUT_ID = "11111111-1111-4111-8111-111111111111"
 ENTRY = {"library_workout_id": WORKOUT_ID, "expected_payload_hash": "a" * 64}
-ROOT = Path(__file__).resolve().parents[1]
+# The container image installs backend/ apart from the tests, so resolve it by import.
+BACKEND = Path(backend.errors.__file__).resolve().parent
 
 
 def normalize(provider, payload=None):
@@ -143,18 +145,16 @@ class NoImplicitExportTests(unittest.TestCase):
             re.IGNORECASE,
         )
         offenders = [
-            str(path.relative_to(ROOT))
+            str(path.relative_to(BACKEND))
             for directory in ("coach", "planning")
-            for path in (ROOT / "backend" / directory).rglob("*.py")
+            for path in (BACKEND / directory).rglob("*.py")
             if pattern.search(path.read_text(encoding="utf-8"))
         ]
 
         self.assertEqual([], offenders)
 
     def test_the_authorized_plan_push_command_enqueues_intervals_only(self) -> None:
-        source = (ROOT / "backend" / "sync" / "plan_commands.py").read_text(
-            encoding="utf-8"
-        )
+        source = (BACKEND / "sync" / "plan_commands.py").read_text(encoding="utf-8")
 
         self.assertIn('"intervals"', source)
         self.assertNotIn("wahoo", source.lower())

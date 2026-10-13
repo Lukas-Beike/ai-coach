@@ -133,7 +133,7 @@ class WahooWorkoutExport:
         )
 
     def verify_library_readback(
-        self, workout: dict[str, Any], remote: dict[str, Any]
+        self, _workout: dict[str, Any], remote: dict[str, Any]
     ) -> None:
         if not str(remote.get("id") or "").strip():
             raise AppError(
