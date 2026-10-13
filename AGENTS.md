@@ -137,6 +137,16 @@ Tests use temporary data and mocked services, never real `.env`, `/data`, or
 OpenAI/Intervals.icu/Garmin accounts. For Dockerfile, dependency, startup, or
 deployment changes also run `docker build -t ai-coach:local .`.
 
+Agents may use the existing local CLIProxyAPI for small, synthetic manual
+provider probes when real model output helps the task. Follow the
+[local proxy runbook](README.md#optional-local-cliproxyapi-probes): use only
+confirmed subscription/OAuth upstreams with paid API-key fallbacks disabled,
+keep normal tests mocked, and never send athlete data or read credential files.
+This authorization covers useful bounded probes without repeated confirmation;
+it does not authorize changing proxy routing, buying credits, or changing the
+app's configured provider. Proxy results are limited compatibility evidence,
+not proof that the full Coach or official OpenAI API works.
+
 CI and Docker use Python 3.14; change the toolchain and CI together if needed.
 Direct pins live in `requirements.in`/`requirements-dev.in`; regenerate their
 hash-locked `.txt` outputs using README's dependency-maintenance recipe.
