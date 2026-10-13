@@ -9,7 +9,7 @@ const WAHOO_RETURN_OUTCOMES = Object.freeze({
 // The OAuth callback redirects to /?wahoo=connected|error. Remember the outcome
 // word once and drop it from the address bar so a reload does not repeat it.
 let pendingWahooReturn = (() => {
-  if (typeof globalThis.location === "undefined") return null;
+  if (globalThis.location === undefined) return null;
   const params = new URLSearchParams(globalThis.location.search);
   const outcome = params.get("wahoo");
   if (outcome === null) return null;
@@ -17,7 +17,8 @@ let pendingWahooReturn = (() => {
   const query = params.toString();
   // Land on the connections segment unless the address already names a route.
   const hash = globalThis.location.hash || "#more/connections";
-  globalThis.history.replaceState(globalThis.history.state, "", `${globalThis.location.pathname}${query ? `?${query}` : ""}${hash}`);
+  const search = query ? "?" + query : "";
+  globalThis.history.replaceState(globalThis.history.state, "", globalThis.location.pathname + search + hash);
   return Object.hasOwn(WAHOO_RETURN_OUTCOMES, outcome) ? outcome : null;
 })();
 
