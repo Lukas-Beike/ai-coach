@@ -190,8 +190,8 @@ class FullProviderResyncService:
     """Run a provider's full refresh while retaining its last good local data.
 
     Each provider contributes a ``FullResyncHandler``; providers without one are
-    rejected as unknown. Gates default to the registered ones, with the Garmin
-    gate as the fallback for an unmapped provider.
+    rejected as unknown. Gates default to the registered ones; a provider with a
+    handler but no gate is rejected as unknown too.
     """
 
     def __init__(

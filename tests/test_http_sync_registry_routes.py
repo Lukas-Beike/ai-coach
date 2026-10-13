@@ -60,6 +60,8 @@ PREVIOUS_POST_PATHS = frozenset(
         "/api/external-calendar/sync",
         "/api/weather/sync",
         "/api/garmin/full-resync",
+        "/api/wahoo/sync",
+        "/api/wahoo/full-resync",
     }
 )
 PREVIOUS_BODY_PATHS = frozenset(
@@ -69,6 +71,7 @@ PREVIOUS_BODY_PATHS = frozenset(
         "/api/garmin/sync",
         "/api/intervals/full-resync",
         "/api/garmin/full-resync",
+        "/api/wahoo/full-resync",
     }
 )
 PREVIOUS_NOT_CONFIGURED_MESSAGES = {

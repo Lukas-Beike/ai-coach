@@ -44,6 +44,8 @@ test("@responsive configured Wahoo offers Connect and follows the authorize URL"
   await expect(page.locator("#wahooConnectionStatus")).toHaveText("Nicht verbunden");
   await expect(page.locator("#wahooSetupHint")).toBeHidden();
   await expect(page.locator("#wahooDisconnectButton")).toBeHidden();
+  await expect(page.locator("#wahooSyncButton")).toBeHidden();
+  await expect(page.locator("#wahooFullResyncButton")).toBeHidden();
   await card.scrollIntoViewIfNeeded();
   await card.screenshot({ path: "test-results/wahoo-configured.png" });
   await page.locator("#wahooConnectButton").click();
@@ -83,6 +85,40 @@ test("@responsive connected Wahoo shows its label everywhere and can be disconne
   await expect.poll(() => disconnected).toBe(true);
   await expect(page.locator("#toast")).toContainText("Wahoo getrennt");
   // Let the follow-up state reload settle before the routes are torn down.
+  await page.waitForLoadState("networkidle");
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
+test("@responsive connected Wahoo runs manual and full resync with the CSRF token", async ({ page }) => {
+  const requests = [];
+  await withWahooState(page, { configured: true, connected: true, scope: "workouts_read", connected_at: "2026-01-02T08:00:00+00:00" }, () => ({}));
+  await page.route("**/api/wahoo/sync", (route) => {
+    requests.push({ path: "/api/wahoo/sync", method: route.request().method(), csrf: route.request().headers()["x-csrf-token"] });
+    return route.fulfill({ status: 202, json: { id: "job-wahoo-fixture", status: "queued" } });
+  });
+  await page.route("**/api/sync/jobs/job-wahoo-fixture", (route) => route.fulfill({ json: { id: "job-wahoo-fixture", status: "completed", items: [] } }));
+  await page.route("**/api/wahoo/full-resync", (route) => {
+    requests.push({ path: "/api/wahoo/full-resync", method: route.request().method(), csrf: route.request().headers()["x-csrf-token"] });
+    return route.fulfill({ json: { status: "ok", source: "wahoo" } });
+  });
+  const card = await openConnections(page);
+  await expect(page.locator("#wahooSyncButton")).toBeVisible();
+  await expect(page.locator("#wahooFullResyncButton")).toBeVisible();
+  await expect(page.locator("#wahooFullResyncStatus")).toContainText("90 Tage");
+  await card.scrollIntoViewIfNeeded();
+  await card.screenshot({ path: "test-results/wahoo-sync-controls.png" });
+  await page.locator("#wahooSyncButton").click();
+  await expect(page.locator("#toast")).toContainText("Wahoo synchronisiert");
+  await page.locator("#wahooFullResyncButton").click();
+  await expect(page.locator("#confirmationDialog")).toContainText("nicht gelöscht");
+  await page.locator("#confirmationDialog").locator("#confirmationDialogAccept").click();
+  await expect.poll(() => requests.length).toBe(2);
+  const csrf = (await page.context().cookies()).find((cookie) => cookie.name === "ic_csrf")?.value;
+  expect(csrf).toBeTruthy();
+  expect(requests).toEqual([
+    { path: "/api/wahoo/sync", method: "POST", csrf },
+    { path: "/api/wahoo/full-resync", method: "POST", csrf },
+  ]);
   await page.waitForLoadState("networkidle");
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });

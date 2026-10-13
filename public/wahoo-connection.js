@@ -55,8 +55,45 @@ function wahooConnectionView(data) {
     connectLabel: reconnect ? "Wahoo erneut verbinden" : "Wahoo verbinden",
     canConnect: configured && !connected,
     canDisconnect: connected,
+    // Manual and full sync only make sense for a connected account.
+    canSync: connected,
     showSetupHint: !configured,
   };
+}
+
+// Status line of the full resync; the same precedence as the Garmin and Intervals.icu lines.
+function wahooFullResyncView(fullResync = {}, running = false) {
+  const error = Boolean(fullResync?.last_error);
+  if (running && fullResync?.status) return { text: fullResync.status, error };
+  if (error) return { text: fullResync.last_error, error };
+  if (fullResync?.last_resync_at) return { text: "Letzter vollständiger Resync: " + formatTime(fullResync.last_resync_at), error };
+  return { text: "Lädt die letzten 90 Tage Wahoo-Einheiten neu; lokal gespeicherte Einheiten bleiben erhalten.", error };
+}
+
+function renderWahooSyncControls(data, view) {
+  const actions = $("#wahooSyncActions");
+  if (actions) actions.hidden = !view.canSync;
+  const fullResync = data?.provider_resync?.[providerIds().wahoo] || {};
+  const syncRunning = Boolean(state.localSync?.wahoo);
+  const fullRunning = Boolean(fullResync.running || state.localSync?.wahooFull);
+  const busy = syncRunning || fullRunning;
+  const syncButton = $("#wahooSyncButton");
+  if (syncButton) {
+    syncButton.disabled = busy || !view.canSync;
+    syncButton.textContent = syncRunning ? "Synchronisierung läuft…" : "Jetzt synchronisieren";
+  }
+  const fullButton = $("#wahooFullResyncButton");
+  if (fullButton) {
+    fullButton.disabled = busy || !view.canSync;
+    fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Vollständig neu synchronisieren";
+  }
+  const status = $("#wahooFullResyncStatus");
+  if (status) {
+    const line = wahooFullResyncView(fullResync, fullRunning);
+    status.hidden = !view.canSync;
+    status.classList.toggle("error", line.error);
+    status.textContent = line.text;
+  }
 }
 
 function renderWahooConnection(data) {
@@ -78,6 +115,7 @@ function renderWahooConnection(data) {
   if (actions) actions.hidden = !view.canConnect && !view.canDisconnect;
   const hint = $("#wahooSetupHint");
   if (hint) hint.hidden = !view.showSetupHint;
+  renderWahooSyncControls(data, view);
   showWahooReturnOutcome();
   return view;
 }
@@ -140,4 +178,4 @@ async function disconnectWahoo() {
   }
 }
 
-if (typeof module !== "undefined") module.exports = { wahooConnectionView, safeWahooAuthorizeUrl };
+if (typeof module !== "undefined") module.exports = { wahooConnectionView, wahooFullResyncView, safeWahooAuthorizeUrl };

@@ -375,6 +375,7 @@ function renderConnectionsSyncProgress(data) {
   [
     [providerIds().intervals, state.localSync.intervalsFull],
     [providerIds().garmin, state.localSync.garminFull],
+    [providerIds().wahoo, state.localSync.wahooFull],
   ].forEach(([provider, localRunning]) => {
     const resync = resyncs[provider] || {};
     if (!resync.running && !localRunning) return;

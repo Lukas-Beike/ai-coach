@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Mapping
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any, Final, Protocol
 
@@ -37,6 +37,7 @@ from backend.sync.canonical_coverage_store import (
 )
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import ProviderRegistry
 
@@ -70,13 +71,17 @@ class WahooConnectionStatus(Protocol):
 def sync_window_days(registry: ProviderRegistry, requested: object) -> int:
     """Clamp a requested window to the descriptor's limits.
 
-    A missing or invalid request uses the descriptor's default window.
+    A missing or invalid request uses the descriptor's default window. Any
+    integer of zero or below is the "all" sentinel (``-1``) and means the
+    descriptor maximum, as it does for the other providers.
     """
     maximum = registry.max_sync_days(WAHOO_ID)
     default = registry.sync_period_defaults().get(WAHOO_ID, maximum)
     if isinstance(requested, bool) or not isinstance(requested, int):
         return max(1, min(default, maximum))
-    return max(1, min(requested, maximum))
+    if requested <= 0:
+        return maximum
+    return min(requested, maximum)
 
 
 class WahooSyncService:
@@ -98,6 +103,7 @@ class WahooSyncService:
         now: Callable[[], datetime],
         logger: logging.Logger,
         lock: Any | None = None,
+        gate: ProviderResyncGate | None = None,
     ) -> None:
         self._config = config
         self._connection = connection
@@ -113,6 +119,7 @@ class WahooSyncService:
         self._now = now
         self._logger = logger
         self._lock = lock if lock is not None else WAHOO_SYNC_LOCK
+        self._gate = gate
 
     def running(self) -> bool:
         return self._lock.locked()
@@ -132,7 +139,12 @@ class WahooSyncService:
         with self._observer().observe(
             WAHOO_ID, FRESHNESS_AREA, reason, operation_id
         ) as scope:
-            result = self._sync(days, reason)
+            # A running resync reset rejects the work before any state changes.
+            operation = (
+                self._gate.operation() if self._gate is not None else nullcontext()
+            )
+            with operation:
+                result = self._sync(days, reason)
             scope.result = result
             return result
 

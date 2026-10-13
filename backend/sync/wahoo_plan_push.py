@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import threading
 from collections.abc import Callable
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
 
@@ -24,6 +25,7 @@ from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.providers.descriptors import WAHOO_ID, WAHOO_NOT_CONFIGURED_MESSAGE
 from backend.providers.wahoo_client import WahooReconnectRequiredError
+from backend.sync.gates import ProviderResyncGate
 from backend.sync.wahoo_workout_export import WahooWorkoutExport
 
 _RETRY_SCOPE = "Nur fehlgeschlagene Objekte erneut auswählen."
@@ -41,12 +43,14 @@ class WahooPlanPushService:
         export: Callable[[], WahooWorkoutExport],
         now: Callable[[], datetime],
         redactor: Callable[[str], str],
+        gate: ProviderResyncGate | None = None,
     ) -> None:
         self._configured = configured
         self._database_manager = database_manager
         self._export = export
         self._now = now
         self._redact = redactor
+        self._gate = gate
         self._lock = threading.Lock()
 
     def sync(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -61,7 +65,9 @@ class WahooPlanPushService:
         requested = planning_library.library_bulk_request_entries(
             payload.get("entries"), require_hash=True
         )
-        with self._lock:
+        # The gate rejects remote writes while a Wahoo resync reset holds it.
+        operation = self._gate.operation() if self._gate is not None else nullcontext()
+        with operation, self._lock:
             results = self._run(requested)
         failed = [
             item["library_workout_id"]

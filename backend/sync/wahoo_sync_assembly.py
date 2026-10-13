@@ -15,6 +15,7 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.providers.wahoo_client import WahooClient
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.wahoo_connection import WahooConnectionService
@@ -38,6 +39,7 @@ class WahooSyncInputs:
     now: Callable[[], datetime]
     logger: logging.Logger
     redactor: Callable[[str], str]
+    resync_gate: ProviderResyncGate
 
 
 class WahooSyncAssembly:
@@ -77,6 +79,7 @@ class WahooSyncAssembly:
                     zone_provider=inputs.zone_provider,
                     now=inputs.now,
                     logger=inputs.logger,
+                    gate=inputs.resync_gate,
                 )
             return self._service
 
@@ -96,5 +99,6 @@ class WahooSyncAssembly:
                     export=self.workout_export,
                     now=inputs.now,
                     redactor=inputs.redactor,
+                    gate=inputs.resync_gate,
                 )
             return self._plan_push
