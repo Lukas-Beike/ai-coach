@@ -46,7 +46,10 @@ from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
 )
-from backend.providers.snapshot_projection import stored_retrieved_at
+from backend.providers.snapshot_projection import (
+    intervals_snapshot_is_stripped,
+    stored_retrieved_at,
+)
 from backend.providers.wahoo_activity_mapping import (
     MAPPER_VERSION as WAHOO_ACTIVITY_VERSION,
 )
@@ -329,10 +332,14 @@ def intervals_snapshot_ingest_plan(
 
     A snapshot without a sync time or without a ``raw_provider_data`` block has no
     mapper input. Its ``recent_activities`` fallback is a compact read model, so it
-    is not mapped and counts as one invalid row.
+    is not mapped and counts as one invalid row. A snapshot stored without its
+    activity sections (``intervals_snapshot_is_stripped``) plans only what it still
+    carries; with nothing left to map it plans nothing and counts no invalid row.
     """
     retrieved_at = stored_retrieved_at(snapshot, zone=zone)
     raw = snapshot.get("raw_provider_data")
+    if intervals_snapshot_is_stripped(snapshot) and not isinstance(raw, Mapping):
+        return IngestPlan(provider=ProviderId.INTERVALS)
     if retrieved_at is None or not isinstance(raw, Mapping):
         return IngestPlan(provider=ProviderId.INTERVALS, skipped_invalid=1)
     return intervals_ingest_plan(raw, zone=zone, retrieved_at=retrieved_at)

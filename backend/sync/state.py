@@ -78,9 +78,12 @@ class SyncStateRepository:
         with self._database_manager.unit_of_work() as db:
             write_cursor(db, provider, stream, cursor, high_water_mark, self._now())
 
-    def latest_snapshot(self) -> dict[str, Any] | None:
-        with self._database_manager.unit_of_work() as db:
+    def latest_snapshot(self, db: Any | None = None) -> dict[str, Any] | None:
+        """Read the stored snapshot, inside the caller's transaction when given."""
+        if db is not None:
             return latest_snapshot(db, self._snapshot_repository)
+        with self._database_manager.unit_of_work() as own:
+            return latest_snapshot(own, self._snapshot_repository)
 
     def latest_metadata(self, db: Any | None = None) -> dict[str, Any]:
         """Read the scalar markers committed with the provider snapshot."""
@@ -94,6 +97,7 @@ class SyncStateRepository:
         snapshot: dict[str, Any],
         update_full_sync: bool = True,
         activity_days: int | None = None,
+        activity_count: int | None = None,
     ) -> None:
         with self._database_manager.unit_of_work() as db:
             save_snapshot(
@@ -102,6 +106,7 @@ class SyncStateRepository:
                 self._snapshot_repository,
                 update_full_sync=update_full_sync,
                 activity_days=activity_days,
+                activity_count=activity_count,
                 set_value=lambda key, value, connection: self._key_value_repository.set(
                     connection, key, value
                 ),

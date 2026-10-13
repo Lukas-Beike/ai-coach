@@ -742,9 +742,23 @@ class SnapshotRepository:
     """Persist bounded provider snapshots without owning a connection."""
 
     def save(
-        self, db: Any, snapshot: dict[str, Any], created_at: str, *, keep: int = 12
+        self,
+        db: Any,
+        snapshot: dict[str, Any],
+        created_at: str,
+        *,
+        keep: int = 12,
+        activity_count: int | None = None,
     ) -> None:
+        """Store a snapshot and keep the newest ``keep`` rows.
+
+        ``activity_count`` is the number of recent activities the snapshot stood for
+        when it is stored without its activity sections; otherwise the count comes
+        from the snapshot's own ``recent_activities`` list.
+        """
         recent = snapshot.get("recent_activities")
+        if activity_count is None:
+            activity_count = len(recent) if isinstance(recent, list) else 0
         db.execute(
             "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
             "VALUES (?, ?, ?, ?)",
@@ -752,7 +766,7 @@ class SnapshotRepository:
                 json.dumps(snapshot, ensure_ascii=False),
                 created_at,
                 str(snapshot.get("synced_at") or ""),
-                len(recent) if isinstance(recent, list) else 0,
+                activity_count,
             ),
         )
         db.execute(

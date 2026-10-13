@@ -84,6 +84,7 @@ migration rolls back; do not replace or reset the data directory to resolve it.
 ### Intervals.icu Synchronization & Mapping
 - **Automated Activity Ingestion**: Scheduled and on-demand synchronization pulling completed activities, training loads, and performance metrics from Intervals.icu.
 - **Duplicate-Safe Pagination**: Resilient pagination fetching large activity histories in bounded chunks while verifying page boundaries to prevent duplicate entries.
+- **Compact Snapshot Storage**: Each sync ingests its full payload into the canonical tables first. Once the tables serve reads (after the first completed backfill), the stored Intervals.icu snapshot omits `recent_activities` and `raw_provider_data.activities` and carries `"canonical_sections": "tables"`; wellness, athlete, calendar and sync-status sections stay. The next incremental or historical sync rebuilds its merge base from the stored activity rows. Existing snapshot rows are never rewritten, and until the first backfill completes snapshots are stored in full.
 - **Initial Template Import**: One-time read-only import of existing remote workout templates into a dedicated, private 'Intervals Coach' folder upon initial setup.
 - **Explicit Plan Synchronization**: Unidirectional push transferring locally approved planned units to the Intervals.icu calendar with stable upsert identifiers.
 - **Automatic Performance Refresh**: Immediate background refresh of current fitness (CTL), fatigue (ATL), and form (TSB) following every successful activity synchronization.

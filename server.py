@@ -1012,6 +1012,7 @@ INTERVALS_SYNC = IntervalsSyncAssembly(
             redact_text=REDACTOR.redact_text,
             logger=LOGGER,
             activity_rows=lambda: CANONICAL_READ,
+            table_serving=lambda: CANONICAL_READ,
         ),
         operations=IntervalsOperationDependencies(
             operation_observer=PROVIDER_SYNC.operation_observer,

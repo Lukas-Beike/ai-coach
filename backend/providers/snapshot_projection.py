@@ -5,6 +5,12 @@ by the sync layer. Each projection calls the pure provider mappers, which never
 raise on malformed provider data. A top-level value that is not a mapping
 projects to empty results. Mapping issues are returned unchanged so the caller
 can count them; they are never logged here.
+
+Once the canonical tables serve reads, new Intervals.icu snapshots are stored
+without ``recent_activities`` and ``raw_provider_data.activities`` and carry the
+``canonical_sections`` marker. ``strip_intervals_activity_sections`` and
+``restore_intervals_activity_sections`` convert between both forms; a stripped
+snapshot projects no activities, because the tables already hold them.
 """
 
 from __future__ import annotations
@@ -35,6 +41,9 @@ _INTERVALS_RAW_ACTIVITIES_KEY: Final = "activities"
 _INTERVALS_WELLNESS_KEY: Final = "recent_wellness"
 _INTERVALS_ATHLETE_KEY: Final = "athlete"
 _GARMIN_ACTIVITIES_KEY: Final = "activities"
+# Content-free marker of a snapshot written without its activity sections.
+CANONICAL_SECTIONS_KEY: Final = "canonical_sections"
+CANONICAL_SECTIONS_TABLES: Final = "tables"
 
 
 def stored_retrieved_at(record: object, *, zone: tzinfo) -> datetime | None:
@@ -105,6 +114,64 @@ def intervals_activity_rows(snapshot: object) -> tuple[dict[str, Any], ...]:
     if not isinstance(rows, list):
         return ()
     return tuple(row for row in rows if isinstance(row, dict))
+
+
+def intervals_snapshot_is_stripped(snapshot: object) -> bool:
+    """Return True when a stored snapshot no longer carries its activity sections.
+
+    The sync layer writes the marker once the canonical tables serve reads: the
+    activities then live only in the tables and their raw records. Wellness, athlete
+    and calendar sections stay in the snapshot.
+    """
+    return (
+        isinstance(snapshot, Mapping)
+        and snapshot.get(CANONICAL_SECTIONS_KEY) == CANONICAL_SECTIONS_TABLES
+    )
+
+
+def strip_intervals_activity_sections(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a copy without the activity sections, marked as served by the tables.
+
+    The sections are removed, not emptied, so a stripped snapshot never reads as a
+    full activity window that is missing every activity.
+    """
+    stripped = {
+        key: value
+        for key, value in snapshot.items()
+        if key != _INTERVALS_ACTIVITIES_KEY
+    }
+    raw = snapshot.get(_INTERVALS_RAW_KEY)
+    if isinstance(raw, Mapping):
+        stripped[_INTERVALS_RAW_KEY] = {
+            key: value
+            for key, value in raw.items()
+            if key != _INTERVALS_RAW_ACTIVITIES_KEY
+        }
+    stripped[CANONICAL_SECTIONS_KEY] = CANONICAL_SECTIONS_TABLES
+    return stripped
+
+
+def restore_intervals_activity_sections(
+    snapshot: Mapping[str, Any],
+    *,
+    raw_rows: Iterable[Mapping[str, Any]],
+    compact_rows: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Return a copy of a stripped snapshot with its activity sections rebuilt.
+
+    The rows come from the canonical tables. The result is an in-memory merge
+    base, so the marker is removed: the next write decides again whether to strip.
+    """
+    restored = {
+        key: value for key, value in snapshot.items() if key != CANONICAL_SECTIONS_KEY
+    }
+    raw = snapshot.get(_INTERVALS_RAW_KEY)
+    restored[_INTERVALS_RAW_KEY] = {
+        **(raw if isinstance(raw, Mapping) else {}),
+        _INTERVALS_RAW_ACTIVITIES_KEY: [dict(row) for row in raw_rows],
+    }
+    restored[_INTERVALS_ACTIVITIES_KEY] = [dict(row) for row in compact_rows]
+    return restored
 
 
 def intervals_snapshot_has_only_compact_rows(snapshot: object) -> bool:

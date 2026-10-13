@@ -985,7 +985,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 267,
+      "line": 274,
       "column": 14,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1089,80 +1089,16 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 268,
-      "column": 17,
-      "code": "arg-type",
-      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/activities/duplicates.py",
-      "line": 269,
-      "column": 17,
-      "code": "arg-type",
-      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/activities/duplicates.py",
-      "line": 270,
-      "column": 17,
-      "code": "arg-type",
-      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_freshness.py",
-      "line": 44,
-      "column": 20,
-      "code": "arg-type",
-      "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_freshness.py",
-      "line": 44,
-      "column": 20,
-      "code": "arg-type",
-      "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_freshness.py",
-      "line": 44,
-      "column": 20,
-      "code": "arg-type",
-      "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_observability.py",
-      "line": 58,
-      "column": 20,
-      "code": "arg-type",
-      "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_observability.py",
-      "line": 58,
-      "column": 20,
-      "code": "arg-type",
-      "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_observability.py",
-      "line": 58,
-      "column": 20,
-      "code": "arg-type",
-      "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/activities/duplicates.py",
       "line": 275,
-      "column": 22,
+      "column": 17,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 276,
+      "column": 17,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
     },
@@ -1170,6 +1106,70 @@
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
       "line": 277,
+      "column": 17,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_freshness.py",
+      "line": 44,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_freshness.py",
+      "line": 44,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_sync_freshness.py",
+      "line": 44,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_observability.py",
+      "line": 58,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_observability.py",
+      "line": 58,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_observability.py",
+      "line": 58,
+      "column": 20,
+      "code": "arg-type",
+      "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 282,
+      "column": 22,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 284,
       "column": 22,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1297,7 +1297,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 276,
+      "line": 283,
       "column": 30,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1305,7 +1305,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 278,
+      "line": 285,
       "column": 30,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -2489,7 +2489,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1024,
+      "line": 1025,
       "column": 16,
       "code": "has-type",
       "message_sha256": "c3827639903091a4321d0e0848e6289e336e994114e1a16099bebc3274bf7946"
@@ -2497,7 +2497,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1027,
+      "line": 1028,
       "column": 16,
       "code": "has-type",
       "message_sha256": "c53b9e646657d76e58ce4a8d414022143183888c840336c5e976cccc80e9fdda"
@@ -2521,7 +2521,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1112,
+      "line": 1113,
       "column": 20,
       "code": "has-type",
       "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
@@ -2537,7 +2537,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1680,
+      "line": 1681,
       "column": 30,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -2585,7 +2585,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1353,
+      "line": 1354,
       "column": 36,
       "code": "has-type",
       "message_sha256": "480057763c1b5347f5e8f0a61c7f20c6cec2d3a6e24f1e8563bd5b76f2138cc4"
@@ -2601,7 +2601,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1684,
+      "line": 1685,
       "column": 37,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2609,7 +2609,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1712,
+      "line": 1713,
       "column": 38,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2625,7 +2625,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1384,
+      "line": 1385,
       "column": 42,
       "code": "has-type",
       "message_sha256": "6b3bf53c953464ae5eca5af23f6ee4aa9b3fe9f5856d07f358d76bd3a8dee02e"
@@ -3121,7 +3121,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 274,
+      "line": 281,
       "column": 13,
       "code": "operator",
       "message_sha256": "23273601c5c51787d946c1da6b8228da0c07d81888006e0784614430d67afe3a"
@@ -3129,7 +3129,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 274,
+      "line": 281,
       "column": 13,
       "code": "operator",
       "message_sha256": "c1d0e13f8fec43a85c14183cf4bb2ae4fd6e3829c26f9cb1b0a76ecd474ee9cb"
@@ -3249,7 +3249,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/performance.py",
-      "line": 226,
+      "line": 229,
       "column": 23,
       "code": "return-value",
       "message_sha256": "a0e5eaad7dba0a912f8407d1698bf050624d54d66a17c5a26fe0074def6714fb"

@@ -17,6 +17,7 @@ from backend.activities.duplicates import (
 from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
+from backend.providers.snapshot_projection import intervals_snapshot_is_stripped
 from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
 
 
@@ -41,6 +42,7 @@ class DuplicateActivityService:
         )
         self._clock = clock
         self._event_buffer = event_buffer
+        self._row_reader = row_reader
         self._references = NoActivityReferences() if references is None else references
 
     def delete(self, payload: Any, intervals_client: Any) -> dict[str, Any]:
@@ -59,8 +61,6 @@ class DuplicateActivityService:
                 duplicate_id,
                 synced_at=synced_at,
             )
-            if updated is not None:
-                self._snapshot_repository.save(db, updated, synced_at)
             # Same transaction: table-served readers must not return the removed copy.
             canonical_store.mark_activity_deleted(
                 db,
@@ -69,6 +69,8 @@ class DuplicateActivityService:
                 provider_activity_id=duplicate_id,
                 now=synced_at,
             )
+            if updated is not None:
+                self._save_snapshot(db, updated, synced_at)
 
         self._event_buffer.publish(
             "provider",
@@ -80,3 +82,15 @@ class DuplicateActivityService:
             "kept_activity_id": canonical_id,
             "kept_source": "Wahoo",
         }
+
+    def _save_snapshot(self, db: Any, snapshot: dict[str, Any], synced_at: Any) -> None:
+        """Save the snapshot; a stripped one keeps the live activity count."""
+        if not intervals_snapshot_is_stripped(snapshot):
+            self._snapshot_repository.save(db, snapshot, synced_at)
+            return
+        self._snapshot_repository.save(
+            db,
+            snapshot,
+            synced_at,
+            activity_count=len(self._row_reader.activity_rows(db, limit=500)),
+        )

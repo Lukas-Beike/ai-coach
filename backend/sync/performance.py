@@ -23,6 +23,7 @@ from backend.sync.canonical_ingest import ingest_intervals_partial_snapshot
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.queue import SyncJobQueueService
+from backend.sync.snapshot_storage import SnapshotStorage
 from backend.sync.snapshots import merge_performance_snapshot
 from backend.sync.state import SyncStateRepository
 
@@ -48,8 +49,12 @@ class PerformanceRefreshService:
         lock: Any = _PERFORMANCE_REFRESH_LOCK,
         *,
         zone_provider: Callable[[], tzinfo | None],
+        snapshot_storage: SnapshotStorage | None = None,
     ):
         self._zone_provider = zone_provider
+        self._snapshot_storage = snapshot_storage or SnapshotStorage(
+            sync_state_repository
+        )
         self._coverage = CanonicalCoverageStore(key_value_repository)
         self._config = config
         self._database_manager = database_manager
@@ -84,14 +89,11 @@ class PerformanceRefreshService:
         try:
             self._set_value("performance_refresh_running", "1")
             provider_snapshot = self._provider_client.fetch_performance_snapshot(
-                self._sync_state_repository.latest_snapshot()
+                self._snapshot_storage.merge_base()
             )
             with self._database_manager.unit_of_work() as db:
                 merged = merge_performance_snapshot(
-                    self._sync_state_repository.latest_snapshot(), provider_snapshot
-                )
-                self._sync_state_repository.save_snapshot(
-                    merged, update_full_sync=False
+                    self._snapshot_storage.merge_base(), provider_snapshot
                 )
                 # The refreshed wellness/athlete rows reach the canonical tables in
                 # the same transaction. This window is partial, so it never deletes.
@@ -100,6 +102,7 @@ class PerformanceRefreshService:
                 self._coverage.persist(
                     db, intervals_snapshot_coverage(merged, zone=zone), zone=zone
                 )
+                self._snapshot_storage.save(db, merged, update_full_sync=False)
                 self._key_value_repository.set(db, "last_performance_error", "")
 
             self._publish_ready()

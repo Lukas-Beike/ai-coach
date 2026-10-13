@@ -16,7 +16,9 @@ except that a snapshot listing activities only in compact form stays on legacy: 
 backfill cannot map those rows.
 
 Tables keep serving after a sync, because the ingest writes each new snapshot
-into the tables in the same transaction.
+into the tables in the same transaction. While the tables serve, the stored
+snapshot omits the activity sections the tables hold (``canonical_sections``
+marker, see ``SnapshotStorage``).
 
 Coverage is served from the summary each ingest persists
 (``canonical_coverage:<provider>``, see ``canonical_coverage_store``), because
