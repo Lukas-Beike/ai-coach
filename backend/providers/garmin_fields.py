@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 GARMIN_DATE_ALIASES = ("calendarDate", "summaryDate", "date")
+GARMIN_SLEEP_DATE_KEYS = ("calendarDate", "summaryDate")
 GARMIN_SLEEP_DURATION_ALIASES = ("sleepTimeSeconds", "sleepDuration")
 GARMIN_SLEEP_SCORE_ALIASES = ("sleepScore", "overallSleepScore")
 GARMIN_HRV_LAST_NIGHT_ALIASES = ("hrvLastNight", "lastNightAvg")

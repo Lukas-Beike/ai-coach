@@ -156,7 +156,7 @@ class NoImplicitExportTests(unittest.TestCase):
     def test_the_authorized_plan_push_command_enqueues_intervals_only(self) -> None:
         source = (BACKEND / "sync" / "plan_commands.py").read_text(encoding="utf-8")
 
-        self.assertIn('"intervals"', source)
+        self.assertIn("INTERVALS_ID", source)
         self.assertNotIn("wahoo", source.lower())
 
 

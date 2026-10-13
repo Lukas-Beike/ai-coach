@@ -24,6 +24,10 @@ from backend.errors import AppError
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 from backend.planning.target_snapshot import freeze_targets
+from backend.providers.intervals_activity_fields import (
+    ACTIVITY_DETAIL_PARAMS,
+    activity_detail_laps,
+)
 from backend.runtime.ports import ActivityRowReader
 
 MAX_STREAM_POINTS = 172_800
@@ -97,7 +101,7 @@ class ActivityDetailRefreshService:
                 503, "Intervals.icu ist nicht konfiguriert.", reason="not_configured"
             )
         path = f"/activity/{quote(activity_id, safe='')}"
-        detail = self._api_client.get(path, {"intervals": "true"})
+        detail = self._api_client.get(path, dict(ACTIVITY_DETAIL_PARAMS))
         if not isinstance(detail, dict) or str(detail.get("id")) != activity_id:
             raise AppError(502, "Der Anbieter hat eine andere Aktivität zurückgegeben.")
         streams = normalize_streams(
@@ -106,9 +110,7 @@ class ActivityDetailRefreshService:
                 {"types": ",".join(COACH_ACTIVITY_DETAIL_STREAM_FIELDS)},
             )
         )
-        projected = detailed_activity(
-            {**detail, "laps": detail.get("icu_intervals", [])}
-        )
+        projected = detailed_activity({**detail, "laps": activity_detail_laps(detail)})
         projected["streams"] = streams
         observed_at = self._utc_now()
         previous = self._store.get(activity_id) or {}

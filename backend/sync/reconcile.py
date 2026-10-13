@@ -10,6 +10,7 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.observability import Redactor
 from backend.planning.planned_units import planned_unit_payload_hash
 from backend.planning.revision import PlanningRevisionService
+from backend.providers.intervals_activity_fields import REMOTE_EVENT_METRIC_KEYS
 
 _REMOTE_LINKS = RemoteLinkRepository()
 
@@ -34,7 +35,7 @@ def _apply_remote_event(
         payload["remote_event_external_id"] = external_id
         payload["external_id"] = external_id
     if state == "synced":
-        for key in ("moving_time", "workout_doc", "icu_training_load", "icu_intensity"):
+        for key in REMOTE_EVENT_METRIC_KEYS:
             if remote_event.get(key) is not None:
                 payload[key] = remote_event[key]
             elif key != "moving_time":

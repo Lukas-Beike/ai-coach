@@ -17,7 +17,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/garmin.py",
-      "line": 489,
+      "line": 491,
       "column": 40,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -577,7 +577,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/garmin_service.py",
-      "line": 240,
+      "line": 241,
       "column": 61,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -1425,7 +1425,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/activity_details.py",
-      "line": 116,
+      "line": 118,
       "column": 40,
       "code": "arg-type",
       "message_sha256": "384ff915813ee6feb4c371741e564d7961ee44a1bf689ebba95de84bebc228dc"

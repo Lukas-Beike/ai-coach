@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.providers.descriptors import INTERVALS_ID
 from backend.sync.queue import SyncJobQueueService
 
 
@@ -39,7 +40,7 @@ class PlanPushCommandService:
                 for entry in chunk
             ]
             job = self._queue_service.enqueue(
-                "intervals",
+                INTERVALS_ID,
                 "plan_push",
                 payload,
                 requested_by="coach",
