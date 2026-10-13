@@ -237,6 +237,19 @@ def parse_environment(value: Any) -> Environment | None:
     return _ENVIRONMENTS_BY_VALUE.get(value.strip().casefold())
 
 
+def activity_type_environment(environment: Environment) -> Environment:
+    """Return the environment an activity type can tell apart.
+
+    Activity types only distinguish virtual from unspecified, so indoor counts as
+    virtual and outdoor as unspecified when stored sports are compared.
+    """
+    if environment is Environment.INDOOR:
+        return Environment.VIRTUAL
+    if environment is Environment.OUTDOOR:
+        return Environment.UNKNOWN
+    return environment
+
+
 def _canonical_sport(value: Any) -> Sport | None:
     if isinstance(value, Sport):
         return value

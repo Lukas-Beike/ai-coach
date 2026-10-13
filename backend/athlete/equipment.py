@@ -9,7 +9,11 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
-from backend.canonical.stored_sports import StoredSport, resolve_equipment_sport
+from backend.canonical.stored_sports import (
+    StoredSport,
+    activity_type_environment,
+    resolve_equipment_sport,
+)
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 
@@ -314,7 +318,10 @@ def _payload_sport(payload: dict[str, Any]) -> StoredSport | None:
 
 
 def _stored_pair(stored: StoredSport | None) -> tuple[str, str] | None:
-    return None if stored is None else (stored.sport.value, stored.environment.value)
+    """Return the comparable sport pair; activity types blur indoor and outdoor."""
+    if stored is None:
+        return None
+    return (stored.sport.value, activity_type_environment(stored.environment).value)
 
 
 def _item_pair(item: dict[str, Any]) -> tuple[str, str] | None:

@@ -8,7 +8,8 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from backend.canonical.vocabulary import Environment, RemoteEntityKind
+from backend.canonical.stored_sports import activity_type_environment
+from backend.canonical.vocabulary import RemoteEntityKind
 from backend.config import Config
 from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLinkRepository
@@ -27,12 +28,9 @@ _REMOTE_LINKS = RemoteLinkRepository()
 def _same_remote_sport(row: dict[str, Any], data: dict[str, Any]) -> bool:
     """Return True when the remote competition names the same sport as the local row.
 
-    Indoor and virtual share one Intervals.icu race type, so they compare equal.
+    Race types tell only virtual from unspecified, so indoor compares equal to
+    virtual and outdoor to unspecified.
     """
-
-    def wire_environment(environment: Any) -> Any:
-        return Environment.VIRTUAL if environment is Environment.INDOOR else environment
-
     local = planning_competitions.competition_stored_sport(
         {
             "sport": row.get("sport"),
@@ -41,9 +39,9 @@ def _same_remote_sport(row: dict[str, Any], data: dict[str, Any]) -> bool:
         }
     )
     remote = planning_competitions.competition_stored_sport(data)
-    return local.sport is remote.sport and wire_environment(
+    return local.sport is remote.sport and activity_type_environment(
         local.environment
-    ) is wire_environment(remote.environment)
+    ) is activity_type_environment(remote.environment)
 
 
 class CompetitionSyncReconciler:

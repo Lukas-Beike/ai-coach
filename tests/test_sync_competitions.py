@@ -422,6 +422,26 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             self.stored_competition("local-indoor")["environment"], "indoor"
         )
 
+    def test_clean_row_keeps_local_outdoor_environment_for_the_same_remote_type(self):
+        row = self.local_competition(
+            "local-outdoor",
+            intervals_event_id="remote-outdoor",
+            external_id="external-outdoor",
+            sync_dirty=0,
+            sync_state="synced",
+        )
+        row["environment"] = "outdoor"
+        self.insert_competition(row)
+        remote = self.remote_event("remote-outdoor", "external-outdoor")
+        remote["type"] = "Ride"
+        plan = self.sync_plan([row], [remote])
+
+        self.reconciler.reconcile(plan, [], [], [row], push_local=False, now=NOW)
+
+        self.assertEqual(
+            self.stored_competition("local-outdoor")["environment"], "outdoor"
+        )
+
     def test_clean_row_adopts_remote_environment_when_the_remote_type_changes(self):
         row = self.local_competition(
             "local-changed",

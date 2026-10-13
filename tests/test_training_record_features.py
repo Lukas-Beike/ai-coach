@@ -401,6 +401,44 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         with self.assertRaises(AppError):
             service.assign({"activity_id": "ride-1", "equipment_id": equipment["id"]})
 
+    def test_equipment_environment_matches_what_activity_types_express(self):
+        activities = [
+            {"id": "run-1", "type": "Run", "start_date_local": "2026-08-30"},
+            {"id": "ride-1", "type": "Ride", "start_date_local": "2026-08-30"},
+            {
+                "id": "virtual-1",
+                "type": "VirtualRide",
+                "start_date_local": "2026-08-30",
+            },
+        ]
+        service = EquipmentService(
+            self.manager,
+            lambda: activities,
+            lambda: date(2026, 9, 1),
+            lambda: "2026-09-01T00:00:00Z",
+            deduplicated_rows,
+        )
+
+        def saved(name, sport, environment, kind):
+            return service.save(
+                {
+                    "name": name,
+                    "sport": sport,
+                    "environment": environment,
+                    "kind": kind,
+                    "start_date": "2026-08-01",
+                    "initial_distance_km": 0,
+                    "initial_hours": 0,
+                }
+            )["equipment"]["id"]
+
+        shoe = saved("Trail shoe", "run", "outdoor", "shoes")
+        trainer = saved("Trainer bike", "ride", "indoor", "bike")
+        service.assign({"activity_id": "run-1", "equipment_id": shoe})
+        service.assign({"activity_id": "virtual-1", "equipment_id": trainer})
+        with self.assertRaises(AppError):
+            service.assign({"activity_id": "ride-1", "equipment_id": trainer})
+
     def test_tag_impact_requires_ten_measured_days_in_each_explicit_group(self):
         checkins = []
         nights = {}
