@@ -15,7 +15,7 @@ from datetime import date
 from typing import Any
 from unittest.mock import patch
 
-from canonical_consumer_parity import TODAY
+from canonical_consumer_cases import TODAY
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 from canonical_recovery_support import RecordingReader, recovery_observation
 
@@ -291,7 +291,6 @@ class PopulatedRecoveryAverageTests(CanonicalReadFixture):
     def test_populated_payload_with_canonical_averages_equals_legacy(self) -> None:
         populate(self)
         selector = make_selector(self)
-        self.write(selector.refresh)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
             inputs = read_performance_inputs(selector, db, self.intervals)

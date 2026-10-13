@@ -541,20 +541,27 @@ def current_observation_rows(
     start: str | None = None,
     end: str | None = None,
     sport: str | None = None,
+    oldest_versions: Mapping[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Return observation rows of one metric at each provider's current mapper version.
 
     ``versions`` maps a provider value to its current observation mapper version;
     rows of any other version, or of no provider, are not returned. Bounds are
-    inclusive ISO dates on ``observed_on``.
+    inclusive ISO dates on ``observed_on``. A natural key has one row, which a
+    re-projection rewrites in place, so ``oldest_versions`` also returns the rows
+    that still carry a version from that provider's oldest version up to the
+    current one: the newest stored version of each identity while a re-projection
+    is pending. Rows below the oldest version were retired by an earlier mapper
+    and stay hidden.
     """
+    lowest = oldest_versions or {}
     provider_clause = " OR ".join(
-        "(provider = ? AND mapper_version = ?)" for _ in versions
+        "(provider = ? AND mapper_version BETWEEN ? AND ?)" for _ in versions
     )
-    clauses = ["metric = ?", f"({provider_clause})"]
     params: list[object] = [metric]
     for provider, version in versions.items():
-        params.extend((provider, version))
+        params.extend((provider, min(lowest.get(provider, version), version), version))
+    clauses = ["metric = ?", f"({provider_clause})"]
     if start is not None:
         clauses.append("observed_on >= ?")
         params.append(start)

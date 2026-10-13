@@ -9,21 +9,29 @@ would return for the same data:
 - activity rows: the stored raw Intervals.icu payloads of those same activities.
 - observations: rows whose ``mapper_version`` equals the current version of their
   provider. Observations have no state column, so a row that an upgraded mapper no
-  longer emits is recognised by its old version and is not served.
+  longer emits is recognised by its old version and is not served. While a
+  re-projection is pending (``oldest_versions``) rows that still carry a version
+  between the one of the last completed run and the current one are served too: a
+  natural key has one row, so each identity is served at the newest version stored
+  for it and nothing vanishes meanwhile. Rows retired before the last completed run
+  carry an older version and stay hidden. A
+  mapper that moves a measurement to a different natural key leaves the old-key row
+  next to the new one until the re-projection completes, so that one measurement
+  can briefly appear twice.
 
 Results use the same inclusive bounds and the same total order as
 ``CanonicalSnapshotProjection``. Activity bounds filter the stored athlete-local
 date, which the ingest computed with the athlete's zone at write time.
 
 Mapping issue counts are not stored in the tables, so this reader does not
-implement ``ProviderCoverageReader``. ``CanonicalReadSelector`` keeps coverage on
-the legacy projection.
+implement ``ProviderCoverageReader``. ``CanonicalReadSelector`` serves coverage
+from the summaries persisted at ingest.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from typing import Any, Final
 
@@ -62,6 +70,11 @@ _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
 
 class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader):
     """Serves canonical activities, raw activity rows and observations from the tables."""
+
+    def __init__(
+        self, *, oldest_versions: Callable[[Any], Mapping[str, int]] | None = None
+    ) -> None:
+        self._oldest_versions = oldest_versions
 
     def activities(
         self,
@@ -119,6 +132,9 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
             start=_iso(start),
             end=_iso(end),
             sport=None if sport is None else sport.value,
+            oldest_versions=(
+                None if self._oldest_versions is None else self._oldest_versions(db)
+            ),
         )
         return tuple(sorted((_observation(row) for row in rows), key=observation_order))
 

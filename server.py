@@ -16,7 +16,6 @@ from pathlib import Path
 
 from backend import config as app_config
 from backend import observability
-from backend.activities.detail_store import summary_fingerprint
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -1843,8 +1842,6 @@ CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
 CANONICAL_READ = build_canonical_read(
     legacy=CANONICAL_SNAPSHOT_PROJECTION,
     key_values=KEY_VALUE_REPOSITORY,
-    snapshots=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
-    fingerprint=summary_fingerprint,
 )
 
 CANONICAL_BACKFILL = build_canonical_backfill(
@@ -1853,7 +1850,6 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
     maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     clock=runtime_clock.utc_now,
-    parity=CANONICAL_READ,
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(

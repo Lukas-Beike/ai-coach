@@ -20,14 +20,13 @@ from canonical_read_support import (
     MAX_BATCHES,
     CanonicalReadFixture,
     intervals_snapshot,
-    make_parity,
     make_selector,
     new_backfill,
     populate,
 )
 from support import load_provider_fixture
 
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.config import load_config
 from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
@@ -409,23 +408,23 @@ class BackfillCompleteTests(CanonicalReadFixture):
 
 
 class ReadsAfterBackfillTests(CanonicalReadFixture):
-    """Ingest, backfill complete, parity mismatch, then a mapper change."""
+    """Ingest, backfill complete, then a stale read-state record and a mapper change."""
 
     def ids(self, records: Any) -> list[tuple[str, str]]:
         return [(r.activity_id, r.provenance.provider.value) for r in records]
 
-    def test_tables_serve_despite_a_parity_mismatch_until_mappers_change(self) -> None:
+    def test_tables_keep_serving_through_mapper_and_zone_changes(self) -> None:
         self.assertIs(self.read(make_selector(self).reader_for), self.projection)
 
         populate(self)  # ingests the snapshots and completes the backfill
-        mismatch = {
+        obsolete = {
             "source": "legacy",
             "reason": "parity_failed",
             "digest": "stale",
             "parity": {"passed": False},
         }
         with self.manager.unit_of_work() as db:
-            self.key_values.set(db, "canonical_read_state", json.dumps(mismatch))
+            self.key_values.set(db, "canonical_read_state", json.dumps(obsolete))
         selector = make_selector(self)
 
         self.assertTrue(self.read(selector.serves_tables))
@@ -443,24 +442,25 @@ class ReadsAfterBackfillTests(CanonicalReadFixture):
             "backend.sync.canonical_backfill.current_mapper_versions",
             return_value=bumped,
         ):
-            self.assertFalse(self.read(selector.serves_tables))
-            self.assertIs(self.read(selector.reader_for), self.projection)
+            self.assertTrue(self.read(selector.serves_tables))
+            self.assertIsNot(self.read(selector.reader_for), self.projection)
             self.assertEqual(
                 self.ids(self.read(selector.activities)),
-                self.ids(self.read(self.projection.activities)),
+                self.ids(self.read(self.table.activities)),
             )
 
-        # A zone change also sends reads back to legacy until re-projection ends.
+        # A zone change keeps the tables serving while the re-projection runs.
         self.assertTrue(self.read(selector.serves_tables))
         self.zone = ZoneInfo("America/Los_Angeles")
-        self.assertFalse(self.read(selector.serves_tables))
-        self.assertIs(self.read(selector.reader_for), self.projection)
+        self.assertTrue(self.read(selector.serves_tables))
+        self.assertIsNot(self.read(selector.reader_for), self.projection)
         backfill = new_backfill(self)
         for _ in range(MAX_BATCHES):
             with self.manager.unit_of_work() as db:
                 if backfill.run_batch(db).done:
                     break
         self.assertTrue(self.read(selector.serves_tables))
+        self.assertTrue(self.read(selector.summary)["digest_current"])
 
     def weights(self) -> list[tuple[str, float]]:
         return [
@@ -512,7 +512,7 @@ class ReadsAfterBackfillTests(CanonicalReadFixture):
                 state["versions"][key] = previous
             self.key_values.set(db, STATE_KEY, json.dumps(state))
         selector = make_selector(self)
-        self.assertFalse(self.read(selector.serves_tables))
+        self.assertTrue(self.read(selector.serves_tables))
         self.assertEqual(self.weights(), [])
 
         backfill = new_backfill(self)
@@ -526,9 +526,10 @@ class ReadsAfterBackfillTests(CanonicalReadFixture):
         self.assertEqual(after[athlete_keys[0]], athlete_value)
         self.assertEqual(sorted(after), sorted(key for key, _ in current))
         self.assertTrue(self.read(selector.serves_tables))
-        report = self.read(make_parity(self).check)
-        self.assertTrue(report.passed)
-        self.assertEqual(report.observations["weight"].differing, 0)
+        self.assertEqual(
+            self.read(selector.observations, MetricKind.WEIGHT),
+            self.read(self.table.observations, MetricKind.WEIGHT),
+        )
 
 
 if __name__ == "__main__":

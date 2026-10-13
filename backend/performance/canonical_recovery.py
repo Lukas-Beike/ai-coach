@@ -1,8 +1,7 @@
 """Canonical current recovery values: sleep score, resting HR and readiness.
 
 Each value is selected by ``select_current`` pinned to the snapshot's latest
-wellness day, the same selection the consumer parity ledger checks for these
-fields. The canonical value replaces the legacy value only when it has the same
+wellness day, the same selection the legacy reader makes for these fields. The canonical value replaces the legacy value only when it has the same
 provider as the legacy source, the same day where the legacy output carries one,
 and the same number, compared exactly. The replacement keeps the legacy
 Python type, so the serialized output stays byte-identical. Otherwise the legacy

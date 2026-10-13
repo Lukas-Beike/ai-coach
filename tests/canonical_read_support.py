@@ -1,4 +1,4 @@
-"""Shared fixture for canonical read, parity and selector tests.
+"""Shared fixture for canonical read and selector tests.
 
 Builds a real canonical database through the backfill over the read-only wire
 fixtures, and the legacy projection over the same in-memory data. This is a helper
@@ -22,7 +22,6 @@ from support import (
     load_provider_fixture,
 )
 
-from backend.activities.detail_store import summary_fingerprint
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
@@ -31,7 +30,6 @@ from backend.sync.canonical_backfill import (
     DEFAULT_BATCH_SIZE,
     CanonicalBackfill,
 )
-from backend.sync.canonical_parity import CanonicalParity
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -124,23 +122,8 @@ class CanonicalReadFixture(unittest.TestCase):
             db.execute(sql, params)
 
 
-def make_parity(case: CanonicalReadFixture) -> CanonicalParity:
-    return CanonicalParity(
-        legacy=case.projection,
-        table=case.table,
-        snapshots=LatestSnapshot(case),
-        fingerprint=summary_fingerprint,
-        zone=case.projection.zone,
-    )
-
-
 def make_selector(case: CanonicalReadFixture) -> Any:
-    return build_canonical_read(
-        legacy=case.projection,
-        key_values=case.key_values,
-        snapshots=LatestSnapshot(case),
-        fingerprint=summary_fingerprint,
-    )
+    return build_canonical_read(legacy=case.projection, key_values=case.key_values)
 
 
 def new_backfill(case: CanonicalReadFixture) -> CanonicalBackfill:

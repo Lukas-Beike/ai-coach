@@ -117,7 +117,6 @@ class SectionReadTests(CanonicalReadFixture):
         """Complete the backfill, then read with the sections stripped."""
         populate(self)
         selector = make_selector(self)
-        self.write(selector.refresh)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         stripped = _stripped(self.intervals)
         return self._inputs(stripped)

@@ -9,7 +9,6 @@ from typing import Any
 
 from backend.db.repositories import KeyValueRepository
 from backend.runtime.maintenance import MaintenanceGate
-from backend.runtime.ports import CanonicalReadRefresher
 from backend.sync.canonical_backfill import DEFAULT_BATCH_SIZE, CanonicalBackfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 
@@ -28,7 +27,6 @@ def build_canonical_backfill(
     maintenance_gate: MaintenanceGate,
     clock: Callable[[], str],
     batch_size: int = DEFAULT_BATCH_SIZE,
-    parity: CanonicalReadRefresher | None = None,
 ) -> CanonicalBackfillAssembly:
     backfill = CanonicalBackfill(
         key_values=key_values,
@@ -40,6 +38,5 @@ def build_canonical_backfill(
         backfill=backfill,
         database=database,
         maintenance_gate=maintenance_gate,
-        parity=parity,
     )
     return CanonicalBackfillAssembly(worker=worker, status_reader=backfill)

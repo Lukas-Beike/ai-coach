@@ -14,7 +14,7 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any, Final
 
-from canonical_consumer_parity import (
+from canonical_consumer_cases import (
     CASES,
     RETRIEVED_AT,
     TODAY,
@@ -359,7 +359,6 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
     def test_populated_tables_reproduce_the_legacy_current_metrics(self) -> None:
         populate(self)
         selector = make_selector(self)
-        self.write(selector.refresh)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
             inputs = read_performance_inputs(selector, db, self.intervals)
