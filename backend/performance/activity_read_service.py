@@ -19,7 +19,7 @@ from backend.performance.canonical_inputs import (
 )
 from backend.performance.context import current_performance_context
 from backend.providers.source_labels import SourceView, provider_label
-from backend.runtime.ports import ProviderSnapshotReader
+from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
 
 
 class ActivityAnalysisReadService(ActivityReadService):
@@ -27,6 +27,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         self,
         database_manager: Any,
         snapshot_reader: ProviderSnapshotReader,
+        row_reader: ActivityRowReader,
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
         *,
@@ -37,6 +38,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         super().__init__(
             database_manager,
             snapshot_reader,
+            row_reader,
             feedback_service,
             detail_store,
             read_equipment=read_equipment,

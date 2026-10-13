@@ -12,7 +12,7 @@ from backend.activities.activity_reference import (
     NoActivityReferences,
 )
 from backend.errors import AppError
-from backend.runtime.ports import ProviderSnapshotReader
+from backend.runtime.ports import ActivityRowReader
 
 ACTIVITY_FEEDBACK_TEXT_LIMITS = {
     "activity_name": 200,
@@ -73,13 +73,13 @@ class ActivityFeedbackService:
         self,
         database_manager: Any,
         feedback_repository: Any,
-        snapshot_reader: ProviderSnapshotReader,
+        row_reader: ActivityRowReader,
         *,
         references: ActivityReferenceResolver | None = None,
     ):
         self._database_manager = database_manager
         self._feedback_repository = feedback_repository
-        self._snapshot_reader = snapshot_reader
+        self._row_reader = row_reader
         self._references = NoActivityReferences() if references is None else references
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -122,7 +122,7 @@ class ActivityFeedbackService:
         return {"status": "ok", "activity_feedback": saved}
 
     def save_coach(self, activity_id: Any, value: Any) -> dict[str, Any]:
-        """Save feedback only for an activity in the latest local snapshot."""
+        """Save feedback only for an activity the canonical activity reads serve."""
         reference = self._references.resolve_reference(activity_id)
         normalized = normalize_activity_feedback(reference.activity_id, value)
         if (
@@ -132,14 +132,7 @@ class ActivityFeedbackService:
         ):
             raise AppError(400, "Die Rückmeldung darf nicht leer sein.")
         with self._database_manager.unit_of_work() as db:
-            snapshot = self._snapshot_reader.latest_snapshot(db) or {}
-            activities = (
-                snapshot.get("recent_activities", [])
-                if isinstance(snapshot, dict)
-                else []
-            )
-            if not isinstance(activities, list):
-                activities = []
+            activities = self._row_reader.activity_rows(db)
             known_ids = {
                 str(candidate_id)
                 for activity in activities

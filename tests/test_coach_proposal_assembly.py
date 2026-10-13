@@ -16,7 +16,7 @@ class CoachProposalAssemblyTests(unittest.TestCase):
     def make_assembly(self):
         dependencies = {
             "manager": Mock(name="database_manager"),
-            "sync_state": Mock(name="sync_state_repository"),
+            "inspector": Mock(name="duplicate_inspector"),
             "nutrition_diary": Mock(name="nutrition_diary_service"),
             "nutrition_meal_library": Mock(name="nutrition_meal_library_service"),
             "duplicate": Mock(name="duplicate_activity_service"),
@@ -28,8 +28,8 @@ class CoachProposalAssemblyTests(unittest.TestCase):
             "uuid": Mock(name="uuid_factory"),
         }
         dependencies["manager_provider"] = Mock(return_value=dependencies["manager"])
-        dependencies["sync_state_provider"] = Mock(
-            return_value=dependencies["sync_state"]
+        dependencies["inspector_provider"] = Mock(
+            return_value=dependencies["inspector"]
         )
         dependencies["nutrition_diary_provider"] = Mock(
             return_value=dependencies["nutrition_diary"]
@@ -47,7 +47,7 @@ class CoachProposalAssemblyTests(unittest.TestCase):
             dependencies=CoachProposalAssembly.Inputs(
                 persistence=ProposalPersistence(
                     dependencies["manager_provider"],
-                    dependencies["sync_state_provider"],
+                    dependencies["inspector_provider"],
                     dependencies["nutrition_diary_provider"],
                     dependencies["nutrition_meal_library_provider"],
                 ),
@@ -69,7 +69,7 @@ class CoachProposalAssemblyTests(unittest.TestCase):
     def test_assembly_is_lazy_and_proposal_factories_use_current_database(self):
         assembly, dependencies = self.make_assembly()
         dependencies["manager_provider"].assert_not_called()
-        dependencies["sync_state_provider"].assert_not_called()
+        dependencies["inspector_provider"].assert_not_called()
 
         with (
             patch.object(proposal_assembly, "CoachProposalReadService") as read_factory,
@@ -86,7 +86,7 @@ class CoachProposalAssemblyTests(unittest.TestCase):
 
         self.assertIs(read_factory.call_args.args[0], dependencies["manager"])
         self.assertIs(create_factory.call_args.args[0], dependencies["manager"])
-        self.assertIs(create_factory.call_args.args[1], dependencies["sync_state"])
+        self.assertIs(create_factory.call_args.args[1], dependencies["inspector"])
         self.assertIs(
             create_factory.call_args.kwargs["nutrition_diary_service"],
             dependencies["nutrition_diary_provider"],

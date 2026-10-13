@@ -12,6 +12,9 @@ from typing import Any
 from unittest.mock import Mock
 from uuid import UUID
 
+from activity_row_support import SnapshotActivityRows
+
+from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
@@ -60,7 +63,11 @@ class CoachProposalCreationTests(unittest.TestCase):
         options.update(overrides)
         return CoachProposalCreationService(
             self.database_manager,
-            self.sync_state_repository,
+            DuplicateInspector(
+                self.database_manager,
+                self.sync_state_repository,
+                SnapshotActivityRows(self.sync_state_repository),
+            ),
             **options,
         )
 
@@ -640,7 +647,7 @@ class CoachProposalCreationTests(unittest.TestCase):
             "delete_duplicate_intervals_activity",
         )
         self.assertEqual(len(self._rows()), 1)
-        self.sync_state_repository.latest_snapshot.assert_called_once_with()
+        self.sync_state_repository.latest_snapshot.assert_called()
 
     def test_duplicate_delete_resolves_local_ids_before_validation(self) -> None:
         current_time = "2026-08-29T10:00:00+00:00"

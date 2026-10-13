@@ -9,7 +9,7 @@ from backend.db.repositories import CheckinRepository
 from backend.errors import AppError
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.tag_impact import tag_impact
-from backend.performance.training_report import canonical_rows
+from backend.performance.training_report import deduplicated_rows
 
 
 class MemoryManager:
@@ -63,10 +63,10 @@ class TrainingRecordFeatureTests(unittest.TestCase):
     def test_garmin_usage_is_authoritative_and_missing_stats_are_not_zero(self):
         service = EquipmentService(
             self.manager,
-            lambda: {"recent_activities": [{"id": "one", "distance": 10000}]},
+            lambda: [{"id": "one", "distance": 10000}],
             lambda: date(2026, 10, 2),
             lambda: "2026-10-02T12:00:00Z",
-            canonical_rows,
+            deduplicated_rows,
         )
         snapshot = {
             "gear": [
@@ -101,7 +101,11 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self,
     ):
         service = EquipmentService(
-            self.manager, dict, lambda: date(2026, 10, 2), lambda: "now", canonical_rows
+            self.manager,
+            tuple,
+            lambda: date(2026, 10, 2),
+            lambda: "now",
+            deduplicated_rows,
         )
         first = {
             "source_freshness": {"gear": {"freshness": "current"}},
@@ -176,7 +180,11 @@ class TrainingRecordFeatureTests(unittest.TestCase):
 
     def test_empty_initial_gear_snapshot_does_not_finalize_import(self):
         service = EquipmentService(
-            self.manager, dict, lambda: date(2026, 10, 2), lambda: "now", canonical_rows
+            self.manager,
+            tuple,
+            lambda: date(2026, 10, 2),
+            lambda: "now",
+            deduplicated_rows,
         )
         service.sync_garmin_snapshot(
             {
@@ -199,7 +207,11 @@ class TrainingRecordFeatureTests(unittest.TestCase):
 
     def test_legacy_empty_import_recovers_once_and_preserves_local_equipment(self):
         service = EquipmentService(
-            self.manager, dict, lambda: date(2026, 10, 2), lambda: "now", canonical_rows
+            self.manager,
+            tuple,
+            lambda: date(2026, 10, 2),
+            lambda: "now",
+            deduplicated_rows,
         )
         local = {
             "id": "local-item",
@@ -232,7 +244,11 @@ class TrainingRecordFeatureTests(unittest.TestCase):
 
     def test_legacy_marker_with_archived_garmin_item_never_imports_new_gear(self):
         service = EquipmentService(
-            self.manager, dict, lambda: date(2026, 10, 2), lambda: "now", canonical_rows
+            self.manager,
+            tuple,
+            lambda: date(2026, 10, 2),
+            lambda: "now",
+            deduplicated_rows,
         )
         existing = {
             "id": "garmin-linked",
@@ -350,10 +366,10 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         }
         service = EquipmentService(
             self.manager,
-            lambda: snapshot,
+            lambda: snapshot["raw_provider_data"]["activities"],
             lambda: date(2026, 9, 1),
             lambda: "2026-09-01T00:00:00Z",
-            canonical_rows,
+            deduplicated_rows,
         )
         equipment = service.save(
             {
@@ -425,10 +441,10 @@ class TrainingRecordFeatureTests(unittest.TestCase):
     def test_equipment_requires_initial_values_and_prevents_component_cycles(self):
         service = EquipmentService(
             self.manager,
-            dict,
+            tuple,
             lambda: date(2026, 9, 1),
             lambda: "2026-09-01T00:00:00Z",
-            canonical_rows,
+            deduplicated_rows,
         )
         payload = {
             "name": "Bike",
@@ -470,10 +486,10 @@ class TrainingRecordFeatureTests(unittest.TestCase):
     def test_local_lifetime_target_must_be_positive_and_is_projected(self):
         service = EquipmentService(
             self.manager,
-            dict,
+            tuple,
             lambda: date(2026, 9, 1),
             lambda: "2026-09-01T00:00:00Z",
-            canonical_rows,
+            deduplicated_rows,
         )
         payload = {
             "name": "Bike",
@@ -493,7 +509,11 @@ class TrainingRecordFeatureTests(unittest.TestCase):
 
     def test_backdated_garmin_maintenance_keeps_distance_baseline_unknown(self):
         service = EquipmentService(
-            self.manager, dict, lambda: date(2026, 10, 2), lambda: "now", canonical_rows
+            self.manager,
+            tuple,
+            lambda: date(2026, 10, 2),
+            lambda: "now",
+            deduplicated_rows,
         )
         service.sync_garmin_snapshot(
             {
@@ -539,10 +559,10 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         }
         service = EquipmentService(
             self.manager,
-            lambda: {"recent_activities": [activity]},
+            lambda: [activity],
             lambda: date(2026, 9, 1),
             lambda: "2026-09-01T00:00:00Z",
-            canonical_rows,
+            deduplicated_rows,
         )
         bike = service.save(
             {

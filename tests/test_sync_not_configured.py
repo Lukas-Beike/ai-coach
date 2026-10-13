@@ -57,11 +57,8 @@ def _full_resync_garmin_not_configured() -> None:
 def _activity_details_not_configured() -> None:
     service = ActivityDetailRefreshService(
         api_client=Mock(),
-        state_repository=Mock(
-            latest_snapshot=Mock(
-                return_value={"raw_provider_data": {"activities": [{"id": "a1"}]}}
-            )
-        ),
+        database_manager=MagicMock(),
+        row_reader=Mock(activity_rows=Mock(return_value=({"id": "a1"},))),
         store=Mock(),
         utc_now=Mock(return_value="2026-10-09T12:00:00+00:00"),
         configured=False,

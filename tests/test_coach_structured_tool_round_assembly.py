@@ -21,7 +21,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
             "read_only_tools",
             "clarification",
             "training_patch",
-            "sync_state",
+            "inspector",
             "proposal_creation",
             "tool_dispatch",
             "job_store",
@@ -64,7 +64,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
                     planning_authority_service=dependencies["planning_authority"],
                 ),
                 state=StructuredToolRoundState(
-                    sync_state_repository=dependencies["sync_state"],
+                    duplicate_inspector=dependencies["inspector"],
                     job_store=dependencies["job_store"],
                 ),
                 conversation=StructuredToolRoundConversation(
@@ -93,7 +93,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
             "read_only_tools",
             "clarification",
             "training_patch",
-            "sync_state",
+            "inspector",
             "proposal_creation",
             "tool_dispatch",
             "job_store",
@@ -116,7 +116,9 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
         self.assertIs(
             service._preparation._dialogue_action, deps["dialogue_action"].return_value
         )
-        self.assertIs(service._execution._sync_state, deps["sync_state"].return_value)
+        self.assertIs(
+            service._execution._duplicate_inspector, deps["inspector"].return_value
+        )
         self.assertIs(service._execution._key_values, deps["key_values"])
         self.assertIs(
             service._execution._training_patch, deps["training_patch"].return_value

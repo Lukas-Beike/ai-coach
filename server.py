@@ -169,7 +169,10 @@ from backend.history.assembly import (
     HistoryPlanningServices,
 )
 from backend.http_api import server as http_server
-from backend.http_api.activity_assembly import ActivityReadAssembly
+from backend.http_api.activity_assembly import (
+    ActivityReadAssembly,
+    ActivityReadSources,
+)
 from backend.http_api.assembly import (
     HttpApiAssembly,
     HttpAthleteServices,
@@ -639,6 +642,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             key_values=KEY_VALUE_REPOSITORY,
             snapshot=SNAPSHOT_REPOSITORY,
             snapshot_reader=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+            activity_rows=lambda: CANONICAL_READ,
             competition=COMPETITION_REPOSITORY,
         ),
         runtime=AthleteRuntime(
@@ -660,10 +664,13 @@ CANONICAL_READ: CanonicalReadSelector
 
 ACTIVITY_READS = ActivityReadAssembly(
     database_manager,
-    SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+    ActivityReadSources(
+        SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+        lambda: CANONICAL_READ,
+        observation_reader=lambda: CANONICAL_READ,
+    ),
     ATHLETE_DATA.activity_feedback,
     lambda: ATHLETE_DATA.equipment().read(),
-    observation_reader=lambda: CANONICAL_READ,
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
@@ -997,6 +1004,7 @@ INTERVALS_SYNC = IntervalsSyncAssembly(
             event_buffer=runtime_events.STATE_EVENT_BUFFER,
             redact_text=REDACTOR.redact_text,
             logger=LOGGER,
+            activity_rows=lambda: CANONICAL_READ,
         ),
         operations=IntervalsOperationDependencies(
             operation_observer=PROVIDER_SYNC.operation_observer,
@@ -1350,7 +1358,7 @@ COACH_PROPOSALS = CoachProposalAssembly(
     dependencies=CoachProposalAssembly.Inputs(
         persistence=ProposalPersistence(
             database_manager=database_manager,
-            sync_state_repository=sync_state_repository,
+            duplicate_inspector=ATHLETE_DATA.duplicate_inspector,
             nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
             nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         ),
@@ -1654,7 +1662,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
             planning_authority_service=SYNC_COMMANDS.authority,
         ),
         state=StructuredToolRoundState(
-            sync_state_repository=lambda: sync_state_repository(),
+            duplicate_inspector=ATHLETE_DATA.duplicate_inspector,
             job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
         ),
         conversation=StructuredToolRoundConversation(

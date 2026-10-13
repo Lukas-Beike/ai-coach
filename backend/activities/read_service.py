@@ -1,4 +1,4 @@
-"""Completed-activity read use cases backed by the durable snapshot."""
+"""Completed-activity read use cases backed by the canonical activity rows."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from backend.activities.activity_reference import (
 )
 from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.matching import record_date
-from backend.runtime.ports import ProviderSnapshotReader
+from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
 
 ALL_DAYS = -1
 PAGE_DEFAULT = 100
@@ -88,6 +88,7 @@ class ActivityReadService:
         self,
         database_manager: Any,
         snapshot_reader: ProviderSnapshotReader,
+        row_reader: ActivityRowReader,
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
         *,
@@ -96,6 +97,7 @@ class ActivityReadService:
     ):
         self._database_manager = database_manager
         self._snapshot_reader = snapshot_reader
+        self._row_reader = row_reader
         self._feedback_service = feedback_service
         self._detail_store = detail_store
         self._read_equipment = read_equipment
@@ -106,14 +108,13 @@ class ActivityReadService:
             snapshot = self._snapshot_reader.latest_snapshot(db)
         return snapshot if isinstance(snapshot, dict) else {}
 
-    @staticmethod
-    def _activities(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-        values = snapshot.get("recent_activities")
-        return (
-            [item for item in values if isinstance(item, dict)]
-            if isinstance(values, list)
-            else []
-        )
+    def _read(self) -> tuple[Any, list[dict[str, Any]]]:
+        """Read the sync time and the activity rows in one transaction."""
+        with self._database_manager.unit_of_work() as db:
+            snapshot = self._snapshot_reader.latest_snapshot(db)
+            rows = self._row_reader.activity_rows(db)
+        synced_at = snapshot.get("synced_at") if isinstance(snapshot, dict) else None
+        return synced_at, list(rows)
 
     def _with_local_ids(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         local_ids = self._references.local_ids(_page_key(item)[1] for item in items)
@@ -129,8 +130,7 @@ class ActivityReadService:
         *,
         today: date,
     ) -> dict[str, Any]:
-        snapshot = self._snapshot()
-        activities = self._activities(snapshot)
+        synced_at, activities = self._read()
         try:
             days_value = int(days)
         except TypeError, ValueError:
@@ -152,7 +152,7 @@ class ActivityReadService:
             self._feedback_service.attach_to_activities(page)
         )
         return {
-            "snapshot_synced_at": snapshot.get("synced_at"),
+            "snapshot_synced_at": synced_at,
             "activities": attached,
             "next_cursor": _encode_page_cursor(_page_key(page[-1]))
             if len(activities) > len(page) and page
@@ -164,9 +164,7 @@ class ActivityReadService:
     def recent(
         self, days: int = ALL_DAYS, limit: int = 250, *, today: date
     ) -> dict[str, Any]:
-        snapshot = self._snapshot()
-        values = snapshot.get("recent_activities")
-        activities = values if isinstance(values, list) else []
+        synced_at, activities = self._read()
         if days != ALL_DAYS:
             cutoff = today - timedelta(days=days - 1)
             activities = [
@@ -178,7 +176,7 @@ class ActivityReadService:
                 >= cutoff.isoformat()
             ]
         return {
-            "snapshot_synced_at": snapshot.get("synced_at"),
+            "snapshot_synced_at": synced_at,
             "activities": self._with_local_ids(
                 self._feedback_service.attach_to_activities(
                     activities[: max(1, min(int(limit), 500))]

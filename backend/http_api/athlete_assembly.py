@@ -7,14 +7,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.activities.activity_reference import ActivityReferences
+from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
 from backend.athlete.checkins import CheckinService
 from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
-from backend.performance.training_report import canonical_rows
-from backend.runtime.ports import ProviderSnapshotReader
+from backend.performance.training_report import deduplicated_rows
+from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
 from backend.weather.cache import invalidate_for_location_change
 
 
@@ -26,6 +27,7 @@ class AthleteRepositories:
     key_values: Any
     snapshot: Any
     snapshot_reader: ProviderSnapshotReader
+    activity_rows: Callable[[], ActivityRowReader]
     competition: Any
 
 
@@ -63,6 +65,7 @@ class AthleteDataAssembly:
         self._key_value_repository = repositories.key_values
         self._snapshot_repository = repositories.snapshot
         self._snapshot_reader = repositories.snapshot_reader
+        self._activity_rows = repositories.activity_rows
         self._utc_now = runtime.utc_now
         self._local_date = runtime.local_date
         self._event_buffer = runtime.event_buffer
@@ -76,13 +79,17 @@ class AthleteDataAssembly:
         with self._database_manager().unit_of_work() as db:
             return self._snapshot_reader.latest_snapshot(db) or {}
 
+    def activity_rows(self) -> tuple[dict[str, Any], ...]:
+        with self._database_manager().unit_of_work() as db:
+            return self._activity_rows().activity_rows(db)
+
     def equipment(self) -> EquipmentService:
         return EquipmentService(
             self._database_manager(),
-            self.training_snapshot,
+            self.activity_rows,
             self._local_date,
             self._utc_now,
-            canonical_rows,
+            deduplicated_rows,
             resolve_activity=ActivityReferences(self._database_manager()).resolve,
         )
 
@@ -90,8 +97,13 @@ class AthleteDataAssembly:
         return ActivityFeedbackService(
             self._database_manager(),
             self._activity_feedback_repository,
-            self._snapshot_reader,
+            self._activity_rows(),
             references=ActivityReferences(self._database_manager()),
+        )
+
+    def duplicate_inspector(self) -> DuplicateInspector:
+        return DuplicateInspector(
+            self._database_manager(), self._snapshot_reader, self._activity_rows()
         )
 
     def duplicate_activity(self) -> DuplicateActivityService:
@@ -99,6 +111,7 @@ class AthleteDataAssembly:
             self._database_manager(),
             self._snapshot_repository,
             self._snapshot_reader,
+            self._activity_rows(),
             self._utc_now,
             self._event_buffer,
             references=ActivityReferences(self._database_manager()),

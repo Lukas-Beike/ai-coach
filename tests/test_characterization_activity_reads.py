@@ -18,9 +18,12 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
+from activity_row_support import SnapshotActivityRows
+
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.read_service import PAGE_DEFAULT, PAGE_MAX, ActivityReadService
 from backend.db.manager import DatabaseManager
+from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.report_service import TrainingRecordsService
@@ -131,8 +134,12 @@ def _ids(rows: list[dict[str, Any]]) -> list[Any]:
 
 class ActivityPageCharacterizationTests(_StorageCase):
     def _page(self, activities: Any, **kwargs: Any) -> dict[str, Any]:
+        snapshots = _Snapshots(_snapshot(activities))
         service = ActivityReadService(
-            self.database, _Snapshots(_snapshot(activities)), _Feedback()
+            self.database,
+            snapshots,
+            CompactActivityRows(SnapshotActivityRows(snapshots)),
+            _Feedback(),
         )
         return service.page(today=TODAY, **kwargs)
 
@@ -207,14 +214,16 @@ class ActivityPageCharacterizationTests(_StorageCase):
         self.assertEqual([9, 10], _ids(result["activities"]))
 
     def test_sort_key_falls_back_through_date_and_id_fields(self) -> None:
+        # The compact row keeps only the planning fields, so the id falls back to
+        # external_id and an empty start sorts last.
         rows = [
             {"external_id": "ext-only", "start_date_local": PREVIOUS_DAY},
-            {"activityId": "from-activity-id", "date": "2026-05-04"},
-            {"id": "empty-local", "start_date_local": "", "start_date": DAY},
+            {"external_id": "from-ext", "start_date_local": "2026-05-04"},
+            {"id": "empty-local", "start_date_local": ""},
         ]
         result = self._page(rows)
         expected = [
-            {**row, "local_activity_id": None} for row in (rows[2], rows[1], rows[0])
+            {**row, "local_activity_id": None} for row in (rows[1], rows[0], rows[2])
         ]
         self.assertEqual(expected, result["activities"])
 
@@ -296,7 +305,13 @@ class ActivityPageCharacterizationTests(_StorageCase):
         self.assertIsNone(result["next_cursor"])
 
     def test_missing_snapshot_returns_empty_page(self) -> None:
-        service = ActivityReadService(self.database, _Snapshots(None), _Feedback())
+        snapshots = _Snapshots(None)
+        service = ActivityReadService(
+            self.database,
+            snapshots,
+            CompactActivityRows(SnapshotActivityRows(snapshots)),
+            _Feedback(),
+        )
         result = service.page(today=TODAY)
         self.assertEqual([], result["activities"])
         self.assertIsNone(result["snapshot_synced_at"])
@@ -310,8 +325,12 @@ class ActivityPageCharacterizationTests(_StorageCase):
 
 class ActivityRecentCharacterizationTests(_StorageCase):
     def _recent(self, activities: Any, **kwargs: Any) -> dict[str, Any]:
+        snapshots = _Snapshots(_snapshot(activities))
         service = ActivityReadService(
-            self.database, _Snapshots(_snapshot(activities)), _Feedback()
+            self.database,
+            snapshots,
+            CompactActivityRows(SnapshotActivityRows(snapshots)),
+            _Feedback(),
         )
         return service.recent(today=TODAY, **kwargs)
 
@@ -332,12 +351,11 @@ class ActivityRecentCharacterizationTests(_StorageCase):
         self.assertEqual(1, len(self._recent(rows, limit=0)["activities"]))
         self.assertEqual(1, len(self._recent(rows, limit=-1)["activities"]))
 
-    def test_non_dict_rows_consume_limit_before_being_dropped(self) -> None:
-        # Quirk pinned: without a days filter, the slice happens before non-dict
-        # rows are dropped by feedback attachment, so "junk" uses up the budget.
+    def test_non_dict_rows_are_dropped_before_the_limit(self) -> None:
+        # The activity rows only contain mappings, so "junk" never uses up the budget.
         rows = ["junk", _activity("a", DAY), _activity("b", DAY)]
-        self.assertEqual(["a"], _ids(self._recent(rows, limit=2)["activities"]))
-        self.assertEqual(["a", "b"], _ids(self._recent(rows, limit=3)["activities"]))
+        self.assertEqual(["a"], _ids(self._recent(rows, limit=1)["activities"]))
+        self.assertEqual(["a", "b"], _ids(self._recent(rows, limit=2)["activities"]))
 
     def test_days_filter_drops_non_dict_rows_before_limit(self) -> None:
         rows = ["junk", _activity("today", DAY)]
@@ -440,9 +458,11 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
     RAW = _activity("ride-1", DAY, name="Threshold", moving_time=3600)
 
     def _detail(self, raw: list[dict[str, Any]]) -> dict[str, Any]:
+        snapshots = _Snapshots(_snapshot([], raw))
         service = ActivityAnalysisReadService(
             self.database,
-            _Snapshots(_snapshot([], raw)),
+            snapshots,
+            CompactActivityRows(SnapshotActivityRows(snapshots)),
             _Feedback(),
             ActivityDetailStore(self.database),
         )
@@ -681,9 +701,11 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
         self._save_profile()
         (row,) = self._planning_activities([self.COMPACT_LEAN])
         self.assertNotIn("workout_profile", row)
+        snapshots = _Snapshots(_snapshot([self.COMPACT_LEAN], [self.RAW]))
         detail = ActivityAnalysisReadService(
             self.database,
-            _Snapshots(_snapshot([self.COMPACT_LEAN], [self.RAW])),
+            snapshots,
+            CompactActivityRows(SnapshotActivityRows(snapshots)),
             _Feedback(),
             ActivityDetailStore(self.database),
         ).detail("ride-1", garmin_snapshot={}, profile={}, today=TODAY)

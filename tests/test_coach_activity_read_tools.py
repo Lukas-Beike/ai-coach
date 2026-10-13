@@ -7,9 +7,12 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
+from activity_row_support import SnapshotActivityRows
+
 from backend.canonical.vocabulary import MetricKind
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.errors import AppError
+from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.runtime.ports import ObservationSourceSelector
@@ -146,6 +149,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         activity_read = ActivityAnalysisReadService(
             manager,
             snapshot_repository,
+            CompactActivityRows(SnapshotActivityRows(snapshot_repository)),
             feedback,
         )
         garmin_snapshot = {"recent_wellness": []}
@@ -252,6 +256,7 @@ def _canonical_activity_tool(snapshot: dict):
     activity_read = ActivityAnalysisReadService(
         manager,
         snapshot_reader,
+        CompactActivityRows(SnapshotActivityRows(snapshot_reader)),
         feedback,
         canonical=CanonicalPerformanceSource(
             database_manager=lambda: manager,

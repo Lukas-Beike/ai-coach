@@ -48,6 +48,7 @@ class IntervalsSyncAssemblyTests(unittest.TestCase):
                     event_buffer=Mock(),
                     redact_text=Mock(),
                     logger=logging.getLogger("test.intervals.assembly"),
+                    activity_rows=Mock(),
                 ),
                 operations=IntervalsOperationDependencies(
                     operation_observer=callbacks["operation_observer"],

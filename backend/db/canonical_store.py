@@ -711,36 +711,87 @@ def mark_missing_deleted(
         activity_id = candidate["activity_id"]
         if provider_activity_id in present_ids:
             continue
-        db.execute(
-            "UPDATE activity_records SET state = ?, updated_at = ? "
-            "WHERE provider = ? AND provider_activity_id = ?",
-            (ActivityRecordState.DELETED.value, now, provider, provider_activity_id),
-        )
-        db.execute(
-            "UPDATE provider_records SET state = ?, updated_at = ? "
-            "WHERE provider = ? AND record_kind = ? AND source_record_id = ?",
-            (
-                ProviderRecordState.DELETED.value,
-                now,
-                provider,
-                record_kind,
-                provider_activity_id,
-            ),
-        )
-        db.execute(
-            "UPDATE activity_sessions SET state = ?, updated_at = ? "
-            "WHERE activity_id = ? AND primary_provider = ? "
-            "AND primary_provider_activity_id = ?",
-            (
-                ActivitySessionState.DELETED.value,
-                now,
-                activity_id,
-                provider,
-                provider_activity_id,
-            ),
+        _delete_activity(
+            db,
+            provider,
+            record_kind=record_kind,
+            provider_activity_id=provider_activity_id,
+            activity_id=activity_id,
+            now=now,
         )
         deleted += 1
     return deleted
+
+
+def mark_activity_deleted(
+    db: Any,
+    provider: str,
+    *,
+    record_kind: str,
+    provider_activity_id: str,
+    now: str,
+) -> bool:
+    """Tombstone one activity the provider removed, with its raw record and session.
+
+    Table-served readers stop returning it. Returns False when the activity was
+    never stored or is already deleted, and then changes nothing.
+    """
+    found = _fetch_all(
+        db,
+        "SELECT activity_id FROM activity_records "
+        "WHERE provider = ? AND provider_activity_id = ? AND state = ?",
+        (provider, provider_activity_id, ActivityRecordState.ACTIVE.value),
+    )
+    if not found:
+        return False
+    _delete_activity(
+        db,
+        provider,
+        record_kind=record_kind,
+        provider_activity_id=provider_activity_id,
+        activity_id=found[0]["activity_id"],
+        now=now,
+    )
+    return True
+
+
+def _delete_activity(
+    db: Any,
+    provider: str,
+    *,
+    record_kind: str,
+    provider_activity_id: str,
+    activity_id: str,
+    now: str,
+) -> None:
+    db.execute(
+        "UPDATE activity_records SET state = ?, updated_at = ? "
+        "WHERE provider = ? AND provider_activity_id = ?",
+        (ActivityRecordState.DELETED.value, now, provider, provider_activity_id),
+    )
+    db.execute(
+        "UPDATE provider_records SET state = ?, updated_at = ? "
+        "WHERE provider = ? AND record_kind = ? AND source_record_id = ?",
+        (
+            ProviderRecordState.DELETED.value,
+            now,
+            provider,
+            record_kind,
+            provider_activity_id,
+        ),
+    )
+    db.execute(
+        "UPDATE activity_sessions SET state = ?, updated_at = ? "
+        "WHERE activity_id = ? AND primary_provider = ? "
+        "AND primary_provider_activity_id = ?",
+        (
+            ActivitySessionState.DELETED.value,
+            now,
+            activity_id,
+            provider,
+            provider_activity_id,
+        ),
+    )
 
 
 def _insert_provider_record(
