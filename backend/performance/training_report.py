@@ -149,9 +149,18 @@ def training_report(
     checkins: list[dict[str, Any]] | None = None,
     activity_feedback: list[dict[str, Any]] | None = None,
     timezone: str = "UTC",
+    activity_rows: Sequence[Any] | None = None,
 ) -> dict[str, Any]:
+    """Build the report; ``activity_rows`` are the raw rows of the activity reader.
+
+    Without them the rows come from the snapshot, as before.
+    """
     snapshot = snapshot or {}
-    rows, duplicates = canonical_rows(snapshot)
+    rows, duplicates = (
+        canonical_rows(snapshot)
+        if activity_rows is None
+        else deduplicated_rows(activity_rows)
+    )
     end = start + timedelta(days=days - 1)
     effective_end = min(today, end)
     eligible = [row for row in rows if sport == "all" or str(row.get("type")) == sport]

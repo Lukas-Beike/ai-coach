@@ -56,7 +56,7 @@ def performance_load_context(
         "tsb": performance_wellness.wellness_form_value(latest_wellness),
         "rampRate": _first_present(latest_wellness, ("rampRate",)),
     }
-    if canonical is not None:
+    if canonical is not None and canonical.wellness_day is not None:
         # Only CTL and ATL come from canonical observations; the rest of the
         # latest wellness row stays on the legacy path.
         load["ctl"] = canonical.ctl

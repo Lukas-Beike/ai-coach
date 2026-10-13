@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from datetime import date, timedelta
 from statistics import median
 from typing import Any
@@ -102,15 +103,23 @@ def _wellness_records(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return _rows(raw_rows) + _rows(snapshot.get("recent_wellness"))
 
 
+def _snapshot_activity_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = snapshot.get("raw_provider_data")
+    raw_rows = raw.get("activities") if isinstance(raw, dict) else []
+    return _rows(snapshot.get("recent_activities")) + _rows(raw_rows)
+
+
 def _intervals_measurements(
-    snapshot: dict[str, Any], today: date
+    snapshot: dict[str, Any],
+    today: date,
+    wellness: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, dict[date, tuple[float, str, Any]]]:
     values: dict[str, dict[date, tuple[float, str, Any]]] = {
         "weight_kg": {},
         "body_fat_pct": {},
     }
     synced_at = snapshot.get("synced_at")
-    for row in _wellness_records(snapshot):
+    for row in _wellness_records(snapshot) if wellness is None else wellness:
         observed = _day(row.get("id") or row.get("date"))
         if observed is None or observed > today:
             continue
@@ -417,6 +426,8 @@ def body_history(
     today: date,
     *,
     canonical: CanonicalBodyInputs | None = None,
+    wellness_rows: Sequence[dict[str, Any]] | None = None,
+    activity_rows: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return API-ready 14d/12w charts under performance.history.body.
 
@@ -427,10 +438,13 @@ def body_history(
     ``canonical`` overrides only the weight and body-fat days it holds. Days it lacks
     keep the legacy value, so values the canonical mapper does not store are not
     dropped. When None, the legacy wellness and Garmin readers are used, as before.
+
+    ``wellness_rows`` and ``activity_rows`` are the rows rebuilt from the canonical
+    read ports; without them the snapshot sections are read.
     """
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     garmin = garmin if isinstance(garmin, dict) else {}
-    intervals = _intervals_measurements(snapshot, today)
+    intervals = _intervals_measurements(snapshot, today, wellness_rows)
     garmin_values = _garmin_measurements(garmin, today)
     if canonical is not None:
         garmin_synced_at = _sync_timestamp(garmin, "weight")
@@ -456,13 +470,10 @@ def body_history(
     }
     intervals_ftp: dict[date, tuple[float, str, Any]] = {}
     for observed_at, value in eftp.eftp_daily_values(
-        _wellness_records(snapshot),
-        _rows(snapshot.get("recent_activities"))
-        + _rows(
-            (snapshot.get("raw_provider_data") or {}).get("activities")
-            if isinstance(snapshot.get("raw_provider_data"), dict)
-            else []
-        ),
+        _wellness_records(snapshot) if wellness_rows is None else list(wellness_rows),
+        _snapshot_activity_rows(snapshot)
+        if activity_rows is None
+        else list(activity_rows),
         today - timedelta(days=83),
         today,
     ).items():

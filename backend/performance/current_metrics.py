@@ -247,6 +247,8 @@ def _height_in_cm(value: Any) -> float | int | None:
 
 def _performance_snapshot_inputs(
     snapshot: dict[str, Any],
+    activities_override: list[Any] | None = None,
+    wellness_override: list[dict[str, Any]] | None = None,
 ) -> tuple[
     dict[str, Any],
     list[Any],
@@ -259,16 +261,18 @@ def _performance_snapshot_inputs(
     athlete = (
         snapshot.get("athlete") if isinstance(snapshot.get("athlete"), dict) else {}
     )
-    wellness_rows = (
-        [row for row in snapshot.get("recent_wellness", []) if isinstance(row, dict)]
-        if isinstance(snapshot.get("recent_wellness"), list)
-        else []
-    )
-    activities = (
-        snapshot.get("recent_activities")
-        if isinstance(snapshot.get("recent_activities"), list)
-        else []
-    )
+    wellness_rows: list[dict[str, Any]] = []
+    if wellness_override is not None:
+        wellness_rows = wellness_override
+    elif isinstance(snapshot.get("recent_wellness"), list):
+        wellness_rows = [
+            row for row in snapshot["recent_wellness"] if isinstance(row, dict)
+        ]
+    activities: list[Any] = []
+    if activities_override is not None:
+        activities = activities_override
+    elif isinstance(snapshot.get("recent_activities"), list):
+        activities = snapshot["recent_activities"]
     latest_wellness = max(
         wellness_rows, key=lambda row: str(row.get("id") or ""), default={}
     )
@@ -580,13 +584,17 @@ def current_performance_metrics(
     garmin_metrics: dict[str, dict[str, Any]],
     *,
     canonical: CanonicalCurrentInputs | None = None,
+    activities: list[Any] | None = None,
+    wellness_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Compose current metrics; ``canonical`` replaces the Intervals sport values.
 
-    Without ``canonical`` the legacy snapshot chain is used unchanged.
+    ``activities`` and ``wellness_rows`` are the canonical rows of the performance
+    context. Without them, and without ``canonical``, the legacy snapshot chain is
+    used unchanged.
     """
     athlete, activities, latest_wellness, ride, run, wellness_ride, wellness_run = (
-        _performance_snapshot_inputs(snapshot)
+        _performance_snapshot_inputs(snapshot, activities, wellness_rows)
     )
     latest_ride_activity = _latest_ride_activity(activities)
     latest_ride_eftp = _first_present(

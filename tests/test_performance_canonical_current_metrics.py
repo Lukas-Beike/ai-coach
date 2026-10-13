@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import unittest
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any, Final
 
 from canonical_consumer_parity import (
@@ -40,6 +40,7 @@ from backend.runtime.ports import ObservationReader
 
 SYNC_DAY = date(2026, 10, 12)
 SENSOR_KINDS = (MetricKind.THRESHOLD_HR, MetricKind.VO2MAX)
+SYNC_KINDS = (MetricKind.THRESHOLD_HR, MetricKind.VO2MAX, MetricKind.WEIGHT)
 
 
 class ObservationStub(ObservationReader):
@@ -83,7 +84,7 @@ def _read(
 ) -> CanonicalCurrentInputs | None:
     """Read a snapshot with its latest wellness day, as the assembly does."""
     latest = _latest_wellness_day(_latest_wellness(snapshot or {}))
-    return read_current_inputs(reader, None, snapshot, latest_wellness_day=latest)
+    return read_current_inputs(reader, None, latest_wellness_day=latest)
 
 
 def _canonical(case: Case, observations: tuple[Observation, ...] | None = None) -> Any:
@@ -263,8 +264,13 @@ class CanonicalCurrentInputTests(unittest.TestCase):
         reader = ObservationStub(_observations(case))
         _read(reader, case.intervals)
         window = (SYNC_DAY - timedelta(days=1), SYNC_DAY + timedelta(days=1))
+        # The sync instant is found by one unbounded read per current-metric kind.
         self.assertEqual(
-            reader.calls,
+            reader.calls[:3],
+            [(kind, None, None, None) for kind in SYNC_KINDS],
+        )
+        self.assertEqual(
+            reader.calls[3:],
             [
                 (MetricKind.THRESHOLD_HR, *window, None),
                 (MetricKind.VO2MAX, *window, None),
@@ -275,48 +281,28 @@ class CanonicalCurrentInputTests(unittest.TestCase):
     def test_weight_window_extends_to_an_older_latest_wellness_day(self) -> None:
         case = _case("intervals_only")
         reader = ObservationStub(_observations(case))
-        read_current_inputs(
-            reader, None, case.intervals, latest_wellness_day=date(2026, 10, 1)
-        )
+        read_current_inputs(reader, None, latest_wellness_day=date(2026, 10, 1))
         self.assertEqual(
             reader.calls[-1],
             (MetricKind.WEIGHT, date(2026, 10, 1), SYNC_DAY + timedelta(days=1), None),
         )
 
-    def test_missing_or_unusable_sync_instant_yields_none(self) -> None:
+    def test_observations_without_an_intervals_sync_instant_yield_none(self) -> None:
         case = _case("intervals_only")
         observations = _observations(case)
-        for synced_at in (
-            None,
-            "",
-            "not a time",
-            "2026-10-12T06:00:00",
-            "0001-01-01T00:00:00+01:00",
-        ):
-            with self.subTest(synced_at=synced_at):
-                snapshot = {**case.intervals, "synced_at": synced_at}
-                reader = ObservationStub(observations)
-                self.assertIsNone(read_current_inputs(reader, None, snapshot))
-                self.assertEqual(reader.calls, [])
-        self.assertIsNone(
-            read_current_inputs(ObservationStub(observations), None, None)
+        unstamped = tuple(
+            replace(
+                observation,
+                provenance=replace(observation.provenance, retrieved_at=None),
+            )
+            for observation in observations
         )
+        reader = ObservationStub(unstamped)
+        self.assertIsNone(read_current_inputs(reader, None))
+        self.assertEqual({call[1:] for call in reader.calls}, {(None, None, None)})
 
     def test_sync_without_stored_sport_values_yields_none(self) -> None:
-        case = _case("intervals_only")
-        self.assertIsNone(
-            read_current_inputs(ObservationStub(()), None, case.intervals)
-        )
-
-    def test_the_same_instant_in_another_offset_matches_the_stored_rows(self) -> None:
-        case = _case("intervals_only")
-        other_offset = timezone(timedelta(hours=2))
-        snapshot = {
-            **case.intervals,
-            "synced_at": RETRIEVED_AT.astimezone(other_offset).isoformat(),
-        }
-        inputs = _read(ObservationStub(_observations(case)), snapshot)
-        self.assertEqual(inputs, _inputs(case))
+        self.assertIsNone(read_current_inputs(ObservationStub(()), None))
 
 
 class CanonicalWeightTests(unittest.TestCase):

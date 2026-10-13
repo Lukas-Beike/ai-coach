@@ -7,6 +7,7 @@ from backend.athlete.local_date import LocalDate
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import activity_validation, body, eftp, garmin_metric_history
 from backend.performance.canonical_body import CanonicalBodyInputs
+from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.display_sources import preferred_providers
 from backend.performance.garmin_load import acute_load_value
 
@@ -47,12 +48,31 @@ def _garmin_day(row: dict[str, Any]) -> date | None:
     return None
 
 
+def _activity_history_rows(
+    raw: dict[str, Any],
+    snapshot: dict[str, Any],
+    canonical: CanonicalPerformanceInputs | None,
+) -> list[dict[str, Any]]:
+    """Raw activity rows: the canonical reader's, or the snapshot's sections."""
+    if canonical is not None and canonical.activity_rows is not None:
+        return list(canonical.activity_rows)
+    return _rows(raw.get("activities")) + _rows(snapshot.get("recent_activities"))
+
+
 def _wellness_history(
-    raw: dict[str, Any], snapshot: dict[str, Any], start: date, today: date
+    raw: dict[str, Any],
+    snapshot: dict[str, Any],
+    start: date,
+    today: date,
+    canonical: CanonicalPerformanceInputs | None = None,
 ) -> dict[date, dict[str, Any]]:
+    if canonical is not None and canonical.history_wellness_rows is not None:
+        rows = list(canonical.history_wellness_rows)
+    else:
+        rows = _rows(raw.get("wellness")) + _rows(snapshot.get("recent_wellness"))
     return {
         day: row
-        for row in _rows(raw.get("wellness")) + _rows(snapshot.get("recent_wellness"))
+        for row in rows
         if (day := _day(row.get("id") or row.get("date"))) is not None
         and start <= day <= today
     }
@@ -68,12 +88,12 @@ def _load_history(dates: list[str], garmin: dict[str, Any]) -> list[dict[str, An
 
 
 def _training_time_history(
-    raw: dict[str, Any], snapshot: dict[str, Any], dates: list[str]
+    rows: list[dict[str, Any]], dates: list[str]
 ) -> list[dict[str, Any]]:
     """Daily moving time in hours; each activity counts once, unknown stays a gap."""
     seconds: dict[str, float] = {}
     seen: set[str] = set()
-    for row in _rows(raw.get("activities")) + _rows(snapshot.get("recent_activities")):
+    for row in rows:
         key = str(row.get("id") or "")
         day = _day(row.get("start_date_local"))
         value = row.get("moving_time")
@@ -123,8 +143,7 @@ def _garmin_values(
 
 def _metric_series(
     key: str,
-    raw: dict[str, Any],
-    snapshot: dict[str, Any],
+    activities: list[dict[str, Any]],
     garmin: dict[str, Any],
     wellness: dict[date, dict[str, Any]],
     dates: list[str],
@@ -136,7 +155,7 @@ def _metric_series(
         provider = ProviderId.INTERVALS
         observations = eftp.eftp_daily_values(
             list(wellness.values()),
-            _rows(raw.get("activities")) + _rows(snapshot.get("recent_activities")),
+            activities,
             start,
             today,
         )
@@ -159,8 +178,13 @@ def analysis_history(
     today: date,
     *,
     canonical_body: CanonicalBodyInputs | None = None,
+    canonical: CanonicalPerformanceInputs | None = None,
 ) -> dict[str, Any]:
-    """Use dated provider history, never backfill today's settings into the past."""
+    """Use dated provider history, never backfill today's settings into the past.
+
+    ``canonical`` supplies the activity and wellness rows read through the canonical
+    ports; without them the snapshot sections are read.
+    """
     snapshot = snapshot or {}
     start = today - timedelta(days=89)
     dates = [(start + timedelta(days=i)).isoformat() for i in range(90)]
@@ -170,10 +194,11 @@ def analysis_history(
     raw = snapshot.get("raw_provider_data")
     raw = raw if isinstance(raw, dict) else {}
     # Raw provider rows retain the history that the compact Coach projection trims.
-    wellness = _wellness_history(raw, snapshot, load_start, today)
+    wellness = _wellness_history(raw, snapshot, load_start, today, canonical)
+    activities = _activity_history_rows(raw, snapshot, canonical)
     load = _load_history(load_dates, garmin)
     series = {
-        key: _metric_series(key, raw, snapshot, garmin, wellness, dates, start, today)
+        key: _metric_series(key, activities, garmin, wellness, dates, start, today)
         for key in METRIC_KEYS
     }
     return {
@@ -190,11 +215,20 @@ def analysis_history(
             "source": INTERVALS_SOURCE,
             "start": load_dates[0],
             "end": load_dates[-1],
-            "points": _training_time_history(raw, snapshot, load_dates),
+            "points": _training_time_history(activities, load_dates),
         },
         # PublicPerformanceStateService exposes this as performance.history.body;
         # the UI can render it in the separate Body tab without another request.
-        "body": body.body_history(snapshot, garmin, today, canonical=canonical_body),
+        "body": body.body_history(
+            snapshot,
+            garmin,
+            today,
+            canonical=canonical_body,
+            wellness_rows=None
+            if canonical is None
+            else canonical.history_wellness_rows,
+            activity_rows=None if canonical is None else canonical.activity_rows,
+        ),
         "cycling_power_profile": {
             **(snapshot.get("cycling_power_profile") or {}),
             "points": [

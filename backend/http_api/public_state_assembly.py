@@ -50,8 +50,8 @@ class PublicStateCoreInputs:
     # When set, body history reads weight and body fat from canonical tables while
     # the tables serve reads.
     canonical_serving: Callable[[], CanonicalTableServing] | None = None
-    # When set, season preparation, load scenarios, and the state and plan
-    # endpoints read activity rows from it.
+    # When set, season preparation, load scenarios, the performance readers and
+    # the state and plan endpoints read activity rows from it.
     activity_row_reader: Callable[[], ActivityRowReader] | None = None
 
 
@@ -195,6 +195,7 @@ class PublicStateAssembly:
             self._database_manager,
             self._observation_reader,
             serving=self._canonical_serving,
+            activity_rows=self._activity_row_reader,
         )
 
     def season_source(self) -> SeasonSource:

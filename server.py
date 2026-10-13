@@ -1305,6 +1305,8 @@ COACH_CONTEXT = CoachContextAssembly(
             canonical=CanonicalPerformanceSource(
                 database_manager=lambda: database_manager(),
                 observation_reader=lambda: CANONICAL_READ,
+                serving=lambda: CANONICAL_READ,
+                activity_rows=lambda: CANONICAL_READ,
             ),
             activity_rows=ActivityRowSource(
                 database_manager=lambda: database_manager(),

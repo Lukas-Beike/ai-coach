@@ -1,11 +1,12 @@
 """Canonical current metrics: Intervals sport thresholds and VO2max from one sync.
 
 The Intervals snapshot is projected into canonical observations dated on the
-athlete-local sync day and stamped with the snapshot's sync instant. The read
-therefore keeps only Intervals rows whose ``retrieved_at`` equals the snapshot's
-``synced_at`` instant, within the UTC sync day and one day either side (the
-athlete-local day always lies inside that window). Rows from older syncs stay in
-the tables and never change the current values.
+athlete-local sync day and stamped with the snapshot's sync instant. The current
+sync is the latest ``retrieved_at`` among the Intervals threshold, VO2max and
+weight observations, so no snapshot section anchors the read. The read keeps only
+Intervals rows whose ``retrieved_at`` equals that instant, within the UTC sync day
+and one day either side (the athlete-local day always lies inside that window).
+Rows from older syncs stay in the tables and never change the current values.
 
 Sport-scoped values keep every candidate of this sync for that sport, because the
 legacy reader takes the first matching sport setting and the caller must match that
@@ -17,13 +18,12 @@ Weight is read for the snapshot's latest wellness row (the row the legacy reader
 picks) and for the athlete record of the same sync. Garmin weight stays on the
 legacy path.
 
-A snapshot without an aware ``synced_at`` yields None, and the caller keeps the
+Observations without an Intervals sync instant yield None, and the caller keeps the
 legacy values.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
@@ -32,7 +32,7 @@ from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.runtime.ports import ObservationReader
 
-_SYNCED_AT: Final = "synced_at"
+_SYNC_KINDS: Final = (MetricKind.THRESHOLD_HR, MetricKind.VO2MAX, MetricKind.WEIGHT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,16 +56,15 @@ class CanonicalCurrentInputs:
 def read_current_inputs(
     reader: ObservationReader,
     db: Any,
-    snapshot: Mapping[str, Any] | None,
     *,
     latest_wellness_day: date | None = None,
 ) -> CanonicalCurrentInputs | None:
-    """Read the current sport thresholds, VO2max and weight for a stored snapshot.
+    """Read the current sport thresholds, VO2max and weight of the latest sync.
 
-    ``latest_wellness_day`` is the snapshot's latest wellness row. Without it no
-    wellness-row weight is selected, and the caller keeps the legacy value.
+    ``latest_wellness_day`` is the latest wellness day. Without it no wellness-row
+    weight is selected, and the caller keeps the legacy value.
     """
-    synced = _synced_instant(snapshot)
+    synced = _latest_sync_instant(reader, db)
     if synced is None:
         return None
     try:
@@ -175,15 +174,13 @@ def _athlete_observation(observations: tuple[Observation, ...]) -> Observation |
     )
 
 
-def _synced_instant(snapshot: Mapping[str, Any] | None) -> datetime | None:
-    """Return the snapshot's sync instant when it is an aware ISO timestamp."""
-    if not snapshot:
-        return None
-    text = snapshot.get(_SYNCED_AT)
-    if not isinstance(text, str):
-        return None
-    try:
-        instant = datetime.fromisoformat(text.strip())
-    except ValueError:
-        return None
-    return instant if instant.utcoffset() is not None else None
+def _latest_sync_instant(reader: ObservationReader, db: Any) -> datetime | None:
+    """Return the latest Intervals sync instant that stored a current-metric kind."""
+    instants = [
+        observation.provenance.retrieved_at
+        for kind in _SYNC_KINDS
+        for observation in reader.observations(db, kind)
+        if observation.provenance.provider is ProviderId.INTERVALS
+        and observation.provenance.retrieved_at is not None
+    ]
+    return max(instants, default=None)

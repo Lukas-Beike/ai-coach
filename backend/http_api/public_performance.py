@@ -51,7 +51,12 @@ class PublicPerformanceStateService:
             snapshot = self._sync_state_repository.latest_snapshot()
             garmin = self._garmin_payload_service.snapshot_in(db)
             reader = resolve_reader(source.observation_reader(), db)
-            canonical = read_performance_inputs(reader, db, snapshot)
+            canonical = read_performance_inputs(
+                reader,
+                db,
+                snapshot,
+                activity_reader=source.activity_row_reader(),
+            )
             body = _body_inputs(source, reader, db, today)
         return self._project(snapshot, garmin, canonical, body, today)
 
@@ -92,7 +97,9 @@ class PublicPerformanceStateService:
         )
         performance = {
             **performance,
-            "history": analysis_history(snapshot, garmin, today, canonical_body=body),
+            "history": analysis_history(
+                snapshot, garmin, today, canonical_body=body, canonical=canonical
+            ),
         }
         return {
             "performance": performance,

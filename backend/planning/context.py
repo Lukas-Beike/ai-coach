@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.providers.intervals_activity_fields import ACTIVITY_FIELDS, selected
 
 UTC_OFFSET_SUFFIX = "+00:00"
 
@@ -85,12 +86,6 @@ PLANNED_FIELDS = (
 FEEDBACK_FIELDS = ("activity_id", "activity_name", "activity_date", "notes")
 
 
-def selected(item: Any, fields: tuple[str, ...]) -> dict[str, Any]:
-    if not isinstance(item, dict):
-        return {}
-    return {key: item[key] for key in fields if key in item and item[key] is not None}
-
-
 SPORT_SETTING_FIELDS = (
     "id",
     "types",
@@ -146,44 +141,6 @@ WELLNESS_SPORT_INFO_FIELDS = (
     "vo2_max",
     "running_vo2max",
     "cycling_vo2max",
-)
-ACTIVITY_FIELDS = (
-    "id",
-    "start_date_local",
-    "name",
-    "type",
-    "moving_time",
-    "distance",
-    "total_elevation_gain",
-    "elapsed_time",
-    "icu_training_load",
-    "icu_intensity",
-    "icu_ctl",
-    "icu_atl",
-    "icu_ftp",
-    "icu_eftp",
-    "average_heartrate",
-    "max_heartrate",
-    "average_watts",
-    "weighted_average_watts",
-    "icu_weighted_avg_watts",
-    "normalized_power",
-    "average_speed",
-    "max_speed",
-    "icu_weighted_avg_speed",
-    "icu_pace",
-    "vo2max",
-    "vo2_max",
-    "vO2MaxValue",
-    "vo2MaxValue",
-    "icu_vo2max",
-    "feel",
-    "icu_rpe",
-    "paired_event_id",
-    "source",
-    "device_name",
-    "external_id",
-    "file_type",
 )
 WELLNESS_FIELDS = (
     "id",
