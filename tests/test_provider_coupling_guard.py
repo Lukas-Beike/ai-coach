@@ -288,6 +288,13 @@ class ProviderCouplingScannerTests(unittest.TestCase):
             "the scan found no provider sources; refusing to record an empty baseline"
         )
         self.assertEqual([empty_message], snapshot_refusals(baseline, []))
+        self.assertEqual(
+            [empty_message], snapshot_refusals(None, [], sources_scanned=True)
+        )
+
+    def test_snapshot_records_removal_of_the_last_entry_after_a_scan(self) -> None:
+        baseline = [_entry("provider_literal", "backend/a.py", "garmin", 1)]
+        self.assertEqual([], snapshot_refusals(baseline, [], sources_scanned=True))
 
     def test_snapshot_allows_bootstrap_without_a_committed_baseline(self) -> None:
         current = [_entry("provider_literal", "backend/a.py", "garmin", 1)]

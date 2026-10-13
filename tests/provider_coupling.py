@@ -304,14 +304,19 @@ def compare_coupling(
 
 
 def snapshot_refusals(
-    baseline: Sequence[CouplingEntry] | None, current: Sequence[CouplingEntry]
+    baseline: Sequence[CouplingEntry] | None,
+    current: Sequence[CouplingEntry],
+    *,
+    sources_scanned: bool = False,
 ) -> list[str]:
     """Return why a snapshot must not be recorded; an empty list means allowed.
 
     A ``None`` baseline means the committed file does not exist yet, which is only
-    the bootstrap case. Growth is refused once a baseline exists.
+    the bootstrap case. Growth is refused once a baseline exists. An empty scan is
+    recorded only when an existing baseline confirms that source files were
+    scanned and every remaining entry was removed.
     """
-    if not current:
+    if not current and (baseline is None or not sources_scanned):
         return [
             "the scan found no provider sources; refusing to record an empty baseline"
         ]
@@ -334,7 +339,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     current = scan_provider_coupling()
     if arguments.snapshot:
         baseline = load_baseline() if BASELINE_PATH.exists() else None
-        refusals = snapshot_refusals(baseline, current)
+        refusals = snapshot_refusals(
+            baseline, current, sources_scanned=bool(scanned_paths(SOURCE_ROOT))
+        )
         if refusals:
             for refusal in refusals:
                 print(refusal)
