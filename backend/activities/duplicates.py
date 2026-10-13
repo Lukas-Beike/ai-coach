@@ -15,7 +15,10 @@ from backend.activities.identity import (
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
-from backend.providers.snapshot_projection import intervals_activity_rows
+from backend.providers.snapshot_projection import (
+    intervals_activity_rows,
+    intervals_snapshot_is_stripped,
+)
 from backend.providers.source_labels import SourceView, provider_label
 
 _DUPLICATE_DELETE_STALE_ERROR = (
@@ -83,6 +86,9 @@ def remove_activity_from_snapshot(
     snapshot: Any, activity_id: str, *, synced_at: Any
 ) -> dict[str, Any] | None:
     """Return a copied snapshot with only exact matching activity IDs removed."""
+    # A snapshot stored without its activity sections stays without them.
+    if intervals_snapshot_is_stripped(snapshot):
+        return {**snapshot, "synced_at": synced_at}
     if not isinstance(snapshot, dict):
         return None
 

@@ -28,6 +28,7 @@ from backend.providers.canonical_plans import (
     intervals_snapshot_ingest_plan,
     wahoo_ingest_plan,
 )
+from backend.providers.snapshot_projection import strip_intervals_activity_sections
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill import (
     DEFAULT_BATCH_SIZE,
@@ -323,6 +324,48 @@ class PopulatedBackfillTests(BackfillFixture):
         self.assertEqual(
             self.rows("SELECT activity_id FROM activity_sessions ORDER BY activity_id"),
             sessions,
+        )
+
+    def test_stripped_newest_snapshot_does_not_supersede_the_full_one(self) -> None:
+        full = intervals_fixture_snapshot()
+        self.insert_snapshot(self.manager, full)
+        self.insert_snapshot(
+            self.manager,
+            strip_intervals_activity_sections({**full, "synced_at": LATER}),
+        )
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        counters = self.summary(backfill)["providers"][INTERVALS]
+        # The five activities come from the older, full snapshot: the stripped one
+        # is the newest row but lists none, so it is neither the activity source
+        # nor a reason to supersede the full snapshot.
+        self.assertEqual(self.count("activity_records"), 5)
+        self.assertEqual(counters["superseded"], 0)
+        self.assertEqual(counters["skipped_invalid"], 0)
+        self.assertEqual(
+            self.rows("SELECT state FROM activity_records GROUP BY state"),
+            [{"state": "active"}],
+        )
+
+    def test_stripped_snapshot_without_a_raw_block_is_not_skipped_invalid(
+        self,
+    ) -> None:
+        stripped = strip_intervals_activity_sections(
+            intervals_snapshot([intervals_activity("7")])
+        )
+        stripped.pop("raw_provider_data", None)
+        self.write_dual_write_activity(self.manager, "7", fetched_at=LATER)
+        self.insert_snapshot(self.manager, stripped)
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        counters = self.summary(backfill)["providers"][INTERVALS]
+        self.assertEqual(counters["skipped_invalid"], 0)
+        self.assertEqual(counters["inserted"], 0)
+        # A stripped snapshot is never a deletion source: the backfill keeps the row.
+        self.assertEqual(
+            self.rows("SELECT state FROM activity_records"), [{"state": "active"}]
         )
 
     def test_pending_summary_before_any_run_has_zero_counters(self) -> None:

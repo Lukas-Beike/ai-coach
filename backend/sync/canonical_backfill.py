@@ -27,6 +27,13 @@ athlete records from older snapshots keep insert-if-absent. Whether an activity 
 inserted depends only on its snapshot's id, not on canonical state, so a batch
 boundary or a resume cannot change the outcome.
 
+Stripped snapshots: once the tables serve reads, a sync stores its snapshot without
+the activity sections and marks it (``canonical_sections``). Such a snapshot never
+counts as the newest one that may insert activities, counts as neither
+``skipped_invalid`` nor a deletion source, and maps only the wellness and athlete
+sections it still carries (insert-if-absent). The activities it lacks are already in
+the tables and their raw records.
+
 Re-projection: when a mapper version is above the ``mapped_version`` of an active
 raw record, that record is mapped again from its stored payload and fetch time, its
 canonical rows are brought to the current projection, and its ``mapped_version`` is
@@ -99,7 +106,10 @@ from backend.providers.canonical_plans import (
     reprojection_mapper_version,
     reprojection_plan,
 )
-from backend.providers.snapshot_projection import stored_retrieved_at
+from backend.providers.snapshot_projection import (
+    CANONICAL_SECTIONS_KEY,
+    stored_retrieved_at,
+)
 from backend.sync.garmin_snapshot_writer import GARMIN_SNAPSHOT_KEY
 
 STATE_KEY: Final = "canonical_backfill_state"
@@ -495,12 +505,20 @@ class CanonicalBackfill:
         row = db.execute(
             "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM snapshots"
         ).fetchone()
+        # A snapshot stored without its activity sections must not become the
+        # only one that may insert activities, or every full snapshot would
+        # supersede its activities.
+        newest = db.execute(
+            "SELECT COALESCE(MAX(id), 0) AS newest_id FROM snapshots "
+            "WHERE json_extract(payload, ?) IS NULL",
+            (f"$.{CANONICAL_SECTIONS_KEY}",),
+        ).fetchone()
         return {
             "status": BackfillStatus.PENDING.value,
             "phase": _INGEST,
             "garmin_done": False,
             "snapshot_before": int(row["next_id"]),
-            "newest_id": int(row["next_id"]) - 1,
+            "newest_id": int(newest["newest_id"]),
             "current": None,
             "reproject_after": 0,
             "reproject_current": None,

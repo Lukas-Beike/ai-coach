@@ -37,6 +37,7 @@ from backend.sync.library import WorkoutLibraryRefreshService
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.performance import PerformanceRefreshFollowupService
 from backend.sync.planned_units import RemotePlannedUnitReconciler
+from backend.sync.snapshot_storage import SnapshotStorage
 from backend.sync.snapshots import merge_historical_snapshot
 from backend.sync.state import SyncStateRepository
 from backend.sync.status import SyncOperationStateWriter
@@ -58,10 +59,13 @@ class IntervalsSnapshotReader:
         all_sync_days: int,
         calendar_history_days: int,
         calendar_future_days: int,
+        snapshot_storage: SnapshotStorage | None = None,
     ) -> None:
         self._config = config
         self._api_client = api_client
-        self._sync_state_repository = sync_state_repository
+        self._snapshot_storage = snapshot_storage or SnapshotStorage(
+            sync_state_repository
+        )
         self._local_now = local_now
         self._utc_now = utc_now
         self._earliest_date = earliest_date
@@ -95,7 +99,7 @@ class IntervalsSnapshotReader:
         today = end_date or self._local_now().date()
         calendar_start = today - timedelta(days=self._calendar_history_days)
         calendar_end = today + timedelta(days=self._calendar_future_days)
-        existing = self._sync_state_repository.latest_snapshot() or {}
+        existing = self._snapshot_storage.merge_base() or {}
         incremental = bool(existing) and activity_days != self._all_sync_days
         request_days = activity_days
         activities: list[Any] = []
@@ -291,10 +295,14 @@ class IntervalsSnapshotService:
         earliest_date: date,
         chunk_days: int,
         all_sync_days: int,
+        snapshot_storage: SnapshotStorage | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
         self._coverage = CanonicalCoverageStore(key_value_repository)
+        self._snapshot_storage = snapshot_storage or SnapshotStorage(
+            sync_state_repository
+        )
         self._sync_state_repository = sync_state_repository
         self._remote_planned_unit_reconciler = remote_planned_unit_reconciler
         self._workout_library_refresh_service = workout_library_refresh_service
@@ -310,7 +318,7 @@ class IntervalsSnapshotService:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         if end_date is not None:
             snapshot = merge_historical_snapshot(
-                self._sync_state_repository.latest_snapshot(), snapshot
+                self._snapshot_storage.merge_base(), snapshot
             )
         zone = self._local_now().tzinfo or UTC
         provider_sync = snapshot.get("provider_sync", {})
@@ -320,17 +328,11 @@ class IntervalsSnapshotService:
             else {}
         )
         planned_import = {"imported": 0, "updated": 0, "conflicts": 0}
-        # The legacy snapshot, its canonical rows and planned-unit reconciliation
-        # commit together. Cursors are written by the caller after this returns.
+        # The snapshot, its canonical rows and planned-unit reconciliation commit
+        # together. Cursors are written by the caller after this returns.
         with self._database_manager.unit_of_work() as db:
-            if end_date is not None:
-                self._sync_state_repository.save_snapshot(
-                    snapshot, update_full_sync=False
-                )
-            else:
-                self._sync_state_repository.save_snapshot(
-                    snapshot, activity_days=activity_days
-                )
+            # The ingest and the coverage read the full payload; the snapshot is
+            # stored afterwards, without the sections the tables serve.
             ingest_intervals_snapshot(
                 db,
                 snapshot,
@@ -343,6 +345,14 @@ class IntervalsSnapshotService:
             self._coverage.persist(
                 db, intervals_snapshot_coverage(snapshot, zone=zone), zone=zone
             )
+            if end_date is not None:
+                self._snapshot_storage.save(
+                    db, snapshot, zone=zone, update_full_sync=False
+                )
+            else:
+                self._snapshot_storage.save(
+                    db, snapshot, zone=zone, activity_days=activity_days
+                )
             if end_date is None:
                 # Nested service calls intentionally share this UOW: reconciliation
                 # and its initial-import marker must roll back together.
