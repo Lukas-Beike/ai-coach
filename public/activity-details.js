@@ -275,6 +275,7 @@
     // Intervals.icu rows keep their device origin (for example "GARMIN") in
     // `source`, so only an explicit provider field marks a non-Intervals record.
     const intervalsId = providerIds().intervals;
+    if (!intervalsId) return true;
     const provider = String(activity?.provider ?? intervalsId).trim().toLowerCase();
     return provider === intervalsId || provider === coachProviderLabel(intervalsId).toLowerCase();
   }

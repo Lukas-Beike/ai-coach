@@ -117,10 +117,11 @@ class PublicPlanStateService:
             provider_window=calendar_window,
             default_name=self._default_workout_name,
         )
-        if "training_calendar" in calendar_projection:
-            calendar_projection["training_calendar"] = neutral_calendar_entries(
-                calendar_projection["training_calendar"]
-            )
+        for key in ("training_calendar", "planned"):
+            if key in calendar_projection:
+                calendar_projection[key] = neutral_calendar_entries(
+                    calendar_projection[key]
+                )
         return {
             "plans": self._training_plans.list(limit=30),
             **calendar_projection,
