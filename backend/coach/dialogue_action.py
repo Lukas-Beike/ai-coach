@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend.canonical.vocabulary import ProviderId
 from backend.coach.authorization import TRAINING_PLAN_SCOPE_PREFIX, require_coach_scope
 from backend.coach.dialogue import validate_request
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
@@ -190,7 +191,7 @@ class CoachDialogueActionService:
     ) -> None:
         if remote_write and (
             not request["remote_write"]
-            or target != "intervals"
+            or target != ProviderId.INTERVALS
             or "intervals_sync" not in scope
         ):
             raise AppError(

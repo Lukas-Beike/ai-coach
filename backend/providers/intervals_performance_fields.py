@@ -11,6 +11,11 @@ from typing import Final
 TRAINING_LOAD: Final = "icu_training_load"
 CONFIGURED_FTP: Final = "icu_ftp"
 W_PRIME: Final = "icu_w_prime"
+INTENSITY: Final = "icu_intensity"
+WEIGHTED_AVG_WATTS: Final = "icu_weighted_avg_watts"
+WEIGHTED_AVG_SPEED: Final = "icu_weighted_avg_speed"
+PACE: Final = "icu_pace"
+RPE: Final = "icu_rpe"
 ZONE_TIMES: Final = "icu_zone_times"
 HEART_RATE_ZONE_TIMES: Final = "icu_hr_zone_times"
 

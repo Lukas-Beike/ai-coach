@@ -35,6 +35,7 @@ from backend.planning.workout_validation import (  # noqa: F401
 )
 from backend.providers.intervals_workouts import (  # noqa: F401
     COACH_EVENT_EXTERNAL_PREFIX,
+    DERIVED_WORKOUT_KEYS,
     INTERVALS_DEFAULT_WORKOUT_TYPE,
     INTERVALS_ENDURANCE_WORKOUT_TYPES,
     INTERVALS_WORKOUT_SPORTS,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.canonical.vocabulary import ProviderId
 from backend.coach.authorization import (
     authorized_operations,
     require_coach_scope,
@@ -46,7 +47,7 @@ class CoachAdaptiveApplyService:
         )
         sync_illness = bool(arguments.get("sync_illness_to_intervals"))
         if sync_illness and (
-            intent.get("target_system") != "intervals"
+            intent.get("target_system") != ProviderId.INTERVALS
             or "intervals_sync" not in scope_values(intent)
         ):
             raise AppError(

@@ -6,6 +6,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from backend.canonical.vocabulary import ProviderId
 from backend.coach.authorization import authorized_operations, require_coach_scope
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
 from backend.sync.authority import PlanningAuthorityService
@@ -94,7 +95,7 @@ class CoachSyncToolService:
     ) -> dict[str, Any]:
         if (
             "sync_nutrition" not in authorized_operations(intent)
-            or intent.get("target_system") != "intervals"
+            or intent.get("target_system") != ProviderId.INTERVALS
         ):
             raise AppError(
                 403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
@@ -130,7 +131,7 @@ class CoachSyncToolService:
                 "Die Ern\u00e4hrungsdaten haben sich seit der Freigabe ge\u00e4ndert.",
             )
         job = self._queue.enqueue(
-            "intervals",
+            ProviderId.INTERVALS.value,
             "nutrition_sync",
             {"approval_manifest": manifest},
             requested_by="coach",
@@ -166,7 +167,7 @@ class CoachSyncToolService:
     ) -> dict[str, Any]:
         if (
             "refresh_current_performance" not in authorized_operations(intent)
-            or intent.get("target_system") != "intervals"
+            or intent.get("target_system") != ProviderId.INTERVALS
         ):
             raise AppError(
                 403,
@@ -183,7 +184,7 @@ class CoachSyncToolService:
     ) -> dict[str, Any]:
         if (
             "start_intervals_plan_sync" not in authorized_operations(intent)
-            or intent.get("target_system") != "intervals"
+            or intent.get("target_system") != ProviderId.INTERVALS
         ):
             raise AppError(
                 403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
@@ -218,7 +219,7 @@ class CoachSyncToolService:
     ) -> dict[str, Any]:
         if (
             "sync_competitions" not in authorized_operations(intent)
-            or intent.get("target_system") != "intervals"
+            or intent.get("target_system") != ProviderId.INTERVALS
         ):
             raise AppError(
                 403,
@@ -233,7 +234,7 @@ class CoachSyncToolService:
         if not isinstance(manifest, list):
             raise AppError(500, "Die bestätigte Wettkampf-Vorschau ist ungültig.")
         job = self._queue.enqueue(
-            "intervals",
+            ProviderId.INTERVALS.value,
             "competition_push",
             {
                 "reason": str(arguments.get("reason") or "Bestätigter Coach-Auftrag"),
@@ -284,7 +285,7 @@ class CoachSyncToolService:
     ) -> dict[str, Any]:
         if (
             "delete_duplicate_intervals_activity" not in authorized_operations(intent)
-            or intent.get("target_system") != "intervals"
+            or intent.get("target_system") != ProviderId.INTERVALS
         ):
             raise AppError(
                 403,

@@ -124,120 +124,6 @@
     },
     {
       "rule": "icu_identifier",
-      "path": "backend/coach/context.py",
-      "token": "icu_intensity",
-      "count": 4
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/coach/context.py",
-      "token": "icu_pace",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/coach/context.py",
-      "token": "icu_rpe",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/coach/context.py",
-      "token": "icu_training_load",
-      "count": 2
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/coach/context.py",
-      "token": "icu_weighted_avg_speed",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/coach/context.py",
-      "token": "icu_weighted_avg_watts",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/adaptive.py",
-      "token": "icu_intensity",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/adaptive.py",
-      "token": "icu_training_load",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
-      "token": "icu_ftp",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
-      "token": "icu_intensity",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
-      "token": "icu_training_load",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
-      "token": "icu_w_prime",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/library.py",
-      "token": "icu_intensity",
-      "count": 2
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/library.py",
-      "token": "icu_training_load",
-      "count": 2
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/planned_units.py",
-      "token": "icu_intensity",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/planned_units.py",
-      "token": "icu_training_load",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/season_preparation.py",
-      "token": "icu_intensity",
-      "count": 3
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/season_preparation.py",
-      "token": "icu_training_load",
-      "count": 3
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/target_snapshot.py",
-      "token": "icu_ftp",
-      "count": 2
-    },
-    {
-      "rule": "icu_identifier",
       "path": "public/activity-details.js",
       "token": "icu_training_load",
       "count": 2
@@ -298,42 +184,6 @@
     },
     {
       "rule": "provider_literal",
-      "path": "backend/coach/adaptive_apply.py",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/coach/dialogue_action.py",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/coach/outcomes.py",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/coach/proposal_creation.py",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/coach/proposal_validation.py",
-      "token": "intervals",
-      "count": 3
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/coach/sync_tools.py",
-      "token": "intervals",
-      "count": 7
-    },
-    {
-      "rule": "provider_literal",
       "path": "backend/diagnostics/report.py",
       "token": "garmin",
       "count": 1
@@ -385,30 +235,6 @@
       "path": "backend/http_api/state_versions.py",
       "token": "garmin",
       "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/planning/calendar.py",
-      "token": "intervals",
-      "count": 2
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/planning/context.py",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/planning/planned_unit_service.py",
-      "token": "intervals",
-      "count": 1
-    },
-    {
-      "rule": "provider_literal",
-      "path": "backend/planning/planned_units.py",
-      "token": "intervals",
-      "count": 3
     },
     {
       "rule": "provider_literal",
