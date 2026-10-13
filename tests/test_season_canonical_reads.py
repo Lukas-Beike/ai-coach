@@ -56,7 +56,7 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
         with self.manager.unit_of_work() as db:
             inputs = read_season_load_inputs(source, db, today=today, timezone=ZONE)
             return load_scenarios(
-                snapshot, {}, today, {"end": "2026-10-20"}, ZONE, inputs=inputs
+                snapshot, {}, today, {"end": "2026-10-20"}, inputs=inputs
             )
 
     def _tables(self) -> Any:

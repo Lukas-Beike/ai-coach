@@ -229,7 +229,6 @@ def load_scenarios(
     plan: dict[str, Any],
     today: date,
     values: dict[str, Any],
-    timezone: str = "UTC",
     *,
     inputs: SeasonLoadInputs,
 ) -> dict[str, Any]:

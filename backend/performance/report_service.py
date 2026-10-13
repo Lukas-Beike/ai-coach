@@ -309,7 +309,6 @@ class TrainingReportReadService:
             self._read_plan() or {},
             today,
             values,
-            timezone,
             inputs=inputs,
         )
 
