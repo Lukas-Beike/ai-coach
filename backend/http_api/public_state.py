@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from backend.canonical.public_metrics import neutral_activity_records
 from backend.canonical.vocabulary import ProviderId
 from backend.db.manager import DatabaseManager
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
@@ -141,7 +142,7 @@ class PublicStateService:
                 "messages": deps.coach_messages.list(),
                 "plans": deps.training_plans.list(),
                 "library": deps.workout_library.list(include_archived=True),
-                "activities": activities,
+                "activities": neutral_activity_records(activities),
                 **calendar_projection,
                 "weather": weather,
                 "profile": deps.profile.get(),

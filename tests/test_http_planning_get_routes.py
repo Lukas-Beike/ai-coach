@@ -21,12 +21,12 @@ class PlanningGetRoutesTests(unittest.TestCase):
 
     def test_plan_uses_first_local_value_and_returns_json(self):
         self.handler.path = "/api/plan?local=1&local=0"
-        self.plan.read.return_value = {"plans": []}
+        self.plan.read_public.return_value = {"plans": []}
 
         self.assertTrue(self.routes.handle(self.handler, "/api/plan"))
 
         self.auth.require_auth.assert_called_once_with(self.handler)
-        self.plan.read.assert_called_once_with(local_only=True)
+        self.plan.read_public.assert_called_once_with(local_only=True)
         self.handler.send_json.assert_called_once_with(200, {"plans": []})
         self.weather.state.assert_not_called()
         self.library.page.assert_not_called()
@@ -53,9 +53,9 @@ class PlanningGetRoutesTests(unittest.TestCase):
 
     def test_query_defaults_match_previous_handler_contract(self):
         self.handler.path = "/api/plan"
-        self.plan.read.return_value = {"plans": []}
+        self.plan.read_public.return_value = {"plans": []}
         self.routes.handle(self.handler, "/api/plan")
-        self.plan.read.assert_called_once_with(local_only=False)
+        self.plan.read_public.assert_called_once_with(local_only=False)
 
         self.handler.path = "/api/weather"
         self.routes.handle(self.handler, "/api/weather")
@@ -74,7 +74,7 @@ class PlanningGetRoutesTests(unittest.TestCase):
             self.routes.handle(self.handler, "/api/plan")
 
         self.auth.require_auth.assert_called_once_with(self.handler)
-        self.plan.read.assert_not_called()
+        self.plan.read_public.assert_not_called()
         self.handler.send_json.assert_not_called()
 
     def test_unknown_route_resolves_no_factory(self):

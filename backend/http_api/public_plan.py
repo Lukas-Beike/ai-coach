@@ -70,6 +70,18 @@ class PublicPlanStateService:
         self._default_workout_name = dependencies.default_workout_name
         self._activity_rows = dependencies.activity_rows
 
+    def read_public(self, local_only: bool = False) -> dict[str, Any]:
+        """Return the plan state with neutral metric names for the browser.
+
+        ``read`` keeps the stored metric keys because the training report and
+        season scenarios consume them internally.
+        """
+        state = self.read(local_only=local_only)
+        for key in ("training_calendar", "planned"):
+            if key in state:
+                state[key] = neutral_calendar_entries(state[key])
+        return state
+
     def read(self, local_only: bool = False) -> dict[str, Any]:
         snapshot = self._sync_state.latest_snapshot() or {}
         local_planned = self._planned_units.list(500)
@@ -117,11 +129,6 @@ class PublicPlanStateService:
             provider_window=calendar_window,
             default_name=self._default_workout_name,
         )
-        for key in ("training_calendar", "planned"):
-            if key in calendar_projection:
-                calendar_projection[key] = neutral_calendar_entries(
-                    calendar_projection[key]
-                )
         return {
             "plans": self._training_plans.list(limit=30),
             **calendar_projection,

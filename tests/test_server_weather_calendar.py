@@ -954,7 +954,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
 
         self.assertEqual(result["planned"][0]["compliance"]["status"], "completed")
         self.assertEqual(
-            result["training_calendar"][0]["compliance"]["actual_activity"]["rpe"],
+            result["training_calendar"][0]["compliance"]["actual_activity"]["icu_rpe"],
             8,
         )
         self.assertIsInstance(result["planning_compliance"], list)

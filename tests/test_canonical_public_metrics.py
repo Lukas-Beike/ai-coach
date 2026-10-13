@@ -4,6 +4,7 @@ import unittest
 
 from backend.canonical.public_metrics import (
     neutral_activity_metrics,
+    neutral_activity_records,
     neutral_calendar_entries,
 )
 
@@ -72,6 +73,30 @@ class NeutralPublicMetricsTests(unittest.TestCase):
             ],
             translated,
         )
+
+    def test_activity_laps_and_rows_are_translated(self) -> None:
+        lap = {"icu_intensity": 0.8}
+        rows = [
+            {
+                "id": "a1",
+                "icu_training_load": 50,
+                "laps": [lap, "not-a-mapping"],
+            },
+            "not-a-mapping",
+        ]
+
+        self.assertEqual(
+            [
+                {
+                    "id": "a1",
+                    "training_load": 50,
+                    "laps": [{"intensity": 0.8}, "not-a-mapping"],
+                },
+                "not-a-mapping",
+            ],
+            neutral_activity_records(rows),
+        )
+        self.assertEqual({"icu_intensity": 0.8}, lap)
 
 
 if __name__ == "__main__":

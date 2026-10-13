@@ -21,7 +21,7 @@ _NEUTRAL_METRIC_KEYS = (
 def neutral_activity_metrics(record: Mapping[str, Any]) -> dict[str, Any]:
     """Return a copy of ``record`` with stored metric keys renamed neutrally.
 
-    An existing neutral value wins over the stored one. Records without the
+    Nested ``laps`` are translated the same way. An existing neutral value wins over the stored one. Records without the
     stored metrics are returned unchanged.
     """
     translated = dict(record)
@@ -31,7 +31,21 @@ def neutral_activity_metrics(record: Mapping[str, Any]) -> dict[str, Any]:
         stored = translated.pop(stored_key)
         if translated.get(neutral_key) is None:
             translated[neutral_key] = stored
+    laps = translated.get("laps")
+    if isinstance(laps, list):
+        translated["laps"] = [
+            neutral_activity_metrics(lap) if isinstance(lap, Mapping) else lap
+            for lap in laps
+        ]
     return translated
+
+
+def neutral_activity_records(records: Iterable[Any]) -> list[Any]:
+    """Translate activity rows, leaving non-mapping items unchanged."""
+    return [
+        neutral_activity_metrics(record) if isinstance(record, Mapping) else record
+        for record in records
+    ]
 
 
 def neutral_calendar_entry(entry: Any) -> Any:

@@ -214,7 +214,7 @@ class ServerHttpTests(ServerTestCase):
                 handler.path = "/api/plan?local=1" if local_only else "/api/plan"
                 handler.send_json = Mock()
                 service = Mock()
-                service.read.return_value = {"plans": []}
+                service.read_public.return_value = {"plans": []}
                 auth = Mock()
                 with (
                     patch.object(
@@ -234,7 +234,7 @@ class ServerHttpTests(ServerTestCase):
                 auth.require_auth.assert_called_once_with(handler)
                 auth_factory.assert_called_once_with()
                 service_factory.assert_called_once_with()
-                service.read.assert_called_once_with(local_only=local_only)
+                service.read_public.assert_called_once_with(local_only=local_only)
                 handler.send_json.assert_called_once_with(200, {"plans": []})
 
     def test_mixed_edit_scope_cannot_authorize_unrelated_existing_unit(self):
