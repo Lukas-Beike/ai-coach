@@ -523,7 +523,11 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         )
         self.assertNotIn(BODY_FAT_WINDOW, reader.calls)
         self.assertNotIn(BODY_WEIGHT_WINDOW, reader.calls)
-        self.assertNotIn(MetricKind.BODY_FAT, {kind for kind, _s, _e in reader.calls})
+        # The wellness rows read every kind once, unbounded; no windowed body read.
+        self.assertNotIn(
+            MetricKind.BODY_FAT,
+            {kind for kind, start, end in reader.calls if (start, end) != (None, None)},
+        )
 
     def test_source_without_serving_never_reads_body_kinds(self) -> None:
         case = CASES[0]
@@ -535,7 +539,11 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         _service(case.intervals, case.garmin, source).performance_state()
         self.assertNotIn(BODY_FAT_WINDOW, reader.calls)
         self.assertNotIn(BODY_WEIGHT_WINDOW, reader.calls)
-        self.assertNotIn(MetricKind.BODY_FAT, {kind for kind, _s, _e in reader.calls})
+        # The wellness rows read every kind once, unbounded; no windowed body read.
+        self.assertNotIn(
+            MetricKind.BODY_FAT,
+            {kind for kind, start, end in reader.calls if (start, end) != (None, None)},
+        )
 
 
 class CanonicalBodyFallbackTests(unittest.TestCase):

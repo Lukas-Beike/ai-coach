@@ -13,6 +13,10 @@ from backend.activities.detail_store import ActivityDetailStore, summary_fingerp
 from backend.activities.identity import intervals_activity_device_source
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
+from backend.performance.canonical_inputs import (
+    CanonicalPerformanceSource,
+    activity_rows_for,
+)
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.season_inputs import (
     SeasonSource,
@@ -20,7 +24,11 @@ from backend.performance.season_inputs import (
     read_season_load_inputs,
 )
 from backend.performance.tag_impact import tag_impact
-from backend.performance.training_report import canonical_rows, training_report
+from backend.performance.training_report import (
+    canonical_rows,
+    deduplicated_rows,
+    training_report,
+)
 
 
 class TrainingRecordsService:
@@ -31,7 +39,9 @@ class TrainingRecordsService:
         read_snapshot: Callable[[], Any],
         read_equipment: Callable[[], dict[str, Any]],
         read_record: Callable[[str, str], dict[str, Any]] | None,
+        canonical: CanonicalPerformanceSource | None = None,
     ) -> None:
+        self._canonical = canonical
         self._database_manager = database_manager
         self._read_snapshot = read_snapshot
         self._read_equipment = read_equipment
@@ -61,7 +71,12 @@ class TrainingRecordsService:
         return recurring_training_comparisons(self.observations())
 
     def observations(self) -> list[dict[str, Any]]:
-        rows, _ = canonical_rows(self._read_snapshot() or {})
+        activity_rows = activity_rows_for(self._canonical)
+        rows, _ = (
+            canonical_rows(self._read_snapshot() or {})
+            if activity_rows is None
+            else deduplicated_rows(activity_rows)
+        )
         known = {str(row.get("id")): row for row in rows}
         records = []
         for stored in ActivityDetailStore(self._database_manager).analysis_summaries():
@@ -284,6 +299,7 @@ class TrainingReportReadService:
         today: Callable[[], date],
         load_scenarios: Callable[..., dict[str, Any]],
         season_source: SeasonSource,
+        canonical: CanonicalPerformanceSource | None = None,
     ) -> None:
         self._read_snapshot = read_snapshot
         self._read_plan = read_plan
@@ -292,6 +308,7 @@ class TrainingReportReadService:
         self._today = today
         self._load_scenarios = load_scenarios
         self._season_source = season_source
+        self._canonical = canonical
 
     def scenarios(
         self, values: dict[str, Any], timezone: str = "UTC"
@@ -341,6 +358,7 @@ class TrainingReportReadService:
             checkins=self._read_checkins(),
             activity_feedback=self._read_feedback(),
             timezone=timezone,
+            activity_rows=activity_rows_for(self._canonical),
         )
 
 
@@ -353,12 +371,14 @@ class TrainingDerivedReadService:
         read_recovery: Callable[[], dict[str, Any]],
         read_performance: Callable[[], dict[str, Any]],
         today: Callable[[], date],
+        canonical: CanonicalPerformanceSource | None = None,
     ) -> None:
         self._read_snapshot = read_snapshot
         self._read_checkins = read_checkins
         self._read_recovery = read_recovery
         self._read_performance = read_performance
         self._today = today
+        self._canonical = canonical
 
     def impact(self, timezone: str = "UTC") -> dict[str, Any]:
         return tag_impact(
@@ -367,6 +387,7 @@ class TrainingDerivedReadService:
             self._read_snapshot() or {},
             self._today(),
             timezone,
+            activity_rows=activity_rows_for(self._canonical),
         )
 
     def body_history(self) -> dict[str, Any]:

@@ -310,12 +310,6 @@
     },
     {
       "rule": "garmin_wire_key",
-      "path": "backend/planning/context.py",
-      "token": "vO2MaxValue",
-      "count": 1
-    },
-    {
-      "rule": "garmin_wire_key",
       "path": "backend/sync/garmin.py",
       "token": "calendarDate",
       "count": 2
@@ -599,73 +593,25 @@
     {
       "rule": "icu_identifier",
       "path": "backend/planning/context.py",
-      "token": "icu_atl",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
-      "token": "icu_ctl",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
-      "token": "icu_eftp",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
       "token": "icu_ftp",
-      "count": 2
+      "count": 1
     },
     {
       "rule": "icu_identifier",
       "path": "backend/planning/context.py",
       "token": "icu_intensity",
-      "count": 2
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
-      "token": "icu_pace",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
-      "token": "icu_rpe",
       "count": 1
     },
     {
       "rule": "icu_identifier",
       "path": "backend/planning/context.py",
       "token": "icu_training_load",
-      "count": 2
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
-      "token": "icu_vo2max",
       "count": 1
     },
     {
       "rule": "icu_identifier",
       "path": "backend/planning/context.py",
       "token": "icu_w_prime",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
-      "token": "icu_weighted_avg_speed",
-      "count": 1
-    },
-    {
-      "rule": "icu_identifier",
-      "path": "backend/planning/context.py",
-      "token": "icu_weighted_avg_watts",
       "count": 1
     },
     {

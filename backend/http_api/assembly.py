@@ -423,6 +423,7 @@ class HttpApiAssembly:
         )
 
         def training_report_services() -> TrainingReportServices:
+            canonical = public.canonical_performance_source()
             records = TrainingRecordsService(
                 database_manager=database_manager(),
                 read_snapshot=report_snapshot,
@@ -437,6 +438,7 @@ class HttpApiAssembly:
                     if kind == "equipment" and athlete.equipment
                     else {}
                 ),
+                canonical=canonical,
             )
             report_read = TrainingReportReadService(
                 read_snapshot=report_snapshot,
@@ -446,6 +448,7 @@ class HttpApiAssembly:
                 today=local_today,
                 load_scenarios=load_scenarios,
                 season_source=public.season_source(),
+                canonical=canonical,
             )
             return TrainingReportServices(
                 records=records,
@@ -457,6 +460,7 @@ class HttpApiAssembly:
                     read_recovery=report_recovery,
                     read_performance=report_performance,
                     today=local_today,
+                    canonical=canonical,
                 ),
                 season=TrainingSeasonReadService(
                     read_snapshot=report_snapshot,

@@ -57,5 +57,7 @@ class ActivityReadAssembly:
         if self._observation_reader is None:
             return None
         return CanonicalPerformanceSource(
-            self._database_manager, self._observation_reader
+            self._database_manager,
+            self._observation_reader,
+            activity_rows=self._row_reader,
         )

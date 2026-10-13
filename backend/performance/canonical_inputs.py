@@ -1,29 +1,39 @@
-"""Canonical performance inputs read through the observation port.
+"""Canonical performance inputs read through the observation and activity-row ports.
 
-CTL and ATL: the reader decides which source serves the values. Each value is
-selected by ``select_current`` pinned to the snapshot's latest wellness day, which
-is the row the legacy load context reads. The read window spans the snapshot's own
-wellness rows and never extends past its latest day, so older or newer canonical
-history cannot change the current load.
+Activities and wellness rows: the reader decides which source serves them, see
+``backend.performance.canonical_sections``. The activity rows are the raw rows of
+``ActivityRowReader`` and their compact projection; the wellness rows are rebuilt
+from the Intervals.icu wellness-day observations and carry the snapshot's
+non-canonical wellness fields. The latest wellness day is the latest day of any
+wellness row or observation.
 
-Current sport thresholds and VO2max come from the same snapshot's sync, see
+CTL and ATL: each value is selected by ``select_current`` pinned to the latest
+wellness day, which is the row the legacy load context reads. The read window spans
+the wellness rows and never extends past the latest day, so older or newer
+canonical history cannot change the current load.
+
+Current sport thresholds and VO2max come from the latest Intervals sync, see
 ``backend.performance.canonical_current``. The current sleep score, resting HR and
 readiness come from ``backend.performance.canonical_recovery``. The 7-day resting HR
 and readiness averages come from ``backend.performance.canonical_recovery_averages``
 and replace the legacy average only when both cover the same days with equal values.
 
-A snapshot without a usable wellness day yields no inputs, and the caller keeps
+Without a usable wellness day the inputs still carry the activities and the
+wellness rows, and no load, threshold or recovery value. Without a canonical
+activity reader and without wellness rows there are no inputs, and the caller keeps
 the legacy values.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
-from backend.canonical.vocabulary import MetricKind
+from backend.canonical.records import Observation
+from backend.canonical.vocabulary import MetricKind, Sport
+from backend.performance import canonical_sections
 from backend.performance.canonical_current import (
     CanonicalCurrentInputs,
     read_current_inputs,
@@ -42,6 +52,7 @@ from backend.performance.canonical_recovery_averages import (
 )
 from backend.performance.source_policy import select_current
 from backend.runtime.ports import (
+    ActivityRowReader,
     CanonicalTableServing,
     ObservationReader,
     ObservationSourceSelector,
@@ -52,18 +63,30 @@ from backend.runtime.ports import (
 class CanonicalPerformanceInputs:
     """CTL and ATL for the wellness day that the legacy load context reads.
 
-    ``current`` holds the sport thresholds and VO2max of the same snapshot, or None
-    when they were not read. ``personal_recovery`` holds the daily resting HR of the
-    personal recovery baselines, or None when it was not read.
+    ``wellness_day`` is None when there is no usable wellness day. ``current`` holds
+    the sport thresholds and VO2max of the latest sync, or None when they were not
+    read. ``personal_recovery`` holds the daily resting HR of the personal recovery
+    baselines, or None when it was not read.
+
+    ``activity_rows`` are the raw activity rows (newest first, before
+    de-duplication) and ``activities`` their compact projection, or None when no
+    activity reader was configured. ``wellness_rows`` are the wellness rows of the
+    performance context and ``history_wellness_rows`` those of the history views,
+    which also keep the raw snapshot rows as carrier. Both are None when the inputs
+    were built without wellness rows.
     """
 
-    wellness_day: date
+    wellness_day: date | None
     ctl: float | None
     atl: float | None
     current: CanonicalCurrentInputs | None = None
     recovery: CanonicalRecoveryInputs | None = None
     personal_recovery: CanonicalPersonalRecoveryInputs | None = None
     recovery_averages: CanonicalRecoveryAverageInputs | None = None
+    activity_rows: tuple[dict[str, Any], ...] | None = None
+    activities: tuple[dict[str, Any], ...] | None = None
+    wellness_rows: tuple[dict[str, Any], ...] | None = None
+    history_wellness_rows: tuple[dict[str, Any], ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,11 +96,17 @@ class CanonicalPerformanceSource:
     Both callables are resolved at read time, as the other assemblies do, so the
     composition root can pass ``lambda: ...`` accessors. ``serving`` is optional;
     when it is None, consumers that gate table-only reads keep the legacy values.
+    ``activity_rows`` is optional; without it the activities stay on the snapshot.
     """
 
     database_manager: Callable[[], Any]
     observation_reader: Callable[[], ObservationReader]
     serving: Callable[[], CanonicalTableServing] | None = None
+    activity_rows: Callable[[], ActivityRowReader] | None = None
+
+    def activity_row_reader(self) -> ActivityRowReader | None:
+        """Return the configured raw activity row reader, if any."""
+        return None if self.activity_rows is None else self.activity_rows()
 
 
 def snapshot_with_inputs(
@@ -93,8 +122,26 @@ def snapshot_with_inputs(
     with source.database_manager().unit_of_work() as db:
         snapshot = read_snapshot()
         return snapshot, read_performance_inputs(
-            source.observation_reader(), db, snapshot
+            source.observation_reader(),
+            db,
+            snapshot,
+            activity_reader=source.activity_row_reader(),
         )
+
+
+def activity_rows_for(
+    source: CanonicalPerformanceSource | None,
+) -> tuple[dict[str, Any], ...] | None:
+    """Read the raw activity rows in their own unit of work.
+
+    None without a source or an activity row reader, so the caller keeps reading
+    the activities from its snapshot.
+    """
+    reader = None if source is None else source.activity_row_reader()
+    if source is None or reader is None:
+        return None
+    with source.database_manager().unit_of_work() as db:
+        return tuple(reader.activity_rows(db))
 
 
 def inputs_for_snapshot(
@@ -103,7 +150,12 @@ def inputs_for_snapshot(
     """Read canonical load inputs inside the caller's snapshot transaction."""
     if source is None:
         return None
-    return read_performance_inputs(source.observation_reader(), db, snapshot)
+    return read_performance_inputs(
+        source.observation_reader(),
+        db,
+        snapshot,
+        activity_reader=source.activity_row_reader(),
+    )
 
 
 def resolve_reader(reader: ObservationReader, db: Any) -> ObservationReader:
@@ -175,63 +227,132 @@ def performance_options(
 
 
 class _ReadOnceReader:
-    """Serve identical reads of one snapshot unit from memory.
+    """Serve the reads of one snapshot unit from one unbounded read per kind.
 
-    The recovery inputs and the recovery averages ask for the same resting HR and
-    readiness rows, so each distinct read reaches the database once per call.
+    The wellness rows, the current metrics, the recovery inputs and the recovery
+    averages all ask for overlapping observations, so each kind reaches the
+    database once per call and the bounds are applied in memory.
     """
 
     def __init__(self, reader: ObservationReader) -> None:
         self._reader = reader
-        self._rows: dict[tuple[Any, ...], tuple[Any, ...]] = {}
+        self._rows: dict[MetricKind, tuple[Observation, ...]] = {}
 
-    def observations(self, db: Any, kind: MetricKind, **kwargs: Any) -> tuple[Any, ...]:
-        key = (kind, kwargs.get("start"), kwargs.get("end"), kwargs.get("sport"))
-        if key not in self._rows:
-            self._rows[key] = tuple(self._reader.observations(db, kind, **kwargs))
-        return self._rows[key]
+    def observations(
+        self,
+        db: Any,
+        kind: MetricKind,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        sport: Sport | None = None,
+    ) -> tuple[Observation, ...]:
+        if kind not in self._rows:
+            self._rows[kind] = tuple(self._reader.observations(db, kind))
+        return tuple(
+            observation
+            for observation in self._rows[kind]
+            if (start is None or observation.observed_on >= start)
+            and (end is None or observation.observed_on <= end)
+            and (sport is None or observation.sport is sport)
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _CarriedRows:
+    """The activity and wellness rows every canonical performance input carries."""
+
+    activity_rows: tuple[dict[str, Any], ...] | None
+    activities: tuple[dict[str, Any], ...] | None
+    wellness_rows: tuple[dict[str, Any], ...]
+    history_wellness_rows: tuple[dict[str, Any], ...]
+
+    def inputs(
+        self,
+        *,
+        wellness_day: date | None,
+        ctl: float | None,
+        atl: float | None,
+        current: CanonicalCurrentInputs | None = None,
+        recovery: CanonicalRecoveryInputs | None = None,
+        personal_recovery: CanonicalPersonalRecoveryInputs | None = None,
+        recovery_averages: CanonicalRecoveryAverageInputs | None = None,
+    ) -> CanonicalPerformanceInputs:
+        return CanonicalPerformanceInputs(
+            wellness_day=wellness_day,
+            ctl=ctl,
+            atl=atl,
+            current=current,
+            recovery=recovery,
+            personal_recovery=personal_recovery,
+            recovery_averages=recovery_averages,
+            activity_rows=self.activity_rows,
+            activities=self.activities,
+            wellness_rows=self.wellness_rows,
+            history_wellness_rows=self.history_wellness_rows,
+        )
 
 
 def read_performance_inputs(
     reader: ObservationReader,
     db: Any,
     snapshot: Mapping[str, Any] | None,
+    *,
+    activity_reader: ActivityRowReader | None = None,
 ) -> CanonicalPerformanceInputs | None:
-    """Read CTL and ATL for a stored snapshot, or return None to keep legacy values.
+    """Read the canonical activities, wellness rows and load inputs of a snapshot.
 
-    None means the snapshot has no wellness rows, or its latest row (the row the
-    legacy reader picks) has an id that is not a strict ``YYYY-MM-DD`` date. A
-    selecting reader chooses its source once for the load and current reads.
+    The snapshot only carries the wellness fields that have no observation (see
+    ``canonical_sections``); activities and wellness values come from the readers.
+    None means there is no activity reader and no wellness row, so the caller keeps
+    the legacy values. A latest row (the row the legacy reader picks) whose id is
+    not a strict ``YYYY-MM-DD`` date yields inputs without a wellness day. A
+    selecting reader chooses its source once for all reads.
     """
-    rows = _wellness_rows(snapshot)
-    if not rows:
-        return None
-    latest_day = _row_day(max(rows, key=_row_id_text))
-    if latest_day is None:
-        return None
-    days = [day for day in map(_row_day, rows) if day is not None]
     reader = _ReadOnceReader(resolve_reader(reader, db))
-    loaded = _load_resolved(
-        reader,
-        db,
-        latest_wellness_day=latest_day,
-        start=min(days),
-        end=latest_day,
+    observed = canonical_sections.read_wellness_observations(reader, db)
+    compact = _snapshot_rows(snapshot, "recent_wellness")
+    rows = canonical_sections.wellness_rows(compact, observed)
+    history = canonical_sections.wellness_rows(
+        [*_raw_wellness_rows(snapshot), *compact], observed
     )
-    return CanonicalPerformanceInputs(
+    activity_rows = (
+        None if activity_reader is None else tuple(activity_reader.activity_rows(db))
+    )
+    if activity_rows is None and not rows:
+        return None
+    activities = (
+        None
+        if activity_rows is None
+        else tuple(canonical_sections.compact_activity_rows(activity_rows))
+    )
+    carried = _CarriedRows(
+        activity_rows=activity_rows,
+        activities=activities,
+        wellness_rows=tuple(rows),
+        history_wellness_rows=tuple(history),
+    )
+    latest_day = (
+        canonical_sections.row_day(max(rows, key=_row_id_text)) if rows else None
+    )
+    if latest_day is None:
+        return carried.inputs(wellness_day=None, ctl=None, atl=None)
+    start = min(day for day in map(canonical_sections.row_day, rows) if day is not None)
+    loaded = _load_resolved(
+        reader, db, latest_wellness_day=latest_day, start=start, end=latest_day
+    )
+    return carried.inputs(
         wellness_day=loaded.wellness_day,
         ctl=loaded.ctl,
         atl=loaded.atl,
-        current=read_current_inputs(
-            reader, db, snapshot, latest_wellness_day=latest_day
-        ),
+        current=read_current_inputs(reader, db, latest_wellness_day=latest_day),
         recovery=read_recovery_inputs(
-            reader, db, latest_wellness_day=latest_day, start=min(days)
+            reader, db, latest_wellness_day=latest_day, start=start
         ),
         personal_recovery=read_personal_recovery_inputs(
             reader, db, start=latest_day - timedelta(days=83)
         ),
-        recovery_averages=read_recovery_average_inputs(reader, db, start=min(days)),
+        recovery_averages=read_recovery_average_inputs(reader, db, start=start),
     )
 
 
@@ -251,27 +372,22 @@ def _current_value(
     return None if observation is None else observation.value.value
 
 
-def _wellness_rows(snapshot: Mapping[str, Any] | None) -> Sequence[Mapping[str, Any]]:
-    if not snapshot:
-        return ()
-    raw = snapshot.get("recent_wellness")
+def _snapshot_rows(
+    snapshot: Mapping[str, Any] | None, key: str
+) -> list[dict[str, Any]]:
+    raw = snapshot.get(key) if snapshot else None
     if not isinstance(raw, list):
-        return ()
+        return []
     return [row for row in raw if isinstance(row, dict)]
+
+
+def _raw_wellness_rows(snapshot: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    raw = snapshot.get("raw_provider_data") if snapshot else None
+    if not isinstance(raw, dict):
+        return []
+    return _snapshot_rows(raw, "wellness")
 
 
 def _row_id_text(row: Mapping[str, Any]) -> str:
     """Order rows as the legacy latest-row selection does."""
     return str(row.get("id") or "")
-
-
-def _row_day(row: Mapping[str, Any]) -> date | None:
-    """Return the row's day only for a strict ``YYYY-MM-DD`` id."""
-    text = row.get("id")
-    if not isinstance(text, str):
-        return None
-    try:
-        day = date.fromisoformat(text)
-    except ValueError:
-        return None
-    return day if day.isoformat() == text else None

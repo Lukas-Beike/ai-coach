@@ -224,7 +224,8 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         ) as project:
             service.execute("get_activity_details", {"activity_id": "synthetic-1"})
         self.assertNotIn("canonical", project.call_args.kwargs)
-        selector.reader_for.assert_not_called()
+        # The wellness observations are now read to find the days, once per call.
+        selector.reader_for.assert_called_once()
 
 
 def _activity_snapshot(recent_wellness: list[dict]) -> dict:

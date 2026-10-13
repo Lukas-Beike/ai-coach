@@ -12,6 +12,7 @@ from __future__ import annotations
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
+from dataclasses import replace
 from datetime import date
 from typing import Any
 from unittest.mock import Mock, patch
@@ -162,6 +163,28 @@ def _latest(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return max(rows, key=lambda row: str(row.get("id") or ""), default={})
 
 
+def _assert_load_inputs(
+    case: unittest.TestCase, inputs: CanonicalPerformanceInputs | None
+) -> None:
+    """The latest row's load; the wellness rows and current metrics are extra."""
+    case.assertEqual(
+        replace(
+            _present(inputs),
+            current=None,
+            wellness_rows=None,
+            history_wellness_rows=None,
+        ),
+        CanonicalPerformanceInputs(
+            wellness_day=PARITY_TODAY,
+            ctl=50.0,
+            atl=60.0,
+            recovery=_NO_RECOVERY,
+            personal_recovery=_NO_PERSONAL_RECOVERY,
+            recovery_averages=_NO_RECOVERY_AVERAGES,
+        ),
+    )
+
+
 def _present(inputs: CanonicalPerformanceInputs | None) -> CanonicalPerformanceInputs:
     if inputs is None:
         raise AssertionError("expected canonical performance inputs")
@@ -283,19 +306,9 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
             {"id": PARITY_DAY, "ctl": 50, "atl": 60},
         ]
         _legacy, _canonical_load, canonical = _load_pair(rows)
-        self.assertEqual(
-            canonical,
-            CanonicalPerformanceInputs(
-                wellness_day=PARITY_TODAY,
-                ctl=50.0,
-                atl=60.0,
-                recovery=_NO_RECOVERY,
-                personal_recovery=_NO_PERSONAL_RECOVERY,
-                recovery_averages=_NO_RECOVERY_AVERAGES,
-            ),
-        )
+        _assert_load_inputs(self, canonical)
 
-    def test_reader_window_spans_the_snapshot_rows_and_ends_at_the_latest_day(
+    def test_every_kind_is_read_once_and_the_windows_are_applied_in_memory(
         self,
     ) -> None:
         rows = [
@@ -304,34 +317,41 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         ]
         snapshot = _snapshot(rows)
         reader = StubObservationReader(_observations(snapshot))
-        read_performance_inputs(reader, "db", snapshot)
-        earliest = date(2026, 9, 19)
-        # Current sport values are read for the sync day of the snapshot, +/- 1 day.
-        sync_window = (date(2026, 10, 9), date(2026, 10, 11))
+        inputs = read_performance_inputs(reader, "db", snapshot)
+        kinds = [kind for kind, _start, _end in reader.calls]
+        # Wellness fields and the current-metric kinds, each read once and unbounded.
+        self.assertEqual(len(kinds), len(set(kinds)))
+        self.assertIn(MetricKind.THRESHOLD_HR, kinds)
         self.assertEqual(
-            reader.calls,
-            [
-                (MetricKind.CTL, earliest, PARITY_TODAY),
-                (MetricKind.ATL, earliest, PARITY_TODAY),
-                (MetricKind.THRESHOLD_HR, *sync_window),
-                (MetricKind.VO2MAX, *sync_window),
-                # Weight also reaches back to the latest wellness day it selects.
-                (MetricKind.WEIGHT, PARITY_TODAY, sync_window[1]),
-                # Recovery values are selected from the earliest wellness day on.
-                (MetricKind.SLEEP_SCORE, earliest, None),
-                (MetricKind.RESTING_HR, earliest, None),
-                (MetricKind.READINESS, earliest, None),
-                # Personal recovery: resting HR from 83 days before the wellness day.
-                (MetricKind.RESTING_HR, date(2026, 6, 29), None),
-            ],
+            {(start, end) for _k, start, end in reader.calls}, {(None, None)}
         )
+        self.assertEqual(_present(inputs).wellness_day, PARITY_TODAY)
+        self.assertEqual(_present(inputs).ctl, 50.0)
 
-    def test_no_wellness_rows_never_reach_the_reader(self) -> None:
+    def test_without_rows_activities_or_observations_there_are_no_inputs(
+        self,
+    ) -> None:
         for snapshot in (_snapshot([]), None):
             with self.subTest(snapshot=snapshot is None):
-                reader = StubObservationReader()
-                self.assertIsNone(read_performance_inputs(reader, "db", snapshot))
-                self.assertEqual(reader.calls, [])
+                self.assertIsNone(
+                    read_performance_inputs(StubObservationReader(), "db", snapshot)
+                )
+
+    def test_a_snapshot_without_wellness_rows_is_rebuilt_from_observations(
+        self,
+    ) -> None:
+        source = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
+        stripped = {
+            key: value for key, value in source.items() if key != "recent_wellness"
+        }
+        inputs = read_performance_inputs(
+            StubObservationReader(_observations(source)), "db", stripped
+        )
+        self.assertEqual(_present(inputs).wellness_day, PARITY_TODAY)
+        self.assertEqual((_present(inputs).ctl, _present(inputs).atl), (50.0, 60.0))
+        self.assertEqual(
+            [row["id"] for row in _present(inputs).wellness_rows or ()], [PARITY_DAY]
+        )
 
     def test_invalid_latest_day_keeps_the_legacy_values(self) -> None:
         # The latest row is the lexicographic maximum of the ids, so each invalid id
@@ -343,11 +363,22 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
             [{"id": "2026-01-01", "ctl": 50}, {"id": "20260920", "ctl": 1}],
         ):
             with self.subTest(rows=rows):
-                reader = StubObservationReader()
-                self.assertIsNone(
-                    read_performance_inputs(reader, "db", _snapshot(rows))
+                inputs = _present(
+                    read_performance_inputs(
+                        StubObservationReader(), "db", _snapshot(rows)
+                    )
                 )
-                self.assertEqual(reader.calls, [])
+                self.assertEqual(
+                    (inputs.wellness_day, inputs.ctl, inputs.atl, inputs.current),
+                    (None, None, None, None),
+                )
+                self.assertIsNone(inputs.recovery)
+                self.assertEqual(
+                    performance_load_context(
+                        [], rows, _latest(rows), PARITY_TODAY, canonical=inputs
+                    )["load"]["ctl"],
+                    1,
+                )
 
     def test_unusable_ids_outside_the_latest_row_are_ignored_for_the_window(
         self,
@@ -358,19 +389,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         ]
         snapshot = _snapshot(rows)
         reader = StubObservationReader(_observations(snapshot))
-        inputs = read_performance_inputs(reader, "db", snapshot)
-        self.assertEqual(
-            inputs,
-            CanonicalPerformanceInputs(
-                wellness_day=PARITY_TODAY,
-                ctl=50.0,
-                atl=60.0,
-                recovery=_NO_RECOVERY,
-                personal_recovery=_NO_PERSONAL_RECOVERY,
-                recovery_averages=_NO_RECOVERY_AVERAGES,
-            ),
-        )
-        self.assertEqual(reader.calls[0][1], PARITY_TODAY)
+        _assert_load_inputs(self, read_performance_inputs(reader, "db", snapshot))
 
     def test_non_mapping_wellness_entries_and_non_list_fields_are_ignored(
         self,
@@ -463,19 +482,9 @@ class CanonicalWiringTests(unittest.TestCase):
             return_value={},
         ) as project:
             service.performance_state()
-        self.assertEqual(manager.events, ["enter", *["read"] * 9, "exit"])
-        self.assertEqual(reader.db_seen, ["db"] * 9)
-        self.assertEqual(
-            project.call_args.kwargs["canonical"],
-            CanonicalPerformanceInputs(
-                wellness_day=PARITY_TODAY,
-                ctl=50.0,
-                atl=60.0,
-                recovery=_NO_RECOVERY,
-                personal_recovery=_NO_PERSONAL_RECOVERY,
-                recovery_averages=_NO_RECOVERY_AVERAGES,
-            ),
-        )
+        self.assertEqual(manager.events, ["enter", *["read"] * 12, "exit"])
+        self.assertEqual(reader.db_seen, ["db"] * 12)
+        _assert_load_inputs(self, project.call_args.kwargs["canonical"])
 
     def test_public_performance_keeps_the_legacy_call_without_wellness(self) -> None:
         snapshot = _snapshot([])
@@ -493,7 +502,8 @@ class CanonicalWiringTests(unittest.TestCase):
             service.performance_state()
         project.assert_called_once_with(snapshot, {}, PARITY_PROFILE, PARITY_TODAY)
         self.assertEqual(manager.events, ["enter", "exit"])
-        self.assertEqual(reader.calls, [])
+        # Only the unbounded wellness reads happen; no windowed read follows.
+        self.assertEqual({(s, e) for _k, s, e in reader.calls}, {(None, None)})
 
     def test_public_performance_without_a_source_uses_no_unit_of_work(self) -> None:
         snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
@@ -523,7 +533,7 @@ class CanonicalWiringTests(unittest.TestCase):
         )
         read_snapshot, canonical = service._performance_inputs()
         self.assertIs(read_snapshot, snapshot)
-        self.assertEqual(reader.db_seen, ["db"] * 9)
+        self.assertEqual(reader.db_seen, ["db"] * 12)
         self.assertEqual(_present(canonical).ctl, 50.0)
 
     def test_activity_performance_inputs_without_a_source_read_nothing_extra(
@@ -596,7 +606,7 @@ class CanonicalWiringTests(unittest.TestCase):
         self.assertIs(read, snapshot)
         self.assertEqual(
             manager.events,
-            ["enter", "snapshot", *["read"] * 9, "exit"],
+            ["enter", "snapshot", *["read"] * 12, "exit"],
         )
         with (
             patch(
@@ -654,18 +664,8 @@ class CanonicalWiringTests(unittest.TestCase):
             ),
         )
         prelude = _prelude(snapshot, manager, service.canonical_inputs).read(True)
-        self.assertEqual(manager.events, ["enter", *["read"] * 9, "exit"])
-        self.assertEqual(
-            prelude.performance_inputs,
-            CanonicalPerformanceInputs(
-                wellness_day=PARITY_TODAY,
-                ctl=50.0,
-                atl=60.0,
-                recovery=_NO_RECOVERY,
-                personal_recovery=_NO_PERSONAL_RECOVERY,
-                recovery_averages=_NO_RECOVERY_AVERAGES,
-            ),
-        )
+        self.assertEqual(manager.events, ["enter", *["read"] * 12, "exit"])
+        _assert_load_inputs(self, prelude.performance_inputs)
         with patch(
             "backend.http_api.public_performance.performance_context.current_performance_context",
             return_value={},
@@ -771,7 +771,7 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         )
         legacy = _service(self.intervals, None, self.garmin).performance_state()
         canonical = _service(self.intervals, source, self.garmin).performance_state()
-        self.assertEqual(counting.calls, 9)
+        self.assertEqual(counting.calls, 12)
         self.assertEqual(_normalized_state(canonical), _normalized_state(legacy))
 
     def test_selector_chooses_its_source_once_for_both_load_reads(self) -> None:

@@ -1201,7 +1201,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 276,
+      "line": 280,
       "column": 25,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -1217,7 +1217,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 275,
+      "line": 279,
       "column": 26,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -1425,7 +1425,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/assembly.py",
-      "line": 496,
+      "line": 500,
       "column": 37,
       "code": "arg-type",
       "message_sha256": "6e2a1d5f101c98ee36bc390fe96e5331bf2154a28467c6d499d7a3153e35cda9"
@@ -2537,7 +2537,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1679,
+      "line": 1681,
       "column": 30,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -2585,7 +2585,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1352,
+      "line": 1354,
       "column": 36,
       "code": "has-type",
       "message_sha256": "480057763c1b5347f5e8f0a61c7f20c6cec2d3a6e24f1e8563bd5b76f2138cc4"
@@ -2601,7 +2601,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1683,
+      "line": 1685,
       "column": 37,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2609,7 +2609,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1711,
+      "line": 1713,
       "column": 38,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2625,7 +2625,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1383,
+      "line": 1385,
       "column": 42,
       "code": "has-type",
       "message_sha256": "6b3bf53c953464ae5eca5af23f6ee4aa9b3fe9f5856d07f358d76bd3a8dee02e"
@@ -3208,19 +3208,19 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/performance/current_metrics.py",
-      "line": 279,
-      "column": 11,
-      "code": "return-value",
-      "message_sha256": "08428d57439c2ba1f6948ebae90f4dd207d232b2f5f44547026c8d7a08479b57"
-    },
-    {
-      "tool": "mypy",
       "path": "tools/extract_bls.py",
       "line": 28,
       "column": 11,
       "code": "return-value",
       "message_sha256": "0394215e142f9965a2058edade273fe77f53ddfff461f70895aaa6f8fe221999"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/performance/current_metrics.py",
+      "line": 283,
+      "column": 11,
+      "code": "return-value",
+      "message_sha256": "d2d361e1e19a2a5feedd3f4f61895c083eb513533d6fff273ee9cb1e7758c57b"
     },
     {
       "tool": "mypy",
