@@ -8,8 +8,8 @@ sections once the backfill is complete. All storage is temporary.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from contextlib import nullcontext
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, nullcontext
 from datetime import date
 from typing import Any, TypeVar
 from unittest.mock import Mock
@@ -46,6 +46,23 @@ class _Manager:
 
     def unit_of_work(self) -> Any:
         return self._case.manager.unit_of_work()
+
+
+class _RecordingManager(_Manager):
+    """Records whether a unit of work is open when callers read."""
+
+    def __init__(self, case: CanonicalReadFixture) -> None:
+        super().__init__(case)
+        self.open = False
+
+    @contextmanager
+    def unit_of_work(self) -> Iterator[Any]:
+        with super().unit_of_work() as db:
+            self.open = True
+            try:
+                yield db
+            finally:
+                self.open = False
 
 
 class CanonicalContextReadCase(CanonicalReadFixture):
@@ -101,6 +118,22 @@ class CompactActivityTests(CanonicalContextReadCase):
             self.assertEqual(source.compact(db), source.compact())
 
 
+class ActivityRowLimitTests(CanonicalContextReadCase):
+    def _limited(self, selector: Any, _snapshot: dict[str, Any]) -> tuple[Any, Any]:
+        with self.manager.reader() as db:
+            return (
+                selector.activity_rows(db),
+                selector.activity_rows(db, limit=1),
+            )
+
+    def test_limit_keeps_the_leading_rows_of_legacy_and_tables(self) -> None:
+        legacy, tables = self._both(self._limited)
+
+        for full, limited in (legacy, tables):
+            self.assertGreater(len(full), 1)
+            self.assertEqual(limited, full[:1])
+
+
 class CoachActivitiesContextTests(CanonicalContextReadCase):
     def _activities(self, selector: Any, snapshot: dict[str, Any]) -> dict[str, Any]:
         reader = CoachPerformanceContextReader(
@@ -120,6 +153,40 @@ class CoachActivitiesContextTests(CanonicalContextReadCase):
         self.assertTrue(tables["recent_activities_by_sport"])
         self.assertEqual(tables, legacy)
         self.assertNotIn("recent_activities", self.intervals)
+
+    def test_read_sources_reads_activities_inside_the_snapshot_unit_of_work(
+        self,
+    ) -> None:
+        populate(self)
+        manager = _RecordingManager(self)
+        source = ActivityRowSource(lambda: manager, lambda: make_selector(self))  # type: ignore[arg-type,return-value]
+        reader = CoachPerformanceContextReader(
+            Mock(), Mock(), Mock(), lambda: TODAY, None, source
+        )
+        seen: list[bool] = []
+
+        def read_snapshot() -> dict[str, Any]:
+            seen.append(manager.open)
+            return self.intervals
+
+        snapshot, _inputs, rows = reader.read_sources(read_snapshot)
+
+        self.assertEqual(seen, [True])
+        self.assertIs(snapshot, self.intervals)
+        self.assertTrue(rows)
+        self.assertEqual(
+            reader.activities(snapshot, [], rows), reader.activities(snapshot, [])
+        )
+
+    def test_read_sources_without_a_row_source_leaves_rows_unread(self) -> None:
+        reader = CoachPerformanceContextReader(
+            Mock(), Mock(), Mock(), lambda: TODAY, None, None
+        )
+
+        snapshot, _inputs, rows = reader.read_sources(lambda: self.intervals)
+
+        self.assertIs(snapshot, self.intervals)
+        self.assertIsNone(rows)
 
     def test_without_a_row_source_no_activities_are_projected(self) -> None:
         reader = CoachPerformanceContextReader(

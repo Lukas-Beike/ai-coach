@@ -122,24 +122,26 @@ class CanonicalSnapshotProjection(
         *,
         start: date | None = None,
         end: date | None = None,
+        limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
         """Return the stored raw Intervals.icu activity rows, in snapshot order.
 
         These are the rows ``canonical_rows`` starts from, before de-duplication.
         Without bounds every row is returned. With a bound, a row is kept when the
         activity mapper gives it an athlete-local date inside the bounds; a row the
-        mapper rejects has no date and is then left out.
+        mapper rejects has no date and is then left out. ``limit`` keeps the
+        first rows after the bounds.
         """
         rows = intervals_activity_rows(self._intervals_snapshot(db))
-        if start is None and end is None:
-            return rows
-        zone = self._zone(db)
-        retrieved_at = self._clock()
-        return tuple(
-            row
-            for row in rows
-            if _row_in_range(row, zone, retrieved_at, start=start, end=end)
-        )
+        if start is not None or end is not None:
+            zone = self._zone(db)
+            retrieved_at = self._clock()
+            rows = tuple(
+                row
+                for row in rows
+                if _row_in_range(row, zone, retrieved_at, start=start, end=end)
+            )
+        return rows if limit is None else rows[:limit]
 
     def has_only_compact_activity_rows(self, db: Any) -> bool:
         """Return True when the stored snapshot lists activities only in compact form."""

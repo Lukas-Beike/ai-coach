@@ -46,6 +46,10 @@ class ActivityRowSource:
         """
         reader = self.reader()
         if db is not None:
-            return compact_activity_rows(reader.activity_rows(db))
+            return compact_activity_rows(
+                reader.activity_rows(db, limit=RECENT_ACTIVITY_LIMIT)
+            )
         with self.database_manager().reader() as own:
-            return compact_activity_rows(reader.activity_rows(own))
+            return compact_activity_rows(
+                reader.activity_rows(own, limit=RECENT_ACTIVITY_LIMIT)
+            )
