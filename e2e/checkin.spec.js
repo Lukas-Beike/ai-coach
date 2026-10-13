@@ -78,9 +78,13 @@ test("@responsive calendar omits check-in while the profile editor saves and sur
   await expect(todayCardFor(page)).toBeVisible();
   await expect(todayCardFor(page).locator(".planned-day-checkin")).toHaveCount(0);
   await page.goto("/#more/profile");
+  // The editor ignores clicks until feedback loads; the browser's restored form values must not stand in for an open dialog.
+  await waitForFeedbackLoaded(page);
   await profileCheckinAction(page).click();
+  await expect(dialog).toBeVisible();
   await expect(dialog.locator('[name="day_form"]')).toHaveValue("E2E check-in: frische Beine");
   await dialog.getByRole("button", { name: "Schließen" }).click();
+  await expect(dialog).toBeHidden();
 });
 
 test("@responsive check-in history asks before replacing an unsaved draft", async ({ page }) => {
