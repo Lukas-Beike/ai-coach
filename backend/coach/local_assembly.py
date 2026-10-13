@@ -11,6 +11,7 @@ from backend.coach.context import CoachQuickActionsService
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.coach.morning import (
+    GarminSleepObservations,
     ManualMorningCheckinService,
     MorningCheckinStateService,
 )
@@ -38,6 +39,7 @@ class CoachLocalGarmin:
     payload_service: Callable[[], Any]
     morning_body_battery: Callable[[], Any]
     logger: Any
+    observations: Callable[[], Any] | None = None
 
 
 class CoachLocalAssembly:
@@ -69,6 +71,7 @@ class CoachLocalAssembly:
         self._garmin_payload = garmin.payload_service
         self._morning_body_battery = garmin.morning_body_battery
         self._logger = garmin.logger
+        self._observations = garmin.observations
         self._provider_registry = provider_registry
 
     def quick_actions_service(self) -> CoachQuickActionsService:
@@ -103,6 +106,13 @@ class CoachLocalAssembly:
             self._morning_body_battery(),
             self._local_date,
             self._logger,
+            observations=(
+                None
+                if self._observations is None
+                else GarminSleepObservations(
+                    self._database_manager(), self._observations
+                )
+            ),
         )
 
     def morning_checkin_state_service(self) -> MorningCheckinStateService:

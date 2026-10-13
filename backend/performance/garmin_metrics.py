@@ -12,6 +12,7 @@ from backend.performance import freshness as performance_freshness
 from backend.performance import garmin_observations, garmin_weight
 from backend.performance.current_metrics import as_number as _as_number
 from backend.performance.current_metrics import metric as _metric
+from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.providers.garmin_fields import first_present as _first_present
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -294,8 +295,8 @@ def _garmin_race_predictions(value: Any) -> dict[str, float | int | None]:
     return races
 
 
-def _garmin_threshold_metrics(
-    snapshot: dict[str, Any],
+def _garmin_canonical_thresholds(
+    snapshot: dict[str, Any], canonical: GarminCanonicalMetrics
 ) -> tuple[
     float | int | None,
     float | int | None,
@@ -303,6 +304,35 @@ def _garmin_threshold_metrics(
     float | int | None,
     float | int | None,
 ]:
+    """Thresholds from observations; the running power has no canonical form."""
+    return (
+        garmin_bounded_metric(canonical.cycling_ftp_watts, 50, 700),
+        garmin_bounded_metric(
+            _garmin_last_numeric(
+                snapshot.get("running_threshold"),
+                {"functionalthresholdpower", "ftp", "runningftp", "power"},
+            ),
+            50,
+            800,
+        ),
+        canonical.run_threshold_pace_seconds_per_km,
+        garmin_bounded_metric(canonical.run_threshold_hr_bpm, 80, 230),
+        garmin_bounded_metric(canonical.bike_threshold_hr_bpm, 80, 230),
+    )
+
+
+def _garmin_threshold_metrics(
+    snapshot: dict[str, Any],
+    canonical: GarminCanonicalMetrics | None = None,
+) -> tuple[
+    float | int | None,
+    float | int | None,
+    float | int | None,
+    float | int | None,
+    float | int | None,
+]:
+    if canonical is not None:
+        return _garmin_canonical_thresholds(snapshot, canonical)
     running_threshold = snapshot.get("running_threshold")
     cycling_ftp = garmin_bounded_metric(
         _garmin_last_numeric(
@@ -368,8 +398,13 @@ def _garmin_activity_max_hr_samples(
 
 def _garmin_max_hr_samples(
     snapshot: dict[str, Any],
+    canonical: GarminCanonicalMetrics | None = None,
 ) -> tuple[dict[str, float | int], dict[str, list[float | int]], list[Any]]:
-    profile_max_hr = garmin_profile_max_hr(snapshot)
+    profile_max_hr: dict[str, float | int] = (
+        garmin_profile_max_hr(snapshot)
+        if canonical is None
+        else dict(canonical.profile_max_hr)
+    )
     values: dict[str, list[float | int]] = {"cycling": [], "running": []}
     stored = snapshot.get("sport_max_hr")
     if not isinstance(stored, dict):
@@ -532,25 +567,45 @@ def _garmin_performance_freshness(
     return metrics
 
 
-def garmin_performance_metrics(
-    snapshot: dict[str, Any], current_date: date
-) -> dict[str, dict[str, Any]]:
-    """Normalize Garmin's varying max-metric and race-prediction payloads."""
-    max_metrics = (
-        snapshot.get("max_metrics")
-        if isinstance(snapshot.get("max_metrics"), (dict, list))
-        else {}
+def _garmin_snapshot_vo2(
+    snapshot: dict[str, Any], canonical: GarminCanonicalMetrics | None
+) -> tuple[float | int | None, float | int | None]:
+    if canonical is not None:
+        return canonical.cycling_vo2max, canonical.running_vo2max
+    max_metrics = snapshot.get("max_metrics")
+    return _garmin_vo2_metrics(
+        max_metrics if isinstance(max_metrics, (dict, list)) else {}
     )
+
+
+def garmin_performance_metrics(
+    snapshot: dict[str, Any],
+    current_date: date,
+    canonical: GarminCanonicalMetrics | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Normalize Garmin's varying max-metric and race-prediction payloads.
+
+    With ``canonical`` the weight, FTP, VO2max, thresholds and profile max heart
+    rate come from the Garmin observations and the snapshot sections behind them
+    are not read. The race predictions, running threshold power, the max heart
+    rate fallbacks from activities and the freshness stay on the snapshot.
+    """
     race_predictions = (
         snapshot.get("race_predictions")
         if isinstance(snapshot.get("race_predictions"), (dict, list))
         else {}
     )
-    cycling_vo2, running_vo2 = _garmin_vo2_metrics(max_metrics)
+    cycling_vo2, running_vo2 = _garmin_snapshot_vo2(snapshot, canonical)
     race_values = _garmin_race_predictions(race_predictions)
-    thresholds = _garmin_threshold_metrics(snapshot)
-    profile_max_hr, max_hr_values, activities = _garmin_max_hr_samples(snapshot)
-    weight = garmin_weight.garmin_weight_metric(snapshot)
+    thresholds = _garmin_threshold_metrics(snapshot, canonical)
+    profile_max_hr, max_hr_values, activities = _garmin_max_hr_samples(
+        snapshot, canonical
+    )
+    weight = (
+        garmin_weight.garmin_weight_metric(snapshot)
+        if canonical is None
+        else {"value": canonical.weight_kg}
+    )
     units = _garmin_performance_units(
         weight,
         max_hr_values,
@@ -579,10 +634,12 @@ def garmin_performance_metrics(
 
 
 def garmin_performance_context(
-    snapshot: dict[str, Any], current_date: date
+    snapshot: dict[str, Any],
+    current_date: date,
+    canonical: GarminCanonicalMetrics | None = None,
 ) -> dict[str, Any]:
     """Project normalized Garmin performance metrics for public contexts."""
-    metrics = garmin_performance_metrics(snapshot, current_date)
+    metrics = garmin_performance_metrics(snapshot, current_date, canonical)
     return {
         "source": GARMIN_PERFORMANCE_SOURCE,
         "weight": metrics["weight_kg"],

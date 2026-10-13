@@ -22,6 +22,7 @@ from backend.performance import garmin_observations
 from backend.performance.history import append_garmin_performance_history
 from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_hr
 from backend.providers.garmin_morning import merge_garmin_records
+from backend.runtime.ports import ActivityRowReader
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.refresh import sync_job_error_class
@@ -136,11 +137,14 @@ class GarminPayloadService:
         key_value_repository: KeyValueRepository,
         sync_state_repository: SyncStateRepository,
         local_today: Callable[[], date],
+        *,
+        activity_rows: Callable[[], ActivityRowReader] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
         self._sync_state_repository = sync_state_repository
         self._local_today = local_today
+        self._activity_rows = activity_rows
 
     def snapshot(self) -> dict[str, Any]:
         with self._database_manager.unit_of_work() as db:
@@ -268,9 +272,21 @@ class GarminPayloadService:
         append_garmin_performance_history(payload, previous, self._local_today())
         return payload
 
+    def intervals_activities(self) -> list[dict[str, Any]]:
+        """Return the stored Intervals.icu activity rows used for duplicate matching.
+
+        With an injected row reader the canonical selector serves them (tables once
+        the backfill is complete, the snapshot before); otherwise the legacy
+        snapshot is read directly.
+        """
+        if self._activity_rows is None:
+            canonical = self._sync_state_repository.latest_snapshot() or {}
+            return list(canonical.get("recent_activities") or [])
+        with self._database_manager.reader() as db:
+            return list(self._activity_rows().activity_rows(db))
+
     def _activity_matches(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        canonical = self._sync_state_repository.latest_snapshot() or {}
-        intervals = canonical.get("recent_activities") or []
+        intervals = self.intervals_activities()
         return [
             {
                 "garmin_activity_id": activity.get("activityId") or activity.get("id"),

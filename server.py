@@ -338,6 +338,7 @@ from backend.sync.garmin_assembly import (
     GarminSyncControl,
     GarminSyncTelemetry,
 )
+from backend.sync.garmin_projection_service import GarminCanonicalSources
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
     GarminMorningRemoteReader,
@@ -606,7 +607,9 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
         MorningBatteryStore(
             manager,
             KEY_VALUE_REPOSITORY,
-            GarminSnapshotWriter(KEY_VALUE_REPOSITORY, lambda: ATHLETE_CLOCK.now().tzinfo),
+            GarminSnapshotWriter(
+                KEY_VALUE_REPOSITORY, lambda: ATHLETE_CLOCK.now().tzinfo
+            ),
         ),
         MorningBatterySource(
             GARMIN_ASSEMBLY.fixture_loader(),
@@ -932,6 +935,10 @@ GARMIN_ASSEMBLY = GarminAssembly(
             lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
             morning_body_battery_service=morning_body_battery_service,
         ),
+        canonical=GarminCanonicalSources(
+            activity_rows=lambda: CANONICAL_READ,
+            observations=lambda: CANONICAL_READ,
+        ),
     )
 )
 
@@ -1183,6 +1190,7 @@ COACH_LOCAL = CoachLocalAssembly(
             payload_service=GARMIN_ASSEMBLY.payload_service,
             morning_body_battery=morning_body_battery_service,
             logger=LOGGER,
+            observations=lambda: CANONICAL_READ,
         ),
     )
 )
