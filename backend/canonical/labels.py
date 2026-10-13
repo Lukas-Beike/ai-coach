@@ -5,7 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Final
 
-from backend.canonical.vocabulary import Sport
+from backend.canonical.vocabulary import ProviderId, Sport
+
+# Provider names as user-facing error messages spell them.
+PROVIDER_ERROR_LABELS: Final[Mapping[str, str]] = {
+    ProviderId.GARMIN.value: "Garmin",
+    ProviderId.INTERVALS.value: "Intervals.icu",
+}
 
 SPORT_LABELS_DE: Final[Mapping[Sport, str]] = {
     Sport.RIDE: "Radfahren",

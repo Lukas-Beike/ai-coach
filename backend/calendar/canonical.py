@@ -3,6 +3,7 @@
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.vocabulary import ProviderId
 
 ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 LOCAL_INTERVALS_SCOPE = "local+intervals"
@@ -117,7 +118,7 @@ def _canonical_remote_event(event: dict[str, Any]) -> dict[str, Any]:
         "remote_library_id": None,
         "is_local": False,
         "is_remote": True,
-        "sync_source": "intervals",
+        "sync_source": ProviderId.INTERVALS,
         "sync_status": "remote",
     }
 

@@ -3,6 +3,8 @@
 import re
 from collections.abc import Callable
 
+from backend.canonical.labels import PROVIDER_ERROR_LABELS
+
 INTERVALS_API_KEY_ERROR = "INTERVALS_API_KEY ist nicht konfiguriert."
 OPENAI_API_KEY_ERROR = "OPENAI_API_KEY ist nicht konfiguriert."
 NOT_FOUND_ERROR = "Nicht gefunden."
@@ -115,8 +117,7 @@ def provider_error(
     """Create a short, classified provider error without forwarding exception text."""
     service_key = str(service or "").casefold()
     label = {
-        "garmin": "Garmin",
-        "intervals": "Intervals.icu",
+        **PROVIDER_ERROR_LABELS,
         "openai": "OpenAI",
         "calendar": "Der externe Kalender",
     }.get(service_key, "Der externe Dienst")

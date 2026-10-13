@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from backend.activities.workout_text import WorkoutTextError, structured_steps
+from backend.providers.intervals_activity_keys import activity_ftp
 
 
 def _number(value: Any) -> float | None:
@@ -55,7 +56,7 @@ def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
     times, values, kind, start, end = streams
     width = (end - start) / 60
     totals, known = _bucket_totals(times, values, kind, start, end)
-    ftp = _number(activity.get("icu_ftp"))
+    ftp = _number(activity_ftp(activity))
     segments = [
         _recorded_segment(total, coverage, width, kind, ftp)
         for total, coverage in zip(totals, known, strict=True)

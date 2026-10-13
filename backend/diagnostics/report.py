@@ -11,6 +11,7 @@ from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.calendar.external import ExternalCalendarReader
+from backend.canonical.vocabulary import ProviderId
 from backend.coach.morning import MorningCheckinStateService
 from backend.config import Config
 from backend.db.manager import DatabaseManager
@@ -165,7 +166,7 @@ class DiagnosticReportService:
                     "running": self._get_value(db, "performance_refresh_running")
                     == "1",
                 },
-                "garmin": garmin_status,
+                ProviderId.GARMIN.value: garmin_status,
                 "provider_freshness": deps.provider_freshness.current(
                     profile=deps.profile.get(),
                     garmin_has_core_error=bool(

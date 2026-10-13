@@ -8,6 +8,8 @@ import math
 import re
 from typing import Any, NoReturn, TypeGuard
 
+from backend.providers.intervals_activity_keys import activity_training_load
+
 
 class WorkoutTextError(ValueError):
     def __init__(self, reason: str, message: str):
@@ -418,10 +420,8 @@ def _verify_totals(doc: dict, remote: dict, actual: list[dict]) -> None:
         or abs(remote["moving_time"] - total) > tolerance
     ):
         _readback_failure()
-    if (
-        not _numeric(remote.get("icu_training_load"))
-        or remote["icu_training_load"] <= 0
-    ):
+    training_load = activity_training_load(remote)
+    if not _numeric(training_load) or training_load <= 0:
         _readback_failure()
 
 

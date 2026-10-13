@@ -9,6 +9,15 @@ from typing import Any
 from backend.activities.identity import activity_datetime
 from backend.activities.matching import is_planned_workout_event, match_planned_workouts
 from backend.athlete.local_date import iso_date_prefix
+from backend.providers.intervals_activity_keys import (
+    INTENSITY,
+    PACE,
+    RPE,
+    TRAINING_LOAD_LOOKUP,
+    WEIGHTED_AVG_SPEED,
+    WEIGHTED_AVG_WATTS,
+)
+from backend.providers.intervals_performance_fields import TRAINING_LOAD
 
 CALENDAR_ACTIVITY_FIELDS = (
     "id",
@@ -20,17 +29,17 @@ CALENDAR_ACTIVITY_FIELDS = (
     "elapsed_time",
     "distance",
     "total_elevation_gain",
-    "icu_training_load",
-    "icu_intensity",
+    TRAINING_LOAD,
+    INTENSITY,
     "average_heartrate",
     "max_heartrate",
     "average_watts",
     "weighted_average_watts",
-    "icu_weighted_avg_watts",
+    WEIGHTED_AVG_WATTS,
     "normalized_power",
-    "icu_weighted_avg_speed",
-    "icu_pace",
-    "icu_rpe",
+    WEIGHTED_AVG_SPEED,
+    PACE,
+    RPE,
     "feel",
     "source",
     "workout_profile",
@@ -117,7 +126,7 @@ def _workout_duration(record: Any) -> float | int | None:
 
 
 def _workout_load(record: Any) -> float | int | None:
-    return activity_metric(record, ("icu_training_load", "training_load", "tss"))
+    return activity_metric(record, TRAINING_LOAD_LOOKUP)
 
 
 def _workout_compliance_basis(
