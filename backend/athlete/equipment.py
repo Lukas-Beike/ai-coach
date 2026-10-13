@@ -14,8 +14,13 @@ from backend.canonical.stored_sports import (
     activity_type_environment,
     resolve_equipment_sport,
 )
-from backend.canonical.vocabulary import Sport
+from backend.canonical.vocabulary import ProviderId, Sport
 from backend.errors import AppError
+from backend.providers.garmin_gear_fields import (
+    garmin_gear_descriptor_texts,
+    garmin_gear_id,
+    garmin_gear_name,
+)
 
 EQUIPMENT_PREFIX = "equipment:"
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
@@ -71,9 +76,9 @@ class EquipmentService:
                 is not None
             )
             garmin_usage = {
-                str(row.get("gearUUID")): _garmin_distance_km(row)
+                garmin_gear_id(row): _garmin_distance_km(row)
                 for row in garmin.get("gear") or []
-                if isinstance(row, dict) and row.get("gearUUID")
+                if isinstance(row, dict) and garmin_gear_id(row)
             }
             items = self._records(db, "equipment", 100)
             if item_id:
@@ -115,7 +120,7 @@ class EquipmentService:
         if not _current_garmin_gear(snapshot):
             return
         rows = [row for row in snapshot.get("gear") or [] if isinstance(row, dict)]
-        rows = [row for row in rows if row.get("gearUUID")]
+        rows = [row for row in rows if garmin_gear_id(row)]
         # A current but empty or malformed inventory is not proof that the
         # initial import succeeded. Leave initialization open for recovery.
         if not rows:
@@ -143,7 +148,7 @@ class EquipmentService:
             initial_import = not initialized or not by_garmin
             if initial_import:
                 for row in rows:
-                    gear_id = str(row.get("gearUUID") or "")
+                    gear_id = garmin_gear_id(row)
                     if gear_id and gear_id not in by_garmin:
                         _insert_initial_garmin_item(
                             db, row, gear_id, self._today(), now
@@ -358,7 +363,7 @@ def _insert_initial_garmin_item(
     item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "garmin:" + gear_id))
     item = {
         "id": item_id,
-        "name": str(row.get("gearName") or "Ausr\u00fcstung")[:200],
+        "name": (garmin_gear_name(row) or "Ausr\u00fcstung")[:200],
         **_equipment_sport_fields(resolve_equipment_sport(sport)),
         "kind": kind,
         "parent_pending": kind == "component",
@@ -375,7 +380,7 @@ def _insert_initial_garmin_item(
         "garmin_distance_km": distance,
         "garmin_maximum_meters": _garmin_maximum_meters(row),
         "lifetime_target_km": _garmin_lifetime_target_km(row),
-        "lifetime_target_source": "garmin",
+        "lifetime_target_source": ProviderId.GARMIN.value,
         "revision": 1,
         "updated_at": now,
         "source": "garmin-initial-sync",
@@ -390,7 +395,7 @@ def _refresh_garmin_distances(
     db: Any, rows: list[dict[str, Any]], by_garmin: dict[str, dict[str, Any]], now: str
 ) -> None:
     for row in rows:
-        linked = by_garmin.get(str(row.get("gearUUID") or ""))
+        linked = by_garmin.get(garmin_gear_id(row))
         if linked is None:
             continue
         changed = _update_garmin_gear(linked, row)
@@ -519,10 +524,7 @@ def _garmin_kind(row: dict) -> str:
 
 
 def _garmin_gear_text(row: dict) -> str:
-    return " ".join(
-        str(row.get(key) or "").lower()
-        for key in ("gearTypeName", "gearName", "activityTypeName")
-    )
+    return " ".join(text.lower() for text in garmin_gear_descriptor_texts(row))
 
 
 def _garmin_status(row: dict) -> str:
@@ -549,8 +551,8 @@ def _garmin_item(row: dict) -> dict[str, Any]:
     goal_km = round(goal / 1000, 2) if goal is not None else None
     lifetime = _lifetime_projection(distance_km, goal_km)
     return {
-        "id": str(row.get("gearUUID") or ""),
-        "name": str(row.get("gearName") or "Ausr\u00fcstung")[:200],
+        "id": garmin_gear_id(row),
+        "name": (garmin_gear_name(row) or "Ausr\u00fcstung")[:200],
         "kind": str(row.get("gearTypeName") or "")[:100],
         "status": _garmin_status(row),
         "garmin_status": _garmin_raw_status(row),
@@ -818,8 +820,10 @@ def _update_garmin_gear(linked: dict[str, Any], row: dict[str, Any]) -> bool:
             changed = True
         if linked.get(
             "lifetime_target_source"
-        ) == "garmin" or not _valid_positive_number(linked.get("lifetime_target_km")):
+        ) == ProviderId.GARMIN or not _valid_positive_number(
+            linked.get("lifetime_target_km")
+        ):
             linked["lifetime_target_km"] = round(maximum_meters / 1000, 2)
-            linked["lifetime_target_source"] = "garmin"
+            linked["lifetime_target_source"] = ProviderId.GARMIN.value
             changed = True
     return changed

@@ -5,6 +5,16 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from backend.providers.intervals_activity_keys import (
+    INTENSITY,
+    PACE,
+    ROLLING_FTP,
+    RPE,
+    WEIGHTED_AVG_SPEED,
+    WEIGHTED_AVG_WATTS,
+)
+from backend.providers.intervals_performance_fields import CONFIGURED_FTP, TRAINING_LOAD
+
 COACH_ACTIVITY_DETAIL_FIELDS = (
     "start_date_local",
     "start_date",
@@ -25,20 +35,20 @@ COACH_ACTIVITY_DETAIL_FIELDS = (
     "average_watts",
     "max_watts",
     "weighted_average_watts",
-    "icu_weighted_avg_watts",
+    WEIGHTED_AVG_WATTS,
     "normalized_power",
     "average_cadence",
     "max_cadence",
     "average_temp",
     "min_temp",
     "max_temp",
-    "icu_training_load",
-    "icu_intensity",
-    "icu_rolling_ftp",
-    "icu_ftp",
-    "icu_weighted_avg_speed",
-    "icu_pace",
-    "icu_rpe",
+    TRAINING_LOAD,
+    INTENSITY,
+    ROLLING_FTP,
+    CONFIGURED_FTP,
+    WEIGHTED_AVG_SPEED,
+    PACE,
+    RPE,
     "feel",
     "faded",
     "decoupling",
@@ -77,12 +87,12 @@ COACH_ACTIVITY_DETAIL_LAP_FIELDS = (
     "average_watts",
     "max_watts",
     "weighted_average_watts",
-    "icu_weighted_avg_watts",
+    WEIGHTED_AVG_WATTS,
     "normalized_power",
     "average_cadence",
     "total_elevation_gain",
-    "icu_training_load",
-    "icu_intensity",
+    TRAINING_LOAD,
+    INTENSITY,
 )
 COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS = 2000
 COACH_ACTIVITY_DETAIL_MAX_LAPS = 200
