@@ -9,6 +9,28 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import AppError
 
 _REMOTE_LINKS = RemoteLinkRepository()
+# Competition fields written by the upsert; an unchanged stored row is left as is.
+_COMPETITION_WRITE_FIELDS = (
+    "name",
+    "event_date",
+    "sport",
+    "environment",
+    "sport_detail",
+    "priority",
+    "distance",
+    "target",
+    "course_profile",
+    "notes",
+    "category",
+    "start_date_local",
+    "description",
+    "moving_time",
+    "external_id",
+)
+
+
+def _is_blank(value: Any) -> bool:
+    return value is None or value == ""
 
 
 class AthleteContextService:
@@ -96,9 +118,36 @@ class AthleteContextService:
                     ),
                 )
 
+    def _competition_unchanged(
+        self, competition: dict[str, Any], stored: dict[str, Any]
+    ) -> bool:
+        """Return True when saving ``competition`` would not change ``stored``.
+
+        Both sides are compared normalized, so legacy spellings in a stored row are
+        not edits. An empty external id never clears the stored one (NULLIF/COALESCE
+        in the upsert), so it is not a change either.
+        """
+        try:
+            current = self.normalize_competition(stored)
+        except AppError:
+            current = stored
+        for field in _COMPETITION_WRITE_FIELDS:
+            submitted = competition.get(field)
+            if field == "external_id" and _is_blank(submitted):
+                continue
+            stored_value = current.get(field)
+            if _is_blank(stored_value) and _is_blank(submitted):
+                continue
+            if stored_value != submitted:
+                return False
+        return True
+
     def _save_competition(
         self, competition: dict[str, Any], existing: dict[str, Any], now: str, db: Any
     ) -> None:
+        stored = existing.get(competition["id"])
+        if stored is not None and self._competition_unchanged(competition, stored):
+            return
         db.execute(
             "INSERT INTO competitions "
             "(id, name, event_date, sport, environment, sport_detail, priority, distance, target, course_profile, "

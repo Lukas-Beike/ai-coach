@@ -100,6 +100,37 @@ class LocalCalendarTests(unittest.TestCase):
                 result = _local_calendar_competition({**base, **fields})
                 self.assertEqual(result["type"], expected)
 
+    def test_blocking_external_markers_are_kept_without_training_relevance(self):
+        base = {"id": "external-1", "event_date": "2026-09-21", "training_relevant": 0}
+        kept_cases = (
+            {"name": "[NO_TRAINING] Travel"},
+            {"name": "[no_training] Travel"},
+            {"name": "[NO_TRAINING] Travel", "no_training": 0},
+            {"name": "Travel", "no_training": 1},
+            {"name": "Recovery", "no_intensity": 1},
+            {"name": "Errand", "short_only": 1},
+        )
+        for fields in kept_cases:
+            with self.subTest(fields=fields):
+                result = _local_calendar_external_event({**base, **fields})
+                self.assertIsNotNone(result)
+                self.assertEqual(result["date"], "2026-09-21")
+                self.assertEqual(result["sync_source"], "external-calendar")
+
+    def test_plain_non_relevant_external_event_is_still_dropped(self):
+        event = {
+            "id": "external-2",
+            "event_date": "2026-09-21",
+            "name": "Dentist",
+            "training_relevant": 0,
+            "no_training": 0,
+            "no_intensity": 0,
+            "short_only": 0,
+        }
+
+        self.assertIsNone(_local_calendar_external_event(event))
+        self.assertEqual(local_calendar_events([], [], [event]), [])
+
 
 if __name__ == "__main__":
     unittest.main()

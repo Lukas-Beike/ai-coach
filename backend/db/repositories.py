@@ -694,6 +694,9 @@ class CheckinRepository:
         )
 
 
+_ACTIVITY_FEEDBACK_ID_CHUNK = 500
+
+
 class ActivityFeedbackRepository:
     """Persist athlete notes about completed activities without owning a connection."""
 
@@ -707,6 +710,31 @@ class ActivityFeedbackRepository:
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def for_activity_ids(
+        self, db: Any, activity_ids: builtins.list[str]
+    ) -> builtins.list[dict[str, Any]]:
+        """Return feedback for exactly these activity ids, queried in bounded chunks."""
+        unique_ids = list(
+            dict.fromkeys(
+                str(activity_id)
+                for activity_id in activity_ids
+                if activity_id not in (None, "")
+            )
+        )
+        rows: builtins.list[dict[str, Any]] = []
+        for start in range(0, len(unique_ids), _ACTIVITY_FEEDBACK_ID_CHUNK):
+            chunk = unique_ids[start : start + _ACTIVITY_FEEDBACK_ID_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows.extend(
+                dict(row)
+                for row in db.execute(
+                    "SELECT activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at "
+                    f"FROM activity_feedback WHERE activity_id IN ({placeholders})",
+                    tuple(chunk),
+                ).fetchall()
+            )
+        return rows
 
     def get(self, db: Any, activity_id: str) -> dict[str, Any] | None:
         row = db.execute(

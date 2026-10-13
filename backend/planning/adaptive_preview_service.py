@@ -470,7 +470,7 @@ class AdaptiveReplanPreviewService:
         signals.extend(calendar_signals)
         changes = [
             change
-            for draft in self._planned_unit_service.list(500)
+            for draft in self._planned_unit_service.list(500, future_only=True)
             if (
                 change := _change(
                     draft,

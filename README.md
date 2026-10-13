@@ -264,7 +264,7 @@ All configuration is loaded from container environment variables or a local `.en
 | `WAHOO_REDIRECT_URI` | *None* | No | Full HTTPS callback URL, `https://<app-host>/api/wahoo/callback`. Never derived from the request Host header. |
 | `CALENDAR_ICAL_URL` | *None* | No | Private read-only iCalendar (ICS) feed URL from Google Calendar, iCloud, or Outlook. |
 | `COOKIE_SECURE` | `false` | No | Set to `true` when running behind an HTTPS reverse proxy to add the `Secure` flag to cookies. |
-| `DATA_RETENTION_DAYS` | `-1` | No | Retention period in days for historical sync logs and data. `-1` retains data indefinitely. |
+| `DATA_RETENTION_DAYS` | `-1` | No | `-1` (or any value ≤ 0) retains data indefinitely; positive values are clamped to 30–3650 days and remove older chat messages and snapshots at startup. |
 | `PORT` | `8090` | No | Internal HTTP port the application listens on. |
 | `DATA_DIR` | `/data` | No | Path to the directory where the encrypted database and tokens are stored. |
 | `TZ` | `UTC` | No | Container timezone (e.g., `Europe/Berlin`). Crucial for accurate daily scheduling and sleep windows. |

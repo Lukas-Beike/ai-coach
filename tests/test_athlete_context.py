@@ -13,6 +13,7 @@ from backend.db.repositories import (
     ProfileRepository,
 )
 from backend.errors import AppError
+from backend.planning.competitions import normalize_competition
 
 
 class _Manager:
@@ -256,6 +257,104 @@ class AthleteContextServiceTests(unittest.TestCase):
         self.assertEqual(
             self.db.execute("SELECT COUNT(*) FROM change_history").fetchone()[0], 0
         )
+
+    def _mark_conflicted(self, competition_id):
+        self.db.execute(
+            "UPDATE competitions SET sync_dirty=0, sync_state='conflict', "
+            "sync_conflict='remote changed' WHERE id=?",
+            (competition_id,),
+        )
+        self.db.commit()
+
+    def test_profile_only_save_keeps_unchanged_competition_sync_state(self):
+        self._insert_competition("kept", external_id="external-kept")
+        self._mark_conflicted("kept")
+
+        result = self.service.save(
+            {"name": "Athlete", "timezone": "UTC"}, [{"id": "kept", "name": "Old"}]
+        )
+
+        self.assertEqual(result["profile"]["name"], "Athlete")
+        kept = self._competition("kept")
+        self.assertEqual(kept["sync_dirty"], 0)
+        self.assertEqual(kept["sync_state"], "conflict")
+        self.assertEqual(kept["sync_conflict"], "remote changed")
+        self.assertEqual(kept["external_id"], "external-kept")
+        self.assertEqual(kept["updated_at"], "updated-before")
+        self.assertEqual(self._history("kept"), [])
+
+    def test_changed_competition_marks_dirty_and_clears_conflict(self):
+        self._insert_competition("kept", external_id="external-kept")
+        self._mark_conflicted("kept")
+
+        self.service.save(
+            {"name": "Athlete", "timezone": "UTC"},
+            [{"id": "kept", "name": "Renamed"}],
+        )
+
+        kept = self._competition("kept")
+        self.assertEqual(kept["name"], "Renamed")
+        self.assertEqual(kept["sync_dirty"], 1)
+        self.assertEqual(kept["sync_state"], "local")
+        self.assertEqual(kept["sync_conflict"], "")
+        self.assertEqual([row["action"] for row in self._history("kept")], ["update"])
+
+    def _real_normalizer_service(self):
+        return AthleteContextService(
+            manager=_Manager(self.db),
+            profile_service=self.profile_service,
+            competition_repository=CompetitionRepository(),
+            normalize_profile=normalize_profile,
+            normalize_competition=normalize_competition,
+            now=lambda: "2026-09-20T12:00:00+00:00",
+            new_id=lambda: next(self._new_ids),
+        )
+
+    def _insert_raw_competition(self, competition_id):
+        # Legacy free-text spellings, as a stored row may hold them.
+        self.db.execute(
+            "INSERT INTO competitions "
+            "(id, name, event_date, sport, environment, sport_detail, priority, distance, "
+            "target, course_profile, notes, category, start_date_local, description, "
+            "moving_time, intervals_event_id, external_id, sync_dirty, sync_state, "
+            "sync_conflict, last_synced_at, created_at, updated_at) "
+            "VALUES (?, 'Gran Fondo', '2026-10-01', 'Cycling', NULL, NULL, 'A', '5 km', "
+            "'', '', 'Race notes', 'RACE_A', '', '', 3600, NULL, NULL, 0, 'conflict', "
+            "'remote changed', NULL, 'created-before', 'updated-before')",
+            (competition_id,),
+        )
+        self.db.commit()
+
+    def test_unchanged_round_trip_of_listed_competitions_is_not_a_change(self):
+        competition_id = "6f1d2c3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f"
+        self._insert_raw_competition(competition_id)
+        service = self._real_normalizer_service()
+        listed = CompetitionRepository().list(self.db)
+
+        service.save({"name": "Athlete", "timezone": "UTC"}, listed)
+
+        competition = self._competition(competition_id)
+        self.assertEqual(competition["sync_dirty"], 0)
+        self.assertEqual(competition["sync_state"], "conflict")
+        self.assertEqual(competition["sync_conflict"], "remote changed")
+        self.assertEqual(competition["distance"], "5 km")
+        self.assertEqual(competition["updated_at"], "updated-before")
+        self.assertEqual(self._history(competition_id), [])
+
+    def test_changed_distance_is_detected_with_real_normalizer(self):
+        competition_id = "6f1d2c3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f"
+        self._insert_raw_competition(competition_id)
+        service = self._real_normalizer_service()
+        listed = CompetitionRepository().list(self.db)
+        listed[0]["distance"] = "10 km"
+
+        service.save({"name": "Athlete", "timezone": "UTC"}, listed)
+
+        competition = self._competition(competition_id)
+        self.assertEqual(competition["distance"], "10000")
+        self.assertEqual(competition["sync_dirty"], 1)
+        self.assertEqual(competition["sync_state"], "local")
+        self.assertEqual(competition["sync_conflict"], "")
 
 
 if __name__ == "__main__":

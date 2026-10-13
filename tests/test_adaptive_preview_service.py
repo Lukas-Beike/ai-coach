@@ -28,9 +28,11 @@ class _PlannedUnits:
     def __init__(self, drafts: list[dict]):
         self.drafts = drafts
         self.limits = []
+        self.future_only: list[bool] = []
 
-    def list(self, limit):
+    def list(self, limit, *, future_only=False):
         self.limits.append(limit)
+        self.future_only.append(future_only)
         return self.drafts
 
 
@@ -250,6 +252,7 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
         )
         self.assertIsNone(result["illness_pause"])
         self.assertEqual(self.planned.limits, [500])
+        self.assertEqual(self.planned.future_only, [True])
         self.assertEqual(self.calendar.limits, [1000])
         self.assertEqual(self.weather.calls, [{"refresh": False}])
         self.assertEqual(self.id_count, 1)

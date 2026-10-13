@@ -169,6 +169,31 @@ class WeatherRecommendationsTests(unittest.TestCase):
         self.assertEqual([item["event_id"] for item in result], ["today", "fifth"])
         self.assertEqual(planned, before)
 
+    def test_missing_gust_hours_are_ignored_in_gust_maximum(self):
+        target = date(2026, 9, 5)
+        forecast = forecast_for(target, low_hours={10, 11})
+        forecast["hourly"]["wind_gusts_10m"] = [
+            35 if hour == 10 else None for hour in range(24)
+        ]
+        result = weather_recommendation(
+            {"type": "Ride", "date": target.isoformat(), "moving_time": 7200},
+            forecast,
+        )
+        self.assertEqual(result["suggested_time"], "10:00–12:00 Uhr")
+        self.assertEqual(result["wind_gusts"], 35)
+        self.assertIn("Böen bis 35 km/h", result["reason"])
+
+    def test_all_missing_gusts_fall_back_to_zero(self):
+        target = date(2026, 9, 5)
+        forecast = forecast_for(target)
+        forecast["hourly"]["wind_gusts_10m"] = [None] * 24
+        result = weather_recommendation(
+            {"type": "Ride", "date": target.isoformat(), "moving_time": 3600},
+            forecast,
+        )
+        self.assertEqual(result["wind_gusts"], 0)
+        self.assertIn("Böen bis 0 km/h", result["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

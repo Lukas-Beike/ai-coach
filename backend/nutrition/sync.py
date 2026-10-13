@@ -63,11 +63,11 @@ class IntervalsNutritionSyncService:
             "kcalConsumed": summary["total_kcal"],
         }
         if summary.get("total_carbs_g") is not None:
-            payload["carbs"] = summary["total_carbs_g"]
+            payload["carbohydrates"] = summary["total_carbs_g"]
         if summary.get("total_protein_g") is not None:
             payload["protein"] = summary["total_protein_g"]
         if summary.get("total_fat_g") is not None:
-            payload["fat"] = summary["total_fat_g"]
+            payload["fatTotal"] = summary["total_fat_g"]
 
         endpoint = f"/athlete/{athlete}/wellness/{meal_date}"
         try:

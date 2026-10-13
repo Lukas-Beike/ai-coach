@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "e4d51d75bde660825d32dbfb22c6ab65d0aa5016",
+  "base": "4e0166eee76c289a51f8f22e35425553037bfe94",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
@@ -2473,7 +2473,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1025,
+      "line": 1024,
       "column": 16,
       "code": "has-type",
       "message_sha256": "c3827639903091a4321d0e0848e6289e336e994114e1a16099bebc3274bf7946"
@@ -2481,7 +2481,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1028,
+      "line": 1027,
       "column": 16,
       "code": "has-type",
       "message_sha256": "c53b9e646657d76e58ce4a8d414022143183888c840336c5e976cccc80e9fdda"
@@ -2505,7 +2505,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1113,
+      "line": 1112,
       "column": 20,
       "code": "has-type",
       "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
@@ -2513,7 +2513,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1002,
+      "line": 1001,
       "column": 28,
       "code": "has-type",
       "message_sha256": "6aa98648523c886c38d6ec5ff2cba0b9a86a5cb9fe5f9593e07c2251a0075a22"
@@ -2521,7 +2521,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1681,
+      "line": 1680,
       "column": 30,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -2569,7 +2569,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1354,
+      "line": 1353,
       "column": 36,
       "code": "has-type",
       "message_sha256": "480057763c1b5347f5e8f0a61c7f20c6cec2d3a6e24f1e8563bd5b76f2138cc4"
@@ -2585,7 +2585,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1685,
+      "line": 1684,
       "column": 37,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2593,7 +2593,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1713,
+      "line": 1712,
       "column": 38,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2609,7 +2609,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1385,
+      "line": 1384,
       "column": 42,
       "code": "has-type",
       "message_sha256": "6b3bf53c953464ae5eca5af23f6ee4aa9b3fe9f5856d07f358d76bd3a8dee02e"
@@ -3248,14 +3248,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/weather/recommendations.py",
-      "line": 107,
-      "column": 24,
-      "code": "type-var",
-      "message_sha256": "c313aee34476942a320a81c257cfed3906219e9611644afa24079877d93d5dd7"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_ci_contracts.py",
       "line": 22,
       "column": 0,
@@ -3585,7 +3577,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_adaptive_preview_service.py",
-      "line": 40,
+      "line": 42,
       "column": 8,
       "code": "var-annotated",
       "message_sha256": "63c1c9b3af004815040d77e41f7e3e6ca426f0117dd99c4473808ec6c8dbe2ac"
@@ -3616,19 +3608,19 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_adaptive_preview_service.py",
-      "line": 50,
-      "column": 8,
-      "code": "var-annotated",
-      "message_sha256": "c9109e7a789ff07480f61264ff9ebcc7b4ab58d2883dfaa9cf7c4e1a844d5b0e"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_planned_calendar.py",
       "line": 51,
       "column": 8,
       "code": "var-annotated",
       "message_sha256": "9710df7244a3c90f48188a2e33cfd8c302d5a75abe3a278c6d119c8747714ba1"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_adaptive_preview_service.py",
+      "line": 52,
+      "column": 8,
+      "code": "var-annotated",
+      "message_sha256": "c9109e7a789ff07480f61264ff9ebcc7b4ab58d2883dfaa9cf7c4e1a844d5b0e"
     },
     {
       "tool": "mypy",

@@ -37,6 +37,7 @@ class StateEventTransport:
         send_headers: Callable[[], None],
         send_event: Callable[..., None],
         set_connection_timeout: Callable[[float | None], None],
+        session_is_active: Callable[[], bool],
     ) -> None:
         query = parse_qs(urlparse(request_target).query)
         raw_since = query.get("since", ["0"])[0]
@@ -54,6 +55,8 @@ class StateEventTransport:
             send_event("ready", {"latest_event_id": since}, since or None)
             while True:
                 self.event_buffer.wait(timeout=15)
+                if not session_is_active():
+                    return
                 pending = self.event_buffer.since(since)
                 since, gap = self.send_batch(pending, since, send_event)
                 if gap:

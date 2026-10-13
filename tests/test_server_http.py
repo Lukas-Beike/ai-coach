@@ -12,7 +12,7 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
-from unittest.mock import Mock, call, patch
+from unittest.mock import ANY, Mock, call, patch
 from urllib.error import HTTPError
 
 from server_test_support import (
@@ -881,6 +881,7 @@ class ServerHttpTests(ServerTestCase):
                 send_headers=handler.send_sse_headers,
                 send_event=handler.send_sse_event,
                 set_connection_timeout=handler.connection.settimeout,
+                session_is_active=ANY,
             )
 
         denied = server.AppError(401, "unauthorized")
