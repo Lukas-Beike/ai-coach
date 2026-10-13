@@ -541,15 +541,20 @@ def current_observation_rows(
     start: str | None = None,
     end: str | None = None,
     sport: str | None = None,
+    include_older: bool = False,
 ) -> list[dict[str, Any]]:
     """Return observation rows of one metric at each provider's current mapper version.
 
     ``versions`` maps a provider value to its current observation mapper version;
     rows of any other version, or of no provider, are not returned. Bounds are
-    inclusive ISO dates on ``observed_on``.
+    inclusive ISO dates on ``observed_on``. A natural key has one row, which a
+    re-projection rewrites in place, so ``include_older`` also returns the rows
+    that still carry an older version: the newest stored version of each identity
+    while a re-projection is pending.
     """
+    comparison = "<=" if include_older else "="
     provider_clause = " OR ".join(
-        "(provider = ? AND mapper_version = ?)" for _ in versions
+        f"(provider = ? AND mapper_version {comparison} ?)" for _ in versions
     )
     clauses = ["metric = ?", f"({provider_clause})"]
     params: list[object] = [metric]

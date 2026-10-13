@@ -362,7 +362,6 @@ class CanonicalPlanningEndToEndTests(CanonicalReadFixture):
     def test_recovery_from_tables_equals_the_stored_snapshot_reference(self) -> None:
         populate(self)
         selector = make_selector(self)
-        self.write(selector.refresh)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         reference = self._reference()
         self.assertTrue(reference)
@@ -379,7 +378,6 @@ class CanonicalPlanningEndToEndTests(CanonicalReadFixture):
     ) -> None:
         populate(self)
         selector = make_selector(self)
-        self.write(selector.refresh)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         # Only the compact wellness rows stay: they carry the form.
         stripped = {

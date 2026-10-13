@@ -1,7 +1,7 @@
 """Canonical body weight and body-fat inputs read through the observation port.
 
-The consumer parity ledger marks ``body_weight_kg_series`` and
-``body_fat_pct_series`` switchable, so both series are read here.
+The ``body_weight_kg_series`` and ``body_fat_pct_series`` consumers can switch to
+the tables, so both series are read here.
 
 Reads are served only while the canonical tables serve reads (see
 ``CanonicalTableServing``). Otherwise ``read_body_inputs`` returns None and the
@@ -12,7 +12,7 @@ wellness rows, so switching without this gate would drop older raw-only days.
 the legacy value, so a value the canonical mapper does not store is never dropped.
 
 Per provider and day, the last observation inside the legacy plausibility bounds
-wins, as the consumer parity ledger does. Intervals athlete-record observations,
+wins, as the legacy body history does. Intervals athlete-record observations,
 whose record id is not the observation's own ISO day, are excluded because the
 legacy body history reads wellness rows only.
 """

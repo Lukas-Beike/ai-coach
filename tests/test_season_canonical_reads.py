@@ -62,7 +62,6 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
     def _tables(self) -> Any:
         populate(self)
         selector = make_selector(self)
-        self.write(selector.refresh)
         self.assertTrue(self.write(selector.serves_tables))
         return selector
 

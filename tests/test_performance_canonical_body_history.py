@@ -1,7 +1,7 @@
 """Body fat history read from canonical observations matches legacy.
 
 ``body_history`` with canonical inputs must return the same output as the legacy
-builder on the same data. The cases cover the consumer parity ledger inputs, the
+builder on the same data. The cases cover the recorded consumer inputs, the
 legacy plausibility bounds, null days, athlete-record exclusion, future days, the
 serving gate and read window, unit-of-work order, and a populated temporary
 database served through the real selector.
@@ -17,7 +17,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import Mock
 
-from canonical_consumer_parity import CASES, TODAY, _observations
+from canonical_consumer_cases import CASES, TODAY, _observations
 from canonical_read_support import (
     CLOCK_AT,
     CanonicalReadFixture,
@@ -625,8 +625,6 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
             row["bodyFat"] = 14.0 + index
         populate(self)
         selector = make_selector(self)
-        with self.manager.unit_of_work() as db:
-            selector.refresh(db)
         # The shared wellness rows are dated 2026-10-08..10, after the fixture clock
         # (CLOCK_AT), so read as of the last recorded day to include them.
         today = date(2026, 10, 10)
@@ -655,12 +653,14 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
             body_history(self.intervals, self.garmin, today, canonical=inputs),
         )
 
-    def test_incomplete_backfill_serves_no_body_inputs(self) -> None:
+    def test_never_completed_backfill_serves_no_body_inputs(self) -> None:
         populate(self)
         with self.manager.unit_of_work() as db:
             state = json.loads(self.key_values.get(db, BACKFILL_STATE_KEY) or "{}")
             self.key_values.set(
-                db, BACKFILL_STATE_KEY, json.dumps({**state, "status": "running"})
+                db,
+                BACKFILL_STATE_KEY,
+                json.dumps({**state, "status": "running", "completed_once": False}),
             )
         selector = make_selector(self)
         with self.manager.reader() as db:

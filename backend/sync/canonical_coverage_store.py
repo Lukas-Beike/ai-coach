@@ -8,9 +8,12 @@ same unit of work that stores the payload. The value is JSON with counts, ISO
 timestamps and dates, the mapper versions and the time zone it was computed
 for. It holds no record references, field names or athlete text.
 
-A stored summary is used only while its mapper versions and time zone equal the
-current ones. Anything else (missing, corrupt, outdated) reads as "not stored",
-and the caller falls back to computing coverage from the legacy projection.
+A stored summary is current only while its mapper versions and time zone equal the
+current ones. By default anything else (missing, corrupt, outdated) reads as "not
+stored", and a caller before the first completed backfill falls back to computing
+coverage from the legacy projection. After that backfill the caller loads with
+``allow_outdated`` and keeps reporting the last persisted summary until the next
+ingest replaces it.
 """
 
 from __future__ import annotations
@@ -108,15 +111,24 @@ class CanonicalCoverageStore:
         )
 
     def load(
-        self, db: Any, provider: ProviderId, *, zone: tzinfo
+        self,
+        db: Any,
+        provider: ProviderId,
+        *,
+        zone: tzinfo,
+        allow_outdated: bool = False,
     ) -> ProviderCoverage | None:
-        """Return the stored summary, or None when absent, corrupt or outdated."""
+        """Return the stored summary, or None when absent, corrupt or outdated.
+
+        ``allow_outdated`` also returns a summary computed for other mapper
+        versions or another zone.
+        """
         raw = self._key_values.get(db, coverage_key(provider))
         if raw is None:
             return None
         try:
             data = json.loads(raw)
-            return _decode(data, provider, zone)
+            return _decode(data, provider, zone, allow_outdated=allow_outdated)
         except ValueError, TypeError, KeyError, AttributeError:
             return None
 
@@ -138,13 +150,12 @@ def _encode(coverage: ProviderCoverage, zone: tzinfo) -> dict[str, Any]:
 
 
 def _decode(
-    data: object, provider: ProviderId, zone: tzinfo
+    data: object, provider: ProviderId, zone: tzinfo, *, allow_outdated: bool
 ) -> ProviderCoverage | None:
-    if not isinstance(data, Mapping):
+    if not isinstance(data, Mapping) or data["provider"] != provider.value:
         return None
-    if (
-        data["provider"] != provider.value
-        or data["mapper_versions"] != current_mapper_versions()
+    if not allow_outdated and (
+        data["mapper_versions"] != current_mapper_versions()
         or data["zone"] != str(zone)
     ):
         return None

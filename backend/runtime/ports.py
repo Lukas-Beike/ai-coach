@@ -82,6 +82,10 @@ class ObservationReader(Protocol):
     ) -> tuple[Observation, ...]: ...
 
 
+class CanonicalReader(ActivityReader, ActivityRowReader, ObservationReader, Protocol):
+    """The reads a canonical source serves: activities, raw rows and observations."""
+
+
 @runtime_checkable
 class ObservationSourceSelector(ObservationReader, Protocol):
     """An observation reader that chooses its serving source for every read.
@@ -99,23 +103,12 @@ class ProviderCoverageReader(Protocol):
     def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]: ...
 
 
-class CanonicalReadRefresher(Protocol):
-    """Re-checks which canonical source serves reads and records the result.
-
-    Both methods write only their own content-free switch state, in the caller's
-    transaction. ``record_failure`` receives the exception class name only.
-    """
-
-    def refresh(self, db: Any) -> None: ...
-
-    def record_failure(self, db: Any, error_class: str) -> None: ...
-
-
 class CanonicalTableServing(Protocol):
     """Reports whether reads are currently served from the canonical tables.
 
-    True only when the backfill is complete and the last parity check passed for
-    the current digest. Callers read table-only data only while this holds.
+    True once the backfill has completed at least once, also while a mapper or
+    time-zone change is re-projected. Callers read table-only data only while this
+    holds.
     """
 
     def serves_tables(self, db: Any) -> bool: ...

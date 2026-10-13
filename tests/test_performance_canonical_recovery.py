@@ -14,7 +14,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from unittest.mock import patch
 
-from canonical_consumer_parity import TODAY
+from canonical_consumer_cases import TODAY
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
 from backend.canonical.records import MetricValue, Observation, Provenance
@@ -275,7 +275,6 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
     def test_populated_tables_reproduce_the_legacy_recovery_bytes(self) -> None:
         populate(self)
         selector = make_selector(self)
-        self.write(selector.refresh)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
             inputs = read_performance_inputs(selector, db, self.intervals)
@@ -302,7 +301,6 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
     def test_selector_resolves_its_source_once_for_the_recovery_read(self) -> None:
         populate(self)
         selector = make_selector(self)
-        self.write(selector.refresh)
         with (
             patch.object(selector, "reader_for", wraps=selector.reader_for) as resolved,
             self.manager.reader() as db,

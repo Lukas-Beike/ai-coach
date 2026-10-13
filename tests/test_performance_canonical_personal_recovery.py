@@ -15,7 +15,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from unittest.mock import patch
 
-from canonical_consumer_parity import TODAY
+from canonical_consumer_cases import TODAY
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
 from backend.canonical.records import MetricValue, Observation, Provenance
@@ -250,7 +250,6 @@ class PopulatedPersonalRecoveryTests(CanonicalReadFixture):
     def test_populated_tables_reproduce_the_legacy_personal_recovery(self) -> None:
         populate(self)
         selector = make_selector(self)
-        self.write(selector.refresh)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
             inputs = read_performance_inputs(selector, db, self.intervals)
