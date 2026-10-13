@@ -6,7 +6,11 @@ import unittest
 from pathlib import Path
 
 from backend.activities.grouping import _as_number as activity_number
-from backend.canonical.decimal_text import comma_decimal_float, is_grouped_thousands
+from backend.canonical.decimal_text import (
+    comma_decimal_float,
+    is_grouped_thousands,
+    provider_number,
+)
 from backend.performance.wellness import _as_number as wellness_number
 from backend.weather.adaptive import _as_number as weather_number
 
@@ -44,6 +48,19 @@ class GroupedThousandsTests(unittest.TestCase):
         for value in (None, "abc", "1,2,3", ""):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 comma_decimal_float(value)
+
+
+class ProviderNumberTests(unittest.TestCase):
+    def test_returns_whole_numbers_as_int_and_rounds_decimals(self) -> None:
+        self.assertEqual(provider_number("80,0"), 80)
+        self.assertIsInstance(provider_number(80.0), int)
+        self.assertEqual(provider_number("80,4567"), 80.46)
+        self.assertEqual(provider_number(1200), 1200)
+
+    def test_rejects_ambiguous_invalid_and_non_finite_values(self) -> None:
+        for value in ("1,200", None, "", "abc", "nan", "inf", float("inf")):
+            with self.subTest(value=value):
+                self.assertIsNone(provider_number(value))
 
 
 class LegacyReaderTests(unittest.TestCase):

@@ -1,11 +1,10 @@
 """Garmin daily-health normalization and aggregate projections."""
 
-import math
 from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
-from backend.canonical.decimal_text import comma_decimal_float
+from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import freshness as performance_freshness
 from backend.performance import recovery as performance_recovery
@@ -54,16 +53,6 @@ GARMIN_DAILY_EXPENDITURE_FIELDS = {
     ),
     "total_kcal": GARMIN_DAILY_HEALTH_FIELDS["calories"],
 }
-
-
-def _as_number(value: Any) -> float | int | None:
-    try:
-        number = comma_decimal_float(value)
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
 
 
 def _metric(

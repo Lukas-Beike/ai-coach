@@ -1,10 +1,9 @@
 """Garmin sport-specific maximum heart-rate aggregation."""
 
-import math
 from typing import Any
 
 from backend.activities.identity import activity_kind
-from backend.canonical.decimal_text import comma_decimal_float
+from backend.canonical.decimal_text import provider_number as _as_number
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -15,16 +14,6 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
         if value not in (None, ""):
             return value
     return None
-
-
-def _as_number(value: Any) -> float | int | None:
-    try:
-        number = comma_decimal_float(value)
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
 
 
 def garmin_activity_max_hr(activities: Any) -> dict[str, float | int]:

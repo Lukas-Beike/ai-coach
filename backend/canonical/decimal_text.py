@@ -9,10 +9,11 @@ as in ``"0,500"``, cannot start a grouped number and stays a decimal.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Final
 
-_GROUPED_THOUSANDS: Final = re.compile(r"[+-]?[1-9][0-9]{0,2},[0-9]{3}")
+_GROUPED_THOUSANDS: Final = re.compile(r"[+-]?[1-9]\d{0,2},\d{3}", re.ASCII)
 
 
 def is_grouped_thousands(text: str) -> bool:
@@ -30,3 +31,18 @@ def comma_decimal_float(value: object) -> float:
     if is_grouped_thousands(text):
         raise ValueError("ambiguous grouped thousands")
     return float(text.replace(",", "."))
+
+
+def provider_number(value: object) -> float | int | None:
+    """Return a finite provider number from ``value``, or None.
+
+    Comma decimal text is read as by ``comma_decimal_float``. Whole numbers become
+    ``int`` and other values are rounded to two decimals.
+    """
+    try:
+        number = comma_decimal_float(value)
+    except TypeError, ValueError:
+        return None
+    if not math.isfinite(number):
+        return None
+    return int(number) if number.is_integer() else round(number, 2)

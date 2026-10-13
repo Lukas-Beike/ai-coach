@@ -2,27 +2,16 @@
 
 from __future__ import annotations
 
-import math
 from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
-from backend.canonical.decimal_text import comma_decimal_float
+from backend.canonical.decimal_text import provider_number as _as_number
 from backend.weather import projection as weather_projection
 from backend.weather import recommendations as weather_recommendations
 
 WEATHER_ADAPTIVE_DAYS = 3
 WEATHER_ADAPTIVE_LONG_RIDE_MINUTES = 180
-
-
-def _as_number(value: Any) -> float | int | None:
-    try:
-        number = comma_decimal_float(value)
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
 
 
 def _weather_adaptive_duration_minutes(event: dict[str, Any]) -> float | int:

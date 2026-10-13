@@ -1705,7 +1705,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/activity_validation.py",
-      "line": 188,
+      "line": 177,
       "column": 51,
       "code": "arg-type",
       "message_sha256": "9f15d58ebcfeea6d361abc404047086f7c68383c4d8b4778eecf645cb9c98ca4"
@@ -3313,7 +3313,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/trends.py",
-      "line": 44,
+      "line": 33,
       "column": 16,
       "code": "union-attr",
       "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
@@ -3417,7 +3417,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/trends.py",
-      "line": 83,
+      "line": 72,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
@@ -3465,7 +3465,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/grouping.py",
-      "line": 63,
+      "line": 52,
       "column": 12,
       "code": "var-annotated",
       "message_sha256": "1e6b9c1f25c0429575bf0637b8b820edaadc516871bbb9a7ca8e2feff091d295"
