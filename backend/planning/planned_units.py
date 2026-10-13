@@ -75,9 +75,7 @@ def planned_unit_payload_hash(payload: Any) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _planned_unit_metadata(
-    workout: dict[str, Any], normalized: dict[str, Any]
-) -> dict[str, Any]:
+def _planned_unit_metadata(workout: dict[str, Any]) -> dict[str, Any]:
     metadata = {
         "origin": str(workout.get("origin") or workout.get("source") or "coach")[:40],
     }
@@ -125,7 +123,7 @@ def normalize_planned_unit(
         external_id=external_id,
         sync_status=sync_status,
     )
-    normalized.update(_planned_unit_metadata(workout, normalized))
+    normalized.update(_planned_unit_metadata(workout))
     if normalized.get("moving_time") in (None, "") and normalized.get(
         "duration_minutes"
     ) not in (None, ""):
