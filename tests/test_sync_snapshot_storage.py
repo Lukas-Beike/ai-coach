@@ -458,6 +458,20 @@ class MergeBaseTests(StorageCase):
             self.environment(tables=True).storage.merge_base(),
         )
 
+    def test_merge_base_refuses_a_stripped_snapshot_when_tables_do_not_serve(
+        self,
+    ) -> None:
+        env = self.environment(tables=True)
+        env.sync(_activities(), days=ALL_DAYS, day=FIRST_DAY)
+        with env.manager.unit_of_work() as db:
+            env.key_values.set(db, STATE_KEY, "{}")
+
+        with self.assertRaises(AppError) as raised:
+            env.storage.merge_base()
+
+        self.assertEqual(raised.exception.reason, "canonical_tables_unavailable")
+        self.assertEqual(env.count("snapshots"), 1)
+
     def test_merge_base_rebuilds_the_activity_sections_of_a_stripped_snapshot(
         self,
     ) -> None:

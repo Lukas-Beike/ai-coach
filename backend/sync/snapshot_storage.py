@@ -28,6 +28,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.db.manager import DatabaseManager
+from backend.errors import AppError
 from backend.planning.compact_activities import compact_activity_rows
 from backend.providers.snapshot_projection import (
     intervals_snapshot_is_stripped,
@@ -66,17 +67,34 @@ class SnapshotStorage:
             snapshot = self._state.latest_snapshot(db)
             if snapshot is None or not intervals_snapshot_is_stripped(snapshot):
                 return snapshot
+            if self._serving is None or not self._serving.serves_tables(db):
+                # The activities live only in the tables; merging against an empty
+                # history would store a snapshot that forgets them.
+                raise AppError(
+                    409,
+                    "Die gespeicherten Aktivitäten sind noch nicht lesbar.",
+                    reason="canonical_tables_unavailable",
+                )
             rows = self._rows.activity_rows(db)
         return restore_intervals_activity_sections(
             snapshot, raw_rows=rows, compact_rows=compact_activity_rows(rows)
         )
 
-    def save(self, db: Any, snapshot: dict[str, Any], **options: Any) -> None:
+    def save(
+        self,
+        db: Any,
+        snapshot: dict[str, Any],
+        *,
+        update_full_sync: bool = True,
+        activity_days: int | None = None,
+    ) -> None:
         """Store the snapshot in the caller's unit of work, stripped when tables serve.
 
-        ``options`` are the ``SyncStateRepository.save_snapshot`` options. The
-        recent-activity count of the full snapshot is kept for the state version.
+        The recent-activity count of the full snapshot is kept for the state version.
         """
+        options: dict[str, Any] = {"update_full_sync": update_full_sync}
+        if activity_days is not None:
+            options["activity_days"] = activity_days
         if self._serving is None or not self._serving.serves_tables(db):
             self._state.save_snapshot(snapshot, **options)
             return
