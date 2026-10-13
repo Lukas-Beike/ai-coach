@@ -175,6 +175,7 @@ class HttpPublicServices:
     feedback_state: Callable[[], Any]
     sync_state: Callable[[], Any]
     canonical_performance_source: Callable[[], Any]
+    season_source: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -444,7 +445,7 @@ class HttpApiAssembly:
                 read_feedback=report_feedback,
                 today=local_today,
                 load_scenarios=load_scenarios,
-                canonical=public.canonical_performance_source(),
+                season_source=public.season_source(),
             )
             return TrainingReportServices(
                 records=records,
@@ -463,6 +464,7 @@ class HttpApiAssembly:
                     read_observations=records.observations,
                     today=local_today,
                     season_preparation=season_preparation,
+                    season_source=public.season_source(),
                 ),
                 timezone=report_timezone,
             )

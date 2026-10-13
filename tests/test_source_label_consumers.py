@@ -5,7 +5,10 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
+from canonical_recovery_support import recovery_observation
+
 from backend.activities.duplicates import duplicate_delete_action
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import (
     activity_read_service,
     body,
@@ -14,6 +17,7 @@ from backend.performance import (
     garmin_metrics,
     garmin_weight,
 )
+from backend.performance.season_inputs import SeasonLoadInputs
 from backend.planning import season_preparation
 
 SEASON_VALUES = {"end": "2026-10-04", "load_scale": 0.8, "taper_days": 2}
@@ -65,8 +69,18 @@ class EmittedSourceOutputTests(unittest.TestCase):
         self.assertEqual("Intervals.icu", metadata["source"])
 
     def test_season_preparation_wellness_basis_names_recorded_wellness(self):
-        snapshot = {"recent_wellness": [{"id": "2026-10-01", "ctl": 50, "atl": 60}]}
+        basis_day = date(2026, 10, 1)
+        inputs = SeasonLoadInputs(
+            basis_day=basis_day,
+            ctl=recovery_observation(
+                MetricKind.CTL, 50, basis_day.isoformat(), ProviderId.INTERVALS
+            ),
+            atl=recovery_observation(
+                MetricKind.ATL, 60, basis_day.isoformat(), ProviderId.INTERVALS
+            ),
+            completed_today=(),
+        )
         result = season_preparation.load_scenarios(
-            snapshot, {}, date(2026, 10, 2), SEASON_VALUES
+            {}, {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
         )
         self.assertEqual("Intervals.icu recorded wellness", result["basis"]["source"])

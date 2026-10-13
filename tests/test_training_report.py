@@ -13,8 +13,40 @@ from backend.performance.report_service import (
     TrainingReportReadService,
     TrainingSeasonReadService,
 )
+from backend.performance.season_inputs import SeasonSource
 from backend.performance.training_report import training_report
 from backend.planning.season_preparation import load_scenarios, season_preparation
+
+
+class _EmptyReader:
+    """Observation and activity-row reader over an empty store."""
+
+    def observations(self, db, kind, *, start, end):
+        return []
+
+    def activity_rows(self, db, *, start, end):
+        return []
+
+
+class _FakeUnitOfWork:
+    def __enter__(self):
+        return object()
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _FakeDatabaseManager:
+    def unit_of_work(self):
+        return _FakeUnitOfWork()
+
+
+def _empty_season_source():
+    return SeasonSource(
+        database_manager=_FakeDatabaseManager,
+        observation_reader=_EmptyReader,
+        activity_rows=_EmptyReader,
+    )
 
 
 class TrainingReportTests(unittest.TestCase):
@@ -431,6 +463,7 @@ class TrainingReportTests(unittest.TestCase):
             read_feedback=list,
             today=lambda: date(2026, 10, 2),
             load_scenarios=load_scenarios,
+            season_source=_empty_season_source(),
         )
         result = service.read({}, "Europe/Berlin")
         self.assertEqual("Europe/Berlin", result["timezone"])
@@ -453,6 +486,7 @@ class TrainingReportTests(unittest.TestCase):
             read_observations=list,
             today=lambda: date(2026, 10, 2),
             season_preparation=season_preparation,
+            season_source=_empty_season_source(),
         )
         self.assertIsInstance(season.season("Europe/Berlin"), dict)
 

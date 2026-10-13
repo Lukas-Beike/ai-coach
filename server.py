@@ -1775,6 +1775,7 @@ PUBLIC_STATE = PublicStateAssembly(
             key_value_service=key_value_service,
             observation_reader=lambda: CANONICAL_READ,
             canonical_serving=lambda: CANONICAL_READ,
+            activity_row_reader=lambda: CANONICAL_READ,
         ),
         owners=PublicStateOwnerAssemblies(
             snapshot_repository=SNAPSHOT_REPOSITORY,
@@ -1970,6 +1971,7 @@ HTTP_API = HttpApiAssembly(
                 feedback_state=PUBLIC_STATE.feedback_state_service,
                 sync_state=PUBLIC_STATE.sync_public_state_service,
                 canonical_performance_source=PUBLIC_STATE.canonical_performance_source,
+                season_source=PUBLIC_STATE.season_source,
             ),
             athlete=HttpAthleteServices(
                 profile=ATHLETE_DATA.profile,

@@ -19,6 +19,10 @@ UNITS = {
     MetricKind.SLEEP_SCORE: "score",
     MetricKind.RESTING_HR: "bpm",
     MetricKind.READINESS: "score",
+    MetricKind.HRV_RMSSD: "ms",
+    MetricKind.SLEEP_DURATION: "s",
+    MetricKind.CTL: "load",
+    MetricKind.ATL: "load",
 }
 
 
