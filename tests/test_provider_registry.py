@@ -225,7 +225,9 @@ class DefaultDescriptorParityTests(unittest.TestCase):
         self.assertEqual(
             ("intervals", "garmin", "wahoo"), registry.ids_with(Capability.ACTIVITIES)
         )
-        self.assertEqual(("intervals",), registry.ids_with(Capability.WORKOUT_EXPORT))
+        self.assertEqual(
+            ("intervals", "wahoo"), registry.ids_with(Capability.WORKOUT_EXPORT)
+        )
         self.assertEqual(("intervals",), registry.ids_with(Capability.COMPETITIONS))
         self.assertEqual(("weather",), registry.ids_with(Capability.WEATHER_FORECAST))
         self.assertEqual(("calendar",), registry.ids_with(Capability.PUBLIC_CALENDAR))
@@ -399,6 +401,7 @@ PREVIOUS_JOB_SUPPORT: dict[str, frozenset[str]] = {
     "garmin": frozenset({"refresh", "historical_backfill"}),
     "calendar": frozenset({"refresh"}),
     "weather": frozenset({"refresh"}),
+    "wahoo": frozenset({"refresh", "plan_push"}),
 }
 PREVIOUS_REFRESH_FIELDS: dict[str, frozenset[str]] = {
     "intervals": frozenset({"days", "reason", "end_date"}),

@@ -411,11 +411,20 @@ class WahooSyncJobOwner(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class WahooJobAdapter:
-    """Refuse plan pushes, then run the read-only Wahoo sync."""
+class WahooPlanPushOwner(Protocol):
+    """Exports the selected library workouts as Wahoo plans."""
 
-    def __init__(self, *, sync: WahooSyncJobOwner) -> None:
+    def sync(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class WahooJobAdapter:
+    """Run the explicit Wahoo plan export or the read-only Wahoo sync."""
+
+    def __init__(
+        self, *, sync: WahooSyncJobOwner, plan_push: WahooPlanPushOwner | None = None
+    ) -> None:
         self._sync = sync
+        self._plan_push = plan_push
 
     def execute(
         self,
@@ -425,6 +434,11 @@ class WahooJobAdapter:
         *,
         job_type: str,
     ) -> dict[str, Any]:
+        if job_type == "plan_push" and self._plan_push is not None:
+            selected_payload = {"entries": payload.get("entries")}
+            if payload.get("repair"):
+                selected_payload["repair"] = True
+            return self._plan_push.sync(selected_payload)
         _reject_plan_push(job_type)
         return self._sync.sync(payload.get("days"), reason, operation_id=job["id"])
 

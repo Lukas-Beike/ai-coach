@@ -1,10 +1,19 @@
-"""Wahoo Cloud API read transport.
+"""Wahoo Cloud API transport.
 
-Only reads: the workout list, one workout summary and the user. The bearer token
-comes from injected callables owned by the connection use case, so this module
-never stores, logs or returns a token. Every request goes through the shared
-JSON client, which applies the timeout and the response size cap and records
-request shapes only. Provider payloads are never copied into exceptions.
+Reads the workout list, one workout summary and the user, and writes training
+plans (create, update, delete) on explicit export. The bearer token comes from
+injected callables owned by the connection use case, so this module never
+stores, logs or returns a token. Every request goes through the shared JSON
+client, which applies the timeout and the response size cap and records
+request shapes only. Provider payloads, including plan files, are never copied
+into exceptions.
+
+Plan field names follow the official Wahoo Cloud API documentation
+(https://cloud-api.wahooligan.com/, "Plans"): ``POST /v1/plans`` and
+``PUT /v1/plans/:id`` take the form fields ``plan[file]`` (a base64 data URI of
+the plan JSON), ``plan[filename]`` and ``plan[provider_updated_at]``; only
+create takes ``plan[external_id]``. The plan JSON is described by
+https://cloud-api.wahooligan.com/docs/plan-json-format.pdf.
 
 Failure contract:
 
@@ -16,6 +25,8 @@ Failure contract:
 
 from __future__ import annotations
 
+import base64
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -28,6 +39,9 @@ from backend.providers.wahoo_oauth import WAHOO_API_BASE, WAHOO_SERVICE
 
 WORKOUTS_PATH: Final = "/v1/workouts"
 USER_PATH: Final = "/v1/user"
+PLANS_PATH: Final = "/v1/plans"
+FORM_CONTENT_TYPE: Final = "application/x-www-form-urlencoded"
+PLAN_DATA_URI_PREFIX: Final = "data:application/json;base64,"
 REQUEST_TIMEOUT_SECONDS: Final = 30
 WORKOUTS_PER_PAGE: Final = 50
 # Bounds one sync at 1000 workouts however the provider paginates.
@@ -116,7 +130,7 @@ def _invalid_response() -> AppError:
 
 
 class WahooClient:
-    """Read Wahoo workouts with an injected, refreshable bearer token."""
+    """Read Wahoo workouts and write plans with an injected, refreshable token."""
 
     def __init__(
         self,
@@ -160,9 +174,7 @@ class WahooClient:
 
     def workout_summary(self, workout_id: int) -> Mapping[str, Any]:
         """Return the summary object of one workout."""
-        payload = self._get(
-            f"{WORKOUTS_PATH}/{_workout_id(workout_id)}/workout_summary"
-        )
+        payload = self._get(f"{WORKOUTS_PATH}/{_remote_id(workout_id)}/workout_summary")
         if not isinstance(payload, dict):
             raise _invalid_response()
         return payload
@@ -174,13 +186,66 @@ class WahooClient:
             raise _invalid_response()
         return payload
 
+    def create_plan(
+        self,
+        plan: Mapping[str, Any],
+        *,
+        filename: str,
+        external_id: str,
+        provider_updated_at: datetime,
+    ) -> Mapping[str, Any]:
+        """Upload a new plan and return the saved plan object."""
+        fields = _plan_fields(plan, filename, provider_updated_at)
+        fields["plan[external_id]"] = external_id
+        return self._plan_object(self._write("POST", PLANS_PATH, fields))
+
+    def update_plan(
+        self,
+        plan_id: int,
+        plan: Mapping[str, Any],
+        *,
+        filename: str,
+        provider_updated_at: datetime,
+    ) -> Mapping[str, Any]:
+        """Replace one plan this app created and return the saved plan object."""
+        fields = _plan_fields(plan, filename, provider_updated_at)
+        return self._plan_object(
+            self._write("PUT", f"{PLANS_PATH}/{_remote_id(plan_id)}", fields)
+        )
+
+    def delete_plan(self, plan_id: int) -> None:
+        """Delete one plan; workouts that used it keep existing without the link."""
+        self._write("DELETE", f"{PLANS_PATH}/{_remote_id(plan_id)}", None)
+
+    def list_plans(self) -> tuple[Mapping[str, Any], ...]:
+        """Return the plans this app uploaded."""
+        payload = self._get(PLANS_PATH)
+        if not isinstance(payload, list) or not all(
+            isinstance(row, dict) for row in payload
+        ):
+            raise _invalid_response()
+        return tuple(payload)
+
+    @staticmethod
+    def _plan_object(payload: Any) -> Mapping[str, Any]:
+        if not isinstance(payload, dict):
+            raise _invalid_response()
+        return payload
+
     def _get(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
         url = f"{WAHOO_API_BASE}{path}"
         if params:
             url = f"{url}?{urlencode(params)}"
+        return self._call("GET", url, None)
+
+    def _write(self, method: str, path: str, fields: Mapping[str, str] | None) -> Any:
+        body = urlencode(fields).encode("ascii") if fields is not None else None
+        return self._call(method, f"{WAHOO_API_BASE}{path}", body)
+
+    def _call(self, method: str, url: str, body: bytes | None) -> Any:
         rejected = self._access_token()
         try:
-            return self._send(url, rejected)
+            return self._send(method, url, rejected, body)
         except AppError as exc:
             if exc.upstream_status != 401:
                 raise _translated(exc) from None
@@ -188,7 +253,7 @@ class WahooClient:
         # the reconnect error from the connection use case.
         token = self._refresh_access_token(rejected)
         try:
-            return self._send(url, token)
+            return self._send(method, url, token, body)
         except AppError as exc:
             if exc.upstream_status == 401:
                 # A freshly refreshed token was rejected too: drop the grant so
@@ -198,14 +263,39 @@ class WahooClient:
                 raise WahooReconnectRequiredError from None
             raise _translated(exc) from None
 
-    def _send(self, url: str, token: str) -> Any:
+    def _send(self, method: str, url: str, token: str, body: bytes | None) -> Any:
+        headers = {"Authorization": f"Bearer {token}"}
+        if body is None:
+            return self._request(
+                method,
+                url,
+                headers=headers,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+                service=WAHOO_SERVICE,
+            )
         return self._request(
-            "GET",
+            method,
             url,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=headers,
+            raw_body=body,
+            content_type=FORM_CONTENT_TYPE,
             timeout=REQUEST_TIMEOUT_SECONDS,
             service=WAHOO_SERVICE,
         )
+
+
+def _plan_fields(
+    plan: Mapping[str, Any], filename: str, provider_updated_at: datetime
+) -> dict[str, str]:
+    if provider_updated_at.utcoffset() is None:
+        raise ValueError("provider_updated_at must be timezone-aware")
+    document = json.dumps(plan, separators=(",", ":"), ensure_ascii=True)
+    encoded = base64.b64encode(document.encode("utf-8")).decode("ascii")
+    return {
+        "plan[file]": f"{PLAN_DATA_URI_PREFIX}{encoded}",
+        "plan[filename]": filename,
+        "plan[provider_updated_at]": provider_updated_at.astimezone(UTC).isoformat(),
+    }
 
 
 def _translated(error: AppError) -> AppError:
@@ -233,11 +323,11 @@ def _page_size(payload: object) -> int:
     return WORKOUTS_PER_PAGE
 
 
-def _workout_id(value: object) -> int:
+def _remote_id(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("workout id must be an integer")  # noqa: TRY004 - bad value, not a type contract
+        raise ValueError("remote id must be an integer")  # noqa: TRY004 - bad value, not a type contract
     if not 0 < value <= MAX_WORKOUT_ID:
-        raise ValueError("workout id is out of range")
+        raise ValueError("remote id is out of range")
     return value
 
 

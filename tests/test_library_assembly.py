@@ -92,6 +92,30 @@ class WorkoutLibrarySyncAssemblyTests(unittest.TestCase):
             assembly.export_port(ProviderId.WAHOO)
         callbacks["intervals_client"].assert_not_called()
 
+    def test_export_port_resolves_wahoo_through_its_registered_factory(self):
+        callbacks = self._callbacks()
+        wahoo_port = Mock()
+        wahoo_port.capabilities.library = True
+        wahoo_factory = Mock(return_value=wahoo_port)
+        assembly = WorkoutLibrarySyncAssembly(
+            dependencies=WorkoutLibrarySyncAssembly.Inputs(
+                provider=WorkoutLibraryProvider(
+                    callbacks["config"],
+                    callbacks["database_manager"],
+                    callbacks["intervals_client"],
+                    callbacks["workout_library_service"],
+                    wahoo_export=wahoo_factory,
+                ),
+                state=WorkoutLibraryState(Mock(), Mock(), Mock(), callbacks["utc_now"]),
+                uuid_factory=callbacks["uuid_factory"],
+            )
+        )
+
+        self.assertIs(assembly.export_port(ProviderId.WAHOO), wahoo_port)
+        self.assertIsInstance(assembly.export_port(), IntervalsWorkoutExport)
+        with self.assertRaises(ValueError):
+            assembly.export_port(ProviderId.GARMIN)
+
     def test_refresh_composes_library_and_remote_reconciliation_owners(self):
         callbacks = self._callbacks()
         assembly = self._assembly(callbacks)

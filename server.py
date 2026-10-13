@@ -561,7 +561,10 @@ def provider_runtime() -> ProviderRuntimeRegistry:
                 intervals=jobs.intervals,
                 garmin=jobs.garmin,
                 calendar_weather=jobs.calendar_weather,
-                wahoo=WahooRuntimeDependencies(sync_service=WAHOO_SYNC.sync_service),
+                wahoo=WahooRuntimeDependencies(
+                    sync_service=WAHOO_SYNC.sync_service,
+                    plan_push_service=WAHOO_SYNC.plan_push_service,
+                ),
             )
         ),
     )
@@ -1077,6 +1080,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
         now=lambda: datetime.now(UTC),
         logger=LOGGER,
+        redactor=REDACTOR.redact_text,
     )
 )
 NUTRITION_ASSEMBLY = NutritionAssembly(
@@ -1209,6 +1213,7 @@ WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
             config=lambda: CONFIG,
             database_manager=database_manager,
             intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+            wahoo_export=WAHOO_SYNC.workout_export,
             workout_library_service=PLANNING_DATA.workout_library,
             calendar_conflict_service=PLANNING_WORKFLOWS.calendar_conflict_service,
         ),

@@ -1,4 +1,4 @@
-"""Lazy composition of the Wahoo read synchronization service."""
+"""Lazy composition of the Wahoo read synchronization and plan export services."""
 
 from __future__ import annotations
 
@@ -18,7 +18,9 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.wahoo_connection import WahooConnectionService
+from backend.sync.wahoo_plan_push import WahooPlanPushService
 from backend.sync.wahoo_sync import WahooSyncService
+from backend.sync.wahoo_workout_export import WahooWorkoutExport
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,7 @@ class WahooSyncInputs:
     zone_provider: Callable[[], tzinfo | None]
     now: Callable[[], datetime]
     logger: logging.Logger
+    redactor: Callable[[str], str]
 
 
 class WahooSyncAssembly:
@@ -43,9 +46,11 @@ class WahooSyncAssembly:
     def __init__(self, inputs: WahooSyncInputs) -> None:
         self._inputs = inputs
         self._service: WahooSyncService | None = None
+        self._plan_push: WahooPlanPushService | None = None
         self._lock = threading.Lock()
 
-    def _client(self) -> WahooClient:
+    def client(self) -> WahooClient:
+        """Create a transport bound to the stored, refreshable Wahoo token."""
         inputs = self._inputs
         connection = inputs.connection()
         return WahooClient(
@@ -62,7 +67,7 @@ class WahooSyncAssembly:
                 self._service = WahooSyncService(
                     config=inputs.config,
                     connection=inputs.connection,
-                    source=self._client,
+                    source=self.client,
                     database_manager=inputs.database_manager,
                     database_lock=inputs.database_lock,
                     key_values=inputs.key_values,
@@ -74,3 +79,22 @@ class WahooSyncAssembly:
                     logger=inputs.logger,
                 )
             return self._service
+
+    def workout_export(self) -> WahooWorkoutExport:
+        """Create the library export target; the client resolves per remote call."""
+        return WahooWorkoutExport(self.client, now=self._inputs.now)
+
+    def plan_push_service(self) -> WahooPlanPushService:
+        """Share one plan-push service so its run lock serializes every caller."""
+        configured = self.sync_service().configured
+        with self._lock:
+            if self._plan_push is None:
+                inputs = self._inputs
+                self._plan_push = WahooPlanPushService(
+                    configured=configured,
+                    database_manager=inputs.database_manager,
+                    export=self.workout_export,
+                    now=inputs.now,
+                    redactor=inputs.redactor,
+                )
+            return self._plan_push

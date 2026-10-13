@@ -45,7 +45,7 @@ PROVIDER_REJECTIONS = {
     "nutrition_sync": "Ungültiger Ernährungssynchronisierungsauftrag.",
     "performance_refresh": "Dieser Job ist nur für Intervals.icu zulässig.",
     "competition_push": "Dieser Job ist nur für Intervals.icu zulässig.",
-    "plan_push": "Plan-Push-Jobs sind nur für Intervals.icu zulässig.",
+    "plan_push": "Plan-Push-Jobs sind nur für Intervals.icu und Wahoo zulässig.",
 }
 # Payloads valid for the Intervals.icu-only types, so only the provider check can fail.
 PROBE_PAYLOADS = {
