@@ -416,6 +416,7 @@ document.querySelector("#nutritionToday").addEventListener("click", () => { docu
 function resetNutritionView() {
   ++nutritionLoadSequence;
   ++nutritionProductLoadSequence;
+  nutritionLookupResultShown = false;
   stopNutritionBarcode();
   document.querySelector("#nutritionBarcodeDialog")?.close();
   document.querySelector("#nutritionProductUseDialog")?.close();
@@ -433,6 +434,7 @@ let nutritionBarcodeDetector = null;
 let nutritionBarcodeSession = 0;
 let nutritionProductForUse = null;
 let nutritionProductLoadSequence = 0;
+let nutritionLookupResultShown = false;
 
 function nutritionProductValue(value) {
   return value == null || value === "" ? "" : String(value);
@@ -608,7 +610,9 @@ async function createNutritionProductDraft() {
   jumpToLatestMessages();
 }
 
-async function loadNutritionProducts(query = "") {
+async function loadNutritionProducts(query = "", { background = false } = {}) {
+  if (background && nutritionLookupResultShown) return;
+  nutritionLookupResultShown = false;
   const sequence = ++nutritionProductLoadSequence;
   const generation = state.sessionGeneration;
   const status = document.querySelector("#nutritionProductStatus");
@@ -668,6 +672,8 @@ async function lookupNutritionProduct(barcode) {
     const result = await api("/api/nutrition/products/lookup", { method: "POST", body: JSON.stringify({ barcode: clean }) });
     if (generation !== state.sessionGeneration) return;
     document.querySelector("#nutritionBarcodeDialog")?.close();
+    ++nutritionProductLoadSequence;
+    nutritionLookupResultShown = true;
     const product = result.product || result.foods?.[0] || result.products?.[0] || null;
     const isLocal = result.local !== false && result.source !== "open_food_facts";
     renderNutritionProducts(product ? [{ ...product, local: isLocal }] : [], { local: isLocal });
