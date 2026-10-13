@@ -9,7 +9,11 @@ from functools import wraps
 from typing import Any, TypeVar, cast
 
 from backend.errors import AppError
-from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
+from backend.providers.descriptors import (
+    DEFAULT_PROVIDER_DESCRIPTORS,
+    GARMIN_ID,
+    INTERVALS_ID,
+)
 
 _Function = TypeVar("_Function", bound=Callable[..., Any])
 
@@ -64,8 +68,12 @@ class ProviderResyncGate:
             return self.resetting
 
 
-INTERVALS_RESYNC_GATE = ProviderResyncGate("Intervals.icu")
-GARMIN_RESYNC_GATE = ProviderResyncGate("Garmin")
+_PROVIDER_LABELS = {
+    descriptor.provider_id: descriptor.label
+    for descriptor in DEFAULT_PROVIDER_DESCRIPTORS
+}
+INTERVALS_RESYNC_GATE = ProviderResyncGate(_PROVIDER_LABELS[INTERVALS_ID])
+GARMIN_RESYNC_GATE = ProviderResyncGate(_PROVIDER_LABELS[GARMIN_ID])
 DEFAULT_RESYNC_GATES: Mapping[str, ProviderResyncGate] = {
     INTERVALS_ID: INTERVALS_RESYNC_GATE,
     GARMIN_ID: GARMIN_RESYNC_GATE,

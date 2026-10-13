@@ -1,12 +1,5 @@
 {
   "description": "Ratchet baseline for provider-specific coupling outside backend/providers/ and backend/canonical/. Entries may only shrink: move new coupling behind a provider adapter or canonical model, and regenerate this file after removing coupling.",
   "regeneration": "python tests/provider_coupling.py --snapshot",
-  "entries": [
-    {
-      "rule": "provider_literal",
-      "path": "backend/sync/gates.py",
-      "token": "garmin",
-      "count": 1
-    }
-  ]
+  "entries": []
 }
