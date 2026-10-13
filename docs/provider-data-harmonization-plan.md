@@ -1112,6 +1112,25 @@ v6); `remote_links` wird v8, v7 wird als develop-Form eingefroren.
 | W | W4 | Wahoo-`WorkoutExportPort` für Pläne, ausdrücklicher Sync mit Ziel aus dem Register | S3, W2 |
 | W | W5 | PWA: Verbinden, Status, Labels; README | W1, W2 |
 
+### 5.14 Ergebnis Rückbau R10 (alle gemergt, Stand 2026-10-13)
+
+| Einheit | PR | Inhalt |
+|---|---|---|
+| R10a | #1156 | Schema v9: gespeicherte Sportwerte als `Sport`/`Environment`, transaktionale Migration v8 → v9, Export Version 5 |
+| R10c | #1152 | Leistung liest Providerfelder über Adapter statt Wire-Namen |
+| R10e | #1157 | Planung und Coach lesen Providerfelder über Adapter |
+| R10f | #1158 | Sync liest Providerfelder über Adapter |
+| R10d | #1159 | Aktivitäten, Athlet, Kalender und Diagnose über Adapter; Fehlerlabels in `canonical/labels.py` (zyklenfrei) |
+| R10b | #1160 | HTTP/PWA: neutrale Metriknamen (`training_load`, `intensity`, `rpe`) nur an der Browser-Grenze, Provider-IDs aus dem Bootstrap |
+| R10g | #1161 | Resync-Gates aus den Deskriptoren; Kopplungs-Baseline leer |
+
+Befunde aus dem Review von #1160: `PublicPlanStateService.read` bleibt für
+Trainingsbericht und Saisonszenarien bei den gespeicherten Schlüsseln; nur
+`read_public` (`/api/plan`), `/api/activities`, Bootstrap-Aktivitäten und
+Runden (`laps`) übersetzen. Der Kopplungs-Guard verweigert eine leere
+Baseline weiterhin ohne Scan oder ohne bestehende Baseline und erlaubt sie
+nur, wenn alle bestehenden Einträge nach einem echten Scan entfernt sind.
+
 ## 6. Pflichtnachweise für Schema-PRs (v6 und folgende)
 
 - Eingefrorenes Fixture des zuletzt veröffentlichten Schemas mit Daten; direkte
