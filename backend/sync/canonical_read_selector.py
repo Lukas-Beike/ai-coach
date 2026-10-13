@@ -102,6 +102,7 @@ class CanonicalReadSelector(
         *,
         start: date | None = None,
         end: date | None = None,
+        limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
         """Return raw activity rows from the same source as ``activities``.
 
@@ -111,7 +112,7 @@ class CanonicalReadSelector(
         source: CanonicalReader = self._source(db)
         if source is self._table and self._legacy.has_only_compact_activity_rows(db):
             source = self._legacy
-        return source.activity_rows(db, start=start, end=end)
+        return source.activity_rows(db, start=start, end=end, limit=limit)
 
     def observations(
         self,

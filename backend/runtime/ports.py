@@ -48,7 +48,8 @@ class ActivityRowReader(Protocol):
     bounds on the athlete-local date of each activity, as in ``ActivityReader``.
     Deleted or tombstoned activities are never returned. The legacy source keeps
     the snapshot order (newest first); the table source orders newest first by
-    activity start, then id.
+    activity start, then id. ``limit`` keeps only the newest rows; the table
+    source applies it before reading the payloads.
     """
 
     def activity_rows(
@@ -57,6 +58,7 @@ class ActivityRowReader(Protocol):
         *,
         start: date | None = None,
         end: date | None = None,
+        limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]: ...
 
 

@@ -486,6 +486,7 @@ def active_activity_payload_texts(
     record_kind: str,
     start: str | None = None,
     end: str | None = None,
+    limit: int | None = None,
 ) -> list[str]:
     """Return the stored raw payload text of one provider's live activities.
 
@@ -493,7 +494,7 @@ def active_activity_payload_texts(
     not deleted are returned, so tombstoned activities are never served. ``start``
     and ``end`` are inclusive ISO dates on the stored athlete-local date. Newest
     first, like the stored snapshot: activity start time, then provider activity
-    id, both descending.
+    id, both descending. ``limit`` bounds the rows in SQL.
     """
     clauses = [
         "p.provider = ?",
@@ -515,6 +516,10 @@ def active_activity_payload_texts(
     if end is not None:
         clauses.append("r.local_date <= ?")
         params.append(end)
+    limit_clause = ""
+    if limit is not None:
+        limit_clause = " LIMIT ?"
+        params.append(limit)
     rows = _fetch_all(
         db,
         "SELECT p.payload FROM provider_records AS p "
@@ -522,7 +527,7 @@ def active_activity_payload_texts(
         "AND r.provider_activity_id = p.source_record_id "
         "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
         f"WHERE {' AND '.join(clauses)} ORDER BY r.started_at DESC, "
-        "r.provider_activity_id DESC",
+        f"r.provider_activity_id DESC{limit_clause}",
         tuple(params),
     )
     return [str(row["payload"]) for row in rows]

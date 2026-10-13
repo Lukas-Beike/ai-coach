@@ -31,6 +31,7 @@ from backend.planning import context as planning_context
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
+from backend.planning.compact_activities import ActivityRowSource
 from backend.planning.library_service import WorkoutLibraryService
 from backend.providers.source_labels import SourceView, provider_label
 from backend.sync.state import SyncStateRepository
@@ -242,21 +243,21 @@ def future_coach_planned_workouts(
 
 
 class CoachIntervalsContextService:
-    """Build a read-only bounded projection of an Intervals.icu snapshot."""
+    """Build a read-only bounded projection of compact recent activities.
+
+    The activities come from the canonical activity row port; the snapshot only
+    supplies the sync time.
+    """
 
     def project(
         self,
         snapshot: dict[str, Any] | None,
         planned_units: list[dict[str, Any]] | None,
         today: date,
+        activities: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         snapshot = snapshot if isinstance(snapshot, dict) else {}
-        raw_activities = snapshot.get("recent_activities")
-        activities = (
-            [item for item in raw_activities if isinstance(item, dict)]
-            if isinstance(raw_activities, list)
-            else []
-        )
+        activities = [item for item in activities or [] if isinstance(item, dict)]
         grouped: dict[str, list[dict[str, Any]]] = {}
         for activity in activities:
             grouped.setdefault(activity_validation.activity_sport(activity), []).append(
@@ -448,24 +449,50 @@ class CoachPerformanceContextReader:
         garmin_projection_service: Any,
         today: Callable[[], date],
         canonical: CanonicalPerformanceSource | None = None,
+        activity_rows: ActivityRowSource | None = None,
     ) -> None:
         self._profile_service = profile_service
         self._garmin_payload_service = garmin_payload_service
         self._garmin_projection_service = garmin_projection_service
         self._today = today
         self._canonical = canonical
+        self._activity_rows = activity_rows
 
     def profile(self) -> Any:
         return self._profile_service.get()
 
-    def activities(self, snapshot: Any, planned: Any) -> dict[str, Any]:
-        return CoachIntervalsContextService().project(snapshot, planned, self._today())
+    def activities(
+        self,
+        snapshot: Any,
+        planned: Any,
+        rows: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Project compact activities, read now unless ``read_sources`` captured them."""
+        if rows is None:
+            rows = self._activity_rows.compact() if self._activity_rows else []
+        return CoachIntervalsContextService().project(
+            snapshot, planned, self._today(), rows
+        )
 
     def read_snapshot(
         self, read_snapshot: Callable[[], Any]
     ) -> tuple[Any, CanonicalPerformanceInputs | None]:
         """Read the snapshot and its canonical load inputs in one unit of work."""
         return snapshot_with_inputs(self._canonical, read_snapshot)
+
+    def read_sources(
+        self, read_snapshot: Callable[[], Any]
+    ) -> tuple[Any, CanonicalPerformanceInputs | None, list[dict[str, Any]] | None]:
+        """Read the snapshot, its load inputs and compact activities in one unit of work.
+
+        A sync that commits in between can then not pair newer activities with the
+        older snapshot's sync time. Without an activity source the rows stay None.
+        """
+        if self._activity_rows is None:
+            return (*self.read_snapshot(read_snapshot), None)
+        with self._activity_rows.database_manager().unit_of_work() as db:
+            snapshot, inputs = self.read_snapshot(read_snapshot)
+            return snapshot, inputs, self._activity_rows.compact(db)
 
     def current_performance(
         self, snapshot: Any, canonical: CanonicalPerformanceInputs | None = None
@@ -517,13 +544,16 @@ class CoachStructuredContextService:
     ) -> dict[str, Any]:
         """Assemble the bounded structured context using explicit read services.
 
-        Canonical load inputs are only used when this call reads the snapshot
-        itself, so both come from one transaction.
+        Canonical load inputs and compact activities are only captured when this
+        call reads the snapshot itself, so all come from one transaction.
         """
         performance_inputs: CanonicalPerformanceInputs | None = None
+        activity_rows: list[dict[str, Any]] | None = None
         if snapshot is None:
-            snapshot, performance_inputs = self._performance_reader.read_snapshot(
-                self._sync_state_repository.latest_snapshot
+            snapshot, performance_inputs, activity_rows = (
+                self._performance_reader.read_sources(
+                    self._sync_state_repository.latest_snapshot
+                )
             )
         included = selection.sections if selection else CONTEXT_SECTIONS
         checkins = (
@@ -563,6 +593,7 @@ class CoachStructuredContextService:
             weather,
             daily_context,
             performance_inputs=performance_inputs,
+            activity_rows=activity_rows,
         )
 
     def _selected_sections(
@@ -575,6 +606,7 @@ class CoachStructuredContextService:
         daily_context: Any,
         *,
         performance_inputs: CanonicalPerformanceInputs | None = None,
+        activity_rows: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         intervals_label = _source_label(ProviderId.INTERVALS)
         garmin_label = _source_label(ProviderId.GARMIN)
@@ -603,7 +635,7 @@ class CoachStructuredContextService:
             if "external_calendar" in included
             else None,
             "activities": self._performance_reader.activities(
-                snapshot, local_planned_workouts
+                snapshot, local_planned_workouts, activity_rows
             )
             if "activities" in included
             else None,

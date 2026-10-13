@@ -450,9 +450,7 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
             "icu_rpe": 6,
         }
 
-        result = CoachIntervalsContextService().project(
-            {"recent_activities": [activity]}, [], TODAY
-        )
+        result = CoachIntervalsContextService().project({}, [], TODAY, [activity])
 
         row = result["recent_activities_by_sport"]["Radfahren"][0]
         # Fields outside COACH_ACTIVITY_FIELDS (icu_eftp, max_speed, description)
@@ -484,9 +482,7 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
             "start_date_local": "2026-05-03T07:00:00",
         }
 
-        result = CoachIntervalsContextService().project(
-            {"recent_activities": [activity]}, [], TODAY
-        )
+        result = CoachIntervalsContextService().project({}, [], TODAY, [activity])
 
         rows = result["recent_activities_by_sport"]["Laufen"]
         self.assertEqual(len(rows), 1)

@@ -24,6 +24,7 @@ from backend.http_api.state_prelude import (
 from backend.http_api.state_versions import StateVersionService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.season_inputs import SeasonSource
+from backend.planning.compact_activities import ActivityRowSource
 from backend.runtime.ports import (
     ActivityRowReader,
     CanonicalTableServing,
@@ -49,7 +50,8 @@ class PublicStateCoreInputs:
     # When set, body history reads weight and body fat from canonical tables while
     # the tables serve reads.
     canonical_serving: Callable[[], CanonicalTableServing] | None = None
-    # When set, season preparation and load scenarios read activity rows from it.
+    # When set, season preparation, load scenarios, and the state and plan
+    # endpoints read activity rows from it.
     activity_row_reader: Callable[[], ActivityRowReader] | None = None
 
 
@@ -206,6 +208,11 @@ class PublicStateAssembly:
             self._activity_row_reader,
         )
 
+    def activity_row_source(self) -> ActivityRowSource | None:
+        if self._activity_row_reader is None:
+            return None
+        return ActivityRowSource(self._database_manager, self._activity_row_reader)
+
     def state_version_service(self) -> StateVersionService:
         return StateVersionService(
             self._database_manager(),
@@ -328,6 +335,7 @@ class PublicStateAssembly:
                 external_calendar_configured=bool(config.calendar_ical_url),
                 external_calendar_window_days=self._external_calendar_window_days(),
                 default_workout_name=self._planned_workout_label(),
+                activity_rows=self.activity_row_source(),
             )
         )
 
@@ -344,6 +352,7 @@ class PublicStateAssembly:
                 self._calendar_history_days(), self._calendar_future_days()
             ),
             self.performance_state_service().canonical_inputs,
+            self.activity_row_source(),
         )
 
     def weather_prelude_service(self) -> PublicStateWeatherPrelude:

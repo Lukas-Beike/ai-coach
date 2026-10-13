@@ -81,14 +81,16 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
         *,
         start: date | None = None,
         end: date | None = None,
+        limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
         """Return the stored raw Intervals.icu payloads of live activities.
 
         Newest first, like the stored snapshot (activity start, then provider
         activity id, both descending). The stored payload
         is the ingest-sanitized one: credential-like keys and signed URLs are
-        already removed. A payload that does not parse as a JSON object is
-        skipped; its content is never logged.
+        already removed. ``limit`` is applied in SQL before any payload is read.
+        A payload that does not parse as a JSON object is skipped; its content
+        is never logged.
         """
         texts = canonical_store.active_activity_payload_texts(
             db,
@@ -96,6 +98,7 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
             record_kind=ACTIVITY_RECORD_KIND,
             start=_iso(start),
             end=_iso(end),
+            limit=limit,
         )
         parsed = (_payload_object(text) for text in texts)
         return tuple(row for row in parsed if row is not None)

@@ -250,6 +250,7 @@ from backend.planning.assembly import (
 from backend.planning.assembly import (
     PlanningRuntime as PlanningDataRuntime,
 )
+from backend.planning.compact_activities import ActivityRowSource
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
@@ -1305,6 +1306,10 @@ COACH_CONTEXT = CoachContextAssembly(
                 database_manager=lambda: database_manager(),
                 observation_reader=lambda: CANONICAL_READ,
             ),
+            activity_rows=ActivityRowSource(
+                database_manager=lambda: database_manager(),
+                reader=lambda: CANONICAL_READ,
+            ),
         ),
         planning=CoachContextPlanningSources(
             checkin_service=ATHLETE_DATA.checkin,
@@ -1881,6 +1886,7 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             canonical_coverage=lambda: CANONICAL_READ,
             canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
             canonical_read=lambda: CANONICAL_READ,
+            canonical_rows=lambda: CANONICAL_READ,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,
