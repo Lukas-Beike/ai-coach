@@ -178,7 +178,7 @@ def _apply_planned_workout_update(
         candidate["start_date_local"] = planning_workouts.validate_workout_start_date(
             values["start_date_local"], str(candidate.get("date") or "")
         )
-    if "type" in values or "sport" in values:
+    if {"type", "sport", "environment"} & values.keys():
         apply_sport_update(candidate, values)
 
 

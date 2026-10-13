@@ -8,7 +8,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from backend.canonical.vocabulary import RemoteEntityKind
+from backend.canonical.vocabulary import Environment, RemoteEntityKind
 from backend.config import Config
 from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLinkRepository
@@ -22,6 +22,28 @@ from backend.sync.authority import competition_push_manifest
 
 _COMPETITION_SYNC_LOCK = threading.Lock()
 _REMOTE_LINKS = RemoteLinkRepository()
+
+
+def _same_remote_sport(row: dict[str, Any], data: dict[str, Any]) -> bool:
+    """Return True when the remote competition names the same sport as the local row.
+
+    Indoor and virtual share one Intervals.icu race type, so they compare equal.
+    """
+
+    def wire_environment(environment: Any) -> Any:
+        return Environment.VIRTUAL if environment is Environment.INDOOR else environment
+
+    local = planning_competitions.competition_stored_sport(
+        {
+            "sport": row.get("sport"),
+            "environment": row.get("environment"),
+            "sport_detail": row.get("sport_detail"),
+        }
+    )
+    remote = planning_competitions.competition_stored_sport(data)
+    return local.sport is remote.sport and wire_environment(
+        local.environment
+    ) is wire_environment(remote.environment)
 
 
 class CompetitionSyncReconciler:
@@ -237,6 +259,12 @@ class CompetitionSyncReconciler:
         if remote:
             data = planning_competitions.remote_competition_data(remote)
             if data:
+                environment, sport_detail = data["environment"], data["sport_detail"]
+                if _same_remote_sport(row, data):
+                    # The remote type cannot tell indoor from virtual, so a clean
+                    # row keeps the local environment and detail it already has.
+                    environment = row.get("environment")
+                    sport_detail = row.get("sport_detail")
                 db.execute(
                     "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, "
                     "environment=?, sport_detail=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, "
@@ -247,8 +275,8 @@ class CompetitionSyncReconciler:
                         data["event_date"],
                         data["start_date_local"],
                         data["sport"],
-                        data["environment"],
-                        data["sport_detail"],
+                        environment,
+                        sport_detail,
                         data["priority"],
                         data["category"],
                         data["distance"],

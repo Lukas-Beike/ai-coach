@@ -387,6 +387,15 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(after["sync_status"], "local")
         self.assertEqual(self.events, ["changed"])
 
+    def test_environment_only_update_is_persisted(self):
+        self.service.create(self.workout())
+
+        self.service.update(str(self.id), {"environment": "indoor"})
+
+        planned, _history, _revision = self.state()
+        payload = json.loads(planned[0]["payload"])
+        self.assertEqual(payload["environment"], "indoor")
+
     def test_archive_and_restore_are_dirty_local_updates(self):
         self.service.create(self.workout())
 

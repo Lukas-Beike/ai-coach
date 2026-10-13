@@ -105,6 +105,10 @@ def intervals_workout_type(stored: StoredSport) -> str:
     without an Intervals.icu type are ``Other``.
     """
     pair = (stored.sport, stored.environment)
+    if stored.environment is Environment.INDOOR:
+        # Intervals.icu has no indoor type; indoor sessions use the virtual one,
+        # as competitions do.
+        pair = (stored.sport, Environment.VIRTUAL)
     if stored.detail and WORKOUT_SPORT_TOKENS.get(stored.detail) == pair:
         return stored.detail
     return (

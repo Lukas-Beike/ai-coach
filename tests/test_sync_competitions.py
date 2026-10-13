@@ -402,6 +402,46 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertEqual(stored["moving_time"], 14400)
         self.assertEqual(stored["last_synced_at"], NOW)
 
+    def test_clean_row_keeps_local_indoor_environment_for_the_same_remote_type(self):
+        row = self.local_competition(
+            "local-indoor",
+            intervals_event_id="remote-indoor",
+            external_id="external-indoor",
+            sync_dirty=0,
+            sync_state="synced",
+        )
+        row["environment"] = "indoor"
+        self.insert_competition(row)
+        remote = self.remote_event("remote-indoor", "external-indoor")
+        remote["type"] = "VirtualRide"
+        plan = self.sync_plan([row], [remote])
+
+        self.reconciler.reconcile(plan, [], [], [row], push_local=False, now=NOW)
+
+        self.assertEqual(
+            self.stored_competition("local-indoor")["environment"], "indoor"
+        )
+
+    def test_clean_row_adopts_remote_environment_when_the_remote_type_changes(self):
+        row = self.local_competition(
+            "local-changed",
+            intervals_event_id="remote-changed",
+            external_id="external-changed",
+            sync_dirty=0,
+            sync_state="synced",
+        )
+        row["environment"] = "indoor"
+        self.insert_competition(row)
+        remote = self.remote_event("remote-changed", "external-changed")
+        remote["type"] = "Ride"
+        plan = self.sync_plan([row], [remote])
+
+        self.reconciler.reconcile(plan, [], [], [row], push_local=False, now=NOW)
+
+        self.assertEqual(
+            self.stored_competition("local-changed")["environment"], "unknown"
+        )
+
     def test_optimistic_check_skips_competition_edited_after_capture(self):
         captured = self.local_competition(
             "local-edit",

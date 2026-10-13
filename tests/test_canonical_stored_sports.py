@@ -180,6 +180,25 @@ class StoredWorkoutSportTests(unittest.TestCase):
             (stored.sport, stored.environment), (Sport.RIDE, Environment.VIRTUAL)
         )
 
+    def test_indoor_workouts_use_the_virtual_provider_type_like_competitions(
+        self,
+    ) -> None:
+        for sport in (Sport.RIDE, Sport.RUN):
+            with self.subTest(sport=sport):
+                indoor = StoredSport(sport, Environment.INDOOR)
+                virtual = StoredSport(sport, Environment.VIRTUAL)
+                self.assertEqual(
+                    intervals_workout_type(indoor), intervals_workout_type(virtual)
+                )
+                self.assertEqual(
+                    intervals_competition_type(indoor),
+                    intervals_competition_type(virtual),
+                )
+        self.assertEqual(
+            intervals_workout_type(StoredSport(Sport.RIDE, Environment.INDOOR)),
+            "VirtualRide",
+        )
+
     def test_specific_token_survives_as_detail(self) -> None:
         stored = legacy_workout_sport("GravelRide")
         self.assertEqual(stored.sport, Sport.RIDE)
