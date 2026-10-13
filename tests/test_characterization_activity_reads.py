@@ -29,6 +29,7 @@ from backend.performance.activity_read_service import ActivityAnalysisReadServic
 from backend.performance.report_service import TrainingRecordsService
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
+from backend.planning.compact_activities import ActivityRowSource
 
 TODAY = date(2026, 5, 4)
 DAY = "2026-05-04T08:00:00"
@@ -636,7 +637,9 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
             },
         )
 
-    def _plan_service(self, snapshot: dict[str, Any]) -> PublicPlanStateService:
+    def _plan_service(
+        self, snapshot: dict[str, Any], compact: list[dict[str, Any]]
+    ) -> PublicPlanStateService:
         return PublicPlanStateService(
             PublicPlanDependencies(
                 sync_state=Mock(latest_snapshot=Mock(return_value=snapshot)),
@@ -666,6 +669,9 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
                 external_calendar_configured=False,
                 external_calendar_window_days=14,
                 default_workout_name="Workout",
+                activity_rows=cast(
+                    ActivityRowSource, Mock(compact=Mock(return_value=compact))
+                ),
             )
         )
 
@@ -683,7 +689,7 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
             ),
             patch.object(planning_season, "planning_state", return_value={}),
         ):
-            self._plan_service(snapshot).read()
+            self._plan_service(snapshot, compact).read()
         return captured[0]
 
     def test_compact_row_with_matching_projection_gets_recorded_profile(self) -> None:

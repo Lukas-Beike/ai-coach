@@ -1010,14 +1010,14 @@ class ServerCoachTests(ServerTestCase):
             "upcoming_calendar": [],
         }
         planned = server.PLANNING_DATA.planned_unit().list(250, future_only=True)
-        first = CoachIntervalsContextService().project(snapshot, planned, today)
+        first = CoachIntervalsContextService().project(
+            snapshot, planned, today, snapshot["recent_activities"]
+        )
         second = CoachIntervalsContextService().project(
-            {
-                **snapshot,
-                "recent_activities": list(reversed(snapshot["recent_activities"])),
-            },
+            snapshot,
             planned,
             today,
+            list(reversed(snapshot["recent_activities"])),
         )
         self.assertEqual(first, second)
         self.assertEqual(

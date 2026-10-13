@@ -12,6 +12,7 @@ from backend.calendar import canonical as calendar_canonical
 from backend.db.manager import DatabaseManager
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
+from backend.planning.compact_activities import ActivityRowSource
 from backend.weather import cache as weather_cache
 from backend.weather import history as weather_history
 
@@ -38,6 +39,8 @@ class PublicPlanDependencies:
     external_calendar_configured: bool
     external_calendar_window_days: int
     default_workout_name: str
+    # Compact recent activities come from the canonical activity row port.
+    activity_rows: ActivityRowSource | None = None
 
 
 class PublicPlanStateService:
@@ -64,6 +67,7 @@ class PublicPlanStateService:
         self._external_calendar_configured = dependencies.external_calendar_configured
         self._external_calendar_window_days = dependencies.external_calendar_window_days
         self._default_workout_name = dependencies.default_workout_name
+        self._activity_rows = dependencies.activity_rows
 
     def read(self, local_only: bool = False) -> dict[str, Any]:
         snapshot = self._sync_state.latest_snapshot() or {}
@@ -71,11 +75,8 @@ class PublicPlanStateService:
         canonical_planned = calendar_canonical.canonical_planned_workouts(
             [], local_planned
         )
-        activities = (
-            snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
-        )
-        activities = activities[:1000] if isinstance(activities, list) else []
-        activities = self._activity_feedback.attach_to_activities(activities)
+        activities = self._activity_rows.compact() if self._activity_rows else []
+        activities = self._activity_feedback.attach_to_activities(activities[:1000])
         weather = self._weather.state(canonical_planned, refresh=not local_only)
         if weather.pop("_refreshed", False):
             self._adaptive_followup.check("weather")

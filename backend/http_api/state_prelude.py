@@ -11,6 +11,7 @@ from backend.activities.feedback import ActivityFeedbackService
 from backend.calendar import canonical as calendar_canonical
 from backend.db.manager import DatabaseManager
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.planning.compact_activities import ActivityRowSource
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.sync.adaptive import AdaptivePreviewFollowupService
 from backend.sync.state import SyncStateRepository
@@ -49,6 +50,7 @@ class PublicStateLocalPrelude:
         window: CalendarWindowRange,
         performance_inputs: Callable[[Any, Any], CanonicalPerformanceInputs | None]
         | None = None,
+        activity_rows: ActivityRowSource | None = None,
     ) -> None:
         self._sync_state = sync_state
         self._activity_feedback = activity_feedback
@@ -59,6 +61,7 @@ class PublicStateLocalPrelude:
         self._today = today
         self._window = window
         self._performance_inputs = performance_inputs
+        self._activity_rows = activity_rows
 
     def read(self, local_only: bool) -> LocalStatePrelude:
         with self._database_lock, self._database_manager.unit_of_work() as db:
@@ -69,9 +72,7 @@ class PublicStateLocalPrelude:
                 else None
             )
             activities = self._activity_feedback.attach_to_activities(
-                snapshot.get("recent_activities", [])
-                if isinstance(snapshot, dict)
-                else []
+                self._activity_rows.compact(db) if self._activity_rows else []
             )
             local_planned = self._planned_units.list()
             canonical_planned = calendar_canonical.canonical_planned_workouts(

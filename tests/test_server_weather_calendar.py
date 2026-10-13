@@ -24,6 +24,7 @@ from backend.planning import adaptive_preview_service
 from backend.planning import planned_unit_service as planning_planned_unit_service
 from backend.planning import planned_units as planning_planned_units
 from backend.planning import workouts as planning_workouts
+from backend.planning.compact_activities import ActivityRowSource
 from backend.providers import calendar as calendar_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.providers import weather as weather_provider
@@ -936,6 +937,11 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 return_value=planned,
             ),
             patch.object(
+                ActivityRowSource,
+                "compact",
+                return_value=snapshot["recent_activities"],
+            ),
+            patch.object(
                 server.WEATHER_ASSEMBLY.service(), "state", return_value={"days": []}
             ),
             patch.object(
@@ -1462,6 +1468,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             snapshot,
             server.PLANNING_DATA.planned_unit().list(250, future_only=True),
             today,
+            activities,
         )
         self.assertEqual(
             [
