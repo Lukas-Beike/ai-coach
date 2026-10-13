@@ -8,14 +8,17 @@ consumes, so their values must not change.
 from collections.abc import Mapping
 from typing import Any, Final
 
-from backend.providers.intervals_performance_fields import CONFIGURED_FTP, TRAINING_LOAD
+from backend.providers.intervals_performance_fields import (  # noqa: F401
+    CONFIGURED_FTP,
+    INTENSITY,
+    PACE,
+    RPE,
+    TRAINING_LOAD,
+    WEIGHTED_AVG_SPEED,
+    WEIGHTED_AVG_WATTS,
+)
 
-INTENSITY: Final = "icu_intensity"
 ROLLING_FTP: Final = "icu_rolling_ftp"
-WEIGHTED_AVG_WATTS: Final = "icu_weighted_avg_watts"
-WEIGHTED_AVG_SPEED: Final = "icu_weighted_avg_speed"
-PACE: Final = "icu_pace"
-RPE: Final = "icu_rpe"
 
 TRAINING_LOAD_LOOKUP: Final = (TRAINING_LOAD, "training_load", "tss")
 
