@@ -59,6 +59,8 @@ $("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 bindExternalCalendar(syncExternalCalendar);
 $("#weatherSyncButton").addEventListener("click", syncWeather);
+$("#wahooConnectButton").addEventListener("click", connectWahoo);
+$("#wahooDisconnectButton").addEventListener("click", disconnectWahoo);
 $("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"));
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#checkinForm").addEventListener("submit", saveCheckin);

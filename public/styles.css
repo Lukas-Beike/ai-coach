@@ -1070,6 +1070,7 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .connection-card small { color: var(--subtle); font-size: .64rem; }
 .connection-card .secondary-button { width: 100%; min-height: 44px; margin-top: auto; display: grid; place-items: center; text-align: center; }
 .connection-actions { display: grid; gap: 8px; margin-top: auto; }
+.connection-actions[hidden], .connection-card .secondary-button[hidden] { display: none; }
 .connection-card .sync-period { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--subtle); font-size: .67rem; font-weight: 500; }
 .connection-card .sync-period input { width: 76px; padding: 7px 8px; text-align: center; font-size: .76rem; }
 .connection-resync-status { display: block; line-height: 1.4; }

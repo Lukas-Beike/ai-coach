@@ -747,10 +747,10 @@ function garminConnectionLabel(garmin, running) {
   return garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert";
 }
 
-function renderConnectionsSummary(openaiHealthy, intervalsHealthy, garminConfigured, weatherConfigured) {
+function renderConnectionsSummary(openaiHealthy, intervalsHealthy, garminConfigured, weatherConfigured, wahoo) {
   const connections = $("#connectionsSummary");
   if (!connections) return;
-  const values = [["OpenAI", openaiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garminConfigured], ["Open-Meteo", weatherConfigured]];
+  const values = [["OpenAI", openaiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garminConfigured], [wahoo.label, wahoo.connected], ["Open-Meteo", weatherConfigured]];
   connections.textContent = values.map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
 }
 
@@ -763,7 +763,8 @@ function renderSettings(data) {
   const garminRunning = Boolean(data.garmin_sync?.running || state.localSync.garmin);
   settingsStatus("#garminConnectionStatus", garmin.configured, garminConnectionLabel(garmin, garminRunning));
   renderWeatherConnection(data.weather || {});
-  renderConnectionsSummary(openaiHealthy, intervalsHealthy, garmin.configured, data.weather?.configured);
+  const wahoo = { ...renderWahooConnection(data), label: wahooProviderLabel(data) };
+  renderConnectionsSummary(openaiHealthy, intervalsHealthy, garmin.configured, data.weather?.configured, wahoo);
   renderSettingsInputs(data);
   renderSettingsSyncControls(data, configured);
   renderSettingsUsage(data);
