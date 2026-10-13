@@ -1049,6 +1049,91 @@ def activity_sessions_by_ids(
     return rows
 
 
+_LINKABLE_COLUMNS: Final = (
+    *_ACTIVITY_READ_COLUMNS,
+    "r.activity_id AS session_id",
+)
+
+
+def linkable_activity_rows(db: Any, *, start: str, end: str) -> list[dict[str, Any]]:
+    """Return active activity rows that session linking may bundle, by ISO local date.
+
+    A record qualifies when its session is active or an alias (``duplicate``) and
+    not athlete-confirmed. Hidden, deleted and confirmed sessions are never linked.
+    ``start`` and ``end`` are inclusive ISO dates on the stored athlete-local date.
+    """
+    return _fetch_all(
+        db,
+        f"SELECT {', '.join(_LINKABLE_COLUMNS)} FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.state = ? AND s.state IN (?, ?) AND s.athlete_confirmed = 0 "
+        "AND r.local_date >= ? AND r.local_date <= ? "
+        "ORDER BY r.started_at, r.provider, r.provider_activity_id",
+        (
+            ActivityRecordState.ACTIVE.value,
+            ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.DUPLICATE.value,
+            start,
+            end,
+        ),
+    )
+
+
+def activity_session_link_rows(
+    db: Any, activity_ids: Sequence[str]
+) -> dict[str, dict[str, Any]]:
+    """Return the session columns that linking decides on, keyed by local activity id."""
+    rows: dict[str, dict[str, Any]] = {}
+    for chunk in _chunked(activity_ids):
+        for row in _fetch_all(
+            db,
+            "SELECT activity_id, link_kind, athlete_confirmed, state, merged_into, "
+            "created_at FROM activity_sessions "
+            f"WHERE activity_id IN ({_placeholders(chunk)})",
+            tuple(chunk),
+        ):
+            rows[row["activity_id"]] = row
+    return rows
+
+
+def merge_activity_session(db: Any, *, activity_id: str, into: str, now: str) -> bool:
+    """Make an active, unconfirmed session an alias of ``into``; return whether it changed.
+
+    Sessions that were already aliases of this one now point at ``into`` directly.
+    Records keep their ``activity_id`` and the session keeps its primary provider.
+    """
+    cursor = db.execute(
+        "UPDATE activity_sessions SET state = ?, merged_into = ?, updated_at = ? "
+        "WHERE activity_id = ? AND state = ? AND athlete_confirmed = 0",
+        (
+            ActivitySessionState.DUPLICATE.value,
+            into,
+            now,
+            activity_id,
+            ActivitySessionState.ACTIVE.value,
+        ),
+    )
+    if cursor.rowcount != 1:
+        return False
+    db.execute(
+        "UPDATE activity_sessions SET merged_into = ?, updated_at = ? "
+        "WHERE merged_into = ? AND state = ?",
+        (into, now, activity_id, ActivitySessionState.DUPLICATE.value),
+    )
+    return True
+
+
+def set_activity_session_link_kind(
+    db: Any, *, activity_id: str, link_kind: str, now: str
+) -> None:
+    """Store the link kind of an active session."""
+    db.execute(
+        "UPDATE activity_sessions SET link_kind = ?, updated_at = ? "
+        "WHERE activity_id = ? AND state = ?",
+        (link_kind, now, activity_id, ActivitySessionState.ACTIVE.value),
+    )
+
+
 def activity_local_ids(
     db: Any, provider: str, provider_activity_ids: Sequence[str]
 ) -> dict[str, str]:

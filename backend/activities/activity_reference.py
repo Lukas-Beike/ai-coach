@@ -4,11 +4,16 @@ A caller may send either a local canonical id (``act_...``) or the legacy
 Intervals.icu provider id. Resolution happens once, at the entry point, and
 yields the provider id that every stored key and provider request uses. The
 mapping is one-to-one with the ``local_activity_id`` that read surfaces report:
-each session resolves to its own provider id, including a duplicate session.
+each Intervals.icu-primary session resolves to its own provider id, including a
+duplicate session, so feedback keyed by either id stays reachable.
 
-Only Intervals.icu-primary sessions that are not deleted resolve. Garmin-primary
-sessions, deleted sessions and unknown ids pass through unchanged so each caller
-keeps its existing not-found or validation response.
+A duplicate session whose own primary is not Intervals.icu is an alias created by
+session linking. It resolves through ``merged_into`` (following the chain, guarded
+against cycles) to the first Intervals.icu-primary session that is not deleted.
+
+Other Garmin- or Wahoo-primary sessions, deleted sessions and unknown ids pass
+through unchanged so each caller keeps its existing not-found or validation
+response.
 """
 
 from __future__ import annotations
@@ -113,14 +118,19 @@ class NoActivityReferences(ActivityReferenceResolver):
         return {}
 
 
+_MAX_ALIAS_DEPTH: Final = 64
+
+
 def _intervals_provider_activity_id(db: Any, activity_id: str) -> str | None:
-    session = canonical_store.activity_sessions_by_ids(db, [activity_id]).get(
-        activity_id
-    )
-    if session is None:
-        return None
-    if session["primary_provider"] != ProviderId.INTERVALS.value:
-        return None
-    if session["state"] == ActivitySessionState.DELETED.value:
-        return None
-    return str(session["primary_provider_activity_id"])
+    seen: set[str] = set()
+    current: str | None = activity_id
+    while current is not None and current not in seen and len(seen) < _MAX_ALIAS_DEPTH:
+        seen.add(current)
+        session = canonical_store.activity_sessions_by_ids(db, [current]).get(current)
+        if session is None or session["state"] == ActivitySessionState.DELETED.value:
+            return None
+        if session["primary_provider"] == ProviderId.INTERVALS.value:
+            return str(session["primary_provider_activity_id"])
+        merged_into = session["merged_into"]
+        current = str(merged_into) if merged_into else None
+    return None
