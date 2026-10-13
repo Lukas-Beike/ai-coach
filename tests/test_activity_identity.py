@@ -4,11 +4,8 @@ import unittest
 from copy import deepcopy
 from datetime import datetime
 
-from backend.activities.identity import (
-    activity_datetime,
-    activity_kind,
-    intervals_activity_device_source,
-)
+from backend.activities.identity import activity_datetime, activity_kind
+from backend.providers.intervals_activity_fields import intervals_activity_device_source
 
 
 class ActivityDatetimeTests(unittest.TestCase):

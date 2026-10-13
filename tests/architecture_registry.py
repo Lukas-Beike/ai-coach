@@ -783,7 +783,11 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "backend.activities.identity",
-        ("activity_datetime", "activity_kind", "intervals_activity_device_source"),
+        ("activity_datetime", "activity_kind"),
+    ),
+    (
+        "backend.providers.intervals_activity_fields",
+        ("intervals_activity_device_source", "intervals_activity_recorded_by_wahoo"),
     ),
     (
         "backend.activities.calendar_projection",

@@ -241,7 +241,7 @@ class PublicStateService:
                     "weather": bool(weather.get("configured")),
                     "external_calendar": bool(deps.config.calendar_ical_url),
                 },
-                "wahoo": connection_status(
+                ProviderId.WAHOO.value: connection_status(
                     deps.config, self._get_value(WAHOO_TOKENS_KEY, manager)
                 ),
                 "usage": deps.provider_state.summary("openai"),

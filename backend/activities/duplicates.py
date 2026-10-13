@@ -7,16 +7,16 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from backend.activities.identity import (
-    activity_datetime,
-    activity_kind,
-    intervals_activity_device_source,
-)
+from backend.activities.identity import activity_datetime, activity_kind
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin
 from backend.errors import AppError
 from backend.providers.garmin_gear_fields import activity_start_local
+from backend.providers.intervals_activity_fields import (
+    intervals_activity_device_source,
+    intervals_activity_recorded_by_wahoo,
+)
 from backend.providers.snapshot_projection import (
     intervals_activity_rows,
     intervals_snapshot_is_stripped,
@@ -56,7 +56,7 @@ def duplicate_delete_action(pair: dict[str, Any]) -> dict[str, Any]:
                 "name": pair["duplicate_name"],
                 "date": iso_date_prefix(str(pair.get("start_date_local") or "")),
                 "source": provider_label(ProviderId.GARMIN, SourceView.DUPLICATE),
-                "kept_source": "Wahoo",
+                "kept_source": provider_label(ProviderId.WAHOO, SourceView.DUPLICATE),
             }
         ],
         "payload": {
@@ -314,9 +314,7 @@ def _wahoo_garmin_pairs(
         ),
         reverse=True,
     )
-    wahoo = [
-        item for item in candidates if intervals_activity_device_source(item) == "wahoo"
-    ]
+    wahoo = [item for item in candidates if intervals_activity_recorded_by_wahoo(item)]
     garmin = [
         item
         for item in candidates
