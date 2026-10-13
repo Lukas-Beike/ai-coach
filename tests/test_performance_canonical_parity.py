@@ -482,8 +482,8 @@ class CanonicalWiringTests(unittest.TestCase):
             return_value={},
         ) as project:
             service.performance_state()
-        self.assertEqual(manager.events, ["enter", *["read"] * 12, "exit"])
-        self.assertEqual(reader.db_seen, ["db"] * 12)
+        self.assertEqual(manager.events, ["enter", *["read"] * 13, "exit"])
+        self.assertEqual(reader.db_seen, ["db"] * 13)
         _assert_load_inputs(self, project.call_args.kwargs["canonical"])
 
     def test_public_performance_keeps_the_legacy_call_without_wellness(self) -> None:
@@ -533,7 +533,7 @@ class CanonicalWiringTests(unittest.TestCase):
         )
         read_snapshot, canonical = service._performance_inputs()
         self.assertIs(read_snapshot, snapshot)
-        self.assertEqual(reader.db_seen, ["db"] * 12)
+        self.assertEqual(reader.db_seen, ["db"] * 13)
         self.assertEqual(_present(canonical).ctl, 50.0)
 
     def test_activity_performance_inputs_without_a_source_read_nothing_extra(
@@ -606,7 +606,7 @@ class CanonicalWiringTests(unittest.TestCase):
         self.assertIs(read, snapshot)
         self.assertEqual(
             manager.events,
-            ["enter", "snapshot", *["read"] * 12, "exit"],
+            ["enter", "snapshot", *["read"] * 13, "exit"],
         )
         with (
             patch(
@@ -664,7 +664,7 @@ class CanonicalWiringTests(unittest.TestCase):
             ),
         )
         prelude = _prelude(snapshot, manager, service.canonical_inputs).read(True)
-        self.assertEqual(manager.events, ["enter", *["read"] * 12, "exit"])
+        self.assertEqual(manager.events, ["enter", *["read"] * 13, "exit"])
         _assert_load_inputs(self, prelude.performance_inputs)
         with patch(
             "backend.http_api.public_performance.performance_context.current_performance_context",
@@ -770,7 +770,7 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         )
         legacy = _service(self.intervals, None, self.garmin).performance_state()
         canonical = _service(self.intervals, source, self.garmin).performance_state()
-        self.assertEqual(counting.calls, 12)
+        self.assertEqual(counting.calls, 13)
         self.assertEqual(_normalized_state(canonical), _normalized_state(legacy))
 
     def test_selector_chooses_its_source_once_for_both_load_reads(self) -> None:

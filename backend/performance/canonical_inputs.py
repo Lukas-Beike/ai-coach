@@ -19,7 +19,8 @@ and readiness averages come from ``backend.performance.canonical_recovery_averag
 and replace the legacy average only when both cover the same days with equal values.
 
 Without a usable wellness day the inputs still carry the activities and the
-wellness rows, and no load, threshold or recovery value. Without a canonical
+wellness rows, and no load, Intervals threshold or recovery value; a stored Wahoo
+cycling FTP or weight fallback still applies. Without a canonical
 activity reader and without wellness rows there are no inputs, and the caller keeps
 the legacy values.
 """
@@ -37,6 +38,7 @@ from backend.performance import canonical_sections
 from backend.performance.canonical_current import (
     CanonicalCurrentInputs,
     read_current_inputs,
+    read_wahoo_fallbacks,
 )
 from backend.performance.canonical_personal_recovery import (
     CanonicalPersonalRecoveryInputs,
@@ -336,7 +338,12 @@ def read_performance_inputs(
         canonical_sections.row_day(max(rows, key=_row_id_text)) if rows else None
     )
     if latest_day is None:
-        return carried.inputs(wellness_day=None, ctl=None, atl=None)
+        return carried.inputs(
+            wellness_day=None,
+            ctl=None,
+            atl=None,
+            current=read_wahoo_fallbacks(reader, db),
+        )
     start = min(day for day in map(canonical_sections.row_day, rows) if day is not None)
     loaded = _load_resolved(
         reader, db, latest_wellness_day=latest_day, start=start, end=latest_day

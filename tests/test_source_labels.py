@@ -27,6 +27,7 @@ from backend.providers.source_labels import (
     observation_source_label,
     provider_label,
 )
+from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
 
 OBSERVED_ON = date(2026, 10, 12)
 RETRIEVED_AT = datetime(2026, 10, 12, 6, 0, tzinfo=UTC)
@@ -120,6 +121,14 @@ class ProviderLabelTests(unittest.TestCase):
         self.assertEqual(
             provider_label(ProviderId.GARMIN, SourceView.DAILY_HEALTH),
             "Garmin Connect",
+        )
+
+    def test_wahoo_fallback_values_carry_the_wahoo_label_in_both_views(self) -> None:
+        self.assertEqual(
+            provider_label(ProviderId.WAHOO, SourceView.CURRENT_METRIC), WAHOO_LABEL
+        )
+        self.assertEqual(
+            provider_label(ProviderId.WAHOO, SourceView.BODY_HISTORY), WAHOO_LABEL
         )
 
     def test_view_overrides_replace_the_base_label(self) -> None:

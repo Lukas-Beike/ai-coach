@@ -6,7 +6,7 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.errors import AppError
 from backend.providers.descriptors import WAHOO_ID
 from backend.providers.wahoo_client import WahooWorkoutFetch
@@ -25,9 +25,117 @@ from tests.wahoo_sync_fixture import (
     EARLIER_UTC,
     LATE_EVENING_UTC,
     ZONE,
+    FakeConnection,
     WahooSyncCase,
     workout,
 )
+
+ALL_SCOPES = "workouts_read power_zones_read user_read"
+CYCLING_ZONE_SET = {
+    "id": 1,
+    "workout_type_family_id": 0,  # biking family
+    "ftp": 250,
+    "updated_at": "2026-10-01T10:00:00Z",
+}
+
+
+def upstream_status(status: int) -> AppError:
+    return AppError(
+        502, "Upstream failed", reason="upstream_rejected", upstream_status=status
+    )
+
+
+class ThresholdSyncTests(WahooSyncCase):
+    """Power zones and profile are read only when their scopes were granted."""
+
+    def grant(self, scope: str = ALL_SCOPES) -> None:
+        self.connection = FakeConnection(scope=scope)
+        self.source.fetch = WahooWorkoutFetch((workout(1, LATE_EVENING_UTC),))
+        self.source.power_zone_rows = (dict(CYCLING_ZONE_SET),)
+        self.source.profile = {"weight": 78.5}
+
+    def stored_kinds(self) -> list[str]:
+        # The workout's own record is kind "activity"; only threshold kinds count here.
+        rows = self.rows(
+            "SELECT record_kind FROM provider_records WHERE provider = 'wahoo' "
+            "AND record_kind <> 'activity' ORDER BY record_kind"
+        )
+        return [row["record_kind"] for row in rows]
+
+    def test_granted_scopes_read_and_store_the_threshold_rows(self) -> None:
+        self.grant()
+
+        result = self.service.sync()
+
+        self.assertEqual("ok", result["status"])
+        self.assertNotIn("skipped_sources", result)
+        self.assertEqual(["power_zones", "user"], self.source.threshold_reads)
+        self.assertEqual(["power_zones", "user"], self.stored_kinds())
+        metrics = self.rows(
+            "SELECT metric, value FROM observations WHERE provider = 'wahoo' "
+            "ORDER BY metric"
+        )
+        self.assertEqual(
+            [
+                (MetricKind.FTP.value, 250.0),
+                (MetricKind.WEIGHT.value, 78.5),
+            ],
+            [(row["metric"], row["value"]) for row in metrics],
+        )
+        self.assertEqual(1, len(self._activity_rows()))
+
+    def test_ungranted_scopes_are_skipped_and_the_workouts_are_still_stored(
+        self,
+    ) -> None:
+        self.grant(scope="workouts_read")
+
+        result = self.service.sync()
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual([], self.source.threshold_reads)
+        self.assertEqual(
+            {"power_zones": "scope", "user": "scope"}, result["skipped_sources"]
+        )
+        self.assertEqual([], self.stored_kinds())
+        self.assertEqual(1, len(self._activity_rows()))
+
+    def test_a_forbidden_power_zones_read_is_non_fatal_and_keeps_the_workouts(
+        self,
+    ) -> None:
+        self.grant()
+        self.source.power_zones_error = upstream_status(403)
+
+        result = self.service.sync()
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual({"power_zones": "rejected"}, result["skipped_sources"])
+        self.assertEqual(["user"], self.stored_kinds())
+        self.assertEqual(1, len(self._activity_rows()))
+        self.assertFalse(self._value(LAST_ERROR_KEY))
+        self.assertEqual(["success"], self._refresh_statuses())
+
+    def test_a_missing_user_read_is_non_fatal_and_keeps_the_zone_sets(self) -> None:
+        self.grant()
+        self.source.user_error = upstream_status(404)
+
+        result = self.service.sync()
+
+        self.assertEqual({"user": "rejected"}, result["skipped_sources"])
+        self.assertEqual(["power_zones"], self.stored_kinds())
+        self.assertEqual(1, len(self._activity_rows()))
+
+    def test_other_threshold_failures_stop_the_run_before_anything_is_written(
+        self,
+    ) -> None:
+        self.grant()
+        self.source.power_zones_error = upstream_status(500)
+
+        with self.assertRaises(AppError):
+            self.service.sync()
+
+        self.assertEqual([], self._activity_rows())
+        self.assertEqual([], self.stored_kinds())
+        self.assertIsNone(self._marker())
 
 
 class IngestTests(WahooSyncCase):

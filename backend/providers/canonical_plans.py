@@ -57,11 +57,25 @@ from backend.providers.wahoo_activity_mapping import (
     map_wahoo_activities,
     raw_workout_for_storage,
 )
+from backend.providers.wahoo_threshold_mapping import (
+    MAPPER_VERSION as WAHOO_THRESHOLD_VERSION,
+)
+from backend.providers.wahoo_threshold_mapping import (
+    USER_RECORD_ID as WAHOO_USER_RECORD_ID,
+)
+from backend.providers.wahoo_threshold_mapping import (
+    map_wahoo_power_zones,
+    map_wahoo_threshold_payload,
+    map_wahoo_user,
+    select_power_zone_sets,
+)
 
 ACTIVITY_RECORD_KIND: Final = "activity"
 WELLNESS_RECORD_KIND: Final = "wellness"
 ATHLETE_RECORD_KIND: Final = "athlete"
 HEALTH_RECORD_KIND: Final = "health"
+WAHOO_POWER_ZONES_RECORD_KIND: Final = "power_zones"
+WAHOO_USER_RECORD_KIND: Final = "user"
 
 ATHLETE_RECORD_ID: Final = "athlete"
 MAX_RECORD_ID_LENGTH: Final = 256
@@ -71,6 +85,8 @@ GARMIN_ACTIVITY_ID_KEY: Final = "activityId"
 WAHOO_ACTIVITY_ID_KEY: Final = "id"
 WAHOO_SYNCED_AT_KEY: Final = "synced_at"
 WAHOO_WORKOUTS_KEY: Final = "workouts"
+WAHOO_POWER_ZONES_KEY: Final = "power_zones"
+WAHOO_USER_KEY: Final = "user"
 
 GARMIN_SYNCED_AT_KEY: Final = "synced_at"
 GARMIN_FRESHNESS_KEY: Final = "source_freshness"
@@ -300,9 +316,11 @@ def wahoo_payload_retrieved_at(payload: object, *, zone: tzinfo) -> datetime | N
 
 
 def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
-    """Plan the canonical rows of one fetched Wahoo workout payload.
+    """Plan the canonical rows of one fetched Wahoo payload.
 
-    The payload is ``{"synced_at": <ISO time>, "workouts": [<workout rows>]}``.
+    The payload is ``{"synced_at": <ISO time>, "workouts": [<workout rows>]}``. It
+    may also carry ``"power_zones"`` and ``"user"`` when those scopes were granted
+    and fetched. An absent key means "not fetched", so earlier threshold rows stay.
     Without a usable fetch time nothing is planned, so no row is ever stamped with
     an invented time. A payload whose workout list is not a list plans nothing.
     """
@@ -320,13 +338,62 @@ def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         retrieved_at=retrieved_at,
         stored=raw_workout_for_storage,
     )
+    threshold_raw, threshold_observations, threshold_skipped = _wahoo_threshold_items(
+        payload, zone=zone, retrieved_at=retrieved_at
+    )
     return IngestPlan(
         provider=ProviderId.WAHOO,
-        raw_records=tuple(raw_records),
+        raw_records=tuple(raw_records) + threshold_raw,
         activities=tuple(items),
+        observations=threshold_observations,
         present_activity_ids=frozenset(present),
-        skipped_invalid=skipped,
+        skipped_invalid=skipped + threshold_skipped,
     )
+
+
+def _wahoo_threshold_items(
+    payload: Mapping[str, Any], *, zone: tzinfo, retrieved_at: datetime
+) -> tuple[tuple[RawRecord, ...], tuple[ObservationItem, ...], int]:
+    """Return the raw rows, observations and skipped count of the fetched threshold data.
+
+    Only the newest zone set of each family is stored, the rows the mapper reads, so
+    re-mapping one stored row reproduces its observation.
+    """
+    rows = payload.get(WAHOO_POWER_ZONES_KEY)
+    user = payload.get(WAHOO_USER_KEY)
+    if rows is None and user is None:
+        return (), (), 0
+    mapped = map_wahoo_threshold_payload(
+        rows, user, zone=zone, retrieved_at=retrieved_at
+    )
+    raw: list[RawRecord] = []
+    if rows is not None:
+        chosen, _selection_issues = select_power_zone_sets(rows, zone=zone)
+        raw.extend(
+            RawRecord(
+                WAHOO_POWER_ZONES_RECORD_KIND,
+                zone_set.record_id,
+                zone_set.row,
+                WAHOO_THRESHOLD_VERSION,
+                retrieved_at=retrieved_at,
+            )
+            for zone_set in chosen
+        )
+    if isinstance(user, Mapping):
+        raw.append(
+            RawRecord(
+                WAHOO_USER_RECORD_KIND,
+                WAHOO_USER_RECORD_ID,
+                user,
+                WAHOO_THRESHOLD_VERSION,
+                retrieved_at=retrieved_at,
+            )
+        )
+    observations = tuple(
+        ObservationItem(observation, WAHOO_THRESHOLD_VERSION)
+        for observation in mapped.records
+    )
+    return tuple(raw), observations, len(mapped.issues)
 
 
 def intervals_snapshot_ingest_plan(
@@ -356,6 +423,8 @@ _MAPPER_VERSIONS: Final[dict[tuple[str, str], int]] = {
     (ProviderId.GARMIN.value, ACTIVITY_RECORD_KIND): GARMIN_ACTIVITY_VERSION,
     (ProviderId.GARMIN.value, HEALTH_RECORD_KIND): GARMIN_HEALTH_VERSION,
     (ProviderId.WAHOO.value, ACTIVITY_RECORD_KIND): WAHOO_ACTIVITY_VERSION,
+    (ProviderId.WAHOO.value, WAHOO_POWER_ZONES_RECORD_KIND): WAHOO_THRESHOLD_VERSION,
+    (ProviderId.WAHOO.value, WAHOO_USER_RECORD_KIND): WAHOO_THRESHOLD_VERSION,
 }
 
 
@@ -373,7 +442,13 @@ def current_mapper_versions() -> dict[str, int]:
 
 
 _OBSERVATION_RECORD_KINDS: Final = frozenset(
-    {WELLNESS_RECORD_KIND, ATHLETE_RECORD_KIND, HEALTH_RECORD_KIND}
+    {
+        WELLNESS_RECORD_KIND,
+        ATHLETE_RECORD_KIND,
+        HEALTH_RECORD_KIND,
+        WAHOO_POWER_ZONES_RECORD_KIND,
+        WAHOO_USER_RECORD_KIND,
+    }
 )
 
 
@@ -442,8 +517,30 @@ def reprojection_plan(raw_row: Mapping[str, Any], *, zone: tzinfo) -> IngestPlan
                 for observation in thresholds.records
             ),
         )
+    if kind == WAHOO_POWER_ZONES_RECORD_KIND:
+        zones = map_wahoo_power_zones([payload], zone=zone, retrieved_at=fetched)
+        return _threshold_observation_plan(provider, zones)
+    if kind == WAHOO_USER_RECORD_KIND:
+        profile = map_wahoo_user(
+            payload, observed_on=local_date(fetched, zone), retrieved_at=fetched
+        )
+        return _threshold_observation_plan(provider, profile)
     return _reprojected_health(
         provider, str(raw_row["source_record_id"]), payload, zone, fetched
+    )
+
+
+def _threshold_observation_plan(
+    provider: ProviderId, mapped: MappingResult[Observation]
+) -> IngestPlan:
+    """Return the observations of one re-mapped Wahoo threshold row."""
+    return IngestPlan(
+        provider=provider,
+        observations=tuple(
+            ObservationItem(observation, WAHOO_THRESHOLD_VERSION)
+            for observation in mapped.records
+        ),
+        skipped_invalid=len(mapped.issues),
     )
 
 

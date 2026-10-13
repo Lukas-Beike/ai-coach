@@ -24,10 +24,12 @@ from datetime import date, datetime, tzinfo
 from typing import Any, Final
 
 from backend.canonical.coverage import ProviderCoverage, summarize_provider
-from backend.canonical.mapping import IssueReason, MappingResult
+from backend.canonical.mapping import IssueReason
 from backend.canonical.vocabulary import ProviderId
 from backend.db.repositories import KeyValueRepository
 from backend.providers.canonical_plans import (
+    WAHOO_POWER_ZONES_KEY,
+    WAHOO_USER_KEY,
     WAHOO_WORKOUTS_KEY,
     current_mapper_versions,
     wahoo_payload_retrieved_at,
@@ -38,6 +40,7 @@ from backend.providers.snapshot_projection import (
     stored_retrieved_at,
 )
 from backend.providers.wahoo_activity_mapping import map_wahoo_activities
+from backend.providers.wahoo_threshold_mapping import map_wahoo_threshold_payload
 
 COVERAGE_KEY_PREFIX: Final = "canonical_coverage:"
 # The providers whose ingest persists a coverage summary. A provider without a
@@ -81,7 +84,8 @@ def garmin_payload_coverage(
 def wahoo_payload_coverage(payload: object, *, zone: tzinfo) -> ProviderCoverage | None:
     """Summarize a fetched Wahoo payload, or None without a usable fetch time.
 
-    Wahoo contributes activities only, so the observation result stays empty.
+    The activities and the threshold observations of this fetch are summarized. A
+    threshold key absent from the payload was not fetched and counts as nothing.
     """
     stored_at = wahoo_payload_retrieved_at(payload, zone=zone)
     if stored_at is None or not isinstance(payload, Mapping):
@@ -89,7 +93,13 @@ def wahoo_payload_coverage(payload: object, *, zone: tzinfo) -> ProviderCoverage
     activities = map_wahoo_activities(
         payload.get(WAHOO_WORKOUTS_KEY), zone=zone, retrieved_at=stored_at
     )
-    return summarize_provider(ProviderId.WAHOO, stored_at, activities, MappingResult())
+    thresholds = map_wahoo_threshold_payload(
+        payload.get(WAHOO_POWER_ZONES_KEY),
+        payload.get(WAHOO_USER_KEY),
+        zone=zone,
+        retrieved_at=stored_at,
+    )
+    return summarize_provider(ProviderId.WAHOO, stored_at, activities, thresholds)
 
 
 class CanonicalCoverageStore:
