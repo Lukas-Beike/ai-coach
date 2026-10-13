@@ -31,6 +31,14 @@ test("connected offers only Disconnect and never exposes the scope", () => {
   assert.ok(!JSON.stringify(view).includes("workouts_read"));
 });
 
+test("stored tokens stay disconnectable after the configuration was removed", () => {
+  const view = wahooConnectionView({ wahoo: { configured: false, connected: true } });
+  assert.equal(view.status, "Verbunden");
+  assert.equal(view.canConnect, false);
+  assert.equal(view.canDisconnect, true);
+  assert.equal(view.showSetupHint, true);
+});
+
 test("a rejected token (auth_required freshness) asks for a reconnect", () => {
   const view = wahooConnectionView({
     wahoo: { configured: true, connected: false },

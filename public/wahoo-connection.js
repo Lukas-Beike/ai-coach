@@ -34,14 +34,15 @@ function wahooProviderLabel(data) {
 function wahooConnectionView(data) {
   const wahoo = data?.wahoo || {};
   const configured = Boolean(wahoo.configured);
-  const connected = configured && Boolean(wahoo.connected);
+  // Stored tokens stay disconnectable even after the WAHOO_* settings were removed.
+  const connected = Boolean(wahoo.connected);
   const freshness = Array.isArray(data?.provider_freshness) ? data.provider_freshness : [];
   // A rejected refresh token is deleted server-side and surfaces as auth_required.
   const reconnect = configured && !connected
     && freshness.some((entry) => entry?.provider === "wahoo" && entry.error_code === "auth_required");
   let status = "Nicht verbunden";
-  if (!configured) status = "Nicht konfiguriert";
-  else if (connected) status = "Verbunden";
+  if (connected) status = "Verbunden";
+  else if (!configured) status = "Nicht konfiguriert";
   else if (reconnect) status = "Erneute Verbindung erforderlich";
   const since = connected && wahoo.connected_at ? globalThis.AppFormat?.dateTime(wahoo.connected_at) : null;
   return {
@@ -53,7 +54,7 @@ function wahooConnectionView(data) {
     detail: since ? `Verbunden seit ${since}` : "",
     connectLabel: reconnect ? "Wahoo erneut verbinden" : "Wahoo verbinden",
     canConnect: configured && !connected,
-    canDisconnect: configured && connected,
+    canDisconnect: connected,
     showSetupHint: !configured,
   };
 }

@@ -366,6 +366,13 @@ class WahooConnectionServiceTests(unittest.TestCase):
         self.assertNotIn(WAHOO_TOKENS_KEY, self.values.data)
         self.assertFalse(self.service.status()["connected"])
 
+    def test_disconnect_deletes_tokens_after_the_configuration_was_removed(self):
+        self.connect()
+        self.config = make_config(WAHOO_CLIENT_SECRET="")
+        result = self.service.disconnect()
+        self.assertFalse(result["connected"])
+        self.assertNotIn(WAHOO_TOKENS_KEY, self.values.data)
+
     def test_disconnect_when_never_connected_is_idempotent(self):
         self.assertFalse(self.service.disconnect()["connected"])
         self.request.assert_not_called()
