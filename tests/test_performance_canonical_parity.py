@@ -624,11 +624,11 @@ class CanonicalWiringTests(unittest.TestCase):
             wellness_day=PARITY_TODAY, ctl=50.0, atl=60.0
         )
         performance = Mock()
-        performance.read_snapshot.return_value = (snapshot, inputs)
+        performance.read_sources.return_value = (snapshot, inputs, None)
         repository = Mock()
         service = _structured_service(repository, performance)
         service.build(selection=_performance_selection())
-        performance.read_snapshot.assert_called_once_with(repository.latest_snapshot)
+        performance.read_sources.assert_called_once_with(repository.latest_snapshot)
         repository.latest_snapshot.assert_not_called()
         performance.current_performance.assert_called_once_with(snapshot, inputs)
 
@@ -639,7 +639,7 @@ class CanonicalWiringTests(unittest.TestCase):
         performance = Mock()
         service = _structured_service(Mock(), performance)
         service.build(snapshot, selection=_performance_selection())
-        performance.read_snapshot.assert_not_called()
+        performance.read_sources.assert_not_called()
         performance.current_performance.assert_called_once_with(snapshot, None)
 
     def test_public_state_prelude_reads_load_inside_its_snapshot_unit(self) -> None:
