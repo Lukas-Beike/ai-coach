@@ -112,7 +112,8 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             db.execute(
                 "CREATE TABLE competitions ("
                 "id TEXT PRIMARY KEY, name TEXT NOT NULL, event_date TEXT NOT NULL, "
-                "sport TEXT NOT NULL, priority TEXT NOT NULL, distance TEXT NOT NULL, "
+                "sport TEXT NOT NULL, environment TEXT, sport_detail TEXT, "
+                "priority TEXT NOT NULL, distance TEXT NOT NULL, "
                 "target TEXT NOT NULL, course_profile TEXT NOT NULL, notes TEXT NOT NULL, "
                 "category TEXT NOT NULL DEFAULT 'RACE_B', start_date_local TEXT, "
                 "description TEXT NOT NULL DEFAULT '', moving_time INTEGER, intervals_event_id TEXT, "
@@ -142,7 +143,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         *,
         name="Gran Fondo",
         event_date="2026-10-01",
-        sport="Ride",
+        sport="ride",
         intervals_event_id=None,
         external_id=None,
         sync_dirty=1,
@@ -153,6 +154,8 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             "name": name,
             "event_date": event_date,
             "sport": sport,
+            "environment": "unknown",
+            "sport_detail": None,
             "priority": "B",
             "distance": "100000",
             "target": "",
@@ -197,11 +200,12 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
     def insert_competition(self, row):
         with self.database_manager.unit_of_work() as db:
             db.execute(
-                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, "
+                "INSERT INTO competitions(id, name, event_date, sport, environment, sport_detail, "
+                "priority, distance, target, "
                 "course_profile, notes, category, start_date_local, description, moving_time, "
                 "intervals_event_id, external_id, sync_dirty, sync_state, sync_conflict, "
                 "last_synced_at, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 tuple(row[key] for key in self.local_competition()),
             )
 
@@ -397,6 +401,66 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertEqual(stored["description"], "Remote details")
         self.assertEqual(stored["moving_time"], 14400)
         self.assertEqual(stored["last_synced_at"], NOW)
+
+    def test_clean_row_keeps_local_indoor_environment_for_the_same_remote_type(self):
+        row = self.local_competition(
+            "local-indoor",
+            intervals_event_id="remote-indoor",
+            external_id="external-indoor",
+            sync_dirty=0,
+            sync_state="synced",
+        )
+        row["environment"] = "indoor"
+        self.insert_competition(row)
+        remote = self.remote_event("remote-indoor", "external-indoor")
+        remote["type"] = "VirtualRide"
+        plan = self.sync_plan([row], [remote])
+
+        self.reconciler.reconcile(plan, [], [], [row], push_local=False, now=NOW)
+
+        self.assertEqual(
+            self.stored_competition("local-indoor")["environment"], "indoor"
+        )
+
+    def test_clean_row_keeps_local_outdoor_environment_for_the_same_remote_type(self):
+        row = self.local_competition(
+            "local-outdoor",
+            intervals_event_id="remote-outdoor",
+            external_id="external-outdoor",
+            sync_dirty=0,
+            sync_state="synced",
+        )
+        row["environment"] = "outdoor"
+        self.insert_competition(row)
+        remote = self.remote_event("remote-outdoor", "external-outdoor")
+        remote["type"] = "Ride"
+        plan = self.sync_plan([row], [remote])
+
+        self.reconciler.reconcile(plan, [], [], [row], push_local=False, now=NOW)
+
+        self.assertEqual(
+            self.stored_competition("local-outdoor")["environment"], "outdoor"
+        )
+
+    def test_clean_row_adopts_remote_environment_when_the_remote_type_changes(self):
+        row = self.local_competition(
+            "local-changed",
+            intervals_event_id="remote-changed",
+            external_id="external-changed",
+            sync_dirty=0,
+            sync_state="synced",
+        )
+        row["environment"] = "indoor"
+        self.insert_competition(row)
+        remote = self.remote_event("remote-changed", "external-changed")
+        remote["type"] = "Ride"
+        plan = self.sync_plan([row], [remote])
+
+        self.reconciler.reconcile(plan, [], [], [row], push_local=False, now=NOW)
+
+        self.assertEqual(
+            self.stored_competition("local-changed")["environment"], "unknown"
+        )
 
     def test_optimistic_check_skips_competition_edited_after_capture(self):
         captured = self.local_competition(

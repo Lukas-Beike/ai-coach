@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import uuid
 from datetime import date, datetime
 from typing import Any
 
 from backend.athlete.local_date import LocalDate, iso_date_prefix
-from backend.canonical.stored_sports import COMPETITION_SPORT_TOKENS
-from backend.canonical.vocabulary import Sport
+from backend.canonical.stored_sports import (
+    LEGACY_COMPETITION_ALIASES,
+    StoredSport,
+    resolve_competition_sport,
+)
+from backend.canonical.vocabulary import Environment, Sport
 from backend.errors import AppError
+from backend.providers.intervals_workouts import intervals_competition_type
 
 COMPETITION_TEXT_LIMITS = {
     "name": 200,
@@ -26,48 +30,58 @@ COMPETITION_TEXT_LIMITS = {
 }
 
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
-COMPETITION_SPORTS = {
-    "cycling": "Ride",
-    "rad": "Ride",
-    "rad outdoor": "Ride",
-    "radfahren": "Ride",
-    "ride": "Ride",
-    "virtualride": "VirtualRide",
-    "virtual ride": "VirtualRide",
-    "rad indoor": "VirtualRide",
-    "indoor cycling": "VirtualRide",
-    "virtual cycling": "VirtualRide",
-    "running": "Run",
-    "lauf": "Run",
-    "laufen": "Run",
-    "run": "Run",
-    "strength": "WeightTraining",
-    "kraft": "WeightTraining",
-    "krafttraining": "WeightTraining",
-    "weighttraining": "WeightTraining",
-}
+# Free-text competition spellings and the provider race type they stand for.
+COMPETITION_SPORTS = dict(LEGACY_COMPETITION_ALIASES)
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 
 
-def supported_competition_sport(value: Any) -> str | None:
-    raw = str(value or "").strip().casefold()
-    normalized = re.sub(r"[\s_-]+", " ", raw)
-    return COMPETITION_SPORTS.get(raw) or COMPETITION_SPORTS.get(normalized)
+def supported_competition_sport(value: Any, environment: Any = None) -> str | None:
+    """Return the provider race type of a supported canonical value or alias."""
+    stored = resolve_competition_sport(value, environment)
+    return None if stored is None else intervals_competition_type(stored)
 
 
 def competition_canonical_sport(row: dict[str, Any]) -> Sport | None:
-    """Return the canonical sport of a stored competition, or None if unknown.
+    """Return the canonical sport of a stored competition, or None if unsupported.
 
-    The stored token is free text (``Cycling``, ``Lauf``, ``Ride`` ...). It is
-    resolved through the exact competition aliases, never by substring.
+    Stored values are canonical; legacy free text (``Cycling``, ``Lauf`` ...) is
+    still resolved through the exact competition aliases, never by substring.
     """
-    token = supported_competition_sport(row.get("sport"))
-    return COMPETITION_SPORT_TOKENS.get(token) if token else None
+    stored = resolve_competition_sport(row.get("sport"), row.get("environment"))
+    return None if stored is None else stored.sport
+
+
+def competition_stored_sport(value: dict[str, Any]) -> StoredSport:
+    """Return the canonical stored sport of a competition input.
+
+    Accepts canonical values and legacy tokens or free text. Text without a
+    supported sport is kept losslessly as ``other`` plus the original detail.
+    """
+    raw = str(value.get("sport") or "Cycling").strip()[:80]
+    resolved = resolve_competition_sport(raw, value.get("environment"))
+    if resolved is not None:
+        return resolved
+    detail = str(value.get("sport_detail") or "").strip()[:80]
+    if not detail and raw.casefold() != Sport.OTHER.value:
+        detail = raw
+    return StoredSport(Sport.OTHER, Environment.UNKNOWN, detail or None)
 
 
 def intervals_competition_sport(value: Any) -> str:
     raw = str(value or "Cycling").strip()
     return supported_competition_sport(raw) or raw[:80] or "Ride"
+
+
+def competition_provider_type(competition: dict[str, Any]) -> str:
+    """Return the provider race type of a stored competition row."""
+    supported = supported_competition_sport(
+        competition.get("sport"), competition.get("environment")
+    )
+    if supported:
+        return supported
+    return intervals_competition_sport(
+        competition.get("sport_detail") or competition.get("sport")
+    )
 
 
 def competition_external_id(competition_id: str) -> str:
@@ -112,7 +126,7 @@ def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
             competition.get("start_date_local")
             or f"{competition['event_date']}{_ISO_MIDNIGHT_SUFFIX}"
         ),
-        "type": intervals_competition_sport(competition.get("sport")),
+        "type": competition_provider_type(competition),
         "name": str(competition.get("name") or "Zielwettkampf")[:200],
         "description": str(
             competition.get("description") or competition.get("notes") or ""
@@ -159,6 +173,17 @@ def remote_competition_distance(value: Any) -> str:
     return competition_distance(value)
 
 
+def resolve_competition_fields(token: str) -> dict[str, str | None]:
+    """Return the canonical stored fields of a supported provider race type."""
+    stored = resolve_competition_sport(token)
+    assert stored is not None
+    return {
+        "sport": stored.sport.value,
+        "environment": stored.environment.value,
+        "sport_detail": None,
+    }
+
+
 def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
     event_date = remote_competition_date(event)
     name = str(event.get("name") or "").strip()[: COMPETITION_TEXT_LIMITS["name"]]
@@ -186,7 +211,7 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
         "name": name,
         "event_date": event_date,
         "start_date_local": start_date_local,
-        "sport": sport,
+        **resolve_competition_fields(sport),
         "priority": priority,
         "category": f"RACE_{priority}",
         "distance": distance,
@@ -232,7 +257,7 @@ def competition_sync_key(
         str(value.get("event_date") or remote_competition_date(value) or "")
     )
     sport = supported_competition_sport(
-        value.get("sport") or value.get("type") or "Ride"
+        value.get("sport") or value.get("type") or "Ride", value.get("environment")
     )
     if not name or not event_date or not sport:
         return None
@@ -316,7 +341,7 @@ def competition_dirty_row_action(
     remote_by_id: dict[str, dict[str, Any]],
     remote_by_identity: dict[tuple[str, str, str], dict[str, Any]],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    if not supported_competition_sport(row.get("sport")):
+    if not supported_competition_sport(row.get("sport"), row.get("environment")):
         return None, None
     remote, identity_remote = competition_remote_match(
         row, remote_by_external, remote_by_id, remote_by_identity
@@ -535,7 +560,9 @@ def competition_normalized_text_fields(value: dict[str, Any]) -> dict[str, str]:
     for field, limit in COMPETITION_TEXT_LIMITS.items():
         if field in {"name", "external_id", "description"}:
             continue
-        default = "Cycling" if field == "sport" else ""
+        if field == "sport":
+            continue
+        default = ""
         result[field] = (
             competition_target(value.get(field))
             if field == "target"
@@ -571,4 +598,8 @@ def normalize_competition(value: Any) -> dict[str, str | int | None]:
         "moving_time": competition_moving_time(value.get("moving_time")),
     }
     result.update(competition_normalized_text_fields(value))
+    stored = competition_stored_sport(value)
+    result["sport"] = stored.sport.value
+    result["environment"] = stored.environment.value
+    result["sport_detail"] = stored.detail
     return result

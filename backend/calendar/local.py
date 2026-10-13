@@ -3,9 +3,24 @@
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.stored_sports import resolve_competition_sport
+from backend.providers.intervals_workouts import intervals_competition_type
 
 ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 LOCAL_INTERVALS_SCOPE = "local+intervals"
+
+
+def _competition_type(competition: dict[str, Any]) -> str:
+    """Return the activity type of a competition from its canonical sport.
+
+    Stored competitions keep the sport and environment apart, so the calendar
+    derives the familiar type (``VirtualRide``) instead of showing the bare sport.
+    """
+    stored = resolve_competition_sport(
+        competition.get("sport"), competition.get("environment")
+    )
+    derived = None if stored is None else intervals_competition_type(stored)
+    return derived or competition.get("sport") or "Competition"
 
 
 def _local_calendar_competition(competition: dict[str, Any]) -> dict[str, Any]:
@@ -19,7 +34,7 @@ def _local_calendar_competition(competition: dict[str, Any]) -> dict[str, Any]:
         "date": event_date,
         "start_date_local": competition.get("start_date_local")
         or f"{event_date}{ISO_MIDNIGHT_SUFFIX}",
-        "type": competition.get("sport") or "Competition",
+        "type": _competition_type(competition),
         "category": competition.get("category") or "RACE_B",
         "is_competition": True,
         "is_local": True,

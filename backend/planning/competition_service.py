@@ -47,6 +47,8 @@ def _coach_payload(arguments: Any) -> dict[str, Any]:
         "event_date": arguments.get("event_date"),
         "start_date_local": arguments.get("start_date_local"),
         "sport": arguments.get("sport"),
+        "environment": arguments.get("environment"),
+        "sport_detail": arguments.get("sport_detail"),
         "priority": arguments.get("priority"),
         "distance": arguments.get("distance"),
         "target": arguments.get("target"),
@@ -65,6 +67,9 @@ def _merge_update(
     for field in _REQUIRED_FIELDS:
         if field not in arguments:
             value[field] = existing.get(field)
+    if "sport" not in arguments:
+        value["environment"] = existing.get("environment")
+        value["sport_detail"] = existing.get("sport_detail")
     for field in _OPTIONAL_FIELDS:
         if value.get(field) in (None, "") and existing.get(field) not in (None, ""):
             value[field] = existing[field]

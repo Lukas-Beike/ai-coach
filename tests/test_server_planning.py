@@ -872,7 +872,7 @@ class ServerPlanningTests(ServerTestCase):
         )
         imported = server.PLANNING_DATA.planned_unit().list()[0]
         self.assertEqual(imported["type"], "Run")
-        self.assertEqual(imported["sport"], "Run")
+        self.assertEqual(imported["sport"], "run")
         payload = planning_workouts.workout_event_payload(
             "local-run",
             {

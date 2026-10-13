@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.canonical.vocabulary import ProviderId
+from backend.db import migrations
 from backend.db.manager import DatabaseManager
 from backend.db.migrations import migrate_schema
 from backend.db.schema import (
@@ -23,6 +24,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V5,
     SHAPE_SCHEMA_V6,
     SHAPE_SCHEMA_V7,
+    SHAPE_SCHEMA_V8,
     released_shape,
 )
 
@@ -33,6 +35,7 @@ SCHEMA_V4 = Path(__file__).with_name("fixtures") / "schema_v4.sql.txt"
 SCHEMA_V5 = Path(__file__).with_name("fixtures") / "schema_v5.sql.txt"
 SCHEMA_V6 = Path(__file__).with_name("fixtures") / "schema_v6.sql.txt"
 SCHEMA_V7 = Path(__file__).with_name("fixtures") / "schema_v7.sql.txt"
+SCHEMA_V8 = Path(__file__).with_name("fixtures") / "schema_v8.sql.txt"
 # Tables added by schema version 6; absent from every released shape.
 PROVIDER_TABLES = (
     "provider_records",
@@ -47,13 +50,32 @@ ADDED_IN_V7_COLUMNS = {("activity_feedback", "provider")}
 # The table is never part of an older database; the column is checked separately.
 ADDED_IN_V8_TABLES = ("remote_links",)
 ADDED_IN_V8_COLUMNS = {("competition_sync_tombstones", "provider")}
-ADDED_LATER_COLUMNS = ADDED_IN_V7_COLUMNS | ADDED_IN_V8_COLUMNS
+# Schema version 9 stores canonical sport values: the competition sport column
+# and the sport members of the JSON payloads are rewritten (asserted by the
+# dedicated canonical-sport tests), every other column and member stays equal.
+ADDED_IN_V9_COLUMNS = {
+    ("competitions", "environment"),
+    ("competitions", "sport_detail"),
+    ("competitions", "sport"),
+}
+ADDED_LATER_COLUMNS = ADDED_IN_V7_COLUMNS | ADDED_IN_V8_COLUMNS | ADDED_IN_V9_COLUMNS
+SPORT_MEMBERS = (
+    "'$.sport', '$.type', '$.environment', '$.sport_detail', '$.sport_pending'"
+)
 INTERVALS = ProviderId.INTERVALS.value
+
+
+def comparable_column(table, name):
+    if name == "payload" and table in ("workout_library", "planned_units"):
+        return f"CASE WHEN json_valid(payload) THEN json_remove(payload, {SPORT_MEMBERS}) ELSE payload END"
+    if table == "kv" and name == "value":
+        return f"CASE WHEN key LIKE 'equipment:%' AND json_valid(value) THEN json_remove(value, {SPORT_MEMBERS}) ELSE value END"
+    return name
 
 
 def comparable_columns(db, table, excluded=frozenset()):
     return ",".join(
-        column["name"]
+        comparable_column(table, column["name"])
         for column in db.execute(f"PRAGMA table_info({table})")
         if (table, column["name"]) not in excluded
     )
@@ -1510,6 +1532,246 @@ class DatabaseMigrationTests(unittest.TestCase):
             migrate_schema(db)
         self.assertEqual(list(db.iterdump()), before)
         self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 7)
+
+    def schema_v8_database(self):
+        db = self.connect()
+        db.executescript(SCHEMA_V8.read_text(encoding="utf-8"))
+        return db
+
+    def test_schema_v8_fixture_is_released_schema_v8(self):
+        db = self.schema_v8_database()
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 8)
+        self.assertEqual(released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V8)
+        self.assertFalse(database_schema_is_current(db))
+        self.assertNotIn(
+            "environment",
+            {row[1] for row in db.execute("PRAGMA table_info(competitions)")},
+        )
+
+    EQUIPMENT_SPORT_CASES = (
+        ("Ride", ("ride", "unknown", False)),
+        ("VirtualRide", ("ride", "virtual", False)),
+        ("WeightTraining", ("strength", "unknown", False)),
+        ("Run", ("run", "unknown", False)),
+        ("Cross-country skiing", ("other", "unknown", True)),
+        ("", ("other", "unknown", True)),
+    )
+    COMPETITION_SPORT_CASES = (
+        ("Ride", ("ride", "unknown", None)),
+        ("VirtualRide", ("ride", "virtual", None)),
+        ("Cycling", ("ride", "unknown", None)),
+        ("WeightTraining", ("strength", "unknown", None)),
+        ("Run", ("run", "unknown", None)),
+        ("Obstacle course", ("other", "unknown", "Obstacle course")),
+        ("", ("other", "unknown", None)),
+    )
+    WORKOUT_SPORT_CASES = (
+        ("Ride", ("ride", "unknown", None)),
+        ("VirtualRide", ("ride", "virtual", None)),
+        ("WeightTraining", ("strength", "unknown", None)),
+        ("GravelRide", ("ride", "unknown", "GravelRide")),
+        ("Basket weaving", ("other", "unknown", "Basket weaving")),
+    )
+
+    def seed_sport_tokens(self, db):
+        # Layer legacy sport tokens (one row per case) over the generic seed rows.
+        tables = set(self.existing_tables(db))
+        stamp = "2026-10-01T08:00:00+00:00"
+        for index, (token, _) in enumerate(self.EQUIPMENT_SPORT_CASES):
+            payload = {"id": f"e{index}", "sport": token, "kind": "bike", "x": [1]}
+            db.execute(
+                "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?)",
+                (f"equipment:e{index}", json.dumps(payload), stamp),
+            )
+        if "competitions" in tables:
+            for index, (token, _) in enumerate(self.COMPETITION_SPORT_CASES):
+                self.clone_row(
+                    db, "competitions", sport=token, name=f"c{index}", external_id=None
+                )
+            db.execute("DELETE FROM competitions WHERE name NOT LIKE 'c_'")
+        for table in ("workout_library", "planned_units"):
+            if table not in tables:
+                continue
+            for index, (token, _) in enumerate(self.WORKOUT_SPORT_CASES):
+                payload = {"name": f"w{index}", "type": token, "target": "AUTO"}
+                self.clone_row(
+                    db,
+                    table,
+                    local_id=f"{table}-{index}",
+                    external_id=None,
+                    payload=json.dumps(payload),
+                )
+        db.commit()
+
+    def assert_canonical_sports(self, db):
+        tables = set(self.existing_tables(db))
+        equipment = {
+            json.loads(row[0])["id"]: json.loads(row[0])
+            for row in db.execute("SELECT value FROM kv WHERE key LIKE 'equipment:e%'")
+        }
+        for index, (token, expected) in enumerate(self.EQUIPMENT_SPORT_CASES):
+            with self.subTest(equipment=token):
+                item = equipment[f"e{index}"]
+                self.assertEqual(
+                    (item["sport"], item["environment"], item["sport_pending"]),
+                    expected,
+                )
+                self.assertEqual(item["kind"], "bike")
+                self.assertEqual(item["x"], [1])
+        if "competitions" in tables:
+            rows = {
+                row[0]: tuple(row[1:])
+                for row in db.execute(
+                    "SELECT name, sport, environment, sport_detail FROM competitions"
+                )
+            }
+            for index, (token, expected) in enumerate(self.COMPETITION_SPORT_CASES):
+                with self.subTest(competition=token):
+                    self.assertEqual(rows[f"c{index}"], expected)
+        for table in ("workout_library", "planned_units"):
+            if table not in tables:
+                continue
+            payloads = {
+                json.loads(row[0])["name"]: json.loads(row[0])
+                for row in db.execute(f"SELECT payload FROM {table}")
+                if row[0].startswith("{") and "name" in row[0]
+            }
+            for index, (token, expected) in enumerate(self.WORKOUT_SPORT_CASES):
+                with self.subTest(table=table, token=token):
+                    payload = payloads[f"w{index}"]
+                    self.assertNotIn("type", payload)
+                    self.assertEqual(
+                        (
+                            payload["sport"],
+                            payload["environment"],
+                            payload.get("sport_detail"),
+                        ),
+                        expected,
+                    )
+                    self.assertEqual(payload["target"], "AUTO")
+
+    def test_schema_v8_populated_database_upgrades_to_canonical_sports(self):
+        db = self.schema_v8_database()
+        self.seed_all_tables(db)
+        self.seed_sport_tokens(db)
+        before_rows = self.full_rows(db)
+
+        migrate_schema(db)
+        db.commit()
+        upgraded_dump = list(db.iterdump())
+
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+        self.assertEqual(self.full_rows(db, before_rows), before_rows)
+        self.assert_canonical_sports(db)
+        migrate_schema(db)
+        db.commit()
+        self.assertEqual(list(db.iterdump()), upgraded_dump)
+        self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_every_released_schema_upgrades_with_canonical_sports(self):
+        factories = {
+            1: self.old_database,
+            2: self.previous_database,
+            4: self.schema_v4_database,
+            5: self.schema_v5_database,
+            6: self.schema_v6_database,
+            7: self.schema_v7_database,
+            8: self.schema_v8_database,
+        }
+        for version, factory in factories.items():
+            with self.subTest(version=version):
+                db = factory()
+                self.seed_all_tables(db)
+                self.seed_sport_tokens(db)
+                migrate_schema(db)
+                db.commit()
+                self.assertTrue(database_schema_is_current(db))
+                self.assert_canonical_sports(db)
+
+    def test_schema_v8_database_file_upgrades_once_and_reopens_unchanged(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            path = Path(data_dir) / "schema-v8.sqlite3"
+            with closing(sqlite3.connect(path)) as setup:
+                setup.row_factory = sqlite3.Row
+                setup.executescript(SCHEMA_V8.read_text(encoding="utf-8"))
+                self.seed_all_tables(setup)
+                self.seed_sport_tokens(setup)
+                v8_rows = self.full_rows(setup)
+            with closing(sqlite3.connect(path)) as upgrade:
+                upgrade.row_factory = sqlite3.Row
+                migrate_schema(upgrade)
+                upgrade.commit()
+                before_dump = list(upgrade.iterdump())
+
+            for _ in range(2):
+                with closing(sqlite3.connect(path)) as db:
+                    db.row_factory = sqlite3.Row
+                    migrate_schema(db)
+                    db.commit()
+                    self.assertEqual(self.full_rows(db, v8_rows), v8_rows)
+                    self.assert_canonical_sports(db)
+                    self.assertEqual(list(db.iterdump()), before_dump)
+                    self.assertEqual(
+                        db.execute("PRAGMA user_version").fetchone()[0],
+                        CURRENT_SCHEMA_VERSION,
+                    )
+
+    def test_schema_v8_upgrade_failure_rolls_back_and_can_be_retried(self):
+        db = self.schema_v8_database()
+        self.seed_all_tables(db)
+        self.seed_sport_tokens(db)
+        before_dump = list(db.iterdump())
+        real = migrations._canonical_workout_payload
+        calls = []
+
+        def fail_on_second(payload):
+            calls.append(payload)
+            if len(calls) == 2:
+                raise sqlite3.OperationalError("synthetic failure")
+            return real(payload)
+
+        with (
+            patch.object(migrations, "_canonical_workout_payload", fail_on_second),
+            self.assertRaises(sqlite3.OperationalError),
+        ):
+            migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), before_dump)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 8)
+        self.assertEqual(released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V8)
+
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
+        self.assert_canonical_sports(db)
+
+    def test_schema_v8_unsupported_versions_are_rejected_without_modification(self):
+        for version in (1, 2, 3, 4, 5, 6, 7, 99):
+            with self.subTest(version=version):
+                db = self.schema_v8_database()
+                self.seed_all_tables(db)
+                db.execute(f"PRAGMA user_version = {version}")
+                db.commit()
+                before = list(db.iterdump())
+                with self.assertRaises(RuntimeError):
+                    migrate_schema(db)
+                self.assertEqual(list(db.iterdump()), before)
+                self.assertEqual(
+                    db.execute("PRAGMA user_version").fetchone()[0], version
+                )
+
+    def test_schema_v8_with_unknown_column_is_rejected_without_modification(self):
+        db = self.schema_v8_database()
+        db.execute("ALTER TABLE competitions ADD COLUMN unknown TEXT")
+        db.commit()
+        before = list(db.iterdump())
+        with self.assertRaises(RuntimeError):
+            migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), before)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 8)
 
     def test_newer_schema_version_is_rejected_without_modification(self):
         db = self.connect()

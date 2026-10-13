@@ -215,13 +215,13 @@ class PrivacyExportProviderTests(ProviderDataFixture):
     def lines(archive, name):
         return [json.loads(line) for line in archive.read(name).splitlines() if line]
 
-    def test_format_version_four_lists_the_provider_and_remote_link_files(self):
-        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 4)
+    def test_format_version_five_lists_the_provider_and_remote_link_files(self):
+        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 5)
         expected = {*PROVIDER_FILES, "remote_links.jsonl"}
         self.assertLessEqual(expected, PRIVACY_EXPORT_JSONL_FILES)
         with self.export() as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(manifest["format_version"], 4)
+            self.assertEqual(manifest["format_version"], 5)
             self.assertLessEqual(expected, set(manifest["jsonl_files"]))
             self.assertLessEqual(expected, set(archive.namelist()))
 

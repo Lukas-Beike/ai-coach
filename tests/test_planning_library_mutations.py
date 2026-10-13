@@ -47,7 +47,7 @@ class WorkoutLibraryMutationTests(unittest.TestCase):
                 "description": "- 20m Z2",
                 "duration_minutes": 20,
                 "target": "POWER",
-                "type": "Run",
+                "sport": "Run",
             },
         )
         self.assertIsNot(archived, current)
@@ -100,7 +100,8 @@ class WorkoutLibraryMutationTests(unittest.TestCase):
         self.assertEqual(updated["id"], LOCAL_ID)
         self.assertEqual(updated["external_id"], "remote-7")
         self.assertEqual(updated["sync_status"], "local")
-        self.assertEqual(updated["type"], "Ride")
+        self.assertEqual(updated["sport"], "ride")
+        self.assertNotIn("type", updated)
         self.assertEqual(updated["name"], "Neue Einheit")
         self.assertEqual(updated["duration_minutes"], 35)
         self.assertEqual(updated["moving_time"], 2100)

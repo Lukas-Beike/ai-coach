@@ -55,7 +55,9 @@ def season_preparation(
         else []
     )
     for event, (window_start, window_end) in zip(result["events"], windows):
-        sport = supported_competition_sport(event.get("sport"))
+        sport = supported_competition_sport(
+            event.get("sport"), event.get("environment")
+        )
         eligible = [
             row
             for row in rows
@@ -129,7 +131,9 @@ def _target_context(event: dict[str, Any]) -> dict[str, Any]:
         pass
     target = str(event.get("target") or "").strip()
     return {
-        "sport": supported_competition_sport(event.get("sport")),
+        "sport": supported_competition_sport(
+            event.get("sport"), event.get("environment")
+        ),
         "distance_meters": int(distance)
         if distance is not None and distance.is_integer()
         else distance,

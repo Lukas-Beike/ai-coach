@@ -78,6 +78,35 @@ class DatabaseBootstrapTests(unittest.TestCase):
             "external_id, created_at FROM competition_sync_tombstones_v8"
         )
         db.execute("DROP TABLE competition_sync_tombstones_v8")
+        # Schema v9 added competitions.environment and sport_detail.
+        db.execute("DROP TABLE competitions")
+        db.execute(
+            """
+            CREATE TABLE competitions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                event_date TEXT NOT NULL,
+                sport TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                distance TEXT NOT NULL,
+                target TEXT NOT NULL,
+                course_profile TEXT NOT NULL,
+                notes TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'RACE_B',
+                start_date_local TEXT,
+                description TEXT NOT NULL DEFAULT '',
+                moving_time INTEGER,
+                intervals_event_id TEXT,
+                external_id TEXT,
+                sync_dirty INTEGER NOT NULL DEFAULT 1,
+                sync_state TEXT NOT NULL DEFAULT 'local',
+                sync_conflict TEXT NOT NULL DEFAULT '',
+                last_synced_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
         for table in (
             "observations",
             "activity_records",

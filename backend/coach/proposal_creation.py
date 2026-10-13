@@ -31,6 +31,7 @@ from backend.coach.proposal_validation import (
 )
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
+from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
 
 _MAX_REMOTE_APPROVAL_DETAILS = 5000
@@ -515,7 +516,7 @@ def _plan_workout_details(rows: list[Any]) -> list[dict[str, str]]:
                 {
                     "name": str(workout.get("name") or "Trainingseinheit")[:120],
                     "date": _approval_date(workout.get("date")),
-                    "sport": str(workout.get("sport") or "")[:40],
+                    "sport": intervals_record_type(workout)[:40],
                     "id": str(row["local_id"]),
                 }
             )

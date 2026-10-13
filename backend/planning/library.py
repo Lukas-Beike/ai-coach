@@ -8,9 +8,11 @@ import uuid
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.stored_sports import workout_sport_from_record
 from backend.errors import AppError
-from backend.planning import competitions as planning_competitions
 from backend.planning import workouts as planning_workouts
+from backend.planning.sport import apply_sport_update
+from backend.providers.intervals_workouts import intervals_record_type
 
 PAYLOAD_HASH_PATTERN = r"[0-9a-f]{64}"
 LIBRARY_BULK_MAX_ENTRIES = 100
@@ -19,6 +21,9 @@ LIBRARY_WORKOUT_FIELDS = {
     "name",
     "description",
     "type",
+    "sport",
+    "environment",
+    "sport_detail",
     "moving_time",
     "duration_minutes",
     "distance",
@@ -104,7 +109,12 @@ def _library_workout_projection(workout: dict[str, Any]) -> dict[str, Any]:
 def _normalize_library_workout_text_fields(result: dict[str, Any]) -> None:
     result["name"] = str(result.get("name") or "Bibliotheks-Einheit")[:200]
     result["description"] = str(result.get("description") or "")[:12000]
-    result["type"] = planning_workouts.intervals_workout_sport(result.get("type"))
+    # Stored workouts carry the canonical sport and environment; the legacy
+    # ``type`` token is accepted on input only.
+    stored = workout_sport_from_record(result)
+    for key in ("type", "sport", "environment", "sport_detail"):
+        result.pop(key, None)
+    result.update(stored.fields())
     for field, limit in (
         ("date", 10),
         ("rationale", 2000),
@@ -148,10 +158,9 @@ def normalize_library_workout(
     return result
 
 
-def workout_library_type(value: Any) -> str:
+def workout_library_type(workout: dict[str, Any]) -> str:
     """Return a stable activity type for matching library entries."""
-    raw = str(value or "").strip()
-    return planning_competitions.supported_competition_sport(raw) or raw.casefold()
+    return intervals_record_type(workout).casefold()
 
 
 def normalized_workout_text(value: Any) -> str:
@@ -174,9 +183,7 @@ def library_workout_duration_minutes(workout: dict[str, Any]) -> float | None:
 
 def library_workout_matches(left: dict[str, Any], right: dict[str, Any]) -> bool:
     """Recognise a remote template after an uncertain create request."""
-    if workout_library_type(
-        left.get("type") or left.get("sport")
-    ) != workout_library_type(right.get("type") or right.get("sport")):
+    if workout_library_type(left) != workout_library_type(right):
         return False
     if normalized_workout_text(left.get("name")) != normalized_workout_text(
         right.get("name")
@@ -211,7 +218,7 @@ def _similar_library_workout_inputs(
     except TypeError, ValueError:
         return None
     return (
-        workout_library_type(workout.get("sport")),
+        workout_library_type(workout),
         normalized_workout_text(workout.get("description")),
         normalized_workout_text(workout.get("name")),
         expected_duration,
@@ -248,8 +255,7 @@ def _similar_library_candidate_score(
 ) -> float | None:
     if (
         not isinstance(candidate, dict)
-        or workout_library_type(candidate.get("type") or candidate.get("sport"))
-        != expected_type
+        or workout_library_type(candidate) != expected_type
     ):
         return None
     candidate_text = normalized_workout_text(candidate.get("description"))
@@ -392,8 +398,8 @@ def workout_library_update_candidate(
     for key in ("name", "description", "duration_minutes", "target"):
         if key in values:
             candidate[key] = values.get(key)
-    if "type" in values or "sport" in values:
-        candidate["type"] = values.get("type") or values.get("sport")
+    if {"type", "sport", "environment"} & values.keys():
+        apply_sport_update(candidate, values)
     return candidate
 
 

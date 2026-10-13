@@ -85,6 +85,21 @@ class LocalCalendarTests(unittest.TestCase):
         self.assertEqual(event_result["sync_source"], "external-calendar")
         self.assertEqual(event_result["sync_status"], "read-only")
 
+    def test_competition_type_keeps_the_virtual_environment(self):
+        base = {"id": "competition-1", "event_date": "2026-09-20"}
+        cases = (
+            ({"sport": "ride", "environment": "virtual"}, "VirtualRide"),
+            ({"sport": "ride", "environment": "indoor"}, "VirtualRide"),
+            ({"sport": "ride", "environment": "outdoor"}, "Ride"),
+            ({"sport": "run"}, "Run"),
+            ({"sport": "Unsupported sport"}, "Unsupported sport"),
+            ({}, "Competition"),
+        )
+        for fields, expected in cases:
+            with self.subTest(fields=fields):
+                result = _local_calendar_competition({**base, **fields})
+                self.assertEqual(result["type"], expected)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,11 +14,11 @@ class CoachWorkoutLibraryProjectionTests(unittest.TestCase):
     def test_sorts_types_for_round_robin_and_preserves_order_within_each_type(self):
         result = self.project(
             [
-                {"id": "b1", "type": "Beta"},
-                {"id": "a1", "type": "Alpha"},
-                {"id": "b2", "type": "Beta"},
-                {"id": "a2", "type": "Alpha"},
-                {"id": "b3", "type": "Beta"},
+                {"id": "b1", "type": "Run"},
+                {"id": "a1", "type": "Ride"},
+                {"id": "b2", "type": "Run"},
+                {"id": "a2", "type": "Ride"},
+                {"id": "b3", "type": "Run"},
             ]
         )
 
@@ -29,10 +29,10 @@ class CoachWorkoutLibraryProjectionTests(unittest.TestCase):
     def test_respects_limit_across_round_robin(self):
         result = self.project(
             [
-                {"id": "b1", "type": "Beta"},
-                {"id": "a1", "type": "Alpha"},
-                {"id": "b2", "type": "Beta"},
-                {"id": "a2", "type": "Alpha"},
+                {"id": "b1", "type": "Run"},
+                {"id": "a1", "type": "Ride"},
+                {"id": "b2", "type": "Run"},
+                {"id": "a2", "type": "Ride"},
             ],
             limit=3,
         )

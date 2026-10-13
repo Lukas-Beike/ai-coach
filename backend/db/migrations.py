@@ -6,14 +6,23 @@ import json
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
+from backend.canonical.stored_sports import (
+    StoredSport,
+    legacy_competition_sport,
+    resolve_equipment_sport,
+    workout_sport_from_record,
+)
 from backend.canonical.vocabulary import (
+    Environment,
     ProviderId,
     RemoteEntityKind,
     RemoteLinkState,
+    Sport,
 )
 from backend.db.schema import (
     ACTIVITY_FEEDBACK_TABLE_SQL,
     COMPETITION_SYNC_TOMBSTONES_TABLE_SQL,
+    COMPETITIONS_TABLE_SQL,
     CURRENT_SCHEMA_VERSION,
     NUTRITION_PRODUCTS_DDL,
     PROVIDER_TABLES_DDL,
@@ -30,6 +39,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V5,
     SHAPE_SCHEMA_V6,
     SHAPE_SCHEMA_V7,
+    SHAPE_SCHEMA_V8,
     released_shape,
 )
 
@@ -420,6 +430,104 @@ def _add_remote_links(db: Any) -> None:
     db.execute("DROP TABLE competition_sync_tombstones_v7")
 
 
+_COMPETITION_COLUMNS = (
+    "id, name, event_date, sport, priority, distance, target, course_profile, "
+    "notes, category, start_date_local, description, moving_time, "
+    "intervals_event_id, external_id, sync_dirty, sync_state, sync_conflict, "
+    "last_synced_at, created_at, updated_at"
+)
+
+
+def _canonical_workout_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a workout payload with legacy sport tokens as canonical fields.
+
+    Idempotent: a payload that already carries canonical fields is unchanged.
+    The legacy ``type`` member is dropped; an original token that the canonical
+    pair cannot reproduce is kept in ``sport_detail``.
+    """
+    stored = workout_sport_from_record(payload)
+    result = {key: value for key, value in payload.items() if key != "type"}
+    result.pop("sport_detail", None)
+    result.update(stored.fields())
+    return result
+
+
+def _canonical_json_rows(
+    db: Any,
+    select: str,
+    update: str,
+    rewrite: Callable[[dict[str, Any]], dict[str, Any]],
+) -> None:
+    for row in db.execute(select).fetchall():
+        payload = _json_object(row["payload"])
+        if payload is None:
+            continue
+        rewritten = json.dumps(rewrite(payload), ensure_ascii=False)
+        if rewritten != row["payload"]:
+            db.execute(update, (rewritten, row["row_key"]))
+
+
+def _canonical_equipment_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    resolved = resolve_equipment_sport(payload.get("sport"), payload.get("environment"))
+    if resolved is None:
+        resolved = StoredSport(Sport.OTHER, Environment.UNKNOWN)
+    return {
+        **payload,
+        "sport": resolved.sport.value,
+        "environment": resolved.environment.value,
+        "sport_pending": resolved.sport is Sport.OTHER,
+    }
+
+
+def _canonical_sports(db: Any) -> None:
+    """Schema version 8 -> schema version 9: canonical stored sport values.
+
+    Competitions are rebuilt with canonical ``sport``, ``environment`` and a
+    lossless ``sport_detail`` for text without a canonical sport. Equipment,
+    workout-library and planned-unit JSON payloads are rewritten in place to
+    the canonical ``sport``/``environment`` (and ``sport_detail``) members; the
+    legacy ``type`` member is dropped. Rewrites are idempotent. Stored
+    ``sync_conflict`` snapshots are provider event copies and stay untouched.
+    """
+    db.execute("ALTER TABLE competitions RENAME TO competitions_v8")
+    db.execute(COMPETITIONS_TABLE_SQL)
+    db.execute(
+        f"INSERT INTO competitions({_COMPETITION_COLUMNS}) "
+        f"SELECT {_COMPETITION_COLUMNS} FROM competitions_v8"
+    )
+    db.execute("DROP TABLE competitions_v8")
+    for row in db.execute("SELECT rowid AS row_id, sport FROM competitions").fetchall():
+        stored = legacy_competition_sport(row["sport"])
+        db.execute(
+            "UPDATE competitions SET sport=?, environment=?, sport_detail=? WHERE rowid=?",
+            (
+                stored.sport.value,
+                stored.environment.value,
+                stored.detail,
+                row["row_id"],
+            ),
+        )
+    _canonical_json_rows(
+        db,
+        "SELECT key AS row_key, value AS payload FROM kv WHERE key LIKE 'equipment:%'",
+        "UPDATE kv SET value=? WHERE key=?",
+        _canonical_equipment_payload,
+    )
+    for table in ("workout_library", "planned_units"):
+        for row in db.execute(f"SELECT local_id, payload FROM {table}").fetchall():
+            payload = _json_object(row["payload"])
+            if payload is None:
+                continue
+            rewritten = json.dumps(
+                _canonical_workout_payload(payload), ensure_ascii=False
+            )
+            if rewritten != row["payload"]:
+                db.execute(
+                    f"UPDATE {table} SET payload=? WHERE local_id=?",
+                    (rewritten, row["local_id"]),
+                )
+
+
 UpgradeStep = Callable[[Any], None]
 
 # Released shape -> (shape reached after the step, step). Every released shape
@@ -430,5 +538,6 @@ UPGRADE_STEPS: Final[Mapping[str, tuple[str, UpgradeStep]]] = {
     SHAPE_SCHEMA_V3_V4: (SHAPE_SCHEMA_V5, _add_logged_time_known),
     SHAPE_SCHEMA_V5: (SHAPE_SCHEMA_V6, _add_provider_tables),
     SHAPE_SCHEMA_V6: (SHAPE_SCHEMA_V7, _add_activity_feedback_provider),
-    SHAPE_SCHEMA_V7: (SHAPE_CURRENT, _add_remote_links),
+    SHAPE_SCHEMA_V7: (SHAPE_SCHEMA_V8, _add_remote_links),
+    SHAPE_SCHEMA_V8: (SHAPE_CURRENT, _canonical_sports),
 }

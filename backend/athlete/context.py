@@ -101,13 +101,14 @@ class AthleteContextService:
     ) -> None:
         db.execute(
             "INSERT INTO competitions "
-            "(id, name, event_date, sport, priority, distance, target, course_profile, "
+            "(id, name, event_date, sport, environment, sport_detail, priority, distance, target, course_profile, "
             "notes, category, start_date_local, description, moving_time, external_id, "
             "sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 1, "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 1, "
             "'local', '', ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET name=excluded.name, "
             "event_date=excluded.event_date, sport=excluded.sport, "
+            "environment=excluded.environment, sport_detail=excluded.sport_detail, "
             "priority=excluded.priority, distance=excluded.distance, "
             "target=excluded.target, course_profile=excluded.course_profile, "
             "notes=excluded.notes, category=excluded.category, "
@@ -121,6 +122,8 @@ class AthleteContextService:
                 competition["name"],
                 competition["event_date"],
                 competition["sport"],
+                competition.get("environment"),
+                competition.get("sport_detail"),
                 competition["priority"],
                 competition["distance"],
                 competition["target"],

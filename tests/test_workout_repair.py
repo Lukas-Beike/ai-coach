@@ -597,7 +597,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             server.SYNC_COMMANDS.illness_pause().apply(preview["id"])["updated"], 1
         )
         current = server.PLANNING_DATA.planned_unit().list()[0]
-        self.assertEqual(current["sport"], "Swim")
+        self.assertEqual(current["sport"], "swim")
         self.assertIn("- 30m Z1 Pace", current["description"])
         self.assertEqual(current["moving_time"], 1800)
         for key in ("workout_doc", "icu_training_load", "icu_intensity"):

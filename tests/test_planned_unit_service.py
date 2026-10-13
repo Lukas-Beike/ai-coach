@@ -151,8 +151,8 @@ class PlannedUnitServiceTests(unittest.TestCase):
 
         planned, history, revision = self.state()
         self.assertEqual(created["id"], str(self.id))
-        self.assertEqual(created["sport"], "Run")
-        self.assertEqual(created["type"], "Run")
+        self.assertEqual(created["sport"], "run")
+        self.assertNotIn("type", created)
         self.assertEqual(created["duration_minutes"], 30)
         self.assertEqual(planned[0]["id"], str(self.id))
         self.assertEqual(planned[0]["local_id"], str(self.id))
@@ -386,6 +386,15 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(before["sync_status"], "synced")
         self.assertEqual(after["sync_status"], "local")
         self.assertEqual(self.events, ["changed"])
+
+    def test_environment_only_update_is_persisted(self):
+        self.service.create(self.workout())
+
+        self.service.update(str(self.id), {"environment": "indoor"})
+
+        planned, _history, _revision = self.state()
+        payload = json.loads(planned[0]["payload"])
+        self.assertEqual(payload["environment"], "indoor")
 
     def test_archive_and_restore_are_dirty_local_updates(self):
         self.service.create(self.workout())

@@ -122,6 +122,8 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "name",
         "event_date",
         "sport",
+        "environment",
+        "sport_detail",
         "priority",
         "distance",
         "target",
@@ -423,7 +425,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -580,6 +582,38 @@ ACTIVITY_FEEDBACK_TABLE_SQL = """
         provider TEXT
     )"""
 
+
+# Shared by initialize_schema and the schema-version-9 migration, which rebuilds
+# the table so its stored definition matches this text exactly. sport is a
+# canonical Sport value; environment (Environment) and sport_detail (the original
+# sport text kept losslessly when it has no canonical counterpart) are NULL on
+# rows written before schema version 9 or when nothing more is known.
+COMPETITIONS_TABLE_SQL = """
+    CREATE TABLE competitions (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        event_date TEXT NOT NULL,
+        sport TEXT NOT NULL,
+        environment TEXT,
+        sport_detail TEXT,
+        priority TEXT NOT NULL,
+        distance TEXT NOT NULL,
+        target TEXT NOT NULL,
+        course_profile TEXT NOT NULL,
+        notes TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'RACE_B',
+        start_date_local TEXT,
+        description TEXT NOT NULL DEFAULT '',
+        moving_time INTEGER,
+        intervals_event_id TEXT,
+        external_id TEXT,
+        sync_dirty INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'local',
+        sync_conflict TEXT NOT NULL DEFAULT '',
+        last_synced_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )"""
 
 # Shared by initialize_schema and the schema-version-8 migration, which rebuilds
 # the table so its stored definition matches this text exactly. The provider
@@ -744,29 +778,9 @@ def initialize_schema(db: Any) -> None:
         updated_at TEXT NOT NULL,
         PRIMARY KEY (provider, stream)
     );
-    CREATE TABLE competitions (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        event_date TEXT NOT NULL,
-        sport TEXT NOT NULL,
-        priority TEXT NOT NULL,
-        distance TEXT NOT NULL,
-        target TEXT NOT NULL,
-        course_profile TEXT NOT NULL,
-        notes TEXT NOT NULL,
-        category TEXT NOT NULL DEFAULT 'RACE_B',
-        start_date_local TEXT,
-        description TEXT NOT NULL DEFAULT '',
-        moving_time INTEGER,
-        intervals_event_id TEXT,
-        external_id TEXT,
-        sync_dirty INTEGER NOT NULL DEFAULT 1,
-        sync_state TEXT NOT NULL DEFAULT 'local',
-        sync_conflict TEXT NOT NULL DEFAULT '',
-        last_synced_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    );
+    """
+        + COMPETITIONS_TABLE_SQL
+        + """;
     CREATE TABLE training_plans (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
