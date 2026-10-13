@@ -14,6 +14,7 @@ from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.observability import Redactor
 from backend.planning.library_service import WorkoutLibraryService
+from backend.providers.descriptors import Capability
 from backend.runtime.events import StateEventBuffer
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.library import (
@@ -22,10 +23,13 @@ from backend.sync.library import (
     WorkoutLibrarySyncService,
     WorkoutLibrarySyncStateService,
 )
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.workout_export import WorkoutLibraryExportPort
 
-# Intervals.icu is the only registered library export target for now; another
-# provider registers its adapter here and is chosen by ``export_port(target)``.
+# Intervals.icu stays the default target. A target must declare the
+# workout-export capability in the provider registry; Wahoo's adapter is
+# injected through ``WorkoutLibraryProvider.wahoo_export`` because it needs the
+# Wahoo connection rather than the Intervals client.
 DEFAULT_LIBRARY_EXPORT_TARGET = ProviderId.INTERVALS
 _LIBRARY_EXPORT_TARGETS: dict[
     ProviderId, Callable[[Callable[[], Any]], WorkoutLibraryExportPort]
@@ -39,6 +43,7 @@ class WorkoutLibraryProvider:
     intervals_client: Callable[[], Any]
     workout_library_service: Callable[[], WorkoutLibraryService]
     calendar_conflict_service: Callable[[], Any] | None = None
+    wahoo_export: Callable[[], WorkoutLibraryExportPort] | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +76,7 @@ class WorkoutLibrarySyncAssembly:
         self._intervals_client = provider.intervals_client
         self._workout_library_service = provider.workout_library_service
         self._calendar_conflict_service = provider.calendar_conflict_service
+        self._wahoo_export = provider.wahoo_export
         self._key_values = state.key_values
         self._event_buffer = state.event_buffer
         self._redactor = state.redactor
@@ -82,8 +88,15 @@ class WorkoutLibrarySyncAssembly:
         self, target: ProviderId = DEFAULT_LIBRARY_EXPORT_TARGET
     ) -> WorkoutLibraryExportPort:
         """Select the library export target; the client resolves per call."""
-        factory = _LIBRARY_EXPORT_TARGETS.get(target)
-        port = factory(self._intervals_client) if factory is not None else None
+        port: WorkoutLibraryExportPort | None = None
+        if target.value in DEFAULT_PROVIDER_REGISTRY.ids_with(
+            Capability.WORKOUT_EXPORT
+        ):
+            if target is ProviderId.WAHOO:
+                port = self._wahoo_export() if self._wahoo_export else None
+            else:
+                factory = _LIBRARY_EXPORT_TARGETS.get(target)
+                port = factory(self._intervals_client) if factory else None
         if port is None or not port.capabilities.library:
             raise ValueError(
                 f"No workout-library export target is registered: {target}"

@@ -411,8 +411,9 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
     ProviderDescriptor(
         provider_id=WAHOO_ID,
         label="Wahoo",
-        # Read-only workout ingest; Wahoo is never written to.
-        capabilities=frozenset({Capability.ACTIVITIES}),
+        # Workout ingest, plus plan export of local library workouts that only
+        # runs on the athlete's explicit library sync with Wahoo as the target.
+        capabilities=frozenset({Capability.ACTIVITIES, Capability.WORKOUT_EXPORT}),
         freshness_areas=(
             FreshnessArea(
                 area="activities",
@@ -423,6 +424,8 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         ),
         max_sync_days=DEFAULT_MAX_SYNC_DAYS,
         resync_keys=(),
+        # plan_push is the explicit library export; backend/sync/jobs.py checks it.
+        job_types=frozenset({"refresh", "plan_push"}),
         refresh_fields=frozenset({"days", "reason"}),
         default_sync_days=_WAHOO_DEFAULT_SYNC_DAYS,
         # Ranked after every earlier provider in the daily, startup and Coach order.

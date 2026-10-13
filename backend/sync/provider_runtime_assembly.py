@@ -66,14 +66,16 @@ from backend.sync.schedule_policies import (
     WeatherSchedulePolicy,
     intervals_busy,
 )
+from backend.sync.wahoo_plan_push import WahooPlanPushService
 from backend.sync.wahoo_sync import WahooSyncService
 
 
 @dataclass(frozen=True)
 class WahooRuntimeDependencies:
-    """The Wahoo sync service, resolved only when the registry asks."""
+    """The Wahoo sync and plan-push services, resolved only when the registry asks."""
 
     sync_service: Callable[[], WahooSyncService]
+    plan_push_service: Callable[[], WahooPlanPushService]
 
 
 @dataclass(frozen=True)
@@ -207,11 +209,16 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
 
 
 def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
-    """Bind the read-only Wahoo workout sync, scheduled once the athlete connected."""
+    """Bind the Wahoo workout sync, scheduled once the athlete connected.
+
+    The same adapter runs the explicit library export (``plan_push``).
+    """
     wahoo = deps.wahoo
 
     def job_owner() -> ProviderJobOwner:
-        return WahooJobAdapter(sync=wahoo.sync_service())
+        return WahooJobAdapter(
+            sync=wahoo.sync_service(), plan_push=wahoo.plan_push_service()
+        )
 
     def schedule() -> WahooSchedulePolicy:
         return WahooSchedulePolicy(

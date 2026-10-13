@@ -402,13 +402,14 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). Complete the initial 
 
 ### Wahoo connection
 
-The app can connect to Wahoo through OAuth and reads its workouts (read-only; nothing is ever written to Wahoo).
+The app can connect to Wahoo through OAuth and reads its workouts. Library workouts are written to Wahoo only when you explicitly start a Wahoo library sync (see step 6).
 
 1. Register an application in the Wahoo developer portal and set its redirect URI to `https://<app-host>/api/wahoo/callback`. This must be the HTTPS URL at which you reach the app, and it must match `WAHOO_REDIRECT_URI` exactly.
 2. Set `WAHOO_CLIENT_ID`, `WAHOO_CLIENT_SECRET` and `WAHOO_REDIRECT_URI` and restart the container.
 3. An authenticated session starts the login with `POST /api/wahoo/connect`, which returns the Wahoo authorize URL. The callback `GET /api/wahoo/callback` needs no session (session cookies are SameSite=Strict); it is accepted only with the server-stored, single-use state that expires after 10 minutes, and always redirects to `/?wahoo=connected` or `/?wahoo=error`.
 4. Tokens are stored in the encrypted database, refreshed with rotation before expiry, and excluded from exports, diagnostics and coach context. `POST /api/wahoo/disconnect` revokes access at Wahoo (best effort) and deletes the local tokens. The state JSON reports only `configured`, `connected`, `scope` and `connected_at`.
 5. Wahoo is polled only; no webhooks are used. Once connected, the startup and daily schedulers enqueue a Wahoo refresh (default window 84 days). Workouts are stored as canonical activities with the provider `wahoo` and local dates, and the sync status shows them as "Wahoo". A disconnected account is skipped with the not-connected message; stored activities are kept.
+6. **Explicit plan export.** A library workout is uploaded to Wahoo as a plan only by the explicit library synchronization action with the target `wahoo` (`POST /api/sync/jobs` with `{"provider": "wahoo", "type": "plan_push", "payload": {"entries": [...]}}`, using the same session and CSRF protections and the same preview hash as Intervals.icu). Intervals.icu stays the default target; the Coach and adaptive replanning never export to Wahoo. The Wahoo plan id is kept in the local remote links, so a second sync updates the same plan instead of creating a duplicate, and a plan deleted at Wahoo is created again. Without a connected Wahoo account the request is rejected with a reconnect hint and nothing is written. Wahoo plans support cycling and running workouts with time-based steps and absolute targets (`W` or `BPM`, or a pace for runs). Ramps, zone targets, other sports, and percentage targets (which need an FTP or heart-rate reference that is not synchronized to Wahoo) are rejected for that workout with a clear message; the other selected workouts still sync. Format reference: <https://cloud-api.wahooligan.com/docs/plan-json-format.pdf>.
 
 ---
 
