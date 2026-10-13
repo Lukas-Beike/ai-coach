@@ -12,6 +12,7 @@ from backend.performance.training_report import (
     deduplicated_rows,
     zone_distribution,
 )
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 _CATEGORIES = {
     "RECOVERY": "low_aerobic",
@@ -160,7 +161,10 @@ def _coverage_row(
             if load_record.get(key) is not None:
                 row[key] = load_record[key]
     day = activity_day(
-        {"start_date_local": row.get("startTimeLocal") or row.get("start_date_local")},
+        {
+            "start_date_local": row.get(garmin_perf_fields.ACTIVITY_START_LOCAL)
+            or row.get("start_date_local")
+        },
         timezone,
     )
     if not day or not start <= day <= end:

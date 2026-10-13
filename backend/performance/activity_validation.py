@@ -6,6 +6,8 @@ import math
 from typing import Any
 
 from backend.activities.identity import activity_datetime
+from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.providers import intervals_performance_fields as intervals_perf_fields
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -37,14 +39,12 @@ def _threshold_pace_seconds(value: Any) -> float | int | None:
 
 def activity_pace_seconds_per_km(activity: dict[str, Any]) -> float | int | None:
     """Normalize an activity pace or speed into seconds per kilometre."""
-    pace = _first_present(activity, ("icu_pace", "average_pace", "pace"))
+    pace = _first_present(activity, intervals_perf_fields.PACE_ALIASES)
     if pace not in (None, ""):
         normalized = _threshold_pace_seconds(pace)
         if normalized is not None and 120 <= float(normalized) <= 1800:
             return normalized
-    speed = _as_number(
-        _first_present(activity, ("average_speed", "icu_weighted_avg_speed"))
-    )
+    speed = _as_number(_first_present(activity, intervals_perf_fields.SPEED_ALIASES))
     if speed is None or speed <= 0:
         return None
     normalized = round(1000 / float(speed)) if float(speed) < 20 else float(speed)
@@ -107,18 +107,18 @@ def activity_validation_evidence(latest: dict[str, Any], sport: str) -> dict[str
         ("duration_seconds", ("moving_time", "elapsed_time"), 1, 604800),
         ("distance", ("distance",), 0, 1_000_000),
         ("elevation_gain", ("total_elevation_gain",), 0, 100_000),
-        ("training_load", ("icu_training_load",), 0, 100_000),
-        ("intensity", ("icu_intensity",), 0, 1_000),
+        ("training_load", intervals_perf_fields.TRAINING_LOAD_ALIASES, 0, 100_000),
+        ("intensity", intervals_perf_fields.INTENSITY_ALIASES, 0, 1_000),
         ("average_heart_rate_bpm", ("average_heartrate", "averageHR"), 30, 230),
         ("max_heart_rate_bpm", ("max_heartrate", "maxHR"), 30, 230),
         ("average_power_watts", ("average_watts", "average_power"), 0, 5_000),
         (
             "weighted_power_watts",
-            ("icu_weighted_avg_watts", "weighted_average_watts", "normalized_power"),
+            intervals_perf_fields.WEIGHTED_POWER_ALIASES,
             0,
             5_000,
         ),
-        ("rpe", ("icu_rpe", "rpe"), 0, 10),
+        ("rpe", intervals_perf_fields.RPE_ALIASES, 0, 10),
     ):
         value = (
             activity_intensity(_first_present(latest, aliases))
@@ -138,13 +138,23 @@ def activity_direct_estimates(latest: dict[str, Any]) -> dict[str, float | int]:
     for key, aliases, minimum, maximum in (
         (
             "activity_vo2max",
-            ("vo2max", "vo2_max", "vO2MaxValue", "vo2MaxValue", "icu_vo2max"),
+            intervals_perf_fields.VO2_MAX_ALIASES,
             10,
             100,
         ),
-        ("activity_ftp_watts", ("ftp", "functionalThresholdPower"), 20, 2000),
-        ("activity_eftp_watts", ("eftp", "eFTP", "icu_eftp"), 20, 2000),
-        ("activity_configured_ftp_watts", ("icu_ftp",), 20, 2000),
+        ("activity_ftp_watts", garmin_perf_fields.ACTIVITY_FTP_ALIASES, 20, 2000),
+        (
+            "activity_eftp_watts",
+            intervals_perf_fields.DIRECT_ESTIMATED_FTP_ALIASES,
+            20,
+            2000,
+        ),
+        (
+            "activity_configured_ftp_watts",
+            intervals_perf_fields.CONFIGURED_FTP_ALIASES,
+            20,
+            2000,
+        ),
     ):
         value = bounded_activity_metric(
             _first_present(latest, aliases), minimum, maximum

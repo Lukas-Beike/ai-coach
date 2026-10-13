@@ -17,6 +17,7 @@ from backend.performance import recovery_context as performance_recovery_context
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.training_focus import training_focus
+from backend.providers import intervals_performance_fields as intervals_perf_fields
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -175,8 +176,8 @@ def current_performance_context(
         "as_of": snapshot.get("synced_at"),
         "metrics": metrics,
         "thresholds": {
-            "icu_ftp": metrics["cycling_ftp_watts"]["value"],
-            "icu_w_prime": athlete.get("icu_w_prime"),
+            intervals_perf_fields.CONFIGURED_FTP: metrics["cycling_ftp_watts"]["value"],
+            intervals_perf_fields.W_PRIME: athlete.get(intervals_perf_fields.W_PRIME),
             "max_hr": athlete.get("max_hr"),
             "lthr": athlete.get("lthr"),
             "weight": metrics["weight_kg"]["value"],

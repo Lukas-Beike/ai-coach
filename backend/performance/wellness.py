@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.performance.recovery import rounded_average
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -133,7 +134,7 @@ def readiness_score_value(value: Any) -> float | int | None:
             return None
         dated.sort(
             key=lambda item: str(
-                _first_present(item, ("calendarDate", "date", "id", "timestamp")) or ""
+                _first_present(item, garmin_perf_fields.WELLNESS_ROW_DATE_KEYS) or ""
             )
         )
         return readiness_score_value(dated[-1])

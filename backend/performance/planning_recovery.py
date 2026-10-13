@@ -13,12 +13,14 @@ from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import recovery as performance_recovery
 from backend.performance import wellness as performance_wellness
 from backend.performance.source_policy import select_daily
+from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.providers.garmin_fields import GARMIN_RESTING_HR_ALIASES
 from backend.runtime.ports import ObservationReader
 
 GARMIN_SOURCE = "Garmin Connect"
 INTERVALS_WELLNESS_SOURCE = "Intervals.icu Wellness"
 UTC_OFFSET_SUFFIX = "+00:00"
-_ROW_DATE_KEYS = ("id", "date", "calendarDate")
+_ROW_DATE_KEYS = garmin_perf_fields.PLANNING_ROW_DATE_KEYS
 _SOURCE_BY_PROVIDER: dict[ProviderId | None, str] = {
     ProviderId.GARMIN: GARMIN_SOURCE,
     ProviderId.INTERVALS: INTERVALS_WELLNESS_SOURCE,
@@ -164,7 +166,7 @@ def _add_garmin_planning_recovery_record(
         _add_planning_recovery_value(
             recovery,
             "sleep_hours",
-            _planning_sleep_hours(record, ("sleepTimeSeconds", "sleepDuration")),
+            _planning_sleep_hours(record, garmin_perf_fields.SLEEP_DURATION_ALIASES),
             GARMIN_SOURCE,
             overwrite=True,
         )
@@ -179,9 +181,7 @@ def _add_garmin_planning_recovery_record(
         _add_planning_recovery_value(
             recovery,
             "hrv",
-            _first_present(
-                record, ("hrvLastNight", "lastNightAvg", "hrvWeeklyAvg", "weeklyAvg")
-            ),
+            _first_present(record, garmin_perf_fields.HRV_WITH_WEEKLY_ALIASES),
             GARMIN_SOURCE,
             overwrite=True,
         )
@@ -189,9 +189,7 @@ def _add_garmin_planning_recovery_record(
         _add_planning_recovery_value(
             recovery,
             "resting_hr",
-            _first_present(
-                record, ("restingHeartRate", "restingHR", "resting_heart_rate")
-            ),
+            _first_present(record, GARMIN_RESTING_HR_ALIASES),
             GARMIN_SOURCE,
             overwrite=True,
         )
@@ -202,13 +200,7 @@ def _add_garmin_planning_recovery_record(
             performance_wellness.readiness_score_value(
                 _first_present(
                     record,
-                    (
-                        "trainingReadinessScore",
-                        "overallReadinessScore",
-                        "readinessScore",
-                        "score",
-                        "trainingReadiness",
-                    ),
+                    garmin_perf_fields.PLANNING_READINESS_ALIASES,
                 )
             ),
             GARMIN_SOURCE,

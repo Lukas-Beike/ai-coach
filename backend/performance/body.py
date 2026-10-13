@@ -22,6 +22,7 @@ from backend.performance.canonical_body import (
     CanonicalBodyInputs,
 )
 from backend.performance.display_sources import preferred_providers
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.source_labels import SourceView, provider_label
 
 INTERVALS_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY)
@@ -66,7 +67,9 @@ def _bounded_weight(value: Any) -> float | None:
         unit = value.get("unit") or value.get("unitKey")
         if unit and "kg" not in str(unit).casefold():
             return None
-        value = value.get("value", value.get("weightKg", value.get("weight")))
+        value = value.get(
+            "value", value.get(garmin_perf_fields.WEIGHT_KG, value.get("weight"))
+        )
     number = _number(value)
     lower, upper = WEIGHT_BOUNDS
     return round(number, 2) if number is not None and lower <= number <= upper else None
@@ -266,7 +269,7 @@ def _direct_ftp_date(value, fallback_day):
     raw = next(
         (
             value.get(key)
-            for key in ("calendarDate", "summaryDate", "date", "timestamp")
+            for key in garmin_perf_fields.RECORD_TIMESTAMP_KEYS
             if value.get(key)
         ),
         None,
@@ -278,7 +281,7 @@ def _direct_ftp_value(value):
     return next(
         (
             value.get(key)
-            for key in ("functionalThresholdPower", "ftp", "power")
+            for key in garmin_perf_fields.DIRECT_FTP_VALUE_KEYS
             if value.get(key) not in (None, "")
         ),
         None,

@@ -12,6 +12,7 @@ from backend.performance.training_report import (
     canonical_rows,
     deduplicated_rows,
 )
+from backend.providers import intervals_performance_fields as intervals_perf_fields
 
 
 def tag_impact(
@@ -70,7 +71,7 @@ def _day_loads(
     loads: dict[str, list[float | None]] = {}
     for row in rows:
         loads.setdefault(activity_day(row, timezone), []).append(
-            number(row.get("icu_training_load"))
+            number(row.get(intervals_perf_fields.TRAINING_LOAD))
         )
 
     return loads

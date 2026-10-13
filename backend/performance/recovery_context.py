@@ -18,6 +18,8 @@ from backend.performance.canonical_recovery_averages import (
     CanonicalRecoveryAverageInputs,
     prefer_canonical_average,
 )
+from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.providers.garmin_fields import GARMIN_RESTING_HR_ALIASES
 
 INTERVALS_WELLNESS_SOURCE = "Intervals.icu Wellness"
 
@@ -49,7 +51,7 @@ def _garmin_sleep_recovery(
     sleep_observed: Observation | None = None,
 ) -> dict[str, Any] | None:
     sleep_seconds, _ = recovery.garmin_recovery_metric(
-        garmin, "sleep", ("sleepTimeSeconds", "sleepDuration")
+        garmin, "sleep", garmin_perf_fields.SLEEP_DURATION_ALIASES
     )
     sleep_score, sleep_score_date = recovery.garmin_recovery_metric(
         garmin,
@@ -67,7 +69,7 @@ def _garmin_sleep_recovery(
     sleep_average = recovery.garmin_recovery_average(
         garmin,
         "sleep",
-        ("sleepTimeSeconds", "sleepDuration"),
+        garmin_perf_fields.SLEEP_DURATION_ALIASES,
         7,
         today,
         lambda value: (
@@ -279,7 +281,7 @@ def performance_recovery_context(
             latest_wellness,
             wellness_rows,
             "resting_hr",
-            ("restingHeartRate", "restingHR", "resting_heart_rate"),
+            GARMIN_RESTING_HR_ALIASES,
             ("restingHR", "resting_hr"),
             lambda value: garmin_metrics.garmin_bounded_metric(value, 30, 230),
             today,
@@ -292,7 +294,7 @@ def performance_recovery_context(
         latest_wellness,
         wellness_rows,
         "hrv",
-        ("hrvLastNight", "lastNightAvg", "hrvWeeklyAvg", "weeklyAvg", "hrv", "hrv_ms"),
+        (*garmin_perf_fields.HRV_WITH_WEEKLY_ALIASES, "hrv", "hrv_ms"),
         ("hrv", "hrv_ms"),
         lambda value: garmin_metrics.garmin_bounded_metric(value, 1, 300),
         today,
