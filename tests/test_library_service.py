@@ -17,6 +17,7 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.planning.library_service import WorkoutLibraryService
+from backend.planning.sport import with_activity_type
 
 NOW = "2026-09-20T08:00:00+00:00"
 
@@ -271,7 +272,8 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
         entry = self.service.create_local_entry(self._workout())
 
         self.assertEqual(entry["id"], "00000000-0000-0000-0000-000000000001")
-        self.assertEqual(entry["type"], "Ride")
+        self.assertEqual((entry["sport"], entry["environment"]), ("ride", "unknown"))
+        self.assertNotIn("type", entry)
         self.assertEqual(entry["moving_time"], 1200)
         self.assertEqual(entry["sync_status"], "local")
         with self.database_manager.reader() as db:
@@ -300,11 +302,12 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
 
     def test_create_uses_ride_fallback_and_rejects_planning_date(self) -> None:
         entry = self.service.create_local_entry(self._workout(sport=None, type="Run"))
-        self.assertEqual(entry["type"], "Ride")
+        self.assertEqual((entry["sport"], entry["environment"]), ("ride", "unknown"))
+        self.assertNotIn("type", entry)
 
         with self.assertRaisesRegex(AppError, "kein Planungsdatum"):
             self.service.create_local_entry(self._workout(date="2026-09-20"))
-        self.assertEqual(self.service.list(), [entry])
+        self.assertEqual(self.service.list(), [with_activity_type(dict(entry))])
 
     def test_external_db_is_used_without_opening_or_committing_a_second_uow(
         self,
@@ -323,7 +326,7 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
             entry = service.create_local_entry(self._workout(), db=connection)
             listed = service.list(db=connection)
 
-            self.assertEqual(listed, [entry])
+            self.assertEqual(listed, [with_activity_type(dict(entry))])
             self.assertTrue(connection.in_transaction)
             manager.unit_of_work.assert_not_called()
             manager.reader.assert_not_called()
@@ -376,14 +379,15 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
         ) as validate:
             entry = self.service.create_template({})
 
-        self.assertEqual(entry["type"], "Ride")
+        self.assertEqual((entry["sport"], entry["environment"]), ("ride", "unknown"))
+        self.assertNotIn("type", entry)
         self.assertEqual(entry["name"], "Coach-Vorlage")
         self.assertEqual(entry["description"], "")
         self.assertEqual(entry["duration_minutes"], 30)
         self.assertEqual(entry["moving_time"], 1800)
         self.assertEqual(entry["target"], "AUTO")
         self.assertEqual(entry["source"], "coach")
-        self.assertEqual(self.service.list(), [entry])
+        self.assertEqual(self.service.list(), [with_activity_type(dict(entry))])
         validate.assert_called_once()
 
     def test_template_duration_sport_object_and_date_validation(self) -> None:
@@ -395,7 +399,10 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
                 "target": "HR",
             }
         )
-        self.assertEqual(entry["type"], "WeightTraining")
+        self.assertEqual(
+            (entry["sport"], entry["environment"]), ("strength", "unknown")
+        )
+        self.assertNotIn("type", entry)
         self.assertEqual(entry["duration_minutes"], 45)
         self.assertEqual(entry["moving_time"], 2700)
         self.assertEqual(entry["target"], "HR")
@@ -417,7 +424,7 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
                 self.assertRaisesRegex(AppError, "Bibliotheksvorlage"),
             ):
                 self.service.create_template(invalid)
-        self.assertEqual(self.service.list(), [entry])
+        self.assertEqual(self.service.list(), [with_activity_type(dict(entry))])
 
     def test_list_sorts_filters_archive_and_skips_non_dict_payloads(self) -> None:
         self._insert_payload("z-run", json.dumps({"type": "Run", "name": "Zed"}))

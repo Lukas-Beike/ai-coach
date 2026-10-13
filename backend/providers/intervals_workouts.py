@@ -15,12 +15,22 @@ from typing import Any
 from backend.canonical.planned_workout import PlannedWorkoutExport
 from backend.canonical.stored_sports import (
     DEFAULT_WORKOUT_SPORT_TOKEN,
+    LEGACY_COMPETITION_TOKENS,
+    PRIMARY_WORKOUT_TOKENS,
     WORKOUT_SPORT_ALIASES,
     WORKOUT_SPORT_TOKENS,
-    workout_stored_token,
+    StoredSport,
+    resolve_workout_sport,
+    workout_sport_from_record,
 )
+from backend.canonical.vocabulary import Environment
+from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 
 INTERVALS_EVENT_CATEGORY = "WORKOUT"
+# Workout payload field holding structured interval text.
+WORKOUT_INTERVALS_FIELD = "intervals"
+# Remote-derived fields that stop being valid once a local workout is edited.
+DERIVED_WORKOUT_KEYS = ("workout_doc", TRAINING_LOAD, INTENSITY)
 INTERVALS_DEFAULT_WORKOUT_TYPE = DEFAULT_WORKOUT_SPORT_TOKEN
 INTERVALS_TEMPLATE_WORKOUT_TYPES = frozenset(
     {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining"}
@@ -34,7 +44,9 @@ def intervals_event_payload(
     return {
         "category": INTERVALS_EVENT_CATEGORY,
         "start_date_local": export.start_date_local,
-        "type": intervals_workout_sport(export.sport_token),
+        "type": intervals_workout_type(
+            StoredSport(export.sport, export.environment, export.sport_token or None)
+        ),
         "name": export.name,
         "description": export.description,
         "moving_time": export.duration_seconds,
@@ -85,8 +97,47 @@ INTERVALS_ENDURANCE_WORKOUT_TYPES = {
 
 
 def intervals_workout_sport(value: Any) -> str:
-    """Return the provider's canonical activity type for workout payloads."""
-    return workout_stored_token(value) or "Other"
+    """Return the provider's activity type for canonical values, tokens or aliases."""
+    resolved = resolve_workout_sport(value)
+    return "Other" if resolved is None else intervals_workout_type(resolved)
+
+
+def intervals_workout_type(stored: StoredSport) -> str:
+    """Return the Intervals.icu activity type of a canonical stored sport.
+
+    A kept original token is used again when it still names the stored pair, so
+    ``GravelRide`` round-trips; otherwise the pair's primary type applies. Sports
+    without an Intervals.icu type are ``Other``.
+    """
+    pair = (stored.sport, stored.environment)
+    if stored.environment is Environment.INDOOR:
+        # Intervals.icu has no indoor type; indoor sessions use the virtual one,
+        # as competitions do.
+        pair = (stored.sport, Environment.VIRTUAL)
+    if stored.detail and WORKOUT_SPORT_TOKENS.get(stored.detail) == pair:
+        return stored.detail
+    return (
+        PRIMARY_WORKOUT_TOKENS.get(pair)
+        or PRIMARY_WORKOUT_TOKENS.get((stored.sport, Environment.UNKNOWN))
+        or "Other"
+    )
+
+
+def intervals_record_type(record: Mapping[str, Any]) -> str:
+    """Return the Intervals.icu activity type of a stored workout record."""
+    return intervals_workout_type(workout_sport_from_record(record))
+
+
+def intervals_competition_type(stored: StoredSport) -> str | None:
+    """Return the Intervals.icu race type of a canonical sport, or None."""
+    pair = (stored.sport, stored.environment)
+    if stored.environment is Environment.INDOOR:
+        pair = (stored.sport, Environment.VIRTUAL)
+    for wanted in (pair, (stored.sport, Environment.UNKNOWN)):
+        for token, entry in LEGACY_COMPETITION_TOKENS.items():
+            if entry == wanted:
+                return token
+    return None
 
 
 def intervals_external_id(local_id: str) -> str:

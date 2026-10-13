@@ -37,7 +37,10 @@ TimeoutErrorFactory = Callable[[], Exception]
 # Version 3 adds activity_feedback.provider (schema v7) to activity_feedback.jsonl.
 # Version 4 adds remote_links.jsonl and competition_sync_tombstones.provider
 # (schema v8).
-PRIVACY_EXPORT_FORMAT_VERSION = 4
+# Version 5 exports stored sports in the canonical vocabulary: competitions gain
+# environment and sport_detail, workouts and planned units carry sport,
+# environment and sport_detail instead of type (schema v9).
+PRIVACY_EXPORT_FORMAT_VERSION = 5
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
@@ -180,7 +183,7 @@ class PrivacyArchiveExportService:
                     (
                         dict(row)
                         for row in db.execute(
-                            "SELECT id, name, event_date, start_date_local, sport, priority, category, distance, target, "
+                            "SELECT id, name, event_date, start_date_local, sport, environment, sport_detail, priority, category, distance, target, "
                             "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
                             "sync_state, sync_conflict, last_synced_at FROM competitions ORDER BY event_date, priority, name"
                         )
@@ -515,7 +518,7 @@ def iter_workout_library(
     """Yield all workout-library payloads in the established order."""
     for row in db.execute(
         "SELECT payload FROM workout_library "
-        "ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name'))"
+        "ORDER BY lower(json_extract(payload, '$.sport')), lower(json_extract(payload, '$.name'))"
     ):
         payload = decode(row["payload"])
         if isinstance(payload, dict):

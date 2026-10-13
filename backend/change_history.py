@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from backend.errors import AppError
@@ -43,6 +43,9 @@ PROFILE_FIELDS = {
 LIBRARY_FIELDS = {
     "id",
     "type",
+    "sport",
+    "environment",
+    "sport_detail",
     "name",
     "description",
     "duration_minutes",
@@ -61,6 +64,9 @@ LIBRARY_FIELDS = {
 PLANNED_UNIT_FIELDS = {
     "id",
     "type",
+    "sport",
+    "environment",
+    "sport_detail",
     "name",
     "description",
     "duration_minutes",
@@ -84,6 +90,8 @@ COMPETITION_FIELDS = {
     "event_date",
     "start_date_local",
     "sport",
+    "environment",
+    "sport_detail",
     "priority",
     "category",
     "distance",
@@ -183,7 +191,7 @@ def audit_diff(
 
 
 def cleanup(db: Any, *, current_time: datetime | None = None) -> None:
-    now = current_time or datetime.now(timezone.utc)
+    now = current_time or datetime.now(UTC)
     cutoff = (now - timedelta(days=RETENTION_DAYS)).isoformat()
     db.execute("DELETE FROM change_history WHERE created_at < ?", (cutoff,))
     db.execute(
@@ -234,7 +242,7 @@ def record_change(
         "entity_id": str(entity_id),
         "action": action,
         "source": str(source)[:40] or "local",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "before_hash": before_hash,
         "after_hash": after_hash,
         "diff": json.dumps(

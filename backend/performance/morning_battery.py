@@ -6,6 +6,8 @@ import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from backend.canonical.decimal_text import comma_decimal_float
+
 _GARMIN_SOURCE = "Garmin Connect"
 _TIMESTAMP_FIELDS = (
     "sleepStartTimestampGMT",
@@ -22,7 +24,7 @@ _END_TIMESTAMP_FIELDS = (
 def timestamp(value: Any) -> datetime | None:
     """Normalize Garmin epoch seconds/milliseconds and ISO timestamps to UTC."""
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         number = None
     if number is not None and math.isfinite(number):
@@ -78,7 +80,7 @@ def sleep_bounds(payload: Any) -> tuple[datetime | None, datetime | None]:
 
 def _number(value: Any) -> float | int | None:
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
+from backend.canonical.decimal_text import is_grouped_thousands
 from backend.canonical.validation import (
     optional_text,
     require_instance,
@@ -92,12 +93,14 @@ def coerce_comma_decimal_number(value: object) -> float | None:
     """Return ``coerce_number`` of a value whose text may use a comma as decimal mark.
 
     Text has every comma read as a dot before the ``coerce_number`` rules apply, so
-    ``"80,4"`` is 80.4 and ``"1,2,3"`` is still rejected. This is how the legacy
-    readers in ``backend.performance`` parse provider text, so grouped thousands such
-    as ``"1,200"`` read as 1.2 here too. Numbers, booleans and every other type follow
-    ``coerce_number`` unchanged. Only providers whose readers accept comma decimals
-    should use it; ``coerce_number`` stays strict for the rest.
+    ``"80,4"`` is 80.4 and ``"1,2,3"`` is still rejected. Ambiguous grouped
+    thousands such as ``"1,200"`` yield None, as in the provider readers (see
+    ``backend.canonical.decimal_text``). Numbers, booleans and every other type
+    follow ``coerce_number`` unchanged. Only providers whose readers accept comma
+    decimals should use it; ``coerce_number`` stays strict for the rest.
     """
     if isinstance(value, str):
+        if is_grouped_thousands(value):
+            return None
         return coerce_number(value.replace(",", "."))
     return coerce_number(value)

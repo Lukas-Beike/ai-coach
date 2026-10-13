@@ -48,6 +48,21 @@ ACTIVITY_FIELDS = (
     "file_type",
 )
 
+# Planned-unit metrics a synced remote event carries back onto the local unit.
+REMOTE_EVENT_METRIC_KEYS = (
+    "moving_time",
+    "workout_doc",
+    "icu_training_load",
+    "icu_intensity",
+)
+# Query that asks the activity detail endpoint to include interval rows.
+ACTIVITY_DETAIL_PARAMS = {"intervals": "true"}
+
+
+def activity_detail_laps(detail: dict[str, Any]) -> Any:
+    """Return the interval rows of an activity detail payload as laps."""
+    return detail.get("icu_intervals", [])
+
 
 def selected(item: Any, fields: tuple[str, ...]) -> dict[str, Any]:
     """Return the non-null ``fields`` of a mapping, or an empty dict for non-mappings."""

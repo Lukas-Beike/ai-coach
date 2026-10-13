@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from backend.canonical.vocabulary import ProviderId
+
 COACH_OPERATION_LABELS = {
     "save_nutrition_template": "Mahlzeitvorlage gespeichert",
     "save_nutrition_product": "Produkt lokal gespeichert",
@@ -160,7 +162,7 @@ def coach_observed_sync_lines(commands: list[dict[str, Any]]) -> str:
         if (
             command.get("tool") == "get_sync_job"
             and result.get("ok")
-            and job.get("provider") == "intervals"
+            and job.get("provider") == ProviderId.INTERVALS
             and job.get("type") == "plan_push"
             and job.get("id")
         ):

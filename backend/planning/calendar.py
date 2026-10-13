@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar.markers import has_marker
+from backend.providers.intervals_workouts import WORKOUT_INTERVALS_FIELD
 
 _HARD_KEYWORD_PATTERN = re.compile(
     r"\b(intervals?|vo2(max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b"
@@ -34,7 +35,7 @@ def _effort_text(workout: dict[str, Any]) -> str:
     return (
         f"{workout.get('name', '')} {workout.get('description', '')} "
         f"{workout.get('target', '')} "
-        f"{workout.get('steps', '')} {workout.get('intervals', '')} "
+        f"{workout.get('steps', '')} {workout.get(WORKOUT_INTERVALS_FIELD, '')} "
         f"{workout.get('workout_steps', '')}"
     ).casefold()
 
@@ -59,7 +60,7 @@ def workout_is_rest(workout: dict[str, Any]) -> bool:
         return False
     if any(
         workout.get(key) not in (None, "", [], {})
-        for key in ("steps", "intervals", "distance", "distance_meters")
+        for key in ("steps", WORKOUT_INTERVALS_FIELD, "distance", "distance_meters")
     ):
         return False
     duration = workout.get("duration_minutes")

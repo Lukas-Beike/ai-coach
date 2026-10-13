@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from backend.canonical.public_metrics import neutral_activity_records
+from backend.canonical.vocabulary import ProviderId
 from backend.db.manager import DatabaseManager
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.public_performance import (
@@ -140,7 +142,7 @@ class PublicStateService:
                 "messages": deps.coach_messages.list(),
                 "plans": deps.training_plans.list(),
                 "library": deps.workout_library.list(include_archived=True),
-                "activities": activities,
+                "activities": neutral_activity_records(activities),
                 **calendar_projection,
                 "weather": weather,
                 "profile": deps.profile.get(),
@@ -157,7 +159,7 @@ class PublicStateService:
                 **deps.public_performance.from_snapshot(
                     snapshot, getattr(prelude, "performance_inputs", None)
                 ),
-                "intervals": intervals_state.public_state(
+                ProviderId.INTERVALS.value: intervals_state.public_state(
                     configured=bool(deps.config.intervals_api_key),
                     running=deps.intervals_sync_lock.locked()
                     or deps.workout_library_sync_running(),
@@ -235,7 +237,7 @@ class PublicStateService:
                 },
                 "configured": {
                     "openai": bool(deps.config.openai_api_key),
-                    "intervals": bool(deps.config.intervals_api_key),
+                    ProviderId.INTERVALS.value: bool(deps.config.intervals_api_key),
                     "weather": bool(weather.get("configured")),
                     "external_calendar": bool(deps.config.calendar_ical_url),
                 },

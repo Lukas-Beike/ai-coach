@@ -23,6 +23,7 @@ from backend.errors import (
 )
 from backend.planning.context import compact_snapshot
 from backend.planning.library_service import WorkoutLibraryService
+from backend.providers.descriptors import INTERVALS_ID
 from backend.providers.intervals import IntervalsApiClient
 from backend.providers.intervals_power import PROFILE_DURATIONS, cycling_power_points
 from backend.sync.canonical_coverage_store import (
@@ -357,9 +358,10 @@ class IntervalsSnapshotService:
                 # Nested service calls intentionally share this UOW: reconciliation
                 # and its initial-import marker must roll back together.
                 pending_repair = db.execute(
-                    "SELECT 1 FROM sync_jobs WHERE provider='intervals' AND type='plan_push' "
+                    "SELECT 1 FROM sync_jobs WHERE provider=? AND type='plan_push' "
                     "AND status IN ('queued', 'running') "
-                    "AND json_extract(payload, '$.repair')=1 LIMIT 1"
+                    "AND json_extract(payload, '$.repair')=1 LIMIT 1",
+                    (INTERVALS_ID,),
                 ).fetchone()
                 if pending_repair:
                     planned_import["deferred_for_repair"] = True
@@ -423,14 +425,14 @@ class IntervalsSnapshotService:
         )
         synced_at = snapshot["synced_at"]
         self._sync_state_repository.update_cursor(
-            "intervals", "activities", sync_window[-1][1].isoformat(), synced_at
+            INTERVALS_ID, "activities", sync_window[-1][1].isoformat(), synced_at
         )
         self._sync_state_repository.update_cursor(
-            "intervals", "wellness", sync_window[-1][1].isoformat(), synced_at
+            INTERVALS_ID, "wellness", sync_window[-1][1].isoformat(), synced_at
         )
         if end_date is not None:
             self._sync_state_repository.update_cursor(
-                "intervals", "historical", sync_window[0][0].isoformat(), synced_at
+                INTERVALS_ID, "historical", sync_window[0][0].isoformat(), synced_at
             )
 
         provider_sync = snapshot.get("provider_sync", {})
@@ -474,7 +476,7 @@ class IntervalsSyncWorkflow:
 
     def sync_period(self) -> int:
         return self._state.sync_period(
-            "intervals", self._sync_period_defaults, self._all_sync_days
+            INTERVALS_ID, self._sync_period_defaults, self._all_sync_days
         )
 
     def synchronize(
@@ -497,7 +499,7 @@ class IntervalsSyncWorkflow:
             snapshot, activity_days, end_date
         )
         if end_date is None:
-            self._daily_sync_marker_service.mark("intervals")
+            self._daily_sync_marker_service.mark(INTERVALS_ID)
         library_imported, library_error, library_count = (
             self._snapshots.seed_workout_library(reason, cancel_event)
         )
@@ -648,7 +650,7 @@ class IntervalsSyncRuntime:
     def operation(self, reason: str, operation_id: str | None) -> Iterator[Any]:
         with (
             self._observer.observe(
-                "intervals", "activities", reason, operation_id
+                INTERVALS_ID, "activities", reason, operation_id
             ) as scope,
             self._provider_resync_gate.operation(),
         ):

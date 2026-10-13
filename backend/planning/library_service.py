@@ -8,16 +8,19 @@ from collections.abc import Callable
 from typing import Any
 
 from backend import change_history
-from backend.canonical.vocabulary import RemoteEntityKind
+from backend.canonical.vocabulary import RemoteEntityKind, Sport
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, AppError
 from backend.planning import library, workouts
+from backend.planning.sport import with_activity_type
 from backend.providers.intervals_workouts import (
     INTERVALS_DEFAULT_WORKOUT_TYPE,
     INTERVALS_TEMPLATE_WORKOUT_TYPES,
+    intervals_record_type,
 )
 
 _REMOTE_LINKS = RemoteLinkRepository()
+_CANONICAL_SPORT_VALUES = frozenset(item.value for item in Sport)
 INSERT_LIBRARY_SQL = (
     "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, "
     "sync_state, sync_error, last_synced_at, updated_at) "
@@ -201,8 +204,8 @@ class WorkoutLibraryService:
             raise AppError(400, "Eine Vorlage darf kein Planungsdatum enthalten.")
         local_id = str(self._id_factory())
         library_workout = {
-            **workout,
-            "type": workout.get("sport") or INTERVALS_DEFAULT_WORKOUT_TYPE,
+            **{key: value for key, value in workout.items() if key != "type"},
+            "sport": workout.get("sport") or INTERVALS_DEFAULT_WORKOUT_TYPE,
             "moving_time": int(workout.get("duration_minutes") or 0) * 60,
         }
         entry = library.normalize_library_workout(
@@ -248,11 +251,15 @@ class WorkoutLibraryService:
                 400, "Die Vorlagendauer muss zwischen 5 und 1440 Minuten liegen."
             )
         sport = str(workout.get("sport") or INTERVALS_DEFAULT_WORKOUT_TYPE)
-        if sport not in INTERVALS_TEMPLATE_WORKOUT_TYPES:
+        sport_fields = {"sport": sport, "environment": workout.get("environment")}
+        if sport not in INTERVALS_TEMPLATE_WORKOUT_TYPES and not (
+            sport in _CANONICAL_SPORT_VALUES
+            and intervals_record_type(sport_fields) in INTERVALS_TEMPLATE_WORKOUT_TYPES
+        ):
             raise AppError(400, "Ungültige Sportart der Vorlage.")
         return self.create_local_entry(
             {
-                "sport": sport,
+                **sport_fields,
                 "name": workout.get("name") or "Coach-Vorlage",
                 "description": workout.get("description") or "",
                 "duration_minutes": duration,
@@ -284,7 +291,7 @@ class WorkoutLibraryService:
             params.extend(cursor)
         return db.execute(
             "WITH templates AS ("
-            "SELECT id, payload, lower(COALESCE(json_extract(payload, '$.type'), '')) AS sport_key, "
+            "SELECT id, payload, lower(COALESCE(json_extract(payload, '$.sport'), '')) AS sport_key, "
             "lower(COALESCE(json_extract(payload, '$.name'), '')) AS name_key "
             "FROM workout_library WHERE json_valid(payload) AND json_type(payload)='object' "
             "AND json_extract(payload, '$.date') IS NULL AND COALESCE(json_extract(payload, '$.archived'), 0)=0) "
@@ -301,7 +308,7 @@ class WorkoutLibraryService:
             "SELECT payload FROM workout_library WHERE json_type(payload)='object' "
             "AND json_extract(payload, '$.date') IS NULL "
             "AND (? OR COALESCE(json_extract(payload, '$.archived'), 0)=0) "
-            "ORDER BY lower(json_extract(payload, '$.type')), "
+            "ORDER BY lower(json_extract(payload, '$.sport')), "
             "lower(json_extract(payload, '$.name')), id LIMIT ?",
             (
                 int(include_archived),
@@ -313,7 +320,7 @@ class WorkoutLibraryService:
             try:
                 payload = json.loads(row["payload"])
                 if isinstance(payload, dict):
-                    result.append(payload)
+                    result.append(with_activity_type(payload))
             except TypeError, ValueError:
                 continue
         return result

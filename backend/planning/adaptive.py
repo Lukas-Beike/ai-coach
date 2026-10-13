@@ -15,6 +15,7 @@ from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
 from backend.planning.planned_unit_service import UPDATE_SQL as PLANNED_UNIT_UPDATE_SQL
+from backend.planning.sport import planned_activity_type
 
 DEFAULT_ILLNESS_PAUSE_DAYS = 3
 WEATHER_ADAPTIVE_MAX_MINUTES = 90
@@ -58,9 +59,7 @@ def adaptive_recovery_replacement(
     available_minutes: int | None = None,
     max_minutes: int | None = None,
 ) -> dict[str, Any]:
-    sport = planning_workouts.intervals_workout_sport(
-        workout.get("sport") or workout.get("type")
-    )
+    sport = planned_activity_type(workout)
     duration_limit = int(available_minutes or workout.get("duration_minutes") or 30)
     duration = max(
         15,
@@ -155,17 +154,19 @@ def adaptive_quick_action_blockers(
 def adaptive_workout_fingerprint(workout: dict[str, Any]) -> str:
     """Hash the mutable fields that an adaptive preview is allowed to replace."""
     source = {
-        key: workout.get(key)
-        for key in (
-            "date",
-            "name",
-            "type",
-            "duration_minutes",
-            "description",
-            "target",
-            "rationale",
-            "private_calendar_adjustment",
-        )
+        "type": planned_activity_type(workout),
+        **{
+            key: workout.get(key)
+            for key in (
+                "date",
+                "name",
+                "duration_minutes",
+                "description",
+                "target",
+                "rationale",
+                "private_calendar_adjustment",
+            )
+        },
     }
     return hashlib.sha256(
         json.dumps(
@@ -471,7 +472,7 @@ class AdaptiveReplanApplyService:
         }
         if not replacement.get("archived") and not replacement.get("local_deleted"):
             planning_workouts.validate_workout_description(replacement)
-            for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+            for key in planning_workouts.DERIVED_WORKOUT_KEYS:
                 replacement.pop(key, None)
         db.execute(
             PLANNED_UNIT_UPDATE_SQL,

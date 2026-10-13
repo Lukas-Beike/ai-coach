@@ -17,6 +17,7 @@ from backend.activities.activity_reference import (
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicates import validate_duplicate_delete
 from backend.athlete.local_date import LocalDate
+from backend.canonical.vocabulary import ProviderId
 from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
     _preview_nutrient,
@@ -31,6 +32,7 @@ from backend.coach.proposal_validation import (
 )
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
+from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
 
 _MAX_REMOTE_APPROVAL_DETAILS = 5000
@@ -159,7 +161,7 @@ class CoachProposalCreationService:
         return self.create(
             {
                 "action_type": "remote_coach_write",
-                "target_system": "intervals",
+                "target_system": ProviderId.INTERVALS.value,
                 "object_ids": {"operation": tool, "targets": targets},
                 "diff": remote_coach_write_diff(
                     tool, arguments, intent, approval_manifest, approval_details
@@ -515,7 +517,7 @@ def _plan_workout_details(rows: list[Any]) -> list[dict[str, str]]:
                 {
                     "name": str(workout.get("name") or "Trainingseinheit")[:120],
                     "date": _approval_date(workout.get("date")),
-                    "sport": str(workout.get("sport") or "")[:40],
+                    "sport": intervals_record_type(workout)[:40],
                     "id": str(row["local_id"]),
                 }
             )

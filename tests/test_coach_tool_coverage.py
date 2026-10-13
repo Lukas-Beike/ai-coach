@@ -2218,7 +2218,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 period={"start": "2026-09-09", "end": "2026-09-09"},
             )
             stored = server.PLANNING_DATA.planned_unit().list()[0]
-            self.assertEqual((stored["sport"], stored["type"]), (sport, sport))
+            self.assertEqual(
+                (stored["sport"], stored["type"]), (sport.casefold(), sport)
+            )
             self.assertEqual(stored["id"], unit["id"])
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 

@@ -194,6 +194,22 @@ class CommaDecimalNumberTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(coerce_comma_decimal_number(text))
 
+    def test_ambiguous_grouped_thousands_are_rejected(self) -> None:
+        for text in ("1,200", "12,345", "999,000", "+1,000", "-1,200", " 1,200 "):
+            with self.subTest(text=text):
+                self.assertIsNone(coerce_comma_decimal_number(text))
+
+    def test_comma_text_that_cannot_be_grouped_thousands_stays_a_decimal(self) -> None:
+        cases: tuple[tuple[str, float], ...] = (
+            ("0,500", 0.5),
+            ("1,20", 1.2),
+            ("1,2000", 1.2),
+            ("1000,500", 1000.5),
+        )
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(expected, coerce_comma_decimal_number(text))
+
     def test_other_values_follow_coerce_number(self) -> None:
         for value in (72, 72.5, True, None, math.nan, b"1,5", [1.5]):
             with self.subTest(value=repr(value)[:40]):

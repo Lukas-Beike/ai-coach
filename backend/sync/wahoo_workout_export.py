@@ -57,9 +57,7 @@ class WahooWorkoutExport:
         local_id = str(workout.get("local_id") or workout.get("id") or "").strip()
         if not local_id:
             raise WahooPlanMappingError("Die Einheit hat keine lokale ID.")
-        sport, environment = planned_sport_environment(
-            workout.get("type") or workout.get("sport")
-        )
+        sport, environment = planned_sport_environment(workout)
         description = str(workout.get("description") or "")
         try:
             steps = structured_steps(description, str(workout.get("target") or "AUTO"))

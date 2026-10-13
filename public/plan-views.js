@@ -146,8 +146,9 @@ function calendarBadgeRow(specs) {
   return row;
 }
 
-function competitionSportLabel(sport) {
-  return ({ Cycling: "Radfahren", Ride: "Radfahren", VirtualRide: "Rad indoor", Running: "Laufen", Run: "Laufen", Swim: "Schwimmen", Strength: "Krafttraining" })[sport] || sport || "–";
+function competitionSportLabel(sport, environment) {
+  if (sport === "ride" && environment === "virtual") return "Rad indoor";
+  return ({ Cycling: "Radfahren", Ride: "Radfahren", ride: "Radfahren", VirtualRide: "Rad indoor", Running: "Laufen", Run: "Laufen", run: "Laufen", Swim: "Schwimmen", swim: "Schwimmen", Strength: "Krafttraining", strength: "Krafttraining", other: "Andere" })[sport] || sport || "–";
 }
 
 function competitionFact(labelText, value) {
@@ -249,12 +250,12 @@ function appendPlannedCalendarComparison(details, entry, actual) {
   planLine.textContent = `Plan: ${[
     entry.name,
     AppFormat.duration(plannedDuration),
-    entry.icu_training_load != null ? `Load ${calendarMetricNumber(entry.icu_training_load)}` : null,
+    entry.training_load != null ? `Load ${calendarMetricNumber(entry.training_load)}` : null,
   ].filter(Boolean).join(" · ")}`;
   const actualLine = document.createElement("p");
   actualLine.textContent = `Ist: ${[
     AppFormat.duration(actual.moving_time ?? actual.elapsed_time),
-    actual.icu_training_load != null ? `Load ${calendarMetricNumber(actual.icu_training_load)}` : null,
+    actual.training_load != null ? `Load ${calendarMetricNumber(actual.training_load)}` : null,
   ].filter(Boolean).join(" · ")}`;
   comparison.append(planLine, actualLine);
   if (entry.compliance?.percentage != null) {
@@ -277,7 +278,7 @@ function appendPlannedTarget(cardSummary, entry) {
   const target = document.createElement("span");
   target.className = "planned-session-target";
   const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
-  if (entry.icu_training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.icu_training_load)}`);
+  if (entry.training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.training_load)}`);
   target.textContent = `Plan: ${targetParts.join(" · ")}`;
   cardSummary.append(target);
 }
@@ -525,16 +526,16 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (!actual) return;
     const primaryMetrics = document.createElement("span");
     primaryMetrics.className = "planned-actual-summary";
-    const load = calendarMetricNumber(actual.icu_training_load);
-    const rpe = calendarRpeLabel(actual.icu_rpe);
+    const load = calendarMetricNumber(actual.training_load);
+    const rpe = calendarRpeLabel(actual.rpe);
     primaryMetrics.textContent = [load != null ? `Load ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
     const facts = document.createElement("div");
     facts.className = "planned-actual-facts";
     appendCalendarFact(facts, "Dauer", AppFormat.duration(actual.moving_time ?? actual.elapsed_time));
     appendCalendarFact(facts, "Distanz", distanceLabel(actual.distance));
-    appendCalendarFact(facts, "Trainingsload", calendarMetricNumber(actual.icu_training_load));
+    appendCalendarFact(facts, "Trainingsload", calendarMetricNumber(actual.training_load));
     appendCalendarFact(facts, "RPE", rpe != null ? `${rpe}/10` : "nicht angegeben");
-    appendCalendarFact(facts, "Intensität", calendarIntensityLabel(actual.icu_intensity));
+    appendCalendarFact(facts, "Intensität", calendarIntensityLabel(actual.intensity));
     appendCalendarFact(facts, "Ø Puls", calendarMetricNumber(actual.average_heartrate, " bpm"));
     appendCalendarFact(facts, "Ø Leistung", calendarMetricNumber(actual.weighted_average_watts ?? actual.average_watts, " W"));
     appendCalendarFact(facts, "Pace", calendarPaceLabel(actual));
@@ -558,7 +559,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     metrics.textContent = [
       actual ? calendarMetricNumber(actual.average_heartrate, " bpm") : null,
       actual ? calendarMetricNumber(actual.average_watts ?? actual.weighted_average_watts, " W") : null,
-      calendarMetricNumber(displayed.icu_training_load) != null ? `Belastung ${calendarMetricNumber(displayed.icu_training_load)}` : null,
+      calendarMetricNumber(displayed.training_load) != null ? `Belastung ${calendarMetricNumber(displayed.training_load)}` : null,
     ].filter(Boolean).join(" · ");
     cardSummary.append(header);
     if (metrics.textContent) cardSummary.append(metrics);
@@ -758,8 +759,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       ["Geplant", plannedSeconds > 0 ? AppFormat.duration(plannedSeconds) : "–"],
       ["Absolviert", AppFormat.duration(actualSeconds)],
       ["Distanz", calendarWeekDistanceLabel(actual)],
-      ["Belastung geplant", planned.length && planned.every((entry) => entry.icu_training_load != null) ? calendarMetricNumber(sum(planned, (entry) => entry.icu_training_load)) : "–"],
-      ["Belastung absolviert", actual.length && actual.every((entry) => entry.icu_training_load != null) ? calendarMetricNumber(sum(actual, (entry) => entry.icu_training_load)) : "–"],
+      ["Belastung geplant", planned.length && planned.every((entry) => entry.training_load != null) ? calendarMetricNumber(sum(planned, (entry) => entry.training_load)) : "–"],
+      ["Belastung absolviert", actual.length && actual.every((entry) => entry.training_load != null) ? calendarMetricNumber(sum(actual, (entry) => entry.training_load)) : "–"],
     ]) {
       const metric = document.createElement("span");
       const number = document.createElement("strong");
@@ -927,7 +928,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     facts.className = "competition-card-facts";
     facts.append(
       competitionFact("Datum", competition.event_date ? dateLabel(competition.event_date) : ""),
-      competitionFact("Sportart", competitionSportLabel(competition.sport)),
+      competitionFact("Sportart", competitionSportLabel(competition.sport, competition.environment)),
       competitionFact("Distanz", distanceLabel(competition.distance)),
       competitionFact("Zielpace / Zielzeit", competition.target)
     );

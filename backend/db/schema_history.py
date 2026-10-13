@@ -32,6 +32,10 @@ SHAPE_SCHEMA_V6: Final = "schema-v6"
 # Schema version 7: adds the provider of activity feedback. Never released, but
 # written by development builds, so its databases stay upgradeable.
 SHAPE_SCHEMA_V7: Final = "schema-v7"
+# Schema version 8: adds provider-neutral remote links. Never released, but
+# written by development builds, so its databases stay upgradeable. Equipment,
+# competitions, workouts and planned units still store Intervals.icu tokens.
+SHAPE_SCHEMA_V8: Final = "schema-v8"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
 
@@ -46,6 +50,7 @@ RELEASED_SHAPE_DIGESTS: Final[Mapping[str, str]] = {
     SHAPE_SCHEMA_V5: "1b47e9f693b025f00045019c9d1633de019618cb48f753c9a213830715040341",
     SHAPE_SCHEMA_V6: "e70b6c800e6892e2b7829db0a80a3d045dd97ec25388eab92eb597a3cda6dce4",
     SHAPE_SCHEMA_V7: "cf62b391c5011a60e7f38509eaaa430e34d4d544972528aa70bb9a6a436b6990",
+    SHAPE_SCHEMA_V8: "b1dd97f09e1ee93bc5fe75ebd224b03e52942a3bd302daae728d595666f547af",
 }
 
 # Stored PRAGMA user_version -> schema shapes that version is allowed to hold.
@@ -62,6 +67,7 @@ ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
             SHAPE_SCHEMA_V5,
             SHAPE_SCHEMA_V6,
             SHAPE_SCHEMA_V7,
+            SHAPE_SCHEMA_V8,
             SHAPE_CURRENT,
         }
     ),
@@ -72,6 +78,7 @@ ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
     5: frozenset({SHAPE_SCHEMA_V5}),
     6: frozenset({SHAPE_SCHEMA_V6}),
     7: frozenset({SHAPE_SCHEMA_V7}),
+    8: frozenset({SHAPE_SCHEMA_V8}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 

@@ -33,6 +33,14 @@ from backend.planning import season as planning_season
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.compact_activities import ActivityRowSource
 from backend.planning.library_service import WorkoutLibraryService
+from backend.providers.intervals_performance_fields import (
+    INTENSITY,
+    PACE,
+    RPE,
+    TRAINING_LOAD,
+    WEIGHTED_AVG_SPEED,
+    WEIGHTED_AVG_WATTS,
+)
 from backend.providers.source_labels import SourceView, provider_label
 from backend.sync.state import SyncStateRepository
 
@@ -84,18 +92,18 @@ COACH_ACTIVITY_FIELDS = (
     "moving_time",
     "distance",
     "total_elevation_gain",
-    "icu_training_load",
-    "icu_intensity",
+    TRAINING_LOAD,
+    INTENSITY,
     "average_heartrate",
     "max_heartrate",
     "average_watts",
     "weighted_average_watts",
-    "icu_weighted_avg_watts",
+    WEIGHTED_AVG_WATTS,
     "normalized_power",
     "average_speed",
-    "icu_weighted_avg_speed",
-    "icu_pace",
-    "icu_rpe",
+    WEIGHTED_AVG_SPEED,
+    PACE,
+    RPE,
     "feel",
 )
 COACH_LIBRARY_FIELDS = (
@@ -106,8 +114,8 @@ COACH_LIBRARY_FIELDS = (
     "moving_time",
     "distance",
     "target",
-    "icu_training_load",
-    "icu_intensity",
+    TRAINING_LOAD,
+    INTENSITY,
     "indoor",
     "tags",
 )
@@ -198,7 +206,7 @@ def compact_coach_planned_event(
             "type",
             "moving_time",
             "target",
-            "icu_intensity",
+            INTENSITY,
             "status",
             "sync_status",
         ),
@@ -679,7 +687,7 @@ def compact_coach_local_planned_workout(
             "type",
             "duration_minutes",
             "target",
-            "icu_intensity",
+            INTENSITY,
             "status",
             "sync_status",
         ),
@@ -726,9 +734,7 @@ def coach_workout_library(
     for workout in items:
         if not isinstance(workout, dict) or workout.get("date"):
             continue
-        workout_type = planning_library.workout_library_type(
-            workout.get("type") or workout.get("sport")
-        )
+        workout_type = planning_library.workout_library_type(workout)
         by_type.setdefault(workout_type, []).append(workout)
 
     chosen: list[dict[str, Any]] = []

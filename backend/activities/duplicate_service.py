@@ -74,7 +74,7 @@ class DuplicateActivityService:
 
         self._event_buffer.publish(
             "provider",
-            {"provider": "intervals", "status": "duplicate_deleted"},
+            {"provider": ProviderId.INTERVALS, "status": "duplicate_deleted"},
         )
         return {
             "status": "deleted",

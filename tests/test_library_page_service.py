@@ -46,12 +46,17 @@ class LibraryPageServiceTests(unittest.TestCase):
             )
 
     def _insert_workout(self, row_id: str, *, sport: str, name: str, **extra) -> None:
-        self._insert(row_id, json.dumps({"type": sport, "name": name, **extra}))
+        self._insert(
+            row_id,
+            json.dumps(
+                {"sport": sport, "environment": "unknown", "name": name, **extra}
+            ),
+        )
 
     def test_pages_in_keyset_order_and_returns_cursor_triplet_as_strings(self) -> None:
-        self._insert_workout("10", sport="Cycling", name="O'Brien — 100%")
-        self._insert_workout("2", sport="cycling", name="O'Brien — 100%")
-        self._insert_workout("3", sport="Run", name="Easy")
+        self._insert_workout("10", sport="ride", name="O'Brien — 100%")
+        self._insert_workout("2", sport="ride", name="O'Brien — 100%")
+        self._insert_workout("3", sport="run", name="Easy")
 
         first = self.service.page(limit=2)
         second = self.service.page(first["next_cursor"], limit=2)
@@ -64,20 +69,27 @@ class LibraryPageServiceTests(unittest.TestCase):
         self.assertIsNotNone(first["next_cursor"])
         self.assertEqual(
             pagination.decode_page_cursor(first["next_cursor"]),
-            ["cycling", "o'brien — 100%", "2"],
+            ["ride", "o'brien — 100%", "2"],
         )
         self.assertEqual(
             second,
             {
-                "workouts": [{"type": "Run", "name": "Easy"}],
+                "workouts": [
+                    {
+                        "sport": "run",
+                        "environment": "unknown",
+                        "type": "Run",
+                        "name": "Easy",
+                    }
+                ],
                 "next_cursor": None,
                 "limit": 2,
             },
         )
 
     def test_invalid_cursor_starts_from_first_page(self) -> None:
-        self._insert_workout("1", sport="Run", name="First")
-        self._insert_workout("2", sport="Run", name="Second")
+        self._insert_workout("1", sport="run", name="First")
+        self._insert_workout("2", sport="run", name="Second")
 
         result = self.service.page("not-a-cursor", limit=1)
 
@@ -86,7 +98,7 @@ class LibraryPageServiceTests(unittest.TestCase):
 
     def test_limit_is_clamped_to_service_maximum(self) -> None:
         for index in range(4):
-            self._insert_workout(str(index), sport="Run", name=f"Run {index}")
+            self._insert_workout(str(index), sport="run", name=f"Run {index}")
         service = LibraryPageService(
             self.database_manager, self.workout_library, maximum=3
         )
@@ -99,9 +111,9 @@ class LibraryPageServiceTests(unittest.TestCase):
         self.assertEqual(self.service.page(limit=0)["limit"], 1)
 
     def test_filters_to_valid_active_undated_json_objects(self) -> None:
-        self._insert_workout("1", sport="Run", name="Keep", archived=False)
-        self._insert_workout("2", sport="Run", name="Dated", date="2026-09-23")
-        self._insert_workout("3", sport="Run", name="Archived", archived=True)
+        self._insert_workout("1", sport="run", name="Keep", archived=False)
+        self._insert_workout("2", sport="run", name="Dated", date="2026-09-23")
+        self._insert_workout("3", sport="run", name="Archived", archived=True)
         self._insert("4", "{")
         self._insert("5", "[]")
         self._insert("6", '"text"')
@@ -110,7 +122,15 @@ class LibraryPageServiceTests(unittest.TestCase):
 
         self.assertEqual(
             result["workouts"],
-            [{"type": "Run", "name": "Keep", "archived": False}],
+            [
+                {
+                    "sport": "run",
+                    "environment": "unknown",
+                    "type": "Run",
+                    "name": "Keep",
+                    "archived": False,
+                }
+            ],
         )
         self.assertIsNone(result["next_cursor"])
 

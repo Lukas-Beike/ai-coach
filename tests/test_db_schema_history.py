@@ -21,6 +21,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V5,
     SHAPE_SCHEMA_V6,
     SHAPE_SCHEMA_V7,
+    SHAPE_SCHEMA_V8,
     released_shape,
     signature_digest,
 )
@@ -33,6 +34,7 @@ FIXTURE_BY_SHAPE = {
     SHAPE_SCHEMA_V5: "schema_v5.sql.txt",
     SHAPE_SCHEMA_V6: "schema_v6.sql.txt",
     SHAPE_SCHEMA_V7: "schema_v7.sql.txt",
+    SHAPE_SCHEMA_V8: "schema_v8.sql.txt",
 }
 RELEASED_SHAPES = tuple(FIXTURE_BY_SHAPE)
 ALL_SHAPES = (*RELEASED_SHAPES, SHAPE_CURRENT)
@@ -42,9 +44,10 @@ NEXT_SHAPE_BY_SHAPE = {
     SHAPE_SCHEMA_V3_V4: SHAPE_SCHEMA_V5,
     SHAPE_SCHEMA_V5: SHAPE_SCHEMA_V6,
     SHAPE_SCHEMA_V6: SHAPE_SCHEMA_V7,
-    SHAPE_SCHEMA_V7: SHAPE_CURRENT,
+    SHAPE_SCHEMA_V7: SHAPE_SCHEMA_V8,
+    SHAPE_SCHEMA_V8: SHAPE_CURRENT,
 }
-UNSUPPORTED_VERSIONS = (9, 99)
+UNSUPPORTED_VERSIONS = (10, 99)
 
 
 def read_fixture(name: str) -> str:
@@ -150,6 +153,7 @@ class SchemaHistoryTests(unittest.TestCase):
                 5: {SHAPE_SCHEMA_V5},
                 6: {SHAPE_SCHEMA_V6},
                 7: {SHAPE_SCHEMA_V7},
+                8: {SHAPE_SCHEMA_V8},
                 CURRENT_SCHEMA_VERSION: {SHAPE_CURRENT},
             },
         )

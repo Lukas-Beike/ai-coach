@@ -9,6 +9,7 @@ from statistics import median
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import (
     activity_validation,
@@ -41,7 +42,7 @@ _FTP_SOURCES = {
 
 def _number(value: Any) -> float | None:
     try:
-        result = float(str(value).replace(",", "."))
+        result = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     return result if math.isfinite(result) else None

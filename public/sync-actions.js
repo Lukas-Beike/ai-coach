@@ -75,10 +75,11 @@ async function syncWeather() {
 }
 
 async function fullResync(source) {
-  const isGarmin = source === "garmin";
+  if (!source) return;
+  const isGarmin = source === providerIds().garmin;
   const button = $(isGarmin ? "#garminFullResyncButton" : "#systemIntervalsFullResyncButton");
   if (!button) return;
-  const providerLabel = isGarmin ? "Garmin" : "Intervals.icu";
+  const providerLabel = coachProviderLabel(source);
   if (!await requestConfirmation(`Alle lokal gespeicherten ${providerLabel}-Daten löschen und vollständig neu laden? Die Daten in ${providerLabel} bleiben unverändert.`, { title: `${providerLabel}-Daten vollständig neu laden?` })) return;
   const stateKey = isGarmin ? "garminFull" : "intervalsFull";
   state.localSync[stateKey] = true;

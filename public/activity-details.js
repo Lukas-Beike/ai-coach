@@ -100,7 +100,7 @@
       activity.start_date_local?.replace("T", " "),
       activity.moving_time != null ? `${Math.round(activity.moving_time / 60)} min` : null,
       AppFormat.distance(activity.distance),
-      activity.icu_training_load != null ? `Belastung ${activity.icu_training_load}` : null,
+      activity.training_load != null ? `Belastung ${activity.training_load}` : null,
     ].filter(Boolean);
     content.append(node("p", values.join(" · ")));
     let description = "Zusammenfassung aus dem lokalen Snapshot. Detaildaten wurden noch nicht geladen.";
@@ -250,7 +250,7 @@
       refresh.disabled = true;
       status.textContent = "Ladejob wird gestartet …";
       try {
-        let job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider: "intervals", type: "activity_details", payload: { activity_id: activityId } }) });
+        let job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider: providerIds().intervals, type: "activity_details", payload: { activity_id: activityId } }) });
         const deadline = Date.now() + 120_000;
         while (!["completed", "failed", "partial"].includes(job.status)) {
           if (token !== generation) return;
@@ -274,8 +274,10 @@
   function isIntervalsActivity(activity) {
     // Intervals.icu rows keep their device origin (for example "GARMIN") in
     // `source`, so only an explicit provider field marks a non-Intervals record.
-    const provider = String(activity?.provider ?? "intervals").trim().toLowerCase();
-    return provider === "intervals" || provider === "intervals.icu";
+    const intervalsId = providerIds().intervals;
+    if (!intervalsId) return true;
+    const provider = String(activity?.provider ?? intervalsId).trim().toLowerCase();
+    return provider === intervalsId || provider === coachProviderLabel(intervalsId).toLowerCase();
   }
 
   function close(navigateBack = true) {

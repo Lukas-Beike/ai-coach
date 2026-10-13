@@ -11,13 +11,15 @@ from typing import Any
 from backend.activities.identity import activity_datetime as _activity_datetime
 from backend.activities.identity import activity_kind as _activity_kind
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.decimal_text import provider_number as _as_number
+from backend.providers.intervals_activity_keys import TRAINING_LOAD_LOOKUP
 
 # Units without a planned time are stored as a bare date or at local midnight.
 _DATE_ONLY_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]00:00(?::00(?:\.0+)?)?)?")
 _UNIT_START_FIELDS = ("start_date_local", "date", "start")
 _ACTIVITY_START_FIELDS = ("start_date_local", "start_date", "start")
 _DURATION_FIELDS = ("moving_time", "elapsed_time")
-_LOAD_FIELDS = ("icu_training_load", "training_load", "tss")
+_LOAD_FIELDS = TRAINING_LOAD_LOOKUP
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -28,16 +30,6 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
         if value not in (None, ""):
             return value
     return None
-
-
-def _as_number(value: Any) -> float | int | None:
-    try:
-        number = float(str(value).replace(",", "."))
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
 
 
 def _number_field(record: Any, keys: tuple[str, ...]) -> float | None:

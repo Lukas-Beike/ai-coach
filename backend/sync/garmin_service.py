@@ -17,6 +17,7 @@ from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.performance import morning_battery as performance_morning_battery
 from backend.providers import garmin_morning
 from backend.providers import http as provider_http
+from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin import (
     GarminClientFactory,
     GarminCollectionOptions,
@@ -142,7 +143,7 @@ class GarminRemoteReader:
             return result
 
         mfa_status, _ = call_external(
-            "garmin",
+            GARMIN_ID,
             "login",
             lambda: client.login(self._config.garmin_tokenstore),
             {
@@ -155,7 +156,7 @@ class GarminRemoteReader:
                 "Garmin login requires MFA",
                 extra={
                     "event": "garmin_mfa_required",
-                    "context": {"service": "garmin", "operation": "login"},
+                    "context": {"service": GARMIN_ID, "operation": "login"},
                 },
             )
             raise AppError(
@@ -397,7 +398,7 @@ class GarminSyncLifecycleState:
             extra={
                 "event": "external_call_skipped",
                 "context": {
-                    "service": "garmin",
+                    "service": GARMIN_ID,
                     "operation": "sync",
                     "reason": reason,
                 },
@@ -475,7 +476,7 @@ class GarminSyncService:
         include_recovery: bool | None = None,
     ) -> dict[str, Any]:
         with (
-            self._observer.observe("garmin", "data", reason, operation_id) as scope,
+            self._observer.observe(GARMIN_ID, "data", reason, operation_id) as scope,
             self._coordination.operation(),
         ):
             result = self._sync_inner(

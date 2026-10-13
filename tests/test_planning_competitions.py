@@ -251,7 +251,8 @@ class PlanningCompetitionTests(unittest.TestCase):
         self.assertEqual(result["name"], ("R" + "x" * 199))
         self.assertEqual(result["event_date"], "2026-10-04")
         self.assertEqual(result["start_date_local"], "2026-10-04T08:45:00")
-        self.assertEqual(result["sport"], "VirtualRide")
+        self.assertEqual(result["sport"], "ride")
+        self.assertEqual(result["environment"], "virtual")
         self.assertEqual(result["priority"], "C")
         self.assertEqual(result["category"], "RACE_C")
         self.assertEqual(result["distance"], "trail")
@@ -272,7 +273,8 @@ class PlanningCompetitionTests(unittest.TestCase):
         self.assertIsNotNone(fallback)
         assert fallback is not None
         self.assertEqual(fallback["start_date_local"], "2026-10-04T00:00:00")
-        self.assertEqual(fallback["sport"], "Ride")
+        self.assertEqual(fallback["sport"], "ride")
+        self.assertEqual(fallback["environment"], "unknown")
         self.assertEqual(fallback["category"], "RACE_B")
         self.assertEqual(fallback["intervals_event_id"], "7")
 

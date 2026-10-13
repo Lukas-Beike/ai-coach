@@ -13,8 +13,10 @@ from backend.activities.identity import (
     intervals_activity_device_source,
 )
 from backend.athlete.local_date import iso_date_prefix
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.decimal_text import comma_decimal_float
+from backend.canonical.vocabulary import ProviderId, RecordingOrigin
 from backend.errors import AppError
+from backend.providers.garmin_gear_fields import activity_start_local
 from backend.providers.snapshot_projection import (
     intervals_activity_rows,
     intervals_snapshot_is_stripped,
@@ -42,7 +44,7 @@ def duplicate_delete_action(pair: dict[str, Any]) -> dict[str, Any]:
     """Describe the explicit confirmation required to delete the Garmin copy."""
     return {
         "action_type": "delete_duplicate_intervals_activity",
-        "target_system": "intervals",
+        "target_system": ProviderId.INTERVALS,
         "object_ids": {
             "keep_activity_id": pair["canonical_id"],
             "delete_activity_id": pair["duplicate_id"],
@@ -126,7 +128,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 
 def _number(value: Any) -> float | int | None:
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):
@@ -185,9 +187,7 @@ def _garmin_duplicate_measurements(
 def _garmin_activity_matches(
     garmin_activity: dict[str, Any], intervals_activity: dict[str, Any]
 ) -> bool:
-    garmin_start = activity_datetime(
-        garmin_activity.get("startTimeLocal") or garmin_activity.get("start_time_local")
-    )
+    garmin_start = activity_datetime(activity_start_local(garmin_activity))
     intervals_start = activity_datetime(
         intervals_activity.get("start_date_local")
         or intervals_activity.get("start_date")
@@ -320,7 +320,7 @@ def _wahoo_garmin_pairs(
     garmin = [
         item
         for item in candidates
-        if intervals_activity_device_source(item) == "garmin"
+        if intervals_activity_device_source(item) == RecordingOrigin.GARMIN
     ]
     pairs: list[tuple[datetime, dict[str, Any], dict[str, Any]]] = []
     for canonical in wahoo:

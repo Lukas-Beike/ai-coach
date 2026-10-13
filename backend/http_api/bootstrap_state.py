@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from backend.canonical.public_metrics import neutral_calendar_entries
+from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
@@ -110,8 +112,8 @@ class PublicBootstrapService:
                 "plans": deps.training_plan_service().list(limit=30),
                 "library": [],
                 "activities": [],
-                "planned": local_planned,
-                "training_calendar": local_planned,
+                "planned": neutral_calendar_entries(local_planned),
+                "training_calendar": neutral_calendar_entries(local_planned),
                 "calendar": deps.local_calendar_events(
                     local_planned, competitions, relevant_external
                 ),
@@ -150,9 +152,9 @@ class PublicBootstrapService:
                 ),
                 "daily_planning_context": [],
                 "performance": {},
-                "garmin": deps.garmin_projection_service().public_state(),
+                ProviderId.GARMIN.value: deps.garmin_projection_service().public_state(),
                 "diagnostic_capture": deps.diagnostic_capture.status(),
-                "intervals": deps.intervals_public_state(
+                ProviderId.INTERVALS.value: deps.intervals_public_state(
                     configured=bool(deps.config.intervals_api_key),
                     running=deps.intervals_sync_lock.locked()
                     or deps.workout_library_sync_running(),
@@ -181,6 +183,9 @@ class PublicBootstrapService:
                 ),
                 "provider_freshness": freshness,
                 "provider_states": bootstrap_provider_states(freshness),
+                "provider_ids": {
+                    member.name.lower(): member.value for member in ProviderId
+                },
                 "provider_labels": {
                     descriptor.provider_id: descriptor.label
                     for descriptor in registry.all()
@@ -265,7 +270,7 @@ class PublicBootstrapService:
                 },
                 "configured": {
                     "openai": bool(deps.config.openai_api_key),
-                    "intervals": bool(deps.config.intervals_api_key),
+                    ProviderId.INTERVALS.value: bool(deps.config.intervals_api_key),
                     "weather": bool(
                         deps.profile_service().get().get("weather_location")
                     ),

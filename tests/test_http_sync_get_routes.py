@@ -141,6 +141,38 @@ class SyncGetRoutesTests(unittest.TestCase):
             [(200, {"activity_id": "CaseSensitive-1"})], self.handler.responses
         )
 
+    def test_activity_page_and_detail_use_neutral_metric_names(self) -> None:
+        self.activities.page.return_value = {
+            "activities": [{"id": "a1", "icu_training_load": 40, "icu_rpe": 4}]
+        }
+        self.handler.path = "/api/activities"
+        self.assertTrue(self.routes.handle(self.handler, "/api/activities"))
+        self.activities.detail.return_value = {
+            "activity": {
+                "id": "a1",
+                "icu_intensity": 0.75,
+                "laps": [{"icu_training_load": 12}],
+            }
+        }
+        self.assertTrue(self.routes.handle(self.handler, "/api/activities/a1"))
+
+        self.assertEqual(
+            [
+                (200, {"activities": [{"id": "a1", "training_load": 40, "rpe": 4}]}),
+                (
+                    200,
+                    {
+                        "activity": {
+                            "id": "a1",
+                            "intensity": 0.75,
+                            "laps": [{"training_load": 12}],
+                        }
+                    },
+                ),
+            ],
+            self.handler.responses,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,9 @@ EXPECTED_LIBRARY_FIELDS = {
     "name",
     "description",
     "type",
+    "sport",
+    "environment",
+    "sport_detail",
     "moving_time",
     "duration_minutes",
     "distance",
@@ -113,7 +116,10 @@ class LibraryWorkoutNormalizationTests(unittest.TestCase):
 
         self.assertEqual(workout, original)
         self.assertEqual(normalized["id"], LOCAL_ID)
-        self.assertEqual(normalized["type"], "Run")
+        self.assertEqual(
+            (normalized["sport"], normalized["environment"]), ("run", "unknown")
+        )
+        self.assertNotIn("type", normalized)
         self.assertEqual(normalized["duration_minutes"], 60)
         self.assertEqual(len(normalized["name"]), 200)
         self.assertEqual(len(normalized["description"]), 12000)
@@ -128,8 +134,10 @@ class LibraryWorkoutNormalizationTests(unittest.TestCase):
         self.assertEqual(library.LIBRARY_WORKOUT_FIELDS, EXPECTED_LIBRARY_FIELDS)
         self.assertEqual(
             set(normalized),
-            (EXPECTED_LIBRARY_FIELDS & workout.keys())
+            ((EXPECTED_LIBRARY_FIELDS & workout.keys()) - {"type"})
             | {
+                "sport",
+                "environment",
                 "id",
                 "external_id",
                 "sync_status",
@@ -185,8 +193,8 @@ class LibraryWorkoutMatchingTests(unittest.TestCase):
         }
 
     def test_sport_and_text_normalization(self):
-        self.assertEqual(library.workout_library_type("Cycling"), "Ride")
-        self.assertEqual(library.workout_library_type("Ride"), "Ride")
+        self.assertEqual(library.workout_library_type({"type": "Cycling"}), "ride")
+        self.assertEqual(library.workout_library_type({"sport": "ride"}), "ride")
         self.assertEqual(library.normalized_workout_text("  Z2 / 85% "), "z2 85%")
 
     def test_exact_and_conservative_near_matches(self):

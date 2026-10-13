@@ -8,6 +8,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from backend.canonical.stored_sports import activity_type_environment
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.config import Config
 from backend.db import DatabaseManager
@@ -22,6 +23,25 @@ from backend.sync.authority import competition_push_manifest
 
 _COMPETITION_SYNC_LOCK = threading.Lock()
 _REMOTE_LINKS = RemoteLinkRepository()
+
+
+def _same_remote_sport(row: dict[str, Any], data: dict[str, Any]) -> bool:
+    """Return True when the remote competition names the same sport as the local row.
+
+    Race types tell only virtual from unspecified, so indoor compares equal to
+    virtual and outdoor to unspecified.
+    """
+    local = planning_competitions.competition_stored_sport(
+        {
+            "sport": row.get("sport"),
+            "environment": row.get("environment"),
+            "sport_detail": row.get("sport_detail"),
+        }
+    )
+    remote = planning_competitions.competition_stored_sport(data)
+    return local.sport is remote.sport and activity_type_environment(
+        local.environment
+    ) is activity_type_environment(remote.environment)
 
 
 class CompetitionSyncReconciler:
@@ -237,9 +257,15 @@ class CompetitionSyncReconciler:
         if remote:
             data = planning_competitions.remote_competition_data(remote)
             if data:
+                environment, sport_detail = data["environment"], data["sport_detail"]
+                if _same_remote_sport(row, data):
+                    # The remote type cannot tell indoor from virtual, so a clean
+                    # row keeps the local environment and detail it already has.
+                    environment = row.get("environment")
+                    sport_detail = row.get("sport_detail")
                 db.execute(
                     "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, "
-                    "priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, "
+                    "environment=?, sport_detail=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, "
                     "intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', "
                     "sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
                     (
@@ -247,6 +273,8 @@ class CompetitionSyncReconciler:
                         data["event_date"],
                         data["start_date_local"],
                         data["sport"],
+                        environment,
+                        sport_detail,
                         data["priority"],
                         data["category"],
                         data["distance"],
@@ -417,16 +445,18 @@ class CompetitionSyncReconciler:
                 or planning_competitions.competition_external_id(local_id)
             )
             db.execute(
-                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, "
+                "INSERT INTO competitions(id, name, event_date, sport, environment, sport_detail, priority, distance, target, "
                 "course_profile, notes, category, start_date_local, description, moving_time, "
                 "intervals_event_id, external_id, sync_dirty, sync_state, sync_conflict, "
                 "last_synced_at, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'synced', '', ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'synced', '', ?, ?, ?)",
                 (
                     local_id,
                     data["name"],
                     data["event_date"],
                     data["sport"],
+                    data["environment"],
+                    data["sport_detail"],
                     data["priority"],
                     data["distance"],
                     data["target"],
@@ -449,6 +479,7 @@ class CompetitionSyncReconciler:
                 "name": data["name"],
                 "event_date": data["event_date"],
                 "sport": data["sport"],
+                "environment": data["environment"],
             }
             imported += 1
         return imported

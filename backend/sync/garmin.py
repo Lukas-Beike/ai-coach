@@ -21,6 +21,8 @@ from backend.observability import Redactor
 from backend.performance import garmin_observations
 from backend.performance.history import append_garmin_performance_history
 from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_hr
+from backend.providers.descriptors import GARMIN_ID
+from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
 from backend.providers.garmin_morning import merge_garmin_records
 from backend.runtime.ports import ActivityRowReader
 from backend.sync.daily import DailySyncMarkerService
@@ -77,7 +79,7 @@ def _fixture_sleep_dates(value: Any) -> list[date]:
             dates.extend(_fixture_sleep_dates(item))
     elif isinstance(value, dict):
         for key, item in value.items():
-            if key in ("calendarDate", "summaryDate") and isinstance(item, str):
+            if key in GARMIN_SLEEP_DATE_KEYS and isinstance(item, str):
                 try:
                     dates.append(date.fromisoformat(iso_date_prefix(item)))
                 except ValueError:
@@ -95,7 +97,7 @@ def _shift_fixture_sleep_dates(value: Any, shift: timedelta) -> Any:
     normalized = {
         key: _shift_fixture_sleep_dates(item, shift) for key, item in value.items()
     }
-    for key in ("calendarDate", "summaryDate"):
+    for key in GARMIN_SLEEP_DATE_KEYS:
         raw = normalized.get(key)
         if isinstance(raw, str):
             try:
@@ -559,7 +561,7 @@ class GarminSyncStateService:
             self._snapshot_writer.write(db, payload)
         self._set("last_garmin_sync_at", synced_at)
         if end_date is None:
-            self._daily_sync_marker_service.mark("garmin")
+            self._daily_sync_marker_service.mark(GARMIN_ID)
         self._set(
             "last_garmin_error",
             ""
@@ -568,14 +570,14 @@ class GarminSyncStateService:
         )
         if complete:
             self._sync_state_repository.update_cursor(
-                "garmin",
+                GARMIN_ID,
                 "data",
                 iso_date_prefix(str(payload.get("end") or fallback_end.isoformat())),
                 synced_at,
             )
             if end_date is not None and historical_cursor is not None:
                 self._sync_state_repository.update_cursor(
-                    "garmin", "historical", historical_cursor, synced_at
+                    GARMIN_ID, "historical", historical_cursor, synced_at
                 )
         result = {
             "status": "ok" if complete else "partial",

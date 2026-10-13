@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend.canonical.vocabulary import ProviderId
 from backend.performance import context as performance_context
 from backend.performance.canonical_body import CanonicalBodyInputs, read_body_inputs
 from backend.performance.canonical_inputs import (
@@ -103,7 +104,7 @@ class PublicPerformanceStateService:
         }
         return {
             "performance": performance,
-            "garmin": self._garmin_projection_service.public_state(),
+            ProviderId.GARMIN.value: self._garmin_projection_service.public_state(),
         }
 
 

@@ -4,6 +4,7 @@ import math
 from typing import Any
 
 from backend.activities.identity import activity_kind
+from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import ProviderId
 from backend.performance.canonical_current import CanonicalCurrentInputs
@@ -36,7 +37,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def as_number(value: Any) -> float | int | None:
     """Return a finite number parsed from a provider value, or None."""
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):

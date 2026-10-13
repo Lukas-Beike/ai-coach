@@ -17,7 +17,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/garmin.py",
-      "line": 489,
+      "line": 491,
       "column": 40,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -25,7 +25,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 37,
+      "line": 39,
       "column": 41,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -73,7 +73,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 42,
+      "line": 44,
       "column": 18,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -129,7 +129,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 191,
+      "line": 193,
       "column": 30,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -177,7 +177,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 189,
+      "line": 191,
       "column": 34,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -192,16 +192,8 @@
     },
     {
       "tool": "ruff",
-      "path": "backend/change_history.py",
-      "line": 237,
-      "column": 36,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/activities/identity.py",
-      "line": 31,
+      "line": 32,
       "column": 36,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -243,14 +235,6 @@
       "path": "backend/providers/garmin_morning.py",
       "line": 50,
       "column": 39,
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/change_history.py",
-      "line": 186,
-      "column": 40,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
     },
@@ -441,7 +425,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 31,
+      "line": 33,
       "column": 52,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -585,7 +569,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 41,
+      "line": 43,
       "column": 60,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -593,7 +577,7 @@
     {
       "tool": "ruff",
       "path": "backend/sync/garmin_service.py",
-      "line": 240,
+      "line": 241,
       "column": 61,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -817,7 +801,7 @@
     {
       "tool": "mypy",
       "path": "backend/coach/sync_tools.py",
-      "line": 211,
+      "line": 212,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "0778ca98903ed91e44ad3e87190c7b73b748aa2e62691a925a5ef32bc54954cf"
@@ -1049,7 +1033,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/competition_service.py",
-      "line": 146,
+      "line": 151,
       "column": 16,
       "code": "arg-type",
       "message_sha256": "f7c065a7f0134867e32dbc0461fd2a976bd9ed1c6c6307f406017d31130ed1da"
@@ -1081,7 +1065,7 @@
     {
       "tool": "mypy",
       "path": "backend/http_api/bootstrap_calendar.py",
-      "line": 85,
+      "line": 86,
       "column": 16,
       "code": "arg-type",
       "message_sha256": "1f0507db8f39955b7380d5ccd6ca09cdc2a0398a644e3e54cd387a5169d01c1a"
@@ -1201,7 +1185,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 281,
+      "line": 282,
       "column": 25,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -1217,7 +1201,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 280,
+      "line": 281,
       "column": 26,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -1241,7 +1225,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/library.py",
-      "line": 169,
+      "line": 182,
       "column": 28,
       "code": "arg-type",
       "message_sha256": "b99b36ea488d466a65f1ebd5b90d5a128b23cbc7f5f56e2da5766f6080c1dbb5"
@@ -1337,7 +1321,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/competitions.py",
-      "line": 278,
+      "line": 303,
       "column": 31,
       "code": "arg-type",
       "message_sha256": "d59123485b6c5a4fa5b5c286400256fd3f11b7d960c13a09b097918eac088be5"
@@ -1361,7 +1345,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/library.py",
-      "line": 210,
+      "line": 221,
       "column": 32,
       "code": "arg-type",
       "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
@@ -1377,7 +1361,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/library.py",
-      "line": 163,
+      "line": 176,
       "column": 33,
       "code": "arg-type",
       "message_sha256": "b99b36ea488d466a65f1ebd5b90d5a128b23cbc7f5f56e2da5766f6080c1dbb5"
@@ -1441,7 +1425,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/activity_details.py",
-      "line": 116,
+      "line": 118,
       "column": 40,
       "code": "arg-type",
       "message_sha256": "384ff915813ee6feb4c371741e564d7961ee44a1bf689ebba95de84bebc228dc"
@@ -1721,7 +1705,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/activity_validation.py",
-      "line": 187,
+      "line": 177,
       "column": 51,
       "code": "arg-type",
       "message_sha256": "9f15d58ebcfeea6d361abc404047086f7c68383c4d8b4778eecf645cb9c98ca4"
@@ -2081,7 +2065,7 @@
     {
       "tool": "mypy",
       "path": "backend/coach/sync_tools.py",
-      "line": 207,
+      "line": 208,
       "column": 19,
       "code": "assignment",
       "message_sha256": "cb2357b99c309c537809d43ffaf4b1309fff836eca0d891ffc25beaff5976314"
@@ -2185,7 +2169,7 @@
     {
       "tool": "mypy",
       "path": "backend/coach/dialogue_action.py",
-      "line": 119,
+      "line": 120,
       "column": 12,
       "code": "attr-defined",
       "message_sha256": "232127bf16e88c0f176ed8e1807960579ac815dba69fc4f319f1bda2d31b8622"
@@ -2393,7 +2377,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_planning_competitions.py",
-      "line": 288,
+      "line": 290,
       "column": 12,
       "code": "call-arg",
       "message_sha256": "2d37048d4d0b8833c7a1ff61433c7afd0b6d0e952fed1a769fb452360056c425"
@@ -2401,7 +2385,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_planning_competitions.py",
-      "line": 290,
+      "line": 292,
       "column": 12,
       "code": "call-arg",
       "message_sha256": "bfb7c6cc7199c64275ff7bdb3a93e6d034ff3099ef468fe78e1dcd752c1ae1fc"
@@ -2817,7 +2801,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_library_service.py",
-      "line": 124,
+      "line": 125,
       "column": 25,
       "code": "index",
       "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
@@ -2825,15 +2809,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_library_service.py",
-      "line": 126,
-      "column": 25,
-      "code": "index",
-      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_library_service.py",
-      "line": 165,
+      "line": 127,
       "column": 25,
       "code": "index",
       "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
@@ -2850,6 +2826,14 @@
       "tool": "mypy",
       "path": "tests/test_library_service.py",
       "line": 167,
+      "column": 25,
+      "code": "index",
+      "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_library_service.py",
+      "line": 168,
       "column": 25,
       "code": "index",
       "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
@@ -2905,7 +2889,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_library_service.py",
-      "line": 125,
+      "line": 126,
       "column": 26,
       "code": "index",
       "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
@@ -2921,7 +2905,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_library_service.py",
-      "line": 196,
+      "line": 197,
       "column": 33,
       "code": "index",
       "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
@@ -3105,7 +3089,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/morning_battery.py",
-      "line": 146,
+      "line": 148,
       "column": 11,
       "code": "operator",
       "message_sha256": "1e36937ce73debcb1d1077d51cc4dfe0782c5d2a0ca2e94d4b23a6927f8b694d"
@@ -3113,7 +3097,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/morning_battery.py",
-      "line": 146,
+      "line": 148,
       "column": 11,
       "code": "operator",
       "message_sha256": "4891f806dea0305c6aa348a0673aea322cd1f07b498e5a316f960d337841444e"
@@ -3137,7 +3121,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/morning_battery.py",
-      "line": 153,
+      "line": 155,
       "column": 15,
       "code": "operator",
       "message_sha256": "1e36937ce73debcb1d1077d51cc4dfe0782c5d2a0ca2e94d4b23a6927f8b694d"
@@ -3145,7 +3129,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/morning_battery.py",
-      "line": 153,
+      "line": 155,
       "column": 15,
       "code": "operator",
       "message_sha256": "4891f806dea0305c6aa348a0673aea322cd1f07b498e5a316f960d337841444e"
@@ -3161,7 +3145,7 @@
     {
       "tool": "mypy",
       "path": "backend/planning/library.py",
-      "line": 417,
+      "line": 427,
       "column": 48,
       "code": "operator",
       "message_sha256": "134b0ed0f4e67b8fe989af28654f6632e4aeeb5d4fcc408f45c84be9069c1f5a"
@@ -3217,7 +3201,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 284,
+      "line": 285,
       "column": 11,
       "code": "return-value",
       "message_sha256": "d2d361e1e19a2a5feedd3f4f61895c083eb513533d6fff273ee9cb1e7758c57b"
@@ -3329,7 +3313,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/trends.py",
-      "line": 43,
+      "line": 33,
       "column": 16,
       "code": "union-attr",
       "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
@@ -3417,7 +3401,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 156,
+      "line": 157,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
@@ -3425,7 +3409,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 179,
+      "line": 180,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
@@ -3433,7 +3417,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/trends.py",
-      "line": 82,
+      "line": 72,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
@@ -3481,7 +3465,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/grouping.py",
-      "line": 62,
+      "line": 52,
       "column": 12,
       "code": "var-annotated",
       "message_sha256": "1e6b9c1f25c0429575bf0637b8b820edaadc516871bbb9a7ca8e2feff091d295"
@@ -3609,7 +3593,7 @@
     {
       "tool": "mypy",
       "path": "tests/test_library_service.py",
-      "line": 414,
+      "line": 421,
       "column": 8,
       "code": "var-annotated",
       "message_sha256": "2ad9430b040bcc016cda336fdfcda7082c29dda37eced43a10067fdfea54d86f"

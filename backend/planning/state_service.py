@@ -15,6 +15,7 @@ from backend.pagination import (
     encode_page_cursor,
 )
 from backend.planning import library as planning_library
+from backend.providers.intervals_workouts import intervals_record_type
 
 
 def _normalized_date(value: Any) -> str | None:
@@ -88,7 +89,7 @@ class StructuredTrainingStateService:
         return {
             "local_id": str(row.get("local_id") or ""),
             "name": str(payload.get("name") or "")[:200],
-            "sport": str(payload.get("sport") or payload.get("type") or "")[:80],
+            "sport": intervals_record_type(payload)[:80],
             "date": _normalized_date(payload.get("date")),
             "archived": bool(payload.get("archived")),
             "local_deleted": bool(payload.get("local_deleted")) if planned else False,

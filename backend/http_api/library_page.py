@@ -7,6 +7,7 @@ from typing import Any
 
 from backend.db import DatabaseManager
 from backend.http_api import pagination
+from backend.planning.sport import with_activity_type
 
 
 class LibraryPageService:
@@ -35,7 +36,9 @@ class LibraryPageService:
             )
         page = rows[:page_size]
         return {
-            "workouts": [json.loads(row["payload"]) for row in page],
+            "workouts": [
+                with_activity_type(json.loads(row["payload"])) for row in page
+            ],
             "next_cursor": pagination.encode_page_cursor(
                 [page[-1][key] for key in ("sport_key", "name_key", "id")]
             )

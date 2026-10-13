@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.athlete.state_version_data import StateVersionDataService
+from backend.canonical.vocabulary import ProviderId
 from backend.db import DatabaseManager
 
 
@@ -44,7 +45,7 @@ class StateVersionService:
         return {
             "activities": f"{synced_at}:{snapshot.get('recent_activity_count', 0)}",
             "performance": f"{state['last_performance_refresh'] or synced_at}",
-            "garmin": f"{state['last_garmin_sync'] or ''}",
+            ProviderId.GARMIN.value: f"{state['last_garmin_sync'] or ''}",
             "chat": f"{counters['message']['latest']}:{counters['message']['count']}",
             "library": f"{counters['library']['latest']}:{counters['library']['count']}",
             "checkins": f"{counters['checkins']['latest']}:{counters['checkins']['count']}",

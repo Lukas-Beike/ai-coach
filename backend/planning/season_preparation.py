@@ -15,6 +15,7 @@ from backend.performance.season_inputs import SeasonLoadInputs
 from backend.performance.training_report import activity_day
 from backend.planning.competitions import supported_competition_sport
 from backend.planning.season import season_plan_summary
+from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 from backend.providers.source_labels import SourceView, provider_label
 
 ActivityRowsBetween = Callable[[date, date], Sequence[dict[str, Any]]]
@@ -24,7 +25,7 @@ ACTIVITY_SOURCE = provider_label(
 )
 PREPARATION_WEEKS = 12
 PLANNED_LOAD_ESTIMATE_SOURCE = (
-    "estimated from planned duration and icu_intensity (hours x IF^2 x 100)"
+    f"estimated from planned duration and {INTENSITY} (hours x IF^2 x 100)"
 )
 
 
@@ -55,7 +56,9 @@ def season_preparation(
         else []
     )
     for event, (window_start, window_end) in zip(result["events"], windows):
-        sport = supported_competition_sport(event.get("sport"))
+        sport = supported_competition_sport(
+            event.get("sport"), event.get("environment")
+        )
         eligible = [
             row
             for row in rows
@@ -129,7 +132,9 @@ def _target_context(event: dict[str, Any]) -> dict[str, Any]:
         pass
     target = str(event.get("target") or "").strip()
     return {
-        "sport": supported_competition_sport(event.get("sport")),
+        "sport": supported_competition_sport(
+            event.get("sport"), event.get("environment")
+        ),
         "distance_meters": int(distance)
         if distance is not None and distance.is_integer()
         else distance,
@@ -293,13 +298,13 @@ def load_scenarios(
             "planned_load_estimated": bool(estimated),
             "estimated_planned_units": estimated,
         }
-    if any(number(row.get("icu_training_load")) is None for row in completed_today):
+    if any(number(row.get(TRAINING_LOAD)) is None for row in completed_today):
         return {
             **base,
             "status": "insufficient_data",
             "reason": "Eine heute absolvierte Einheit hat keine bekannte Belastung.",
         }
-    actual_today_load = sum(float(row["icu_training_load"]) for row in completed_today)
+    actual_today_load = sum(float(row[TRAINING_LOAD]) for row in completed_today)
     curves = [
         _scenario_curve(
             planned_loads,
@@ -416,7 +421,7 @@ def _planned_loads(
         key = str(row.get("start_date_local") or row.get("date") or "")
         day = iso_date_prefix(key)
         name = str(row.get("name") or "Training")[:200]
-        load = number(row.get("icu_training_load"))
+        load = number(row.get(TRAINING_LOAD))
         if load is None:
             load = _estimated_load(row)
             if load is None:
@@ -435,9 +440,9 @@ def _planned_loads(
 
 
 def _estimated_load(row: dict[str, Any]) -> float | None:
-    """TSS-like estimate: hours x IF^2 x 100, from planned duration and icu_intensity."""
+    """TSS-like estimate: hours x IF^2 x 100, from planned duration and the activity intensity."""
     seconds = number(row.get("moving_time"))
-    intensity = number(row.get("icu_intensity"))
+    intensity = number(row.get(INTENSITY))
     if not seconds or seconds <= 0 or intensity is None:
         return None
     # Intervals.icu reports intensity in percent; plain intensity factors are accepted too.

@@ -310,7 +310,8 @@ class LibraryPlanServiceTests(unittest.TestCase):
             [
                 {
                     "date": "2026-09-21",
-                    "sport": "VirtualRide",
+                    "sport": "ride",
+                    "environment": "virtual",
                     "name": "Tempo ride",
                     "description": "- 45m 110%",
                     "duration_minutes": 45,
@@ -320,7 +321,8 @@ class LibraryPlanServiceTests(unittest.TestCase):
                 },
                 {
                     "date": "2026-09-22",
-                    "sport": "Run",
+                    "sport": "run",
+                    "environment": "unknown",
                     "name": "Recovery run",
                     "description": "- 10m 60%",
                     "duration_minutes": 10,

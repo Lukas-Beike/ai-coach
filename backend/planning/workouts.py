@@ -16,6 +16,7 @@ from backend.activities.workout_text import (
     verify_workout_readback,
 )
 from backend.errors import AppError
+from backend.planning.sport import planned_stored_sport
 from backend.planning.workout_export import (
     build_planned_workout_export,
     planned_target,
@@ -34,11 +35,13 @@ from backend.planning.workout_validation import (  # noqa: F401
 )
 from backend.providers.intervals_workouts import (  # noqa: F401
     COACH_EVENT_EXTERNAL_PREFIX,
+    DERIVED_WORKOUT_KEYS,
     INTERVALS_DEFAULT_WORKOUT_TYPE,
     INTERVALS_ENDURANCE_WORKOUT_TYPES,
     INTERVALS_WORKOUT_SPORTS,
     INTERVALS_WORKOUT_TYPES,
     intervals_event_payload,
+    intervals_record_type,
     intervals_workout_sport,
 )
 
@@ -57,7 +60,7 @@ def library_workout_payload(workout: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "name": str(workout.get("name") or "Coach-Einheit")[:200],
         "description": str(workout.get("description") or "")[:12000],
-        "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
+        "type": intervals_record_type(workout),
         "target": workout.get("target") or "AUTO",
     }
     if workout.get("folder_id") is not None:
@@ -74,9 +77,7 @@ def library_workout_event_payload(
 ) -> dict[str, Any]:
     planned = {
         "date": plan_date,
-        "sport": workout.get("type")
-        or workout.get("sport")
-        or INTERVALS_DEFAULT_WORKOUT_TYPE,
+        **planned_stored_sport(workout).fields(),
         "name": workout.get("name") or "Bibliotheks-Einheit",
         "description": workout.get("description") or "",
         "duration_minutes": workout.get("duration_minutes")
@@ -92,9 +93,7 @@ def validate_intervals_workout_result(
     workout: dict[str, Any], remote: dict[str, Any]
 ) -> None:
     """A saved provider resource is only synced after its parsed structure agrees."""
-    expected_sport = intervals_workout_sport(
-        workout.get("sport") or workout.get("type")
-    )
+    expected_sport = intervals_record_type(workout)
     if not isinstance(remote, dict) or remote.get("type") != expected_sport:
         raise AppError(
             502,
@@ -131,7 +130,13 @@ def validate_workout_start_date(value: Any, workout_date: str) -> str:
 def normalize_workout(workout: Any, *, today: date) -> dict[str, Any]:
     if not isinstance(workout, dict):
         raise AppError(400, "Jede geplante Einheit muss ein Objekt sein.")
-    sport = intervals_workout_sport(workout.get("sport"))
+    sport = intervals_record_type(
+        {
+            "sport": workout.get("sport"),
+            "environment": workout.get("environment"),
+            "sport_detail": workout.get("sport_detail"),
+        }
+    )
     draft = {
         "date": str(workout.get("date") or "").strip(),
         "sport": sport,

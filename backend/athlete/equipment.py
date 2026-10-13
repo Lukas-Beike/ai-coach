@@ -9,11 +9,20 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
-from backend.canonical.stored_sports import EQUIPMENT_SPORT_TOKENS
+from backend.canonical.stored_sports import (
+    StoredSport,
+    activity_type_environment,
+    resolve_equipment_sport,
+)
+from backend.canonical.vocabulary import ProviderId, Sport
 from backend.errors import AppError
+from backend.providers.garmin_gear_fields import (
+    garmin_gear_descriptor_texts,
+    garmin_gear_id,
+    garmin_gear_name,
+)
 
 EQUIPMENT_PREFIX = "equipment:"
-EQUIPMENT_SPORTS = frozenset(EQUIPMENT_SPORT_TOKENS)
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
 
 
@@ -67,9 +76,9 @@ class EquipmentService:
                 is not None
             )
             garmin_usage = {
-                str(row.get("gearUUID")): _garmin_distance_km(row)
+                garmin_gear_id(row): _garmin_distance_km(row)
                 for row in garmin.get("gear") or []
-                if isinstance(row, dict) and row.get("gearUUID")
+                if isinstance(row, dict) and garmin_gear_id(row)
             }
             items = self._records(db, "equipment", 100)
             if item_id:
@@ -111,7 +120,7 @@ class EquipmentService:
         if not _current_garmin_gear(snapshot):
             return
         rows = [row for row in snapshot.get("gear") or [] if isinstance(row, dict)]
-        rows = [row for row in rows if row.get("gearUUID")]
+        rows = [row for row in rows if garmin_gear_id(row)]
         # A current but empty or malformed inventory is not proof that the
         # initial import succeeded. Leave initialization open for recovery.
         if not rows:
@@ -139,7 +148,7 @@ class EquipmentService:
             initial_import = not initialized or not by_garmin
             if initial_import:
                 for row in rows:
-                    gear_id = str(row.get("gearUUID") or "")
+                    gear_id = garmin_gear_id(row)
                     if gear_id and gear_id not in by_garmin:
                         _insert_initial_garmin_item(
                             db, row, gear_id, self._today(), now
@@ -165,6 +174,7 @@ class EquipmentService:
             "expected_revision",
             "name",
             "sport",
+            "environment",
             "kind",
             "status",
             "parent_id",
@@ -188,10 +198,11 @@ class EquipmentService:
                 raise AppError(409, "Ausrüstung geändert; neu lesen.")
             parent_id = _equipment_parent(db, payload, item_id)
             _validate_equipment_children(db, item_id, parent_id, payload)
+            sport = _payload_sport(payload)
             saved = {
                 "id": item_id,
                 "name": name,
-                "sport": payload["sport"],
+                **_equipment_sport_fields(sport),
                 "kind": payload["kind"],
                 "status": payload.get("status", "active"),
                 "parent_id": parent_id,
@@ -200,7 +211,6 @@ class EquipmentService:
                 "revision": previous["revision"] + 1 if previous else 1,
                 "updated_at": self._utc_now(),
                 "source": "athlete-entered equipment",
-                "sport_pending": payload["sport"] == "Other",
                 "parent_pending": payload["kind"] == "component" and not parent_id,
             }
             _preserve_equipment_metadata(saved, previous, payload)
@@ -240,7 +250,8 @@ class EquipmentService:
                 or equipment.get("parent_id")
                 or equipment.get("parent_pending")
                 or equipment.get("sport_pending")
-                or equipment["sport"] != row.get("type")
+                or _item_pair(equipment)
+                != _stored_pair(resolve_equipment_sport(row.get("type")))
             ):
                 raise AppError(400, "Aktive passende Hauptausrüstung erforderlich.")
             saved = {
@@ -306,6 +317,35 @@ class EquipmentService:
         return {"ok": True, "stored_locally": True, "maintenance": saved}
 
 
+def _payload_sport(payload: dict[str, Any]) -> StoredSport | None:
+    """Return the canonical sport of submitted equipment (canonical value or legacy token)."""
+    return resolve_equipment_sport(payload.get("sport"), payload.get("environment"))
+
+
+def _stored_pair(stored: StoredSport | None) -> tuple[str, str] | None:
+    """Return the comparable sport pair; activity types blur indoor and outdoor."""
+    if stored is None:
+        return None
+    return (stored.sport.value, activity_type_environment(stored.environment).value)
+
+
+def _item_pair(item: dict[str, Any]) -> tuple[str, str] | None:
+    """Return the canonical sport pair of a stored equipment item."""
+    return _stored_pair(
+        resolve_equipment_sport(item.get("sport"), item.get("environment"))
+    )
+
+
+def _equipment_sport_fields(stored: StoredSport | None) -> dict[str, Any]:
+    if stored is None:
+        raise AppError(400, "Name, Sport, Art oder Status der Ausrüstung ungültig.")
+    return {
+        "sport": stored.sport.value,
+        "environment": stored.environment.value,
+        "sport_pending": stored.sport is Sport.OTHER,
+    }
+
+
 def _current_garmin_gear(snapshot: Any) -> bool:
     return bool(
         isinstance(snapshot, dict)
@@ -323,9 +363,8 @@ def _insert_initial_garmin_item(
     item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "garmin:" + gear_id))
     item = {
         "id": item_id,
-        "name": str(row.get("gearName") or "Ausr\u00fcstung")[:200],
-        "sport": sport,
-        "sport_pending": sport == "Other",
+        "name": (garmin_gear_name(row) or "Ausr\u00fcstung")[:200],
+        **_equipment_sport_fields(resolve_equipment_sport(sport)),
         "kind": kind,
         "parent_pending": kind == "component",
         "status": _garmin_status(row),
@@ -341,7 +380,7 @@ def _insert_initial_garmin_item(
         "garmin_distance_km": distance,
         "garmin_maximum_meters": _garmin_maximum_meters(row),
         "lifetime_target_km": _garmin_lifetime_target_km(row),
-        "lifetime_target_source": "garmin",
+        "lifetime_target_source": ProviderId.GARMIN.value,
         "revision": 1,
         "updated_at": now,
         "source": "garmin-initial-sync",
@@ -356,7 +395,7 @@ def _refresh_garmin_distances(
     db: Any, rows: list[dict[str, Any]], by_garmin: dict[str, dict[str, Any]], now: str
 ) -> None:
     for row in rows:
-        linked = by_garmin.get(str(row.get("gearUUID") or ""))
+        linked = by_garmin.get(garmin_gear_id(row))
         if linked is None:
             continue
         changed = _update_garmin_gear(linked, row)
@@ -380,7 +419,9 @@ def _validate_equipment_children(
         ).fetchall()
     ]
     invalid_parent = parent_id or payload["kind"] == "component"
-    mismatched_sport = any(item["sport"] != payload["sport"] for item in children)
+    mismatched_sport = any(
+        _item_pair(item) != _stored_pair(_payload_sport(payload)) for item in children
+    )
     if children and (invalid_parent or mismatched_sport):
         raise AppError(
             409,
@@ -483,10 +524,7 @@ def _garmin_kind(row: dict) -> str:
 
 
 def _garmin_gear_text(row: dict) -> str:
-    return " ".join(
-        str(row.get(key) or "").lower()
-        for key in ("gearTypeName", "gearName", "activityTypeName")
-    )
+    return " ".join(text.lower() for text in garmin_gear_descriptor_texts(row))
 
 
 def _garmin_status(row: dict) -> str:
@@ -513,8 +551,8 @@ def _garmin_item(row: dict) -> dict[str, Any]:
     goal_km = round(goal / 1000, 2) if goal is not None else None
     lifetime = _lifetime_projection(distance_km, goal_km)
     return {
-        "id": str(row.get("gearUUID") or ""),
-        "name": str(row.get("gearName") or "Ausr\u00fcstung")[:200],
+        "id": garmin_gear_id(row),
+        "name": (garmin_gear_name(row) or "Ausr\u00fcstung")[:200],
         "kind": str(row.get("gearTypeName") or "")[:100],
         "status": _garmin_status(row),
         "garmin_status": _garmin_raw_status(row),
@@ -534,7 +572,7 @@ def _equipment_identity(payload: dict, today: date) -> tuple[str, date, str]:
     if (
         not name
         or len(name) > 200
-        or payload.get("sport") not in EQUIPMENT_SPORTS
+        or _payload_sport(payload) is None
         or payload.get("kind") not in {"shoes", "bike", "component", "other"}
         or payload.get("status", "active") not in {"active", "archived"}
     ):
@@ -593,7 +631,8 @@ def _equipment_parent(db: Any, payload: dict, item_id: str) -> str | None:
             or parent_id == item_id
             or json.loads(parent["value"]).get("parent_id")
             or json.loads(parent["value"])["kind"] == "component"
-            or json.loads(parent["value"])["sport"] != payload["sport"]
+            or _item_pair(json.loads(parent["value"]))
+            != _stored_pair(_payload_sport(payload))
         ):
             raise AppError(
                 400,
@@ -781,8 +820,10 @@ def _update_garmin_gear(linked: dict[str, Any], row: dict[str, Any]) -> bool:
             changed = True
         if linked.get(
             "lifetime_target_source"
-        ) == "garmin" or not _valid_positive_number(linked.get("lifetime_target_km")):
+        ) == ProviderId.GARMIN or not _valid_positive_number(
+            linked.get("lifetime_target_km")
+        ):
             linked["lifetime_target_km"] = round(maximum_meters / 1000, 2)
-            linked["lifetime_target_source"] = "garmin"
+            linked["lifetime_target_source"] = ProviderId.GARMIN.value
             changed = True
     return changed
