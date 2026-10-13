@@ -33,6 +33,10 @@ sys.path.insert(0, "/app")
 import server
 from backend.errors import COACH_ABORTED_ERROR
 from backend.http_api import auth as http_auth
+from backend.sync.canonical_ingest import (
+    ingest_garmin_payload,
+    ingest_intervals_partial_snapshot,
+)
 
 FIXTURE_SOURCE = "synthetic fixture"
 
@@ -481,6 +485,18 @@ def demo_performance_history(today):
     return history
 
 
+def _save_intervals_snapshot(db, snapshot):
+    """Store a fixture snapshot and ingest its raw block like a partial sync does."""
+    server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
+    ingest_intervals_partial_snapshot(db, snapshot, zone=UTC)
+
+
+def _save_garmin_snapshot(db, payload):
+    """Store a fixture Garmin payload and ingest it like the Garmin writer does."""
+    server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(payload))
+    ingest_garmin_payload(db, payload, zone=UTC)
+
+
 def _merge_snapshot_activities(activities, wellness=None):
     """Upsert fixture activities into the latest snapshot without dropping others."""
     with server.database_manager().unit_of_work() as db:
@@ -509,7 +525,7 @@ def _merge_snapshot_activities(activities, wellness=None):
             snapshot["raw_provider_data"]["wellness"] = wellness
         snapshot.setdefault("recent_wellness", [])
         snapshot["synced_at"] = server.runtime_clock.utc_now()
-        server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
+        _save_intervals_snapshot(db, snapshot)
     return snapshot
 
 
@@ -668,7 +684,7 @@ def seed_training_features():
                 ],
             }
         )
-        server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(garmin_full))
+        _save_garmin_snapshot(db, garmin_full)
     targets = {
         "steps": [{"duration": 3600, "target": "200W", "kind": "power"}],
         "basis": {},
@@ -1354,7 +1370,7 @@ def _fixture_seed_wave2(today, snapshot, garmin):
 
     append_garmin_performance_history(garmin, None, today)
     with server.database_manager().unit_of_work() as db:
-        server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(garmin))
+        _save_garmin_snapshot(db, garmin)
 
 
 def _fixture_completed_sports(today, by_id):
@@ -1511,7 +1527,7 @@ def _fixture_wave2_summaries(today, snapshot):
     snapshot["raw_provider_data"] = {**raw, "activities": merged}
     snapshot.setdefault("synced_at", server.runtime_clock.utc_now())
     with server.database_manager().unit_of_work() as db:
-        server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
+        _save_intervals_snapshot(db, snapshot)
     return by_id
 
 
@@ -1846,8 +1862,8 @@ def _upgrade_preview_demo(today):
     snapshot.setdefault("synced_at", server.runtime_clock.utc_now())
     garmin = _fixture_demo_garmin(today, demo_performance_history(today))
     with server.database_manager().unit_of_work() as db:
-        server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
-        server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(garmin))
+        _save_intervals_snapshot(db, snapshot)
+        _save_garmin_snapshot(db, garmin)
     _fixture_seed_equipment(today, garmin)
     _fixture_seed_calendar(today)
     _fixture_seed_wave2(today, snapshot, garmin)
@@ -1968,7 +1984,7 @@ def seed_preview_demo():
     _fixture_seed_wave2(today, snapshot, garmin)
     _fixture_seed_v6(today)
     with server.database_manager().unit_of_work() as db:
-        server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(garmin))
+        _save_garmin_snapshot(db, garmin)
         for role, content in [
             ("user", "Wie sieht meine Trainingswoche aus?"),
             (

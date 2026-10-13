@@ -790,29 +790,35 @@ class StandardFixtureDataTests(unittest.TestCase):
         with self._temporary_fixture_database("fixture-v6-provider-") as server:
             fixture_runtime.initialise_fixture()
             fixture_runtime.seed_preview_demo()
+            first = self._canonical_counts(server)
             fixture_runtime.seed_preview_demo()
+            second = self._canonical_counts(server)
             with server.database_manager().unit_of_work() as db:
-                counts = {
-                    table: db.execute(
-                        f"SELECT COUNT(*) AS count FROM {table}"
-                    ).fetchone()["count"]
-                    for table in (
-                        "provider_records",
-                        "activity_sessions",
-                        "activity_records",
-                        "observations",
-                    )
-                }
+                synthetic = db.execute(
+                    "SELECT COUNT(*) AS count FROM provider_records "
+                    "WHERE provider = 'fixture-provider'"
+                ).fetchone()["count"]
 
-        self.assertEqual(
-            counts,
-            {
-                "provider_records": 1,
-                "activity_sessions": 1,
-                "activity_records": 1,
-                "observations": 1,
-            },
-        )
+        self.assertEqual(first, second)
+        self.assertEqual(synthetic, 1)
+        # Seeded snapshots reach the canonical tables through the real ingest path.
+        self.assertGreater(first["activity_sessions"], 1)
+        self.assertGreater(first["observations"], 1)
+
+    @staticmethod
+    def _canonical_counts(server):
+        with server.database_manager().unit_of_work() as db:
+            return {
+                table: db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()[
+                    "count"
+                ]
+                for table in (
+                    "provider_records",
+                    "activity_sessions",
+                    "activity_records",
+                    "observations",
+                )
+            }
 
     def test_v5_database_upgrades_to_v6_scenarios_without_duplicates(self):
         with self._temporary_fixture_database("fixture-v6-upgrade-") as server:
