@@ -136,6 +136,7 @@ class CounterTests(unittest.TestCase):
                 "unchanged": 2,
                 "skipped_invalid": 0,
                 "deleted": 0,
+                "linked": 0,
             },
         )
 
@@ -329,7 +330,7 @@ class PlanObservationTests(IngestFixture):
             skipped_invalid=1,
         )
         counters = ingest.ingest_plan(
-            self.db, plan, retrieved_at=RETRIEVED_AT, deletion_window=None
+            self.db, plan, retrieved_at=RETRIEVED_AT, deletion_window=None, zone=ZONE
         )
         self.assertEqual((counters.written, counters.skipped_invalid), (1, 2))
         self.assertEqual(

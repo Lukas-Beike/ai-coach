@@ -820,6 +820,7 @@ class ReprojectionTests(BackfillFixture):
                 )
                 or self.fail("retrieval time"),
                 deletion_window=None,
+                zone=ZONE,
             )
         backfill = self.make_backfill()
         self.run_to_completion(backfill)

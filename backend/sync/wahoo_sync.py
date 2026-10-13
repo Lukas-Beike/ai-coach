@@ -170,7 +170,7 @@ class WahooSyncService:
         plan = wahoo_ingest_plan(payload, zone=zone)
         with self._database_lock, self._database_manager().unit_of_work() as db:
             counters = ingest_plan(
-                db, plan, retrieved_at=synced_at, deletion_window=None
+                db, plan, retrieved_at=synced_at, deletion_window=None, zone=zone
             )
             self._coverage.persist(
                 db, wahoo_payload_coverage(payload, zone=zone), zone=zone
