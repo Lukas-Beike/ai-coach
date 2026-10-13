@@ -32,5 +32,8 @@ class CompactActivityRows(ActivityRowReader):
         *,
         start: date | None = None,
         end: date | None = None,
+        limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
-        return compact_activity_rows(self._rows.activity_rows(db, start=start, end=end))
+        return compact_activity_rows(
+            self._rows.activity_rows(db, start=start, end=end, limit=limit)
+        )

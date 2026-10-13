@@ -20,8 +20,10 @@ class SnapshotActivityRows:
         *,
         start: date | None = None,
         end: date | None = None,
+        limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
-        return intervals_activity_rows(self._snapshot_reader.latest_snapshot(db))
+        rows = intervals_activity_rows(self._snapshot_reader.latest_snapshot(db))
+        return rows if limit is None else rows[:limit]
 
 
 class FixedActivityRows:
@@ -36,5 +38,6 @@ class FixedActivityRows:
         *,
         start: date | None = None,
         end: date | None = None,
+        limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
-        return self.rows
+        return self.rows if limit is None else self.rows[:limit]
