@@ -6,6 +6,8 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
+from activity_row_support import SnapshotActivityRows
+
 from backend.activities.feedback import (
     ACTIVITY_FEEDBACK_TEXT_LIMITS,
     ActivityFeedbackService,
@@ -154,10 +156,13 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
             lambda: "2026-09-20T12:00:00+00:00"
         )
         self.snapshot_repository = SnapshotRepository()
+        self.rows = SnapshotActivityRows(
+            SnapshotRepositoryReader(self.snapshot_repository)
+        )
         self.service = ActivityFeedbackService(
             self.manager,
             self.feedback_repository,
-            SnapshotRepositoryReader(self.snapshot_repository),
+            self.rows,
         )
 
     def save_snapshot(self, payload: dict) -> None:
@@ -262,9 +267,7 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
                 return super().list(db, limit)
 
         repository = FailingListRepository()
-        service = ActivityFeedbackService(
-            self.manager, repository, SnapshotRepositoryReader(self.snapshot_repository)
-        )
+        service = ActivityFeedbackService(self.manager, repository, self.rows)
         with self.assertRaisesRegex(RuntimeError, "read failure"):
             service.save("activity-1", {"notes": "must persist"})
         repository.fail = False
@@ -279,7 +282,7 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         service = ActivityFeedbackService(
             self.manager,
             FailingUpsertRepository(lambda: "2026-09-20T12:00:00+00:00"),
-            SnapshotRepositoryReader(self.snapshot_repository),
+            self.rows,
         )
         with self.assertRaisesRegex(RuntimeError, "write failure"):
             service.save("activity-1", {"notes": "must roll back"})

@@ -3,7 +3,7 @@
 import json
 import math
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Any
 
@@ -21,19 +21,19 @@ class EquipmentService:
     def __init__(
         self,
         manager: Any,
-        read_snapshot: Callable[[], dict[str, Any]],
+        read_activity_rows: Callable[[], Sequence[dict[str, Any]]],
         today: Callable[[], date],
         utc_now: Callable[[], str],
-        canonical_rows: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], int]],
+        deduplicate: Callable[[Sequence[Any]], tuple[list[dict[str, Any]], int]],
         resolve_activity: Callable[[Any], Any] | None = None,
     ):
-        self._manager, self._read_snapshot, self._today, self._utc_now = (
+        self._manager, self._read_activity_rows, self._today, self._utc_now = (
             manager,
-            read_snapshot,
+            read_activity_rows,
             today,
             utc_now,
         )
-        self._canonical_rows = canonical_rows
+        self._deduplicate = deduplicate
         self._resolve_activity = (
             (lambda reference: reference)
             if resolve_activity is None
@@ -50,7 +50,7 @@ class EquipmentService:
         ]
 
     def read(self, item_id: str | None = None) -> dict[str, Any]:
-        rows, duplicates = self._canonical_rows(self._read_snapshot() or {})
+        rows, duplicates = self._deduplicate(self._read_activity_rows())
         with self._manager.unit_of_work() as db:
             garmin_row = db.execute(
                 "SELECT value FROM kv WHERE key='garmin_snapshot'"
@@ -103,7 +103,7 @@ class EquipmentService:
             .get("freshness"),
             "assignments": list(assignments.values()),
             "excluded_duplicates": duplicates,
-            "scope": "Known canonical snapshot activities with explicit assignments only, plus confirmed initial usage. Missing provider history or measurements makes counters incomplete; no inferred favorite gear. Maintenance includes only later calendar days, same-day order is unknown. Limits: 100 items, 2000 assignments, 1000 maintenance events.",
+            "scope": "Known canonical activities with explicit assignments only, plus confirmed initial usage. Missing provider history or measurements makes counters incomplete; no inferred favorite gear. Maintenance includes only later calendar days, same-day order is unknown. Limits: 100 items, 2000 assignments, 1000 maintenance events.",
         }
 
     def sync_garmin_snapshot(self, snapshot: dict[str, Any]) -> None:
@@ -221,7 +221,7 @@ class EquipmentService:
         }:
             raise AppError(400, "Aktivität und Ausrüstung sind erforderlich.")
         activity_id = str(self._resolve_activity(payload["activity_id"]))
-        rows, _ = self._canonical_rows(self._read_snapshot() or {})
+        rows, _ = self._deduplicate(self._read_activity_rows())
         row = next(
             (row for row in rows if str(row.get("id")) == activity_id),
             None,

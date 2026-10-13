@@ -6,17 +6,14 @@ import threading
 from contextlib import nullcontext
 from typing import Any
 
-from backend.activities.duplicates import (
-    duplicate_delete_action,
-    latest_wahoo_garmin_duplicate,
-)
+from backend.activities.duplicate_inspection import DuplicateInspector
+from backend.activities.duplicates import duplicate_delete_action
 from backend.coach.clarification import CoachClarificationService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.sync.state import SyncStateRepository
 
 COACH_EXTERNAL_FOOD_LOOKUP_TOOLS = frozenset(
     {
@@ -38,7 +35,7 @@ class CoachStructuredToolExecutionService:
         key_values: KeyValueRepository,
         clarification: CoachClarificationService,
         training_patch: CoachTrainingPatchService,
-        sync_state: SyncStateRepository,
+        duplicate_inspector: DuplicateInspector,
         proposal_creation: CoachProposalCreationService,
         tool_dispatch: CoachToolDispatchService,
     ) -> None:
@@ -47,7 +44,7 @@ class CoachStructuredToolExecutionService:
         self._key_values = key_values
         self._clarification = clarification
         self._training_patch = training_patch
-        self._sync_state = sync_state
+        self._duplicate_inspector = duplicate_inspector
         self._proposal_creation = proposal_creation
         self._tool_dispatch = tool_dispatch
 
@@ -96,9 +93,7 @@ class CoachStructuredToolExecutionService:
                 )
                 return {**proposal, "ok": True, "status": "approval_required"}
             if name == "inspect_activity_duplicates":
-                duplicate = latest_wahoo_garmin_duplicate(
-                    self._sync_state.latest_snapshot() or {}
-                )
+                duplicate = self._duplicate_inspector.latest()
                 result = {"ok": True, "duplicate": duplicate}
                 if duplicate and session_csrf_hash:
                     result.update(

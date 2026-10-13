@@ -3,7 +3,10 @@ import unittest
 from contextlib import contextmanager
 from datetime import date
 
+from activity_row_support import SnapshotActivityRows
+
 from backend.errors import AppError
+from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.sync.snapshot_reader import SnapshotRepositoryReader
 
@@ -61,17 +64,23 @@ class ActivityReadServiceTests(unittest.TestCase):
             "raw_provider_data": {
                 "activities": [
                     {
+                        "id": "old",
+                        "type": "Run",
+                        "start_date_local": "2026-09-18T08:00:00",
+                    },
+                    {
                         "id": "new",
                         "name": "Morning run",
                         "type": "Run",
                         "start_date_local": "2026-09-20T08:00:00",
-                    }
+                    },
                 ]
             },
         }
         return ActivityAnalysisReadService(
             _Manager(),
             _Snapshots(snapshot),
+            CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
             _Feedback(),
         )
 
@@ -123,6 +132,7 @@ class ActivityReadServiceTests(unittest.TestCase):
         service = ActivityAnalysisReadService(
             _Manager(),
             SnapshotRepositoryReader(_Snapshots(snapshot)),
+            CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
             _Feedback(),
         )
         self.assertEqual(service._snapshot(), snapshot)

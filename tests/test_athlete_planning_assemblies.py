@@ -11,7 +11,7 @@ from backend.http_api.athlete_assembly import (
     AthleteRepositories,
     AthleteRuntime,
 )
-from backend.performance.training_report import canonical_rows
+from backend.performance.training_report import deduplicated_rows
 from backend.planning.assembly import (
     PlanningDataAssembly,
     PlanningMutations,
@@ -27,6 +27,7 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         event_buffer = Mock(name="event_buffer")
         repositories = [Mock(name=f"repository_{index}") for index in range(5)]
         snapshot_reader = Mock(name="snapshot_reader")
+        row_reader = Mock(name="row_reader")
         now = Mock(name="utc_now")
         today = Mock(name="local_date")
         assembly = AthleteDataAssembly(
@@ -39,6 +40,7 @@ class AthleteDataAssemblyTests(unittest.TestCase):
                     key_values=Mock(name="key_values"),
                     snapshot=repositories[4],
                     snapshot_reader=snapshot_reader,
+                    activity_rows=lambda: row_reader,
                     competition=repositories[2],
                 ),
                 runtime=AthleteRuntime(
@@ -63,10 +65,10 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         self.assertIs(checkin._today, today)
         self.assertIs(profile._manager, manager)
         self.assertIs(profile._on_location_changed, invalidate_for_location_change)
-        self.assertIs(assembly.equipment()._canonical_rows, canonical_rows)
+        self.assertIs(assembly.equipment()._deduplicate, deduplicated_rows)
         self.assertIs(duplicate._database_manager, manager)
         self.assertIs(duplicate._event_buffer, event_buffer)
-        self.assertIs(feedback._snapshot_reader, snapshot_reader)
+        self.assertIs(feedback._row_reader, row_reader)
         self.assertFalse(hasattr(assembly, "activity_read"))
         self.assertIs(duplicate._snapshot_reader, snapshot_reader)
 
@@ -89,6 +91,7 @@ class AthleteDataAssemblyTests(unittest.TestCase):
                     key_values=Mock(),
                     snapshot=Mock(),
                     snapshot_reader=reader,
+                    activity_rows=Mock(),
                     competition=Mock(),
                 ),
                 runtime=AthleteRuntime(
@@ -108,13 +111,15 @@ class AthleteDataAssemblyTests(unittest.TestCase):
 
 class EquipmentDependencyTests(unittest.TestCase):
     def test_assignment_uses_injected_canonical_activity_rows(self) -> None:
-        snapshot = {"recent_activities": [{"id": "synthetic"}]}
-        rows = Mock(return_value=([], 0))
-        service = EquipmentService(Mock(), lambda: snapshot, Mock(), Mock(), rows)
+        activity_rows = [{"id": "synthetic"}]
+        deduplicate = Mock(return_value=([], 0))
+        service = EquipmentService(
+            Mock(), lambda: activity_rows, Mock(), Mock(), deduplicate
+        )
         with self.assertRaises(AppError) as raised:
             service.assign({"activity_id": "synthetic", "equipment_id": None})
         self.assertEqual(raised.exception.status, 404)
-        rows.assert_called_once_with(snapshot)
+        deduplicate.assert_called_once_with(activity_rows)
 
     def test_usage_numbers_reject_invalid_values_and_preserve_zero(self) -> None:
         for value in (True, False, "12", None, -1, float("inf"), float("nan")):

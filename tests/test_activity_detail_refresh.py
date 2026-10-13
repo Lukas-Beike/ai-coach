@@ -7,6 +7,8 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from unittest.mock import Mock
 
+from activity_row_support import FixedActivityRows
+
 from backend.activities.detail_store import ActivityDetailStore
 from backend.errors import AppError
 from backend.sync.activity_details import (
@@ -39,13 +41,11 @@ class ActivityDetailRefreshTests(unittest.TestCase):
             )
         self.store = ActivityDetailStore(self.manager)
         self.api = Mock()
-        self.state = Mock()
-        self.state.latest_snapshot.return_value = {
-            "raw_provider_data": {"activities": [{"id": "CaseSensitive-1"}]}
-        }
+        self.rows = FixedActivityRows([{"id": "CaseSensitive-1"}])
         self.service = ActivityDetailRefreshService(
             api_client=self.api,
-            state_repository=self.state,
+            database_manager=self.manager,
+            row_reader=self.rows,
             store=self.store,
             utc_now=lambda: "2026-10-02T08:00:00Z",
             configured=True,

@@ -515,6 +515,7 @@ class CanonicalWiringTests(unittest.TestCase):
             manager,
             snapshot_reader,
             Mock(),
+            Mock(),
             canonical=CanonicalPerformanceSource(
                 database_manager=lambda: manager,
                 observation_reader=lambda: reader,
@@ -532,7 +533,7 @@ class CanonicalWiringTests(unittest.TestCase):
         manager = RecordingManager()
         snapshot_reader = Mock()
         snapshot_reader.latest_snapshot.return_value = snapshot
-        service = ActivityAnalysisReadService(manager, snapshot_reader, Mock())
+        service = ActivityAnalysisReadService(manager, snapshot_reader, Mock(), Mock())
         read_snapshot, canonical = service._performance_inputs()
         self.assertIs(read_snapshot, snapshot)
         self.assertIsNone(canonical)
@@ -558,6 +559,7 @@ class CanonicalWiringTests(unittest.TestCase):
         service = ActivityAnalysisReadService(
             manager,
             snapshot_reader,
+            Mock(),
             feedback,
             canonical=CanonicalPerformanceSource(
                 database_manager=lambda: manager,

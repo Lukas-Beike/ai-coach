@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.activities.activity_reference import ActivityReferences
+from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.proposal_execution import CoachProposalExecutionService
@@ -18,13 +19,12 @@ from backend.coach.proposal_read import (
 )
 from backend.db.manager import DatabaseManager
 from backend.history.undo_service import HistoryUndoService
-from backend.sync.state import SyncStateRepository
 
 
 @dataclass(frozen=True)
 class ProposalPersistence:
     database_manager: Callable[[], DatabaseManager]
-    sync_state_repository: Callable[[], SyncStateRepository]
+    duplicate_inspector: Callable[[], DuplicateInspector]
     nutrition_diary_service: Callable[[], Any]
     nutrition_meal_library_service: Callable[[], Any]
 
@@ -63,7 +63,7 @@ class CoachProposalAssembly:
         execution = dependencies.execution
         clock = dependencies.clock
         self._database_manager = persistence.database_manager
-        self._sync_state_repository = persistence.sync_state_repository
+        self._duplicate_inspector = persistence.duplicate_inspector
         self._nutrition_diary_service = persistence.nutrition_diary_service
         self._nutrition_meal_library_service = (
             persistence.nutrition_meal_library_service
@@ -84,7 +84,7 @@ class CoachProposalAssembly:
         manager = self._database_manager()
         return CoachProposalCreationService(
             manager,
-            self._sync_state_repository(),
+            self._duplicate_inspector(),
             now=self._now,
             utc_now=self._utc_now,
             uuid_factory=self._uuid_factory,

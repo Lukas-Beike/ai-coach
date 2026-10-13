@@ -15,6 +15,7 @@ from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.providers.intervals import IntervalsApiClient
+from backend.runtime.ports import ActivityRowReader
 from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
@@ -52,6 +53,7 @@ class IntervalsPersistenceDependencies:
     event_buffer: Any
     redact_text: Callable[[str], str]
     logger: logging.Logger
+    activity_rows: Callable[[], ActivityRowReader]
 
 
 @dataclass(frozen=True)
@@ -116,6 +118,7 @@ class IntervalsSyncAssembly:
         self._event_buffer = persistence.event_buffer
         self._redact_text = persistence.redact_text
         self._logger = persistence.logger
+        self._activity_rows = persistence.activity_rows
         self._operation_observer = operations.operation_observer
         self._intervals_resync_gate = operations.resync_gate
         self._intervals_sync_lock = operations.sync_lock
@@ -139,7 +142,8 @@ class IntervalsSyncAssembly:
             api_client=IntervalsApiClient(
                 api_key=config.intervals_api_key, request=self._request()
             ),
-            state_repository=self._state_repository(),
+            database_manager=self._database_manager(),
+            row_reader=self._activity_rows(),
             store=ActivityDetailStore(self._database_manager()),
             utc_now=self._utc_now,
             configured=bool(config.intervals_api_key),
