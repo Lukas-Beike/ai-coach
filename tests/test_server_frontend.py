@@ -251,7 +251,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("new EventSource(`/api/state/events?since=", app)
         self.assertIn("function connectStateEvents()", app)
         self.assertIn('event.type === "reset"', app)
-        self.assertIn('garmin: ["performance", "plan"]', app)
+        self.assertIn('[providerIds().garmin]: ["performance", "plan"]', app)
         self.assertIn('checkins: ["feedback", "plan"]', app)
         self.assertIn("function scrollChatToResponseStart()", coach)
         self.assertIn("function restoreChatScrollPosition()", coach)
@@ -1240,7 +1240,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="providerFreshnessTimeline"', index)
         self.assertIn("function renderProviderFreshness(data)", app)
         self.assertIn("async function retryProvider(provider, button)", app)
-        self.assertIn('provider === "intervals"', app)
+        self.assertIn("provider === providerIds().intervals", app)
         self.assertIn('provider === "weather"', app)
         self.assertIn(asset_ref("/icon.svg"), index)
         self.assertIn('id="connectionsSyncProgress"', index)
@@ -1248,10 +1248,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
         self.assertIn("function providerRequiresManualAttention(entry)", app)
         self.assertIn("function coachProviderLabel(provider)", app)
-        self.assertIn('intervals: "Intervals.icu"', app)
-        self.assertIn('garmin: "Garmin"', app)
-        self.assertIn('calendar: "Gemeinsamer Kalender"', app)
-        self.assertIn('weather: "Open-Meteo"', app)
+        self.assertIn("state.data?.provider_labels?.[key]", app)
+        self.assertNotIn('garmin: "Garmin"', app)
 
     def test_shared_format_module_is_loaded_and_served_before_consumers(self):
         root = Path(__file__).resolve().parents[1]

@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.calendar import canonical as calendar_canonical
+from backend.canonical.public_metrics import neutral_calendar_entries
 from backend.db.manager import DatabaseManager
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
@@ -68,6 +69,18 @@ class PublicPlanStateService:
         self._external_calendar_window_days = dependencies.external_calendar_window_days
         self._default_workout_name = dependencies.default_workout_name
         self._activity_rows = dependencies.activity_rows
+
+    def read_public(self, local_only: bool = False) -> dict[str, Any]:
+        """Return the plan state with neutral metric names for the browser.
+
+        ``read`` keeps the stored metric keys because the training report and
+        season scenarios consume them internally.
+        """
+        state = self.read(local_only=local_only)
+        for key in ("training_calendar", "planned"):
+            if key in state:
+                state[key] = neutral_calendar_entries(state[key])
+        return state
 
     def read(self, local_only: bool = False) -> dict[str, Any]:
         snapshot = self._sync_state.latest_snapshot() or {}

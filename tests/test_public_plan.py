@@ -149,6 +149,38 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         self.assertEqual(services["daily"].build.call_args.args[-1], external_window)
         self.assertEqual(state["external_calendar"]["events"], external_1000[:300])
 
+    def test_internal_read_keeps_stored_metrics_and_public_read_translates(self):
+        service, services, *_ = self.make_service()
+        services["external"].list_events.side_effect = None
+        services["external"].list_events.return_value = []
+        entry = {
+            "id": "planned-1",
+            "icu_training_load": 30,
+            "compliance": {"actual_activity": {"icu_training_load": 28}},
+        }
+        with patch(
+            "backend.http_api.public_plan.calendar_read_model.project_planning_calendar",
+            side_effect=lambda *args, **kwargs: {
+                "planned": [dict(entry)],
+                "training_calendar": [dict(entry)],
+            },
+        ):
+            internal = service.read(local_only=True)
+            public = service.read_public(local_only=True)
+
+        # The training report and season scenarios read the stored keys.
+        self.assertEqual(30, internal["planned"][0]["icu_training_load"])
+        self.assertEqual(30, internal["training_calendar"][0]["icu_training_load"])
+        for key in ("planned", "training_calendar"):
+            self.assertEqual(
+                {
+                    "id": "planned-1",
+                    "training_load": 30,
+                    "compliance": {"actual_activity": {"training_load": 28}},
+                },
+                public[key][0],
+            )
+
     def test_weather_refresh_followup_only_runs_when_weather_reports_refreshed(self):
         service, services, _projection, *_ = self.make_service(
             {"days": [], "_refreshed": True}

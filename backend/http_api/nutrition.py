@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.http_api.auth import SessionAuthService
 from backend.nutrition.diary import NutritionDiaryService
@@ -139,7 +140,10 @@ class NutritionPostRoutes:
             else {"pending_limit": payload.get("limit") or 14}
         )
         job = self._sync_job_queue().enqueue(
-            "intervals", "nutrition_sync", job_payload, requested_by="http_api"
+            ProviderId.INTERVALS.value,
+            "nutrition_sync",
+            job_payload,
+            requested_by="http_api",
         )
         handler.send_json(
             202,

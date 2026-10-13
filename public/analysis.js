@@ -927,8 +927,8 @@ async function renderTrainingRecords() { // NOSONAR
       run: garminRunItems,
     };
     const archivedGroups = {
-      bike: [...archivedBikeItems.map((item) => ({ item, source: "local" })), ...archivedGarminBikeItems.map((item) => ({ item, source: "garmin" }))],
-      run: [...archivedRunItems.map((item) => ({ item, source: "local" })), ...archivedGarminRunItems.map((item) => ({ item, source: "garmin" }))],
+      bike: [...archivedBikeItems.map((item) => ({ item, source: "local" })), ...archivedGarminBikeItems.map((item) => ({ item, source: "provider" }))],
+      run: [...archivedRunItems.map((item) => ({ item, source: "local" })), ...archivedGarminRunItems.map((item) => ({ item, source: "provider" }))],
     };
     for (const key of ["bike", "run"]) {
       const tab = reportNode("button", groups[key].label); tab.type = "button";
@@ -974,7 +974,7 @@ async function renderTrainingRecords() { // NOSONAR
         const archived = reportNode("details", null, "training-focus-details equipment-archive");
         const archivedItems = [
           ...archivedUncategorizedItems.map((item) => ({ item, source: "local" })),
-          ...archivedUncategorizedGarminItems.map((item) => ({ item, source: "garmin" })),
+          ...archivedUncategorizedGarminItems.map((item) => ({ item, source: "provider" })),
         ];
         archived.append(reportNode("summary", `Archivierte Ausr\u00fcstung (${archivedItems.length})`));
         for (const { item, source } of archivedItems) archived.append(source === "local" ? localEquipmentCard(item) : garminEquipmentCard(item));

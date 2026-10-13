@@ -34,7 +34,7 @@ class PlanningGetRoutes:
         self._session_auth_service().require_auth(handler)
         query = parse_qs(urlparse(handler.path).query)
         if path == "/api/plan":
-            payload = self._public_plan_state_service().read(
+            payload = self._public_plan_state_service().read_public(
                 local_only=query.get("local", ["0"])[0] == "1"
             )
         elif path == "/api/weather":

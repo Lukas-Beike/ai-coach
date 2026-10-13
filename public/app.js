@@ -55,13 +55,13 @@ document.addEventListener("click", (event) => {
   if (section) section.open = true;
 });
 $("#systemIntervalsSyncButton").addEventListener("click", syncNow);
-$("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync("intervals"));
+$("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync(providerIds().intervals));
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 bindExternalCalendar(syncExternalCalendar);
 $("#weatherSyncButton").addEventListener("click", syncWeather);
 $("#wahooConnectButton").addEventListener("click", connectWahoo);
 $("#wahooDisconnectButton").addEventListener("click", disconnectWahoo);
-$("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"));
+$("#garminFullResyncButton").addEventListener("click", () => fullResync(providerIds().garmin));
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#checkinForm").addEventListener("submit", saveCheckin);
 $("#checkinCloseButton").addEventListener("click", () => $("#checkinDialog")?.close());
