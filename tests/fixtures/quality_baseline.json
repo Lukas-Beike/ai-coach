@@ -784,6 +784,14 @@
     },
     {
       "tool": "mypy",
+      "path": "tests/test_activity_feedback.py",
+      "line": 165,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "092f1f0d115abc4d9703f3098a1f641843f02319ed177bbaf99cd057b2114aa2"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_sync_worker.py",
       "line": 171,
       "column": 12,
@@ -872,11 +880,51 @@
     },
     {
       "tool": "mypy",
+      "path": "tests/test_activity_feedback.py",
+      "line": 285,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "092f1f0d115abc4d9703f3098a1f641843f02319ed177bbaf99cd057b2114aa2"
+    },
+    {
+      "tool": "mypy",
       "path": "backend/http_api/handler.py",
       "line": 306,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "454abbaab0cc1828be65fbd1b78572b7e7e5ed8bc7cca575ab77dc69909bdeeb"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_activity_reference.py",
+      "line": 319,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "41e30d6f19e8534ce8a66dfe16eea13b2aa458a317e385f5861ea7ca4d22b997"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_activity_reference.py",
+      "line": 335,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "41e30d6f19e8534ce8a66dfe16eea13b2aa458a317e385f5861ea7ca4d22b997"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_activity_reference.py",
+      "line": 352,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "41e30d6f19e8534ce8a66dfe16eea13b2aa458a317e385f5861ea7ca4d22b997"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_activity_reference.py",
+      "line": 396,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "9bf97bbcce8c4f97589cae4bbb45adc8859829c086dbb6e6acadeddd1d255c86"
     },
     {
       "tool": "mypy",
@@ -888,11 +936,27 @@
     },
     {
       "tool": "mypy",
+      "path": "tests/test_activity_reference.py",
+      "line": 475,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "41e30d6f19e8534ce8a66dfe16eea13b2aa458a317e385f5861ea7ca4d22b997"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_sync_worker.py",
       "line": 49,
       "column": 12,
       "code": "arg-type",
       "message_sha256": "ee45538c43ac3c9b1af562d31b77e169478391b967b13f32a963ee942b2fb38e"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_activity_reference.py",
+      "line": 500,
+      "column": 12,
+      "code": "arg-type",
+      "message_sha256": "41e30d6f19e8534ce8a66dfe16eea13b2aa458a317e385f5861ea7ca4d22b997"
     },
     {
       "tool": "mypy",
@@ -1072,6 +1136,14 @@
     },
     {
       "tool": "mypy",
+      "path": "tests/test_coach_proposal_creation.py",
+      "line": 69,
+      "column": 16,
+      "code": "arg-type",
+      "message_sha256": "2540f363d4932362a7a794d7db314e1530bcef2af73d7c0bb8b7ae384ae9b0e4"
+    },
+    {
+      "tool": "mypy",
       "path": "backend/coach/background_job.py",
       "line": 80,
       "column": 16,
@@ -1192,6 +1264,14 @@
     },
     {
       "tool": "mypy",
+      "path": "tests/test_activity_reference.py",
+      "line": 457,
+      "column": 23,
+      "code": "arg-type",
+      "message_sha256": "b52c80726ba02565d34846430e0886d4a3371077714e4e99671142c25a882a15"
+    },
+    {
+      "tool": "mypy",
       "path": "backend/planning/daily_context_service.py",
       "line": 129,
       "column": 25,
@@ -1253,6 +1333,14 @@
       "column": 28,
       "code": "arg-type",
       "message_sha256": "e499eec59cbf8e6f80b3c2b7c309167b74628f653f83de1269183e6534dc886a"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_activity_read_tools.py",
+      "line": 259,
+      "column": 28,
+      "code": "arg-type",
+      "message_sha256": "5249906596310713d1992c07238bc3b4df36d8dc02eb1c181abec6c07ca0fa50"
     },
     {
       "tool": "mypy",
@@ -1360,11 +1448,67 @@
     },
     {
       "tool": "mypy",
+      "path": "tests/test_characterization_activity_reads.py",
+      "line": 142,
+      "column": 32,
+      "code": "arg-type",
+      "message_sha256": "5249906596310713d1992c07238bc3b4df36d8dc02eb1c181abec6c07ca0fa50"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_activity_reference.py",
+      "line": 209,
+      "column": 32,
+      "code": "arg-type",
+      "message_sha256": "5249906596310713d1992c07238bc3b4df36d8dc02eb1c181abec6c07ca0fa50"
+    },
+    {
+      "tool": "mypy",
       "path": "backend/planning/library.py",
       "line": 210,
       "column": 32,
       "code": "arg-type",
       "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_activity_reference.py",
+      "line": 299,
+      "column": 32,
+      "code": "arg-type",
+      "message_sha256": "f05a4251287765a93c841460fa461e7640b19ff2a1880b0d34835627ac9320ea"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_characterization_activity_reads.py",
+      "line": 313,
+      "column": 32,
+      "code": "arg-type",
+      "message_sha256": "5249906596310713d1992c07238bc3b4df36d8dc02eb1c181abec6c07ca0fa50"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_characterization_activity_reads.py",
+      "line": 333,
+      "column": 32,
+      "code": "arg-type",
+      "message_sha256": "5249906596310713d1992c07238bc3b4df36d8dc02eb1c181abec6c07ca0fa50"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_characterization_activity_reads.py",
+      "line": 466,
+      "column": 32,
+      "code": "arg-type",
+      "message_sha256": "5249906596310713d1992c07238bc3b4df36d8dc02eb1c181abec6c07ca0fa50"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_characterization_activity_reads.py",
+      "line": 714,
+      "column": 32,
+      "code": "arg-type",
+      "message_sha256": "5249906596310713d1992c07238bc3b4df36d8dc02eb1c181abec6c07ca0fa50"
     },
     {
       "tool": "mypy",
@@ -2077,6 +2221,14 @@
       "column": 65,
       "code": "arg-type",
       "message_sha256": "67a23cbd9410f306da2960b552efb8b98e596674f8f448bcdfb691411841ca0d"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_activity_feedback.py",
+      "line": 270,
+      "column": 68,
+      "code": "arg-type",
+      "message_sha256": "092f1f0d115abc4d9703f3098a1f641843f02319ed177bbaf99cd057b2114aa2"
     },
     {
       "tool": "mypy",
@@ -3205,6 +3357,14 @@
       "column": 8,
       "code": "operator",
       "message_sha256": "d2e0707d21e78ea4f68568bf7ca771fc3ee06a1de9a20ffa975fe0e37cfe3560"
+    },
+    {
+      "tool": "mypy",
+      "path": "backend/http_api/compact_activity_rows.py",
+      "line": 29,
+      "column": 4,
+      "code": "override",
+      "message_sha256": "b33f2de0c48fd96c8575ffa11795d766142e6ee0d0620dc0ab841f162d447885"
     },
     {
       "tool": "mypy",
