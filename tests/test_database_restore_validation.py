@@ -46,6 +46,43 @@ OLD_RELEASE_ABSENT_PROVIDER_TABLES = (
     "provider_records",
 )
 
+# The released activity_feedback table predates the schema v7 provider column.
+# DROP COLUMN would leave different stored SQL text than a released schema, so
+# the empty table is recreated with its released DDL.
+RELEASED_ACTIVITY_FEEDBACK_SQL = """
+    CREATE TABLE activity_feedback (
+        activity_id TEXT PRIMARY KEY,
+        activity_name TEXT NOT NULL DEFAULT '',
+        activity_date TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        session_rpe REAL CHECK (session_rpe IS NULL OR (session_rpe >= 0 AND session_rpe <= 10)),
+        deviation_reason TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )"""
+
+
+def restore_released_activity_feedback(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE activity_feedback")
+    connection.execute(RELEASED_ACTIVITY_FEEDBACK_SQL)
+
+
+# Schema v8 added remote_links and the tombstone provider column; the released
+# tombstone table is recreated from its DDL for the same reason as above.
+RELEASED_TOMBSTONES_SQL = """
+    CREATE TABLE competition_sync_tombstones (
+        id TEXT PRIMARY KEY,
+        intervals_event_id TEXT,
+        external_id TEXT,
+        created_at TEXT NOT NULL
+    )"""
+
+
+def restore_released_remote_links(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE remote_links")
+    connection.execute("DROP TABLE competition_sync_tombstones")
+    connection.execute(RELEASED_TOMBSTONES_SQL)
+
 
 class DatabaseRestoreValidationTests(unittest.TestCase):
     def test_stage_enforces_payload_boundary_and_uses_uuid_filename(self) -> None:
@@ -160,6 +197,8 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 connection.execute(
                     "ALTER TABLE nutrition_logs DROP COLUMN logged_time_known"
                 )
+                restore_released_activity_feedback(connection)
+                restore_released_remote_links(connection)
                 for table in OLD_RELEASE_ABSENT_PROVIDER_TABLES:
                     connection.execute(f"DROP TABLE {table}")
                 connection.execute("PRAGMA user_version = 1")
@@ -178,6 +217,65 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
             with closing(sqlite3.connect(path)) as connection:
                 connection.row_factory = sqlite3.Row
                 self.assertTrue(database_schema_is_current(connection))
+                self.assertEqual(
+                    connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0
+                )
+
+    def test_validate_migrates_schema_v7_backup_and_backfills_remote_links(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.db"
+            with closing(sqlite3.connect(path)) as connection:
+                initialize_schema(connection)
+                restore_released_remote_links(connection)
+                connection.execute("PRAGMA user_version = 7")
+                connection.execute(
+                    "INSERT INTO competitions(id, name, event_date, sport, priority, "
+                    "distance, target, course_profile, notes, intervals_event_id, "
+                    "external_id, created_at, updated_at) "
+                    "VALUES ('c1', 'Synthetic race', '2026-11-01', 'ride', 'B', '', "
+                    "'', '', '', '77', 'ext-c1', 'now', 'now')"
+                )
+                connection.execute(
+                    "INSERT INTO competition_sync_tombstones(id, intervals_event_id, "
+                    "external_id, created_at) VALUES ('t1', '78', 'ext-t1', 'now')"
+                )
+                connection.execute(
+                    "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, "
+                    "last_seen) VALUES ('token', 'csrf', 1, 'now', 'now')"
+                )
+                connection.commit()
+            validator = service(
+                Path(directory),
+                schema_is_current=database_schema_is_current,
+                migrate_schema=migrate_schema,
+            )
+
+            validator.validate(path)
+
+            with closing(sqlite3.connect(path)) as connection:
+                connection.row_factory = sqlite3.Row
+                self.assertTrue(database_schema_is_current(connection))
+                self.assertEqual(
+                    [
+                        tuple(row)
+                        for row in connection.execute(
+                            "SELECT entity_kind, local_id, provider, remote_id, "
+                            "remote_external_id, sync_state FROM remote_links"
+                        )
+                    ],
+                    [("competition", "c1", "intervals", "77", "ext-c1", "synced")],
+                )
+                self.assertEqual(
+                    tuple(
+                        connection.execute(
+                            "SELECT id, intervals_event_id, provider "
+                            "FROM competition_sync_tombstones"
+                        ).fetchone()
+                    ),
+                    ("t1", "78", "intervals"),
+                )
                 self.assertEqual(
                     connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0
                 )
@@ -360,6 +458,8 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 connection.execute(
                     "ALTER TABLE nutrition_logs DROP COLUMN logged_time_known"
                 )
+                restore_released_activity_feedback(connection)
+                restore_released_remote_links(connection)
                 for table in OLD_RELEASE_ABSENT_PROVIDER_TABLES:
                     connection.execute(f"DROP TABLE {table}")
                 connection.execute("PRAGMA user_version = 1")

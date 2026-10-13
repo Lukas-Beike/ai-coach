@@ -9,7 +9,11 @@ from typing import Any
 from backend.athlete.profile import ProfileService
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.context import bounded_coach_context_value, coach_context_json_size
-from backend.coach.context_selection import CONTEXT_SECTIONS, CoachContextSelection
+from backend.coach.context_selection import (
+    CONTEXT_SECTIONS,
+    CoachContextSelection,
+    canonical_section,
+)
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
 from backend.nutrition.diary import NutritionDiaryService
@@ -64,7 +68,8 @@ class CoachReadToolService:
             not isinstance(sections, list)
             or not 1 <= len(sections) <= 15
             or any(
-                not isinstance(section, str) or section not in CONTEXT_SECTIONS
+                not isinstance(section, str)
+                or canonical_section(section) not in CONTEXT_SECTIONS
                 for section in sections
             )
         ):
@@ -75,10 +80,13 @@ class CoachReadToolService:
             )
         if self._context_service is None:
             raise AppError(503, "Coach-Kontext ist nicht verfügbar.")
+        requested = list(
+            dict.fromkeys(canonical_section(section) for section in sections)
+        )
         context = self._context_service().build(
             selection=CoachContextSelection(
                 "requested_details",
-                frozenset(sections),
+                frozenset(requested),
                 include_library=False,
             )
         )
@@ -87,7 +95,7 @@ class CoachReadToolService:
             "ok": True,
             "context": bounded,
             "projection": {
-                "requested_sections": sections,
+                "requested_sections": requested,
                 "characters": coach_context_json_size(bounded),
                 "complete": coach_context_json_size(context) <= 40_000,
             },

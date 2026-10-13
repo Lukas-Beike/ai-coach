@@ -7,11 +7,15 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db import DatabaseManager
+from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning.planned_unit_service import UPDATE_SQL
 from backend.planning.revision import PlanningRevisionService
 from backend.sync.library import WorkoutLibrarySyncStateService
+
+_REMOTE_LINKS = RemoteLinkRepository()
 
 
 def competition_push_manifest(db: Any) -> list[dict[str, str]]:
@@ -119,6 +123,9 @@ class PlanningAuthorityService:
                         "UPDATE competitions SET intervals_event_id=NULL, sync_dirty=1, "
                         "sync_state='local_override', sync_conflict='', updated_at=? WHERE id=?",
                         (now, row["id"]),
+                    )
+                    _REMOTE_LINKS.refresh_from_slots(
+                        db, RemoteEntityKind.COMPETITION, str(row["id"])
                     )
                 else:
                     db.execute(

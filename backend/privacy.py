@@ -20,6 +20,7 @@ from backend.backup.export import (
 )
 from backend.calendar import public_events as public_event_calendar
 from backend.calendar.external import ExternalCalendarReader
+from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, NutritionTemplateRepository
 from backend.errors import AppError
@@ -31,6 +32,7 @@ from backend.planning.revision import PlanningRevisionService
 from backend.planning.training_plans import TrainingPlanService
 from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.wahoo_connection import WAHOO_SECRET_KEYS
 from backend.weather import cache as weather_cache
 
 
@@ -114,7 +116,12 @@ class PrivacyDataExportService:
             ]
 
         application_state: dict[str, Any] = {}
-        excluded_state = {"profile", "garmin_snapshot", weather_cache.CACHE_KEY}
+        excluded_state = {
+            "profile",
+            "garmin_snapshot",
+            weather_cache.CACHE_KEY,
+            *WAHOO_SECRET_KEYS,
+        }
         for row in kv_rows:
             key = str(row["key"])
             if key in excluded_state or key.endswith(("_running", "_status")):
@@ -173,12 +180,12 @@ PRIVACY_DELETE_SCOPE = (
     (
         "library",
         "Workout-Bibliothek und geplante Einheiten",
-        ("workout_library", "planned_units"),
+        ("workout_library", "planned_units", "remote_links"),
     ),
     (
         "competitions",
         "Wettkämpfe und Sync-Vormerkungen",
-        ("competitions", "competition_sync_tombstones"),
+        ("competitions", "competition_sync_tombstones", "remote_links"),
     ),
     ("plans", "Trainingspläne", ("training_plans", "planning_state")),
     ("checkins", "Tages-Check-ins", ("athlete_checkins",)),
@@ -224,6 +231,12 @@ PRIVACY_DELETE_SCOPE = (
         ),
     ),
 )
+# remote_links is one table listed in two groups: each group reports (and the
+# deletion removes) the links of the entities it owns.
+_REMOTE_LINK_KINDS_BY_CATEGORY = {
+    "library": (RemoteEntityKind.LIBRARY_WORKOUT, RemoteEntityKind.PLANNED_UNIT),
+    "competitions": (RemoteEntityKind.COMPETITION,),
+}
 PRIVACY_REMOTE_SCOPE = (
     "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
     "Garmin-Konto und Garmin-Daten bleiben unverändert.",
@@ -253,14 +266,23 @@ class PrivacyDeleteService:
         counts: dict[str, int] = {}
         for category, _label, tables in PRIVACY_DELETE_SCOPE:
             counts[category] = sum(
-                int(
-                    db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()[
-                        "count"
-                    ]
-                )
+                PrivacyDeleteService._table_count(db, category, table)
                 for table in tables
             )
         return counts
+
+    @staticmethod
+    def _table_count(db: Any, category: str, table: str) -> int:
+        if table == "remote_links":
+            kinds = [kind.value for kind in _REMOTE_LINK_KINDS_BY_CATEGORY[category]]
+            row = db.execute(
+                "SELECT COUNT(*) AS count FROM remote_links "
+                f"WHERE entity_kind IN ({', '.join('?' for _ in kinds)})",
+                kinds,
+            ).fetchone()
+        else:
+            row = db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()
+        return int(row["count"])
 
     def preview(self) -> dict[str, Any]:
         dependencies = self._dependencies

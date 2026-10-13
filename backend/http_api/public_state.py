@@ -23,6 +23,7 @@ from backend.planning import season as planning_season
 from backend.runtime.ports import ProviderStateReader
 from backend.sync import intervals_state
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.wahoo_connection import WAHOO_TOKENS_KEY, connection_status
 
 if TYPE_CHECKING:
     from backend.athlete.profile import ProfileService
@@ -238,5 +239,8 @@ class PublicStateService:
                     "weather": bool(weather.get("configured")),
                     "external_calendar": bool(deps.config.calendar_ical_url),
                 },
+                "wahoo": connection_status(
+                    deps.config, self._get_value(WAHOO_TOKENS_KEY, manager)
+                ),
                 "usage": deps.provider_state.summary("openai"),
             }

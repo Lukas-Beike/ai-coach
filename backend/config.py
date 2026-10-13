@@ -17,8 +17,19 @@ from urllib.parse import urlsplit, urlunsplit
 from backend.errors import AppError
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
-SETTINGS_SECRET_KEYS = ("OPENAI_API_KEY", "INTERVALS_API_KEY", "GARMIN_PASSWORD")
-SETTINGS_VALUE_KEYS = ("GARMIN_EMAIL", "GARMINTOKENS", "GARMIN_FIXTURE_PATH")
+SETTINGS_SECRET_KEYS = (
+    "OPENAI_API_KEY",
+    "INTERVALS_API_KEY",
+    "GARMIN_PASSWORD",
+    "WAHOO_CLIENT_SECRET",
+)
+SETTINGS_VALUE_KEYS = (
+    "GARMIN_EMAIL",
+    "GARMINTOKENS",
+    "GARMIN_FIXTURE_PATH",
+    "WAHOO_CLIENT_ID",
+    "WAHOO_REDIRECT_URI",
+)
 SETTINGS_KEYS = SETTINGS_SECRET_KEYS + SETTINGS_VALUE_KEYS
 
 
@@ -112,6 +123,18 @@ class Config:
     app_password: str
     secure_cookies: bool
     data_retention_days: int
+    wahoo_client_id: str = ""
+    wahoo_client_secret: str = ""
+    wahoo_redirect_uri: str = ""
+
+    @property
+    def wahoo_configured(self) -> bool:
+        """Wahoo is usable only when client id, secret and redirect URI are set."""
+        return bool(
+            self.wahoo_client_id.strip()
+            and self.wahoo_client_secret.strip()
+            and self.wahoo_redirect_uri.strip()
+        )
 
 
 def security_configuration_error(
@@ -221,4 +244,7 @@ def load_config(
         app_password=value("APP_PASSWORD", ""),
         secure_cookies=_env_bool(target, "COOKIE_SECURE"),
         data_retention_days=_env_int(target, "DATA_RETENTION_DAYS", -1),
+        wahoo_client_id=value("WAHOO_CLIENT_ID", "").strip(),
+        wahoo_client_secret=value("WAHOO_CLIENT_SECRET", "").strip(),
+        wahoo_redirect_uri=value("WAHOO_REDIRECT_URI", "").strip(),
     )

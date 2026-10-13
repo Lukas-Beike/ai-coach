@@ -20,10 +20,13 @@ from backend.canonical.vocabulary import (
     ActivityLinkKind,
     ActivityRecordState,
     ActivitySessionState,
+    MetricKind,
+    ProviderId,
     ProviderRecordState,
 )
 
 ACTIVITY_ID_PREFIX: Final = "act_"
+ATHLETE_SERIES: Final = "athlete"
 OBSERVATION_DETAILS: Final = "{}"
 _PROVIDER_RECORD_EXISTS: Final = (
     "SELECT 1 AS present FROM provider_records "
@@ -476,6 +479,60 @@ def active_activity_rows(
     )
 
 
+def active_activity_payload_texts(
+    db: Any,
+    *,
+    provider: str,
+    record_kind: str,
+    start: str | None = None,
+    end: str | None = None,
+    limit: int | None = None,
+) -> list[str]:
+    """Return the stored raw payload text of one provider's live activities.
+
+    Only active raw records whose activity record is active and whose session is
+    not deleted are returned, so tombstoned activities are never served. ``start``
+    and ``end`` are inclusive ISO dates on the stored athlete-local date. Newest
+    first, like the stored snapshot: activity start time, then provider activity
+    id, both descending. ``limit`` bounds the rows in SQL.
+    """
+    clauses = [
+        "p.provider = ?",
+        "p.record_kind = ?",
+        "p.state = ?",
+        "r.state = ?",
+        "s.state <> ?",
+    ]
+    params: list[object] = [
+        provider,
+        record_kind,
+        ProviderRecordState.ACTIVE.value,
+        ActivityRecordState.ACTIVE.value,
+        ActivitySessionState.DELETED.value,
+    ]
+    if start is not None:
+        clauses.append("r.local_date >= ?")
+        params.append(start)
+    if end is not None:
+        clauses.append("r.local_date <= ?")
+        params.append(end)
+    limit_clause = ""
+    if limit is not None:
+        limit_clause = " LIMIT ?"
+        params.append(limit)
+    rows = _fetch_all(
+        db,
+        "SELECT p.payload FROM provider_records AS p "
+        "JOIN activity_records AS r ON r.provider = p.provider "
+        "AND r.provider_activity_id = p.source_record_id "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        f"WHERE {' AND '.join(clauses)} ORDER BY r.started_at DESC, "
+        f"r.provider_activity_id DESC{limit_clause}",
+        tuple(params),
+    )
+    return [str(row["payload"]) for row in rows]
+
+
 def current_observation_rows(
     db: Any,
     metric: str,
@@ -484,20 +541,27 @@ def current_observation_rows(
     start: str | None = None,
     end: str | None = None,
     sport: str | None = None,
+    oldest_versions: Mapping[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Return observation rows of one metric at each provider's current mapper version.
 
     ``versions`` maps a provider value to its current observation mapper version;
     rows of any other version, or of no provider, are not returned. Bounds are
-    inclusive ISO dates on ``observed_on``.
+    inclusive ISO dates on ``observed_on``. A natural key has one row, which a
+    re-projection rewrites in place, so ``oldest_versions`` also returns the rows
+    that still carry a version from that provider's oldest version up to the
+    current one: the newest stored version of each identity while a re-projection
+    is pending. Rows below the oldest version were retired by an earlier mapper
+    and stay hidden.
     """
+    lowest = oldest_versions or {}
     provider_clause = " OR ".join(
-        "(provider = ? AND mapper_version = ?)" for _ in versions
+        "(provider = ? AND mapper_version BETWEEN ? AND ?)" for _ in versions
     )
-    clauses = ["metric = ?", f"({provider_clause})"]
     params: list[object] = [metric]
     for provider, version in versions.items():
-        params.extend((provider, version))
+        params.extend((provider, min(lowest.get(provider, version), version), version))
+    clauses = ["metric = ?", f"({provider_clause})"]
     if start is not None:
         clauses.append("observed_on >= ?")
         params.append(start)
@@ -554,10 +618,11 @@ def count_unresolved_feedback(db: Any, provider: str) -> int:
 
 
 def observation_natural_key(observation: Observation) -> str:
-    """Return provider|metric|sport|method|(observed_at or observed_on).
+    """Return provider|metric|sport|series|(observed_at or observed_on).
 
-    NULL parts are empty strings. Canonical observations carry no method, so that
-    part is always empty.
+    NULL parts are empty strings. The series part is empty except for a weight
+    that the Intervals.icu athlete profile reports (see ``_observation_series``),
+    which therefore never shares a key with the wellness weight of the same day.
     """
     provider = observation.provenance.provider
     sport = observation.sport
@@ -571,10 +636,28 @@ def observation_natural_key(observation: Observation) -> str:
             provider.value if provider is not None else "",
             observation.kind.value,
             sport.value if sport is not None else "",
-            "",
+            _observation_series(observation),
             when,
         )
     )
+
+
+def _observation_series(observation: Observation) -> str:
+    """Return ``athlete`` for an Intervals.icu athlete-profile weight, else empty.
+
+    A wellness row is identified by its ISO day, so a weight whose source record
+    is anything else comes from the athlete record. The consumers tell the two
+    apart by the same rule. Both values are kept: the current-metrics reader
+    shows the wellness weight first and the athlete weight as its fallback.
+    """
+    provenance = observation.provenance
+    if (
+        provenance.provider is ProviderId.INTERVALS
+        and observation.kind is MetricKind.WEIGHT
+        and provenance.source_record_id != observation.observed_on.isoformat()
+    ):
+        return ATHLETE_SERIES
+    return ""
 
 
 def upsert_observation(
@@ -640,36 +723,87 @@ def mark_missing_deleted(
         activity_id = candidate["activity_id"]
         if provider_activity_id in present_ids:
             continue
-        db.execute(
-            "UPDATE activity_records SET state = ?, updated_at = ? "
-            "WHERE provider = ? AND provider_activity_id = ?",
-            (ActivityRecordState.DELETED.value, now, provider, provider_activity_id),
-        )
-        db.execute(
-            "UPDATE provider_records SET state = ?, updated_at = ? "
-            "WHERE provider = ? AND record_kind = ? AND source_record_id = ?",
-            (
-                ProviderRecordState.DELETED.value,
-                now,
-                provider,
-                record_kind,
-                provider_activity_id,
-            ),
-        )
-        db.execute(
-            "UPDATE activity_sessions SET state = ?, updated_at = ? "
-            "WHERE activity_id = ? AND primary_provider = ? "
-            "AND primary_provider_activity_id = ?",
-            (
-                ActivitySessionState.DELETED.value,
-                now,
-                activity_id,
-                provider,
-                provider_activity_id,
-            ),
+        _delete_activity(
+            db,
+            provider,
+            record_kind=record_kind,
+            provider_activity_id=provider_activity_id,
+            activity_id=activity_id,
+            now=now,
         )
         deleted += 1
     return deleted
+
+
+def mark_activity_deleted(
+    db: Any,
+    provider: str,
+    *,
+    record_kind: str,
+    provider_activity_id: str,
+    now: str,
+) -> bool:
+    """Tombstone one activity the provider removed, with its raw record and session.
+
+    Table-served readers stop returning it. Returns False when the activity was
+    never stored or is already deleted, and then changes nothing.
+    """
+    found = _fetch_all(
+        db,
+        "SELECT activity_id FROM activity_records "
+        "WHERE provider = ? AND provider_activity_id = ? AND state = ?",
+        (provider, provider_activity_id, ActivityRecordState.ACTIVE.value),
+    )
+    if not found:
+        return False
+    _delete_activity(
+        db,
+        provider,
+        record_kind=record_kind,
+        provider_activity_id=provider_activity_id,
+        activity_id=found[0]["activity_id"],
+        now=now,
+    )
+    return True
+
+
+def _delete_activity(
+    db: Any,
+    provider: str,
+    *,
+    record_kind: str,
+    provider_activity_id: str,
+    activity_id: str,
+    now: str,
+) -> None:
+    db.execute(
+        "UPDATE activity_records SET state = ?, updated_at = ? "
+        "WHERE provider = ? AND provider_activity_id = ?",
+        (ActivityRecordState.DELETED.value, now, provider, provider_activity_id),
+    )
+    db.execute(
+        "UPDATE provider_records SET state = ?, updated_at = ? "
+        "WHERE provider = ? AND record_kind = ? AND source_record_id = ?",
+        (
+            ProviderRecordState.DELETED.value,
+            now,
+            provider,
+            record_kind,
+            provider_activity_id,
+        ),
+    )
+    db.execute(
+        "UPDATE activity_sessions SET state = ?, updated_at = ? "
+        "WHERE activity_id = ? AND primary_provider = ? "
+        "AND primary_provider_activity_id = ?",
+        (
+            ActivitySessionState.DELETED.value,
+            now,
+            activity_id,
+            provider,
+            provider_activity_id,
+        ),
+    )
 
 
 def _insert_provider_record(
@@ -920,6 +1054,91 @@ def activity_sessions_by_ids(
         ):
             rows[row["activity_id"]] = row
     return rows
+
+
+_LINKABLE_COLUMNS: Final = (
+    *_ACTIVITY_READ_COLUMNS,
+    "r.activity_id AS session_id",
+)
+
+
+def linkable_activity_rows(db: Any, *, start: str, end: str) -> list[dict[str, Any]]:
+    """Return active activity rows that session linking may bundle, by ISO local date.
+
+    A record qualifies when its session is active or an alias (``duplicate``) and
+    not athlete-confirmed. Hidden, deleted and confirmed sessions are never linked.
+    ``start`` and ``end`` are inclusive ISO dates on the stored athlete-local date.
+    """
+    return _fetch_all(
+        db,
+        f"SELECT {', '.join(_LINKABLE_COLUMNS)} FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.state = ? AND s.state IN (?, ?) AND s.athlete_confirmed = 0 "
+        "AND r.local_date >= ? AND r.local_date <= ? "
+        "ORDER BY r.started_at, r.provider, r.provider_activity_id",
+        (
+            ActivityRecordState.ACTIVE.value,
+            ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.DUPLICATE.value,
+            start,
+            end,
+        ),
+    )
+
+
+def activity_session_link_rows(
+    db: Any, activity_ids: Sequence[str]
+) -> dict[str, dict[str, Any]]:
+    """Return the session columns that linking decides on, keyed by local activity id."""
+    rows: dict[str, dict[str, Any]] = {}
+    for chunk in _chunked(activity_ids):
+        for row in _fetch_all(
+            db,
+            "SELECT activity_id, link_kind, athlete_confirmed, state, merged_into, "
+            "created_at FROM activity_sessions "
+            f"WHERE activity_id IN ({_placeholders(chunk)})",
+            tuple(chunk),
+        ):
+            rows[row["activity_id"]] = row
+    return rows
+
+
+def merge_activity_session(db: Any, *, activity_id: str, into: str, now: str) -> bool:
+    """Make an active, unconfirmed session an alias of ``into``; return whether it changed.
+
+    Sessions that were already aliases of this one now point at ``into`` directly.
+    Records keep their ``activity_id`` and the session keeps its primary provider.
+    """
+    cursor = db.execute(
+        "UPDATE activity_sessions SET state = ?, merged_into = ?, updated_at = ? "
+        "WHERE activity_id = ? AND state = ? AND athlete_confirmed = 0",
+        (
+            ActivitySessionState.DUPLICATE.value,
+            into,
+            now,
+            activity_id,
+            ActivitySessionState.ACTIVE.value,
+        ),
+    )
+    if cursor.rowcount != 1:
+        return False
+    db.execute(
+        "UPDATE activity_sessions SET merged_into = ?, updated_at = ? "
+        "WHERE merged_into = ? AND state = ?",
+        (into, now, activity_id, ActivitySessionState.DUPLICATE.value),
+    )
+    return True
+
+
+def set_activity_session_link_kind(
+    db: Any, *, activity_id: str, link_kind: str, now: str
+) -> None:
+    """Store the link kind of an active session."""
+    db.execute(
+        "UPDATE activity_sessions SET link_kind = ?, updated_at = ? "
+        "WHERE activity_id = ? AND state = ?",
+        (link_kind, now, activity_id, ActivitySessionState.ACTIVE.value),
+    )
 
 
 def activity_local_ids(

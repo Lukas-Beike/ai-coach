@@ -24,7 +24,11 @@ from backend.db.schema import initialize_schema
 from backend.diagnostics.canonical_backfill import summarize_canonical_backfill
 from backend.errors import AppError
 from backend.providers import canonical_plans
-from backend.providers.canonical_plans import intervals_snapshot_ingest_plan
+from backend.providers.canonical_plans import (
+    intervals_snapshot_ingest_plan,
+    wahoo_ingest_plan,
+)
+from backend.providers.snapshot_projection import strip_intervals_activity_sections
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill import (
     DEFAULT_BATCH_SIZE,
@@ -38,6 +42,7 @@ from backend.sync.canonical_backfill import (
 )
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
+from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_snapshot_writer import GARMIN_SNAPSHOT_KEY
 
 NOW = "2026-09-20T08:00:00+00:00"
@@ -47,6 +52,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers"
 SECRET_ID = "secret-activity-42"
 INTERVALS = ProviderId.INTERVALS.value
 GARMIN = ProviderId.GARMIN.value
+WAHOO = ProviderId.WAHOO.value
 ACTIVITY_KIND = canonical_plans.ACTIVITY_RECORD_KIND
 HEALTH_KIND = canonical_plans.HEALTH_RECORD_KIND
 
@@ -318,6 +324,48 @@ class PopulatedBackfillTests(BackfillFixture):
         self.assertEqual(
             self.rows("SELECT activity_id FROM activity_sessions ORDER BY activity_id"),
             sessions,
+        )
+
+    def test_stripped_newest_snapshot_does_not_supersede_the_full_one(self) -> None:
+        full = intervals_fixture_snapshot()
+        self.insert_snapshot(self.manager, full)
+        self.insert_snapshot(
+            self.manager,
+            strip_intervals_activity_sections({**full, "synced_at": LATER}),
+        )
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        counters = self.summary(backfill)["providers"][INTERVALS]
+        # The five activities come from the older, full snapshot: the stripped one
+        # is the newest row but lists none, so it is neither the activity source
+        # nor a reason to supersede the full snapshot.
+        self.assertEqual(self.count("activity_records"), 5)
+        self.assertEqual(counters["superseded"], 0)
+        self.assertEqual(counters["skipped_invalid"], 0)
+        self.assertEqual(
+            self.rows("SELECT state FROM activity_records GROUP BY state"),
+            [{"state": "active"}],
+        )
+
+    def test_stripped_snapshot_without_a_raw_block_is_not_skipped_invalid(
+        self,
+    ) -> None:
+        stripped = strip_intervals_activity_sections(
+            intervals_snapshot([intervals_activity("7")])
+        )
+        stripped.pop("raw_provider_data", None)
+        self.write_dual_write_activity(self.manager, "7", fetched_at=LATER)
+        self.insert_snapshot(self.manager, stripped)
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        counters = self.summary(backfill)["providers"][INTERVALS]
+        self.assertEqual(counters["skipped_invalid"], 0)
+        self.assertEqual(counters["inserted"], 0)
+        # A stripped snapshot is never a deletion source: the backfill keeps the row.
+        self.assertEqual(
+            self.rows("SELECT state FROM activity_records"), [{"state": "active"}]
         )
 
     def test_pending_summary_before_any_run_has_zero_counters(self) -> None:
@@ -794,6 +842,45 @@ class ReprojectionTests(BackfillFixture):
             self.summary(backfill)["providers"][INTERVALS]["reprojected"], 3
         )
 
+    def test_live_ingested_wahoo_rows_reproject_into_an_on_demand_counter_bucket(
+        self,
+    ) -> None:
+        # Wahoo is ingested live and is not backfilled, so its counters bucket
+        # does not exist until a bumped Wahoo mapper re-projects its raw rows.
+        payload = {
+            "synced_at": NOW,
+            "workouts": [
+                {"id": 7, "starts": "2026-09-19T06:00:00Z", "workout_type_id": 1}
+            ],
+        }
+        plan = wahoo_ingest_plan(payload, zone=ZONE)
+        with self.manager.unit_of_work() as db:
+            ingest_plan(
+                db,
+                plan,
+                retrieved_at=canonical_plans.wahoo_payload_retrieved_at(
+                    payload, zone=ZONE
+                )
+                or self.fail("retrieval time"),
+                deletion_window=None,
+                zone=ZONE,
+            )
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+        self.assertNotIn(WAHOO, self.summary(backfill)["providers"])
+
+        key = (WAHOO, ACTIVITY_KIND)
+        bumped = {key: canonical_plans._MAPPER_VERSIONS[key] + 1}
+        with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
+            self.run_to_completion(backfill)
+            providers = self.summary(backfill)["providers"]
+
+        self.assertEqual(providers[WAHOO]["reprojected"], 1)
+        self.assertEqual(providers[WAHOO]["retired"], 0)
+        self.assertEqual(providers[INTERVALS]["reprojected"], 0)
+        self.assertEqual(providers[GARMIN]["reprojected"], 0)
+        self.assertEqual(self.count("activity_records"), 1)
+
     def test_comma_decimal_wellness_stored_at_the_previous_version_is_reprojected(
         self,
     ) -> None:
@@ -964,6 +1051,8 @@ class ReprojectionTests(BackfillFixture):
         with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
             self.run_to_completion(backfill)
             for (provider, kind), version in bumped.items():
+                if provider == WAHOO:
+                    continue  # live-ingested; this fixture stores no Wahoo rows
                 with self.subTest(provider=provider, kind=kind):
                     rows = self.rows(
                         "SELECT COUNT(*) AS n FROM provider_records WHERE provider = ? "

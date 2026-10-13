@@ -55,6 +55,7 @@ from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.transcribe_post import TranscribePostRoutes
+from backend.http_api.wahoo import WahooGetRoutes, WahooPostRoutes
 from backend.performance.report_service import (
     TrainingDerivedReadService,
     TrainingProfileSelectionService,
@@ -173,6 +174,8 @@ class HttpPublicServices:
     performance_state: Callable[[], Any]
     feedback_state: Callable[[], Any]
     sync_state: Callable[[], Any]
+    canonical_performance_source: Callable[[], Any]
+    season_source: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -257,6 +260,7 @@ class HttpDomainRouteServices:
     privacy: HttpPrivacyServices
     sync: HttpSyncServices
     nutrition: HttpNutritionServices
+    wahoo: Callable[[], Any] | None = None
 
 
 class HttpApiAssembly:
@@ -287,6 +291,7 @@ class HttpApiAssembly:
         privacy = dependencies.domains.privacy
         sync = dependencies.domains.sync
         nutrition = dependencies.domains.nutrition
+        wahoo_connection_service = dependencies.domains.wahoo
         resources = core.resources
         handler_services = core.handler
         handler_configuration = handler_services.handler_configuration
@@ -418,6 +423,7 @@ class HttpApiAssembly:
         )
 
         def training_report_services() -> TrainingReportServices:
+            canonical = public.canonical_performance_source()
             records = TrainingRecordsService(
                 database_manager=database_manager(),
                 read_snapshot=report_snapshot,
@@ -432,6 +438,7 @@ class HttpApiAssembly:
                     if kind == "equipment" and athlete.equipment
                     else {}
                 ),
+                canonical=canonical,
             )
             report_read = TrainingReportReadService(
                 read_snapshot=report_snapshot,
@@ -440,6 +447,8 @@ class HttpApiAssembly:
                 read_feedback=report_feedback,
                 today=local_today,
                 load_scenarios=load_scenarios,
+                season_source=public.season_source(),
+                canonical=canonical,
             )
             return TrainingReportServices(
                 records=records,
@@ -451,6 +460,7 @@ class HttpApiAssembly:
                     read_recovery=report_recovery,
                     read_performance=report_performance,
                     today=local_today,
+                    canonical=canonical,
                 ),
                 season=TrainingSeasonReadService(
                     read_snapshot=report_snapshot,
@@ -458,6 +468,7 @@ class HttpApiAssembly:
                     read_observations=records.observations,
                     today=local_today,
                     season_preparation=season_preparation,
+                    season_source=public.season_source(),
                 ),
                 timezone=report_timezone,
             )
@@ -544,6 +555,16 @@ class HttpApiAssembly:
         self.nutrition_put_routes = NutritionPutRoutes(
             diary_service, meal_library_service
         )
+        self.wahoo_get_routes = (
+            WahooGetRoutes(wahoo_connection_service, maintenance_gate)
+            if wahoo_connection_service
+            else None
+        )
+        self.wahoo_post_routes = (
+            WahooPostRoutes(wahoo_connection_service)
+            if wahoo_connection_service
+            else None
+        )
         self.route_dispatcher = HttpRouteDispatcher(
             (
                 self.public_get_routes,
@@ -557,6 +578,7 @@ class HttpApiAssembly:
                 self.privacy_get_routes,
                 self.nutrition_get_routes,
                 self.analysis_routes,
+                *((self.wahoo_get_routes,) if self.wahoo_get_routes else ()),
             ),
             (
                 self.settings_put_routes,
@@ -581,6 +603,7 @@ class HttpApiAssembly:
             self.nutrition_post_routes,
             self.analysis_routes,
             self.equipment_post_routes,
+            self.wahoo_post_routes,
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,

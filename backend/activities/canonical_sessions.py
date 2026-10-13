@@ -21,6 +21,20 @@ provider, then activity id). A record is a duplicate of at most one primary, and
 every input record appears in exactly one session. A Garmin-provider duplicate
 of a Garmin-recorded Intervals copy joins that copy's Wahoo session.
 
+Wahoo-provider records (direct Wahoo ingest) join the same bundling:
+
+* a Wahoo-provider record duplicates an Intervals.icu record recorded by Wahoo when
+  the starts are within 30 minutes, the sport families agree (or either is
+  "other"), and every comparable measurement agrees (the Garmin-versus-Intervals
+  tolerances apply). Canonical records carry no provider file key, so this link is
+  always heuristic.
+* a Garmin-provider cycling ride that matched no Intervals.icu record duplicates a
+  Wahoo-provider cycling ride under the Wahoo/Garmin-copy rule above. A Wahoo
+  record that is itself a duplicate passes its own primary on to the Garmin record,
+  so Intervals.icu stays primary over Wahoo and Wahoo over Garmin.
+
+Each duplicate carries the kind of link that joined it to its session.
+
 Candidates are found by a sorted wall-clock window (``_WallWindow``) instead of a
 scan over every record. The window contains exactly the candidates the start rule
 accepts, so the sessions are the ones the full comparison would produce.
@@ -30,13 +44,18 @@ from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, tzinfo
 from typing import Final
 
 from backend.canonical.records import ActivityRecord
 from backend.canonical.sports import legacy_activity_family
-from backend.canonical.vocabulary import ProviderId, RecordingOrigin, Sport
+from backend.canonical.vocabulary import (
+    ActivityLinkKind,
+    ProviderId,
+    RecordingOrigin,
+    Sport,
+)
 
 __all__ = ["ActivitySession", "bundle_sessions"]
 
@@ -49,10 +68,15 @@ _OTHER_FAMILY: Final = "other"
 
 @dataclass(frozen=True, slots=True)
 class ActivitySession:
-    """One activity and the records that duplicate it."""
+    """One activity and the records that duplicate it.
+
+    ``link_kinds`` runs parallel to ``duplicates``. It describes how each duplicate
+    was joined and does not take part in equality.
+    """
 
     primary: ActivityRecord
     duplicates: tuple[ActivityRecord, ...]
+    link_kinds: tuple[ActivityLinkKind, ...] = field(default=(), compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,7 +205,49 @@ def _assign_duplicates(entries: tuple[_Entry, ...]) -> dict[int, int]:
         if matches:
             target_index = min(matches)
             duplicate_of[index] = duplicate_of.get(target_index, target_index)
+    _assign_wahoo_provider_duplicates(entries, duplicate_of, intervals_window)
     return duplicate_of
+
+
+def _assign_wahoo_provider_duplicates(
+    entries: tuple[_Entry, ...],
+    duplicate_of: dict[int, int],
+    intervals_window: _WallWindow,
+) -> None:
+    """Join Wahoo-provider records to Intervals.icu copies, then Garmin records to Wahoo."""
+    for index, entry in enumerate(entries):
+        if entry.record.provenance.provider is not ProviderId.WAHOO:
+            continue
+        matches = [
+            target_index
+            for target_index in intervals_window.near(entry.wall)
+            if _wahoo_matches_intervals(entry, entries[target_index])
+        ]
+        if matches:
+            target_index = min(matches)
+            duplicate_of[index] = duplicate_of.get(target_index, target_index)
+    wahoo_rides = [
+        index
+        for index, entry in enumerate(entries)
+        if entry.record.provenance.provider is ProviderId.WAHOO
+        and entry.record.sport is Sport.RIDE
+    ]
+    wahoo_window = _WallWindow(entries, wahoo_rides)
+    for index, entry in enumerate(entries):
+        if (
+            entry.record.provenance.provider is not ProviderId.GARMIN
+            or entry.record.sport is not Sport.RIDE
+            or index in duplicate_of
+        ):
+            continue
+        matches = [
+            target_index
+            for target_index in wahoo_window.near(entry.wall)
+            if _wahoo_and_garmin_copy_match(entries[target_index], entry)
+        ]
+        if matches:
+            target_index = min(matches)
+            duplicate_of[index] = duplicate_of.get(target_index, target_index)
 
 
 def _sessions(
@@ -193,8 +259,13 @@ def _sessions(
     for index in range(len(entries)):
         if index in duplicate_of:
             members[duplicate_of[index]].append(entries[index].record)
+    # Every rule is a heuristic comparison: provider records carry no shared file key.
     return tuple(
-        ActivitySession(entries[primary].record, tuple(duplicates))
+        ActivitySession(
+            entries[primary].record,
+            tuple(duplicates),
+            (ActivityLinkKind.HEURISTIC,) * len(duplicates),
+        )
         for primary, duplicates in members.items()
     )
 
@@ -208,6 +279,15 @@ def _garmin_matches_intervals(garmin: _Entry, intervals: _Entry) -> bool:
     ):
         return False
     return _garmin_measurements_agree(garmin.record, intervals.record)
+
+
+def _wahoo_matches_intervals(wahoo: _Entry, intervals: _Entry) -> bool:
+    if not _is_intervals(intervals.record):
+        return False
+    if intervals.record.provenance.recorded_by is not RecordingOrigin.WAHOO:
+        return False
+    # Same start, family and tolerance rules as a Garmin record against Intervals.
+    return _garmin_matches_intervals(wahoo, intervals)
 
 
 def _garmin_measurements_agree(

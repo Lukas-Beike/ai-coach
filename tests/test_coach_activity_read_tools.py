@@ -5,11 +5,17 @@ from __future__ import annotations
 import unittest
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, patch
 
+from activity_row_support import SnapshotActivityRows
+
+from backend.canonical.vocabulary import MetricKind
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.errors import AppError
+from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.runtime.ports import ObservationSourceSelector
 
 
 class CoachActivityReadToolServiceTests(unittest.TestCase):
@@ -143,6 +149,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         activity_read = ActivityAnalysisReadService(
             manager,
             snapshot_repository,
+            CompactActivityRows(SnapshotActivityRows(snapshot_repository)),
             feedback,
         )
         garmin_snapshot = {"recent_wellness": []}
@@ -188,6 +195,81 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             service.execute("get_activity_details", {"activity_id": " "})
         self.assertEqual(caught.exception.status, 400)
         self.assertEqual(caught.exception.reason, "invalid_activity_request")
+
+    def test_detail_passes_canonical_inputs_resolved_once_per_call(self):
+        selector, service = _canonical_activity_tool(
+            _activity_snapshot([{"id": "2026-09-22"}])
+        )
+        with patch(
+            "backend.performance.activity_read_service.current_performance_context",
+            return_value={},
+        ) as project:
+            service.execute("get_activity_details", {"activity_id": "synthetic-1"})
+        canonical = project.call_args.kwargs["canonical"]
+        self.assertEqual(canonical.wellness_day, date(2026, 9, 22))
+        self.assertIsNotNone(canonical.recovery)
+        selector.reader_for.assert_called_once()
+        served_kinds = {
+            call.args[1]
+            for call in selector.reader_for.return_value.observations.call_args_list
+        }
+        self.assertIn(MetricKind.CTL, served_kinds)
+        self.assertIn(MetricKind.ATL, served_kinds)
+
+    def test_detail_without_wellness_rows_keeps_legacy_call_shape(self):
+        selector, service = _canonical_activity_tool(_activity_snapshot([]))
+        with patch(
+            "backend.performance.activity_read_service.current_performance_context",
+            return_value={},
+        ) as project:
+            service.execute("get_activity_details", {"activity_id": "synthetic-1"})
+        self.assertNotIn("canonical", project.call_args.kwargs)
+        # The wellness observations are now read to find the days, once per call.
+        selector.reader_for.assert_called_once()
+
+
+def _activity_snapshot(recent_wellness: list[dict]) -> dict:
+    raw_activity = {
+        "id": "synthetic-1",
+        "type": "Run",
+        "start_date_local": "2026-09-22T07:00:00",
+        "moving_time": 3600,
+    }
+    return {
+        "synced_at": "synthetic-sync",
+        "recent_wellness": recent_wellness,
+        "recent_activities": [{"id": "synthetic-1", "type": "Run"}],
+        "raw_provider_data": {"activities": [raw_activity]},
+    }
+
+
+def _canonical_activity_tool(snapshot: dict):
+    """Wire the coach tool over the real activity service with a selecting source."""
+    inner = Mock()
+    inner.observations.return_value = ()
+    selector = Mock(spec=ObservationSourceSelector)
+    selector.reader_for.return_value = inner
+    snapshot_reader = Mock()
+    snapshot_reader.latest_snapshot.return_value = snapshot
+    feedback = Mock()
+    feedback.list.return_value = []
+    manager = MagicMock()
+    activity_read = ActivityAnalysisReadService(
+        manager,
+        snapshot_reader,
+        CompactActivityRows(SnapshotActivityRows(snapshot_reader)),
+        feedback,
+        canonical=CanonicalPerformanceSource(
+            database_manager=lambda: manager,
+            observation_reader=lambda: selector,
+        ),
+    )
+    garmin = Mock(snapshot=Mock(return_value={}))
+    profile = Mock(get=Mock(return_value={}))
+    service = CoachActivityReadToolService(
+        activity_read, garmin, profile, lambda: date(2026, 9, 23)
+    )
+    return selector, service
 
 
 if __name__ == "__main__":

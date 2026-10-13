@@ -94,8 +94,14 @@ def save_snapshot(
     update_full_sync: bool,
     activity_days: int | None,
     set_value: Callable[[str, str, Any], None],
+    activity_count: int | None = None,
 ) -> None:
-    repository.save(db, snapshot, snapshot["synced_at"])
+    if activity_count is None:
+        repository.save(db, snapshot, snapshot["synced_at"])
+    else:
+        repository.save(
+            db, snapshot, snapshot["synced_at"], activity_count=activity_count
+        )
     if update_full_sync:
         set_value("last_sync_at", snapshot["synced_at"], db)
         set_value("last_sync_error", "", db)

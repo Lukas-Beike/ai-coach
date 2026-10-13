@@ -46,7 +46,14 @@ from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
 )
-from backend.providers.snapshot_projection import stored_retrieved_at
+from backend.providers.snapshot_projection import (
+    intervals_snapshot_is_stripped,
+    stored_retrieved_at,
+)
+from backend.providers.wahoo_activity_mapping import (
+    MAPPER_VERSION as WAHOO_ACTIVITY_VERSION,
+)
+from backend.providers.wahoo_activity_mapping import map_wahoo_activities
 
 ACTIVITY_RECORD_KIND: Final = "activity"
 WELLNESS_RECORD_KIND: Final = "wellness"
@@ -58,6 +65,9 @@ MAX_RECORD_ID_LENGTH: Final = 256
 INTERVALS_ACTIVITY_ID_KEY: Final = "id"
 INTERVALS_WELLNESS_ID_KEY: Final = "id"
 GARMIN_ACTIVITY_ID_KEY: Final = "activityId"
+WAHOO_ACTIVITY_ID_KEY: Final = "id"
+WAHOO_SYNCED_AT_KEY: Final = "synced_at"
+WAHOO_WORKOUTS_KEY: Final = "workouts"
 
 GARMIN_SYNCED_AT_KEY: Final = "synced_at"
 GARMIN_FRESHNESS_KEY: Final = "source_freshness"
@@ -279,15 +289,57 @@ def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
     )
 
 
-def intervals_snapshot_ingest_plan(snapshot: Mapping[str, Any], *, zone: tzinfo) -> IngestPlan:
+def wahoo_payload_retrieved_at(payload: object, *, zone: tzinfo) -> datetime | None:
+    """Return when a Wahoo payload was fetched, or None when it carries no usable time."""
+    if not isinstance(payload, Mapping):
+        return None
+    return parse_provider_datetime(payload.get(WAHOO_SYNCED_AT_KEY), zone)
+
+
+def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
+    """Plan the canonical rows of one fetched Wahoo workout payload.
+
+    The payload is ``{"synced_at": <ISO time>, "workouts": [<workout rows>]}``.
+    Without a usable fetch time nothing is planned, so no row is ever stamped with
+    an invented time. A payload whose workout list is not a list plans nothing.
+    """
+    retrieved_at = wahoo_payload_retrieved_at(payload, zone=zone)
+    if retrieved_at is None or not isinstance(payload, Mapping):
+        return IngestPlan(provider=ProviderId.WAHOO)
+    items, raw_records, skipped, present = _activity_batch(
+        payload.get(WAHOO_WORKOUTS_KEY),
+        id_key=WAHOO_ACTIVITY_ID_KEY,
+        mapper=lambda rows: map_wahoo_activities(
+            rows, zone=zone, retrieved_at=retrieved_at
+        ),
+        mapper_version=WAHOO_ACTIVITY_VERSION,
+        zone=zone,
+        retrieved_at=retrieved_at,
+    )
+    return IngestPlan(
+        provider=ProviderId.WAHOO,
+        raw_records=tuple(raw_records),
+        activities=tuple(items),
+        present_activity_ids=frozenset(present),
+        skipped_invalid=skipped,
+    )
+
+
+def intervals_snapshot_ingest_plan(
+    snapshot: Mapping[str, Any], *, zone: tzinfo
+) -> IngestPlan:
     """Plan the Intervals.icu rows of one stored snapshot for the backfill.
 
     A snapshot without a sync time or without a ``raw_provider_data`` block has no
     mapper input. Its ``recent_activities`` fallback is a compact read model, so it
-    is not mapped and counts as one invalid row.
+    is not mapped and counts as one invalid row. A snapshot stored without its
+    activity sections (``intervals_snapshot_is_stripped``) plans only what it still
+    carries; with nothing left to map it plans nothing and counts no invalid row.
     """
     retrieved_at = stored_retrieved_at(snapshot, zone=zone)
     raw = snapshot.get("raw_provider_data")
+    if intervals_snapshot_is_stripped(snapshot) and not isinstance(raw, Mapping):
+        return IngestPlan(provider=ProviderId.INTERVALS)
     if retrieved_at is None or not isinstance(raw, Mapping):
         return IngestPlan(provider=ProviderId.INTERVALS, skipped_invalid=1)
     return intervals_ingest_plan(raw, zone=zone, retrieved_at=retrieved_at)
@@ -299,6 +351,7 @@ _MAPPER_VERSIONS: Final[dict[tuple[str, str], int]] = {
     (ProviderId.INTERVALS.value, ATHLETE_RECORD_KIND): INTERVALS_WELLNESS_VERSION,
     (ProviderId.GARMIN.value, ACTIVITY_RECORD_KIND): GARMIN_ACTIVITY_VERSION,
     (ProviderId.GARMIN.value, HEALTH_RECORD_KIND): GARMIN_HEALTH_VERSION,
+    (ProviderId.WAHOO.value, ACTIVITY_RECORD_KIND): WAHOO_ACTIVITY_VERSION,
 }
 
 
@@ -326,11 +379,25 @@ def current_observation_mapper_versions() -> dict[str, int]:
     Observations carry no state column, so a table row is current only when its
     ``mapper_version`` equals the version returned here for its provider.
     """
-    versions: dict[str, int] = {}
-    for (provider, kind), version in sorted(_MAPPER_VERSIONS.items()):
-        if kind in _OBSERVATION_RECORD_KINDS:
-            versions[provider] = version
-    return versions
+    return observation_mapper_versions(current_mapper_versions())
+
+
+def observation_mapper_versions(versions: Mapping[str, Any]) -> dict[str, int]:
+    """Return the observation mapper version of each provider in ``versions``.
+
+    ``versions`` is keyed by ``provider.record_kind`` as ``current_mapper_versions``
+    returns it; keys of other record kinds and non-integer values are ignored.
+    """
+    result: dict[str, int] = {}
+    for key, version in sorted(versions.items()):
+        provider, _, kind = key.partition(".")
+        if (
+            kind in _OBSERVATION_RECORD_KINDS
+            and isinstance(version, int)
+            and not isinstance(version, bool)
+        ):
+            result[provider] = version
+    return result
 
 
 def reprojection_plan(raw_row: Mapping[str, Any], *, zone: tzinfo) -> IngestPlan | None:
@@ -391,16 +458,31 @@ def _reprojected_activities(
             zone=zone,
             retrieved_at=fetched,
         )
+    elif provider is ProviderId.WAHOO:
+        items, _raw, skipped, _present = _activity_batch(
+            [payload],
+            id_key=WAHOO_ACTIVITY_ID_KEY,
+            mapper=lambda rows: map_wahoo_activities(
+                rows, zone=zone, retrieved_at=fetched
+            ),
+            mapper_version=WAHOO_ACTIVITY_VERSION,
+            zone=zone,
+            retrieved_at=fetched,
+        )
     else:
         items, _raw, skipped, _present = _activity_batch(
             [payload],
             id_key=GARMIN_ACTIVITY_ID_KEY,
-            mapper=lambda rows: map_garmin_activities(rows, zone=zone, retrieved_at=fetched),
+            mapper=lambda rows: map_garmin_activities(
+                rows, zone=zone, retrieved_at=fetched
+            ),
             mapper_version=GARMIN_ACTIVITY_VERSION,
             zone=zone,
             retrieved_at=fetched,
         )
-    return IngestPlan(provider=provider, activities=tuple(items), skipped_invalid=skipped)
+    return IngestPlan(
+        provider=provider, activities=tuple(items), skipped_invalid=skipped
+    )
 
 
 def _reprojected_health(

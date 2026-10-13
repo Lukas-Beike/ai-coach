@@ -451,7 +451,9 @@ def _normalize_plan_push_job(
     provider: str, values: dict[str, Any], registry: ProviderRegistry
 ) -> dict[str, Any]:
     if not registry.supports_job(provider, "plan_push"):
-        raise JobValidationError("Plan-Push-Jobs sind nur für Intervals.icu zulässig.")
+        raise JobValidationError(
+            "Plan-Push-Jobs sind nur für Intervals.icu und Wahoo zulässig."
+        )
     if set(values) - {"entries", "reason", "repair"}:
         raise JobValidationError("Ein Plan-Push-Job enthält nicht unterstützte Felder.")
     entries = values.get("entries")

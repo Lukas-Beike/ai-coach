@@ -22,7 +22,7 @@ SNAKE_CASE = re.compile(r"^[a-z][a-z0-9_]*$")
 class CanonicalVocabularyTests(unittest.TestCase):
     def test_provider_identifiers_are_stable(self) -> None:
         self.assertEqual(
-            {"INTERVALS": "intervals", "GARMIN": "garmin"},
+            {"INTERVALS": "intervals", "GARMIN": "garmin", "WAHOO": "wahoo"},
             {member.name: member.value for member in ProviderId},
         )
 

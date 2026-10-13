@@ -15,7 +15,11 @@ from backend.planning import workouts as planning_workouts
 from backend.planning.workout_export import build_planned_workout_export
 from backend.providers.intervals_client import IntervalsClient
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
-from backend.sync.workout_export import WorkoutExportCapabilities, WorkoutExportPort
+from backend.sync.workout_export import (
+    WorkoutExportCapabilities,
+    WorkoutExportPort,
+    WorkoutLibraryExportPort,
+)
 
 TODAY = date(2026, 9, 20)
 LOCAL_ID = "12345678-1234-5678-1234-567812345678"
@@ -47,10 +51,12 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
         self.client = IntervalsClient(config_stub(), request=self.request)
         self.export = IntervalsWorkoutExport(lambda: self.client)
 
-    def test_declares_planned_events_capability_only(self):
+    def test_declares_planned_events_and_library_capabilities_only(self):
         self.assertIsInstance(self.export, WorkoutExportPort)
+        self.assertIsInstance(self.export, WorkoutLibraryExportPort)
         self.assertEqual(
-            self.export.capabilities, WorkoutExportCapabilities(planned_events=True)
+            self.export.capabilities,
+            WorkoutExportCapabilities(planned_events=True, library=True),
         )
 
     def test_serialize_matches_planning_payload_and_never_resolves_client(self):

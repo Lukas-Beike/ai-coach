@@ -21,7 +21,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
             "read_only_tools",
             "clarification",
             "training_patch",
-            "sync_state",
+            "inspector",
             "proposal_creation",
             "tool_dispatch",
             "job_store",
@@ -41,7 +41,6 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
         key_values = Mock(name="key_values")
         logger = Mock(name="logger")
         root = Mock(name="repository_root")
-        sync_defaults = {"intervals": 30}
         assembly = CoachStructuredToolRoundAssembly(
             dependencies=CoachStructuredToolRoundAssembly.Inputs(
                 runtime=StructuredToolRoundRuntime(
@@ -54,8 +53,6 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
                 contract=StructuredToolRoundContract(
                     tool_names=dependencies["tool_names"],
                     read_only_tools=dependencies["read_only_tools"],
-                    sync_period_defaults=sync_defaults,
-                    all_sync_days=3650,
                     limits=dependencies["limits"],
                 ),
                 services=StructuredToolRoundServices(
@@ -67,7 +64,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
                     planning_authority_service=dependencies["planning_authority"],
                 ),
                 state=StructuredToolRoundState(
-                    sync_state_repository=dependencies["sync_state"],
+                    duplicate_inspector=dependencies["inspector"],
                     job_store=dependencies["job_store"],
                 ),
                 conversation=StructuredToolRoundConversation(
@@ -82,7 +79,6 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
                 "key_values": key_values,
                 "root": root,
                 "logger": logger,
-                "sync_defaults": sync_defaults,
                 "journal_jobs": journal_jobs,
                 "round_jobs": round_jobs,
             }
@@ -97,7 +93,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
             "read_only_tools",
             "clarification",
             "training_patch",
-            "sync_state",
+            "inspector",
             "proposal_creation",
             "tool_dispatch",
             "job_store",
@@ -120,7 +116,9 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
         self.assertIs(
             service._preparation._dialogue_action, deps["dialogue_action"].return_value
         )
-        self.assertIs(service._preparation._sync_state, deps["sync_state"].return_value)
+        self.assertIs(
+            service._execution._duplicate_inspector, deps["inspector"].return_value
+        )
         self.assertIs(service._execution._key_values, deps["key_values"])
         self.assertIs(
             service._execution._training_patch, deps["training_patch"].return_value

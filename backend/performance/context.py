@@ -17,6 +17,7 @@ from backend.performance import recovery_context as performance_recovery_context
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.training_focus import training_focus
+from backend.providers import intervals_performance_fields as intervals_perf_fields
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -29,6 +30,30 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
     return None
 
 
+def _activities_and_wellness(
+    snapshot: dict[str, Any], canonical: CanonicalPerformanceInputs | None
+) -> tuple[list[Any], list[dict[str, Any]]]:
+    """Return the compact activities and wellness rows of the performance context.
+
+    Canonical inputs hold the rows rebuilt from the canonical read ports; without
+    them the snapshot sections are read as before.
+    """
+    if canonical is not None and canonical.activities is not None:
+        activities: list[Any] = list(canonical.activities)
+    else:
+        raw_activities = snapshot.get("recent_activities")
+        activities = raw_activities if isinstance(raw_activities, list) else []
+    if canonical is not None and canonical.wellness_rows is not None:
+        return activities, list(canonical.wellness_rows)
+    raw_wellness = snapshot.get("recent_wellness")
+    wellness_rows = (
+        [row for row in raw_wellness if isinstance(row, dict)]
+        if isinstance(raw_wellness, list)
+        else []
+    )
+    return activities, wellness_rows
+
+
 def current_performance_context(
     snapshot: dict[str, Any] | None,
     garmin: dict[str, Any],
@@ -39,7 +64,8 @@ def current_performance_context(
 ) -> dict[str, Any]:
     """Compose the current performance projection from explicit inputs.
 
-    ``canonical`` replaces only CTL and ATL in the load context when given.
+    ``canonical`` replaces CTL and ATL in the load context, the sport thresholds and
+    VO2max, and the matching recovery values, when given.
     """
     if not snapshot:
         unavailable = {
@@ -61,13 +87,7 @@ def current_performance_context(
 
     athlete_value = snapshot.get("athlete")
     athlete: dict[str, Any] = athlete_value if isinstance(athlete_value, dict) else {}
-    raw_activities = snapshot.get("recent_activities")
-    activities = raw_activities if isinstance(raw_activities, list) else []
-    wellness_rows = (
-        [row for row in snapshot.get("recent_wellness", []) if isinstance(row, dict)]
-        if isinstance(snapshot.get("recent_wellness"), list)
-        else []
-    )
+    activities, wellness_rows = _activities_and_wellness(snapshot, canonical)
     latest_wellness = max(
         wellness_rows,
         key=lambda row: str(row.get("id") or ""),
@@ -75,7 +95,12 @@ def current_performance_context(
     )
 
     recovery = performance_recovery_context.performance_recovery_context(
-        garmin, latest_wellness, wellness_rows, today
+        garmin,
+        latest_wellness,
+        wellness_rows,
+        today,
+        canonical=None if canonical is None else canonical.recovery,
+        averages=None if canonical is None else canonical.recovery_averages,
     )
     sleep_hours = recovery["sleep_hours"]
     sleep_source = recovery["sleep_source"]
@@ -92,6 +117,9 @@ def current_performance_context(
         snapshot,
         profile,
         performance_garmin_metrics.garmin_performance_metrics(garmin, today),
+        canonical=None if canonical is None else canonical.current,
+        activities=activities,
+        wellness_rows=wellness_rows,
     )
     load_context = performance_load_context.performance_load_context(
         activities, wellness_rows, latest_wellness, today, canonical=canonical
@@ -127,19 +155,29 @@ def current_performance_context(
     )
     return {
         "available": True,
-        "personal_recovery": personal_recovery(wellness_rows, garmin, profile, today),
+        "personal_recovery": personal_recovery(
+            wellness_rows,
+            garmin,
+            profile,
+            today,
+            canonical=None if canonical is None else canonical.personal_recovery,
+        ),
         "garmin_training_load": garmin_projection.garmin_training_load_projection(
             garmin, today
         ),
         "training_focus": training_focus(
-            snapshot, garmin, today, str(profile.get("timezone") or "UTC")
+            snapshot,
+            garmin,
+            today,
+            str(profile.get("timezone") or "UTC"),
+            activity_rows=None if canonical is None else canonical.activity_rows,
         ),
         "source": "Letzter gespeicherter Intervals.icu-Snapshot",
         "as_of": snapshot.get("synced_at"),
         "metrics": metrics,
         "thresholds": {
-            "icu_ftp": metrics["cycling_ftp_watts"]["value"],
-            "icu_w_prime": athlete.get("icu_w_prime"),
+            intervals_perf_fields.CONFIGURED_FTP: metrics["cycling_ftp_watts"]["value"],
+            intervals_perf_fields.W_PRIME: athlete.get(intervals_perf_fields.W_PRIME),
             "max_hr": athlete.get("max_hr"),
             "lthr": athlete.get("lthr"),
             "weight": metrics["weight_kg"]["value"],

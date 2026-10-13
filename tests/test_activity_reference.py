@@ -15,6 +15,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
+from activity_row_support import FixedActivityRows, SnapshotActivityRows
+
 from backend.activities.activity_reference import (
     ActivityReferences,
     NoActivityReferences,
@@ -35,8 +37,10 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.db import DatabaseManager, canonical_store, row_factory
+from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.sync.activity_details import ActivityDetailRefreshService
@@ -198,9 +202,11 @@ class ActivityReadReferenceTests(_Fixture):
                 ]
             )
         )
+        snapshot_reader = Mock(latest_snapshot=Mock(return_value=snapshot))
         return ActivityReadService(
             self.manager,
-            Mock(latest_snapshot=Mock(return_value=snapshot)),
+            snapshot_reader,
+            CompactActivityRows(SnapshotActivityRows(snapshot_reader)),
             feedback,
             references=ActivityReferences(self.manager),
         )
@@ -290,6 +296,7 @@ class ActivityCallerResolutionTests(_Fixture):
                     }
                 )
             ),
+            CompactActivityRows(FixedActivityRows()),
             Mock(
                 attach_to_activities=Mock(side_effect=lambda rows: list(rows)),
                 list=Mock(return_value=[]),
@@ -309,7 +316,7 @@ class ActivityCallerResolutionTests(_Fixture):
         service = ActivityFeedbackService(
             self.manager,
             repository,
-            Mock(),
+            FixedActivityRows(),
             references=ActivityReferences(self.manager),
         )
         service.save(local, {"session_rpe": 6})
@@ -318,16 +325,14 @@ class ActivityCallerResolutionTests(_Fixture):
 
     def test_coach_feedback_route_accepts_local_id(self) -> None:
         local = self.seed("ride-1")
-        snapshot_reader = Mock(
-            latest_snapshot=Mock(return_value={"recent_activities": [{"id": "ride-1"}]})
-        )
+        rows = FixedActivityRows([{"id": "ride-1"}])
         repository = Mock()
         repository.get.return_value = None
         repository.list.return_value = [{"activity_id": "ride-1", "session_rpe": 6}]
         service = ActivityFeedbackService(
             self.manager,
             repository,
-            snapshot_reader,
+            rows,
             references=ActivityReferences(self.manager),
         )
         routes = FeedbackPostRoutes(lambda: Mock(), lambda: service)
@@ -340,13 +345,11 @@ class ActivityCallerResolutionTests(_Fixture):
         self.assertEqual("ride-1", body["activity_feedback"]["activity_id"])
 
     def test_coach_feedback_route_keeps_not_found_for_unknown_local_id(self) -> None:
-        snapshot_reader = Mock(
-            latest_snapshot=Mock(return_value={"recent_activities": [{"id": "ride-1"}]})
-        )
+        rows = FixedActivityRows([{"id": "ride-1"}])
         service = ActivityFeedbackService(
             self.manager,
             Mock(get=Mock(return_value=None)),
-            snapshot_reader,
+            rows,
             references=ActivityReferences(self.manager),
         )
         routes = FeedbackPostRoutes(lambda: Mock(), lambda: service)
@@ -362,10 +365,10 @@ class ActivityCallerResolutionTests(_Fixture):
         resolver = Mock(return_value="ride-1")
         service = EquipmentService(
             self.manager,
-            read_snapshot=dict,
+            read_activity_rows=tuple,
             today=lambda: TODAY,
             utc_now=lambda: STAMP,
-            canonical_rows=lambda _snapshot: ([], 0),
+            deduplicate=lambda _rows: ([], 0),
             resolve_activity=resolver,
         )
         with self.assertRaises(AppError):
@@ -375,10 +378,10 @@ class ActivityCallerResolutionTests(_Fixture):
     def test_equipment_without_resolver_keeps_the_reference_unchanged(self) -> None:
         service = EquipmentService(
             self.manager,
-            read_snapshot=dict,
+            read_activity_rows=tuple,
             today=lambda: TODAY,
             utc_now=lambda: STAMP,
-            canonical_rows=lambda _snapshot: ([], 0),
+            deduplicate=lambda _rows: ([], 0),
         )
         with self.assertRaises(AppError):
             service.assign({"activity_id": "act_missing", "equipment_id": "bike-1"})
@@ -390,15 +393,12 @@ class ActivityCallerResolutionTests(_Fixture):
             self.manager,
             Mock(),
             Mock(latest_snapshot=Mock(return_value=None)),
+            FixedActivityRows(),
             Mock(),
             Mock(),
             references=ActivityReferences(self.manager),
         )
         with (
-            patch(
-                "backend.activities.duplicate_service.latest_wahoo_garmin_duplicate",
-                return_value=None,
-            ),
             patch(
                 "backend.activities.duplicate_service.validate_duplicate_delete",
                 side_effect=RuntimeError("stop after resolution"),
@@ -451,13 +451,10 @@ class ActivityCallerResolutionTests(_Fixture):
                 {"type": "watts", "data": [200, 210, 220]},
             ],
         ]
-        state = Mock()
-        state.latest_snapshot.return_value = {
-            "raw_provider_data": {"activities": [{"id": "ride-1"}]}
-        }
         service = ActivityDetailRefreshService(
             api_client=api,
-            state_repository=state,
+            database_manager=self.manager,
+            row_reader=FixedActivityRows([{"id": "ride-1"}]),
             store=ActivityDetailStore(self.manager),
             utc_now=lambda: "2026-10-02T08:00:00Z",
             configured=True,
@@ -466,6 +463,78 @@ class ActivityCallerResolutionTests(_Fixture):
         service.refresh(local)
         self.assertEqual("/activity/ride-1", api.get.call_args_list[0].args[0])
         self.assertIsNotNone(ActivityDetailStore(self.manager).get("ride-1"))
+
+
+class ActivityFeedbackProviderColumnTests(_Fixture):
+    """Feedback rows record the provider of the resolved activity reference."""
+
+    def _service(self, activities: list[dict[str, object]] | None = None):
+        return ActivityFeedbackService(
+            self.manager,
+            ActivityFeedbackRepository(lambda: STAMP),
+            FixedActivityRows(activities),
+            references=ActivityReferences(self.manager),
+        )
+
+    def _provider_of(self, activity_id: str):
+        with self.manager.unit_of_work() as db:
+            row = db.execute(
+                "SELECT provider FROM activity_feedback WHERE activity_id = ?",
+                (activity_id,),
+            ).fetchone()
+        return row["provider"]
+
+    def test_local_id_records_the_intervals_provider(self) -> None:
+        local = self.seed("ride-1")
+        self._service().save(local, {"session_rpe": 6})
+        self.assertEqual("intervals", self._provider_of("ride-1"))
+
+    def test_unresolved_id_records_no_provider(self) -> None:
+        self._service().save("ride-unknown", {"notes": "passthrough"})
+        self.assertIsNone(self._provider_of("ride-unknown"))
+
+    def test_null_reference_resolver_records_no_provider(self) -> None:
+        service = ActivityFeedbackService(
+            self.manager,
+            ActivityFeedbackRepository(lambda: STAMP),
+            FixedActivityRows(),
+            references=NoActivityReferences(),
+        )
+        service.save("ride-1", {"notes": "no resolver"})
+        self.assertIsNone(self._provider_of("ride-1"))
+
+    def test_update_without_resolved_provider_keeps_existing_provider(self) -> None:
+        local = self.seed("ride-1")
+        service = self._service()
+        service.save(local, {"session_rpe": 5})
+        service.save("ride-1", {"notes": "later edit by provider id"})
+        self.assertEqual("intervals", self._provider_of("ride-1"))
+
+    def test_coach_save_records_the_intervals_provider(self) -> None:
+        local = self.seed("ride-1")
+        service = self._service([{"id": "ride-1"}])
+        result = service.save_coach(local, {"session_rpe": 4})
+        self.assertEqual("ride-1", result["activity_feedback"]["activity_id"])
+        self.assertEqual("intervals", self._provider_of("ride-1"))
+
+    def test_api_feedback_json_keeps_the_released_keys(self) -> None:
+        local = self.seed("ride-1")
+        service = self._service()
+        saved = service.save(local, {"notes": "felt good", "session_rpe": 3})
+        self.assertEqual(
+            {
+                "activity_id",
+                "activity_name",
+                "activity_date",
+                "notes",
+                "session_rpe",
+                "deviation_reason",
+                "created_at",
+                "updated_at",
+            },
+            set(saved["activity_feedback"]),
+        )
+        self.assertEqual(saved["activity_feedback"], service.list()[0])
 
 
 if __name__ == "__main__":

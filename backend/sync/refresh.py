@@ -213,7 +213,10 @@ class ProviderRefreshTracker:
             return "rate_limited"
         if (
             status in {401, 403}
-            or any(token in reason for token in ("auth", "unauthorized", "forbidden"))
+            or any(
+                token in reason
+                for token in ("auth", "unauthorized", "forbidden", "reconnect")
+            )
             or any(code in message for code in ("http 401", "http 403"))
         ):
             return "auth_required"

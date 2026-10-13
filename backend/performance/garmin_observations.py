@@ -8,17 +8,9 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 
-_OBSERVATION_DATE_FIELDS = (
-    "calendarDate",
-    "summaryDate",
-    "date",
-    "measurementDate",
-    "timestampGMT",
-    "timestamp",
-    "startTimeLocal",
-    "startTimeGMT",
-)
+_OBSERVATION_DATE_FIELDS = garmin_perf_fields.OBSERVATION_DATE_FIELDS
 
 
 def _garmin_record_date(value: Any) -> str | None:
@@ -83,8 +75,18 @@ def garmin_source_observed_at(value: Any) -> str | None:
     return max(dates, default=None)
 
 
-def garmin_sleep_observation_date(snapshot: dict[str, Any]) -> str | None:
-    """Return the authoritative sleep observation date from a snapshot."""
+_FROM_SNAPSHOT: Any = object()
+
+
+def garmin_sleep_observation_date(
+    snapshot: dict[str, Any], observed_day: Any = _FROM_SNAPSHOT
+) -> str | None:
+    """Return the authoritative sleep observation date from a snapshot.
+
+    Stored freshness stays authoritative. Without it the date comes from the
+    snapshot's sleep records, or from ``observed_day`` (an ISO date string or
+    None) when the caller read the day from the canonical sleep observations.
+    """
     if not isinstance(snapshot, dict):
         return None
     freshness = snapshot.get("source_freshness")
@@ -96,18 +98,23 @@ def garmin_sleep_observation_date(snapshot: dict[str, Any]) -> str | None:
                 # Preserve the source-owned value exactly; malformed values
                 # must remain authoritative and must not fall back to raw data.
                 return iso_date_prefix(str(observed_at))
+    if observed_day is not _FROM_SNAPSHOT:
+        return observed_day
     return garmin_source_observed_at(snapshot.get("sleep"))
 
 
 def garmin_sleep_ready_for_checkin(
-    checkin_date: date, snapshot: dict[str, Any]
+    checkin_date: date, snapshot: dict[str, Any], observed_day: Any = _FROM_SNAPSHOT
 ) -> bool:
     """Allow a check-in only for current-day sleep with usable freshness."""
     if not isinstance(checkin_date, date) or isinstance(checkin_date, datetime):
         return False
     if not isinstance(snapshot, dict):
         return False
-    if garmin_sleep_observation_date(snapshot) != checkin_date.isoformat():
+    if (
+        garmin_sleep_observation_date(snapshot, observed_day)
+        != checkin_date.isoformat()
+    ):
         return False
     freshness = snapshot.get("source_freshness")
     if not isinstance(freshness, dict) or not isinstance(freshness.get("sleep"), dict):

@@ -24,14 +24,21 @@ from backend.providers.descriptors import (
     DEFAULT_PROVIDER_DESCRIPTORS,
     GARMIN_ID,
     INTERVALS_ID,
+    WAHOO_ID,
     WEATHER_ID,
 )
 from backend.sync.commands import ProviderRefreshCommandService
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.state import SyncStateRepository
 
 USER_MESSAGE_ID = 7
-DEFAULT_TARGETS = ["local", INTERVALS_ID, GARMIN_ID, CALENDAR_ID, WEATHER_ID]
+DEFAULT_TARGETS = [
+    "local",
+    INTERVALS_ID,
+    GARMIN_ID,
+    CALENDAR_ID,
+    WEATHER_ID,
+    WAHOO_ID,
+]
 
 
 def acme_registry(*, waits: bool = False) -> ProviderRegistry:
@@ -157,20 +164,15 @@ class CoachRefreshClassificationTests(unittest.TestCase):
 class CoachRefreshPreparationTests(unittest.TestCase):
     def make_service(
         self, registry: ProviderRegistry
-    ) -> tuple[CoachStructuredToolPreparationService, Mock, Mock]:
+    ) -> tuple[CoachStructuredToolPreparationService, Mock]:
         dialogue_action = Mock(spec=CoachDialogueActionService)
-        sync_state = Mock(spec=SyncStateRepository)
-        sync_state.sync_period.return_value = 14
         service = CoachStructuredToolPreparationService(
             dialogue_action,
-            sync_state,
             Mock(),
             frozenset(),
-            {},
-            -1,
             registry=registry,
         )
-        return service, dialogue_action, sync_state
+        return service, dialogue_action
 
     @staticmethod
     def classified_action() -> dict[str, Any]:
@@ -196,30 +198,26 @@ class CoachRefreshPreparationTests(unittest.TestCase):
             allow_mutations=True,
         )
 
-    def test_waiting_mock_refresh_gets_wait_flag_and_sync_window(self) -> None:
-        service, dialogue_action, sync_state = self.make_service(
-            acme_registry(waits=True)
-        )
+    def test_waiting_mock_refresh_gets_wait_flag_and_keeps_default_window(
+        self,
+    ) -> None:
+        service, dialogue_action = self.make_service(acme_registry(waits=True))
         dialogue_action.classify.return_value = self.classified_action()
         arguments: dict[str, Any] = {}
 
         self.prepare(service, arguments)
 
         self.assertIs(True, arguments["_wait_for_completion"])
-        self.assertEqual(14, arguments["days"])
-        sync_state.sync_period.assert_called_once_with(ACME_ID, {}, -1)
+        self.assertNotIn("days", arguments)
 
     def test_non_waiting_mock_refresh_is_not_marked_to_wait(self) -> None:
-        service, dialogue_action, sync_state = self.make_service(
-            acme_registry(waits=False)
-        )
+        service, dialogue_action = self.make_service(acme_registry(waits=False))
         dialogue_action.classify.return_value = self.classified_action()
         arguments: dict[str, Any] = {}
 
         self.prepare(service, arguments)
 
         self.assertNotIn("_wait_for_completion", arguments)
-        sync_state.sync_period.assert_not_called()
 
 
 class CoachRefreshDispatchTests(unittest.TestCase):

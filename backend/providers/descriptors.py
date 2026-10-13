@@ -26,6 +26,7 @@ from backend.canonical.vocabulary import ProviderId
 
 INTERVALS_ID = ProviderId.INTERVALS.value
 GARMIN_ID = ProviderId.GARMIN.value
+WAHOO_ID = ProviderId.WAHOO.value
 WEATHER_ID = "weather"
 CALENDAR_ID = "calendar"
 
@@ -35,6 +36,7 @@ _INTERVALS_MAX_SYNC_DAYS = 365
 DEFAULT_MAX_SYNC_DAYS = 90
 _INTERVALS_DEFAULT_SYNC_DAYS = 84
 _GARMIN_DEFAULT_SYNC_DAYS = 84
+_WAHOO_DEFAULT_SYNC_DAYS = 84
 
 _INTERVALS_NOT_CONFIGURED_MESSAGE = (
     "Intervals.icu ist nicht konfiguriert. Bitte INTERVALS_API_KEY in der "
@@ -43,6 +45,9 @@ _INTERVALS_NOT_CONFIGURED_MESSAGE = (
 _GARMIN_NOT_CONFIGURED_MESSAGE = (
     "Garmin ist nicht konfiguriert. Bitte GARMIN_EMAIL oder einen vorhandenen "
     "Garmin-Tokenstore einrichten."
+)
+WAHOO_NOT_CONFIGURED_MESSAGE = (
+    "Wahoo ist nicht verbunden. Bitte Wahoo in den Einstellungen verbinden."
 )
 
 _ALL_INTERVALS_JOB_TYPES = frozenset(
@@ -346,6 +351,8 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         default_sync_days=_GARMIN_DEFAULT_SYNC_DAYS,
         schedule=SchedulePolicy(daily_rank=2, startup_rank=2, daily_marker=True),
         coach_rank=2,
+        # Coach waits for this refresh so a check-in never reads stale recovery data.
+        coach_waits_for_completion=True,
         not_configured_message=_GARMIN_NOT_CONFIGURED_MESSAGE,
         manual_sync=ManualSyncRoute(
             path="/api/garmin/sync",
@@ -400,5 +407,30 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             uses_sync_period=False,
             payload=(("reason", "manuell"),),
         ),
+    ),
+    ProviderDescriptor(
+        provider_id=WAHOO_ID,
+        label="Wahoo",
+        # Workout ingest, plus plan export of local library workouts that only
+        # runs on the athlete's explicit library sync with Wahoo as the target.
+        capabilities=frozenset({Capability.ACTIVITIES, Capability.WORKOUT_EXPORT}),
+        freshness_areas=(
+            FreshnessArea(
+                area="activities",
+                label="Wahoo",
+                stale_after_s=_TWO_DAYS_SECONDS,
+                read_only=True,
+            ),
+        ),
+        max_sync_days=DEFAULT_MAX_SYNC_DAYS,
+        resync_keys=(),
+        # plan_push is the explicit library export; backend/sync/jobs.py checks it.
+        job_types=frozenset({"refresh", "plan_push"}),
+        refresh_fields=frozenset({"days", "reason"}),
+        default_sync_days=_WAHOO_DEFAULT_SYNC_DAYS,
+        # Ranked after every earlier provider in the daily, startup and Coach order.
+        schedule=SchedulePolicy(daily_rank=4, startup_rank=4, daily_marker=True),
+        coach_rank=5,
+        not_configured_message=WAHOO_NOT_CONFIGURED_MESSAGE,
     ),
 )

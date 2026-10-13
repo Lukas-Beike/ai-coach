@@ -22,6 +22,7 @@ from backend.performance import garmin_observations
 from backend.performance.history import append_garmin_performance_history
 from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_hr
 from backend.providers.garmin_morning import merge_garmin_records
+from backend.runtime.ports import ActivityRowReader
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.refresh import sync_job_error_class
@@ -31,6 +32,8 @@ GARMIN_CAPABILITY_FAILURE_LIMIT = 3
 GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
 GARMIN_INITIAL_SYNC_DAYS = 84
 GARMIN_CATCHUP_MAX_DAYS = 90
+# Collections every refresh window must cover before it counts as current.
+GARMIN_WINDOW_SOURCES = frozenset({"activities", "sleep", "hrv"})
 
 GARMIN_COLLECTION_SOURCES = (
     "sleep",
@@ -134,18 +137,25 @@ class GarminPayloadService:
         key_value_repository: KeyValueRepository,
         sync_state_repository: SyncStateRepository,
         local_today: Callable[[], date],
+        *,
+        activity_rows: Callable[[], ActivityRowReader] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
         self._sync_state_repository = sync_state_repository
         self._local_today = local_today
+        self._activity_rows = activity_rows
 
     def snapshot(self) -> dict[str, Any]:
         with self._database_manager.unit_of_work() as db:
-            serialized = self._key_value_repository.get(db, "garmin_snapshot")
+            return self.snapshot_in(db)
+
+    def snapshot_in(self, db: Any) -> dict[str, Any]:
+        """Read the stored Garmin snapshot inside the caller's transaction."""
+        serialized = self._key_value_repository.get(db, "garmin_snapshot")
         try:
             value = json.loads(serialized or "{}")
-        except TypeError, ValueError:
+        except TypeError, ValueError, RecursionError:
             return {}
         return value if isinstance(value, dict) else {}
 
@@ -156,7 +166,7 @@ class GarminPayloadService:
         """Return a bounded, contiguous refresh window for the oldest collection."""
         snapshot = self.snapshot()
         freshness = snapshot.get("source_freshness") or {}
-        sources = {"activities", "sleep", "hrv"} | (
+        sources = GARMIN_WINDOW_SOURCES | (
             set(freshness) & {"daily_stats", "resting_hr", "training_status"}
         )
         today = self._local_today()
@@ -180,6 +190,46 @@ class GarminPayloadService:
             days=GARMIN_CATCHUP_MAX_DAYS - 1
         )
 
+    def awaited_run_status(
+        self, days: int, end_date: date | None, synced_at: str | None
+    ) -> str | None:
+        """Return the stored run's status if it completely read the window.
+
+        ``None`` means the run from ``synced_at`` is no longer the latest
+        snapshot or did not completely read the window's core collections. The
+        run's own ``read_window`` is checked, not the merged snapshot range, so
+        coverage from an older run cannot vouch for it; empty but complete
+        reads still count. A failed collection outside the window's core makes
+        the run ``partial``.
+        """
+        snapshot = self.snapshot()
+        if not synced_at or snapshot.get("synced_at") != synced_at:
+            return None
+        end = end_date or self._local_today()
+        start = end - timedelta(days=days - 1)
+        provider_sync = snapshot.get("provider_sync") or {}
+        read_window = provider_sync.get("read_window") or {}
+        try:
+            covered = (
+                date.fromisoformat(read_window["start"]) <= start
+                and date.fromisoformat(read_window["end"]) >= end
+            )
+        except KeyError, TypeError, ValueError:
+            return None
+        pagination = provider_sync.get("pagination") or {}
+        failed = {
+            error.get("source")
+            for error in snapshot.get("errors") or []
+            if isinstance(error, dict)
+        }
+        if not covered or not all(
+            source not in failed
+            and (pagination.get(source) or {}).get("complete") is True
+            for source in GARMIN_WINDOW_SOURCES
+        ):
+            return None
+        return "ok" if collection_complete(snapshot) else "partial"
+
     def prepare_fixture(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._prepare(payload, self.snapshot(), fixture=True)
 
@@ -193,6 +243,11 @@ class GarminPayloadService:
         *,
         fixture: bool,
     ) -> dict[str, Any]:
+        # Merging widens ``start`` to older runs; keep this run's own window.
+        payload.setdefault("provider_sync", {})["read_window"] = {
+            "start": payload.get("start"),
+            "end": payload.get("end"),
+        }
         merge_sources(payload, previous)
         if not fixture:
             payload["activities"] = deduplicate_api_records(
@@ -204,24 +259,34 @@ class GarminPayloadService:
         )
         payload["activity_matches"] = self._activity_matches(payload)
         if fixture:
-            payload.setdefault(
-                "provider_sync",
+            payload["provider_sync"].setdefault(
+                "pagination",
                 {
-                    "pagination": {
-                        "fixture": {
-                            "windows": 1,
-                            "records": len(payload.get("activities") or []),
-                            "complete": True,
-                        }
+                    "fixture": {
+                        "windows": 1,
+                        "records": len(payload.get("activities") or []),
+                        "complete": True,
                     }
                 },
             )
         append_garmin_performance_history(payload, previous, self._local_today())
         return payload
 
+    def intervals_activities(self) -> list[dict[str, Any]]:
+        """Return the stored Intervals.icu activity rows used for duplicate matching.
+
+        With an injected row reader the canonical selector serves them (tables once
+        the backfill is complete, the snapshot before); otherwise the legacy
+        snapshot is read directly.
+        """
+        if self._activity_rows is None:
+            canonical = self._sync_state_repository.latest_snapshot() or {}
+            return list(canonical.get("recent_activities") or [])
+        with self._database_manager.reader() as db:
+            return list(self._activity_rows().activity_rows(db))
+
     def _activity_matches(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        canonical = self._sync_state_repository.latest_snapshot() or {}
-        intervals = canonical.get("recent_activities") or []
+        intervals = self.intervals_activities()
         return [
             {
                 "garmin_activity_id": activity.get("activityId") or activity.get("id"),

@@ -20,9 +20,9 @@ from tests import test_coach_structured_tool_round as round_tests
 class CoachContextReductionTests(unittest.TestCase):
     def test_oversized_single_section_retains_useful_prefix(self):
         result = bounded_coach_context_value(
-            {"garmin": {"history": "synthetic " * 5000}}, 40_000
+            {"recovery": {"history": "synthetic " * 5000}}, 40_000
         )
-        self.assertTrue(result["garmin"]["history"])
+        self.assertTrue(result["recovery"]["history"])
         self.assertLessEqual(coach_context_json_size(result), 40_000)
 
     def test_scoped_assembly_skips_unnecessary_reads(self):
@@ -43,11 +43,11 @@ class CoachContextReductionTests(unittest.TestCase):
         result = fixture.service.build(
             selection=CoachContextSelection(
                 "requested_details",
-                frozenset({"garmin"}),
+                frozenset({"recovery"}),
                 include_library=False,
             )
         )
-        self.assertEqual(set(result), {"garmin"})
+        self.assertEqual(set(result), {"recovery"})
         fixture.weather_service.state.assert_not_called()
         fixture.profile_service.get.assert_not_called()
         fixture.planned_unit_service.list.assert_not_called()
@@ -64,18 +64,19 @@ class CoachContextReductionTests(unittest.TestCase):
     def test_detail_read_bounds_output_and_rejects_unknown_sections(self):
         context = Mock()
         context.build.return_value = {
-            "garmin": {"source": "Garmin", "notes": "synthetic " * 8000}
+            "recovery": {"source": "Garmin", "notes": "synthetic " * 8000}
         }
         service = self.read_service(context)
-        result = service.execute("read_coach_context", {"sections": ["garmin"]})
+        result = service.execute("read_coach_context", {"sections": ["recovery"]})
         self.assertTrue(result["ok"])
         self.assertFalse(result["projection"]["complete"])
         self.assertLessEqual(result["projection"]["characters"], 40_000)
-        self.assertEqual(result["context"]["garmin"]["source"], "Garmin")
+        self.assertEqual(result["context"]["recovery"]["source"], "Garmin")
         self.assertEqual(
-            context.build.call_args.kwargs["selection"].sections, frozenset({"garmin"})
+            context.build.call_args.kwargs["selection"].sections,
+            frozenset({"recovery"}),
         )
-        for sections in (None, [], ["raw_snapshot"], [1], ["garmin"] * 16):
+        for sections in (None, [], ["raw_snapshot"], [1], ["recovery"] * 16):
             with self.subTest(sections=sections), self.assertRaises(AppError):
                 service.execute("read_coach_context", {"sections": sections})
 
@@ -201,7 +202,7 @@ class CoachContextReductionTests(unittest.TestCase):
             "local_feedback": {"recent": []},
             "local_planned_workouts": [],
             "current_performance": {"source": "Garmin", "metrics": {"vo2max": 50}},
-            "garmin": {"history": "synthetic history " * 2000},
+            "recovery": {"history": "synthetic history " * 2000},
             "weather": {"history": "synthetic weather " * 1000},
             "external_calendar": {"history": "synthetic events " * 1000},
         }

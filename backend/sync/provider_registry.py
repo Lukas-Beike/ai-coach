@@ -95,6 +95,14 @@ class ProviderRegistry:
             return default
         return descriptor.max_sync_days
 
+    def accepts_sync_days(self, provider_id: str, days: int, all_days: int) -> bool:
+        """Return whether ``days`` is a valid sync window for the provider.
+
+        ``all_days`` marks the whole history; any other window must lie between
+        one day and the provider's sync-window limit.
+        """
+        return days == all_days or 1 <= days <= self.max_sync_days(provider_id)
+
     def supports_job(self, provider_id: str, job_type: str) -> bool:
         """Return whether the provider accepts the job type; unknown ids are False."""
         descriptor = self._lookup(provider_id)

@@ -331,6 +331,10 @@ class SyncRefreshTests(unittest.TestCase):
             (AppError(503, "busy", reason="rate_limit_exceeded"), "rate_limited"),
             (AppError(403, "denied"), "auth_required"),
             (AppError(502, "HTTP 401 response"), "auth_required"),
+            (
+                AppError(409, "reconnect", reason="x_reconnect_required"),
+                "auth_required",
+            ),
             (AppError(400, "invalid input"), "invalid_configuration"),
             (AppError(503, "configuration missing"), "invalid_configuration"),
             (

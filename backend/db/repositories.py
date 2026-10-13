@@ -7,6 +7,9 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
+from backend.db.remote_links import RemoteLinkRepository
+
 
 class NutritionTemplateRepository:
     """Persist reusable meals separately from consumed nutrition records."""
@@ -168,6 +171,9 @@ class KeyValueRepository:
             (key, value, self._now()),
         )
 
+    def delete(self, db: Any, key: str) -> None:
+        db.execute("DELETE FROM kv WHERE key = ?", (key,))
+
 
 class SessionRepository:
     """Persist authentication sessions without owning their transaction."""
@@ -287,6 +293,9 @@ class ProfileRepository:
 class CompetitionRepository:
     """Read local competitions without owning a database connection."""
 
+    def __init__(self, remote_links: RemoteLinkRepository | None = None) -> None:
+        self._remote_links = remote_links or RemoteLinkRepository()
+
     _LIST_FIELDS = (
         "id, name, event_date, start_date_local, sport, priority, category, distance, target, "
         "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
@@ -365,12 +374,24 @@ class CompetitionRepository:
         now: str,
     ) -> None:
         db.execute(
-            "INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) VALUES (?, ?, ?, ?)",
-            (tombstone_id, intervals_event_id, external_id, now),
+            "INSERT INTO competition_sync_tombstones"
+            "(id, intervals_event_id, external_id, created_at, provider) "
+            "VALUES (?, ?, ?, ?, ?)",
+            # Competition remote slots are Intervals.icu event ids.
+            (
+                tombstone_id,
+                intervals_event_id,
+                external_id,
+                now,
+                ProviderId.INTERVALS.value,
+            ),
         )
 
     def delete(self, db: Any, competition_id: str) -> None:
         db.execute("DELETE FROM competitions WHERE id=?", (competition_id,))
+        self._remote_links.delete_for_entity(
+            db, RemoteEntityKind.COMPETITION, competition_id
+        )
 
     def unlink_public_event_candidate(
         self, db: Any, competition_id: str, now: str
@@ -408,6 +429,9 @@ class CompetitionRepository:
                 now,
                 competition_id,
             ),
+        )
+        self._remote_links.refresh_from_slots(
+            db, RemoteEntityKind.COMPETITION, competition_id
         )
 
     def resolve_keep_local(self, db: Any, competition_id: str, now: str) -> None:
@@ -689,13 +713,17 @@ class ActivityFeedbackRepository:
             "DELETE FROM activity_feedback WHERE activity_id = ?", (activity_id,)
         )
 
-    def upsert(self, db: Any, feedback: dict[str, Any]) -> None:
+    def upsert(
+        self, db: Any, feedback: dict[str, Any], *, provider: str | None = None
+    ) -> None:
+        """Write feedback; a write without a resolved provider keeps the stored one."""
         now = self._now()
         db.execute(
-            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at, provider) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(activity_id) DO UPDATE SET activity_name=excluded.activity_name, "
-            "activity_date=excluded.activity_date, notes=excluded.notes, session_rpe=excluded.session_rpe, deviation_reason=excluded.deviation_reason, updated_at=excluded.updated_at",
+            "activity_date=excluded.activity_date, notes=excluded.notes, session_rpe=excluded.session_rpe, deviation_reason=excluded.deviation_reason, updated_at=excluded.updated_at, "
+            "provider=COALESCE(excluded.provider, activity_feedback.provider)",
             (
                 feedback["activity_id"],
                 feedback["activity_name"],
@@ -705,6 +733,7 @@ class ActivityFeedbackRepository:
                 feedback.get("deviation_reason", ""),
                 now,
                 now,
+                provider,
             ),
         )
 
@@ -713,9 +742,23 @@ class SnapshotRepository:
     """Persist bounded provider snapshots without owning a connection."""
 
     def save(
-        self, db: Any, snapshot: dict[str, Any], created_at: str, *, keep: int = 12
+        self,
+        db: Any,
+        snapshot: dict[str, Any],
+        created_at: str,
+        *,
+        keep: int = 12,
+        activity_count: int | None = None,
     ) -> None:
+        """Store a snapshot and keep the newest ``keep`` rows.
+
+        ``activity_count`` is the number of recent activities the snapshot stood for
+        when it is stored without its activity sections; otherwise the count comes
+        from the snapshot's own ``recent_activities`` list.
+        """
         recent = snapshot.get("recent_activities")
+        if activity_count is None:
+            activity_count = len(recent) if isinstance(recent, list) else 0
         db.execute(
             "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
             "VALUES (?, ?, ?, ?)",
@@ -723,7 +766,7 @@ class SnapshotRepository:
                 json.dumps(snapshot, ensure_ascii=False),
                 created_at,
                 str(snapshot.get("synced_at") or ""),
-                len(recent) if isinstance(recent, list) else 0,
+                activity_count,
             ),
         )
         db.execute(

@@ -117,6 +117,33 @@ class StandardFixtureDataTests(unittest.TestCase):
             )
             self.assertGreater(sleep["sleepScore"], 0)
 
+    def test_standard_fixture_remote_links_match_the_legacy_remote_slots(self):
+        # The standard fixture only holds local entities, so no legacy slot
+        # carries a remote identifier and remote_links must hold no row either.
+        with self._temporary_fixture_database("fixture-remote-links-") as server:
+            fixture_runtime.initialise_fixture()
+            fixture_runtime.seed_preview_demo()
+            with server.database_manager().unit_of_work() as db:
+                slots = db.execute(
+                    "SELECT (SELECT COUNT(*) FROM workout_library "
+                    "WHERE external_id IS NOT NULL) "
+                    "+ (SELECT COUNT(*) FROM planned_units "
+                    "WHERE external_id IS NOT NULL) "
+                    "+ (SELECT COUNT(*) FROM competitions "
+                    "WHERE intervals_event_id IS NOT NULL "
+                    "OR external_id IS NOT NULL) AS slots"
+                ).fetchone()["slots"]
+                links = db.execute("SELECT COUNT(*) AS n FROM remote_links").fetchone()[
+                    "n"
+                ]
+                unattributed = db.execute(
+                    "SELECT COUNT(*) AS n FROM competition_sync_tombstones "
+                    "WHERE provider IS NULL"
+                ).fetchone()["n"]
+        self.assertEqual(slots, 0)
+        self.assertEqual(links, slots)
+        self.assertEqual(unattributed, 0)
+
     def test_standard_dataset_covers_sparse_body_history_and_both_ftp_sources(self):
         wellness = fixture_runtime._fixture_demo_wellness(self.today)
         garmin = fixture_runtime._fixture_demo_garmin(
@@ -763,29 +790,35 @@ class StandardFixtureDataTests(unittest.TestCase):
         with self._temporary_fixture_database("fixture-v6-provider-") as server:
             fixture_runtime.initialise_fixture()
             fixture_runtime.seed_preview_demo()
+            first = self._canonical_counts(server)
             fixture_runtime.seed_preview_demo()
+            second = self._canonical_counts(server)
             with server.database_manager().unit_of_work() as db:
-                counts = {
-                    table: db.execute(
-                        f"SELECT COUNT(*) AS count FROM {table}"
-                    ).fetchone()["count"]
-                    for table in (
-                        "provider_records",
-                        "activity_sessions",
-                        "activity_records",
-                        "observations",
-                    )
-                }
+                synthetic = db.execute(
+                    "SELECT COUNT(*) AS count FROM provider_records "
+                    "WHERE provider = 'fixture-provider'"
+                ).fetchone()["count"]
 
-        self.assertEqual(
-            counts,
-            {
-                "provider_records": 1,
-                "activity_sessions": 1,
-                "activity_records": 1,
-                "observations": 1,
-            },
-        )
+        self.assertEqual(first, second)
+        self.assertEqual(synthetic, 1)
+        # Seeded snapshots reach the canonical tables through the real ingest path.
+        self.assertGreater(first["activity_sessions"], 1)
+        self.assertGreater(first["observations"], 1)
+
+    @staticmethod
+    def _canonical_counts(server):
+        with server.database_manager().unit_of_work() as db:
+            return {
+                table: db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()[
+                    "count"
+                ]
+                for table in (
+                    "provider_records",
+                    "activity_sessions",
+                    "activity_records",
+                    "observations",
+                )
+            }
 
     def test_v5_database_upgrades_to_v6_scenarios_without_duplicates(self):
         with self._temporary_fixture_database("fixture-v6-upgrade-") as server:

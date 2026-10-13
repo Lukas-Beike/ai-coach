@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 
+from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.local_time import local_date
 from backend.db import canonical_store
 from backend.db.canonical_store import WriteOutcome
@@ -40,6 +41,7 @@ class CanonicalIngestCounters:
     unchanged: int = 0
     skipped_invalid: int = 0
     deleted: int = 0
+    linked: int = 0
 
     def count(self, outcome: WriteOutcome) -> None:
         if outcome is WriteOutcome.WRITTEN:
@@ -56,6 +58,7 @@ class CanonicalIngestCounters:
             "unchanged": self.unchanged,
             "skipped_invalid": self.skipped_invalid,
             "deleted": self.deleted,
+            "linked": self.linked,
         }
 
 
@@ -129,7 +132,30 @@ def ingest_intervals_snapshot(
             earliest_date=earliest_date,
         )
     return ingest_plan(
-        db, plan, retrieved_at=retrieved_at, deletion_window=deletion_window
+        db,
+        plan,
+        retrieved_at=retrieved_at,
+        deletion_window=deletion_window,
+        zone=zone,
+    )
+
+
+def ingest_intervals_partial_snapshot(
+    db: Any, snapshot: Mapping[str, Any], *, zone: tzinfo
+) -> CanonicalIngestCounters:
+    """Write the raw block of a partial Intervals.icu fetch, such as a performance refresh.
+
+    A partial window never marks missing records deleted: only a full window
+    knows which records the provider no longer returns.
+    """
+    retrieved_at = stored_retrieved_at(snapshot, zone=zone)
+    if retrieved_at is None:
+        return CanonicalIngestCounters()
+    plan = intervals_ingest_plan(
+        snapshot.get("raw_provider_data"), zone=zone, retrieved_at=retrieved_at
+    )
+    return ingest_plan(
+        db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=zone
     )
 
 
@@ -145,7 +171,9 @@ def ingest_garmin_payload(
     if retrieved_at is None:
         return CanonicalIngestCounters()
     plan = garmin_ingest_plan(payload, zone=zone)
-    return ingest_plan(db, plan, retrieved_at=retrieved_at, deletion_window=None)
+    return ingest_plan(
+        db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=zone
+    )
 
 
 def ingest_plan(
@@ -154,8 +182,13 @@ def ingest_plan(
     *,
     retrieved_at: datetime,
     deletion_window: DeletionWindow | None,
+    zone: tzinfo,
 ) -> CanonicalIngestCounters:
-    """Write raw records, then activities, then observations, then apply deletions."""
+    """Write raw records, then activities, then observations, then apply deletions.
+
+    The written activities are then linked to duplicates from other providers on
+    the athlete's wall clock ``zone`` (see ``link_activity_sessions``).
+    """
     stamp = retrieved_at.isoformat()
     provider = plan.provider.value
     counters = CanonicalIngestCounters(skipped_invalid=plan.skipped_invalid)
@@ -202,6 +235,14 @@ def ingest_plan(
             window_start=deletion_window.start,
             window_end=deletion_window.end,
             present_ids=plan.present_activity_ids,
+            now=stamp,
+        )
+    if plan.activities:
+        # After the deletions, so a tombstoned activity is never bundled.
+        counters.linked = link_activity_sessions(
+            db,
+            touched_dates={activity.local_date for activity in plan.activities},
+            zone=zone,
             now=stamp,
         )
     return counters

@@ -8,8 +8,10 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from backend.canonical.vocabulary import RemoteEntityKind
 from backend.config import Config
 from backend.db import DatabaseManager
+from backend.db.remote_links import RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.observability import Redactor
@@ -19,6 +21,7 @@ from backend.runtime.events import StateEventBuffer
 from backend.sync.authority import competition_push_manifest
 
 _COMPETITION_SYNC_LOCK = threading.Lock()
+_REMOTE_LINKS = RemoteLinkRepository()
 
 
 class CompetitionSyncReconciler:
@@ -213,6 +216,9 @@ class CompetitionSyncReconciler:
                     row["id"],
                 ),
             )
+            _REMOTE_LINKS.refresh_from_slots(
+                db, RemoteEntityKind.COMPETITION, str(row["id"])
+            )
             return 0
         if row.get("intervals_event_id"):
             self._record_conflict(db, row, now, self._remote_missing_conflict(now))
@@ -257,6 +263,9 @@ class CompetitionSyncReconciler:
                         row["id"],
                     ),
                 )
+                _REMOTE_LINKS.refresh_from_slots(
+                    db, RemoteEntityKind.COMPETITION, str(row["id"])
+                )
                 return 1, 0
             return 0, 0
         if row.get("intervals_event_id") and push_local:
@@ -280,6 +289,7 @@ class CompetitionSyncReconciler:
             ).fetchone()
             if current is None or dict(current) != row:
                 continue
+            row = self._prefer_remote_link(db, row)
             external_id, remote, identity_remote = self._remote_match(row, indexes)
             if row.get("sync_dirty"):
                 conflicts += self._reconcile_dirty(
@@ -298,6 +308,26 @@ class CompetitionSyncReconciler:
                 updated += changed
                 conflicts += conflicted
         return updated, conflicts
+
+    @staticmethod
+    def _prefer_remote_link(db: Any, row: dict[str, Any]) -> dict[str, Any]:
+        """Return the row with remote ids from its link; the slots are the fallback."""
+        competition_id = str(row["id"])
+        return {
+            **row,
+            "intervals_event_id": _REMOTE_LINKS.resolve_remote_id(
+                db,
+                RemoteEntityKind.COMPETITION,
+                competition_id,
+                row.get("intervals_event_id"),
+            ),
+            "external_id": _REMOTE_LINKS.resolve_remote_external_id(
+                db,
+                RemoteEntityKind.COMPETITION,
+                competition_id,
+                row.get("external_id"),
+            ),
+        }
 
     @staticmethod
     def _remote_local_id(
@@ -413,6 +443,7 @@ class CompetitionSyncReconciler:
                     now,
                 ),
             )
+            _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.COMPETITION, local_id)
             existing[local_id] = {
                 "id": local_id,
                 "name": data["name"],

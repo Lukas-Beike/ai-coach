@@ -19,6 +19,7 @@ from backend import change_history
 from backend.errors import AppError
 from backend.observability import sanitized_provider_payload
 from backend.planning import season as planning_season
+from backend.sync.wahoo_connection import WAHOO_SECRET_KEYS
 from backend.weather import cache as weather_cache
 
 if TYPE_CHECKING:
@@ -33,7 +34,10 @@ PayloadDecoder = Callable[[Any], Any]
 Clock = Callable[[], float]
 TimeoutErrorFactory = Callable[[], Exception]
 
-PRIVACY_EXPORT_FORMAT_VERSION = 2
+# Version 3 adds activity_feedback.provider (schema v7) to activity_feedback.jsonl.
+# Version 4 adds remote_links.jsonl and competition_sync_tombstones.provider
+# (schema v8).
+PRIVACY_EXPORT_FORMAT_VERSION = 4
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
@@ -46,6 +50,7 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "public_event_candidates.jsonl",
     "competitions.jsonl",
     "competition_sync_tombstones.jsonl",
+    "remote_links.jsonl",
     "messages.jsonl",
     "coach_plan_artifacts.jsonl",
     "coach_commands.jsonl",
@@ -97,7 +102,12 @@ class PrivacyArchiveExportService:
     def _application_state(db: Any) -> dict[str, Any]:
         return application_state(
             db,
-            excluded_keys={"profile", "garmin_snapshot", weather_cache.CACHE_KEY},
+            excluded_keys={
+                "profile",
+                "garmin_snapshot",
+                weather_cache.CACHE_KEY,
+                *WAHOO_SECRET_KEYS,
+            },
         )
 
     def _write_jsonl(
@@ -183,7 +193,19 @@ class PrivacyArchiveExportService:
                     (
                         dict(row)
                         for row in db.execute(
-                            "SELECT intervals_event_id, external_id, created_at FROM competition_sync_tombstones ORDER BY created_at"
+                            "SELECT intervals_event_id, external_id, created_at, provider FROM competition_sync_tombstones ORDER BY created_at"
+                        )
+                    ),
+                    deadline,
+                )
+                self._write_jsonl(
+                    archive,
+                    "remote_links.jsonl",
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT entity_kind, local_id, provider, remote_id, remote_external_id, baseline_hash, sync_state, last_synced_at "
+                            "FROM remote_links ORDER BY entity_kind, local_id, provider"
                         )
                     ),
                     deadline,

@@ -1,5 +1,6 @@
 """Recorded sensor zones and Garmin's activity training-effect categories."""
 
+from collections.abc import Sequence
 from datetime import date, timedelta
 from typing import Any
 
@@ -8,8 +9,10 @@ from backend.performance.activity_validation import bounded_activity_metric
 from backend.performance.training_report import (
     activity_day,
     canonical_rows,
+    deduplicated_rows,
     zone_distribution,
 )
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 _CATEGORIES = {
     "RECOVERY": "low_aerobic",
@@ -32,10 +35,16 @@ def training_focus(
     garmin: dict[str, Any],
     today: date,
     timezone: str = "UTC",
+    *,
+    activity_rows: Sequence[Any] | None = None,
 ) -> dict[str, Any]:
     start = (today - timedelta(days=27)).isoformat()
     end = today.isoformat()
-    activities, _ = canonical_rows(snapshot or {})
+    activities, _ = (
+        canonical_rows(snapshot or {})
+        if activity_rows is None
+        else deduplicated_rows(activity_rows)
+    )
     zones = zone_distribution(
         [row for row in activities if start <= activity_day(row, timezone) <= end]
     )
@@ -152,7 +161,10 @@ def _coverage_row(
             if load_record.get(key) is not None:
                 row[key] = load_record[key]
     day = activity_day(
-        {"start_date_local": row.get("startTimeLocal") or row.get("start_date_local")},
+        {
+            "start_date_local": row.get(garmin_perf_fields.ACTIVITY_START_LOCAL)
+            or row.get("start_date_local")
+        },
         timezone,
     )
     if not day or not start <= day <= end:

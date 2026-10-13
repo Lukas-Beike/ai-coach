@@ -1,7 +1,7 @@
 """Total ordering of canonical records, shared by the legacy projection and the tables.
 
-Both readers must return the same sequence for the same data, so the parity check
-can compare them. Every key is total for records with unique identities: activities
+Both readers must return the same sequence for the same data, so the served
+order does not depend on the source. Every key is total for records with unique identities: activities
 by (start, provider, provider activity id), observations by the components of their
 natural key (provider, metric, sport, instant or day).
 """

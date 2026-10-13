@@ -3,6 +3,8 @@ import sqlite3
 import unittest
 from contextlib import contextmanager
 
+from remote_link_fixtures import create_remote_links_table
+
 from backend.athlete.context import AthleteContextService
 from backend.athlete.profile import ProfileService, normalize_profile
 from backend.db.repositories import (
@@ -70,7 +72,8 @@ class AthleteContextServiceTests(unittest.TestCase):
                 updated_at TEXT NOT NULL
             );
             CREATE TABLE competition_sync_tombstones (
-                id TEXT PRIMARY KEY, intervals_event_id TEXT, external_id TEXT, created_at TEXT NOT NULL
+                id TEXT PRIMARY KEY, intervals_event_id TEXT, external_id TEXT, created_at TEXT NOT NULL,
+                provider TEXT
             );
             CREATE TABLE change_history (
                 id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
@@ -79,6 +82,7 @@ class AthleteContextServiceTests(unittest.TestCase):
             );
             """
         )
+        create_remote_links_table(self.db)
         self.key_values = KeyValueRepository(lambda: "2026-09-20T12:00:00+00:00")
         self.profile_service = ProfileService(
             _Manager(self.db),
@@ -181,6 +185,7 @@ class AthleteContextServiceTests(unittest.TestCase):
             {(row["intervals_event_id"], row["external_id"]) for row in tombstones},
             {(None, "external-removed"), ("intervals-only", None)},
         )
+        self.assertEqual({row["provider"] for row in tombstones}, {"intervals"})
         self.assertEqual(
             {row["id"] for row in tombstones}, {"tombstone-1", "tombstone-2"}
         )

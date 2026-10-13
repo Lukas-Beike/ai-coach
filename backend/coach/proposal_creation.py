@@ -14,10 +14,8 @@ from backend.activities.activity_reference import (
     NoActivityReferences,
     resolve_duplicate_ids,
 )
-from backend.activities.duplicates import (
-    latest_wahoo_garmin_duplicate,
-    validate_duplicate_delete,
-)
+from backend.activities.duplicate_inspection import DuplicateInspector
+from backend.activities.duplicates import validate_duplicate_delete
 from backend.athlete.local_date import LocalDate
 from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
@@ -34,7 +32,6 @@ from backend.coach.proposal_validation import (
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.sync.authority import competition_push_manifest
-from backend.sync.state import SyncStateRepository
 
 _MAX_REMOTE_APPROVAL_DETAILS = 5000
 
@@ -54,7 +51,7 @@ class CoachProposalCreationService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        sync_state_repository: SyncStateRepository,
+        duplicate_inspector: DuplicateInspector,
         *,
         ttl_seconds: int = COACH_ACTION_TTL_SECONDS,
         now: Callable[[], float] = time.time,
@@ -66,7 +63,7 @@ class CoachProposalCreationService:
     ) -> None:
         self._database_manager = database_manager
         self._references = NoActivityReferences() if references is None else references
-        self._sync_state_repository = sync_state_repository
+        self._duplicate_inspector = duplicate_inspector
         self._ttl_seconds = ttl_seconds
         self._now = now
         self._utc_now = utc_now
@@ -80,12 +77,7 @@ class CoachProposalCreationService:
         )
         if action_type == "delete_duplicate_intervals_activity":
             payload = resolve_duplicate_ids(payload, self._references)
-            validate_duplicate_delete(
-                payload,
-                latest_wahoo_garmin_duplicate(
-                    self._sync_state_repository.latest_snapshot() or {}
-                ),
-            )
+            validate_duplicate_delete(payload, self._duplicate_inspector.latest())
 
         proposal_id = str(self._uuid_factory())
         expires_at = self._now() + self._ttl_seconds
@@ -156,7 +148,7 @@ class CoachProposalCreationService:
             arguments,
             intent,
             database_manager=self._database_manager,
-            sync_state_repository=self._sync_state_repository,
+            duplicate_inspector=self._duplicate_inspector,
             nutrition_diary_service=self._nutrition_diary_service,
             references=self._references,
         )
@@ -317,7 +309,7 @@ def _approved_remote_arguments(
     intent: dict[str, Any],
     *,
     database_manager: DatabaseManager,
-    sync_state_repository: Any,
+    duplicate_inspector: DuplicateInspector,
     nutrition_diary_service: Callable[[], Any] | None,
     references: ActivityReferenceResolver,
 ) -> dict[str, Any]:
@@ -328,7 +320,7 @@ def _approved_remote_arguments(
             return {**arguments, "_approval_manifest": competition_push_manifest(db)}
     if tool == "delete_duplicate_intervals_activity":
         return _duplicate_approval_arguments(
-            resolve_duplicate_ids(arguments, references), sync_state_repository
+            resolve_duplicate_ids(arguments, references), duplicate_inspector
         )
     if tool == "sync_nutrition":
         return _nutrition_approval_arguments(arguments, nutrition_diary_service)
@@ -531,10 +523,9 @@ def _plan_workout_details(rows: list[Any]) -> list[dict[str, str]]:
 
 
 def _duplicate_approval_arguments(
-    arguments: dict[str, Any], sync_state_repository: Any
+    arguments: dict[str, Any], duplicate_inspector: DuplicateInspector
 ) -> dict[str, Any]:
-    snapshot = sync_state_repository.latest_snapshot() or {}
-    duplicate = latest_wahoo_garmin_duplicate(snapshot)
+    duplicate = duplicate_inspector.latest()
     if not duplicate:
         raise AppError(409, "Das Wahoo-/Garmin-Duplikat ist nicht mehr aktuell.")
     for field in ("canonical_id", "duplicate_id"):

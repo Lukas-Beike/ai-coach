@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
 import unittest
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -39,6 +40,18 @@ class FakeLock:
     def release(self) -> None:
         self.trace.append("lock:release")
         self.release_calls += 1
+
+
+class CancellingLock(FakeLock):
+    """A busy lock whose first wait is interrupted by a cancellation."""
+
+    def __init__(self, trace: list[str], cancel_event: threading.Event) -> None:
+        super().__init__(trace, acquire_result=False)
+        self.cancel_event = cancel_event
+
+    def acquire(self, *, timeout: int) -> bool:
+        self.cancel_event.set()
+        return super().acquire(timeout=timeout)
 
 
 class FakeLogger:
@@ -102,7 +115,11 @@ class Harness:
     def write(self, db: object, payload: object) -> None:
         # Stands in for GarminSnapshotWriter, which the composition root injects.
         # Only the legacy snapshot value is stored here, matching the old behavior.
-        self.set(db, "garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        self.set(
+            db,
+            "garmin_snapshot",
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        )
 
     def unit_of_work(self):
         @contextmanager
@@ -455,6 +472,59 @@ class MorningBodyBatteryServiceTests(unittest.TestCase):
         )
         self.assertIs(later.logger.warnings[0][2], True)
         self.assertEqual(later.safe_errors[0].args, ("fake fixture failure",))
+
+    def test_refresh_reports_a_failed_remote_reading(self) -> None:
+        harness = Harness()
+        harness.is_remote_configured = True
+        harness.remote_payload = ValueError("fake transport failure")  # type: ignore[assignment]
+
+        self.assertFalse(harness.make_service().refresh(CHECKIN_DATE))
+
+        self.assertEqual(harness.remote_calls, [CHECKIN_DATE])
+        saved = json.loads(harness.values["garmin_snapshot"])
+        self.assertNotIn("failed", saved["morning_body_battery"])
+
+    def test_refresh_reports_success_busy_and_skipped_readings(self) -> None:
+        ready = Harness()
+        ready.is_remote_configured = True
+        ready.remote_payload = (sleep_payload(), body_battery_records())
+        self.assertTrue(ready.make_service().refresh(CHECKIN_DATE))
+
+        busy = Harness()
+        busy.is_remote_configured = True
+        busy.lock.acquire_result = False
+        self.assertFalse(busy.make_service().refresh(CHECKIN_DATE))
+
+        unconfigured = Harness()
+        self.assertTrue(unconfigured.make_service().refresh(CHECKIN_DATE))
+
+    def test_cancelled_refresh_skips_lock_and_provider(self) -> None:
+        harness = Harness()
+        harness.is_remote_configured = True
+        cancel_event = threading.Event()
+        cancel_event.set()
+        service = harness.make_service()
+
+        self.assertEqual(
+            service.sync(CHECKIN_DATE, cancel_event),
+            {"status": "cancelled", "sleep_date": "2026-09-04"},
+        )
+        self.assertFalse(service.refresh(CHECKIN_DATE, cancel_event))
+        self.assertEqual(harness.lock.acquire_calls, 0)
+        self.assertEqual(harness.remote_calls, [])
+
+    def test_cancellation_stops_waiting_for_a_busy_reading(self) -> None:
+        harness = Harness()
+        harness.is_remote_configured = True
+        cancel_event = threading.Event()
+        harness.lock = CancellingLock(harness.trace, cancel_event)
+
+        result = harness.make_service().sync(CHECKIN_DATE, cancel_event)
+
+        self.assertEqual(result["status"], "cancelled")
+        self.assertEqual(harness.lock.acquire_calls, 1)
+        self.assertEqual(harness.lock.release_calls, 0)
+        self.assertEqual(harness.remote_calls, [])
 
 
 if __name__ == "__main__":

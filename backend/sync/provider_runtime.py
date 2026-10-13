@@ -165,6 +165,8 @@ def _check_capabilities(
         raise ValueError("schedule policy requires a descriptor schedule rank")
     if binding.synchronous_refresh is not None and descriptor.coach_rank is None:
         raise ValueError("synchronous refresh requires a descriptor coach rank")
+    if descriptor.coach_waits_for_completion and binding.synchronous_refresh is None:
+        raise ValueError("descriptor waiting requires a synchronous refresh")
 
 
 def _has_schedule_rank(descriptor: ProviderDescriptor) -> bool:

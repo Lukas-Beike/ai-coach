@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.providers import intervals_performance_fields as intervals_perf_fields
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -59,7 +60,9 @@ def _activity_rollup_totals(
             continue
         count += 1
         moving_seconds += _activity_rollup_number(activity, "moving_time")
-        training_load += _activity_rollup_number(activity, "icu_training_load")
+        training_load += _activity_rollup_number(
+            activity, intervals_perf_fields.TRAINING_LOAD
+        )
     return count, moving_seconds, training_load
 
 
@@ -109,7 +112,9 @@ def _activity_load_by_date(activities: list[Any], anchor: date) -> dict[date, fl
             continue
         if activity_date > anchor:
             continue
-        load = _as_number(_first_present(activity, ("icu_training_load",)))
+        load = _as_number(
+            _first_present(activity, intervals_perf_fields.TRAINING_LOAD_ALIASES)
+        )
         if load is not None:
             load_by_date[activity_date] = load_by_date.get(activity_date, 0.0) + float(
                 load

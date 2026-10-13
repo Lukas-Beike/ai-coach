@@ -1,4 +1,4 @@
 interface:
   display_name: "Pull Request Workflow"
   short_description: "Rebase, validate, open, and merge PRs"
-  default_prompt: "Use $pr to rebase the current feature branch onto develop, validate commits, open a PR, and wait for its merge."
+  default_prompt: "Use $pr to rebase the current feature branch onto develop, validate commits, pass /code-review where the host provides it (stop before rebasing otherwise), open a PR, and wait for its merge."

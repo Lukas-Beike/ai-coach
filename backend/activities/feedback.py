@@ -7,11 +7,12 @@ import math
 from typing import Any
 
 from backend.activities.activity_reference import (
+    ActivityReference,
     ActivityReferenceResolver,
     NoActivityReferences,
 )
 from backend.errors import AppError
-from backend.runtime.ports import ProviderSnapshotReader
+from backend.runtime.ports import ActivityRowReader
 
 ACTIVITY_FEEDBACK_TEXT_LIMITS = {
     "activity_name": 200,
@@ -72,13 +73,13 @@ class ActivityFeedbackService:
         self,
         database_manager: Any,
         feedback_repository: Any,
-        snapshot_reader: ProviderSnapshotReader,
+        row_reader: ActivityRowReader,
         *,
         references: ActivityReferenceResolver | None = None,
     ):
         self._database_manager = database_manager
         self._feedback_repository = feedback_repository
-        self._snapshot_reader = snapshot_reader
+        self._row_reader = row_reader
         self._references = NoActivityReferences() if references is None else references
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -87,9 +88,10 @@ class ActivityFeedbackService:
             return self._feedback_repository.list(db, bounded_limit)
 
     def save(self, activity_id: Any, value: Any) -> dict[str, Any]:
-        feedback = normalize_activity_feedback(
-            self._references.resolve(activity_id), value
-        )
+        return self._save(self._references.resolve_reference(activity_id), value)
+
+    def _save(self, reference: ActivityReference, value: Any) -> dict[str, Any]:
+        feedback = normalize_activity_feedback(reference.activity_id, value)
         with self._database_manager.unit_of_work() as db:
             existing = self._feedback_repository.get(db, feedback["activity_id"]) or {}
             for field in (
@@ -108,7 +110,7 @@ class ActivityFeedbackService:
             ):
                 self._feedback_repository.delete(db, feedback["activity_id"])
                 return {"status": "ok", "activity_feedback": None}
-            self._feedback_repository.upsert(db, feedback)
+            self._feedback_repository.upsert(db, feedback, provider=reference.provider)
         saved = next(
             (
                 item
@@ -120,10 +122,9 @@ class ActivityFeedbackService:
         return {"status": "ok", "activity_feedback": saved}
 
     def save_coach(self, activity_id: Any, value: Any) -> dict[str, Any]:
-        """Save feedback only for an activity in the latest local snapshot."""
-        normalized = normalize_activity_feedback(
-            self._references.resolve(activity_id), value
-        )
+        """Save feedback only for an activity the canonical activity reads serve."""
+        reference = self._references.resolve_reference(activity_id)
+        normalized = normalize_activity_feedback(reference.activity_id, value)
         if (
             not normalized["notes"]
             and normalized.get("session_rpe") is None
@@ -131,14 +132,7 @@ class ActivityFeedbackService:
         ):
             raise AppError(400, "Die Rückmeldung darf nicht leer sein.")
         with self._database_manager.unit_of_work() as db:
-            snapshot = self._snapshot_reader.latest_snapshot(db) or {}
-            activities = (
-                snapshot.get("recent_activities", [])
-                if isinstance(snapshot, dict)
-                else []
-            )
-            if not isinstance(activities, list):
-                activities = []
+            activities = self._row_reader.activity_rows(db)
             known_ids = {
                 str(candidate_id)
                 for activity in activities
@@ -150,7 +144,7 @@ class ActivityFeedbackService:
                     404,
                     "Die Aktivität ist im aktuellen lokalen Trainingssnapshot nicht vorhanden.",
                 )
-        return self.save(normalized["activity_id"], value)
+        return self._save(reference, value)
 
     def context(self) -> dict[str, Any]:
         return {

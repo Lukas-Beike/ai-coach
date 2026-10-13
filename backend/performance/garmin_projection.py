@@ -6,6 +6,7 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.performance import freshness as performance_freshness
 from backend.performance.activity_validation import bounded_activity_metric
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.garmin_fields import (
     GARMIN_FTP_ALIASES,
     GARMIN_HRV_LAST_NIGHT_ALIASES,
@@ -18,7 +19,7 @@ from backend.providers.garmin_fields import (
 
 GARMIN_CONTEXT_FIELDS = {
     "date",
-    "calendarDate",
+    garmin_perf_fields.CALENDAR_DATE,
     "start",
     "end",
     *GARMIN_SLEEP_DURATION_ALIASES,
@@ -31,8 +32,8 @@ GARMIN_CONTEXT_FIELDS = {
     "score",
     "status",
     "hrvStatus",
-    "hrvWeeklyAvg",
-    "weeklyAvg",
+    garmin_perf_fields.WEEKLY_HRV_AVERAGE,
+    garmin_perf_fields.WEEKLY_AVERAGE,
     *GARMIN_HRV_LAST_NIGHT_ALIASES,
     "bodyBattery",
     "body_battery",
@@ -44,7 +45,7 @@ GARMIN_CONTEXT_FIELDS = {
     "activityId",
     "activityName",
     "activityType",
-    "startTimeLocal",
+    garmin_perf_fields.ACTIVITY_START_LOCAL,
     "duration",
     "averageHR",
     "maxHR",
@@ -53,15 +54,15 @@ GARMIN_CONTEXT_FIELDS = {
     "trainingEffect",
     "trainingEffectLabel",
     "activityTrainingLoad",
-    "vO2MaxValue",
+    garmin_perf_fields.VO2_MAX_VALUE,
     "trainingReadiness",
     "recoveryTime",
     "weight",
-    "weightKg",
+    garmin_perf_fields.WEIGHT_KG,
     "weight_kg",
-    "summaryDate",
+    garmin_perf_fields.SUMMARY_DATE,
     "latestWeight",
-    "restingHeartRate",
+    garmin_perf_fields.RESTING_HEART_RATE,
     "restingHR",
     *GARMIN_FTP_ALIASES,
     "power",
@@ -102,7 +103,7 @@ def garmin_training_load_projection(
         "mostRecentTrainingLoadBalance",
         "metricsTrainingLoadBalanceDTOMap",
         (
-            "calendarDate",
+            garmin_perf_fields.CALENDAR_DATE,
             "monthlyLoadAerobicLow",
             "monthlyLoadAerobicLowTargetMin",
             "monthlyLoadAerobicLowTargetMax",
@@ -129,13 +130,13 @@ def garmin_training_load_projection(
         result["four_week_balance"] = {
             "source": "Garmin Connect",
             **freshness.get("training_load_balance", {"freshness": "unknown"}),
-            "date": _date(balance.get("calendarDate")),
+            "date": _date(balance.get(garmin_perf_fields.CALENDAR_DATE)),
             **{
                 key: metric
                 for key in fields
                 if _fresh_source(
                     freshness.get("training_load_balance"),
-                    balance.get("calendarDate"),
+                    balance.get(garmin_perf_fields.CALENDAR_DATE),
                     current_date,
                 )
                 if (metric := bounded_activity_metric(balance.get(key), 0, 100_000))
@@ -147,7 +148,7 @@ def garmin_training_load_projection(
         "mostRecentTrainingStatus",
         "latestTrainingStatusData",
         (
-            "calendarDate",
+            garmin_perf_fields.CALENDAR_DATE,
             "acuteTrainingLoadDTO.dailyTrainingLoadAcute",
             "acuteTrainingLoadDTO.dailyTrainingLoadChronic",
             "acuteTrainingLoadDTO.dailyAcuteChronicWorkloadRatio",
@@ -159,14 +160,14 @@ def garmin_training_load_projection(
         result["daily_status"] = {
             "source": "Garmin Connect",
             **freshness.get("daily_training_status", {"freshness": "unknown"}),
-            "date": _date(daily.get("calendarDate")),
+            "date": _date(daily.get(garmin_perf_fields.CALENDAR_DATE)),
             "acute_load": bounded_activity_metric(
                 acute.get("dailyTrainingLoadAcute"), 0, 100_000
             )
             if daily
             and _fresh_source(
                 freshness.get("daily_training_status"),
-                daily.get("calendarDate"),
+                daily.get(garmin_perf_fields.CALENDAR_DATE),
                 current_date,
             )
             else None,
@@ -176,7 +177,7 @@ def garmin_training_load_projection(
             if daily
             and _fresh_source(
                 freshness.get("daily_training_status"),
-                daily.get("calendarDate"),
+                daily.get(garmin_perf_fields.CALENDAR_DATE),
                 current_date,
             )
             else None,
@@ -186,7 +187,7 @@ def garmin_training_load_projection(
             if daily
             and _fresh_source(
                 freshness.get("daily_training_status"),
-                daily.get("calendarDate"),
+                daily.get(garmin_perf_fields.CALENDAR_DATE),
                 current_date,
             )
             else None,
@@ -235,12 +236,13 @@ def _primary_device_record(
     if primary:
         return (
             primary[0]
-            if len(primary) == 1 and _date(primary[0].get("calendarDate"))
+            if len(primary) == 1
+            and _date(primary[0].get(garmin_perf_fields.CALENDAR_DATE))
             else None
         )
     dated: list[tuple[str, dict[str, Any]]] = []
     for item in candidates:
-        day = _date(item.get("calendarDate"))
+        day = _date(item.get(garmin_perf_fields.CALENDAR_DATE))
         if day is not None:
             dated.append((day, item))
     return _latest_unambiguous_record(dated, comparable_fields)
@@ -264,7 +266,11 @@ def _one_unambiguous_record(
     matches: list[dict[str, Any]], comparable_fields: tuple[str, ...]
 ) -> dict[str, Any] | None:
     if len(matches) == 1:
-        return matches[0] if _date(matches[0].get("calendarDate")) else None
+        return (
+            matches[0]
+            if _date(matches[0].get(garmin_perf_fields.CALENDAR_DATE))
+            else None
+        )
     if not matches:
         return None
 
@@ -288,13 +294,13 @@ def _nested_value(value: dict[str, Any], keys: list[str]) -> Any:
 
 GARMIN_RECOVERY_FIELDS = (
     "date",
-    "calendarDate",
-    "summaryDate",
+    garmin_perf_fields.CALENDAR_DATE,
+    garmin_perf_fields.SUMMARY_DATE,
     *GARMIN_SLEEP_DURATION_ALIASES,
     *GARMIN_SLEEP_SCORE_ALIASES,
     "hrvStatus",
-    "hrvWeeklyAvg",
-    "weeklyAvg",
+    garmin_perf_fields.WEEKLY_HRV_AVERAGE,
+    garmin_perf_fields.WEEKLY_AVERAGE,
     *GARMIN_HRV_LAST_NIGHT_ALIASES,
     "bodyBattery",
     "body_battery",
@@ -305,7 +311,7 @@ GARMIN_RECOVERY_FIELDS = (
     "level",
     "qualifier",
     "trainingReadiness",
-    "trainingReadinessScore",
+    garmin_perf_fields.READINESS_SCORE,
     "trainingReadinessLevel",
     "overallReadinessScore",
     "overallReadinessLevel",
@@ -331,9 +337,7 @@ def latest_garmin_record(value: Any) -> dict[str, Any]:
         current = pending.pop()
         visited += 1
         if isinstance(current, dict):
-            if _first_present(
-                current, ("calendarDate", "summaryDate", "date", "timestamp", "id")
-            ):
+            if _first_present(current, garmin_perf_fields.RECORD_IDENTITY_KEYS):
                 records.append(current)
             pending.extend(
                 item for item in current.values() if isinstance(item, (dict, list))
@@ -347,15 +351,10 @@ def latest_garmin_record(value: Any) -> dict[str, Any]:
             records,
             key=lambda item: (
                 1
-                if _first_present(
-                    item, ("calendarDate", "summaryDate", "date", "timestamp")
-                )
+                if _first_present(item, garmin_perf_fields.RECORD_TIMESTAMP_KEYS)
                 else 0,
                 str(
-                    _first_present(
-                        item, ("calendarDate", "summaryDate", "date", "timestamp", "id")
-                    )
-                    or ""
+                    _first_present(item, garmin_perf_fields.RECORD_IDENTITY_KEYS) or ""
                 ),
             ),
             default={},

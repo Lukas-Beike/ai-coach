@@ -12,8 +12,10 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import RemoteEntityKind
 from backend.config import Config
 from backend.db import DatabaseManager
+from backend.db.remote_links import RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import (
     COACH_ABORTED_ERROR,
@@ -29,7 +31,9 @@ from backend.planning.library_service import WorkoutLibraryService
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import maintenance_operation
 from backend.sync.gates import intervals_operation
+from backend.sync.workout_export import WorkoutLibraryExportPort
 
+_REMOTE_LINKS = RemoteLinkRepository()
 _OPEN_SYNC_STATES = ("local", "sync_error", "remote_missing", "conflict")
 _WORKOUT_LIBRARY_SYNC_LOCK = threading.Lock()
 _REMOTE_LIBRARY_METADATA_FIELDS = (
@@ -170,6 +174,7 @@ class WorkoutLibraryRemoteReconciler:
                 now,
             ),
         )
+        _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.LIBRARY_WORKOUT, local_id)
         return entry
 
     @classmethod
@@ -177,11 +182,19 @@ class WorkoutLibraryRemoteReconciler:
         cls, db: Any, seen_external_ids: set[str], now: str
     ) -> None:
         remote_rows = db.execute(
-            "SELECT id, external_id, sync_dirty, sync_state, payload "
-            "FROM workout_library WHERE external_id IS NOT NULL"
+            "SELECT id, local_id, external_id, sync_dirty, sync_state, payload "
+            "FROM workout_library"
         ).fetchall()
         for row in remote_rows:
-            external_id = str(row.get("external_id") or "")
+            external_id = str(
+                _REMOTE_LINKS.resolve_remote_external_id(
+                    db,
+                    RemoteEntityKind.LIBRARY_WORKOUT,
+                    str(row.get("local_id") or ""),
+                    row.get("external_id"),
+                )
+                or ""
+            )
             if not external_id or external_id in seen_external_ids:
                 continue
             if int(row.get("sync_dirty") or 0) or str(row.get("sync_state") or "") in {
@@ -217,7 +230,7 @@ class WorkoutLibraryRefreshService:
         self,
         config: Config,
         database_manager: DatabaseManager,
-        provider_client_factory: Callable[[], Any],
+        export: WorkoutLibraryExportPort,
         remote_reconciler: WorkoutLibraryRemoteReconciler,
         workout_library_service: WorkoutLibraryService,
         sync_state_service: WorkoutLibrarySyncStateService,
@@ -227,7 +240,7 @@ class WorkoutLibraryRefreshService:
     ) -> None:
         self._config = config
         self._database_manager = database_manager
-        self._provider_client_factory = provider_client_factory
+        self._export = export
         self._remote_reconciler = remote_reconciler
         self._workout_library_service = workout_library_service
         self._sync_state_service = sync_state_service
@@ -262,11 +275,7 @@ class WorkoutLibraryRefreshService:
 
         with workout_library_sync_guard():
             self._raise_chat_cancelled(cancel_event)
-            client = self._provider_client_factory()
-            if cancel_event is None:
-                workouts = client.get_workout_library()
-            else:
-                workouts = client.get_workout_library(cancel_event=cancel_event)
+            workouts = self._export.library_list(cancel_event=cancel_event)
             self._raise_chat_cancelled(cancel_event)
             normalized = self._remote_reconciler.reconcile(
                 workouts, remove_missing=True
@@ -326,7 +335,31 @@ class WorkoutLibrarySyncStateService:
                 "WHERE sync_state IN (?, ?, ?, ?) ORDER BY local_id",
                 _OPEN_SYNC_STATES,
             ).fetchall()
+            rows = self._with_linked_external_ids(
+                db, rows, RemoteEntityKind.LIBRARY_WORKOUT
+            )
+            planned_rows = self._with_linked_external_ids(
+                db, planned_rows, RemoteEntityKind.PLANNED_UNIT
+            )
         return self._snapshot(rows, planned_rows)
+
+    @staticmethod
+    def _with_linked_external_ids(
+        db: Any, rows: list[Any], entity_kind: RemoteEntityKind
+    ) -> list[Any]:
+        """Resolve each row's external id through its remote link, slot as fallback."""
+        return [
+            {
+                **row,
+                "external_id": _REMOTE_LINKS.resolve_remote_external_id(
+                    db,
+                    entity_kind,
+                    str(row.get("local_id") or ""),
+                    row.get("external_id"),
+                ),
+            }
+            for row in rows
+        ]
 
     def update(self, local_id: str, state: str, error: str | None = None) -> bool:
         with self._database_manager.unit_of_work() as db:
@@ -392,6 +425,17 @@ class WorkoutLibrarySyncStateService:
                 "FROM workout_library WHERE local_id = ?",
                 (normalized_id,),
             ).fetchone()
+            if row:
+                # Prefer the remote link; the legacy slot is the fallback.
+                row = {
+                    **row,
+                    "external_id": _REMOTE_LINKS.resolve_remote_external_id(
+                        db,
+                        RemoteEntityKind.LIBRARY_WORKOUT,
+                        normalized_id,
+                        row.get("external_id"),
+                    ),
+                }
         if not row:
             raise AppError(404, "Lokale Bibliothekseinheit nicht gefunden.")
         try:
@@ -424,6 +468,9 @@ class WorkoutLibrarySyncStateService:
                     local_id,
                 ),
             )
+            _REMOTE_LINKS.refresh_from_slots(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
+            )
         return external_id
 
     def finish(
@@ -432,10 +479,10 @@ class WorkoutLibrarySyncStateService:
         external_id: str,
         local_workout: dict[str, Any],
         remote_workout: dict[str, Any],
+        *,
+        verify_readback: Callable[[dict[str, Any], dict[str, Any]], None],
     ) -> dict[str, Any]:
-        planning_workouts.validate_intervals_workout_result(
-            local_workout, remote_workout
-        )
+        verify_readback(local_workout, remote_workout)
         synced = planning_library.normalize_library_workout(
             {**local_workout, **remote_workout},
             local_id=local_id,
@@ -455,6 +502,9 @@ class WorkoutLibrarySyncStateService:
                     now,
                     local_id,
                 ),
+            )
+            _REMOTE_LINKS.refresh_from_slots(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
             )
             self._key_value_repository.set(db, "last_library_sync_at", now)
             self._key_value_repository.set(db, "last_library_sync_error", "")
@@ -477,6 +527,9 @@ class WorkoutLibrarySyncStateService:
             db.execute(
                 "UPDATE workout_library SET payload=?, updated_at=? WHERE local_id=?",
                 (json.dumps(payload, ensure_ascii=False), self._now(), local_id),
+            )
+            _REMOTE_LINKS.refresh_from_slots(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
             )
         return True
 
@@ -572,7 +625,7 @@ class WorkoutLibrarySyncService:
     def __init__(
         self,
         config: Config,
-        provider_client_factory: Callable[[], Any],
+        export: WorkoutLibraryExportPort,
         state_service: WorkoutLibrarySyncStateService,
         calendar_conflict_service: Any | None = None,
         *,
@@ -580,7 +633,7 @@ class WorkoutLibrarySyncService:
         _lock: Any | None = None,
     ):
         self._config = config
-        self._provider_client_factory = provider_client_factory
+        self._export = export
         self._local_today = local_today
         self._state_service = state_service
         self._calendar_conflict_service = calendar_conflict_service
@@ -589,20 +642,13 @@ class WorkoutLibrarySyncService:
     def plan_remote(
         self, workout_id: str, workout: dict[str, Any], plan_date: str
     ) -> dict[str, Any]:
-        client = self._provider_client_factory()
-        today = (
-            self._local_today()
-            if self._local_today is not None
-            else client.local_today()
-        )
-        payload = planning_workouts.library_workout_event_payload(
+        event = self._export.library_plan(
             workout_id,
             workout,
             plan_date,
-            today=today,
+            today=self._local_today() if self._local_today is not None else None,
         )
-        event = client.plan_library_workout(payload)
-        planning_workouts.validate_intervals_workout_result(workout, event)
+        self._export.verify_library_readback(workout, event)
         return event
 
     def sync_calendar_entry(
@@ -657,20 +703,22 @@ class WorkoutLibrarySyncService:
             normalized_id, local_workout, remote_workout or {}
         )
         return self._state_service.finish(
-            normalized_id, external_id, local_workout, remote_workout or {}
+            normalized_id,
+            external_id,
+            local_workout,
+            remote_workout or {},
+            verify_readback=self._export.verify_library_readback,
         )
 
     def _upsert_remote(
         self, row: dict[str, Any], local_workout: dict[str, Any]
     ) -> dict[str, Any] | None:
         external_id = str(row.get("external_id") or "")
-        payload = planning_workouts.library_workout_payload(local_workout)
+        payload = self._export.serialize_library(local_workout)
         if external_id and row.get("sync_state") != "remote_missing":
-            updated = self._provider_client_factory().update_library_workout(
-                external_id, payload
-            )
+            updated = self._export.library_update(external_id, payload)
             return {**updated, "id": external_id}
-        remote_workouts = self._provider_client_factory().get_workout_library()
+        remote_workouts = self._export.library_list()
         recovered = next(
             (
                 item
@@ -681,5 +729,5 @@ class WorkoutLibrarySyncService:
         )
         if recovered is not None:
             return recovered
-        created = self._provider_client_factory().create_library_workouts([payload])
+        created = self._export.library_create([payload])
         return created[0] if created and isinstance(created[0], dict) else None

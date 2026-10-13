@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from backend.canonical.vocabulary import RemoteEntityKind
+from backend.db.remote_links import RemoteLinkRepository
 from backend.observability import Redactor
 from backend.planning.planned_units import planned_unit_payload_hash
 from backend.planning.revision import PlanningRevisionService
+
+_REMOTE_LINKS = RemoteLinkRepository()
 
 
 def _load_payload(row: Any) -> dict[str, Any]:
@@ -67,6 +71,7 @@ class PlannedUnitSyncStateWriter:
             self._insert_deleted_row(db, local_id, error, now, state, state_values)
         else:
             self._update_row(db, local_id, row, error, now, state, state_values)
+        _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.PLANNED_UNIT, local_id)
         self._revision_service.bump(db)
         return True
 

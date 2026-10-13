@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import unittest
 from contextlib import contextmanager
+from unittest.mock import Mock
+
+from activity_row_support import SnapshotActivityRows
 
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.errors import AppError
@@ -10,7 +13,8 @@ from backend.errors import AppError
 
 class _Manager:
     def __init__(self) -> None:
-        self.db = object()
+        self.db = Mock()
+        self.db.execute.return_value.fetchall.return_value = []
         self.transactions = 0
 
     @contextmanager
@@ -87,6 +91,7 @@ class DuplicateActivityServiceTests(unittest.TestCase):
             self.manager,
             self.snapshots,
             self.snapshots,
+            SnapshotActivityRows(self.snapshots),
             lambda: "2026-09-20T11:00:00+00:00",
             self.events,
         )
@@ -167,6 +172,29 @@ class DuplicateActivityServiceTests(unittest.TestCase):
 
         self.assertEqual(self.snapshots.saved, [])
         self.assertEqual(self.events.published, [])
+
+    def test_delete_tombstones_the_canonical_records_in_the_snapshot_transaction(self):
+        self.manager.db.execute.return_value.fetchall.return_value = [
+            {"activity_id": "activity-garmin-1"}
+        ]
+        self.service.delete(
+            {
+                "canonical_id": "wahoo-1",
+                "duplicate_id": "garmin-1",
+                "snapshot_synced_at": "2026-09-20T10:00:00+00:00",
+            },
+            self.intervals,
+        )
+
+        updates = [
+            call.args[0].split()[1]
+            for call in self.manager.db.execute.call_args_list
+            if call.args[0].startswith("UPDATE")
+        ]
+        self.assertEqual(
+            updates, ["activity_records", "provider_records", "activity_sessions"]
+        )
+        self.assertEqual(self.manager.transactions, 2)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
+from backend.canonical.vocabulary import ProviderId
 from backend.db.manager import DatabaseManager
 from backend.db.migrations import migrate_schema
 from backend.db.schema import (
@@ -18,13 +19,20 @@ from backend.db.schema import (
     database_schema_signature,
     initialize_schema,
 )
-from backend.db.schema_history import SHAPE_SCHEMA_V5, released_shape
+from backend.db.schema_history import (
+    SHAPE_SCHEMA_V5,
+    SHAPE_SCHEMA_V6,
+    SHAPE_SCHEMA_V7,
+    released_shape,
+)
 
 RELEASE_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_19.sql.txt"
 PREVIOUS_SCHEMA = Path(__file__).with_name("fixtures") / "schema_v2.sql.txt"
 RELEASE_1_12_26_SCHEMA = Path(__file__).with_name("fixtures") / "schema_1_12_26.sql.txt"
 SCHEMA_V4 = Path(__file__).with_name("fixtures") / "schema_v4.sql.txt"
 SCHEMA_V5 = Path(__file__).with_name("fixtures") / "schema_v5.sql.txt"
+SCHEMA_V6 = Path(__file__).with_name("fixtures") / "schema_v6.sql.txt"
+SCHEMA_V7 = Path(__file__).with_name("fixtures") / "schema_v7.sql.txt"
 # Tables added by schema version 6; absent from every released shape.
 PROVIDER_TABLES = (
     "provider_records",
@@ -32,6 +40,24 @@ PROVIDER_TABLES = (
     "activity_sessions",
     "observations",
 )
+# Columns added by schema version 7. Rows keep every other column unchanged, so
+# comparisons that predate the column leave it out and check it separately.
+ADDED_IN_V7_COLUMNS = {("activity_feedback", "provider")}
+# Schema version 8 adds the remote_links table and the tombstone provider column.
+# The table is never part of an older database; the column is checked separately.
+ADDED_IN_V8_TABLES = ("remote_links",)
+ADDED_IN_V8_COLUMNS = {("competition_sync_tombstones", "provider")}
+ADDED_LATER_COLUMNS = ADDED_IN_V7_COLUMNS | ADDED_IN_V8_COLUMNS
+INTERVALS = ProviderId.INTERVALS.value
+
+
+def comparable_columns(db, table, excluded=frozenset()):
+    return ",".join(
+        column["name"]
+        for column in db.execute(f"PRAGMA table_info({table})")
+        if (table, column["name"]) not in excluded
+    )
+
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -80,15 +106,23 @@ class DatabaseMigrationTests(unittest.TestCase):
             row[0]
             for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-        return [table for table in CURRENT_DATABASE_SCHEMA if table in present]
+        return [
+            table
+            for table in CURRENT_DATABASE_SCHEMA
+            if table in present and table not in ADDED_IN_V8_TABLES
+        ]
 
     def full_rows(self, db, tables=None):
-        # Every column of every table; the default covers the tables present.
+        # Every column of every table except the schema-v7 column; the default
+        # covers the tables present.
         names = self.existing_tables(db) if tables is None else tables
         return {
             table: [
                 tuple(row)
-                for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid")
+                for row in db.execute(
+                    f"SELECT {comparable_columns(db, table, ADDED_LATER_COLUMNS)} "
+                    f"FROM {table} ORDER BY rowid"
+                )
             ]
             for table in names
         }
@@ -172,13 +206,14 @@ class DatabaseMigrationTests(unittest.TestCase):
         added_later = {
             ("external_calendar_events", "no_training"),
             ("nutrition_logs", "logged_time_known"),
+            *ADDED_LATER_COLUMNS,
         }
         names = self.existing_tables(db) if tables is None else tables
         return {
             table: [
                 tuple(row)
                 for row in db.execute(
-                    f"SELECT {','.join(column['name'] for column in db.execute(f'PRAGMA table_info({table})') if (table, column['name']) not in added_later)} FROM {table}"
+                    f"SELECT {comparable_columns(db, table, added_later)} FROM {table}"
                 )
             ]
             for table in names
@@ -971,7 +1006,9 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertFalse(database_schema_is_current(db))
         self.assertEqual(
             set(self.existing_tables(db)),
-            set(CURRENT_DATABASE_SCHEMA) - set(PROVIDER_TABLES),
+            set(CURRENT_DATABASE_SCHEMA)
+            - set(PROVIDER_TABLES)
+            - set(ADDED_IN_V8_TABLES),
         )
 
     def test_schema_v5_populated_database_upgrades_preserving_rows_and_is_restart_stable(
@@ -1067,7 +1104,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
 
     def test_schema_v5_unsupported_versions_are_rejected_without_modification(self):
-        for version in (1, 2, 3, 4, 6, 7, 99):
+        for version in (1, 2, 3, 4, 6, 8, 99):
             with self.subTest(version=version):
                 db = self.schema_v5_database()
                 self.seed_all_tables(db)
@@ -1091,10 +1128,115 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertEqual(list(db.iterdump()), before)
         self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
 
-    def test_schema_v6_with_unknown_column_is_rejected_without_modification(self):
-        db = self.schema_v5_database()
+    def schema_v6_database(self):
+        db = self.connect()
+        db.executescript(SCHEMA_V6.read_text(encoding="utf-8"))
+        return db
+
+    def test_schema_v6_fixture_is_released_schema_v6(self):
+        db = self.schema_v6_database()
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 6)
+        self.assertEqual(released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V6)
+        self.assertFalse(database_schema_is_current(db))
+        self.assertNotIn(
+            "provider",
+            {row[1] for row in db.execute("PRAGMA table_info(activity_feedback)")},
+        )
+
+    def test_schema_v6_populated_database_upgrades_preserving_rows_and_is_restart_stable(
+        self,
+    ):
+        db = self.schema_v6_database()
+        self.seed_all_tables(db)
+        self.seed_provider_tables(db)
+        before_rows = self.full_rows(db)
+
         migrate_schema(db)
         db.commit()
+        upgraded_dump = list(db.iterdump())
+
+        self.assertEqual(self.full_rows(db, before_rows), before_rows)
+        self.assertEqual(
+            db.execute(
+                "SELECT COUNT(*) FROM activity_feedback WHERE provider IS NOT NULL"
+            ).fetchone()[0],
+            0,
+        )
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+
+        migrate_schema(db)
+        db.commit()
+        self.assertEqual(list(db.iterdump()), upgraded_dump)
+        self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_schema_v6_database_file_upgrades_once_and_reopens_unchanged(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            path = Path(data_dir) / "schema-v6.sqlite3"
+            with closing(sqlite3.connect(path)) as setup:
+                setup.row_factory = sqlite3.Row
+                setup.executescript(SCHEMA_V6.read_text(encoding="utf-8"))
+                self.seed_all_tables(setup)
+                self.seed_provider_tables(setup)
+                v6_rows = self.full_rows(setup)
+            with closing(sqlite3.connect(path)) as upgrade:
+                upgrade.row_factory = sqlite3.Row
+                migrate_schema(upgrade)
+                upgrade.commit()
+                self.assertEqual(self.full_rows(upgrade, v6_rows), v6_rows)
+                before_dump = list(upgrade.iterdump())
+
+            for _ in range(2):
+                with closing(sqlite3.connect(path)) as db:
+                    db.row_factory = sqlite3.Row
+                    migrate_schema(db)
+                    db.commit()
+                    self.assertEqual(self.full_rows(db), v6_rows)
+                    self.assertEqual(list(db.iterdump()), before_dump)
+                    self.assertEqual(
+                        db.execute("PRAGMA user_version").fetchone()[0],
+                        CURRENT_SCHEMA_VERSION,
+                    )
+
+    def test_schema_v6_upgrade_failure_rolls_back_and_can_be_retried(self):
+        db = self.schema_v6_database()
+        self.seed_all_tables(db)
+        before_dump = list(db.iterdump())
+        with (
+            patch(
+                "backend.db.migrations.ACTIVITY_FEEDBACK_TABLE_SQL",
+                "CREATE TABLE activity_feedback (INVALID SQL);",
+            ),
+            self.assertRaises(sqlite3.OperationalError),
+        ):
+            migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), before_dump)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 6)
+
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
+
+    def test_schema_v6_unsupported_versions_are_rejected_without_modification(self):
+        for version in (1, 2, 3, 4, 5, 7, 8, 99):
+            with self.subTest(version=version):
+                db = self.schema_v6_database()
+                self.seed_all_tables(db)
+                db.execute(f"PRAGMA user_version = {version}")
+                db.commit()
+                before = list(db.iterdump())
+                with self.assertRaises(RuntimeError):
+                    migrate_schema(db)
+                self.assertEqual(list(db.iterdump()), before)
+                self.assertEqual(
+                    db.execute("PRAGMA user_version").fetchone()[0], version
+                )
+
+    def test_schema_v6_with_unknown_column_is_rejected_without_modification(self):
+        db = self.schema_v6_database()
         db.execute("ALTER TABLE observations ADD COLUMN unknown TEXT")
         db.commit()
         before = list(db.iterdump())
@@ -1102,6 +1244,297 @@ class DatabaseMigrationTests(unittest.TestCase):
             migrate_schema(db)
         self.assertEqual(list(db.iterdump()), before)
         self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 6)
+
+    def schema_v7_database(self):
+        db = self.connect()
+        db.executescript(SCHEMA_V7.read_text(encoding="utf-8"))
+        return db
+
+    def test_schema_v7_fixture_is_released_schema_v7(self):
+        db = self.schema_v7_database()
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 7)
+        self.assertEqual(released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V7)
+        self.assertFalse(database_schema_is_current(db))
+        self.assertNotIn(
+            "remote_links",
+            {row[0] for row in db.execute("SELECT name FROM sqlite_master")},
+        )
+        self.assertNotIn(
+            "provider",
+            {
+                row[1]
+                for row in db.execute("PRAGMA table_info(competition_sync_tombstones)")
+            },
+        )
+
+    def clone_row(self, db, table, **overrides):
+        # Copy the first seeded row of a table with some columns replaced.
+        columns = [
+            column["name"]
+            for column in db.execute(f"PRAGMA table_info({table})")
+            if column["name"] != "id"
+        ]
+        selected = ",".join(
+            f"? AS {column}" if column in overrides else column for column in columns
+        )
+        db.execute(
+            f"INSERT INTO {table}({','.join(columns)}) "
+            f"SELECT {selected} FROM {table} ORDER BY rowid LIMIT 1",
+            [overrides[column] for column in columns if column in overrides],
+        )
+
+    def seed_remote_slots(self, db):
+        # Layer the legacy remote slots on top of the generic seed rows. Tables
+        # a released database lacks are skipped; returns the expected links.
+        tables = set(self.existing_tables(db))
+        expected = set()
+        stamp = "2026-10-01T08:00:00+00:00"
+        if "workout_library" in tables:
+            db.execute(
+                "UPDATE workout_library SET external_id='ext-lib-1', last_synced_at=?, "
+                "payload='{\"remote_event_id\": 501}'",
+                (stamp,),
+            )
+            local_id = db.execute("SELECT local_id FROM workout_library").fetchone()[0]
+            self.clone_row(
+                db,
+                "workout_library",
+                local_id="lib-duplicate",
+                external_id="ext-lib-2",
+                last_synced_at=None,
+                payload='{"remote_event_id": 501}',
+            )
+            self.clone_row(
+                db,
+                "workout_library",
+                local_id="lib-malformed",
+                external_id=None,
+                last_synced_at=None,
+                payload="{not json",
+            )
+            self.clone_row(
+                db,
+                "workout_library",
+                local_id="",
+                external_id="ext-blank-local-id",
+                last_synced_at=None,
+                payload='{"remote_event_id": 502}',
+            )
+            self.clone_row(
+                db,
+                "workout_library",
+                local_id="lib-local-only",
+                external_id=None,
+                last_synced_at=None,
+                payload='{"remote_event_id": null}',
+            )
+            expected |= {
+                ("library_workout", local_id, "501", "ext-lib-1", "synced", stamp),
+                (
+                    "library_workout",
+                    "lib-duplicate",
+                    None,
+                    "ext-lib-2",
+                    "pending",
+                    None,
+                ),
+            }
+        if "planned_units" in tables:
+            db.execute(
+                "UPDATE planned_units SET external_id=NULL, last_synced_at=?, "
+                "baseline_hash='baseline-1', "
+                'payload=\'{"remote_event_id": "unit-9"}\'',
+                (stamp,),
+            )
+            local_id = db.execute(
+                "SELECT local_id FROM planned_units ORDER BY id LIMIT 1"
+            ).fetchone()[0]
+            expected.add(("planned_unit", local_id, "unit-9", None, "synced", stamp))
+        if "competitions" in tables:
+            db.execute(
+                "UPDATE competitions SET intervals_event_id='77', "
+                "external_id='ext-comp-1', last_synced_at=?",
+                (stamp,),
+            )
+            competition_id = db.execute(
+                "SELECT id FROM competitions ORDER BY id LIMIT 1"
+            ).fetchone()[0]
+            expected.add(
+                (
+                    "competition",
+                    str(competition_id),
+                    "77",
+                    "ext-comp-1",
+                    "synced",
+                    stamp,
+                )
+            )
+        db.commit()
+        return expected
+
+    def links(self, db):
+        return {
+            tuple(row)
+            for row in db.execute(
+                "SELECT entity_kind, local_id, remote_id, remote_external_id, "
+                "sync_state, last_synced_at FROM remote_links"
+            )
+        }
+
+    def test_every_released_schema_upgrades_with_remote_links_backfilled_from_slots(
+        self,
+    ):
+        factories = {
+            1: self.old_database,
+            2: self.previous_database,
+            4: self.schema_v4_database,
+            5: self.schema_v5_database,
+            6: self.schema_v6_database,
+            7: self.schema_v7_database,
+        }
+        for version, factory in factories.items():
+            with self.subTest(version=version):
+                db = factory()
+                self.seed_all_tables(db)
+                expected = self.seed_remote_slots(db)
+                tombstones = db.execute(
+                    "SELECT COUNT(*) FROM competition_sync_tombstones"
+                ).fetchone()[0]
+                before_rows = self.rows(db)
+
+                migrate_schema(db)
+                db.commit()
+                upgraded_dump = list(db.iterdump())
+
+                self.assertTrue(database_schema_is_current(db))
+                self.assertEqual(
+                    db.execute("PRAGMA user_version").fetchone()[0],
+                    CURRENT_SCHEMA_VERSION,
+                )
+                self.assertEqual(self.rows(db, before_rows), before_rows)
+                self.assertEqual(self.links(db), expected)
+                self.assertEqual(
+                    {row[0] for row in db.execute("SELECT provider FROM remote_links")}
+                    - {INTERVALS},
+                    set(),
+                )
+                self.assertEqual(
+                    tuple(
+                        db.execute(
+                            "SELECT COUNT(*), COUNT(CASE WHEN provider=? THEN 1 END) "
+                            "FROM competition_sync_tombstones",
+                            (INTERVALS,),
+                        ).fetchone()
+                    ),
+                    (tombstones, tombstones),
+                )
+                migrate_schema(db)
+                db.commit()
+                self.assertEqual(list(db.iterdump()), upgraded_dump)
+                self.assertEqual(
+                    db.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+                )
+                self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_schema_v7_database_file_upgrades_once_and_reopens_unchanged(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            path = Path(data_dir) / "schema-v7.sqlite3"
+            with closing(sqlite3.connect(path)) as setup:
+                setup.row_factory = sqlite3.Row
+                setup.executescript(SCHEMA_V7.read_text(encoding="utf-8"))
+                self.seed_all_tables(setup)
+                expected = self.seed_remote_slots(setup)
+                v7_rows = self.full_rows(setup)
+            with closing(sqlite3.connect(path)) as upgrade:
+                upgrade.row_factory = sqlite3.Row
+                migrate_schema(upgrade)
+                upgrade.commit()
+                before_dump = list(upgrade.iterdump())
+
+            for _ in range(2):
+                with closing(sqlite3.connect(path)) as db:
+                    db.row_factory = sqlite3.Row
+                    migrate_schema(db)
+                    db.commit()
+                    self.assertEqual(self.full_rows(db, v7_rows), v7_rows)
+                    self.assertEqual(self.links(db), expected)
+                    self.assertEqual(list(db.iterdump()), before_dump)
+                    self.assertEqual(
+                        db.execute("PRAGMA user_version").fetchone()[0],
+                        CURRENT_SCHEMA_VERSION,
+                    )
+
+    def test_schema_v7_upgrade_failure_rolls_back_and_can_be_retried(self):
+        db = self.schema_v7_database()
+        self.seed_all_tables(db)
+        expected = self.seed_remote_slots(db)
+        before_dump = list(db.iterdump())
+        with (
+            patch(
+                "backend.db.migrations.COMPETITION_SYNC_TOMBSTONES_TABLE_SQL",
+                "CREATE TABLE competition_sync_tombstones (INVALID SQL);",
+            ),
+            self.assertRaises(sqlite3.OperationalError),
+        ):
+            migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), before_dump)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 7)
+        self.assertEqual(released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V7)
+
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(self.links(db), expected)
+
+    def test_schema_v7_unsupported_versions_are_rejected_without_modification(self):
+        for version in (1, 2, 3, 4, 5, 6, 8, 99):
+            with self.subTest(version=version):
+                db = self.schema_v7_database()
+                self.seed_all_tables(db)
+                db.execute(f"PRAGMA user_version = {version}")
+                db.commit()
+                before = list(db.iterdump())
+                with self.assertRaises(RuntimeError):
+                    migrate_schema(db)
+                self.assertEqual(list(db.iterdump()), before)
+                self.assertEqual(
+                    db.execute("PRAGMA user_version").fetchone()[0], version
+                )
+
+    def test_schema_v7_with_unknown_column_is_rejected_without_modification(self):
+        db = self.schema_v7_database()
+        db.execute("ALTER TABLE competition_sync_tombstones ADD COLUMN unknown TEXT")
+        db.commit()
+        before = list(db.iterdump())
+        with self.assertRaises(RuntimeError):
+            migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), before)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 7)
+
+    def test_newer_schema_version_is_rejected_without_modification(self):
+        db = self.connect()
+        initialize_schema(db)
+        db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION + 1}")
+        db.commit()
+        before = list(db.iterdump())
+        with self.assertRaises(RuntimeError):
+            migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), before)
+
+    def test_remote_links_reject_duplicate_remote_ids_per_provider_and_kind(self):
+        db = self.connect()
+        initialize_schema(db)
+        insert = (
+            "INSERT INTO remote_links(entity_kind, local_id, provider, remote_id, "
+            "sync_state) VALUES (?, ?, ?, ?, 'synced')"
+        )
+        db.execute(insert, ("competition", "1", INTERVALS, "9"))
+        db.execute(insert, ("competition", "2", "other-provider", "9"))
+        db.execute(insert, ("library_workout", "1", INTERVALS, "9"))
+        db.execute(insert, ("competition", "3", INTERVALS, None))
+        db.execute(insert, ("competition", "4", INTERVALS, None))
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute(insert, ("competition", "5", INTERVALS, "9"))
 
     def test_unknown_or_newer_schema_is_not_modified(self):
         for version in (None, 5, 6, 7, 99):
@@ -1206,6 +1639,48 @@ class DatabaseMigrationTests(unittest.TestCase):
                     migrate_schema(db)
                     self.assertEqual(self.rows(db, before), before)
                     self.assert_provider_tables_empty(db)
+                    self.assertTrue(database_schema_is_current(db))
+                    self.assertEqual(
+                        db.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+                    )
+                    self.assertEqual(
+                        db.execute("PRAGMA cipher_integrity_check").fetchall(), []
+                    )
+                    self.assertEqual(
+                        db.execute("PRAGMA foreign_key_check").fetchall(), []
+                    )
+            finally:
+                reopened.close()
+            self.assertNotEqual(path.read_bytes()[:16], b"SQLite format 3\x00")
+
+    @unittest.skipIf(
+        cipher_backend is None, "SQLCipher requires the Docker runtime on Windows"
+    )
+    def test_encrypted_schema_v7_update_backfills_links_and_reopens_with_same_key(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "encrypted.db"
+            options = {
+                "password": "synthetic-migration-test-key",
+                "configure": configure_cipher,
+                "row_factory": cipher_backend.Row,
+            }
+            manager = DatabaseManager(path, cipher_backend, **options)
+            try:
+                with manager.unit_of_work() as db:
+                    db.executescript(SCHEMA_V7.read_text(encoding="utf-8"))
+                    self.seed_all_tables(db)
+                    expected = self.seed_remote_slots(db)
+                    before = self.full_rows(db)
+                with manager.unit_of_work() as db:
+                    migrate_schema(db)
+            finally:
+                manager.close()
+            reopened = DatabaseManager(path, cipher_backend, **options)
+            try:
+                with reopened.unit_of_work() as db:
+                    migrate_schema(db)
+                    self.assertEqual(self.full_rows(db, before), before)
+                    self.assertEqual(self.links(db), expected)
                     self.assertTrue(database_schema_is_current(db))
                     self.assertEqual(
                         db.execute("PRAGMA integrity_check").fetchone()[0], "ok"

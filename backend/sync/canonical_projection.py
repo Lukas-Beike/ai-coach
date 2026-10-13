@@ -22,19 +22,23 @@ from datetime import date, datetime, tzinfo
 from itertools import chain
 from typing import Any
 
-from backend.canonical.coverage import ProviderCoverage, count_issues
+from backend.canonical.coverage import ProviderCoverage, summarize_provider
 from backend.canonical.local_time import local_date
 from backend.canonical.mapping import MappingResult
 from backend.canonical.ordering import activity_order, observation_order
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.providers.snapshot_projection import (
+    intervals_activity_rows,
+    intervals_row_local_date,
+    intervals_snapshot_has_only_compact_rows,
     project_garmin_snapshot,
     project_intervals_snapshot,
     stored_retrieved_at,
 )
 from backend.runtime.ports import (
     ActivityReader,
+    ActivityRowReader,
     ObservationReader,
     ProviderCoverageReader,
 )
@@ -62,7 +66,7 @@ class _Projection:
 
 
 class CanonicalSnapshotProjection(
-    ActivityReader, ObservationReader, ProviderCoverageReader
+    ActivityReader, ActivityRowReader, ObservationReader, ProviderCoverageReader
 ):
     """Serves canonical activities, observations and coverage from snapshots.
 
@@ -111,6 +115,37 @@ class CanonicalSnapshotProjection(
             for record in projection.activities
             if _in_range(local_date(record.started_at, zone), start, end)
         )
+
+    def activity_rows(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        limit: int | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return the stored raw Intervals.icu activity rows, in snapshot order.
+
+        These are the rows ``canonical_rows`` starts from, before de-duplication.
+        Without bounds every row is returned. With a bound, a row is kept when the
+        activity mapper gives it an athlete-local date inside the bounds; a row the
+        mapper rejects has no date and is then left out. ``limit`` keeps the
+        first rows after the bounds.
+        """
+        rows = intervals_activity_rows(self._intervals_snapshot(db))
+        if start is not None or end is not None:
+            zone = self._zone(db)
+            retrieved_at = self._clock()
+            rows = tuple(
+                row
+                for row in rows
+                if _row_in_range(row, zone, retrieved_at, start=start, end=end)
+            )
+        return rows if limit is None else rows[:limit]
+
+    def has_only_compact_activity_rows(self, db: Any) -> bool:
+        """Return True when the stored snapshot lists activities only in compact form."""
+        return intervals_snapshot_has_only_compact_rows(self._intervals_snapshot(db))
 
     def observations(
         self,
@@ -213,16 +248,19 @@ def _in_range(day: date, start: date | None, end: date | None) -> bool:
     return (start is None or day >= start) and (end is None or day <= end)
 
 
+def _row_in_range(
+    row: dict[str, Any],
+    zone: tzinfo,
+    retrieved_at: datetime,
+    *,
+    start: date | None,
+    end: date | None,
+) -> bool:
+    day = intervals_row_local_date(row, zone=zone, retrieved_at=retrieved_at)
+    return day is not None and _in_range(day, start, end)
+
+
 def _coverage(source: _Source) -> ProviderCoverage:
-    days = [observation.observed_on for observation in source.observations.records]
-    return ProviderCoverage(
-        provider=source.provider,
-        retrieved_at=source.stored_at,
-        activity_count=len(source.activities.records),
-        observation_count=len(source.observations.records),
-        issue_counts=count_issues(
-            (*source.activities.issues, *source.observations.issues)
-        ),
-        first_observed_on=min(days, default=None),
-        last_observed_on=max(days, default=None),
+    return summarize_provider(
+        source.provider, source.stored_at, source.activities, source.observations
     )

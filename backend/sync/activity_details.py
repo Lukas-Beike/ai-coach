@@ -24,6 +24,7 @@ from backend.errors import AppError
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 from backend.planning.target_snapshot import freeze_targets
+from backend.runtime.ports import ActivityRowReader
 
 MAX_STREAM_POINTS = 172_800
 MAX_DETAIL_BYTES = 24 * 1024 * 1024
@@ -58,7 +59,8 @@ class ActivityDetailRefreshService:
         self,
         *,
         api_client: Any,
-        state_repository: Any,
+        database_manager: Any,
+        row_reader: ActivityRowReader,
         store: ActivityDetailStore,
         utc_now: Callable[[], str],
         configured: bool,
@@ -66,7 +68,8 @@ class ActivityDetailRefreshService:
         references: ActivityReferenceResolver | None = None,
     ) -> None:
         self._api_client = api_client
-        self._state_repository = state_repository
+        self._database_manager = database_manager
+        self._row_reader = row_reader
         self._store = store
         self._utc_now = utc_now
         self._configured = configured
@@ -77,14 +80,10 @@ class ActivityDetailRefreshService:
         activity_id = normalize_activity_id(
             self._references.resolve(normalize_activity_id(activity_id))
         )
-        snapshot = self._state_repository.latest_snapshot() or {}
-        rows = (snapshot.get("raw_provider_data") or {}).get("activities") or []
+        with self._database_manager.unit_of_work() as db:
+            rows = self._row_reader.activity_rows(db)
         summary = next(
-            (
-                row
-                for row in rows
-                if isinstance(row, dict) and str(row.get("id")) == activity_id
-            ),
+            (row for row in rows if str(row.get("id")) == activity_id),
             None,
         )
         if summary is None:

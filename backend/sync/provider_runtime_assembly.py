@@ -25,9 +25,10 @@ from backend.providers.descriptors import (
     CALENDAR_ID,
     GARMIN_ID,
     INTERVALS_ID,
+    WAHOO_ID,
     WEATHER_ID,
 )
-from backend.sync.commands import IntervalsSynchronousRefresh
+from backend.sync.commands import GarminSynchronousRefresh, IntervalsSynchronousRefresh
 from backend.sync.execution_assembly import (
     CalendarWeatherJobDependencies,
     GarminJobDependencies,
@@ -43,6 +44,7 @@ from backend.sync.executor import (
     CalendarWeatherJobAdapter,
     GarminJobAdapter,
     IntervalsJobAdapter,
+    WahooJobAdapter,
 )
 from backend.sync.freshness_sources import (
     DEFAULT_FRESHNESS_SOURCES,
@@ -60,9 +62,20 @@ from backend.sync.schedule_policies import (
     CalendarSchedulePolicy,
     GarminSchedulePolicy,
     IntervalsSchedulePolicy,
+    WahooSchedulePolicy,
     WeatherSchedulePolicy,
     intervals_busy,
 )
+from backend.sync.wahoo_plan_push import WahooPlanPushService
+from backend.sync.wahoo_sync import WahooSyncService
+
+
+@dataclass(frozen=True)
+class WahooRuntimeDependencies:
+    """The Wahoo sync and plan-push services, resolved only when the registry asks."""
+
+    sync_service: Callable[[], WahooSyncService]
+    plan_push_service: Callable[[], WahooPlanPushService]
 
 
 @dataclass(frozen=True)
@@ -82,6 +95,7 @@ class ProviderRuntimeDependencies:
     intervals: IntervalsJobDependencies
     garmin: GarminJobDependencies
     calendar_weather: CalendarWeatherJobDependencies
+    wahoo: WahooRuntimeDependencies
 
 
 def _stored_value(deps: ProviderRuntimeDependencies) -> Callable[[str], Any]:
@@ -175,6 +189,13 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
             garmin_service=garmin.sync_service(), all_sync_days=all_sync_days
         )
 
+    def synchronous_refresh() -> GarminSynchronousRefresh:
+        return GarminSynchronousRefresh(
+            garmin.sync_service(),
+            garmin.morning_body_battery_service(),
+            all_sync_days,
+        )
+
     return ProviderRuntimeBinding(
         provider_id=GARMIN_ID,
         job_owner=job_owner,
@@ -183,6 +204,37 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
         schedule=schedule,
         freshness=DEFAULT_FRESHNESS_SOURCES[GARMIN_ID],
         full_resync=full_resync,
+        synchronous_refresh=synchronous_refresh,
+    )
+
+
+def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
+    """Bind the Wahoo workout sync, scheduled once the athlete connected.
+
+    The same adapter runs the explicit library export (``plan_push``).
+    """
+    wahoo = deps.wahoo
+
+    def job_owner() -> ProviderJobOwner:
+        return WahooJobAdapter(
+            sync=wahoo.sync_service(), plan_push=wahoo.plan_push_service()
+        )
+
+    def schedule() -> WahooSchedulePolicy:
+        return WahooSchedulePolicy(
+            configured=lambda: wahoo.sync_service().configured(),
+            sync_state=deps.state.sync_state_repository(),
+            sync_period_defaults=deps.historical.sync_period_defaults,
+            all_sync_days=deps.historical.all_sync_days,
+        )
+
+    return ProviderRuntimeBinding(
+        provider_id=WAHOO_ID,
+        job_owner=job_owner,
+        configured=lambda: wahoo.sync_service().configured(),
+        schedule=schedule,
+        freshness=DEFAULT_FRESHNESS_SOURCES[WAHOO_ID],
+        running_probe=lambda: wahoo.sync_service().running(),
     )
 
 
@@ -231,10 +283,11 @@ def calendar_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBindin
 def builtin_bindings(
     deps: ProviderRuntimeDependencies,
 ) -> tuple[ProviderRuntimeBinding, ...]:
-    """Return the bindings of the four built-in providers."""
+    """Return the bindings of the five built-in providers."""
     return (
         intervals_binding(deps),
         garmin_binding(deps),
+        wahoo_binding(deps),
         weather_binding(deps),
         calendar_binding(deps),
     )

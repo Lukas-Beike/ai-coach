@@ -10,11 +10,14 @@ from typing import Any
 from backend import change_history
 from backend.athlete.local_date import LocalDate
 from backend.calendar.canonical import canonical_planned_workouts
+from backend.canonical.vocabulary import RemoteEntityKind
+from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_PLANNING_ERROR, AppError
 from backend.planning import calendar as planning_calendar
 from backend.planning import planned_units, workouts
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 
+_REMOTE_LINKS = RemoteLinkRepository()
 UPDATE_SQL = (
     "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', "
     "sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?"
@@ -78,6 +81,9 @@ class PlannedUnitService:
                 now,
             ),
         )
+        _REMOTE_LINKS.refresh_from_slots(
+            db, RemoteEntityKind.PLANNED_UNIT, str(stored["id"])
+        )
         return stored
 
     def restore_in_transaction(
@@ -91,6 +97,9 @@ class PlannedUnitService:
         """Restore one audited local state inside the caller-owned transaction."""
         if target is None:
             db.execute("DELETE FROM planned_units WHERE local_id=?", (entity_id,))
+            _REMOTE_LINKS.delete_for_entity(
+                db, RemoteEntityKind.PLANNED_UNIT, entity_id
+            )
             return None
         if current is None:
             self._reject_restore_conflict(entity_id, target)
@@ -159,6 +168,7 @@ class PlannedUnitService:
             UPDATE_SQL,
             (json.dumps(restored, ensure_ascii=False), self._now(), entity_id),
         )
+        _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.PLANNED_UNIT, entity_id)
         return restored
 
     @staticmethod
@@ -353,6 +363,7 @@ class PlannedUnitService:
         payload = planned_units.planned_conflict_payload(row)
         payload["sync_status"] = "local"
         db.execute(UPDATE_SQL, (json.dumps(payload, ensure_ascii=False), now, local_id))
+        _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.PLANNED_UNIT, local_id)
 
     @staticmethod
     def _accept_remote_conflict(
@@ -404,6 +415,7 @@ class PlannedUnitService:
                 local_id,
             ),
         )
+        _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.PLANNED_UNIT, local_id)
 
     def _load_for_update(
         self, db: Any, normalized_id: str
@@ -440,6 +452,9 @@ class PlannedUnitService:
         db.execute(
             UPDATE_SQL,
             (json.dumps(normalized, ensure_ascii=False), self._now(), normalized_id),
+        )
+        _REMOTE_LINKS.refresh_from_slots(
+            db, RemoteEntityKind.PLANNED_UNIT, normalized_id
         )
         change_history.record_change(
             db,

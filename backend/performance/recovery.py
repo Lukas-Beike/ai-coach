@@ -1,13 +1,15 @@
 """Stateless Garmin recovery record search and aggregation."""
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 UTC_OFFSET_SUFFIX = "+00:00"
+AVERAGE_DAYS = 7
 
 
 def _garmin_key(value: Any) -> str:
@@ -71,9 +73,7 @@ def dated_garmin_recovery_records(value: Any) -> list[tuple[str, dict[str, Any]]
         visited += 1
         if isinstance(current, dict):
             record_date = _planning_context_date(
-                _first_present(
-                    current, ("calendarDate", "summaryDate", "date", "timestamp", "id")
-                )
+                _first_present(current, garmin_perf_fields.RECORD_IDENTITY_KEYS)
             )
             if record_date:
                 records.append((record_date, current))
@@ -130,17 +130,23 @@ def garmin_recovery_metric(
     return None, None
 
 
-def garmin_recovery_average(
+def rounded_average(values: Sequence[float]) -> float | None:
+    """Average to two decimals, or None for no values."""
+    return round(sum(values) / len(values), 2) if values else None
+
+
+def garmin_recovery_window_values(
     snapshot: dict[str, Any],
     section: str,
     keys: tuple[str, ...],
     days: int,
     end_date: date,
     transform: Callable[[Any], float | int | None] | None = None,
-) -> float | None:
+) -> list[tuple[date, float]]:
+    """Dated numbers of the window that the Garmin 7-day average is taken from."""
     normalized_keys = {_garmin_key(key) for key in keys}
     cutoff = end_date - timedelta(days=days - 1)
-    values: list[float] = []
+    values: list[tuple[date, float]] = []
     for record_date, record in dated_garmin_recovery_records(snapshot.get(section)):
         try:
             current = date.fromisoformat(iso_date_prefix(record_date))
@@ -153,5 +159,19 @@ def garmin_recovery_average(
             value = transform(value)
         number = _as_number(value)
         if number is not None:
-            values.append(float(number))
-    return round(sum(values) / len(values), 2) if values else None
+            values.append((current, float(number)))
+    return values
+
+
+def garmin_recovery_average(
+    snapshot: dict[str, Any],
+    section: str,
+    keys: tuple[str, ...],
+    days: int,
+    end_date: date,
+    transform: Callable[[Any], float | int | None] | None = None,
+) -> float | None:
+    values = garmin_recovery_window_values(
+        snapshot, section, keys, days, end_date, transform
+    )
+    return rounded_average([value for _, value in values])

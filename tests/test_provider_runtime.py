@@ -206,7 +206,7 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
 
     def test_static_registry_and_binding_lookup(self) -> None:
         self.assertEqual(
-            ("intervals", "garmin", "weather", "calendar", ACME_ID, BETA_ID),
+            ("intervals", "garmin", "weather", "calendar", "wahoo", ACME_ID, BETA_ID),
             self.registry.static.ids(),
         )
         self.assertIs(self.acme, self.registry.binding(ACME_ID))
@@ -358,6 +358,18 @@ class RuntimeOrchestrationBindingTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "synchronous refresh requires"):
             ProviderRuntimeRegistry(static, [binding])
+
+    def test_waiting_descriptor_requires_a_synchronous_refresh(self) -> None:
+        static = ProviderRegistry(
+            (dataclasses.replace(acme_descriptor(), coach_waits_for_completion=True),)
+        )
+        with self.assertRaisesRegex(ValueError, "waiting requires"):
+            ProviderRuntimeRegistry(static, [fake_binding()])
+        waiting = dataclasses.replace(
+            fake_binding(), synchronous_refresh=_FakeSynchronousRefresh
+        )
+        registry = ProviderRuntimeRegistry(static, [waiting])
+        self.assertIn(ACME_ID, registry.synchronous_refreshes())
 
     def test_freshness_view_is_copied_at_construction(self) -> None:
         sources = {ACME_AREA: acme_freshness_source()}

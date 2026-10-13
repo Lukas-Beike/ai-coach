@@ -34,6 +34,7 @@ from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.providers.garmin_health_mapping import GARMIN_LABEL
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
+from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
 
 
 class SourceView(StrEnum):
@@ -58,6 +59,7 @@ _GARMIN_DUPLICATE: Final = "Garmin"
 _PROVIDER_LABELS: Final[Mapping[ProviderId, str]] = {
     ProviderId.INTERVALS: INTERVALS_LABEL,
     ProviderId.GARMIN: GARMIN_LABEL,
+    ProviderId.WAHOO: WAHOO_LABEL,
 }
 # Only views whose coarse label differs from the provider's base label appear here.
 _VIEW_LABELS: Final[Mapping[tuple[ProviderId, SourceView], str]] = {

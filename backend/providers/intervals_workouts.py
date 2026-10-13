@@ -9,13 +9,19 @@ predicates live in the sync-layer export adapter.
 
 from __future__ import annotations
 
-import re
+from collections.abc import Mapping
 from typing import Any
 
 from backend.canonical.planned_workout import PlannedWorkoutExport
+from backend.canonical.stored_sports import (
+    DEFAULT_WORKOUT_SPORT_TOKEN,
+    WORKOUT_SPORT_ALIASES,
+    WORKOUT_SPORT_TOKENS,
+    workout_stored_token,
+)
 
 INTERVALS_EVENT_CATEGORY = "WORKOUT"
-INTERVALS_DEFAULT_WORKOUT_TYPE = "Ride"
+INTERVALS_DEFAULT_WORKOUT_TYPE = DEFAULT_WORKOUT_SPORT_TOKEN
 INTERVALS_TEMPLATE_WORKOUT_TYPES = frozenset(
     {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining"}
 )
@@ -38,104 +44,11 @@ def intervals_event_payload(
 
 
 COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
-INTERVALS_WORKOUT_SPORTS = {
-    "cycling": "Ride",
-    "rad": "Ride",
-    "rad outdoor": "Ride",
-    "radfahren": "Ride",
-    "ride": "Ride",
-    "virtualride": "VirtualRide",
-    "virtual ride": "VirtualRide",
-    "rad indoor": "VirtualRide",
-    "indoor cycling": "VirtualRide",
-    "virtual cycling": "VirtualRide",
-    "running": "Run",
-    "lauf": "Run",
-    "laufen": "Run",
-    "run": "Run",
-    "strength": "WeightTraining",
-    "kraft": "WeightTraining",
-    "krafttraining": "WeightTraining",
-    "weighttraining": "WeightTraining",
-    "bike": "Ride",
-    "biking": "Ride",
-    "bicycle": "Ride",
-    "bike workout": "Ride",
-    "cycling workout": "Ride",
-    "swim": "Swim",
-    "swimming": "Swim",
-    "schwimmen": "Swim",
-    "run workout": "Run",
-    "jogging": "Run",
-    "jog": "Run",
-    "gym": "WeightTraining",
-    "weights": "WeightTraining",
-    "weight training": "WeightTraining",
-    "hiking": "Hike",
-    "walking": "Walk",
-    "row": "Rowing",
-    "rowing": "Rowing",
-    "yoga": "Yoga",
-}
-
-INTERVALS_WORKOUT_TYPES = {
-    "Ride",
-    "Run",
-    "Swim",
-    "WeightTraining",
-    "Hike",
-    "Walk",
-    "AlpineSki",
-    "BackcountrySki",
-    "Badminton",
-    "Canoeing",
-    "Crossfit",
-    "EBikeRide",
-    "EMountainBikeRide",
-    "Elliptical",
-    "Golf",
-    "GravelRide",
-    "Handcycle",
-    "HighIntensityIntervalTraining",
-    "IceSkate",
-    "InlineSkate",
-    "Kayaking",
-    "Kitesurf",
-    "MountainBikeRide",
-    "NordicSki",
-    "OpenWaterSwim",
-    "Padel",
-    "Pilates",
-    "Pickleball",
-    "Racquetball",
-    "Rugby",
-    "RockClimbing",
-    "RollerSki",
-    "Rowing",
-    "Sail",
-    "Skateboard",
-    "Snowboard",
-    "Snowshoe",
-    "Soccer",
-    "Squash",
-    "StairStepper",
-    "StandUpPaddling",
-    "Surfing",
-    "TableTennis",
-    "Tennis",
-    "TrailRun",
-    "Transition",
-    "Velomobile",
-    "VirtualRide",
-    "VirtualRow",
-    "VirtualRun",
-    "WaterSport",
-    "Wheelchair",
-    "Windsurf",
-    "Workout",
-    "Yoga",
-    "Other",
-}
+# The stored workout sport vocabulary is the Intervals.icu activity-type
+# vocabulary, so the wire type of a stored token is the token itself. Aliases and
+# the token set derive from the canonical stored-sport tables.
+INTERVALS_WORKOUT_SPORTS: Mapping[str, str] = WORKOUT_SPORT_ALIASES
+INTERVALS_WORKOUT_TYPES: frozenset[str] = frozenset(WORKOUT_SPORT_TOKENS)
 
 # These sport families have duration/distance and intensity prescriptions.
 # Other supported activities retain free-text instructions (e.g. Yoga/Golf).
@@ -173,17 +86,7 @@ INTERVALS_ENDURANCE_WORKOUT_TYPES = {
 
 def intervals_workout_sport(value: Any) -> str:
     """Return the provider's canonical activity type for workout payloads."""
-    raw = str(value or "Ride").strip()
-    normalized = re.sub(r"[\s_-]+", " ", raw.casefold())
-    canonical = INTERVALS_WORKOUT_SPORTS.get(
-        raw.casefold()
-    ) or INTERVALS_WORKOUT_SPORTS.get(normalized)
-    if canonical:
-        return canonical
-    for activity_type in INTERVALS_WORKOUT_TYPES:
-        if activity_type.casefold() == raw.casefold():
-            return activity_type
-    return "Other"
+    return workout_stored_token(value) or "Other"
 
 
 def intervals_external_id(local_id: str) -> str:

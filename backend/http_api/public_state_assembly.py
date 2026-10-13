@@ -23,7 +23,13 @@ from backend.http_api.state_prelude import (
 )
 from backend.http_api.state_versions import StateVersionService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
-from backend.runtime.ports import ObservationReader
+from backend.performance.season_inputs import SeasonSource
+from backend.planning.compact_activities import ActivityRowSource
+from backend.runtime.ports import (
+    ActivityRowReader,
+    CanonicalTableServing,
+    ObservationReader,
+)
 from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.status import SyncPublicStateService
 
@@ -41,6 +47,12 @@ class PublicStateCoreInputs:
     key_value_service: Callable[[], Any]
     # When set, the performance endpoint reads CTL and ATL from canonical observations.
     observation_reader: Callable[[], ObservationReader] | None = None
+    # When set, body history reads weight and body fat from canonical tables while
+    # the tables serve reads.
+    canonical_serving: Callable[[], CanonicalTableServing] | None = None
+    # When set, season preparation, load scenarios, the performance readers and
+    # the state and plan endpoints read activity rows from it.
+    activity_row_reader: Callable[[], ActivityRowReader] | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +135,8 @@ class PublicStateAssembly:
         self._key_values = core.key_values
         self._key_value_service = core.key_value_service
         self._observation_reader = core.observation_reader
+        self._canonical_serving = core.canonical_serving
+        self._activity_row_reader = core.activity_row_reader
         self._snapshot_repository = owners.snapshot_repository
         self._sync_persistence = owners.sync_persistence
         self._planning_data = owners.planning_data
@@ -171,15 +185,34 @@ class PublicStateAssembly:
             athlete.profile(),
             garmin.projection_service(),
             self._local_date,
-            self._canonical_performance_source(),
+            self.canonical_performance_source(),
         )
 
-    def _canonical_performance_source(self) -> CanonicalPerformanceSource | None:
+    def canonical_performance_source(self) -> CanonicalPerformanceSource | None:
         if self._observation_reader is None:
             return None
         return CanonicalPerformanceSource(
-            self._database_manager, self._observation_reader
+            self._database_manager,
+            self._observation_reader,
+            serving=self._canonical_serving,
+            activity_rows=self._activity_row_reader,
         )
+
+    def season_source(self) -> SeasonSource:
+        if self._observation_reader is None or self._activity_row_reader is None:
+            raise RuntimeError(
+                "The season views need an observation reader and an activity row reader."
+            )
+        return SeasonSource(
+            self._database_manager,
+            self._observation_reader,
+            self._activity_row_reader,
+        )
+
+    def activity_row_source(self) -> ActivityRowSource | None:
+        if self._activity_row_reader is None:
+            return None
+        return ActivityRowSource(self._database_manager, self._activity_row_reader)
 
     def state_version_service(self) -> StateVersionService:
         return StateVersionService(
@@ -303,6 +336,7 @@ class PublicStateAssembly:
                 external_calendar_configured=bool(config.calendar_ical_url),
                 external_calendar_window_days=self._external_calendar_window_days(),
                 default_workout_name=self._planned_workout_label(),
+                activity_rows=self.activity_row_source(),
             )
         )
 
@@ -319,6 +353,7 @@ class PublicStateAssembly:
                 self._calendar_history_days(), self._calendar_future_days()
             ),
             self.performance_state_service().canonical_inputs,
+            self.activity_row_source(),
         )
 
     def weather_prelude_service(self) -> PublicStateWeatherPrelude:

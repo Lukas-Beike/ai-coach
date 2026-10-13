@@ -6,6 +6,7 @@ import tempfile
 import threading
 import unittest
 from contextlib import contextmanager
+from datetime import UTC
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -159,6 +160,7 @@ class PerformanceRefreshServiceTests(unittest.TestCase):
             observer or self.observer,
             provider_resync_gate or self.provider_resync_gate,
             lock if lock is not None else self.lock,
+            zone_provider=lambda: UTC,
         )
 
     def seed_snapshot(self):

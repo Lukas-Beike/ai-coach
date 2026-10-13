@@ -35,12 +35,11 @@ class CoachIntervalsContextTests(unittest.TestCase):
                 "start_date_local": self.today.isoformat(),
             },
         ]
-        snapshot = {
-            "synced_at": "sync-time",
-            "recent_activities": rides + same_day + [None, "invalid"],
-        }
+        snapshot = {"synced_at": "sync-time"}
 
-        result = self.service.project(snapshot, [], self.today)
+        result = self.service.project(
+            snapshot, [], self.today, rides + same_day + [None, "invalid"]
+        )
 
         self.assertEqual(
             [row["name"] for row in result["recent_activities_by_sport"]["Radfahren"]],
@@ -60,14 +59,10 @@ class CoachIntervalsContextTests(unittest.TestCase):
 
     def test_ignores_invalid_activities_and_preserves_unclassified_sport(self):
         result = self.service.project(
-            {
-                "recent_activities": [
-                    None,
-                    {"name": "No sport", "start_date_local": "bad-date"},
-                ]
-            },
+            {},
             None,
             self.today,
+            [None, {"name": "No sport", "start_date_local": "bad-date"}],
         )
 
         self.assertEqual(list(result["recent_activities_by_sport"]), ["No sport"])
@@ -119,10 +114,23 @@ class CoachIntervalsContextTests(unittest.TestCase):
         self.assertEqual(
             result,
             {
+                "source": {
+                    "provider": "intervals",
+                    "label": "Intervals.icu",
+                    "synced_at": None,
+                    "applies_to": [
+                        "recent_activities_by_sport",
+                        "activity_rollups_by_sport",
+                    ],
+                },
                 "synced_at": None,
                 "recent_activities_by_sport": {},
                 "activity_rollups_by_sport": {},
                 "planned_workouts": [],
+                "planned_workouts_source": {
+                    "kind": "local_planning",
+                    "label": "Lokale Planung",
+                },
                 "scope": "Letzte 5 abgeschlossene Einheiten je Sportart, Sportartensummen sowie zukünftige geplante Einheiten; kein vollständiger Roh-Snapshot.",
             },
         )

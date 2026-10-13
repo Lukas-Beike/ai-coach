@@ -10,6 +10,7 @@ from unittest.mock import Mock
 from backend.errors import AppError
 from backend.planning import workouts
 from backend.providers.intervals_client import IntervalsClient
+from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.library import WorkoutLibrarySyncService
 
 
@@ -17,7 +18,9 @@ class WorkoutExportLayeringTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = Mock()
         self.client.local_today.return_value = date(2026, 9, 20)
-        self.service = WorkoutLibrarySyncService(Mock(), lambda: self.client, Mock())
+        self.service = WorkoutLibrarySyncService(
+            Mock(), IntervalsWorkoutExport(lambda: self.client), Mock()
+        )
         self.workout = {
             "sport": "Ride",
             "type": "Ride",

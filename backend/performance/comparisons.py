@@ -57,17 +57,20 @@ def performance_trend_average(
     key: str,
     days: int,
     end_date: date,
+    *,
+    wellness_rows: list[dict[str, Any]] | None = None,
 ) -> float | None:
+    """Average a metric over ``days``; ``wellness_rows`` replace the snapshot rows."""
     current_source = metrics.get(key, {}).get("source")
     if current_source == garmin_metrics.GARMIN_PERFORMANCE_SOURCE:
         if key == "weight_kg":
             return garmin_weight.garmin_weight_average(garmin, days, end_date)
         return trends.garmin_history_average(garmin, key, days, end_date)
-    raw_rows = snapshot.get("recent_wellness")
-    rows = raw_rows if isinstance(raw_rows, list) else []
-    return trends.intervals_performance_average(
-        [row for row in rows if isinstance(row, dict)], key, days, end_date
-    )
+    if wellness_rows is None:
+        raw_rows = snapshot.get("recent_wellness")
+        rows = raw_rows if isinstance(raw_rows, list) else []
+        wellness_rows = [row for row in rows if isinstance(row, dict)]
+    return trends.intervals_performance_average(wellness_rows, key, days, end_date)
 
 
 def _performance_trend(
@@ -78,10 +81,13 @@ def _performance_trend(
     unit: str,
     today: date,
     higher_is_better: bool | None = True,
+    wellness_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     return wellness.comparison_value(
         metrics.get(key, {}).get("value"),
-        performance_trend_average(snapshot, garmin, metrics, key, 30, today),
+        performance_trend_average(
+            snapshot, garmin, metrics, key, 30, today, wellness_rows=wellness_rows
+        ),
         unit,
         30,
         higher_is_better,
@@ -107,7 +113,14 @@ def performance_comparisons(
         key: str, unit: str = "", higher_is_better: bool | None = True
     ) -> dict[str, Any] | None:
         return _performance_trend(
-            snapshot, garmin, metrics, key, unit, today, higher_is_better
+            snapshot,
+            garmin,
+            metrics,
+            key,
+            unit,
+            today,
+            higher_is_better,
+            wellness_rows=wellness_rows,
         )
 
     readiness_trend = wellness.comparison_value(
@@ -119,6 +132,7 @@ def performance_comparisons(
             "readiness",
             30,
             today,
+            wellness_rows=wellness_rows,
         ),
         "",
         30,

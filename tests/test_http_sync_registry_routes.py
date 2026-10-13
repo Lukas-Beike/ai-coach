@@ -23,7 +23,10 @@ from backend.http_api.sync_commands import (
     SyncCommandEndpoint,
 )
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
-from backend.providers.descriptors import ManualSyncRoute
+from backend.providers.descriptors import (
+    WAHOO_NOT_CONFIGURED_MESSAGE,
+    ManualSyncRoute,
+)
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 try:
@@ -71,6 +74,7 @@ PREVIOUS_BODY_PATHS = frozenset(
 PREVIOUS_NOT_CONFIGURED_MESSAGES = {
     "intervals": INTERVALS_MESSAGE,
     "garmin": GARMIN_MESSAGE,
+    "wahoo": WAHOO_NOT_CONFIGURED_MESSAGE,
 }
 
 

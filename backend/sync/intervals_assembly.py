@@ -15,6 +15,7 @@ from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.providers.intervals import IntervalsApiClient
+from backend.runtime.ports import ActivityRowReader, CanonicalTableServing
 from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
@@ -31,6 +32,7 @@ from backend.sync.performance import (
     PerformanceRefreshFollowupService,
     PerformanceRefreshService,
 )
+from backend.sync.snapshot_storage import SnapshotStorage
 from backend.sync.state import SyncStateRepository
 from backend.sync.status import SyncOperationStateWriter
 
@@ -52,6 +54,10 @@ class IntervalsPersistenceDependencies:
     event_buffer: Any
     redact_text: Callable[[str], str]
     logger: logging.Logger
+    activity_rows: Callable[[], ActivityRowReader]
+    # Decides per write whether the snapshot is stored without the activity
+    # sections the canonical tables serve. None stores every snapshot in full.
+    table_serving: Callable[[], CanonicalTableServing] | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +122,8 @@ class IntervalsSyncAssembly:
         self._event_buffer = persistence.event_buffer
         self._redact_text = persistence.redact_text
         self._logger = persistence.logger
+        self._activity_rows = persistence.activity_rows
+        self._table_serving = persistence.table_serving
         self._operation_observer = operations.operation_observer
         self._intervals_resync_gate = operations.resync_gate
         self._intervals_sync_lock = operations.sync_lock
@@ -139,7 +147,8 @@ class IntervalsSyncAssembly:
             api_client=IntervalsApiClient(
                 api_key=config.intervals_api_key, request=self._request()
             ),
-            state_repository=self._state_repository(),
+            database_manager=self._database_manager(),
+            row_reader=self._activity_rows(),
             store=ActivityDetailStore(self._database_manager()),
             utc_now=self._utc_now,
             configured=bool(config.intervals_api_key),
@@ -149,6 +158,17 @@ class IntervalsSyncAssembly:
                 if self._planned_unit_service
                 else []
             ),
+        )
+
+    def snapshot_storage(self) -> SnapshotStorage:
+        """Create the snapshot writer and merge-base reader of the sync services."""
+        if self._table_serving is None:
+            return SnapshotStorage(self._state_repository())
+        return SnapshotStorage(
+            self._state_repository(),
+            database_manager=self._database_manager(),
+            serving=self._table_serving(),
+            rows=self._activity_rows(),
         )
 
     def performance_service(self) -> PerformanceRefreshService:
@@ -164,6 +184,8 @@ class IntervalsSyncAssembly:
             self._logger,
             self._operation_observer(),
             self._intervals_resync_gate,
+            zone_provider=lambda: self._athlete_clock().now().tzinfo,
+            snapshot_storage=self.snapshot_storage(),
         )
 
     def snapshot_reader(self) -> IntervalsSnapshotReader:
@@ -184,6 +206,7 @@ class IntervalsSyncAssembly:
             self._all_sync_days,
             self._calendar_history_days,
             self._calendar_future_days,
+            self.snapshot_storage(),
         )
 
     def performance_followup(self) -> PerformanceRefreshFollowupService:
@@ -213,6 +236,7 @@ class IntervalsSyncAssembly:
             self._sync_earliest_date,
             self._sync_chunk_days,
             self._all_sync_days,
+            self.snapshot_storage(),
         )
 
     def sync_service(self) -> IntervalsSyncService:

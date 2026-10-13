@@ -10,8 +10,9 @@ from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, Self
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
+from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicates import duplicate_delete_action
 from backend.coach.clarification import CoachClarificationService
 from backend.coach.proposal_creation import CoachProposalCreationService
@@ -21,7 +22,6 @@ from backend.coach.training_patch import CoachTrainingPatchService
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
-from backend.sync.state import SyncStateRepository
 
 
 class TrackingLock:
@@ -75,7 +75,7 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.key_values = KeyValueRepository(lambda: "2026-09-24T00:00:00+00:00")
         self.clarification = Mock(spec=CoachClarificationService)
         self.training_patch = Mock(spec=CoachTrainingPatchService)
-        self.sync_state = Mock(spec=SyncStateRepository)
+        self.inspector = Mock(spec=DuplicateInspector)
         self.proposal_creation = Mock(spec=CoachProposalCreationService)
         self.tool_dispatch = Mock(spec=CoachToolDispatchService)
         self.service = CoachStructuredToolExecutionService(
@@ -84,7 +84,7 @@ class StructuredToolExecutionTests(unittest.TestCase):
             self.key_values,
             self.clarification,
             self.training_patch,
-            self.sync_state,
+            self.inspector,
             self.proposal_creation,
             self.tool_dispatch,
         )
@@ -177,25 +177,17 @@ class StructuredToolExecutionTests(unittest.TestCase):
             "distance": 5000,
             "snapshot_synced_at": "2026-09-21T00:00:00Z",
         }
-        self.sync_state.latest_snapshot.return_value = {"duplicate": duplicate}
-        with patch(
-            "backend.coach.tool_execution_service.latest_wahoo_garmin_duplicate",
-            return_value=duplicate,
-        ):
-            result = self.execute("inspect_activity_duplicates", session_csrf_hash="")
+        self.inspector.latest.return_value = duplicate
+        result = self.execute("inspect_activity_duplicates", session_csrf_hash="")
 
         self.assertEqual(result, {"ok": True, "duplicate": duplicate})
         self.proposal_creation.create.assert_not_called()
-        self.sync_state.latest_snapshot.assert_called_once_with()
+        self.inspector.latest.assert_called_once_with()
 
         self.proposal_creation.create.return_value = {"proposal": {"id": "proposal-1"}}
-        with patch(
-            "backend.coach.tool_execution_service.latest_wahoo_garmin_duplicate",
-            return_value=duplicate,
-        ):
-            result = self.execute(
-                "inspect_activity_duplicates", session_csrf_hash="bound-csrf"
-            )
+        result = self.execute(
+            "inspect_activity_duplicates", session_csrf_hash="bound-csrf"
+        )
         self.assertEqual(
             result,
             {"ok": True, "duplicate": duplicate, "proposal": {"id": "proposal-1"}},

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -14,6 +15,8 @@ from backend.activities.duplicates import (
 from backend.activities.identity import intervals_activity_device_source
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
+from backend.canonical.vocabulary import RecordingOrigin
+from backend.providers import intervals_performance_fields as intervals_perf_fields
 
 METHOD = "local-training-report-v1"
 
@@ -21,17 +24,27 @@ METHOD = "local-training-report-v1"
 def canonical_rows(snapshot: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
     raw = (snapshot.get("raw_provider_data") or {}).get("activities")
     rows = raw if isinstance(raw, list) else snapshot.get("recent_activities", [])
-    rows = [row for row in deduplicate_api_records(rows or []) if isinstance(row, dict)]
-    wahoo = [row for row in rows if intervals_activity_device_source(row) == "wahoo"]
+    return deduplicated_rows(rows or [])
+
+
+def deduplicated_rows(rows: Sequence[Any]) -> tuple[list[dict[str, Any]], int]:
+    """Drop duplicate rows and Garmin rows that a matching Wahoo row duplicates.
+
+    Returns the kept rows and how many rows were dropped.
+    """
+    unique = [
+        row for row in deduplicate_api_records(list(rows)) if isinstance(row, dict)
+    ]
+    wahoo = [row for row in unique if intervals_activity_device_source(row) == "wahoo"]
     kept = [
         row
-        for row in rows
+        for row in unique
         if not (
-            intervals_activity_device_source(row) == "garmin"
+            intervals_activity_device_source(row) == RecordingOrigin.GARMIN
             and any(intervals_cycling_activities_match(other, row) for other in wahoo)
         )
     ]
-    return kept, len(rows) - len(kept)
+    return kept, len(unique) - len(kept)
 
 
 def activity_day(row: dict[str, Any], timezone: str = "UTC") -> str:
@@ -48,7 +61,7 @@ def activity_day(row: dict[str, Any], timezone: str = "UTC") -> str:
 
 def _totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {"sessions": len(rows)}
-    for key in ("moving_time", "distance", "icu_training_load"):
+    for key in ("moving_time", "distance", intervals_perf_fields.TRAINING_LOAD):
         measured = [
             value for row in rows if (value := number(row.get(key))) is not None
         ]
@@ -80,7 +93,9 @@ def _weekly_load_history(
                 "start": start.isoformat(),
                 "end": end.isoformat(),
                 "partial_period": end >= today,
-                "training_load": _totals(activities)["icu_training_load"],
+                "training_load": _totals(activities)[
+                    intervals_perf_fields.TRAINING_LOAD
+                ],
             }
         )
     return weeks
@@ -91,7 +106,7 @@ def _cumulative_load(
 ) -> dict[str, Any]:
     metric = _totals(
         [row for row in rows if activity_day(row, timezone) <= day.isoformat()]
-    )["icu_training_load"]
+    )[intervals_perf_fields.TRAINING_LOAD]
     if not metric["total_sessions"]:
         metric["value"] = 0
     return metric
@@ -105,8 +120,8 @@ def zone_distribution(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         sport_rows = [row for row in rows if str(row.get("type") or "Unknown") == sport]
         duration = sum(number(row.get("moving_time")) or 0 for row in sport_rows)
         for key, sensor in (
-            ("icu_zone_times", "power"),
-            ("icu_hr_zone_times", "heart_rate"),
+            (intervals_perf_fields.ZONE_TIMES, "power"),
+            (intervals_perf_fields.HEART_RATE_ZONE_TIMES, "heart_rate"),
             ("pace_zone_times", "pace"),
         ):
             zones, measured_sessions = _sensor_zones(sport_rows, key, sensor)
@@ -138,9 +153,18 @@ def training_report(
     checkins: list[dict[str, Any]] | None = None,
     activity_feedback: list[dict[str, Any]] | None = None,
     timezone: str = "UTC",
+    activity_rows: Sequence[Any] | None = None,
 ) -> dict[str, Any]:
+    """Build the report; ``activity_rows`` are the raw rows of the activity reader.
+
+    Without them the rows come from the snapshot, as before.
+    """
     snapshot = snapshot or {}
-    rows, duplicates = canonical_rows(snapshot)
+    rows, duplicates = (
+        canonical_rows(snapshot)
+        if activity_rows is None
+        else deduplicated_rows(activity_rows)
+    )
     end = start + timedelta(days=days - 1)
     effective_end = min(today, end)
     eligible = [row for row in rows if sport == "all" or str(row.get("type")) == sport]
@@ -207,7 +231,7 @@ def training_report(
             "missed": sum(
                 row.get("compliance", {}).get("status") == "missed" for row in planned
             ),
-            "load": _totals(planned)["icu_training_load"],
+            "load": _totals(planned)[intervals_perf_fields.TRAINING_LOAD],
         },
         "checkins": [
             {
@@ -289,11 +313,11 @@ def _key_sessions(current: list[dict], timezone: str) -> list[dict]:
             "name": str(row.get("name") or "Training")[:200],
             "date": activity_day(row, timezone),
             "sport": row.get("type"),
-            "training_load": number(row.get("icu_training_load")),
+            "training_load": number(row.get(intervals_perf_fields.TRAINING_LOAD)),
         }
         for row in sorted(
             current,
-            key=lambda row: number(row.get("icu_training_load")) or -1,
+            key=lambda row: number(row.get(intervals_perf_fields.TRAINING_LOAD)) or -1,
             reverse=True,
         )[:3]
     ]
@@ -317,7 +341,7 @@ def _daily_report(
                 "activity_id": str(row.get("id") or ""),
                 "name": str(row.get("name") or "Training")[:200],
                 "sport": str(row.get("type") or "Unknown"),
-                "training_load": number(row.get("icu_training_load")),
+                "training_load": number(row.get(intervals_perf_fields.TRAINING_LOAD)),
             }
             for row in activities
         ],

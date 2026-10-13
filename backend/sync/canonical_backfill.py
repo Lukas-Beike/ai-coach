@@ -27,6 +27,13 @@ athlete records from older snapshots keep insert-if-absent. Whether an activity 
 inserted depends only on its snapshot's id, not on canonical state, so a batch
 boundary or a resume cannot change the outcome.
 
+Stripped snapshots: once the tables serve reads, a sync stores its snapshot without
+the activity sections and marks it (``canonical_sections``). Such a snapshot never
+counts as the newest one that may insert activities, counts as neither
+``skipped_invalid`` nor a deletion source, and maps only the wellness and athlete
+sections it still carries (insert-if-absent). The activities it lacks are already in
+the tables and their raw records.
+
 Re-projection: when a mapper version is above the ``mapped_version`` of an active
 raw record, that record is mapped again from its stored payload and fetch time, its
 canonical rows are brought to the current projection, and its ``mapped_version`` is
@@ -44,6 +51,22 @@ only observations whose ``mapper_version`` equals the current version of their m
 so stale observations are never served as current. The cursor is bound to the mapper
 version, so a version bump during a partial run restarts that record from its first
 item. This is the only phase that updates existing canonical rows.
+
+Time zone: the canonical tables store local dates computed in the athlete's zone at
+write time, so the state records the zone it projected with. A different current zone
+(or an older state without one) makes the next batch re-project every active raw row
+once (``reproject_all``), regardless of ``mapped_version``, and ``backfill_complete``
+is False until that finishes.
+
+Read policy: the first time the backfill completes, the state records
+``completed_once`` and ``first_completed_at`` in the same transaction as the
+completion. A state that is already ``complete`` without the marker (stored before
+the marker existed) counts as completed once, and the marker is added when the next
+re-projection starts. From then on reads come from the tables (``read_state``): a
+mapper-version bump or a zone change re-projects as described above, but reads stay
+on the tables meanwhile and serve each observation's newest stored version, so
+nothing vanishes. Only an installation whose backfill never completed reads the
+legacy snapshot projection. Nothing is deleted.
 
 Each batch writes at most ``batch_size`` plan items in one writer transaction. The
 cursor and the content-free counters are one kv value written in that same
@@ -79,10 +102,14 @@ from backend.providers.canonical_plans import (
     garmin_ingest_plan,
     garmin_payload_retrieved_at,
     intervals_snapshot_ingest_plan,
+    observation_mapper_versions,
     reprojection_mapper_version,
     reprojection_plan,
 )
-from backend.providers.snapshot_projection import stored_retrieved_at
+from backend.providers.snapshot_projection import (
+    CANONICAL_SECTIONS_KEY,
+    stored_retrieved_at,
+)
 from backend.sync.garmin_snapshot_writer import GARMIN_SNAPSHOT_KEY
 
 STATE_KEY: Final = "canonical_backfill_state"
@@ -137,8 +164,16 @@ class _Work:
     superseded: int = 0
 
 
+# Wahoo is ingested live and has no legacy snapshot to backfill, so persisted
+# backfill counters stay limited to the providers that are actually backfilled.
+_BACKFILL_PROVIDERS = (ProviderId.INTERVALS, ProviderId.GARMIN)
+
+
 def _empty_counters() -> dict[str, dict[str, int]]:
-    return {provider.value: dict.fromkeys(COUNTER_NAMES, 0) for provider in ProviderId}
+    return {
+        provider.value: dict.fromkeys(COUNTER_NAMES, 0)
+        for provider in _BACKFILL_PROVIDERS
+    }
 
 
 def _provider_of(source: str) -> str:
@@ -157,6 +192,79 @@ def read_status(key_values: KeyValueRepository, db: Any) -> str:
         return BackfillStatus.PENDING.value
     status = state.get("status") if isinstance(state, dict) else None
     return status if isinstance(status, str) else BackfillStatus.PENDING.value
+
+
+class ReadState(StrEnum):
+    """Which source serves canonical reads, decided from the backfill state alone."""
+
+    LEGACY = "legacy"
+    TABLES = "tables"
+    TABLES_REPROJECTING = "tables_reprojecting"
+
+
+def _stored_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
+    """Return the stored backfill state; a missing or corrupt record reads as empty."""
+    raw = key_values.get(db, STATE_KEY)
+    if raw is None:
+        return {}
+    try:
+        state = json.loads(raw)
+    except ValueError:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def completed_observation_versions(
+    key_values: KeyValueRepository, db: Any
+) -> dict[str, int]:
+    """Return each provider's observation mapper version at the last completed run.
+
+    The stored versions change only when a run completes, so during a pending
+    re-projection they name the oldest version whose rows are still emitted. A
+    missing or corrupt record reads as empty.
+    """
+    versions = _stored_state(key_values, db).get("versions")
+    return observation_mapper_versions(versions) if isinstance(versions, dict) else {}
+
+
+def _is_current(state: Mapping[str, Any], zone: tzinfo) -> bool:
+    return (
+        state.get("status") == BackfillStatus.COMPLETE.value
+        and state.get("versions") == current_mapper_versions()
+        and state.get("zone") == str(zone)
+    )
+
+
+def _completed_once(state: Mapping[str, Any]) -> bool:
+    return (
+        state.get("completed_once") is True
+        or state.get("status") == BackfillStatus.COMPLETE.value
+    )
+
+
+def backfill_complete(key_values: KeyValueRepository, db: Any, *, zone: tzinfo) -> bool:
+    """Return True when the backfill is complete for the current mappers and time zone.
+
+    A read-only query. After a mapper upgrade or a zone change the stored status
+    stays ``complete`` until the worker's first batch moves it back to
+    re-projection, so the stored mapper versions and zone are compared too. The
+    canonical tables hold local dates computed in the zone of the write. A missing,
+    corrupt or older record (including one without a stored zone) is False.
+
+    This is not the read gate: reads follow ``read_state``, which keeps serving the
+    tables while a re-projection is pending.
+    """
+    return _is_current(_stored_state(key_values, db), zone)
+
+
+def read_state(key_values: KeyValueRepository, db: Any, *, zone: tzinfo) -> ReadState:
+    """Return which source serves reads: legacy only before the first completion."""
+    state = _stored_state(key_values, db)
+    if not _completed_once(state):
+        return ReadState.LEGACY
+    if _is_current(state, zone):
+        return ReadState.TABLES
+    return ReadState.TABLES_REPROJECTING
 
 
 class CanonicalBackfill:
@@ -183,14 +291,25 @@ class CanonicalBackfill:
 
     def run_batch(self, db: Any) -> BatchReport:
         """Write one batch and its cursor in the caller's transaction."""
-        state = self._load(db)
+        zone = self._zone_provider() or UTC
+        state = self._load(db, zone)
         versions = current_mapper_versions()
+        zone_changed = state.get("zone") != str(zone)
         if state["status"] == BackfillStatus.COMPLETE:
-            if state["versions"] == versions:
+            if state["versions"] == versions and not zone_changed:
                 return BatchReport(items=0, done=True)
             state.update(phase=_REPROJECT, reproject_after=0, reproject_current=None)
+            self._mark_completed_once(state, now=self._clock())
+        if zone_changed:
+            # Stored local dates were computed in another zone (or an older record
+            # kept none), so every active raw row is projected again, once.
+            state.update(
+                zone=str(zone),
+                reproject_all=True,
+                reproject_after=0,
+                reproject_current=None,
+            )
         state["status"] = BackfillStatus.RUNNING
-        zone = self._zone_provider() or UTC
         now = self._clock()
         if state["phase"] == _INGEST:
             written, ingest_done = self._ingest_step(
@@ -206,14 +325,27 @@ class CanonicalBackfill:
                 db, state, zone=zone, now=now, budget=self._batch_size
             )
         if done:
-            state.update(status=BackfillStatus.COMPLETE, versions=versions)
+            state.update(
+                status=BackfillStatus.COMPLETE, versions=versions, reproject_all=False
+            )
+            self._mark_completed_once(state, now=now)
         state["batches"] += 1
         self._save(db, state)
         return BatchReport(items=written, done=done)
 
+    @staticmethod
+    def _mark_completed_once(state: dict[str, Any], *, now: str) -> None:
+        """Record, once, that the backfill completed; the value is content-free."""
+        if state.get("completed_once") is not True:
+            state.update(completed_once=True, first_completed_at=now)
+
     def mark_failed(self, db: Any) -> None:
         """Record that the run stopped; the cursor stays where the last batch committed."""
-        state = self._load(db)
+        state = self._load(db, self._zone_provider() or UTC)
+        if state["status"] == BackfillStatus.COMPLETE:
+            # A completion that predates the marker must survive the failure, or
+            # reads would fall back to legacy.
+            self._mark_completed_once(state, now=self._clock())
         state["status"] = BackfillStatus.FAILED
         self._save(db, state)
 
@@ -275,7 +407,7 @@ class CanonicalBackfill:
         if text is None:
             return None
         return self._work_for(
-            _source_key(current),
+            f"{_source_key(current)}@{zone}",
             current,
             text,
             partial(
@@ -308,7 +440,7 @@ class CanonicalBackfill:
             work = self._work_for(
                 f"row:{current['id']}",
                 current,
-                f"{version}:{row['payload']}",
+                f"{version}:{zone}:{row['payload']}",
                 partial(_reprojection_work, row, zone),
             )
             count, finished = _drain(
@@ -356,10 +488,10 @@ class CanonicalBackfill:
         self._cache_key = f"{key}|{fingerprint}"
         self._cache = work
 
-    def _load(self, db: Any) -> dict[str, Any]:
+    def _load(self, db: Any, zone: tzinfo) -> dict[str, Any]:
         raw = self._key_values.get(db, STATE_KEY)
         if raw is None:
-            return self._fresh_state(db)
+            return self._fresh_state(db, zone)
         return json.loads(raw)
 
     def _save(self, db: Any, state: dict[str, Any]) -> None:
@@ -368,23 +500,35 @@ class CanonicalBackfill:
         )
 
     @staticmethod
-    def _fresh_state(db: Any) -> dict[str, Any]:
+    def _fresh_state(db: Any, zone: tzinfo) -> dict[str, Any]:
         # Snapshots created after the run starts are written by dual-write already.
         row = db.execute(
             "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM snapshots"
+        ).fetchone()
+        # A snapshot stored without its activity sections must not become the
+        # only one that may insert activities, or every full snapshot would
+        # supersede its activities.
+        newest = db.execute(
+            "SELECT COALESCE(MAX(id), 0) AS newest_id FROM snapshots "
+            "WHERE json_extract(payload, ?) IS NULL",
+            (f"$.{CANONICAL_SECTIONS_KEY}",),
         ).fetchone()
         return {
             "status": BackfillStatus.PENDING.value,
             "phase": _INGEST,
             "garmin_done": False,
             "snapshot_before": int(row["next_id"]),
-            "newest_id": int(row["next_id"]) - 1,
+            "newest_id": int(newest["newest_id"]),
             "current": None,
             "reproject_after": 0,
             "reproject_current": None,
             "batches": 0,
             "counters": _empty_counters(),
             "versions": {},
+            "zone": str(zone),
+            "reproject_all": False,
+            "completed_once": False,
+            "first_completed_at": None,
         }
 
 
@@ -439,7 +583,10 @@ def _pending_reprojection(
         if row is None
         else reprojection_mapper_version(row["provider"], row["record_kind"])
     )
-    if row is None or version is None or int(row["mapped_version"]) >= version:
+    if row is None or version is None:
+        _leave_reprojection(state, current)
+        return None
+    if int(row["mapped_version"]) >= version and not state.get("reproject_all"):
         _leave_reprojection(state, current)
         return None
     return row, version
@@ -459,7 +606,10 @@ def _complete_reprojection(
     version: int,
     now: str,
 ) -> None:
-    bucket = state["counters"][row["provider"]]
+    # Wahoo rows are ingested live, not backfilled, so its bucket appears on demand.
+    bucket = state["counters"].setdefault(
+        row["provider"], dict.fromkeys(COUNTER_NAMES, 0)
+    )
     bucket["retired"] += _retire_unemitted(db, row, work, now=now)
     canonical_store.set_mapped_version(
         db, record_id=current["id"], mapper_version=version, now=now

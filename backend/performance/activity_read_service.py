@@ -1,6 +1,6 @@
 """Completed-activity analysis combining activity reads and performance context."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Any
 
@@ -19,7 +19,7 @@ from backend.performance.canonical_inputs import (
 )
 from backend.performance.context import current_performance_context
 from backend.providers.source_labels import SourceView, provider_label
-from backend.runtime.ports import ProviderSnapshotReader
+from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
 
 
 class ActivityAnalysisReadService(ActivityReadService):
@@ -27,6 +27,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         self,
         database_manager: Any,
         snapshot_reader: ProviderSnapshotReader,
+        row_reader: ActivityRowReader,
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
         *,
@@ -37,6 +38,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         super().__init__(
             database_manager,
             snapshot_reader,
+            row_reader,
             feedback_service,
             detail_store,
             read_equipment=read_equipment,
@@ -54,7 +56,10 @@ class ActivityAnalysisReadService(ActivityReadService):
         with source.database_manager().unit_of_work() as db:
             snapshot = self._snapshot()
             canonical = read_performance_inputs(
-                source.observation_reader(), db, snapshot
+                source.observation_reader(),
+                db,
+                snapshot,
+                activity_reader=source.activity_row_reader(),
             )
         return snapshot, canonical
 
@@ -75,7 +80,11 @@ class ActivityAnalysisReadService(ActivityReadService):
             )
         normalized_id = str(self._references.resolve(normalized_id))
         snapshot, canonical = self._performance_inputs()
-        activity = _raw_activity(snapshot, normalized_id)
+        activity = _raw_activity(
+            snapshot,
+            normalized_id,
+            None if canonical is None else canonical.activity_rows,
+        )
         cached = self._detail_store.get(normalized_id) if self._detail_store else None
         stale = bool(
             cached
@@ -122,13 +131,17 @@ class ActivityAnalysisReadService(ActivityReadService):
         }
 
 
-def _raw_activity(snapshot: dict, normalized_id: str) -> dict:
-    raw_provider_data = snapshot.get("raw_provider_data")
-    raw_activities = (
-        raw_provider_data.get("activities")
-        if isinstance(raw_provider_data, dict)
-        else None
-    )
+def _raw_activity(
+    snapshot: dict,
+    normalized_id: str,
+    activity_rows: Sequence[Any] | None = None,
+) -> dict:
+    """Find one raw activity row, in the canonical rows when they were read."""
+    raw_activities: Any = activity_rows
+    if raw_activities is None:
+        raw_provider_data = snapshot.get("raw_provider_data")
+        if isinstance(raw_provider_data, dict):
+            raw_activities = raw_provider_data.get("activities")
     activity = (
         next(
             (
@@ -140,7 +153,7 @@ def _raw_activity(snapshot: dict, normalized_id: str) -> dict:
             ),
             None,
         )
-        if isinstance(raw_activities, list)
+        if isinstance(raw_activities, list | tuple)
         else None
     )
     if activity is None:

@@ -13,8 +13,12 @@ from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanState
 
 class PublicPlanStateServiceTests(unittest.TestCase):
     def make_service(self, weather_state: dict | None = None):
+        activity_rows = Mock()
+        activity_rows.compact.return_value = [
+            {"id": str(index)} for index in range(1001)
+        ]
         snapshot = {
-            "recent_activities": [{"id": str(index)} for index in range(1001)],
+            "recent_activities": activity_rows.compact.return_value,
             "provider_sync": {
                 "calendar_window": {"start": "2026-01-01", "end": "2026-03-01"}
             },
@@ -85,6 +89,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
                 external_calendar_configured=True,
                 external_calendar_window_days=35,
                 default_workout_name="Geplante Einheit",
+                activity_rows=activity_rows,
             ),
         )
         return (

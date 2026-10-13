@@ -9,11 +9,14 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db import DatabaseManager
+from backend.db.remote_links import RemoteLinkRepository
 from backend.planning import planned_units
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
 
+_REMOTE_LINKS = RemoteLinkRepository()
 _DATE_ONLY_PATTERN = r"\d{4}-\d{2}-\d{2}"
 _ROW_COLUMNS = (
     "id",
@@ -123,11 +126,7 @@ class RemotePlannedUnitReconciler:
         identity: str,
         now: str,
     ) -> tuple[int, int, int, bool]:
-        current_row = db.execute(
-            "SELECT * FROM planned_units WHERE "
-            "json_extract(payload, '$.remote_event_id')=? OR external_id=? LIMIT 1",
-            (remote_id, identity),
-        ).fetchone()
+        current_row = self._find_current_row(db, remote_id, identity)
         incoming_hash = planned_units.planned_unit_payload_hash(incoming)
         if not current_row:
             incoming["sync_status"] = "synced"
@@ -155,6 +154,15 @@ class RemotePlannedUnitReconciler:
         ):
             return 0, 1, 0, True
         return 0, 0, 0, False
+
+    @staticmethod
+    def _find_current_row(db: Any, remote_id: str, identity: str) -> Any:
+        """Find the local row of a remote event through its legacy slots."""
+        return db.execute(
+            "SELECT * FROM planned_units WHERE "
+            "json_extract(payload, '$.remote_event_id')=? OR external_id=? LIMIT 1",
+            (remote_id, identity),
+        ).fetchone()
 
     @staticmethod
     def _update_conflict(
@@ -199,7 +207,7 @@ class RemotePlannedUnitReconciler:
         ):
             if current.get(key) is not None:
                 incoming[key] = current[key]
-        return _update_if_unchanged(
+        updated = _update_if_unchanged(
             db,
             current_row,
             "UPDATE planned_units SET external_id=?, payload=?, sync_dirty=0, "
@@ -214,6 +222,11 @@ class RemotePlannedUnitReconciler:
                 current_row["local_id"],
             ),
         )
+        if updated:
+            _REMOTE_LINKS.refresh_from_slots(
+                db, RemoteEntityKind.PLANNED_UNIT, str(current_row["local_id"])
+            )
+        return updated
 
     @staticmethod
     def _calendar_window(

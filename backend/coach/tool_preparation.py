@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 from backend.coach.dialogue_action import CoachDialogueActionService
@@ -10,7 +9,6 @@ from backend.coach.outcomes import unresolved_coach_steps
 from backend.errors import AppError
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.state import SyncStateRepository
 
 
 class CoachStructuredToolPreparationService:
@@ -19,20 +17,14 @@ class CoachStructuredToolPreparationService:
     def __init__(
         self,
         dialogue_action: CoachDialogueActionService,
-        sync_state: SyncStateRepository,
         planning_authority: PlanningAuthorityService,
         read_only_tools: frozenset[str],
-        sync_period_defaults: Mapping[str, int],
-        all_sync_days: int,
         *,
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._dialogue_action = dialogue_action
-        self._sync_state = sync_state
         self._planning_authority = planning_authority
         self._read_only_tools = read_only_tools
-        self._sync_period_defaults = sync_period_defaults
-        self._all_sync_days = all_sync_days
         self._registry = registry
 
     def prepare(
@@ -73,12 +65,6 @@ class CoachStructuredToolPreparationService:
         target = action.get("target_system")
         if name == "start_provider_refresh" and self._waits_for_completion(target):
             arguments["_wait_for_completion"] = True
-            arguments.setdefault(
-                "days",
-                self._sync_state.sync_period(
-                    target, self._sync_period_defaults, self._all_sync_days
-                ),
-            )
         if name == "get_sync_job":
             action["authorization_scope"] = [
                 "sync_job:" + str(arguments.get("job_id") or "")

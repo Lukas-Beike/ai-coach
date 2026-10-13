@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
 from datetime import date, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from backend.athlete.profile import timezone_name
 from backend.config import Config
@@ -35,6 +35,32 @@ GARMIN_SYNC_LOCK = threading.Lock()
 def shared_garmin_sync_lock() -> threading.Lock:
     """Return the one lock shared by normal and morning Garmin reads."""
     return GARMIN_SYNC_LOCK
+
+
+class MorningBatteryRefresher(Protocol):
+    """Refreshes the optional morning Body Battery, swallowing its failures."""
+
+    def refresh(
+        self,
+        checkin_date: date | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> bool: ...
+
+
+def refresh_morning_battery_after_sync(
+    result: Mapping[str, Any],
+    morning_battery: MorningBatteryRefresher,
+    cancel_event: threading.Event | None = None,
+) -> bool:
+    """Refresh the morning Body Battery once a Garmin sync stored new data.
+
+    Queued and inline refreshes share this rule; a busy or failed run leaves
+    the morning reading untouched. Returns ``False`` when a due Body Battery
+    refresh failed, was busy, or was cancelled.
+    """
+    if result.get("status") not in {"ok", "partial"}:
+        return True
+    return morning_battery.refresh(cancel_event=cancel_event)
 
 
 class GarminRemoteReader:
@@ -432,6 +458,11 @@ class GarminSyncService:
 
     def automatic_sync_window(self, minimum_days: int) -> tuple[int, date | None]:
         return self._payload_service.automatic_sync_window(minimum_days)
+
+    def awaited_run_status(
+        self, days: int, end_date: date | None, synced_at: str | None
+    ) -> str | None:
+        return self._payload_service.awaited_run_status(days, end_date, synced_at)
 
     def sync(
         self,

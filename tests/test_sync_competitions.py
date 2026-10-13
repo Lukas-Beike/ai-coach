@@ -9,6 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from remote_link_fixtures import create_remote_links_table
+
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import CompetitionRepository, KeyValueRepository
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
@@ -123,6 +125,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
                 "id TEXT PRIMARY KEY, intervals_event_id TEXT, external_id TEXT, "
                 "created_at TEXT NOT NULL)"
             )
+            create_remote_links_table(db)
             db.execute(
                 "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
             )

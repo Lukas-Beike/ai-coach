@@ -7,6 +7,7 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import ProviderId
+from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.garmin_fields import (
     GARMIN_BODY_FAT_ALIASES,
     GARMIN_WEIGHT_UNIT_ALIASES,
@@ -60,7 +61,7 @@ def _metric(
 def _garmin_weight_kg(value: Any, unit: Any = None) -> float | int | None:
     if isinstance(value, dict):
         unit = _first_present(value, GARMIN_WEIGHT_UNIT_ALIASES) or unit
-        value = _first_present(value, ("weightKg", "weight_kg", "weight", "value"))
+        value = _first_present(value, garmin_perf_fields.WEIGHT_VALUE_ALIASES)
     number = _as_number(value)
     if number is None:
         return None
@@ -89,9 +90,7 @@ def _garmin_record_date(value: Any) -> str | None:
 
 
 def _garmin_record_timestamp(item: Mapping[str, Any]) -> float | None:
-    value = _first_present(
-        item, ("timestampGMT", "timestamp", "measurementDate", "date")
-    )
+    value = _first_present(item, garmin_perf_fields.WEIGHT_TIMESTAMP_ALIASES)
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         try:
             scale = 1000 if value > 100_000_000_000 else 1
@@ -117,7 +116,7 @@ def _legacy_record_day(record: Mapping[str, Any]) -> str | None:
 
 
 def _weight_reading(record: Mapping[str, Any]) -> float | None:
-    direct = _first_present(record, ("weightKg", "weight_kg", "weight"))
+    direct = _first_present(record, garmin_perf_fields.WEIGHT_READING_ALIASES)
     if direct in (None, ""):
         return None
     weight = _garmin_weight_kg(

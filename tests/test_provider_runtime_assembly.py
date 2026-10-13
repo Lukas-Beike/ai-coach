@@ -34,6 +34,7 @@ from backend.providers.descriptors import (
     DEFAULT_PROVIDER_DESCRIPTORS,
     GARMIN_ID,
     INTERVALS_ID,
+    WAHOO_ID,
     WEATHER_ID,
     SchedulePolicy,
 )
@@ -62,7 +63,7 @@ from backend.sync.provider_runtime_assembly import (
     builtin_bindings,
 )
 
-BUILTIN_IDS = frozenset({INTERVALS_ID, GARMIN_ID, WEATHER_ID, CALENDAR_ID})
+BUILTIN_IDS = frozenset({INTERVALS_ID, GARMIN_ID, WEATHER_ID, CALENDAR_ID, WAHOO_ID})
 ACME_STATIC = ProviderRegistry((*DEFAULT_PROVIDER_DESCRIPTORS, acme_descriptor()))
 ACME_ONLY_STATIC = ProviderRegistry((acme_descriptor(),))
 NOW = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
@@ -92,6 +93,7 @@ def _builtin_deps(
         intervals=mock.Mock(name="intervals"),
         garmin=mock.Mock(name="garmin"),
         calendar_weather=mock.Mock(name="calendar_weather"),
+        wahoo=mock.Mock(name="wahoo"),
     )
 
 
@@ -193,12 +195,12 @@ def _command_assembly(
 
 
 class BuiltinBindingTests(unittest.TestCase):
-    def test_builtin_bindings_declare_four_providers_in_order(self) -> None:
+    def test_builtin_bindings_declare_five_providers_in_order(self) -> None:
         bindings = builtin_bindings(_builtin_deps())
 
         self.assertEqual(
             [binding.provider_id for binding in bindings],
-            [INTERVALS_ID, GARMIN_ID, WEATHER_ID, CALENDAR_ID],
+            [INTERVALS_ID, GARMIN_ID, WAHOO_ID, WEATHER_ID, CALENDAR_ID],
         )
 
     def test_default_registry_accepts_builtin_bindings_with_live_gates(self) -> None:
@@ -224,8 +226,10 @@ class BuiltinBindingTests(unittest.TestCase):
 
         self.assertEqual(set(runtime.job_owners()), BUILTIN_IDS)
         self.assertEqual(set(runtime.resync_handlers()), {INTERVALS_ID, GARMIN_ID})
-        self.assertEqual(set(runtime.synchronous_refreshes()), {INTERVALS_ID})
-        self.assertEqual(set(runtime.running_probes()), {INTERVALS_ID})
+        self.assertEqual(
+            set(runtime.synchronous_refreshes()), {INTERVALS_ID, GARMIN_ID}
+        )
+        self.assertEqual(set(runtime.running_probes()), {INTERVALS_ID, WAHOO_ID})
 
     def test_builtin_schedules_follow_registry_order(self) -> None:
         runtime = build_provider_runtime(

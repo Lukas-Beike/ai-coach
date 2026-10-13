@@ -410,15 +410,18 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
         reader, garmin_projection = _performance_reader(_garmin_payload())
 
         unavailable = reader.current_performance(None)
-        garmin_context = reader.garmin(None)
-        reader.garmin(_intervals_snapshot())
+        garmin_context = reader.recovery(None)
+        reader.recovery(_intervals_snapshot())
 
         self.assertFalse(unavailable["available"])
         self.assertEqual(
             unavailable["garmin_training_load"]["four_week_balance"]["source"],
             GARMIN_SOURCE,
         )
-        self.assertEqual(garmin_context, {"recovery": {}})
+        self.assertEqual(
+            {key: value for key, value in garmin_context.items() if key != "source"},
+            {"recovery": {}},
+        )
         # The Garmin fallback performance block is only requested when no
         # Intervals.icu snapshot exists.
         self.assertEqual(
@@ -447,9 +450,7 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
             "icu_rpe": 6,
         }
 
-        result = CoachIntervalsContextService().project(
-            {"recent_activities": [activity]}, [], TODAY
-        )
+        result = CoachIntervalsContextService().project({}, [], TODAY, [activity])
 
         row = result["recent_activities_by_sport"]["Radfahren"][0]
         # Fields outside COACH_ACTIVITY_FIELDS (icu_eftp, max_speed, description)
@@ -481,9 +482,7 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
             "start_date_local": "2026-05-03T07:00:00",
         }
 
-        result = CoachIntervalsContextService().project(
-            {"recent_activities": [activity]}, [], TODAY
-        )
+        result = CoachIntervalsContextService().project({}, [], TODAY, [activity])
 
         rows = result["recent_activities_by_sport"]["Laufen"]
         self.assertEqual(len(rows), 1)
@@ -552,19 +551,19 @@ class CoachStructuredContextSwitchTests(unittest.TestCase):
             ],
             GARMIN_SOURCE,
         )
-        self.assertIsNone(result["intervals"]["synced_at"])
-        self.assertEqual(result["garmin"], {"recovery": {}})
+        self.assertIsNone(result["activities"]["synced_at"])
+        self.assertEqual(result["recovery"]["recovery"], {})
 
     def test_selection_without_garmin_never_calls_garmin_projection(self) -> None:
         service, garmin_projection = _structured_service(None, _garmin_payload())
         selection = CoachContextSelection(
-            "focused", frozenset({"intervals", "current_performance"})
+            "focused", frozenset({"activities", "current_performance"})
         )
 
         result = service.build(_intervals_snapshot(), selection=selection)
 
         garmin_projection.coach_context.assert_not_called()
-        self.assertEqual(set(result), {"intervals", "current_performance"})
+        self.assertEqual(set(result), {"activities", "current_performance"})
         self.assertTrue(result["current_performance"]["available"])
 
 

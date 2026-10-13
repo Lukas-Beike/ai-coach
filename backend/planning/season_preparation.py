@@ -3,6 +3,7 @@
 import hashlib
 import json
 import math
+from collections.abc import Callable, Sequence
 from datetime import date, timedelta
 from typing import Any
 
@@ -10,10 +11,13 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
-from backend.performance.training_report import activity_day, canonical_rows
+from backend.performance.season_inputs import SeasonLoadInputs
+from backend.performance.training_report import activity_day
 from backend.planning.competitions import supported_competition_sport
 from backend.planning.season import season_plan_summary
 from backend.providers.source_labels import SourceView, provider_label
+
+ActivityRowsBetween = Callable[[date, date], Sequence[dict[str, Any]]]
 
 ACTIVITY_SOURCE = provider_label(
     ProviderId.INTERVALS, SourceView.SEASON_PREPARATION_ACTIVITY
@@ -30,12 +34,28 @@ def season_preparation(
     today: date,
     timezone: str = "UTC",
     observations: list[dict[str, Any]] | None = None,
+    *,
+    activity_rows: ActivityRowsBetween,
 ) -> dict[str, Any]:
+    """Summarise the preparation evidence of every season event.
+
+    ``activity_rows`` returns de-duplicated activity rows around the given inclusive
+    local dates; it is called once for the span of all event windows. The snapshot
+    only supplies its sync time.
+    """
     result = season_plan_summary(competitions, today)
-    rows, _ = canonical_rows(snapshot)
-    for event in result["events"]:
+    windows = [_evidence_window(event, today) for event in result["events"]]
+    rows = (
+        list(
+            activity_rows(
+                min(start for start, _ in windows), max(end for _, end in windows)
+            )
+        )
+        if windows
+        else []
+    )
+    for event, (window_start, window_end) in zip(result["events"], windows):
         sport = supported_competition_sport(event.get("sport"))
-        window_start, window_end = _evidence_window(event, today)
         eligible = [
             row
             for row in rows
@@ -209,26 +229,26 @@ def load_scenarios(
     plan: dict[str, Any],
     today: date,
     values: dict[str, Any],
-    timezone: str = "UTC",
+    *,
+    inputs: SeasonLoadInputs,
 ) -> dict[str, Any]:
+    """Model the load curves of the current plan and one explicit alternative.
+
+    ``inputs`` carries yesterday's CTL/ATL and today's completed activities, read
+    by ``read_season_load_inputs``; the snapshot only supplies its sync time.
+    """
     end, scale, taper = _scenario_values(values, today)
-    wellness = [
-        row
-        for row in snapshot.get("recent_wellness", [])
-        if str(row.get("id") or "").startswith((today - timedelta(days=1)).isoformat())
-    ]
-    latest = wellness[-1] if wellness else {}
-    ctl, atl = number(latest.get("ctl")), number(latest.get("atl"))
+    ctl, atl = (
+        number(observation.value.value) if observation is not None else None
+        for observation in (inputs.ctl, inputs.atl)
+    )
     basis = {
-        "as_of": (today - timedelta(days=1)).isoformat(),
+        "as_of": inputs.basis_day.isoformat(),
         "ctl": ctl,
         "atl": atl,
-        "source": provider_label(ProviderId.INTERVALS, SourceView.SEASON_PREPARATION),
+        "source": inputs.source_label(),
     }
-    activities, _ = canonical_rows(snapshot)
-    completed_today = [
-        row for row in activities if activity_day(row, timezone) == today.isoformat()
-    ]
+    completed_today = list(inputs.completed_today)
     base = {
         "method": "explicit-local-exponential-model-v1",
         "basis": basis,

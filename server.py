@@ -16,7 +16,6 @@ from pathlib import Path
 
 from backend import config as app_config
 from backend import observability
-from backend.activities.detail_store import summary_fingerprint
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -169,7 +168,10 @@ from backend.history.assembly import (
     HistoryPlanningServices,
 )
 from backend.http_api import server as http_server
-from backend.http_api.activity_assembly import ActivityReadAssembly
+from backend.http_api.activity_assembly import (
+    ActivityReadAssembly,
+    ActivityReadSources,
+)
 from backend.http_api.assembly import (
     HttpApiAssembly,
     HttpAthleteServices,
@@ -247,6 +249,7 @@ from backend.planning.assembly import (
 from backend.planning.assembly import (
     PlanningRuntime as PlanningDataRuntime,
 )
+from backend.planning.compact_activities import ActivityRowSource
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
@@ -335,6 +338,7 @@ from backend.sync.garmin_assembly import (
     GarminSyncControl,
     GarminSyncTelemetry,
 )
+from backend.sync.garmin_projection_service import GarminCanonicalSources
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
     GarminMorningRemoteReader,
@@ -383,6 +387,7 @@ from backend.sync.provider_resync_assembly import (
 from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.provider_runtime_assembly import (
     ProviderRuntimeDependencies,
+    WahooRuntimeDependencies,
     build_provider_runtime,
     builtin_bindings,
 )
@@ -407,6 +412,11 @@ from backend.sync.selected_assembly import (
 )
 from backend.sync.snapshot_reader import SnapshotRepositoryReader
 from backend.sync.state import SyncStateRepository
+from backend.sync.wahoo_connection_assembly import (
+    WahooConnectionAssembly,
+    WahooConnectionInputs,
+)
+from backend.sync.wahoo_sync_assembly import WahooSyncAssembly, WahooSyncInputs
 from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
@@ -437,7 +447,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.12.32"
+APP_VERSION = "1.12.33"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -555,6 +565,10 @@ def provider_runtime() -> ProviderRuntimeRegistry:
                 intervals=jobs.intervals,
                 garmin=jobs.garmin,
                 calendar_weather=jobs.calendar_weather,
+                wahoo=WahooRuntimeDependencies(
+                    sync_service=WAHOO_SYNC.sync_service,
+                    plan_push_service=WAHOO_SYNC.plan_push_service,
+                ),
             )
         ),
     )
@@ -593,7 +607,9 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
         MorningBatteryStore(
             manager,
             KEY_VALUE_REPOSITORY,
-            GarminSnapshotWriter(KEY_VALUE_REPOSITORY, lambda: ATHLETE_CLOCK.now().tzinfo),
+            GarminSnapshotWriter(
+                KEY_VALUE_REPOSITORY, lambda: ATHLETE_CLOCK.now().tzinfo
+            ),
         ),
         MorningBatterySource(
             GARMIN_ASSEMBLY.fixture_loader(),
@@ -629,6 +645,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             key_values=KEY_VALUE_REPOSITORY,
             snapshot=SNAPSHOT_REPOSITORY,
             snapshot_reader=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+            activity_rows=lambda: CANONICAL_READ,
             competition=COMPETITION_REPOSITORY,
         ),
         runtime=AthleteRuntime(
@@ -650,10 +667,13 @@ CANONICAL_READ: CanonicalReadSelector
 
 ACTIVITY_READS = ActivityReadAssembly(
     database_manager,
-    SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+    ActivityReadSources(
+        SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
+        lambda: CANONICAL_READ,
+        observation_reader=lambda: CANONICAL_READ,
+    ),
     ATHLETE_DATA.activity_feedback,
     lambda: ATHLETE_DATA.equipment().read(),
-    observation_reader=lambda: CANONICAL_READ,
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
@@ -709,6 +729,7 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
             local_date=lambda: ATHLETE_CLOCK.now().date(),
             calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
             checkin_text_limit=CHECKIN_TEXT_LIMITS["illness"],
+            observation_reader=lambda: CANONICAL_READ,
         ),
         runtime=PlanningRuntime(
             sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),
@@ -914,6 +935,10 @@ GARMIN_ASSEMBLY = GarminAssembly(
             lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
             morning_body_battery_service=morning_body_battery_service,
         ),
+        canonical=GarminCanonicalSources(
+            activity_rows=lambda: CANONICAL_READ,
+            observations=lambda: CANONICAL_READ,
+        ),
     )
 )
 
@@ -986,6 +1011,8 @@ INTERVALS_SYNC = IntervalsSyncAssembly(
             event_buffer=runtime_events.STATE_EVENT_BUFFER,
             redact_text=REDACTOR.redact_text,
             logger=LOGGER,
+            activity_rows=lambda: CANONICAL_READ,
+            table_serving=lambda: CANONICAL_READ,
         ),
         operations=IntervalsOperationDependencies(
             operation_observer=PROVIDER_SYNC.operation_observer,
@@ -1044,6 +1071,33 @@ PROVIDER_TRANSPORT = ProviderTransportAssembly(
             operation=INTERVALS_RESYNC_GATE.operation,
         ),
     ),
+)
+WAHOO_CONNECTION = WahooConnectionAssembly(
+    WahooConnectionInputs(
+        config=lambda: CONFIG,
+        json_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
+        database_manager=database_manager,
+        database_lock=lambda: DB_LOCK,
+        key_values=KEY_VALUE_REPOSITORY,
+        utc_now=runtime_clock.utc_now,
+    )
+)
+WAHOO_SYNC = WahooSyncAssembly(
+    WahooSyncInputs(
+        config=lambda: CONFIG,
+        connection=WAHOO_CONNECTION.service,
+        json_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
+        database_manager=database_manager,
+        database_lock=DB_LOCK,
+        key_values=KEY_VALUE_REPOSITORY,
+        daily_markers=sync_daily_markers,
+        observer=lambda: PROVIDER_SYNC.operation_observer(),
+        registry=DEFAULT_PROVIDER_REGISTRY,
+        zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
+        now=lambda: datetime.now(UTC),
+        logger=LOGGER,
+        redactor=REDACTOR.redact_text,
+    )
 )
 NUTRITION_ASSEMBLY = NutritionAssembly(
     dependencies=NutritionAssembly.Inputs(
@@ -1137,6 +1191,7 @@ COACH_LOCAL = CoachLocalAssembly(
             payload_service=GARMIN_ASSEMBLY.payload_service,
             morning_body_battery=morning_body_battery_service,
             logger=LOGGER,
+            observations=lambda: CANONICAL_READ,
         ),
     )
 )
@@ -1175,6 +1230,7 @@ WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
             config=lambda: CONFIG,
             database_manager=database_manager,
             intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+            wahoo_export=WAHOO_SYNC.workout_export,
             workout_library_service=PLANNING_DATA.workout_library,
             calendar_conflict_service=PLANNING_WORKFLOWS.calendar_conflict_service,
         ),
@@ -1249,6 +1305,12 @@ COACH_CONTEXT = CoachContextAssembly(
             canonical=CanonicalPerformanceSource(
                 database_manager=lambda: database_manager(),
                 observation_reader=lambda: CANONICAL_READ,
+                serving=lambda: CANONICAL_READ,
+                activity_rows=lambda: CANONICAL_READ,
+            ),
+            activity_rows=ActivityRowSource(
+                database_manager=lambda: database_manager(),
+                reader=lambda: CANONICAL_READ,
             ),
         ),
         planning=CoachContextPlanningSources(
@@ -1311,7 +1373,7 @@ COACH_PROPOSALS = CoachProposalAssembly(
     dependencies=CoachProposalAssembly.Inputs(
         persistence=ProposalPersistence(
             database_manager=database_manager,
-            sync_state_repository=sync_state_repository,
+            duplicate_inspector=ATHLETE_DATA.duplicate_inspector,
             nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
             nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         ),
@@ -1597,8 +1659,6 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
         contract=StructuredToolRoundContract(
             tool_names=lambda: (tool["name"] for tool in COACH_DIALOGUE_TOOLS),
             read_only_tools=lambda: STRUCTURED_READ_ONLY_TOOLS,
-            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-            all_sync_days=ALL_SYNC_DAYS,
             limits=lambda: CoachStructuredToolRoundLimits(
                 max_rounds=structured_tool_round.COACH_TOOL_MAX_ROUNDS,
                 background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
@@ -1617,7 +1677,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
             planning_authority_service=SYNC_COMMANDS.authority,
         ),
         state=StructuredToolRoundState(
-            sync_state_repository=lambda: sync_state_repository(),
+            duplicate_inspector=ATHLETE_DATA.duplicate_inspector,
             job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
         ),
         conversation=StructuredToolRoundConversation(
@@ -1721,6 +1781,8 @@ PUBLIC_STATE = PublicStateAssembly(
             key_values=lambda: KEY_VALUE_REPOSITORY,
             key_value_service=key_value_service,
             observation_reader=lambda: CANONICAL_READ,
+            canonical_serving=lambda: CANONICAL_READ,
+            activity_row_reader=lambda: CANONICAL_READ,
         ),
         owners=PublicStateOwnerAssemblies(
             snapshot_repository=SNAPSHOT_REPOSITORY,
@@ -1781,8 +1843,6 @@ CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
 CANONICAL_READ = build_canonical_read(
     legacy=CANONICAL_SNAPSHOT_PROJECTION,
     key_values=KEY_VALUE_REPOSITORY,
-    snapshots=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
-    fingerprint=summary_fingerprint,
 )
 
 CANONICAL_BACKFILL = build_canonical_backfill(
@@ -1791,7 +1851,6 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
     maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     clock=runtime_clock.utc_now,
-    parity=CANONICAL_READ,
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
@@ -1826,6 +1885,7 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             canonical_coverage=lambda: CANONICAL_READ,
             canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
             canonical_read=lambda: CANONICAL_READ,
+            canonical_rows=lambda: CANONICAL_READ,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,
@@ -1915,6 +1975,8 @@ HTTP_API = HttpApiAssembly(
                 performance_state=PUBLIC_STATE.performance_state_service,
                 feedback_state=PUBLIC_STATE.feedback_state_service,
                 sync_state=PUBLIC_STATE.sync_public_state_service,
+                canonical_performance_source=PUBLIC_STATE.canonical_performance_source,
+                season_source=PUBLIC_STATE.season_source,
             ),
             athlete=HttpAthleteServices(
                 profile=ATHLETE_DATA.profile,
@@ -1963,6 +2025,7 @@ HTTP_API = HttpApiAssembly(
                 intervals_sync=NUTRITION_ASSEMBLY.intervals_sync_service,
                 audio_transcription=MODEL_TRANSPORT.audio_transcription_client,
             ),
+            wahoo=WAHOO_CONNECTION.service,
         ),
     ),
 )

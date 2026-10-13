@@ -5,6 +5,7 @@ from __future__ import annotations
 import platform
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from backend.diagnostics.canonical_backfill import (
     CanonicalBackfillStatusReader,
     summarize_canonical_backfill,
 )
+from backend.diagnostics.canonical_counts import activity_count, wellness_day_count
 from backend.diagnostics.canonical_coverage import summarize_canonical_coverage
 from backend.diagnostics.canonical_read import (
     CanonicalReadStatusReader,
@@ -28,7 +30,11 @@ from backend.diagnostics.logs import RecentLogEntriesService
 from backend.observability import DiagnosticCapture, Redactor
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.state import ProviderStateService
-from backend.runtime.ports import ProviderCoverageReader
+from backend.runtime.ports import (
+    ActivityRowReader,
+    ObservationReader,
+    ProviderCoverageReader,
+)
 from backend.settings import SettingsService
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.freshness import ProviderFreshnessService
@@ -69,6 +75,8 @@ class DiagnosticReportDependencies:
     diagnostic_capture: DiagnosticCapture
     canonical_backfill: CanonicalBackfillStatusReader | None = None
     canonical_read: CanonicalReadStatusReader | None = None
+    activity_rows: ActivityRowReader | None = None
+    observations: ObservationReader | None = None
 
 
 class DiagnosticReportService:
@@ -137,12 +145,12 @@ class DiagnosticReportService:
                     or None,
                     "running": self._get_value(db, "sync_running") == "1",
                     "snapshot_counts": {
-                        "activities": len(snapshot.get("recent_activities", []))
-                        if snapshot
-                        else 0,
-                        "wellness": len(snapshot.get("recent_wellness", []))
-                        if snapshot
-                        else 0,
+                        "activities": activity_count(deps.activity_rows, db),
+                        "wellness": wellness_day_count(
+                            deps.observations,
+                            db,
+                            date.fromisoformat(deps.utc_now()[:10]),
+                        ),
                         "calendar_events": len(snapshot.get("upcoming_calendar", []))
                         if snapshot
                         else 0,

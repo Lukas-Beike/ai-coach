@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -11,9 +12,19 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.performance import garmin_observations
+from backend.performance.garmin_canonical import read_garmin_sleep_day
 from backend.performance.morning_battery_service import MorningBodyBatteryService
+from backend.runtime.ports import ObservationReader
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.garmin_service import GARMIN_AUTOMATIC_SYNC_DAYS, GarminSyncService
+
+
+@dataclass(frozen=True)
+class GarminSleepObservations:
+    """Where the sleep day is read from: a database and a lazy observation reader."""
+
+    database_manager: DatabaseManager
+    reader: Callable[[], ObservationReader]
 
 
 class ManualMorningCheckinService:
@@ -26,7 +37,10 @@ class ManualMorningCheckinService:
         morning_battery: MorningBodyBatteryService,
         local_today: Callable[[], date],
         logger: logging.Logger,
+        *,
+        observations: GarminSleepObservations | None = None,
     ) -> None:
+        self._observations = observations
         self._garmin_sync = garmin_sync
         self._garmin_payload = garmin_payload
         self._morning_battery = morning_battery
@@ -51,9 +65,7 @@ class ManualMorningCheckinService:
                 exc_info=True,
             )
 
-        if not garmin_observations.garmin_sleep_ready_for_checkin(
-            checkin_date, self._garmin_payload.snapshot()
-        ):
+        if not self._sleep_ready(checkin_date):
             raise AppError(
                 503,
                 "Der Morgen-Check-in wartet auf Garmins Schlafdaten für heute.",
@@ -61,6 +73,18 @@ class ManualMorningCheckinService:
             )
 
         self._morning_battery.refresh(checkin_date)
+
+    def _sleep_ready(self, checkin_date: date) -> bool:
+        snapshot = self._garmin_payload.snapshot()
+        if self._observations is None:
+            return garmin_observations.garmin_sleep_ready_for_checkin(
+                checkin_date, snapshot
+            )
+        with self._observations.database_manager.reader() as db:
+            day = read_garmin_sleep_day(self._observations.reader(), db)
+        return garmin_observations.garmin_sleep_ready_for_checkin(
+            checkin_date, snapshot, None if day is None else day.isoformat()
+        )
 
 
 class MorningCheckinStateService:

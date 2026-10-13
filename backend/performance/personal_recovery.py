@@ -8,11 +8,19 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import ProviderId
+from backend.performance.canonical_personal_recovery import (
+    CanonicalPersonalRecoveryInputs,
+)
+from backend.performance.canonical_recovery import prefer_canonical
+from backend.performance.display_sources import preferred_providers
 from backend.performance.morning_battery import timestamp
 from backend.performance.recovery import (
     dated_garmin_recovery_records,
     garmin_recovery_metric,
 )
+from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.providers.source_labels import SourceView, provider_label
 
 
 def _number(value: Any) -> float | None:
@@ -21,31 +29,32 @@ def _number(value: Any) -> float | None:
     )
 
 
-INTERVALS_SOURCE = "Intervals.icu"
-
-
 def personal_recovery(
     wellness: list[dict[str, Any]],
     garmin: dict[str, Any],
     profile: dict[str, Any],
     today: date,
+    *,
+    canonical: CanonicalPersonalRecoveryInputs | None = None,
 ) -> dict[str, Any]:
     cutoff = (today - timedelta(days=42)).isoformat()
     history_start = (today - timedelta(days=83)).isoformat()
     current_day = today.isoformat()
-    groups: dict[tuple[str, str, str], dict[str, float]] = {}
+    groups: dict[tuple[ProviderId, str, str], dict[str, float]] = {}
 
     add = partial(_add_record, groups, (history_start, current_day))
 
     for row in wellness:
         day = iso_date_prefix(str(row.get("id") or row.get("date") or ""))
-        add((INTERVALS_SOURCE, "sleep", "sleepSecs"), day, row.get("sleepSecs"), 3600)
-        add((INTERVALS_SOURCE, "resting_hr", "restingHR"), day, row.get("restingHR"))
+        intervals = ProviderId.INTERVALS
+        add((intervals, "sleep", "sleepSecs"), day, row.get("sleepSecs"), 3600)
+        add((intervals, "resting_hr", "restingHR"), day, row.get("restingHR"))
         # The measurement method is fixed by the Intervals.icu field name, so rMSSD
         # (`hrv`) and SDNN (`hrvSDNN`) form separate, never mixed, baselines.
-        add((INTERVALS_SOURCE, "hrv", "RMSSD"), day, row.get("hrv"))
-        add((INTERVALS_SOURCE, "hrv", "SDNN"), day, row.get("hrvSDNN"))
+        add((intervals, "hrv", "RMSSD"), day, row.get("hrv"))
+        add((intervals, "hrv", "SDNN"), day, row.get("hrvSDNN"))
     _add_garmin_records(garmin, history_start, current_day, add)
+    _prefer_canonical_resting_hr(groups, canonical)
     baselines = [
         _baseline(key, records, cutoff, today)
         for key, records in sorted(groups.items())
@@ -65,6 +74,7 @@ def personal_recovery(
         "sleep_deficits": deficits,
         "sleep_target_hours": target if math.isfinite(target) else None,
         "regularity": regularity,
+        "preferred_providers": preferred_providers(),
         "note": "Persönliche Quartile beschreiben Abweichungen, keine medizinische Trainingsfreigabe. Krankheit und Schmerzen separat berücksichtigen. Quellen und Messfelder werden nicht gemischt; lange Nächte gleichen Defizite nicht rechnerisch aus.",
     }
 
@@ -72,7 +82,7 @@ def personal_recovery(
 def _add_record(
     groups: dict,
     window: tuple[str, str],
-    key: tuple[str, str, str],
+    key: tuple[ProviderId, str, str],
     day: str,
     value: Any,
     scale: float = 1,
@@ -92,17 +102,36 @@ def _add_record(
     groups.setdefault(key, {})[day] = number
 
 
+def _prefer_canonical_resting_hr(
+    groups: dict[tuple[ProviderId, str, str], dict[str, float]],
+    canonical: CanonicalPersonalRecoveryInputs | None,
+) -> None:
+    """Replace each resting HR day with its canonical record when it matches."""
+    if canonical is None:
+        return
+    for (provider, metric, _), records in groups.items():
+        if metric != "resting_hr":
+            continue
+        daily = canonical.resting_hr.get(provider, {})
+        for day, value in records.items():
+            records[day] = prefer_canonical(daily.get(day), value, provider, day)
+
+
 def _baseline(
-    key: tuple[str, str, str], records: dict[str, float], cutoff: str, today: date
+    key: tuple[ProviderId, str, str],
+    records: dict[str, float],
+    cutoff: str,
+    today: date,
 ) -> dict[str, Any]:
-    source, metric, field = key
+    provider, metric, field = key
     observed = max(records)
     # Today's value never influences its own normal range.
     prior = [value for day, value in records.items() if cutoff <= day < observed]
     latest = records[observed]
     current = observed >= (today - timedelta(days=1)).isoformat()
     baseline: dict[str, Any] = {
-        "source": source,
+        "source": provider_label(provider, SourceView.DAILY_HEALTH),
+        "source_provider": provider.value,
         "metric": metric,
         "measurement": field,
         "value": latest,
@@ -138,11 +167,15 @@ def _upper_position(latest: float, upper: float) -> str:
     return "above" if latest > upper else "within"
 
 
-def _sleep_deficits(groups: dict, target: float, today: date) -> list[dict[str, Any]]:
+def _sleep_deficits(
+    groups: dict[tuple[ProviderId, str, str], dict[str, float]],
+    target: float,
+    today: date,
+) -> list[dict[str, Any]]:
     current_day = today.isoformat()
     deficits = []
     if math.isfinite(target) and 4 <= target <= 12:
-        for (source, metric, field), records in sorted(groups.items()):
+        for (provider, metric, field), records in sorted(groups.items()):
             if metric != "sleep":
                 continue
             selected = {
@@ -152,7 +185,7 @@ def _sleep_deficits(groups: dict, target: float, today: date) -> list[dict[str, 
             }
             deficits.append(
                 {
-                    "source": source,
+                    "source": provider_label(provider, SourceView.DAILY_HEALTH),
                     "measurement": field,
                     "known_nights": len(selected),
                     "target_hours": target,
@@ -170,9 +203,9 @@ def _add_garmin_records(
     garmin: dict, history_start: str, current_day: str, add: Any
 ) -> None:
     specifications = (
-        ("sleep", "sleep", "sleepTimeSeconds", 3600),
-        ("resting_hr", "resting_hr", "restingHeartRate", 1),
-        ("hrv", "hrv", "lastNightAvg", 1),
+        ("sleep", "sleep", garmin_perf_fields.SLEEP_SECONDS, 3600),
+        ("resting_hr", "resting_hr", garmin_perf_fields.RESTING_HEART_RATE, 1),
+        ("hrv", "hrv", garmin_perf_fields.HRV_NIGHT_AVERAGE, 1),
     )
     for section, metric, field, scale in specifications:
         for day, record in sorted(
@@ -184,7 +217,7 @@ def _add_garmin_records(
                 {section: [record]}, section, (field,)
             )
             if observed == day:
-                add(("Garmin Connect", metric, field), day, value, scale)
+                add((ProviderId.GARMIN, metric, field), day, value, scale)
 
 
 _SLEEP_START_FIELDS = (

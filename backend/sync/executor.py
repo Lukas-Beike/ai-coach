@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
@@ -18,7 +18,11 @@ from backend.providers.descriptors import (
 from backend.sync.competitions import CompetitionSyncService
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.garmin import GarminFixtureLoader
-from backend.sync.garmin_service import GARMIN_AUTOMATIC_SYNC_DAYS, GarminSyncService
+from backend.sync.garmin_service import (
+    GARMIN_AUTOMATIC_SYNC_DAYS,
+    GarminSyncService,
+    refresh_morning_battery_after_sync,
+)
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.intervals import IntervalsSyncService
 from backend.sync.job_outcomes import SyncJobOutcomeService
@@ -267,12 +271,10 @@ class GarminSyncJobOwner:
         if historical_end is not None and self._garmin_fixture_loader.path() is None:
             sync_kwargs["end_date"] = historical_end
         result = self._garmin_sync_service.sync(**sync_kwargs)
-        if (
-            historical_end is None
-            and days != self._all_sync_days
-            and result.get("status") in {"ok", "partial"}
-        ):
-            self._morning_body_battery_service.refresh()
+        if historical_end is None and days != self._all_sync_days:
+            refresh_morning_battery_after_sync(
+                result, self._morning_body_battery_service
+            )
         if job_type == "historical_backfill":
             self._historical_sync.add_next_end(result, historical_end, days)
         return result
@@ -396,6 +398,49 @@ class GarminJobAdapter:
     ) -> dict[str, Any]:
         _reject_plan_push(job_type)
         return self._jobs.execute(job, payload, reason)
+
+
+class WahooSyncJobOwner(Protocol):
+    """Runs one Wahoo read synchronization."""
+
+    def sync(
+        self,
+        days: object = None,
+        reason: str = "manual",
+        operation_id: str | None = None,
+    ) -> dict[str, Any]: ...
+
+
+class WahooPlanPushOwner(Protocol):
+    """Exports the selected library workouts as Wahoo plans."""
+
+    def sync(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class WahooJobAdapter:
+    """Run the explicit Wahoo plan export or the read-only Wahoo sync."""
+
+    def __init__(
+        self, *, sync: WahooSyncJobOwner, plan_push: WahooPlanPushOwner | None = None
+    ) -> None:
+        self._sync = sync
+        self._plan_push = plan_push
+
+    def execute(
+        self,
+        job: Mapping[str, Any],
+        payload: dict[str, Any],
+        reason: str,
+        *,
+        job_type: str,
+    ) -> dict[str, Any]:
+        if job_type == "plan_push" and self._plan_push is not None:
+            selected_payload = {"entries": payload.get("entries")}
+            if payload.get("repair"):
+                selected_payload["repair"] = True
+            return self._plan_push.sync(selected_payload)
+        _reject_plan_push(job_type)
+        return self._sync.sync(payload.get("days"), reason, operation_id=job["id"])
 
 
 class CalendarWeatherJobAdapter:

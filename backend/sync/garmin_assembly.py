@@ -13,7 +13,10 @@ from backend.observability import Redactor
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.providers import garmin as garmin_provider
 from backend.sync import garmin, garmin_service
-from backend.sync.garmin_projection_service import GarminProjectionService
+from backend.sync.garmin_projection_service import (
+    GarminCanonicalSources,
+    GarminProjectionService,
+)
 from backend.sync.garmin_service import (
     GarminRemoteReader,
     GarminSyncCoordination,
@@ -73,8 +76,10 @@ class GarminAssembly:
         persistence: GarminPersistenceOwners
         telemetry: GarminSyncTelemetry
         control: GarminSyncControl
+        canonical: GarminCanonicalSources | None = None
 
     def __init__(self, *, dependencies: GarminAssembly.Inputs) -> None:
+        self._canonical = dependencies.canonical
         provider = dependencies.provider
         persistence = dependencies.persistence
         telemetry = dependencies.telemetry
@@ -123,6 +128,9 @@ class GarminAssembly:
             self._key_values,
             self._sync_state_repository(),
             lambda: self._athlete_clock.now().date(),
+            activity_rows=(
+                None if self._canonical is None else self._canonical.activity_rows
+            ),
         )
 
     def sync_state_service(self) -> garmin.GarminSyncStateService:
@@ -203,4 +211,5 @@ class GarminAssembly:
             self._key_values,
             self._redactor,
             self._athlete_clock.now,
+            canonical=self._canonical,
         )

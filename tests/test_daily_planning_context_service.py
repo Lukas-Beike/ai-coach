@@ -6,6 +6,9 @@ from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
+from canonical_recovery_support import RecordingReader, recovery_observation
+
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.planning.daily_context_service import DailyPlanningContextService
 
 
@@ -87,6 +90,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         self.calendar = FakeCalendarReader()
         self.morning_battery = FakeMorningBodyBatteryService()
         self.feedback = FakeActivityFeedbackService()
+        self.observations = RecordingReader({})
         self.service = DailyPlanningContextService(
             self.database_manager,
             self.key_values,
@@ -96,6 +100,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
             self.feedback,
             self._today,
             35,
+            lambda: self.observations,
         )
 
     def _today(self):
@@ -187,18 +192,23 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         self.key_values.values.update(
             {
                 "garmin_snapshot": json.dumps(
-                    {
-                        "sleep": [
-                            {
-                                "calendarDate": "2026-09-20",
-                                "sleepTimeSeconds": 28_800,
-                                "sleepScore": 90,
-                            }
-                        ],
-                        "daily_stats": [{"date": "2026-09-20", "totalSteps": 9000}],
-                    }
+                    {"daily_stats": [{"date": "2026-09-20", "totalSteps": 9000}]}
                 ),
                 "morning_body_battery_history": json.dumps({"2026-09-19": 64}),
+            }
+        )
+        self.observations = RecordingReader(
+            {
+                MetricKind.SLEEP_DURATION: [
+                    recovery_observation(
+                        MetricKind.SLEEP_DURATION, 28_800, "2026-09-20"
+                    )
+                ],
+                MetricKind.CTL: [
+                    recovery_observation(
+                        MetricKind.CTL, 80, "2026-09-20", ProviderId.INTERVALS
+                    )
+                ],
             }
         )
         self.morning_battery.record = {
@@ -233,6 +243,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         today = next(day for day in result if day["date"] == "2026-09-20")
         self.assertEqual(today["recovery"]["sleep_hours"], 8.0)
         self.assertEqual(today["recovery"]["ctl"], 80)
+        self.assertEqual(today["recovery"]["tsb"], 20)
         self.assertEqual(today["recovery"]["body_battery"], 76)
         self.assertEqual(today["health"]["steps"], 9000)
         self.assertEqual(today["weather"]["temperature_max"], 17)
@@ -251,6 +262,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
             self.feedback,
             self._today,
             1,
+            lambda: self.observations,
         )
         result = service.build(
             calendar_events=[
@@ -287,6 +299,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         self.assertIn("backend.planning.context", imports)
         self.assertIn("backend.performance.daily_health", imports)
         self.assertIn("backend.performance.planning_recovery", imports)
+        self.assertIn("backend.runtime.ports", imports)
         self.assertIn("backend.weather.history", imports)
 
         service = next(
@@ -313,6 +326,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
                 "activity_feedback_service",
                 "today",
                 "calendar_window_days",
+                "observation_reader",
             ],
         )
         self.assertFalse(

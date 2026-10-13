@@ -5,6 +5,7 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.performance import activity_validation
+from backend.providers import intervals_performance_fields as intervals_perf_fields
 from backend.providers.garmin_fields import first_present as _first_present
 
 
@@ -73,7 +74,7 @@ def _activity_eftp_value(activity: Any, cutoff: date, anchor: date) -> float | N
         return None
     value = activity_validation.bounded_performance_metric(
         "cycling_eftp_watts",
-        _first_present(activity, ("icu_eftp", "eftp", "eFTP")),
+        _first_present(activity, intervals_perf_fields.ESTIMATED_FTP_ALIASES),
     )
     return float(value) if value is not None else None
 

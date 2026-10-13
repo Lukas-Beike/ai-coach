@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.diagnostics.report import (
     DiagnosticReportDependencies,
     DiagnosticReportService,
@@ -77,11 +78,20 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         )
         self.sync_state = Mock()
         self.sync_state.latest_snapshot.return_value = {
-            "recent_activities": [{}, {}],
-            "recent_wellness": [{}],
             "upcoming_calendar": [{}, {}, {}],
             "private_athlete_text": "never projected",
         }
+        # Activity and wellness counts come from the canonical read ports, not
+        # from the stored snapshot's recent_activities / recent_wellness lists.
+        self.canonical_rows = Mock()
+        self.canonical_rows.activity_rows.return_value = [{}, {}]
+        wellness = SimpleNamespace(
+            observed_on="2026-09-22",
+            provenance=SimpleNamespace(provider=ProviderId.INTERVALS),
+        )
+        self.canonical_rows.observations.side_effect = lambda _db, kind, **_bounds: (
+            [wellness] if kind == MetricKind.RESTING_HR else []
+        )
         self.garmin_projection = Mock()
         self.garmin_projection.public_state.return_value = {
             "configured": True,
@@ -147,6 +157,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 canonical_coverage=self.coverage,
                 recent_logs=SimpleNamespace(list=lambda: [{"event": "safe"}]),
                 diagnostic_capture=self.capture,
+                activity_rows=self.canonical_rows,
+                observations=self.canonical_rows,
             )
         )
 

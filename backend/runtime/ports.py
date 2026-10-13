@@ -40,6 +40,28 @@ class ActivityReader(Protocol):
     ) -> tuple[ActivityRecord, ...]: ...
 
 
+class ActivityRowReader(Protocol):
+    """Reads the raw Intervals.icu activity payloads behind the canonical records.
+
+    Rows are provider dictionaries (device source, ``icu_*`` fields, laps, gear),
+    untrusted data, before any de-duplication. ``start`` and ``end`` are inclusive
+    bounds on the athlete-local date of each activity, as in ``ActivityReader``.
+    Deleted or tombstoned activities are never returned. The legacy source keeps
+    the snapshot order (newest first); the table source orders newest first by
+    activity start, then id. ``limit`` keeps only the newest rows; the table
+    source applies it before reading the payloads.
+    """
+
+    def activity_rows(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        limit: int | None = None,
+    ) -> tuple[dict[str, Any], ...]: ...
+
+
 class ObservationReader(Protocol):
     """Reads canonical observations of one metric kind.
 
@@ -60,6 +82,10 @@ class ObservationReader(Protocol):
     ) -> tuple[Observation, ...]: ...
 
 
+class CanonicalReader(ActivityReader, ActivityRowReader, ObservationReader, Protocol):
+    """The reads a canonical source serves: activities, raw rows and observations."""
+
+
 @runtime_checkable
 class ObservationSourceSelector(ObservationReader, Protocol):
     """An observation reader that chooses its serving source for every read.
@@ -77,16 +103,15 @@ class ProviderCoverageReader(Protocol):
     def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]: ...
 
 
-class CanonicalReadRefresher(Protocol):
-    """Re-checks which canonical source serves reads and records the result.
+class CanonicalTableServing(Protocol):
+    """Reports whether reads are currently served from the canonical tables.
 
-    Both methods write only their own content-free switch state, in the caller's
-    transaction. ``record_failure`` receives the exception class name only.
+    True once the backfill has completed at least once, also while a mapper or
+    time-zone change is re-projected. Callers read table-only data only while this
+    holds.
     """
 
-    def refresh(self, db: Any) -> None: ...
-
-    def record_failure(self, db: Any, error_class: str) -> None: ...
+    def serves_tables(self, db: Any) -> bool: ...
 
 
 ProviderOperation = Callable[[], AbstractContextManager[None]]
