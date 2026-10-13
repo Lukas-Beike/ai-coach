@@ -1,5 +1,5 @@
 function render(data) {
-  if (AppRouter.baseRoute() === "nutrition") { if (state.route === "nutrition/products") void loadNutritionProducts(); else void loadNutrition(); }
+  if (AppRouter.baseRoute() === "nutrition") { if (state.route === "nutrition/products") void loadNutritionProducts("", { background: true }); else void loadNutrition(); }
   const firstRender = !state.data;
   state.data = data;
   renderAppVersion(data.app);
