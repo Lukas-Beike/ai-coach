@@ -23,7 +23,11 @@ from backend.diagnostics.canonical_read import summarize_canonical_read
 from backend.providers import canonical_plans
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill import STATE_KEY as BACKFILL_STATE_KEY
-from backend.sync.canonical_backfill import CanonicalBackfill, read_status
+from backend.sync.canonical_backfill import (
+    CanonicalBackfill,
+    completed_observation_versions,
+    read_status,
+)
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.canonical_coverage_store import (
     CanonicalCoverageStore,
@@ -285,6 +289,68 @@ class SelectorTests(CanonicalReadFixture):
                 len({(o.observed_on, o.sport, o.provenance.provider) for o in served}),
                 len(served),
             )
+
+    def _insert_retired_observation(self) -> None:
+        """Copy one Intervals.icu observation under a new key at an older version.
+
+        It stands in for a measurement that an earlier mapper stopped emitting
+        before the last completed run.
+        """
+        columns = (
+            "metric, value, unit, method, aggregation, source_kind, recorded_by, "
+            "provider, source_record_id, sport, observed_on, observed_at, "
+            "retrieved_at, label, details, created_at, updated_at"
+        )
+        self.execute(
+            f"INSERT INTO observations (natural_key, mapper_version, {columns}) "
+            f"SELECT natural_key || ':retired', mapper_version - 1, {columns} "
+            "FROM observations WHERE provider = ? ORDER BY id LIMIT 1",
+            (ProviderId.INTERVALS.value,),
+        )
+
+    def test_observations_retired_before_the_last_completion_stay_hidden(
+        self,
+    ) -> None:
+        backfill = populate(self)
+        selector = make_selector(self)
+        before = self._all_observations(selector)
+        self._insert_retired_observation()
+        self.assertEqual(self._all_observations(selector), before)
+
+        with bumped_intervals_mappers():
+            self._assert_reprojecting_tables(selector)
+            self.assertEqual(self._all_observations(selector), before)
+            with self.manager.unit_of_work() as db:
+                backfill.mark_failed(db)
+            self._assert_reprojecting_tables(selector)
+            self.assertEqual(self._all_observations(selector), before)
+
+    def _completed_versions(self) -> dict[str, int]:
+        with self.manager.reader() as db:
+            return completed_observation_versions(self.key_values, db)
+
+    def test_completed_observation_versions_ignore_other_kinds_and_bad_values(
+        self,
+    ) -> None:
+        populate(self)
+        intervals = ProviderId.INTERVALS.value
+        self.assertEqual(
+            self._completed_versions()[intervals],
+            canonical_plans.INTERVALS_WELLNESS_VERSION,
+        )
+        self._store_backfill_state(
+            {
+                **self._backfill_state(),
+                "versions": {
+                    f"{intervals}.{canonical_plans.WELLNESS_RECORD_KIND}": "2",
+                    f"{intervals}.{canonical_plans.ATHLETE_RECORD_KIND}": True,
+                    f"{intervals}.{canonical_plans.ACTIVITY_RECORD_KIND}": 7,
+                },
+            }
+        )
+        self.assertEqual(self._completed_versions(), {})
+        self._store_backfill_state({**self._backfill_state(), "versions": []})
+        self.assertEqual(self._completed_versions(), {})
 
     def test_zone_change_keeps_serving_tables_until_reprojection_finishes(
         self,

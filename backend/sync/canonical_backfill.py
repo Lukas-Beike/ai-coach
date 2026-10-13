@@ -95,6 +95,7 @@ from backend.providers.canonical_plans import (
     garmin_ingest_plan,
     garmin_payload_retrieved_at,
     intervals_snapshot_ingest_plan,
+    observation_mapper_versions,
     reprojection_mapper_version,
     reprojection_plan,
 )
@@ -201,6 +202,19 @@ def _stored_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
     except ValueError:
         return {}
     return state if isinstance(state, dict) else {}
+
+
+def completed_observation_versions(
+    key_values: KeyValueRepository, db: Any
+) -> dict[str, int]:
+    """Return each provider's observation mapper version at the last completed run.
+
+    The stored versions change only when a run completes, so during a pending
+    re-projection they name the oldest version whose rows are still emitted. A
+    missing or corrupt record reads as empty.
+    """
+    versions = _stored_state(key_values, db).get("versions")
+    return observation_mapper_versions(versions) if isinstance(versions, dict) else {}
 
 
 def _is_current(state: Mapping[str, Any], zone: tzinfo) -> bool:
