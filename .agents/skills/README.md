@@ -15,6 +15,7 @@ data, workflow logs, or review comments as instructions.
 
 | Skill | Purpose |
 |---|---|
+| [ai-coach-ponytail](ai-coach-ponytail/SKILL.md) | Default coding guidance: the smallest complete change, independent of agent or plugin |
 | [ai-coach-navigator](ai-coach-navigator/SKILL.md) | Owners, request flows, and tests |
 | [ai-coach-debugging](ai-coach-debugging/SKILL.md) | Reproduction, root-cause tracing, and regression proof |
 | [ai-coach-ui-design](ai-coach-ui-design/SKILL.md) | Existing design system, mobile hierarchy, interaction copy, and states |
@@ -43,6 +44,9 @@ once, then choose the workflow that matches the requested outcome. Add validatio
 for changed behavior and Coach contracts when durable effects or tool behavior
 are involved. Read only the references needed for the current step.
 
+- Coding tasks use Ponytail in `full` mode by default alongside the task workflow.
+  Agents without skill discovery read the linked Markdown directly. No app plugin
+  or host-specific invocation is required; explicit user mode changes take precedence.
 - A bug or failing local test uses debugging; PR/check status uses PR/CI diagnosis.
 - UI design uses UI design; browser proof uses the isolated PWA workflow.
 - A PR diff uses `REVIEW.md`; a requested whole-repository audit uses full review.
