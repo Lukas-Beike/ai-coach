@@ -23,7 +23,12 @@ from backend.http_api.state_prelude import (
 )
 from backend.http_api.state_versions import StateVersionService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
-from backend.runtime.ports import CanonicalTableServing, ObservationReader
+from backend.performance.season_inputs import SeasonSource
+from backend.runtime.ports import (
+    ActivityRowReader,
+    CanonicalTableServing,
+    ObservationReader,
+)
 from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.status import SyncPublicStateService
 
@@ -44,6 +49,8 @@ class PublicStateCoreInputs:
     # When set, body history reads weight and body fat from canonical tables while
     # the tables serve reads.
     canonical_serving: Callable[[], CanonicalTableServing] | None = None
+    # When set, season preparation and load scenarios read activity rows from it.
+    activity_row_reader: Callable[[], ActivityRowReader] | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +134,7 @@ class PublicStateAssembly:
         self._key_value_service = core.key_value_service
         self._observation_reader = core.observation_reader
         self._canonical_serving = core.canonical_serving
+        self._activity_row_reader = core.activity_row_reader
         self._snapshot_repository = owners.snapshot_repository
         self._sync_persistence = owners.sync_persistence
         self._planning_data = owners.planning_data
@@ -185,6 +193,17 @@ class PublicStateAssembly:
             self._database_manager,
             self._observation_reader,
             serving=self._canonical_serving,
+        )
+
+    def season_source(self) -> SeasonSource:
+        if self._observation_reader is None or self._activity_row_reader is None:
+            raise RuntimeError(
+                "The season views need an observation reader and an activity row reader."
+            )
+        return SeasonSource(
+            self._database_manager,
+            self._observation_reader,
+            self._activity_row_reader,
         )
 
     def state_version_service(self) -> StateVersionService:

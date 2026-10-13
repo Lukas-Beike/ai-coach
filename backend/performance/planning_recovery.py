@@ -3,25 +3,37 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Mapping
 from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.records import Observation
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import recovery as performance_recovery
 from backend.performance import wellness as performance_wellness
-from backend.performance.canonical_recovery import (
-    CanonicalDailyRecovery,
-    prefer_canonical,
-)
+from backend.performance.source_policy import select_daily
+from backend.runtime.ports import ObservationReader
 
 GARMIN_SOURCE = "Garmin Connect"
 INTERVALS_WELLNESS_SOURCE = "Intervals.icu Wellness"
 UTC_OFFSET_SUFFIX = "+00:00"
-_PROVIDER_BY_SOURCE: dict[str, ProviderId] = {
-    GARMIN_SOURCE: ProviderId.GARMIN,
-    INTERVALS_WELLNESS_SOURCE: ProviderId.INTERVALS,
+_ROW_DATE_KEYS = ("id", "date", "calendarDate")
+_SOURCE_BY_PROVIDER: dict[ProviderId | None, str] = {
+    ProviderId.GARMIN: GARMIN_SOURCE,
+    ProviderId.INTERVALS: INTERVALS_WELLNESS_SOURCE,
 }
+_DAILY_FIELDS: tuple[tuple[str, MetricKind], ...] = (
+    ("sleep_hours", MetricKind.SLEEP_DURATION),
+    ("sleep_score", MetricKind.SLEEP_SCORE),
+    ("hrv", MetricKind.HRV_RMSSD),
+    ("readiness", MetricKind.READINESS),
+    ("resting_hr", MetricKind.RESTING_HR),
+)
+_LOAD_FIELDS: tuple[tuple[str, MetricKind], ...] = (
+    ("ctl", MetricKind.CTL),
+    ("atl", MetricKind.ATL),
+)
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -87,9 +99,7 @@ def _add_intervals_planning_recovery(
     for row in rows:
         if not isinstance(row, dict):
             continue
-        record_date = _planning_context_date(
-            _first_present(row, ("id", "date", "calendarDate"))
-        )
+        record_date = _planning_context_date(_first_present(row, _ROW_DATE_KEYS))
         if not record_date:
             continue
         recovery = recovery_by_date.setdefault(record_date, {})
@@ -256,7 +266,12 @@ def planning_recovery_by_date(
     morning_battery_history: Any,
     morning_body_battery: Any,
 ) -> dict[str, dict[str, Any]]:
-    """Build a date-indexed recovery view from already loaded provider data."""
+    """Build a date-indexed recovery view from stored provider snapshots.
+
+    This is the reference reader of the stored-snapshot shape. The planning context
+    reads ``planning_recovery_view`` instead, and the source-policy tests compare
+    the two on the same data.
+    """
     recovery_by_date: dict[str, dict[str, Any]] = {}
     _add_intervals_planning_recovery(recovery_by_date, wellness_rows)
     _add_garmin_planning_recovery(recovery_by_date, garmin)
@@ -266,27 +281,119 @@ def planning_recovery_by_date(
     return recovery_by_date
 
 
-def with_canonical_recovery(
-    recovery_by_date: dict[str, dict[str, Any]],
-    canonical: CanonicalDailyRecovery,
-) -> dict[str, dict[str, Any]]:
-    """Replace switched legacy values with the matching canonical observation.
+def _canonical_value(kind: MetricKind, observation: Observation) -> float | int:
+    """Return the planning value of an observation.
 
-    A value changes only when the canonical observation of that day comes from the
-    provider the legacy view named for the value, and carries the same number. The
-    legacy value keeps its Python type. Source labels are never changed. Every other
-    field, and every day without a match, stays legacy.
+    Sleep duration is stored in seconds and shown in hours. Whole numbers are shown
+    as integers, as the other planning values are.
     """
-    observations_by_field = canonical.by_field()
-    for day, recovery in recovery_by_date.items():
-        sources = recovery.get("sources", {})
-        for field, observations in observations_by_field.items():
-            if field not in recovery:
-                continue
-            provider = _PROVIDER_BY_SOURCE.get(sources.get(field))
-            if provider is None:
-                continue
-            recovery[field] = prefer_canonical(
-                observations.get(day), recovery[field], provider, day
-            )
+    value = observation.value.value
+    if kind is MetricKind.SLEEP_DURATION:
+        return round(float(value) / 3600, 1)
+    return int(value) if float(value).is_integer() else value
+
+
+def first_intervals_by_day(
+    observations: Iterable[Observation],
+) -> dict[date, Observation]:
+    """Return the first Intervals.icu observation of each day."""
+    first: dict[date, Observation] = {}
+    for observation in observations:
+        if observation.provenance.provider is ProviderId.INTERVALS:
+            first.setdefault(observation.observed_on, observation)
+    return first
+
+
+def canonical_planning_recovery(
+    reader: ObservationReader, db: Any, *, start: date, end: date
+) -> dict[str, dict[str, Any]]:
+    """Build the date-indexed recovery view from canonical observations.
+
+    ``reader`` must already be the source chosen for the unit of work. Each value
+    is the observation the daily source rule selects for its day: Garmin before
+    Intervals.icu for sleep, HRV and resting HR, the reverse for readiness. CTL and
+    ATL come from Intervals.icu only. Every value carries the source label of the
+    provider that supplied it.
+    """
+    recovery_by_date: dict[str, dict[str, Any]] = {}
+    for field, kind in _DAILY_FIELDS:
+        selected = select_daily(
+            reader.observations(db, kind, start=start, end=end), kind
+        )
+        _add_observations(recovery_by_date, field, kind, selected)
+    for field, kind in _LOAD_FIELDS:
+        loaded = first_intervals_by_day(
+            reader.observations(db, kind, start=start, end=end)
+        )
+        _add_observations(recovery_by_date, field, kind, loaded)
+    return recovery_by_date
+
+
+def _add_observations(
+    recovery_by_date: dict[str, dict[str, Any]],
+    field: str,
+    kind: MetricKind,
+    observations: Mapping[date, Observation],
+) -> None:
+    for day, observation in observations.items():
+        source = _SOURCE_BY_PROVIDER.get(observation.provenance.provider)
+        if source is None:
+            continue
+        _add_planning_recovery_value(
+            recovery_by_date.setdefault(day.isoformat(), {}),
+            field,
+            _canonical_value(kind, observation),
+            source,
+        )
+
+
+def add_intervals_form(
+    recovery_by_date: dict[str, dict[str, Any]],
+    wellness_rows: Any,
+    *,
+    start: date,
+    end: date,
+) -> None:
+    """Add the Intervals.icu form (TSB) of each day in the window.
+
+    Form has no canonical observation, so it stays a read of the stored wellness
+    rows. Nothing else is read from them, and the window comes from the caller.
+    """
+    if not isinstance(wellness_rows, list):
+        return
+    for row in wellness_rows:
+        if not isinstance(row, dict):
+            continue
+        record_date = _planning_context_date(_first_present(row, _ROW_DATE_KEYS))
+        form = _first_present(row, ("tsb", "form"))
+        if form is None or not start.isoformat() <= record_date <= end.isoformat():
+            continue
+        _add_planning_recovery_value(
+            recovery_by_date.setdefault(record_date, {}),
+            "tsb",
+            form,
+            INTERVALS_WELLNESS_SOURCE,
+        )
+
+
+def planning_recovery_view(
+    reader: ObservationReader,
+    db: Any,
+    *,
+    start: date,
+    end: date,
+    wellness_rows: Any,
+    morning_battery_history: Any,
+    morning_body_battery: Any,
+) -> dict[str, dict[str, Any]]:
+    """Combine canonical recovery with the values that have no canonical form.
+
+    Form (TSB) comes from the stored wellness rows and body battery from the
+    morning history and the current morning reading.
+    """
+    recovery_by_date = canonical_planning_recovery(reader, db, start=start, end=end)
+    add_intervals_form(recovery_by_date, wellness_rows, start=start, end=end)
+    _add_morning_battery_recovery(
+        recovery_by_date, morning_battery_history, morning_body_battery
+    )
     return recovery_by_date

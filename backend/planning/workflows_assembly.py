@@ -16,6 +16,7 @@ from backend.planning.replacement_service import (
     StructuredTrainingPlanReplacementService,
 )
 from backend.planning.state_service import StructuredTrainingStateService
+from backend.runtime.ports import ObservationReader
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,7 @@ class DailyPlanningSources:
     local_date: Callable[[], Any]
     calendar_window_days: int
     checkin_text_limit: int
-    observation_reader: Callable[[], Any] | None = None
+    observation_reader: Callable[[], ObservationReader]
 
 
 @dataclass(frozen=True)
@@ -149,7 +150,7 @@ class PlanningWorkflowAssembly:
             self._activity_feedback_service(),
             self._local_date,
             self._calendar_window_days,
-            canonical_reader=self._observation_reader,
+            self._observation_reader,
         )
 
     def structured_training_state_service(self) -> StructuredTrainingStateService:

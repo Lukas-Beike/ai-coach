@@ -13,12 +13,12 @@ from backend.activities.detail_store import ActivityDetailStore, summary_fingerp
 from backend.activities.identity import intervals_activity_device_source
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
-from backend.performance.canonical_inputs import CanonicalPerformanceSource
-from backend.performance.canonical_season_load import (
-    season_load_options,
-    snapshot_with_season_load,
-)
 from backend.performance.comparisons import recurring_training_comparisons
+from backend.performance.season_inputs import (
+    SeasonSource,
+    read_activity_rows,
+    read_season_load_inputs,
+)
 from backend.performance.tag_impact import tag_impact
 from backend.performance.training_report import canonical_rows, training_report
 
@@ -283,7 +283,7 @@ class TrainingReportReadService:
         read_feedback: Callable[[], list[dict[str, Any]]],
         today: Callable[[], date],
         load_scenarios: Callable[..., dict[str, Any]],
-        canonical: CanonicalPerformanceSource | None = None,
+        season_source: SeasonSource,
     ) -> None:
         self._read_snapshot = read_snapshot
         self._read_plan = read_plan
@@ -291,7 +291,7 @@ class TrainingReportReadService:
         self._read_feedback = read_feedback
         self._today = today
         self._load_scenarios = load_scenarios
-        self._canonical = canonical
+        self._season_source = season_source
 
     def scenarios(
         self, values: dict[str, Any], timezone: str = "UTC"
@@ -299,16 +299,18 @@ class TrainingReportReadService:
         if not isinstance(values, dict):
             raise AppError(400, "Das Szenario muss ein Objekt sein.")
         today = self._today()
-        snapshot, canonical = snapshot_with_season_load(
-            self._canonical, self._read_snapshot, today - timedelta(days=1)
-        )
+        with self._season_source.database_manager().unit_of_work() as db:
+            snapshot = self._read_snapshot()
+            inputs = read_season_load_inputs(
+                self._season_source, db, today=today, timezone=timezone
+            )
         return self._load_scenarios(
             snapshot or {},
             self._read_plan() or {},
             today,
             values,
             timezone,
-            **season_load_options(canonical),
+            inputs=inputs,
         )
 
     def read(self, values: dict[str, Any], timezone: str = "UTC") -> dict[str, Any]:
@@ -389,21 +391,27 @@ class TrainingSeasonReadService:
         read_observations: Callable[[], list[dict[str, Any]]],
         today: Callable[[], date],
         season_preparation: Callable[..., dict[str, Any]],
+        season_source: SeasonSource,
     ) -> None:
         self._read_snapshot = read_snapshot
         self._read_competitions = read_competitions
         self._read_observations = read_observations
         self._today = today
         self._season_preparation = season_preparation
+        self._season_source = season_source
 
     def season(self, timezone: str = "UTC") -> dict[str, Any]:
-        return self._season_preparation(
-            self._read_snapshot() or {},
-            self._read_competitions(),
-            self._today(),
-            timezone,
-            self._read_observations(),
-        )
+        with self._season_source.database_manager().unit_of_work() as db:
+            return self._season_preparation(
+                self._read_snapshot() or {},
+                self._read_competitions(),
+                self._today(),
+                timezone,
+                self._read_observations(),
+                activity_rows=lambda start, end: read_activity_rows(
+                    self._season_source, db, start, end
+                ),
+            )
 
 
 @dataclass(frozen=True)
