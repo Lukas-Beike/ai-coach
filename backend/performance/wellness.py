@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.decimal_text import comma_decimal_float
 from backend.performance.recovery import rounded_average
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 
@@ -23,7 +24,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 
 def _as_number(value: Any) -> float | int | None:
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):

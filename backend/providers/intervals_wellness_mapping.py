@@ -10,7 +10,8 @@ Alias precedence follows the readers in ``backend.performance`` and
 neither ``None`` nor an empty string is used, even when that value is invalid.
 A rejected value is never replaced by a later alias, so an invalid ``ctl``
 does not fall back to ``ctLoad``. Numbers follow ``coerce_comma_decimal_number``,
-so text such as ``"80,4"`` is read as 80.4, as the readers read it.
+so text such as ``"80,4"`` is read as 80.4 and ambiguous grouped thousands such
+as ``"1,200"`` are rejected, as the readers read them.
 
 Wellness rows
     ``id`` is the ISO calendar date (``YYYY-MM-DD``) and is required. Each
@@ -87,7 +88,7 @@ from backend.canonical.vocabulary import (
 # Version 4: the athlete-profile weight has its own observation key, so it no
 # longer overwrites the wellness weight of the same day. Re-projection rewrites
 # rows written at older versions.
-MAPPER_VERSION: Final = 4
+MAPPER_VERSION: Final = 5
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
 _DAY_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)

@@ -9,6 +9,7 @@ from typing import Any
 from backend.activities.identity import activity_datetime
 from backend.activities.matching import is_planned_workout_event, match_planned_workouts
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.decimal_text import comma_decimal_float
 from backend.providers.intervals_activity_keys import (
     INTENSITY,
     PACE,
@@ -58,7 +59,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 
 def _as_number(value: Any) -> float | int | None:
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):

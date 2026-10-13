@@ -90,7 +90,7 @@ def sport_records(
 
 class ModuleContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 4)
+        self.assertEqual(MAPPER_VERSION, 5)
 
     def test_naive_retrieved_at_is_a_programming_error_for_both_mappers(self) -> None:
         naive_time = naive("2026-10-11T08:00:00")
@@ -283,8 +283,13 @@ class CommaDecimalTests(unittest.TestCase):
                 )
         self.assertEqual(legacy_weight_number("80,4"), 80.4)
         self.assertIsNone(legacy_weight_number("1,2,3"))
-        # Shared legacy rule, kept for parity: grouped thousands read as decimals.
-        self.assertEqual(coerce_comma_decimal_number("1,200"), 1.2)
+        # Shared rule: ambiguous grouped thousands are rejected by both readers.
+        for text in ("1,200", "-12,345", " 999,000 "):
+            with self.subTest(text=text):
+                self.assertIsNone(coerce_comma_decimal_number(text))
+                self.assertIsNone(legacy_weight_number(text))
+        self.assertEqual(coerce_comma_decimal_number("0,500"), 0.5)
+        self.assertEqual(legacy_weight_number("0,500"), 0.5)
         # Known deviation: underscore separators are a coerce_number rejection.
         self.assertEqual(legacy_weight_number("1_0,5"), 10.5)
         self.assertIsNone(coerce_comma_decimal_number("1_0,5"))

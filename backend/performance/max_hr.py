@@ -4,6 +4,7 @@ import math
 from typing import Any
 
 from backend.activities.identity import activity_kind
+from backend.canonical.decimal_text import comma_decimal_float
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -18,7 +19,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 
 def _as_number(value: Any) -> float | int | None:
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):

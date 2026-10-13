@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.decimal_text import comma_decimal_float
 from backend.weather import projection as weather_projection
 from backend.weather import recommendations as weather_recommendations
 
@@ -16,7 +17,7 @@ WEATHER_ADAPTIVE_LONG_RIDE_MINUTES = 180
 
 def _as_number(value: Any) -> float | int | None:
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):

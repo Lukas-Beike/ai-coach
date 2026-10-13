@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.vocabulary import ProviderId
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.garmin_fields import (
@@ -38,7 +39,7 @@ def _garmin_key(value: Any) -> str:
 
 def _as_number(value: Any) -> float | int | None:
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):
@@ -178,7 +179,7 @@ def garmin_weight_daily_records(
 
 def _garmin_body_fat_pct(value: Any, unit: Any = None) -> float | None:
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):

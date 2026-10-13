@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Any
 
+from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import garmin_metrics, recovery, wellness
@@ -36,7 +37,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 
 def _as_number(value: Any) -> float | int | None:
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):

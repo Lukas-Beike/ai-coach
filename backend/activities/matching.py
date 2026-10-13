@@ -11,6 +11,7 @@ from typing import Any
 from backend.activities.identity import activity_datetime as _activity_datetime
 from backend.activities.identity import activity_kind as _activity_kind
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.decimal_text import comma_decimal_float
 from backend.providers.intervals_activity_keys import TRAINING_LOAD_LOOKUP
 
 # Units without a planned time are stored as a bare date or at local midnight.
@@ -33,7 +34,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 
 def _as_number(value: Any) -> float | int | None:
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):
