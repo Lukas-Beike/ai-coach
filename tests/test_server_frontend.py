@@ -43,6 +43,7 @@ def frontend_source():
             "diagnostics.js",
             "state-loader.js",
             "sync-actions.js",
+            "wahoo-connection.js",
             "settings.js",
             "app.js",
         )
@@ -83,6 +84,11 @@ class ServerFrontendTests(ServerTestCase):
             "diagnostics.js": ("loadLogs", "deleteDiagnostics"),
             "state-loader.js": ("loadState", "load", "render"),
             "sync-actions.js": ("syncNow", "syncGarmin", "fullResync"),
+            "wahoo-connection.js": (
+                "connectWahoo",
+                "disconnectWahoo",
+                "renderWahooConnection",
+            ),
             "settings.js": (
                 "saveProfile",
                 "saveCheckin",
