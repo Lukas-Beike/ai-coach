@@ -1,20 +1,10 @@
 """Grouping for planned cycling events with overlapping or vague times."""
 
-import math
 from datetime import datetime, timedelta
 from typing import Any
 
 from backend.activities.identity import activity_datetime, activity_kind
-
-
-def _as_number(value: Any) -> float | int | None:
-    try:
-        number = float(str(value).replace(",", "."))
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
+from backend.canonical.decimal_text import provider_number as _as_number
 
 
 def _cycling_event_candidates(events: Any) -> list[dict[str, Any]]:

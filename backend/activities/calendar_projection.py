@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import math
 from datetime import date, timedelta
 from typing import Any
 
 from backend.activities.identity import activity_datetime
 from backend.activities.matching import is_planned_workout_event, match_planned_workouts
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.decimal_text import provider_number as _as_number
 from backend.providers.intervals_activity_keys import (
     INTENSITY,
     PACE,
@@ -54,16 +54,6 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
         if value not in (None, ""):
             return value
     return None
-
-
-def _as_number(value: Any) -> float | int | None:
-    try:
-        number = float(str(value).replace(",", "."))
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
 
 
 def _selected(item: Any, fields: tuple[str, ...]) -> dict[str, Any]:

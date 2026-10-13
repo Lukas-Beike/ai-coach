@@ -13,6 +13,7 @@ from backend.activities.identity import (
     intervals_activity_device_source,
 )
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin
 from backend.errors import AppError
 from backend.providers.garmin_gear_fields import activity_start_local
@@ -127,7 +128,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 
 def _number(value: Any) -> float | int | None:
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     if not math.isfinite(number):

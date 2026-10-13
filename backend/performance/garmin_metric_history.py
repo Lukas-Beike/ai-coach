@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.decimal_text import comma_decimal_float
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 GARMIN_SOURCE = "Garmin Connect"
@@ -28,7 +29,7 @@ def _number(value: Any) -> float | None:
     if isinstance(value, (bool, dict, list)):
         return None
     try:
-        number = float(str(value).replace(",", "."))
+        number = comma_decimal_float(value)
     except TypeError, ValueError:
         return None
     return number if math.isfinite(number) else None

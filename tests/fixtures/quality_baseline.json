@@ -25,7 +25,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 37,
+      "line": 39,
       "column": 41,
       "code": "FURB162",
       "message_sha256": "ab2ea6cfc4065b1061b920ef6d31811648990ea82947d22f57b6a44d39268770"
@@ -73,7 +73,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 42,
+      "line": 44,
       "column": 18,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -129,7 +129,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 191,
+      "line": 193,
       "column": 30,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -177,7 +177,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 189,
+      "line": 191,
       "column": 34,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -425,7 +425,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 31,
+      "line": 33,
       "column": 52,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -569,7 +569,7 @@
     {
       "tool": "ruff",
       "path": "backend/performance/morning_battery.py",
-      "line": 41,
+      "line": 43,
       "column": 60,
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -969,7 +969,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 272,
+      "line": 273,
       "column": 14,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1073,14 +1073,6 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 273,
-      "column": 17,
-      "code": "arg-type",
-      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/activities/duplicates.py",
       "line": 274,
       "column": 17,
       "code": "arg-type",
@@ -1096,6 +1088,14 @@
     },
     {
       "tool": "mypy",
+      "path": "backend/activities/duplicates.py",
+      "line": 276,
+      "column": 17,
+      "code": "arg-type",
+      "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
+    },
+    {
+      "tool": "mypy",
       "path": "tests/test_sync_freshness.py",
       "line": 44,
       "column": 20,
@@ -1145,7 +1145,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 280,
+      "line": 281,
       "column": 22,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1153,7 +1153,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 282,
+      "line": 283,
       "column": 22,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1185,7 +1185,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 281,
+      "line": 282,
       "column": 25,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -1201,7 +1201,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 280,
+      "line": 281,
       "column": 26,
       "code": "arg-type",
       "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
@@ -1281,7 +1281,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 281,
+      "line": 282,
       "column": 30,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1289,7 +1289,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 283,
+      "line": 284,
       "column": 30,
       "code": "arg-type",
       "message_sha256": "e025e5ffe55be4da7d049cd6a1771377caec3d407282b1bdd49dbd54efcb545d"
@@ -1705,7 +1705,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/activity_validation.py",
-      "line": 187,
+      "line": 177,
       "column": 51,
       "code": "arg-type",
       "message_sha256": "9f15d58ebcfeea6d361abc404047086f7c68383c4d8b4778eecf645cb9c98ca4"
@@ -3089,7 +3089,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/morning_battery.py",
-      "line": 146,
+      "line": 148,
       "column": 11,
       "code": "operator",
       "message_sha256": "1e36937ce73debcb1d1077d51cc4dfe0782c5d2a0ca2e94d4b23a6927f8b694d"
@@ -3097,7 +3097,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/morning_battery.py",
-      "line": 146,
+      "line": 148,
       "column": 11,
       "code": "operator",
       "message_sha256": "4891f806dea0305c6aa348a0673aea322cd1f07b498e5a316f960d337841444e"
@@ -3105,7 +3105,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 279,
+      "line": 280,
       "column": 13,
       "code": "operator",
       "message_sha256": "23273601c5c51787d946c1da6b8228da0c07d81888006e0784614430d67afe3a"
@@ -3113,7 +3113,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/duplicates.py",
-      "line": 279,
+      "line": 280,
       "column": 13,
       "code": "operator",
       "message_sha256": "c1d0e13f8fec43a85c14183cf4bb2ae4fd6e3829c26f9cb1b0a76ecd474ee9cb"
@@ -3121,7 +3121,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/morning_battery.py",
-      "line": 153,
+      "line": 155,
       "column": 15,
       "code": "operator",
       "message_sha256": "1e36937ce73debcb1d1077d51cc4dfe0782c5d2a0ca2e94d4b23a6927f8b694d"
@@ -3129,7 +3129,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/morning_battery.py",
-      "line": 153,
+      "line": 155,
       "column": 15,
       "code": "operator",
       "message_sha256": "4891f806dea0305c6aa348a0673aea322cd1f07b498e5a316f960d337841444e"
@@ -3201,7 +3201,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 284,
+      "line": 285,
       "column": 11,
       "code": "return-value",
       "message_sha256": "d2d361e1e19a2a5feedd3f4f61895c083eb513533d6fff273ee9cb1e7758c57b"
@@ -3313,7 +3313,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/trends.py",
-      "line": 43,
+      "line": 33,
       "column": 16,
       "code": "union-attr",
       "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
@@ -3401,7 +3401,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 156,
+      "line": 157,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
@@ -3409,7 +3409,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/current_metrics.py",
-      "line": 179,
+      "line": 180,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
@@ -3417,7 +3417,7 @@
     {
       "tool": "mypy",
       "path": "backend/performance/trends.py",
-      "line": 82,
+      "line": 72,
       "column": 33,
       "code": "union-attr",
       "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
@@ -3465,7 +3465,7 @@
     {
       "tool": "mypy",
       "path": "backend/activities/grouping.py",
-      "line": 62,
+      "line": 52,
       "column": 12,
       "code": "var-annotated",
       "message_sha256": "1e6b9c1f25c0429575bf0637b8b820edaadc516871bbb9a7ca8e2feff091d295"

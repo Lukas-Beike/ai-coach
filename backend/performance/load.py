@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.decimal_text import provider_number as _as_number
 from backend.providers import intervals_performance_fields as intervals_perf_fields
 
 
@@ -16,16 +17,6 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
         if value not in (None, ""):
             return value
     return None
-
-
-def _as_number(value: Any) -> float | int | None:
-    try:
-        number = float(str(value).replace(",", "."))
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
 
 
 def _activity_rollup_date(activity: dict[str, Any]) -> date | None:
