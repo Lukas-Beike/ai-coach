@@ -46,7 +46,8 @@ def _recovery_presence(
         }
     return {
         "sleep": state.has_sleep,
-        "hrv": state.has_hrv,
+        # A weekly-only HRV section has no canonical observation; it stays on the snapshot.
+        "hrv": state.has_hrv or bool(snapshot.get("hrv")),
         "resting_hr": state.has_resting_hr,
         "readiness": state.has_readiness,
     }

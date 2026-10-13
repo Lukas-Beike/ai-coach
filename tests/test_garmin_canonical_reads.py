@@ -302,6 +302,19 @@ class GarminServiceEqualityTests(GarminReadFixture):
         # The running threshold power stays on the snapshot, so thresholds remain.
         self.assertTrue(state["has_thresholds"])
 
+    def test_weekly_only_hrv_section_still_counts_as_present(self) -> None:
+        self.garmin = {
+            key: value
+            for key, value in self.garmin.items()
+            if key not in CANONICAL_SECTIONS
+        }
+        self.garmin["hrv"] = {"weeklyAvg": 48}
+        populate(self)
+
+        state = self._projection_service(canonical=True).public_state()
+
+        self.assertTrue(state["has_hrv"])
+
     def test_activity_matches_are_equal_between_sources(self) -> None:
         populate(self)
         garmin_activities = copy.deepcopy(self.garmin["activities"])
@@ -479,6 +492,46 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
         self.assertEqual(pace(4.0), 250)
         self.assertIsNone(pace(0.5))
         self.assertIsNone(pace(14.0))
+
+    def test_newer_generic_vo2max_replaces_an_older_running_value(self) -> None:
+        older_running = self._observation(
+            MetricKind.VO2MAX, 54.0, sport=Sport.RUN, day=date(2026, 10, 8)
+        )
+        newer_generic = self._observation(MetricKind.VO2MAX, 51.0)
+        same_day_running = self._observation(MetricKind.VO2MAX, 53.0, sport=Sport.RUN)
+
+        self.assertEqual(
+            self._metrics([older_running, newer_generic]).running_vo2max, 51.0
+        )
+        self.assertEqual(
+            self._metrics(
+                [older_running, newer_generic, same_day_running]
+            ).running_vo2max,
+            53.0,
+        )
+
+    def test_vo2max_outside_the_legacy_bounds_is_dropped(self) -> None:
+        metrics = self._metrics(
+            [
+                self._observation(MetricKind.VO2MAX, 120.0, sport=Sport.RIDE),
+                self._observation(MetricKind.VO2MAX, 15.0),
+            ]
+        )
+
+        self.assertIsNone(metrics.cycling_vo2max)
+        self.assertIsNone(metrics.running_vo2max)
+
+    def test_max_hr_comes_from_the_latest_day_of_each_category(self) -> None:
+        metrics = self._metrics(
+            [
+                self._observation(
+                    MetricKind.MAX_HR, 195.0, sport=Sport.RUN, day=date(2026, 10, 1)
+                ),
+                self._observation(MetricKind.MAX_HR, 188.0, sport=Sport.RUN),
+            ]
+        )
+
+        self.assertEqual(dict(metrics.profile_max_hr), {"running": 188.0})
 
     def test_max_hr_keeps_the_highest_value_per_category(self) -> None:
         metrics = self._metrics(

@@ -30,6 +30,7 @@ _PACE_SECONDS_PER_KM_RANGE = (120, 900)
 # the canonical validation does at ingest.
 _MAX_HR_RANGE = (80, 260)
 _WEIGHT_KG_RANGE = (30, 300)
+_VO2MAX_RANGE = (20, 100)
 _MAX_HR_CATEGORIES: Mapping[Sport | None, str] = {
     Sport.RIDE: "cycling",
     Sport.RUN: "running",
@@ -42,7 +43,8 @@ class GarminCanonicalMetrics:
     """Garmin performance values that have canonical observations.
 
     ``profile_max_hr`` maps the legacy categories ``cycling``, ``running`` and
-    ``generic`` to the highest profile max heart rate of that category.
+    ``generic`` to the profile max heart rate of the latest day of that category;
+    the highest value resolves records of that one day.
     """
 
     weight_kg: float | None = None
@@ -132,15 +134,11 @@ def _metrics(
 ) -> GarminCanonicalMetrics:
     vo2 = by_kind[MetricKind.VO2MAX]
     threshold_hr = by_kind[MetricKind.THRESHOLD_HR]
-    running_vo2 = _latest_value(vo2, Sport.RUN)
     return GarminCanonicalMetrics(
         weight_kg=_bounded(_latest_value(by_kind[MetricKind.WEIGHT]), _WEIGHT_KG_RANGE),
         cycling_ftp_watts=_latest_value(by_kind[MetricKind.FTP], Sport.RIDE),
-        cycling_vo2max=_latest_value(vo2, Sport.RIDE),
-        # The legacy reader takes the generic VO2max for running unless a running one exists.
-        running_vo2max=running_vo2
-        if running_vo2 is not None
-        else _latest_value(vo2, None),
+        cycling_vo2max=_bounded(_latest_value(vo2, Sport.RIDE), _VO2MAX_RANGE),
+        running_vo2max=_bounded(_running_vo2max(vo2), _VO2MAX_RANGE),
         run_threshold_pace_seconds_per_km=_pace_seconds_per_km(
             _latest_value(by_kind[MetricKind.THRESHOLD_PACE], Sport.RUN)
         ),
@@ -157,6 +155,20 @@ def _latest_value(
     latest = max(
         (item for item in observations if item.sport is sport),
         key=_order,
+        default=None,
+    )
+    return None if latest is None else latest.value.value
+
+
+def _running_vo2max(observations: Iterable[Observation]) -> float | None:
+    """Return the newest running or generic VO2max; running wins on the same day.
+
+    The legacy reader took the generic value of the current snapshot unless it held
+    a running one, so an older running value must not hide a newer generic one.
+    """
+    latest = max(
+        (item for item in observations if item.sport in (Sport.RUN, None)),
+        key=lambda item: (item.observed_on, item.sport is Sport.RUN, *_order(item)[1:]),
         default=None,
     )
     return None if latest is None else latest.value.value
@@ -187,12 +199,13 @@ def _pace_seconds_per_km(speed_m_s: float | None) -> int | None:
 
 
 def _profile_max_hr(observations: Iterable[Observation]) -> dict[str, float]:
-    values: dict[str, float] = {}
+    """Return the max heart rate of each category's latest day, so a lowered value wins."""
+    latest: dict[str, tuple[date, float]] = {}
     low, high = _MAX_HR_RANGE
     for item in observations:
         category = _MAX_HR_CATEGORIES.get(item.sport)
-        if category is not None and low <= item.value.value <= high:
-            values[category] = max(
-                values.get(category, item.value.value), item.value.value
-            )
-    return values
+        if category is None or not low <= item.value.value <= high:
+            continue
+        candidate = (item.observed_on, item.value.value)
+        latest[category] = max(latest.get(category, candidate), candidate)
+    return {category: value for category, (_, value) in latest.items()}
