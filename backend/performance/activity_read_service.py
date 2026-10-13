@@ -137,14 +137,11 @@ def _raw_activity(
     activity_rows: Sequence[Any] | None = None,
 ) -> dict:
     """Find one raw activity row, in the canonical rows when they were read."""
-    raw_provider_data = snapshot.get("raw_provider_data")
-    raw_activities = (
-        activity_rows
-        if activity_rows is not None
-        else raw_provider_data.get("activities")
-        if isinstance(raw_provider_data, dict)
-        else None
-    )
+    raw_activities: Any = activity_rows
+    if raw_activities is None:
+        raw_provider_data = snapshot.get("raw_provider_data")
+        if isinstance(raw_provider_data, dict):
+            raw_activities = raw_provider_data.get("activities")
     activity = (
         next(
             (
