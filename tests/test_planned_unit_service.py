@@ -305,7 +305,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(len(bounded), 1)
         self.assertEqual(len(bounded_with_archived), 2)
 
-    def test_limited_list_keeps_newest_rows_while_future_list_keeps_earliest(self):
+    def test_limited_list_is_anchored_on_today_while_future_list_keeps_earliest(self):
         rows = (
             ("2026-09-18", "Past 1"),
             ("2026-09-19", "Past 2"),
@@ -326,10 +326,41 @@ class PlannedUnitServiceTests(unittest.TestCase):
         upcoming = self.service.list(3, future_only=True)
 
         self.assertEqual(
-            [item["name"] for item in newest], ["Future 2", "Future 3", "Future 4"]
+            [item["name"] for item in newest], ["Past 2", "Future 1", "Future 2"]
         )
         self.assertEqual(
             [item["name"] for item in upcoming], ["Future 1", "Future 2", "Future 3"]
+        )
+
+    def _create_days(self, days):
+        for index, (day, name) in enumerate(days):
+            self.id = uuid.UUID(f"{index + 1:x}2345678-1234-5678-1234-567812345678")
+            self.service.create(self.workout(date=day, name=name))
+
+    def test_limited_list_keeps_the_nearest_upcoming_units_when_future_overflows(self):
+        self._create_days(
+            [("2026-09-20", "Today")]
+            + [(f"2026-10-{day:02d}", f"Later {day}") for day in range(1, 8)]
+        )
+
+        window = self.service.list(4)
+
+        self.assertEqual(
+            [item["name"] for item in window],
+            ["Today", "Later 1", "Later 2", "Later 3"],
+        )
+
+    def test_limited_list_gives_unused_upcoming_share_to_recent_past(self):
+        self._create_days(
+            [(f"2026-09-{day:02d}", f"Past {day}") for day in range(10, 16)]
+            + [("2026-09-21", "Future 1")]
+        )
+
+        window = self.service.list(4)
+
+        self.assertEqual(
+            [item["name"] for item in window],
+            ["Past 13", "Past 14", "Past 15", "Future 1"],
         )
 
     def test_list_for_coach_returns_canonical_future_local_units_with_limit(self):
