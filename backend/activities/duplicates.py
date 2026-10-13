@@ -86,6 +86,9 @@ def remove_activity_from_snapshot(
     snapshot: Any, activity_id: str, *, synced_at: Any
 ) -> dict[str, Any] | None:
     """Return a copied snapshot with only exact matching activity IDs removed."""
+    # A snapshot stored without its activity sections stays without them.
+    if intervals_snapshot_is_stripped(snapshot):
+        return {**snapshot, "synced_at": synced_at}
     if not isinstance(snapshot, dict):
         return None
 
@@ -100,10 +103,6 @@ def remove_activity_from_snapshot(
         ]
 
     updated = dict(snapshot)
-    # A snapshot stored without its activity sections stays without them.
-    if intervals_snapshot_is_stripped(snapshot):
-        updated["synced_at"] = synced_at
-        return updated
     updated["recent_activities"] = retained(snapshot.get("recent_activities"))
     raw = snapshot.get("raw_provider_data")
     if isinstance(raw, dict):
