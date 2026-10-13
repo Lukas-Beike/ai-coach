@@ -3249,7 +3249,7 @@
     {
       "tool": "mypy",
       "path": "backend/sync/performance.py",
-      "line": 229,
+      "line": 231,
       "column": 23,
       "code": "return-value",
       "message_sha256": "a0e5eaad7dba0a912f8407d1698bf050624d54d66a17c5a26fe0074def6714fb"

@@ -25,12 +25,14 @@ sections from the canonical activity rows, so the merge sees what it saw before.
 
 from __future__ import annotations
 
+from datetime import tzinfo
 from typing import Any
 
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.planning.compact_activities import compact_activity_rows
 from backend.providers.snapshot_projection import (
+    intervals_activity_sections_are_mapped,
     intervals_snapshot_is_stripped,
     restore_intervals_activity_sections,
     strip_intervals_activity_sections,
@@ -85,17 +87,24 @@ class SnapshotStorage:
         db: Any,
         snapshot: dict[str, Any],
         *,
+        zone: tzinfo,
         update_full_sync: bool = True,
         activity_days: int | None = None,
     ) -> None:
         """Store the snapshot in the caller's unit of work, stripped when tables serve.
 
-        The recent-activity count of the full snapshot is kept for the state version.
+        The sections stay whenever an activity row would not reach the tables, so
+        a row the mapper cannot handle is never lost. The recent-activity count of
+        the full snapshot is kept for the state version.
         """
         options: dict[str, Any] = {"update_full_sync": update_full_sync}
         if activity_days is not None:
             options["activity_days"] = activity_days
-        if self._serving is None or not self._serving.serves_tables(db):
+        if (
+            self._serving is None
+            or not self._serving.serves_tables(db)
+            or not intervals_activity_sections_are_mapped(snapshot, zone=zone)
+        ):
             self._state.save_snapshot(snapshot, **options)
             return
         recent = snapshot.get("recent_activities")

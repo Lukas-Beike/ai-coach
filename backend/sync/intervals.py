@@ -346,9 +346,13 @@ class IntervalsSnapshotService:
                 db, intervals_snapshot_coverage(snapshot, zone=zone), zone=zone
             )
             if end_date is not None:
-                self._snapshot_storage.save(db, snapshot, update_full_sync=False)
+                self._snapshot_storage.save(
+                    db, snapshot, zone=zone, update_full_sync=False
+                )
             else:
-                self._snapshot_storage.save(db, snapshot, activity_days=activity_days)
+                self._snapshot_storage.save(
+                    db, snapshot, zone=zone, activity_days=activity_days
+                )
             if end_date is None:
                 # Nested service calls intentionally share this UOW: reconciliation
                 # and its initial-import marker must roll back together.

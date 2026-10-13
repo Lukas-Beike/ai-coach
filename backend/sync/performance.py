@@ -102,7 +102,9 @@ class PerformanceRefreshService:
                 self._coverage.persist(
                     db, intervals_snapshot_coverage(merged, zone=zone), zone=zone
                 )
-                self._snapshot_storage.save(db, merged, update_full_sync=False)
+                self._snapshot_storage.save(
+                    db, merged, zone=zone, update_full_sync=False
+                )
                 self._key_value_repository.set(db, "last_performance_error", "")
 
             self._publish_ready()

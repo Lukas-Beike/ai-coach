@@ -52,6 +52,7 @@ KEPT_ID = "i-act-001"
 DROPPED_ID = "i-act-002"
 NEW_ID = "i-act-006"
 OLD_ID = "i-act-000"
+UNMAPPED_ID = "i-act-099"
 RAW = "raw_provider_data"
 RECENT = "recent_activities"
 SNAPSHOT_COUNT = "SELECT COUNT(*) AS n FROM snapshots"
@@ -344,6 +345,32 @@ class WriteGateTests(StorageCase):
         self.assertEqual(stripped.canonical_dump(), full.canonical_dump())
         self.assertIsNotNone(stripped.coverage())
         self.assertEqual(stripped.coverage(), full.coverage())
+
+    def test_a_row_the_mapper_rejects_keeps_the_activity_sections(self) -> None:
+        env = self.environment(tables=True)
+        unmapped = {**_activities()[0], "id": UNMAPPED_ID, "start_date_local": None}
+        env.sync([*_activities(), unmapped], days=ALL_DAYS, day=FIRST_DAY)
+
+        stored = env.stored()
+        self.assert_full(stored, 6)
+        self.assertIn(UNMAPPED_ID, [row["id"] for row in stored[RAW]["activities"]])
+        self.assertNotIn(UNMAPPED_ID, env.table_activity_ids())
+        # The next incremental sync merges against the full snapshot and keeps it.
+        env.sync([_activity(NEW_ID, "2026-11-09T07:00:00")], days=7, day=SECOND_DAY)
+        self.assert_full(env.stored(), 7)
+        self.assertIn(
+            UNMAPPED_ID, [row["id"] for row in env.stored()[RAW]["activities"]]
+        )
+
+    def test_a_mapped_window_strips_again_once_the_rejected_row_is_gone(self) -> None:
+        env = self.environment(tables=True)
+        unmapped = {**_activities()[0], "id": UNMAPPED_ID, "start_date_local": None}
+        env.sync([*_activities(), unmapped], days=ALL_DAYS, day=FIRST_DAY)
+
+        env.sync(_activities(), days=ALL_DAYS, day=SECOND_DAY)
+
+        self.assert_stripped(env.stored())
+        self.assertEqual(env.activity_count_column(), 5)
 
     def test_rollback_leaves_neither_the_snapshot_nor_the_canonical_rows(self) -> None:
         env = self.environment(tables=True)

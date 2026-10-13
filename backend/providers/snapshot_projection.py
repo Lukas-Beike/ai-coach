@@ -151,6 +151,37 @@ def strip_intervals_activity_sections(snapshot: Mapping[str, Any]) -> dict[str, 
     return stripped
 
 
+def intervals_activity_sections_are_mapped(snapshot: object, *, zone: tzinfo) -> bool:
+    """Return True when the canonical tables durably hold every activity row.
+
+    Stripping is safe only then: a row the mapper rejects, a compact-only list and
+    a snapshot without a sync time never reach the tables, so their sections must
+    stay in the snapshot. A snapshot without activity sections is trivially mapped.
+    """
+    if not isinstance(snapshot, Mapping):
+        return False
+    raw = snapshot.get(_INTERVALS_RAW_KEY)
+    rows = raw.get(_INTERVALS_RAW_ACTIVITIES_KEY) if isinstance(raw, Mapping) else None
+    if rows is None:
+        return not isinstance(snapshot.get(_INTERVALS_ACTIVITIES_KEY), list)
+    if not isinstance(rows, list):
+        return False
+    if not rows:
+        return True
+    retrieved_at = stored_retrieved_at(snapshot, zone=zone)
+    if retrieved_at is None:
+        return False
+    return all(_maps_with_source_id(row, zone, retrieved_at) for row in rows)
+
+
+def _maps_with_source_id(row: object, zone: tzinfo, retrieved_at: datetime) -> bool:
+    mapped = map_intervals_activities([row], zone=zone, retrieved_at=retrieved_at)
+    return (
+        bool(mapped.records)
+        and mapped.records[0].provenance.source_record_id is not None
+    )
+
+
 def restore_intervals_activity_sections(
     snapshot: Mapping[str, Any],
     *,
