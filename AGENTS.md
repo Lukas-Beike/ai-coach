@@ -105,6 +105,13 @@ Never install or synchronize them globally or into app caches. App-supplied tool
 and managed skills have separate runtime/license constraints; see the index.
 Scan before reading sources or references.
 
+For coding tasks, use the repository's [Ponytail workflow](.agents/skills/ai-coach-ponytail/SKILL.md)
+by default in `full` mode alongside the relevant task workflow. Any coding agent
+can scan and read that file directly; no plugin, slash command, or global skill
+installation is required. Prefer the smallest complete change, existing code,
+and standard-library/platform features. Repository boundaries and required
+validation take precedence over simplification; honor explicit mode changes.
+
 Before editing, inspect the branch, worktree, and existing diff; preserve prior
 work. Locate the owning flow, state the intended behavior and observable acceptance
 check. Plan cross-domain or migration work before coding; keep routine fixes direct.

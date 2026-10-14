@@ -557,6 +557,13 @@ root, `.agents/skills/`; full review and `pr` were moved from the legacy `.codex
 root without duplicate copies. No duplicate `CLAUDE.md` or app-specific rules
 layer is needed.
 
+Coding tasks default to the repository's [Ponytail workflow](.agents/skills/ai-coach-ponytail/SKILL.md)
+in `full` mode: the smallest complete change, reusing existing code before adding
+dependencies or abstractions. Any agent can scan and read its Markdown directly;
+the external Ponytail plugin is optional. Say `ponytail lite`, `ponytail full`,
+`ponytail ultra`, or `stop ponytail` to change the session mode. Repository safety
+rules and required checks still apply. This is instruction routing, not a CI gate.
+
 For any coding agent, start in the task worktree and load root plus applicable
 scoped AGENTS guidance. Identify the requested behavior, affected owner, and
 acceptance check; select the relevant skill, implement the complete flow, inspect
