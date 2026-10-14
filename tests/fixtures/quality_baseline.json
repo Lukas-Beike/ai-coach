@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "4e0166eee76c289a51f8f22e35425553037bfe94",
+  "base": "5f6a705e3facc8dfcedc2dc6b249c0eb90de36df",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
@@ -1217,7 +1217,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 701,
+      "line": 703,
       "column": 27,
       "code": "arg-type",
       "message_sha256": "570d1b972c0b2f2550ad42db3eb3936ceda3bf167873fb1c991c7a6af5d78110"
@@ -1273,7 +1273,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 633,
+      "line": 635,
       "column": 29,
       "code": "arg-type",
       "message_sha256": "8201b28533baa9af4e40901aafd403409021ccf3e9391330974505c193ecfc6a"
@@ -2473,7 +2473,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1024,
+      "line": 1026,
       "column": 16,
       "code": "has-type",
       "message_sha256": "c3827639903091a4321d0e0848e6289e336e994114e1a16099bebc3274bf7946"
@@ -2481,7 +2481,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1027,
+      "line": 1029,
       "column": 16,
       "code": "has-type",
       "message_sha256": "c53b9e646657d76e58ce4a8d414022143183888c840336c5e976cccc80e9fdda"
@@ -2489,7 +2489,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 699,
+      "line": 701,
       "column": 16,
       "code": "has-type",
       "message_sha256": "4b7e78aca8d7c14e4949c4d2c1e7b5dbe37f97501201f64a1fc21f632e11770d"
@@ -2497,7 +2497,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 737,
+      "line": 739,
       "column": 16,
       "code": "has-type",
       "message_sha256": "e020f47cf690127bbfb4750cbe0b93f382fe80b2ac32f84d93c47d3cdb2e0192"
@@ -2505,7 +2505,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1112,
+      "line": 1115,
       "column": 20,
       "code": "has-type",
       "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
@@ -2513,7 +2513,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1001,
+      "line": 1003,
       "column": 28,
       "code": "has-type",
       "message_sha256": "6aa98648523c886c38d6ec5ff2cba0b9a86a5cb9fe5f9593e07c2251a0075a22"
@@ -2521,7 +2521,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1680,
+      "line": 1683,
       "column": 30,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -2529,7 +2529,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 830,
+      "line": 832,
       "column": 30,
       "code": "has-type",
       "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
@@ -2537,7 +2537,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 653,
+      "line": 655,
       "column": 31,
       "code": "has-type",
       "message_sha256": "7fadfe3e746eaff9f0518c8e8252349ddb632785627d5bcb9e2c837b0403f130"
@@ -2545,7 +2545,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 831,
+      "line": 833,
       "column": 31,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -2553,7 +2553,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 796,
+      "line": 798,
       "column": 34,
       "code": "has-type",
       "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
@@ -2561,7 +2561,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 832,
+      "line": 834,
       "column": 35,
       "code": "has-type",
       "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
@@ -2569,7 +2569,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1353,
+      "line": 1356,
       "column": 36,
       "code": "has-type",
       "message_sha256": "480057763c1b5347f5e8f0a61c7f20c6cec2d3a6e24f1e8563bd5b76f2138cc4"
@@ -2577,7 +2577,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 727,
+      "line": 729,
       "column": 36,
       "code": "has-type",
       "message_sha256": "743b0a5f8fa53d140838c45e76a8917ca3b252a48e3882d05cde8d6f0b24e492"
@@ -2585,7 +2585,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1684,
+      "line": 1687,
       "column": 37,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2593,7 +2593,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1712,
+      "line": 1715,
       "column": 38,
       "code": "has-type",
       "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
@@ -2601,7 +2601,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 658,
+      "line": 660,
       "column": 39,
       "code": "has-type",
       "message_sha256": "a6717e30878d2725304d97c5fb32dacd1e9390ad42c1c53805e5ad4228c63498"
@@ -2609,7 +2609,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 1384,
+      "line": 1387,
       "column": 42,
       "code": "has-type",
       "message_sha256": "6b3bf53c953464ae5eca5af23f6ee4aa9b3fe9f5856d07f358d76bd3a8dee02e"
@@ -2617,7 +2617,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 735,
+      "line": 737,
       "column": 43,
       "code": "has-type",
       "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
@@ -2625,7 +2625,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 726,
+      "line": 728,
       "column": 45,
       "code": "has-type",
       "message_sha256": "9076d7668e920f937d99a8809d7222f870ef1d895bef707f657887bd19ded42e"
@@ -2633,7 +2633,7 @@
     {
       "tool": "mypy",
       "path": "server.py",
-      "line": 784,
+      "line": 786,
       "column": 45,
       "code": "has-type",
       "message_sha256": "9076d7668e920f937d99a8809d7222f870ef1d895bef707f657887bd19ded42e"
