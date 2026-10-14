@@ -229,9 +229,14 @@ _INFORMATION_QUESTION = re.compile(
     r"^\s*(?:wie|was|wann|wo|woher|wohin|wer|wem|wen|welche[mnrs]?|warum|"
     r"wieso|weshalb|wozu|what|how|when|where|which|why|who)(?![a-z])"
 )
+# Second-person forms only: "How can I sync?" asks how, "Can you sync?" asks to.
 _POLITE_REQUEST = re.compile(
-    r"(?<![a-z])(?:wuerdest|kannst|koenntest|solltest|willst|would|could|can)"
-    r"(?![a-z])"
+    r"(?<![a-z])(?:"
+    + "|".join(
+        normalize(word)
+        for word in ("würdest", "kannst", "könntest", "solltest", "willst")
+    )
+    + r"|(?:can|could|would|will) you)(?![a-z])"
 )
 
 
@@ -242,7 +247,7 @@ def requested_domains(text: str) -> frozenset[str]:
     they address the coach with a request verb ("Was würdest du anpassen?"); a
     negated clause ("nicht zu Intervals syncen") grants no plan change or sync;
     the classifier decides those. Other negations describe facts ("nicht gut
-    geschlafen"), and "doch nicht" is an undo request.
+    geschlafen") and keep their check-in or undo grant ("doch nicht").
     """
     domains: set[str] = set()
     for sentence in _SENTENCE.findall(normalize(text)):
@@ -254,7 +259,7 @@ def requested_domains(text: str) -> frozenset[str]:
             continue
         for clause in _CLAUSE_BREAK.split(sentence):
             found = stem_domains(clause)
-            if _NEGATION.search(clause.replace("doch nicht", "")):
+            if _NEGATION.search(clause):
                 found -= _REFUSABLE_DOMAINS
             domains |= found
     return frozenset(domains)

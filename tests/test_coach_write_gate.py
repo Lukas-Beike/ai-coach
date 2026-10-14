@@ -182,6 +182,8 @@ class NegationAndQuestionTests(unittest.TestCase):
             "Synchronisier nichts mit Intervals",
             "Bitte nicht zu Intervals hochladen",
             "Don't upload it to Intervals",
+            "Lade das doch nicht zu Intervals hoch",
+            "Synchronisier den Plan doch nicht",
         ):
             with self.subTest(text=text):
                 self.assertNotIn("remote_intervals", gate.requested_domains(text))
@@ -191,6 +193,12 @@ class NegationAndQuestionTests(unittest.TestCase):
                 self.assertFalse(decision.allowed)
 
     def test_information_question_grants_no_domain(self):
+        for question in (
+            "How can I sync my plan to Intervals?",
+            "Wie kann ich meinen Plan zu Intervals synchronisieren?",
+        ):
+            with self.subTest(text=question):
+                self.assertEqual(gate.requested_domains(question), frozenset())
         text = "Wie sieht mein Trainingsplan aus?"
         self.assertEqual(gate.requested_domains(text), frozenset())
         decision = _check("stage_training_plan", text, classifier=_Classifier())
@@ -200,6 +208,8 @@ class NegationAndQuestionTests(unittest.TestCase):
     def test_requests_and_unnegated_clauses_still_grant(self):
         for text, domain in (
             ("Kannst du meinen Plan für nächste Woche anpassen?", "planning"),
+            ("Was würdest du an meinem Plan anpassen?", "planning"),
+            ("How could you adjust my plan?", "planning"),
             ("Ich kann Dienstag nicht, verschieb den Lauf auf Mittwoch", "planning"),
             ("Nicht zu Intervals hochladen, aber den Plan anpassen", "planning"),
             ("Ach, doch nicht", "undo"),
