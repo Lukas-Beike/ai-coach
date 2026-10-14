@@ -407,7 +407,8 @@ with patch.object(Path, 'read_text', deny):
                 scope=["adaptive_replan:" + latest["id"]],
             )
 
-        self.confirm_impact("planning")
+        # Even an accepting verdict cannot approve a preview from its own turn.
+        self.confirm_impact("planning", accepts=True)
         first, _ = self.turn(
             "Show a preview, do not apply it.",
             [preview, apply, {"output_text": "Preview ready."}],
