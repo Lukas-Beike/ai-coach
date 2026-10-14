@@ -1422,25 +1422,30 @@ async function executeCoachActionProposal(proposal, button) {
     }
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);
   } catch (error) {
-    if (executeSent && !executeResponded && !isHttpClientRejection(error)) {
-      // The action may have run; keep the button locked until the server state is known.
-      state.coachActionUnknownIds.add(proposal.id);
-      addCoachReceipt({ title: "Ausführung unklar", message: "Die Antwort zur Freigabe ist nicht angekommen. Die Freigabe bleibt gesperrt, bis der Status geprüft ist.", status: "error" });
-      renderCoachActionReview();
-      toast(error.message, true);
-      return;
-    }
-    addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
-    if (error.reason === "proposal_expired") {
-      proposal.status = "expired";
-      renderCoachActionReview();
-    } else if (["proposal_invalid", "proposal_used", "proposal_unavailable"].includes(error.reason)) {
-      proposal.status = "used";
-      renderCoachActionReview();
-    }
-    toast(error.message, true);
-    button.disabled = false;
+    if (executeSent && !executeResponded && !isHttpClientRejection(error)) lockUnknownCoachActionOutcome(proposal, error);
+    else rejectCoachActionProposal(proposal, button, error);
   }
+}
+
+// The action may have run; keep the button locked until the server state is known.
+function lockUnknownCoachActionOutcome(proposal, error) {
+  state.coachActionUnknownIds.add(proposal.id);
+  addCoachReceipt({ title: "Ausführung unklar", message: "Die Antwort zur Freigabe ist nicht angekommen. Die Freigabe bleibt gesperrt, bis der Status geprüft ist.", status: "error" });
+  renderCoachActionReview();
+  toast(error.message, true);
+}
+
+function rejectCoachActionProposal(proposal, button, error) {
+  addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
+  if (error.reason === "proposal_expired") {
+    proposal.status = "expired";
+    renderCoachActionReview();
+  } else if (["proposal_invalid", "proposal_used", "proposal_unavailable"].includes(error.reason)) {
+    proposal.status = "used";
+    renderCoachActionReview();
+  }
+  toast(error.message, true);
+  button.disabled = false;
 }
 
 function createPendingMessage(entry, index = 0) {
