@@ -76,10 +76,12 @@ class DatabaseRestoreService:
 
     def _resume(self) -> None:
         dependencies = self._dependencies
-        dependencies.sync_jobs.resume_interrupted()
-        dependencies.coach_jobs.resume_interrupted(dependencies.coach_failures)
-        dependencies.sync_wake.set()
-        dependencies.coach_wake.set()
+        try:
+            dependencies.sync_jobs.resume_interrupted()
+            dependencies.coach_jobs.resume_interrupted(dependencies.coach_failures)
+        finally:
+            dependencies.sync_wake.set()
+            dependencies.coach_wake.set()
 
     def restore(self, payload: bytes) -> dict[str, Any]:
         with self._dependencies.maintenance_gate.restore():
@@ -89,12 +91,6 @@ class DatabaseRestoreService:
                 self._dependencies.validation.validate(temporary_path)
                 previous_backup_name = self._replace(temporary_path)
                 temporary_path = None
-                self._resume()
-                return {
-                    "status": "ok",
-                    "restored": True,
-                    "previous_database_backup": previous_backup_name,
-                }
             except AppError:
                 raise
             except Exception as exc:
@@ -109,3 +105,20 @@ class DatabaseRestoreService:
                         temporary_path.unlink()
                     except FileNotFoundError:
                         pass
+            # The live database is already replaced here; failures must not be
+            # reported as validation errors.
+            try:
+                self._resume()
+            except Exception as exc:
+                raise AppError(
+                    500,
+                    "Das Datenbank-Backup wurde wiederhergestellt, aber die "
+                    "Hintergrundaufgaben konnten nicht fortgesetzt werden. "
+                    "Bitte starte die App neu.",
+                    reason="restored_resume_failed",
+                ) from exc
+            return {
+                "status": "ok",
+                "restored": True,
+                "previous_database_backup": previous_backup_name,
+            }
