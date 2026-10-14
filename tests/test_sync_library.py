@@ -739,6 +739,30 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         self.assertEqual(synced["external_id"], "remote-created")
         self.assertEqual(self.library_row()["sync_state"], "synced")
 
+    def test_retry_after_lost_identity_adopts_the_created_remote_workout(self):
+        self.add_entry()
+        created = {**self.workout(), "id": "remote-created"}
+        self.client.get_workout_library.return_value = []
+        self.client.create_library_workouts.return_value = [created]
+        with (
+            patch.object(
+                WorkoutLibrarySyncStateService,
+                "store_remote_identity",
+                side_effect=RuntimeError("database busy"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "database busy"),
+        ):
+            self.service.sync_entry(LIBRARY_ID)
+        self.assertEqual(self.library_row()["sync_state"], "sync_error")
+        self.assertIsNone(self.library_row()["external_id"])
+
+        self.client.get_workout_library.return_value = [created]
+        synced = self.service.sync_entry(LIBRARY_ID)
+
+        self.assertEqual(self.client.create_library_workouts.call_count, 1)
+        self.assertEqual(synced["external_id"], "remote-created")
+        self.assertEqual(self.library_row()["sync_state"], "synced")
+
     def remote_link(self, local_id=LIBRARY_ID):
         with self.database_manager.reader() as db:
             return db.execute(
