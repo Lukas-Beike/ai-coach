@@ -536,7 +536,7 @@ When a database restore is initiated:
 
 ### Operational Logging & Diagnostics
 - **Sanitized Logs**: Standard container logs contain only operational timestamps, correlation IDs, status codes, and anonymized error classifications. API tokens, passwords, and athlete metrics are never logged.
-- **Always-on Technical Diagnostics**: The application keeps up to 10,000 recent diagnostic entries (16 MiB total, 1 MiB per entry, with truncation marked), including sanitized Coach requests, provider responses, tool activity, and provider error messages. Credentials, keys, tokens, and session data are removed before storage.
+- **Always-on Technical Diagnostics**: The application keeps up to 10,000 recent diagnostic entries (16 MiB total, 1 MiB per entry, with truncation marked), including sanitized Coach requests, provider responses, tool activity, and classified provider error details such as status, error code and request ID. Raw OpenAI error text is not stored. Credentials, keys, tokens, and session data are removed before storage.
 - **Server Log Management**: In **Betrieb & Diagnose**, authenticated users can download the sanitized current server log and its available rotations as JSON Lines, or delete the log files.
 - **Diagnostics Management**: In **Betrieb & Diagnose**, authenticated users can download the sanitized technical diagnostic report as JSON, or clear the stored technical diagnostic entries.
 - **Canonical Coverage Summary**: The diagnostic report includes a `canonical_coverage` section with per-provider counts only: activities, observations, issue counts per reason, and whether a sync time is stored. It contains no dates or record content. If the summary cannot be computed, the section reports `unavailable` without details.
