@@ -6,11 +6,12 @@ import sqlite3
 import threading
 import unittest
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.jobs import SyncJobStore
 from backend.sync.worker import SyncJobWorker
 
 
@@ -165,7 +166,10 @@ class SyncJobWorkerTests(unittest.TestCase):
 
         store = FlakyStore()
         worker = SyncJobWorker(
-            store, FailingThenStoppingRunner(), MaintenanceGate(), poll_seconds=0
+            cast(SyncJobStore, store),
+            FailingThenStoppingRunner(),
+            MaintenanceGate(),
+            poll_seconds=0,
         )
 
         def stop_on_third_claim() -> None:
