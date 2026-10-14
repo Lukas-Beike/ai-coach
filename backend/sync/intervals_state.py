@@ -30,9 +30,8 @@ def calendar_window(
 
 def latest_library_timestamp(*values: str | None) -> str | None:
     """Return the newest library import/push ISO timestamp, if any."""
-    present = [value for value in values if value]
-    texts = [value for value in present if isinstance(value, str)]
-    return max(texts) if texts else (present[0] if present else None)
+    texts = [value for value in values if isinstance(value, str) and value]
+    return max(texts) if texts else None
 
 
 def connection_state(

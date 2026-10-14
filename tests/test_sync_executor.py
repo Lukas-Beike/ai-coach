@@ -355,12 +355,13 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertEqual(self.observer.scopes[0].result, {"status": "ok", "count": 2})
         self.assertEqual(self.gate.events, ["enter", "exit"])
 
-    def test_competition_error_keeps_core_status_and_busy_skips_competitions(
+    def test_competition_error_makes_intervals_partial_and_busy_skips_competitions(
         self,
     ) -> None:
         self.competitions.error = RuntimeError("fake competition failure")
         result = self.executor.execute(self.job("intervals"))
-        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["status"], "partial")
+        self.assertIs(result["window_complete"], True)
         self.assertEqual(result["competitions"], {"status": "error"})
 
         self.intervals.result = {"status": "already_running"}
@@ -514,9 +515,22 @@ class SyncJobExecutorTests(unittest.TestCase):
         )
         self.assertEqual(self.outcomes.failure_calls, [])
 
-    def test_run_continues_historical_chain_after_partial_chunk(self) -> None:
+    def test_run_stops_historical_chain_after_partial_window(self) -> None:
         self.outcomes.fallback_status = "partial"
         self.intervals.result = {"status": "partial"}
+        job = self.job(
+            "intervals",
+            "historical_backfill",
+            {"days": 90, "end_date": "2026-09-01"},
+        )
+
+        self.executor.run(job)
+
+        self.assertEqual(self.queue.calls, [])
+
+    def test_run_continues_historical_chain_after_competition_failure(self) -> None:
+        self.outcomes.fallback_status = "partial"
+        self.competitions.error = RuntimeError("fake competition failure")
         job = self.job(
             "intervals",
             "historical_backfill",

@@ -116,11 +116,17 @@ class HistoricalSyncJobOwner:
     def queue_next(
         self, job: dict[str, Any], result: Any, fallback_status: str
     ) -> None:
+        # A partial chunk stops the chain: providers advance their historical
+        # cursor only for complete windows, so continuing would skip the gap. Only
+        # a failed section outside the window (competitions) may still continue.
         if not (
             job.get("type") == "historical_backfill"
-            and fallback_status in {"completed", "partial"}
             and isinstance(result, dict)
             and result.get("historical_next_end")
+            and (
+                fallback_status == "completed"
+                or (fallback_status == "partial" and result.get("window_complete"))
+            )
         ):
             return
         self._queue_service.enqueue(
@@ -211,10 +217,11 @@ class IntervalsSyncJobOwner:
             result["competitions"] = self._sync_competitions(
                 reason, push_local=False, operation_id=job["id"]
             )
-        except Exception:  # noqa: BLE001 - competition failure is a section error
-            # The core Intervals status is kept: a failed competitions section
-            # must not mark the whole sync partial (that would also fail waiting
-            # performance refreshes and stop the historical backfill chain).
+        except Exception:  # noqa: BLE001 - competition failure remains a partial refresh
+            # The job stays partial so the competitions section can be retried;
+            # the flag records whether the Intervals window itself was complete.
+            result["window_complete"] = result.get("status") == "ok"
+            result["status"] = "partial"
             result["competitions"] = {"status": "error"}
         return result
 
