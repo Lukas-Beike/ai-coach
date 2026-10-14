@@ -12,6 +12,7 @@ from pathlib import Path
 from backend.db import row_factory
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import PlanAdjustmentRepository
+from backend.errors import AppError
 from backend.planning import adaptive_preview_service
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 
@@ -251,11 +252,41 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
             "Keine zukünftigen lokalen Einheiten müssen angepasst werden.",
         )
         self.assertIsNone(result["illness_pause"])
-        self.assertEqual(self.planned.limits, [500])
+        self.assertEqual(self.planned.limits, [501])
         self.assertEqual(self.planned.future_only, [True])
         self.assertEqual(self.calendar.limits, [1000])
         self.assertEqual(self.weather.calls, [{"refresh": False}])
         self.assertEqual(self.id_count, 1)
+
+    def test_preview_refuses_instead_of_silently_truncating_future_units(self):
+        def drafts(count):
+            return [
+                {
+                    "id": f"draft-{index}",
+                    "date": "2026-09-21",
+                    "name": f"Easy run {index}",
+                    "duration_minutes": 30,
+                }
+                for index in range(count)
+            ]
+
+        self.drafts[:] = drafts(500)
+        self.assertEqual(self.service.preview()["changes"], [])
+
+        self.drafts[:] = drafts(501)
+        with self.assertRaises(AppError) as refused:
+            self.service.preview()
+
+        self.assertEqual(refused.exception.status, 409)
+        self.assertIn("500", refused.exception.message)
+        self.assertEqual(self.id_count, 1)
+        with self.manager.reader() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) AS n FROM plan_adjustments").fetchone()[
+                    "n"
+                ],
+                1,
+            )
 
     def test_combined_illness_calendar_weather_preview_keeps_triggers_and_fingerprint(
         self,
