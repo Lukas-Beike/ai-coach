@@ -90,7 +90,11 @@ class CalendarProviderTests(unittest.TestCase):
                 ),
                 "HTTPS://calendar.example/feed.ics?x=1",
             )
-        resolve.assert_called_once_with("calendar.example", status=400)
+        resolve.assert_called_once_with(
+            "calendar.example",
+            status=400,
+            timeout=calendar_provider.CALENDAR_FETCH_TIMEOUT_SECONDS,
+        )
         for value in (
             "http://calendar.example/feed.ics",
             "https://calendar.example:444/feed.ics",
@@ -185,6 +189,33 @@ class CalendarProviderTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 504)
         self.assertLess(elapsed, 4)
         connect.assert_not_called()
+
+    def test_calendar_url_validation_bounds_blocking_dns_resolution(self):
+        release = threading.Event()
+
+        def blocking_getaddrinfo(*_args, **_kwargs):
+            # Released by the test in ``finally``; the wait is only a safety bound.
+            release.wait(5)
+            return [(None, None, None, None, ("93.184.216.34", 443))]
+
+        started_at = time.perf_counter()
+        try:
+            with (
+                patch.object(calendar_provider, "CALENDAR_FETCH_TIMEOUT_SECONDS", 0.2),
+                patch.object(
+                    calendar_provider.socket,
+                    "getaddrinfo",
+                    side_effect=blocking_getaddrinfo,
+                ),
+                self.assertRaises(AppError) as raised,
+            ):
+                calendar_provider.external_calendar_url(
+                    "https://calendar.example/feed.ics"
+                )
+        finally:
+            release.set()
+        self.assertEqual(raised.exception.status, 504)
+        self.assertLess(time.perf_counter() - started_at, 4)
 
     def test_calendar_fetch_bounded_resolution_preserves_resolver_errors(self):
         with (

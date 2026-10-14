@@ -25,6 +25,7 @@ from backend.runtime.socket_deadline import SocketDeadline
 
 MAX_EXTERNAL_CALENDAR_BYTES = 5_000_000
 CALENDAR_FETCH_TIMEOUT_SECONDS = 30
+CALENDAR_TIMEOUT_MESSAGE = "Der Kalender-Feed hat nicht rechtzeitig geantwortet."
 CALENDAR_CONNECTION_TIMEOUT_SECONDS = 10
 EXTERNAL_HTTP_STARTED_EVENT = "External HTTP request started"
 EXTERNAL_HTTP_COMPLETED_EVENT = "External HTTP request completed"
@@ -246,19 +247,11 @@ def fetch_calendar_feed(url: str, *, app_version: str) -> bytes:
             addresses = _resolve_calendar_addresses(
                 hostname, status=502, timeout=_calendar_fetch_remaining(deadline)
             )
-        except TimeoutError as exc:
-            timed_out = True
-            raise AppError(
-                504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet."
-            ) from exc
-        request_context["address_count"] = len(addresses)
-        try:
+            request_context["address_count"] = len(addresses)
             _calendar_fetch_remaining(deadline)
         except TimeoutError as exc:
             timed_out = True
-            raise AppError(
-                504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet."
-            ) from exc
+            raise AppError(504, CALENDAR_TIMEOUT_MESSAGE) from exc
         last_network_error: OSError | None = None
         for address in addresses:
             try:
@@ -290,7 +283,7 @@ def fetch_calendar_feed(url: str, *, app_version: str) -> bytes:
                 last_network_error = exc
                 continue
         if timed_out:
-            raise AppError(504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet.")
+            raise AppError(504, CALENDAR_TIMEOUT_MESSAGE)
         raise AppError(
             502, "Der Kalender-Feed konnte nicht geladen werden."
         ) from last_network_error
@@ -301,7 +294,14 @@ def fetch_calendar_feed(url: str, *, app_version: str) -> bytes:
 
 def external_calendar_url(value: Any) -> str:
     raw, _, hostname, _ = _calendar_url_parts(value)
-    _resolve_calendar_addresses(hostname, status=400)
+    try:
+        _resolve_calendar_addresses(
+            hostname, status=400, timeout=CALENDAR_FETCH_TIMEOUT_SECONDS
+        )
+    except TimeoutError as exc:
+        raise AppError(
+            504, "Die Kalenderadresse konnte nicht rechtzeitig aufgelöst werden."
+        ) from exc
     return raw
 
 

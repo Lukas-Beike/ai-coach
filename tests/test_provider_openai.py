@@ -610,6 +610,30 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertIs(raised.exception, retrieve_error)
 
+    def test_poll_background_response_keeps_resumable_failures_running(self):
+        for reason in ("provider_unavailable", "provider_timeout", "invalid_response"):
+            cancelled = []
+            retrieve_error = AppError(503, "Transient.", reason=reason)
+
+            def retrieve(_response_id, error=retrieve_error):
+                raise error
+
+            with (
+                self.subTest(reason=reason),
+                mock.patch("backend.providers.openai.time.sleep"),
+                self.assertRaises(AppError) as raised,
+            ):
+                poll_background_response(
+                    {"id": "resp_resumable", "status": "in_progress"},
+                    retrieve=retrieve,
+                    cancel=cancelled.append,
+                    poll_seconds=1,
+                    max_seconds=60,
+                    monotonic=lambda: 0,
+                )
+            self.assertIs(raised.exception, retrieve_error)
+            self.assertEqual(cancelled, [])
+
     def test_poll_background_response_rejects_invalid_initial_response_id(self):
         with self.assertRaises(AppError) as raised:
             poll_background_response(

@@ -149,6 +149,24 @@ def _consume_sse_line(
     return event_name, data_lines, None, None
 
 
+def _read_bounded_line(
+    response: Any,
+    read_state: StreamReadState,
+    max_bytes: int,
+    check_cancelled: Callable[[], None],
+) -> bytes:
+    # Bound each line by the remaining budget (plus one byte to detect overflow)
+    # so an overlong line is never buffered whole before the budget check.
+    raw_line = response.readline(max(1, max_bytes - read_state.response_bytes + 1))
+    check_cancelled()
+    read_state.response_bytes += len(raw_line)
+    if read_state.response_bytes > max_bytes:
+        raise provider_http.ProviderResponseTooLarge(
+            "provider response exceeds configured size limit"
+        )
+    return raw_line
+
+
 def read_stream_response(
     response: Any,
     *,
@@ -170,17 +188,9 @@ def read_stream_response(
     read_state = state or StreamReadState()
     check_cancelled()
     while True:
-        # Bound each line by the remaining budget (plus one byte to detect overflow)
-        # so an overlong line is never buffered whole before the budget check.
-        raw_line = response.readline(max(1, max_bytes - read_state.response_bytes + 1))
-        check_cancelled()
+        raw_line = _read_bounded_line(response, read_state, max_bytes, check_cancelled)
         if not raw_line:
             break
-        read_state.response_bytes += len(raw_line)
-        if read_state.response_bytes > max_bytes:
-            raise provider_http.ProviderResponseTooLarge(
-                "provider response exceeds configured size limit"
-            )
         line = raw_line.decode("utf-8").rstrip("\r\n")
         event_name, data_lines, event_response, terminal_event_type = _consume_sse_line(
             line, event_name, data_lines, on_text_delta, on_response_id, read_state
