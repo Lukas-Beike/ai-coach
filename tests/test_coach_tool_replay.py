@@ -35,12 +35,12 @@ class LockCheckingDatabaseManager(DatabaseManager):
         self._tracking_lock = lock
 
     @contextmanager
-    def unit_of_work(self) -> Iterator[Any]:
+    def unit_of_work(self, *, timeout: float | None = None) -> Iterator[Any]:
         if not self._tracking_lock.held:
             raise AssertionError(
                 "database unit of work must run under the injected lock"
             )
-        with super().unit_of_work() as db:
+        with super().unit_of_work(timeout=timeout) as db:
             yield db
 
 

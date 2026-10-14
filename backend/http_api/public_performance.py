@@ -46,10 +46,12 @@ class PublicPerformanceStateService:
         if source is None:
             return self.from_snapshot(self._sync_state_repository.latest_snapshot())
         today = self._today()
-        # One unit of work: the performance snapshot, the Garmin snapshot, and the
-        # canonical reads share one connection, so a concurrent sync cannot mix
-        # revisions. The chosen source serves both body and load reads.
-        with source.database_manager().unit_of_work() as db:
+        # One read-only snapshot: the performance snapshot, the Garmin snapshot,
+        # the canonical reads and the profile/Garmin projection share one
+        # connection, so a concurrent sync cannot mix revisions and the request
+        # never waits for the writer. The chosen source serves both body and
+        # load reads.
+        with source.database_manager().read_snapshot() as db:
             snapshot = self._sync_state_repository.latest_snapshot()
             garmin = self._garmin_payload_service.snapshot_in(db)
             reader = resolve_reader(source.observation_reader(), db)
@@ -60,7 +62,7 @@ class PublicPerformanceStateService:
                 activity_reader=source.activity_row_reader(),
             )
             body = _body_inputs(source, reader, db, today)
-        return self._project(snapshot, garmin, canonical, body, today)
+            return self._project(snapshot, garmin, canonical, body, today)
 
     def canonical_inputs(
         self, db: Any, snapshot: Any

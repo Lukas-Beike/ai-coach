@@ -41,7 +41,7 @@ class ProductCatalogService:
         barcode: str | None = None,
         include_archived: bool = False,
     ) -> list[dict[str, Any]]:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             return self._products.list(
                 db, query=query, barcode=barcode, include_archived=include_archived
             )

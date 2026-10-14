@@ -83,6 +83,26 @@ class PublicPlanStateService:
         return state
 
     def read(self, local_only: bool = False) -> dict[str, Any]:
+        if not local_only:
+            return self._read(local_only=False)
+        # The local-only plan never refreshes weather or writes, so every read
+        # below shares one read-only snapshot and none waits for the writer.
+        with self._database_manager_factory().read_snapshot():
+            return self._read(local_only=True)
+
+    def _history_and_profiles(self, local_only: bool) -> tuple[Any, Any]:
+        if local_only:
+            manager = self._database_manager_factory()
+            with manager.reader() as db:
+                history = self._key_values.get(db, weather_cache.HISTORY_KEY)
+            return history, ActivityDetailStore(manager).calendar_profiles()
+        with self._db_lock:
+            manager = self._database_manager_factory()
+            with manager.unit_of_work() as db:
+                history = self._key_values.get(db, weather_cache.HISTORY_KEY)
+            return history, ActivityDetailStore(manager).calendar_profiles()
+
+    def _read(self, local_only: bool) -> dict[str, Any]:
         snapshot = self._sync_state.latest_snapshot() or {}
         local_planned = self._planned_units.list(500)
         canonical_planned = calendar_canonical.canonical_planned_workouts(
@@ -93,11 +113,7 @@ class PublicPlanStateService:
         weather = self._weather.state(canonical_planned, refresh=not local_only)
         if weather.pop("_refreshed", False):
             self._adaptive_followup.check("weather")
-        with self._db_lock:
-            manager = self._database_manager_factory()
-            with manager.unit_of_work() as db:
-                history = self._key_values.get(db, weather_cache.HISTORY_KEY)
-            profiles = ActivityDetailStore(manager).calendar_profiles()
+        history, profiles = self._history_and_profiles(local_only)
         activities = [
             {**row, "workout_profile": profiles[str(row.get("id"))]["profile"]}
             if isinstance(row, dict)

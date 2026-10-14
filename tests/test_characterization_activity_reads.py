@@ -52,6 +52,9 @@ class _Database:
             db.row_factory = sqlite3.Row
             yield db
 
+    def reader(self) -> Any:
+        return self.unit_of_work()
+
 
 class _Snapshots:
     def __init__(self, snapshot: Any) -> None:

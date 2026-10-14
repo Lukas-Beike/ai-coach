@@ -2208,9 +2208,19 @@ class ServerHttpTests(ServerTestCase):
                                 server.database_manager().unit_of_work(),
                             ):
                                 thread.start()
-                                self.assertTrue(
-                                    database_lock.worker_waiting.wait(timeout=3)
-                                )
+                                if update:
+                                    self.assertTrue(
+                                        database_lock.worker_waiting.wait(timeout=3)
+                                    )
+                                else:
+                                    # The usage summary is a pure reader read:
+                                    # it finishes while this thread owns both
+                                    # DB_LOCK and the writer, never queueing.
+                                    thread.join(timeout=3)
+                                    self.assertFalse(thread.is_alive())
+                                    self.assertFalse(
+                                        database_lock.worker_waiting.is_set()
+                                    )
                                 state = state_reader()
                                 self.assertIn("usage", state)
                         finally:

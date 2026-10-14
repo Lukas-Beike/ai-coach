@@ -55,10 +55,10 @@ class CoachJobSubmissionService:
         self, session_csrf_hash: str, operation_id: str | None = None
     ) -> dict[str, Any] | None:
         session_key = coach_session_key(session_csrf_hash)
-        with self._database_lock:
-            database_manager = self._database_manager()
-            with database_manager.unit_of_work() as db:
-                rows = self._active_rows(db)
+        # Pure read of one table: no writer or shared lock. Enqueue re-checks
+        # the same rows inside its own transaction before inserting.
+        with self._database_manager().reader() as db:
+            rows = self._active_rows(db)
         return self._find_active(rows, session_key, operation_id)
 
     def stream_status(self, session_csrf_hash: str) -> dict[str, Any]:

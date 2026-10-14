@@ -69,9 +69,11 @@ class PublicBootstrapService:
     def read(self) -> dict[str, Any]:
         deps = self._dependencies
         registry = getattr(deps, "provider_registry", DEFAULT_PROVIDER_REGISTRY)
-        # Resolve the manager only after taking the shared lock; all reads below
-        # then reuse this single unit of work, including nested service reads.
-        with deps.database_lock, deps.database_manager().unit_of_work() as db:
+        # One read-only WAL snapshot serves every read below, including nested
+        # service reads, so the projection is consistent without the writer or
+        # the shared database lock. A hidden write fails on the query-only
+        # connection instead of racing.
+        with deps.database_manager().read_snapshot() as db:
             snapshot = deps.sync_state_repository().latest_snapshot()
             local_planned = deps.planned_unit_service().list(250)
             competitions = deps.competition_service().list(limit=100)
@@ -85,6 +87,7 @@ class PublicBootstrapService:
                     deps.garmin_sync_state_service().core_error_entries()
                 ),
                 garmin_tokenstore_exists=Path(deps.config.garmin_tokenstore).exists(),
+                read_only=True,
             )
             jobs = deps.sync_job_queue_service().list()
             state_version_values = deps.state_version_service().versions(

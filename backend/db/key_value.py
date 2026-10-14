@@ -24,11 +24,12 @@ class KeyValueService:
         self._db_lock = db_lock
 
     def get(self, key: str) -> str | None:
-        lock = self._db_lock if self._db_lock is not None else nullcontext()
-        with lock:
-            database = self._database() if callable(self._database) else self._database
-            with database.unit_of_work() as db:
-                return self.get_in_transaction(db, key)
+        # A single-row read needs neither the writer nor the shared lock. It
+        # joins an active unit of work or read snapshot, so callers inside one
+        # still observe that transaction; otherwise it sees committed state.
+        database = self._database() if callable(self._database) else self._database
+        with database.reader() as db:
+            return self.get_in_transaction(db, key)
 
     def get_in_transaction(self, db: Any, key: str) -> str | None:
         return self._repository.get(db, key)
