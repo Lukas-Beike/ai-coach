@@ -83,33 +83,34 @@ def eftp_30_day_average(
     wellness_rows: list[dict[str, Any]], activities: list[Any], end_date: date
 ) -> float | None:
     cutoff = end_date - timedelta(days=29)
-    values: list[float] = []
-    for row in wellness_rows:
-        value = _wellness_eftp_value(row, cutoff, end_date)
-        if value is not None:
-            values.append(value)
-    for activity in activities:
-        value = _activity_eftp_value(activity, cutoff, end_date)
-        if value is not None:
-            values.append(value)
+    values = list(
+        eftp_daily_values(wellness_rows, activities, cutoff, end_date).values()
+    )
     return round(sum(values) / len(values), 1) if values else None
 
 
 def eftp_daily_values(
     wellness_rows: list[dict[str, Any]],
-    activities: list[dict[str, Any]],
+    activities: list[Any],
     start: date,
     end: date,
 ) -> dict[str, float]:
-    """Prefer dated wellness eFTP, otherwise the day's latest cycling activity."""
+    """Prefer dated wellness eFTP, otherwise the day's latest cycling activity.
+
+    Each day contributes at most one value, so a same-day wellness and activity
+    eFTP are not both counted.
+    """
     observations: dict[str, float] = {}
+    activity_rows = [row for row in activities if isinstance(row, dict)]
     for activity in sorted(
-        activities, key=lambda row: str(row.get("start_date_local") or "")
+        activity_rows, key=lambda row: str(row.get("start_date_local") or "")
     ):
         value = _activity_eftp_value(activity, start, end)
         if value is not None:
             observations[iso_date_prefix(str(activity["start_date_local"]))] = value
     for row in wellness_rows:
+        if not isinstance(row, dict):
+            continue
         value = _wellness_eftp_value(row, start, end)
         if value is not None:
             observations[iso_date_prefix(str(row.get("id") or row.get("date")))] = value
