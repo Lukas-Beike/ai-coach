@@ -35,6 +35,11 @@ def _apply_remote_event(
         payload["remote_event_external_id"] = external_id
         payload["external_id"] = external_id
     if state == "synced":
+        # The event is the answer to the push of the local unit. Derived metrics
+        # follow it; the planned duration is the athlete's own value that was just
+        # sent, so an answer without it must not erase it. A duration cleared on
+        # Intervals.icu reaches the unit through RemotePlannedUnitReconciler, which
+        # keeps a locally edited unit as a conflict instead.
         for key in REMOTE_EVENT_METRIC_KEYS:
             if remote_event.get(key) is not None:
                 payload[key] = remote_event[key]

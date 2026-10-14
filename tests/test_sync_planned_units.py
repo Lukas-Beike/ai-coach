@@ -230,6 +230,36 @@ class RemotePlannedUnitReconcilerTests(unittest.TestCase):
         self.assertEqual(self.planning_revision(), 1)
         self.assertEqual(self.revision.calls, 1)
 
+    def test_remote_duration_clear_reaches_a_clean_unit_and_conflicts_with_an_edit(
+        self,
+    ) -> None:
+        # This pull path owns remote clears; the sync-state writer keeps the pushed
+        # duration (see test_sync_reconcile).
+        self.reconciler.reconcile([self.event("one", "2026-09-21", moving_time=3600)])
+        cleared = self.event("one", "2026-09-21", moving_time=None)
+
+        result = self.reconciler.reconcile([cleared])
+
+        payload = self.payload("one")
+        self.assertEqual(result, {"imported": 0, "updated": 1, "conflicts": 0})
+        # A unit without a remote duration carries the 30-minute default.
+        self.assertEqual(
+            (payload["moving_time"], payload["duration_minutes"]), (1800, 30)
+        )
+
+        self.reconciler.reconcile([self.event("one", "2026-09-21", moving_time=3600)])
+        self.set_payload(
+            "one", state="local", dirty=1, moving_time=3000, duration_minutes=50
+        )
+        result = self.reconciler.reconcile([cleared])
+
+        payload = self.payload("one")
+        self.assertEqual(result, {"imported": 0, "updated": 0, "conflicts": 1})
+        self.assertEqual(
+            (payload["moving_time"], payload["duration_minutes"]), (3000, 50)
+        )
+        self.assertEqual(self.row("one")["sync_state"], "conflict")
+
     def test_clean_remote_update_preserves_local_metadata(self) -> None:
         self.reconciler.reconcile([self.event("one", "2026-09-21")])
         self.set_payload(
