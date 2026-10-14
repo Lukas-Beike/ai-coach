@@ -375,9 +375,7 @@ def _removes_records(tool_name: str, arguments: Mapping[str, Any] | None) -> boo
         return True
     if not isinstance(arguments, Mapping):
         return False
-    if tool_name == "save_equipment":
-        return arguments.get("status") == "archived"
-    if tool_name == "update_training_plan":
+    if tool_name in {"save_equipment", "update_training_plan"}:
         payload = arguments.get("payload")
         return isinstance(payload, Mapping) and (
             payload.get("action") == "delete" or payload.get("status") == "archived"

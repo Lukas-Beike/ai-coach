@@ -208,11 +208,11 @@ class DestructiveTierTests(unittest.TestCase):
         self.assertFalse(_check("replace_training_plan", "x", classifier=bulk).allowed)
 
     def test_archiving_equipment_is_a_delete(self):
-        archive = {"status": "archived"}
+        # save_equipment wraps its fields in payload like the other record tools.
+        archive = {"payload": {"name": "Altes Rad", "status": "archived"}}
+        active = {"payload": {"name": "Neues Rad", "status": "active"}}
         self.assertEqual(gate.call_impact("save_equipment", archive), {"delete"})
-        self.assertEqual(
-            gate.call_impact("save_equipment", {"status": "active"}), set()
-        )
+        self.assertEqual(gate.call_impact("save_equipment", active), set())
         self.assertTrue(_check("save_equipment", "Neues Rad").allowed)
         self.assertFalse(
             _check(
