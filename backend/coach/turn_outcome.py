@@ -6,7 +6,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from backend.coach.context_selection import infer_coach_domain, select_coach_context
+from backend.coach.context_selection import (
+    infer_coach_domain,
+    is_bare_follow_up,
+    select_coach_context,
+)
 from backend.coach.outcomes import (
     coach_effect_label,
     coach_failure_lines,
@@ -164,13 +168,13 @@ def _athlete_request(
 
     The model's `_request.summary` is never stored: a later "retry" re-runs this
     text, so it must be what the athlete wrote, read back from stored messages.
-    `retained` is the pending request this turn continues, if any.
+    `retained` is the failed request a bare retry of this turn re-runs, if any.
     """
     current_id = context["current_user_message_id"]
     ids = _message_ids(request)
     if retained is not None:
-        # A bare "retry" or answer is not part of the request it continues; a
-        # retry that fails again keeps pointing at the original request.
+        # A bare "retry" is not part of the request it re-runs; a retry that
+        # fails again keeps pointing at the original request.
         ids = [item for item in ids if item != current_id] or [
             item for item in _message_ids(retained) if item != current_id
         ]
@@ -223,7 +227,12 @@ def _pending_value(
             request,
             context,
             message,
-            retained=pending_request or None,
+            retained=(
+                pending_request
+                if pending_request.get("status") == "failed"
+                and is_bare_follow_up(message)
+                else None
+            ),
         )
         domain = request.get("domain") or infer_coach_domain(summary, tools=tool_names)
         return json.dumps(

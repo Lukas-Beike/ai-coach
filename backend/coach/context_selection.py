@@ -212,6 +212,15 @@ class CoachContextSelection:
         ]
 
 
+def is_bare_follow_up(message: str) -> bool:
+    """Return whether the message only retries or continues, with no request of its own."""
+    normalized = message.casefold()
+    return bool(
+        re.search(RETRY_PATTERN, normalized)
+        or re.search(CONTINUATION_PATTERN, normalized)
+    )
+
+
 def select_coach_context(
     message: str,
     dialogue: dict[str, Any],
