@@ -1413,10 +1413,12 @@ async function executeCoachActionProposal(proposal, button) {
       method: "POST",
       body: JSON.stringify({ proposal_id: proposal.id }),
     });
+    const payloadHash = confirmed?.proposed_action?.payload_hash;
+    if (!confirmed?.action_token || !payloadHash) throw new Error("Die Freigabe konnte nicht bestätigt werden; bitte den Vorschlag erneut prüfen.");
     executeSent = true;
     const result = await api("/api/coach/actions/execute", {
       method: "POST",
-      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
+      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: payloadHash }),
     });
     executeResponded = true;
     if (proposal.action_type === "undo_change" && result.status !== "undone") throw new Error("Die Undo-Bestätigung fehlt; bitte den aktuellen Stand prüfen.");
@@ -1425,16 +1427,18 @@ async function executeCoachActionProposal(proposal, button) {
     const receipt = coachActionReceipt(proposal, result);
     addCoachReceipt(receipt);
     toast(receipt.message);
-    if (state.route === originalRoute) {
-      if (receipt.nutritionProductWrite) await AppRouter.navigate("nutrition/products", { historyMode: "push" });
-      else if (receipt.localWrite) await AppRouter.navigate("nutrition/diary", { historyMode: "push" });
-      else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
-    }
+    if (state.route === originalRoute) await showCoachReceiptArea(receipt);
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);
   } catch (error) {
     if (executeSent && !executeResponded && !isHttpClientRejection(error)) lockUnknownCoachActionOutcome(proposal, error);
     else rejectCoachActionProposal(proposal, button, error);
   }
+}
+
+async function showCoachReceiptArea(receipt) {
+  if (receipt.nutritionProductWrite) await AppRouter.navigate("nutrition/products", { historyMode: "push" });
+  else if (receipt.localWrite) await AppRouter.navigate("nutrition/diary", { historyMode: "push" });
+  else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
 }
 
 // The action may have run; keep the button locked until the server state is known.

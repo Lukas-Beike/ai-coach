@@ -22,6 +22,9 @@ Wahoo cycling FTP and Wahoo weight are read separately, without an Intervals syn
 instant, because each Wahoo row keeps its own fetch time. They are the caller's
 fallbacks, so a Wahoo-only store still yields them when no Intervals sync exists.
 The Intervals fields then stay empty and the caller keeps the legacy values.
+
+A Wahoo value older than its age limit on the athlete-local ``as_of`` day is
+not current. Its row stays stored and readable, so history keeps it.
 """
 
 from __future__ import annotations
@@ -87,14 +90,15 @@ _NO_INTERVALS: Final = CanonicalCurrentInputs(
 
 
 def read_wahoo_fallbacks(
-    reader: ObservationReader, db: Any
+    reader: ObservationReader, db: Any, *, as_of: date
 ) -> CanonicalCurrentInputs | None:
     """Return only the stored Wahoo fallbacks, or None when neither is stored.
 
     Used without a usable wellness day: the Intervals sport values and weight stay
     absent, and the caller's Wahoo cycling FTP and weight fallbacks still apply.
+    ``as_of`` is the athlete-local day the Wahoo values must be current on.
     """
-    wahoo_ftp, wahoo_weight = _wahoo_current(reader, db)
+    wahoo_ftp, wahoo_weight = _wahoo_current(reader, db, as_of=as_of)
     if wahoo_ftp is None and wahoo_weight is None:
         return None
     return _NO_INTERVALS.with_wahoo(wahoo_ftp, wahoo_weight)
@@ -105,15 +109,17 @@ def read_current_inputs(
     db: Any,
     *,
     latest_wellness_day: date | None = None,
+    as_of: date,
 ) -> CanonicalCurrentInputs | None:
     """Read the current sport thresholds, VO2max and weight, and the Wahoo fallbacks.
 
     ``latest_wellness_day`` is the latest wellness day. Without it no wellness-row
-    weight is selected, and the caller keeps the legacy value. Returns None when
+    weight is selected, and the caller keeps the legacy value. ``as_of`` is the
+    athlete-local day the Wahoo values must be current on. Returns None when
     neither an Intervals sync nor a stored Wahoo value exists.
     """
     intervals = _intervals_current(reader, db, latest_wellness_day=latest_wellness_day)
-    wahoo_ftp, wahoo_weight = _wahoo_current(reader, db)
+    wahoo_ftp, wahoo_weight = _wahoo_current(reader, db, as_of=as_of)
     if intervals is None:
         if wahoo_ftp is None and wahoo_weight is None:
             return None
@@ -175,13 +181,14 @@ def _intervals_current(
 
 
 def _wahoo_current(
-    reader: ObservationReader, db: Any
+    reader: ObservationReader, db: Any, *, as_of: date
 ) -> tuple[Observation | None, Observation | None]:
     """Return the current Wahoo cycling FTP and the current Wahoo weight, or None each.
 
     Sport-scoped ranking ignores days, so the cycling FTP is reduced first to the
     newest stored zone set, by observed day and then fetch time. The weight is
-    ranked by ``select_current`` over every stored Wahoo weight.
+    ranked by ``select_current`` over every stored Wahoo weight. Both must be within
+    their age limit on ``as_of``.
     """
     ftps = [
         observation
@@ -193,14 +200,14 @@ def _wahoo_current(
     ftp = (
         None
         if newest is None
-        else select_current([newest], MetricKind.FTP, sport=Sport.RIDE)
+        else select_current([newest], MetricKind.FTP, sport=Sport.RIDE, as_of=as_of)
     )
     weights = [
         observation
         for observation in reader.observations(db, MetricKind.WEIGHT)
         if observation.provenance.provider is ProviderId.WAHOO
     ]
-    return ftp, select_current(weights, MetricKind.WEIGHT)
+    return ftp, select_current(weights, MetricKind.WEIGHT, as_of=as_of)
 
 
 def _newest_first(observation: Observation) -> tuple[date, datetime]:

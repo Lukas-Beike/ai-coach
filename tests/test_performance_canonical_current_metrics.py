@@ -8,6 +8,7 @@ All storage is temporary and every provider is mocked by fixtures.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import unittest
 from dataclasses import replace
@@ -27,13 +28,17 @@ from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
+from backend.coach.context import CoachPerformanceContextReader
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance.canonical_current import (
     CanonicalCurrentInputs,
     read_current_inputs,
     read_wahoo_fallbacks,
 )
-from backend.performance.canonical_inputs import read_performance_inputs
+from backend.performance.canonical_inputs import (
+    CanonicalPerformanceSource,
+    read_performance_inputs,
+)
 from backend.performance.context import current_performance_context
 from backend.performance.current_metrics import current_performance_metrics
 from backend.providers.source_labels import SourceView, observation_source_label
@@ -89,7 +94,7 @@ def _read(
 ) -> CanonicalCurrentInputs | None:
     """Read a snapshot with its latest wellness day, as the assembly does."""
     latest = _latest_wellness_day(_latest_wellness(snapshot or {}))
-    return read_current_inputs(reader, None, latest_wellness_day=latest)
+    return read_current_inputs(reader, None, latest_wellness_day=latest, as_of=TODAY)
 
 
 def _canonical(case: Case, observations: tuple[Observation, ...] | None = None) -> Any:
@@ -289,7 +294,9 @@ class CanonicalCurrentInputTests(unittest.TestCase):
     def test_weight_window_extends_to_an_older_latest_wellness_day(self) -> None:
         case = _case("intervals_only")
         reader = ObservationStub(_observations(case))
-        read_current_inputs(reader, None, latest_wellness_day=date(2026, 10, 1))
+        read_current_inputs(
+            reader, None, latest_wellness_day=date(2026, 10, 1), as_of=TODAY
+        )
         # The Intervals weight read is windowed; the Wahoo weight read follows it.
         self.assertIn(
             (MetricKind.WEIGHT, date(2026, 10, 1), SYNC_DAY + timedelta(days=1), None),
@@ -307,11 +314,11 @@ class CanonicalCurrentInputTests(unittest.TestCase):
             for observation in observations
         )
         reader = ObservationStub(unstamped)
-        self.assertIsNone(read_current_inputs(reader, None))
+        self.assertIsNone(read_current_inputs(reader, None, as_of=TODAY))
         self.assertEqual({call[1:] for call in reader.calls}, {(None, None, None)})
 
     def test_sync_without_stored_sport_values_yields_none(self) -> None:
-        self.assertIsNone(read_current_inputs(ObservationStub(()), None))
+        self.assertIsNone(read_current_inputs(ObservationStub(()), None, as_of=TODAY))
 
 
 class CanonicalWeightTests(unittest.TestCase):
@@ -370,7 +377,7 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
-            inputs = read_performance_inputs(selector, db, self.intervals)
+            inputs = read_performance_inputs(selector, db, self.intervals, as_of=TODAY)
         self.assertIsNotNone(inputs)
         assert inputs is not None
         self.assertIsNotNone(inputs.current)
@@ -408,7 +415,7 @@ class WahooFallbackReadTests(unittest.TestCase):
     def test_stored_wahoo_ftp_and_weight_are_the_only_current_inputs(self) -> None:
         reader = ObservationStub((_wahoo_ftp(250), _wahoo_weight(78.5)))
 
-        inputs = read_wahoo_fallbacks(reader, None)
+        inputs = read_wahoo_fallbacks(reader, None, as_of=TODAY)
 
         assert inputs is not None
         assert inputs.wahoo_ftp is not None
@@ -426,19 +433,124 @@ class WahooFallbackReadTests(unittest.TestCase):
         )
         run_ftp = _wahoo_ftp(280, sport_family=1)
 
-        self.assertIsNone(read_wahoo_fallbacks(ObservationStub((intervals_ftp,)), None))
-        self.assertIsNone(read_wahoo_fallbacks(ObservationStub((run_ftp,)), None))
+        self.assertIsNone(
+            read_wahoo_fallbacks(ObservationStub((intervals_ftp,)), None, as_of=TODAY)
+        )
+        self.assertIsNone(
+            read_wahoo_fallbacks(ObservationStub((run_ftp,)), None, as_of=TODAY)
+        )
 
     def test_no_stored_wahoo_rows_yields_none(self) -> None:
-        self.assertIsNone(read_wahoo_fallbacks(ObservationStub(()), None))
+        self.assertIsNone(read_wahoo_fallbacks(ObservationStub(()), None, as_of=TODAY))
 
     def test_wahoo_rows_alone_feed_the_current_inputs(self) -> None:
         reader = ObservationStub((_wahoo_ftp(250), _wahoo_weight(78.5)))
 
-        inputs = read_current_inputs(reader, None)
+        inputs = read_current_inputs(reader, None, as_of=TODAY)
 
         assert inputs is not None
         assert inputs.wahoo_ftp is not None
         assert inputs.wahoo_weight is not None
         self.assertEqual(250, inputs.wahoo_ftp.value.value)
         self.assertEqual(78.5, inputs.wahoo_weight.value.value)
+
+
+AS_OF: Final = TODAY
+WAHOO_AGE_LIMIT_DAYS: Final = 90
+
+
+def _wahoo_ftp_on(value: float, day: date) -> Observation:
+    (record,) = map_wahoo_power_zones(
+        [
+            {
+                "id": 1,
+                "workout_type_family_id": 0,
+                "ftp": value,
+                "updated_at": f"{day.isoformat()}T10:00:00Z",
+            }
+        ],
+        zone=UTC,
+        retrieved_at=RETRIEVED_AT,
+    ).records
+    return record
+
+
+def _wahoo_weight_on(value: float, day: date) -> Observation:
+    (record,) = map_wahoo_user(
+        {"weight": value}, observed_on=day, retrieved_at=RETRIEVED_AT
+    ).records
+    return record
+
+
+class _UnitOfWorkManager:
+    """Opens a unit of work without a database; the stub reader needs no connection."""
+
+    def unit_of_work(self) -> contextlib.AbstractContextManager[None]:
+        return contextlib.nullcontext()
+
+
+class WahooAgeLimitProductionReadTests(unittest.TestCase):
+    """A Wahoo FTP or weight older than its limit is not current on the read day.
+
+    The stored rows stay readable: history keeps them, and a read on a day within
+    the limit still uses them.
+    """
+
+    SNAPSHOT: Final = {"recent_wellness": [{"id": AS_OF.isoformat()}]}
+
+    def _stored(self, day: date) -> ObservationStub:
+        return ObservationStub((_wahoo_ftp_on(250, day), _wahoo_weight_on(78.5, day)))
+
+    def test_a_wahoo_value_91_days_old_is_not_current(self) -> None:
+        stale = AS_OF - timedelta(days=WAHOO_AGE_LIMIT_DAYS + 1)
+        inputs = read_performance_inputs(
+            self._stored(stale), None, self.SNAPSHOT, as_of=AS_OF
+        )
+        assert inputs is not None
+        self.assertIsNone(inputs.current)
+
+    def test_a_wahoo_value_90_days_old_is_current(self) -> None:
+        limit = AS_OF - timedelta(days=WAHOO_AGE_LIMIT_DAYS)
+        inputs = read_performance_inputs(
+            self._stored(limit), None, self.SNAPSHOT, as_of=AS_OF
+        )
+        assert inputs is not None
+        assert inputs.current is not None
+        assert inputs.current.wahoo_ftp is not None
+        assert inputs.current.wahoo_weight is not None
+        self.assertEqual(250, inputs.current.wahoo_ftp.value.value)
+        self.assertEqual(78.5, inputs.current.wahoo_weight.value.value)
+
+    def test_the_stale_value_stays_stored_and_is_read_within_the_limit(self) -> None:
+        stale = AS_OF - timedelta(days=WAHOO_AGE_LIMIT_DAYS + 1)
+        reader = self._stored(stale)
+        read_performance_inputs(reader, None, self.SNAPSHOT, as_of=AS_OF)
+        # History: the store still returns both stale Wahoo rows.
+        self.assertEqual(
+            [stale], [o.observed_on for o in reader.observations(None, MetricKind.FTP)]
+        )
+        self.assertEqual(
+            [stale],
+            [o.observed_on for o in reader.observations(None, MetricKind.WEIGHT)],
+        )
+        # Reads: the same rows are used once the read day is within the limit.
+        within = stale + timedelta(days=WAHOO_AGE_LIMIT_DAYS)
+        inputs = read_performance_inputs(reader, None, self.SNAPSHOT, as_of=within)
+        assert inputs is not None
+        assert inputs.current is not None
+        assert inputs.current.wahoo_ftp is not None
+        self.assertEqual(250, inputs.current.wahoo_ftp.value.value)
+
+    def test_the_coach_context_read_applies_the_athlete_day(self) -> None:
+        stale = AS_OF - timedelta(days=WAHOO_AGE_LIMIT_DAYS + 1)
+        reader = self._stored(stale)
+        source = CanonicalPerformanceSource(
+            database_manager=_UnitOfWorkManager,
+            observation_reader=lambda: reader,
+        )
+        context = CoachPerformanceContextReader(
+            None, None, None, today=lambda: AS_OF, canonical=source
+        )
+        _snapshot, inputs = context.read_snapshot(lambda: self.SNAPSHOT)
+        assert inputs is not None
+        self.assertIsNone(inputs.current)

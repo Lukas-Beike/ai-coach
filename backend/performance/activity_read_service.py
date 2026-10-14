@@ -47,7 +47,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         self._canonical = canonical
 
     def _performance_inputs(
-        self,
+        self, as_of: date
     ) -> tuple[dict[str, Any], CanonicalPerformanceInputs | None]:
         """Read the snapshot, and CTL and ATL in the same unit of work when configured."""
         source = self._canonical
@@ -60,6 +60,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                 db,
                 snapshot,
                 activity_reader=source.activity_row_reader(),
+                as_of=as_of,
             )
         return snapshot, canonical
 
@@ -79,7 +80,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                 reason="invalid_activity_request",
             )
         normalized_id = str(self._references.resolve(normalized_id))
-        snapshot, canonical = self._performance_inputs()
+        snapshot, canonical = self._performance_inputs(today)
         activity = _raw_activity(
             snapshot,
             normalized_id,

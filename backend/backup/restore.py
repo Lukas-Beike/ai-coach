@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -83,42 +83,58 @@ class DatabaseRestoreService:
             dependencies.sync_wake.set()
             dependencies.coach_wake.set()
 
-    def restore(self, payload: bytes) -> dict[str, Any]:
-        with self._dependencies.maintenance_gate.restore():
-            temporary_path: Path | None = None
-            try:
-                temporary_path = self._dependencies.validation.stage(payload)
-                self._dependencies.validation.validate(temporary_path)
-                previous_backup_name = self._replace(temporary_path)
-                temporary_path = None
-            except AppError:
-                raise
-            except Exception as exc:
-                raise AppError(
-                    400,
-                    "Das Datenbank-Backup konnte nicht validiert werden: "
-                    f"{self._dependencies.redact(str(exc))[:300]}",
-                ) from exc
-            finally:
-                if temporary_path is not None:
-                    try:
-                        temporary_path.unlink()
-                    except FileNotFoundError:
-                        pass
-            # The live database is already replaced here; failures must not be
-            # reported as validation errors.
-            try:
-                self._resume()
-            except Exception as exc:
-                raise AppError(
-                    500,
-                    "Das Datenbank-Backup wurde wiederhergestellt, aber die "
-                    "Hintergrundaufgaben konnten nicht fortgesetzt werden. "
-                    "Bitte starte die App neu.",
-                    reason="restored_resume_failed",
-                ) from exc
-            return {
-                "status": "ok",
-                "restored": True,
-                "previous_database_backup": previous_backup_name,
-            }
+    def _invalid_backup(self, exc: Exception) -> AppError:
+        return AppError(
+            400,
+            "Das Datenbank-Backup konnte nicht validiert werden: "
+            f"{self._dependencies.redact(str(exc))[:300]}",
+        )
+
+    def _stage(self, payload: bytes | Iterable[bytes]) -> Path:
+        try:
+            return self._dependencies.validation.stage(payload)
+        except AppError:
+            raise
+        except Exception as exc:
+            raise self._invalid_backup(exc) from exc
+
+    def _promote(self, temporary_path: Path) -> str | None:
+        """Validate the staged file and swap it in; the caller holds the gate."""
+        try:
+            self._dependencies.validation.validate(temporary_path)
+            return self._replace(temporary_path)
+        except AppError:
+            raise
+        except Exception as exc:
+            raise self._invalid_backup(exc) from exc
+
+    def restore(self, payload: bytes | Iterable[bytes]) -> dict[str, Any]:
+        """Restore from a whole backup or its ordered chunks.
+
+        The payload is staged before the maintenance gate is taken, so a slow
+        upload does not hold back ordinary operations. Validation and the file
+        swap run under the gate. The staged file is removed on every path.
+        """
+        temporary_path = self._stage(payload)
+        try:
+            with self._dependencies.maintenance_gate.restore():
+                previous_backup_name = self._promote(temporary_path)
+                # The live database is already replaced here; failures must not be
+                # reported as validation errors.
+                try:
+                    self._resume()
+                except Exception as exc:
+                    raise AppError(
+                        500,
+                        "Das Datenbank-Backup wurde wiederhergestellt, aber die "
+                        "Hintergrundaufgaben konnten nicht fortgesetzt werden. "
+                        "Bitte starte die App neu.",
+                        reason="restored_resume_failed",
+                    ) from exc
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        return {
+            "status": "ok",
+            "restored": True,
+            "previous_database_backup": previous_backup_name,
+        }
