@@ -526,7 +526,7 @@ class OpenAIStreamClient:
             {
                 "diagnostic_id": context.get("diagnostic_id"),
                 "status": status,
-                "response_body": raw_error.decode("utf-8", errors="replace"),
+                **diagnostic,
             },
         )
         error = ProviderErrorClassifier.classify_upstream(

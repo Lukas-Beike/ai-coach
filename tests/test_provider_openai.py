@@ -57,6 +57,7 @@ class _StreamResponse:
         headers=_UNSET,
     ):
         self._lines = iter(lines)
+        self._pending = b""
         self._index = 0
         self._on_iter = on_iter
         self._close_event = close_event
@@ -74,14 +75,15 @@ class _StreamResponse:
     def __exit__(self, *_exc_info):
         self.close()
 
-    def __iter__(self):
-        return self
-
-    def __next__(self):
+    def readline(self, limit=-1):
         if self._on_iter is not None:
             self._on_iter(self._index)
         self._index += 1
-        return next(self._lines)
+        if not self._pending:
+            self._pending = next(self._lines, b"")
+        end = len(self._pending) if limit < 0 else limit
+        line, self._pending = self._pending[:end], self._pending[end:]
+        return line
 
     def close(self):
         self.closed = True
@@ -563,6 +565,75 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             (504, "provider_timeout"),
         )
 
+    def test_poll_background_response_cancels_once_when_retrieve_fails(self):
+        cancelled = []
+
+        def retrieve(_response_id):
+            raise RuntimeError("provider unreachable")
+
+        with (
+            mock.patch("backend.providers.openai.time.sleep"),
+            self.assertRaisesRegex(RuntimeError, "^provider unreachable$"),
+        ):
+            poll_background_response(
+                {"id": "resp_retrieve_failure", "status": "queued"},
+                retrieve=retrieve,
+                cancel=cancelled.append,
+                poll_seconds=1,
+                max_seconds=60,
+                monotonic=lambda: 0,
+            )
+
+        self.assertEqual(cancelled, ["resp_retrieve_failure"])
+
+    def test_poll_background_response_keeps_retrieve_error_when_cancel_fails(self):
+        retrieve_error = AppError(502, "Upstream failed.", reason="provider_error")
+
+        def retrieve(_response_id):
+            raise retrieve_error
+
+        def cancel(_response_id):
+            raise RuntimeError("remote cancellation failed")
+
+        with (
+            mock.patch("backend.providers.openai.time.sleep"),
+            self.assertRaises(AppError) as raised,
+        ):
+            poll_background_response(
+                {"id": "resp_retrieve_cancel_failure", "status": "in_progress"},
+                retrieve=retrieve,
+                cancel=cancel,
+                poll_seconds=1,
+                max_seconds=60,
+                monotonic=lambda: 0,
+            )
+
+        self.assertIs(raised.exception, retrieve_error)
+
+    def test_poll_background_response_keeps_resumable_failures_running(self):
+        for reason in ("provider_unavailable", "provider_timeout", "invalid_response"):
+            cancelled = []
+            retrieve_error = AppError(503, "Transient.", reason=reason)
+
+            def retrieve(_response_id, error=retrieve_error):
+                raise error
+
+            with (
+                self.subTest(reason=reason),
+                mock.patch("backend.providers.openai.time.sleep"),
+                self.assertRaises(AppError) as raised,
+            ):
+                poll_background_response(
+                    {"id": "resp_resumable", "status": "in_progress"},
+                    retrieve=retrieve,
+                    cancel=cancelled.append,
+                    poll_seconds=1,
+                    max_seconds=60,
+                    monotonic=lambda: 0,
+                )
+            self.assertIs(raised.exception, retrieve_error)
+            self.assertEqual(cancelled, [])
+
     def test_poll_background_response_rejects_invalid_initial_response_id(self):
         with self.assertRaises(AppError) as raised:
             poll_background_response(
@@ -752,7 +823,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         deltas = []
         response_ids = []
         result = read_stream_response(
-            lines,
+            _StreamResponse(lines),
             max_bytes=sum(map(len, lines)),
             on_text_delta=deltas.append,
             on_response_id=response_ids.append,
@@ -773,7 +844,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         ]
         deltas = []
         result = read_stream_response(
-            lines, max_bytes=1000, on_text_delta=deltas.append
+            _StreamResponse(lines), max_bytes=1000, on_text_delta=deltas.append
         )
         self.assertIsNone(result.response)
         self.assertEqual(result.response_bytes, sum(map(len, lines)))
@@ -782,9 +853,11 @@ class OpenAIProviderErrorTests(unittest.TestCase):
     def test_read_stream_response_records_terminal_type_from_data_only_event(self):
         state = StreamReadState()
         result = read_stream_response(
-            [
-                b'data: {"type":"response.failed","response":{"id":"resp_123","status":"failed"}}\n'
-            ],
+            _StreamResponse(
+                [
+                    b'data: {"type":"response.failed","response":{"id":"resp_123","status":"failed"}}\n'
+                ]
+            ),
             max_bytes=1000,
             on_text_delta=lambda _: None,
             state=state,
@@ -797,8 +870,8 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         cancel_event.set()
 
         class UnreadResponse:
-            def __iter__(self):
-                raise AssertionError("cancelled response must not be iterated")
+            def readline(self, limit=-1):
+                raise AssertionError("cancelled response must not be read")
 
         with self.assertRaises(ProviderRequestCancelled):
             read_stream_response(
@@ -808,17 +881,14 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 on_text_delta=lambda _: None,
             )
 
-    def test_read_stream_response_raises_when_cancelled_during_iteration(self):
+    def test_read_stream_response_raises_when_cancelled_during_read(self):
         cancel_event = threading.Event()
 
         class CancellingResponse:
             def __init__(self):
                 self._lines = iter((b'data: {"delta":"first"}\n', b"\n"))
 
-            def __iter__(self):
-                return self
-
-            def __next__(self):
+            def readline(self, limit=-1):
                 line = next(self._lines)
                 cancel_event.set()
                 return line
@@ -831,6 +901,26 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 on_text_delta=lambda _: None,
             )
 
+    def test_read_stream_response_bounds_each_line_read_by_remaining_budget(self):
+        class RecordingResponse:
+            def __init__(self, payload):
+                self._payload = io.BytesIO(payload)
+                self.limits = []
+
+            def readline(self, limit=-1):
+                self.limits.append(limit)
+                return self._payload.readline(limit)
+
+        response = RecordingResponse(b"data: {}\n" + b"data: " + b"x" * 5000 + b"\n")
+        with self.assertRaisesRegex(
+            ProviderResponseTooLarge,
+            "^provider response exceeds configured size limit$",
+        ):
+            read_stream_response(response, max_bytes=50, on_text_delta=lambda _: None)
+        # The overlong line is never requested in full: each read is capped at the
+        # remaining budget plus one byte, so the reader stops after 51 bytes.
+        self.assertEqual(response.limits, [51, 42])
+
     def test_read_stream_response_rejects_oversized_stream(self):
         state = StreamReadState()
         with self.assertRaisesRegex(
@@ -838,18 +928,18 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             "^provider response exceeds configured size limit$",
         ):
             read_stream_response(
-                [b"data: {}\n"], max_bytes=1, on_text_delta=lambda _: None, state=state
+                _StreamResponse([b"data: {}\n"]),
+                max_bytes=1,
+                on_text_delta=lambda _: None,
+                state=state,
             )
-        self.assertEqual(state.response_bytes, len(b"data: {}\n"))
+        self.assertEqual(state.response_bytes, 2)
 
-    def test_read_stream_response_preserves_iterator_exception(self):
-        failure = RuntimeError("iterator failed")
+    def test_read_stream_response_preserves_read_exception(self):
+        failure = RuntimeError("read failed")
 
         class FailingResponse:
-            def __iter__(self):
-                return self
-
-            def __next__(self):
+            def readline(self, limit=-1):
                 raise failure
 
         with self.assertRaises(RuntimeError) as raised:
@@ -1021,10 +1111,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         iterator_failure = RuntimeError("iterator failed")
 
         class FailingResponse(_StreamResponse):
-            def __next__(self):
+            def readline(self, limit=-1):
                 if self._index == 1:
                     raise iterator_failure
-                return super().__next__()
+                return super().readline(limit)
 
         response = FailingResponse([b"data: {}\n"])
         state = StreamReadState()
@@ -1070,7 +1160,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 opener=lambda *_args, **_kwargs: response,
                 state=state,
             )
-        self.assertEqual(state.response_bytes, len(b"data: {}\n"))
+        # Each read is bounded to the remaining budget plus one byte, so the
+        # overflow is detected after max_bytes + 1 bytes rather than the full line.
+        self.assertEqual(state.response_bytes, 2)
         self.assertTrue(response.closed)
 
     def test_response_parsers_remain_pure(self):
@@ -2067,10 +2159,70 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             (429, "rate_limit_exceeded"),
         )
         self.assertEqual(raised.exception.retry_after_seconds, 2)
-        self.assertIn("private", repr(capture.events))
+        self.assertNotIn("private provider text", repr(capture.events))
         self.assertNotIn("sk-test-secret", repr(capture.events))
         self.assertEqual(
             state.rate_limits, [{"retry-after": "1.2", "x-request-id": "req_test"}]
+        )
+
+    def test_stream_client_http_error_capture_excludes_echoed_athlete_content(self):
+        echoed = "Jane Athlete threshold 312 W weight 71.4 kg"
+        error = HTTPError(
+            "https://api.example.test/v1/responses",
+            400,
+            "bad request",
+            {"x-request-id": "req_test"},
+            io.BytesIO(
+                json.dumps(
+                    {
+                        "error": {
+                            "type": "invalid_request_error",
+                            "code": "invalid_value",
+                            "param": "input",
+                            "message": f"Unsupported input: {echoed}",
+                        }
+                    }
+                ).encode()
+            ),
+        )
+        capture = _DiagnosticCapture()
+
+        def opener(*_args, **_kwargs):
+            raise error
+
+        client = self._stream_client(opener, capture=capture)
+
+        with self.assertRaises(AppError):
+            client.stream({"input": "hello"}, lambda _delta: None)
+
+        self.assertNotIn("Jane Athlete", repr(capture.events))
+        self.assertNotIn("312 W", repr(capture.events))
+        http_failures = [
+            details for name, details in capture.events if name == "openai_http_failed"
+        ]
+        self.assertEqual(len(http_failures), 1)
+        failure = http_failures[0]
+        self.assertEqual(
+            set(failure),
+            {
+                "diagnostic_id",
+                "status",
+                "error_body_bytes",
+                "error_code",
+                "error_type",
+                "parameter",
+                "request_id",
+            },
+        )
+        self.assertEqual(
+            (
+                failure["status"],
+                failure["error_code"],
+                failure["error_type"],
+                failure["parameter"],
+                failure["request_id"],
+            ),
+            (400, "invalid_value", "invalid_request_error", "input", "req_test"),
         )
 
     def test_stream_client_records_http_failure_in_safe_order(self):

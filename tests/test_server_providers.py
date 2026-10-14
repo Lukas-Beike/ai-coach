@@ -217,17 +217,11 @@ class ServerProvidersTests(ServerTestCase):
     def test_responses_stream_request_uses_configured_compatible_provider_endpoint(
         self,
     ):
-        class FakeResponse:
+        class FakeResponse(BytesIO):
             status = 200
             headers: ClassVar = {}
 
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def __iter__(self):
+            def __init__(self):
                 response = {
                     "id": "resp-test",
                     "status": "completed",
@@ -239,7 +233,7 @@ class ServerProvidersTests(ServerTestCase):
                     + json.dumps({"type": "response.completed", "response": response})
                     + "\n\n"
                 )
-                yield from (line.encode() for line in stream.splitlines(keepends=True))
+                super().__init__(stream.encode())
 
         config = replace(
             server.CONFIG,
@@ -774,7 +768,9 @@ class ServerProvidersTests(ServerTestCase):
             failed["details"]["error_code"], "invalid_function_call_output"
         )
         self.assertEqual(failed["details"]["request_id"], "req_test_456")
-        self.assertIn("athlete-private", json.dumps(captured))
+        # Raw provider error text must not reach the diagnostic capture; only
+        # the allow-listed fields above are recorded.
+        self.assertNotIn("athlete-private", json.dumps(captured))
 
     def test_responses_stream_request_emits_deltas_and_validates_only_final_response(
         self,
@@ -791,17 +787,11 @@ class ServerProvidersTests(ServerTestCase):
             "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
         }
 
-        class FakeResponse:
+        class FakeResponse(BytesIO):
             status = 200
             headers: ClassVar = {}
 
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def __iter__(self):
+            def __init__(self):
                 stream = (
                     "event: response.output_text.delta\n"
                     'data: {"type":"response.output_text.delta","delta":"Hal"}\n\n'
@@ -814,7 +804,7 @@ class ServerProvidersTests(ServerTestCase):
                     + "\n\n"
                     + "data: [DONE]\n\n"
                 )
-                yield from (line.encode() for line in stream.splitlines(keepends=True))
+                super().__init__(stream.encode())
 
         deltas = []
         with patch.object(
@@ -842,21 +832,15 @@ class ServerProvidersTests(ServerTestCase):
     def test_responses_stream_request_preserves_response_too_large_contract_and_byte_count(
         self,
     ):
-        class OversizedResponse:
+        class OversizedResponse(BytesIO):
             status = 200
             headers: ClassVar = {
                 "x-ratelimit-remaining-requests": "7",
                 "x-ratelimit-remaining-tokens": "9000",
             }
 
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_args):
-                return False
-
-            def __iter__(self):
-                yield b"data: {}\n"
+            def __init__(self):
+                super().__init__(b"data: {}\n")
 
         with (
             patch.object(provider_http, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
@@ -878,7 +862,8 @@ class ServerProvidersTests(ServerTestCase):
             for entry in reversed(captured)
             if entry["event"] == "openai_stream_failed"
         )
-        self.assertEqual(failed["details"]["response_bytes"], len(b"data: {}\n"))
+        # Bounded reads stop at max_bytes + 1 (1 + 1 = 2) instead of the full line.
+        self.assertEqual(failed["details"]["response_bytes"], 2)
 
     def test_responses_stream_request_cancel_before_provider_call_records_cancelled_usage(
         self,
@@ -906,19 +891,12 @@ class ServerProvidersTests(ServerTestCase):
             server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR
         )
 
-        class TimeoutResponse:
+        class TimeoutResponse(BytesIO):
             headers: ClassVar = {}
             status = 200
 
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def __iter__(self):
+            def readline(self, limit=-1):
                 raise TimeoutError("test timeout")
-                yield b""
 
         with (
             patch.object(openai_provider, "urlopen", return_value=TimeoutResponse()),
@@ -952,20 +930,14 @@ class ServerProvidersTests(ServerTestCase):
         self.assertIs(client.opener, openai_provider.urlopen)
 
     def test_responses_stream_request_client_disconnect_records_cancelled_usage(self):
-        class DisconnectResponse:
+        class DisconnectResponse(BytesIO):
             headers: ClassVar = {}
             status = 200
 
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def __iter__(self):
-                yield b"event: response.output_text.delta\n"
-                yield b'data: {"delta":"partial"}\n'
-                yield b"\n"
+            def __init__(self):
+                super().__init__(
+                    b'event: response.output_text.delta\ndata: {"delta":"partial"}\n\n'
+                )
 
         with (
             patch.object(openai_provider, "urlopen", return_value=DisconnectResponse()),
