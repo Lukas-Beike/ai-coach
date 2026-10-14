@@ -34,7 +34,10 @@ Daily rules have no bounds.
 
 Wahoo is the lowest-priority provider for current FTP and weight: it follows
 Garmin and Intervals, and it ranks after them in both rules. Its FTP is the newest
-stored cycling zone set, and its weight is the newest stored profile weight.
+stored cycling zone set, and its weight is the newest stored profile weight. When
+the caller passes ``as_of`` (the athlete-local day), a Wahoo value observed more
+than ``WAHOO_CURRENT_MAX_AGE_DAYS`` days before it is not current. Such values stay
+in the observations, so history keeps them.
 
 Values that this module does not see, and must stay with the caller: profile and
 manual values, per-sport settings from the wellness row, Intervals eFTP, the
@@ -67,6 +70,8 @@ _INTERVALS: Final = ProviderId.INTERVALS
 _WAHOO: Final = ProviderId.WAHOO
 _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
 _NO_DATE: Final = date.min
+# A Wahoo FTP or weight observed longer ago than this is history, not the current value.
+WAHOO_CURRENT_MAX_AGE_DAYS: Final = 90
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,13 +84,22 @@ class ProviderBounds:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderMaxAge:
+    """Largest allowed age, in days before ``as_of``, of one provider's observations."""
+
+    provider: ProviderId
+    days: int
+
+
+@dataclass(frozen=True, slots=True)
 class SourceRule:
-    """Provider order, optional bounds, and whether Intervals is latest-row only."""
+    """Provider order, optional bounds and age limits, and Intervals latest-row only."""
 
     kind: MetricKind
     order: tuple[ProviderId, ...]
     bounds: tuple[ProviderBounds, ...] = ()
     latest_intervals_row: bool = False
+    max_age: tuple[ProviderMaxAge, ...] = ()
 
 
 # Rules for select_current. A provider absent from ``order`` never supplies the kind.
@@ -100,6 +114,7 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
                 MetricKind.WEIGHT,
                 (_GARMIN, _INTERVALS, _WAHOO),
                 latest_intervals_row=True,
+                max_age=(ProviderMaxAge(_WAHOO, WAHOO_CURRENT_MAX_AGE_DAYS),),
             ),
             SourceRule(MetricKind.BODY_FAT, (_INTERVALS,), latest_intervals_row=True),
             # recovery_context: newest in-bounds Garmin value, else Intervals latest.
@@ -141,6 +156,7 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
                     ProviderBounds(_GARMIN, 50.0, 700.0),
                     ProviderBounds(_WAHOO, 50.0, 700.0),
                 ),
+                max_age=(ProviderMaxAge(_WAHOO, WAHOO_CURRENT_MAX_AGE_DAYS),),
             ),
             SourceRule(
                 MetricKind.THRESHOLD_HR,
@@ -244,12 +260,26 @@ def _within_latest_row(
     return observation.observed_on == latest_wellness_day
 
 
+def _within_max_age(
+    observation: Observation, rule: SourceRule, as_of: date | None
+) -> bool:
+    """Return False for a value older than its provider's limit before ``as_of``."""
+    if as_of is None:
+        return True
+    provider = observation.provenance.provider
+    age_days = (as_of - observation.observed_on).days
+    return all(
+        age_days <= limit.days for limit in rule.max_age if limit.provider is provider
+    )
+
+
 def _eligible(
     observations: Iterable[Observation],
     kind: MetricKind,
     rule: SourceRule,
     sport: Sport | None,
     latest_wellness_day: date | None,
+    as_of: date | None,
 ) -> list[tuple[int, Observation]]:
     return [
         (index, observation)
@@ -259,6 +289,7 @@ def _eligible(
         and (sport is None or observation.sport is sport)
         and _within_bounds(observation, rule)
         and _within_latest_row(observation, rule, latest_wellness_day)
+        and _within_max_age(observation, rule, as_of)
     ]
 
 
@@ -268,6 +299,7 @@ def select_current(
     *,
     sport: Sport | None = None,
     latest_wellness_day: date | None = None,
+    as_of: date | None = None,
 ) -> Observation | None:
     """Return the current observation for ``kind`` under its source rule.
 
@@ -280,6 +312,10 @@ def select_current(
     on that day; a newest row that lacks the field yields no Intervals value. None
     applies no restriction and is correct when the snapshot has no wellness rows.
 
+    ``as_of`` is the athlete-local day the value must be current on. Age limits of
+    the rule (Wahoo FTP and weight) apply only when it is given, so a caller that
+    has the day must pass it. None applies no age limit.
+
     Unknown kinds return None.
     """
     rule = CURRENT_RULES.get(kind)
@@ -287,7 +323,7 @@ def select_current(
         return None
     if sport is None and kind in _SPORT_SCOPED:
         raise ValueError(f"{kind.value} is sport-scoped and needs a sport")
-    candidates = _eligible(observations, kind, rule, sport, latest_wellness_day)
+    candidates = _eligible(observations, kind, rule, sport, latest_wellness_day, as_of)
     for provider in rule.order:
         best: tuple[_Rank, Observation] | None = None
         for index, observation in candidates:

@@ -104,7 +104,7 @@ class SectionReadTests(CanonicalReadFixture):
         selector = make_selector(self)
         with self.manager.reader() as db:
             inputs = read_performance_inputs(
-                selector, db, snapshot, activity_reader=selector
+                selector, db, snapshot, activity_reader=selector, as_of=TODAY
             )
         self.assertIsNotNone(inputs)
         assert inputs is not None

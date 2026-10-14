@@ -114,6 +114,8 @@ class CanonicalPerformanceSource:
 def snapshot_with_inputs(
     source: CanonicalPerformanceSource | None,
     read_snapshot: Callable[[], Any],
+    *,
+    as_of: date,
 ) -> tuple[Any, CanonicalPerformanceInputs | None]:
     """Read a snapshot and its canonical load inputs in one unit of work.
 
@@ -128,6 +130,7 @@ def snapshot_with_inputs(
             db,
             snapshot,
             activity_reader=source.activity_row_reader(),
+            as_of=as_of,
         )
 
 
@@ -147,7 +150,11 @@ def activity_rows_for(
 
 
 def inputs_for_snapshot(
-    source: CanonicalPerformanceSource | None, db: Any, snapshot: Any
+    source: CanonicalPerformanceSource | None,
+    db: Any,
+    snapshot: Any,
+    *,
+    as_of: date,
 ) -> CanonicalPerformanceInputs | None:
     """Read canonical load inputs inside the caller's snapshot transaction."""
     if source is None:
@@ -157,6 +164,7 @@ def inputs_for_snapshot(
         db,
         snapshot,
         activity_reader=source.activity_row_reader(),
+        as_of=as_of,
     )
 
 
@@ -301,6 +309,7 @@ def read_performance_inputs(
     snapshot: Mapping[str, Any] | None,
     *,
     activity_reader: ActivityRowReader | None = None,
+    as_of: date,
 ) -> CanonicalPerformanceInputs | None:
     """Read the canonical activities, wellness rows and load inputs of a snapshot.
 
@@ -309,7 +318,8 @@ def read_performance_inputs(
     None means there is no activity reader and no wellness row, so the caller keeps
     the legacy values. A latest row (the row the legacy reader picks) whose id is
     not a strict ``YYYY-MM-DD`` date yields inputs without a wellness day. A
-    selecting reader chooses its source once for all reads.
+    selecting reader chooses its source once for all reads. ``as_of`` is the
+    athlete-local day the Wahoo fallbacks must be current on.
     """
     reader = _ReadOnceReader(resolve_reader(reader, db))
     observed = canonical_sections.read_wellness_observations(reader, db)
@@ -342,7 +352,7 @@ def read_performance_inputs(
             wellness_day=None,
             ctl=None,
             atl=None,
-            current=read_wahoo_fallbacks(reader, db),
+            current=read_wahoo_fallbacks(reader, db, as_of=as_of),
         )
     start = min(day for day in map(canonical_sections.row_day, rows) if day is not None)
     loaded = _load_resolved(
@@ -352,7 +362,9 @@ def read_performance_inputs(
         wellness_day=loaded.wellness_day,
         ctl=loaded.ctl,
         atl=loaded.atl,
-        current=read_current_inputs(reader, db, latest_wellness_day=latest_day),
+        current=read_current_inputs(
+            reader, db, latest_wellness_day=latest_day, as_of=as_of
+        ),
         recovery=read_recovery_inputs(
             reader, db, latest_wellness_day=latest_day, start=start
         ),

@@ -1508,12 +1508,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/http_api/handler.py",
-      "code": "arg-type",
-      "message_sha256": "f685cb5d563f596260359c7ec60fc7f872d16dfe84fb079fef2741fa26ae038d"
-    },
-    {
-      "tool": "mypy",
       "path": "backend/planning/competition_service.py",
       "code": "arg-type",
       "message_sha256": "f7c065a7f0134867e32dbc0461fd2a976bd9ed1c6c6307f406017d31130ed1da"

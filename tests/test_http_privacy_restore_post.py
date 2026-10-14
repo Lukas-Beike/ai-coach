@@ -24,8 +24,10 @@ class PrivacyRestorePostRoutesTests(unittest.TestCase):
             lambda: self.restore_service,
             max_backup_bytes=10_000,
         )
+        self.body_chunks = iter([b"synthetic-", b"backup-data"])
         self.handler = SimpleNamespace(
-            read_body=Mock(return_value=b"synthetic-backup-data"),
+            read_body_stream=Mock(return_value=self.body_chunks),
+            read_body=Mock(side_effect=AssertionError("restore must stream")),
             send_json=Mock(),
         )
 
@@ -36,8 +38,9 @@ class PrivacyRestorePostRoutesTests(unittest.TestCase):
         self.auth_service.require_csrf.assert_called_once_with(
             self.handler, {"user": "athlete"}
         )
-        self.handler.read_body.assert_called_once_with(10_000)
-        self.restore_service.restore.assert_called_once_with(b"synthetic-backup-data")
+        self.handler.read_body_stream.assert_called_once_with(10_000)
+        self.handler.read_body.assert_not_called()
+        self.restore_service.restore.assert_called_once_with(self.body_chunks)
         self.auth_service.session_cookie_headers.assert_called_once_with(clear=True)
         self.handler.send_json.assert_called_once_with(
             200,

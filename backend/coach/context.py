@@ -486,7 +486,7 @@ class CoachPerformanceContextReader:
         self, read_snapshot: Callable[[], Any]
     ) -> tuple[Any, CanonicalPerformanceInputs | None]:
         """Read the snapshot and its canonical load inputs in one unit of work."""
-        return snapshot_with_inputs(self._canonical, read_snapshot)
+        return snapshot_with_inputs(self._canonical, read_snapshot, as_of=self._today())
 
     def read_sources(
         self, read_snapshot: Callable[[], Any]

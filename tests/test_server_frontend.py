@@ -1203,6 +1203,22 @@ class ServerFrontendTests(ServerTestCase):
             self.assertIn(f'"{ref}"', precache.group(1))
         self.assertRegex(service_worker, CACHE_NAME_PATTERN)
 
+    def test_service_worker_precache_excludes_logo_and_links_apple_touch_icon(self):
+        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        service_worker = (server.PUBLIC_DIR / "service-worker.js").read_text(
+            encoding="utf-8"
+        )
+        precache = re.search(r"const ASSETS = \[(.*?)\];", service_worker, re.DOTALL)
+        self.assertIsNotNone(precache)
+        self.assertNotIn('"/logo.png', service_worker)
+        self.assertIn(
+            '<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">',
+            index,
+        )
+        self.assertIn('"/apple-touch-icon.png?v=1"', precache.group(1))
+        self.assertTrue((server.PUBLIC_DIR / "logo.png").is_file())
+        self.assertTrue((server.PUBLIC_DIR / "apple-touch-icon.png").is_file())
+
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
         self.assertIn(f'"{asset_ref("/api.js")}"', source)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -19,6 +19,9 @@ from backend.http_api.requests import (
 )
 from backend.http_api.requests import (
     read_body as read_request_body,
+)
+from backend.http_api.requests import (
+    read_body_stream as read_request_body_stream,
 )
 from backend.http_api.requests import (
     read_json as read_request_json,
@@ -241,6 +244,18 @@ class RequestHandler(BaseHTTPRequestHandler):
         if max_bytes is None:
             max_bytes = self.dependencies.max_body_bytes
         return read_request_body(
+            self.headers,
+            self._read_input,
+            max_bytes,
+            error=AppError,
+            too_large_status_threshold=self.dependencies.max_body_bytes,
+        )
+
+    def read_body_stream(self, max_bytes: int | None = None) -> Iterator[bytes]:
+        """Validate a bounded body now and return its chunks for incremental reading."""
+        if max_bytes is None:
+            max_bytes = self.dependencies.max_body_bytes
+        return read_request_body_stream(
             self.headers,
             self._read_input,
             max_bytes,

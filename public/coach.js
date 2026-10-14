@@ -1413,10 +1413,12 @@ async function executeCoachActionProposal(proposal, button) {
       method: "POST",
       body: JSON.stringify({ proposal_id: proposal.id }),
     });
+    const payloadHash = confirmed?.proposed_action?.payload_hash;
+    if (!confirmed?.action_token || !payloadHash) throw new Error("Die Freigabe konnte nicht bestätigt werden; bitte den Vorschlag erneut prüfen.");
     executeSent = true;
     const result = await api("/api/coach/actions/execute", {
       method: "POST",
-      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
+      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: payloadHash }),
     });
     executeResponded = true;
     if (proposal.action_type === "undo_change" && result.status !== "undone") throw new Error("Die Undo-Bestätigung fehlt; bitte den aktuellen Stand prüfen.");

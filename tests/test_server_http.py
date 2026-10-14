@@ -1036,6 +1036,41 @@ class ServerHttpTests(ServerTestCase):
             )
         self.assertEqual(incomplete.exception.status, 400)
 
+    def test_streamed_body_checks_limits_before_reading_and_bounds_each_chunk(self):
+        from backend.http_api import requests
+
+        reads: list[int] = []
+        source = BytesIO(b"0123456789")
+
+        def read(size: int) -> bytes:
+            reads.append(size)
+            return source.read(size)
+
+        with self.assertRaises(server.AppError) as oversized:
+            requests.read_body_stream(
+                {"Content-Length": "11"}, read, 10, error=server.AppError
+            )
+        self.assertEqual(oversized.exception.status, 413)
+        self.assertEqual(reads, [])
+
+        chunks = requests.read_body_stream(
+            {"Content-Length": "10"}, read, 10, error=server.AppError, chunk_size=4
+        )
+        self.assertEqual(reads, [])
+        self.assertEqual(list(chunks), [b"0123", b"4567", b"89"])
+        self.assertEqual(reads, [4, 4, 2])
+
+        truncated = requests.read_body_stream(
+            {"Content-Length": "10"},
+            BytesIO(b"01234").read,
+            10,
+            error=server.AppError,
+            chunk_size=4,
+        )
+        with self.assertRaises(server.AppError) as incomplete:
+            list(truncated)
+        self.assertEqual(incomplete.exception.status, 400)
+
     def test_public_state_exposes_provider_calendar_window(self):
         today = server.ATHLETE_CLOCK.now().date()
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(
