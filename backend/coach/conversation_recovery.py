@@ -9,6 +9,7 @@ from typing import Any
 from backend.coach.attachments import model_input
 from backend.coach.context_selection import compact_coach_dialogue, select_coach_context
 from backend.coach.job_store import CoachJobStore
+from backend.coach.request_payload import model_confirmed_steps
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
@@ -74,7 +75,7 @@ class CoachConversationRecoveryService:
                         ),
                     ),
                     "current_message": message,
-                    "confirmed_steps": command_receipts,
+                    "confirmed_steps": model_confirmed_steps(command_receipts),
                 },
                 ensure_ascii=False,
             ),

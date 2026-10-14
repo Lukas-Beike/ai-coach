@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
+from backend import change_history
 from backend.coach.authorization import coach_execution_scope
 from backend.coach.context import CoachTrainingContextService
 from backend.coach.context_selection import select_coach_context
@@ -166,6 +167,8 @@ class CoachStructuredToolRoundService:
                     self._database_manager().unit_of_work()
                     if local_transaction
                     else nullcontext(),
+                    # Kept on the receipt so the athlete can undo the turn's changes.
+                    change_history.collect_changes() as changes,
                 ):
                     result = self._execution.execute(
                         metadata,
@@ -189,6 +192,7 @@ class CoachStructuredToolRoundService:
                             "plan_effect_key": plan_effect_key,
                             "request": action.get("request"),
                             "result": result,
+                            "changes": changes,
                         }
                     )
                     self._jobs.merge_receipt(

@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from backend.coach.turn_undo import CoachTurnUndoService
 from backend.diagnostics.readiness_probe import ReadinessProbeService
 from backend.http_api.analysis import AnalysisRoutes
 from backend.http_api.athlete_get import AthleteGetRoutes
@@ -480,6 +481,9 @@ class HttpApiAssembly:
         self.history_undo_post_routes = HistoryUndoPostRoutes(
             history_undo_service,
             proposal_creation_service,
+            CoachTurnUndoService(
+                database_manager, database_lock(), history_undo_service
+            ),
         )
         self.coach_actions_post_routes = CoachActionsPostRoutes(
             proposal_confirmation_service,
