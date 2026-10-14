@@ -447,6 +447,111 @@ class MarkMissingDeletedTests(StoreFixture):
         self.assertEqual(self.states()["foreign"], ("active", "active", "active"))
 
 
+class MergedAliasDeletionTests(StoreFixture):
+    """A duplicate alias session must be deletable without breaking its merge CHECK."""
+
+    def seed(self, source_id: str, provider: ProviderId) -> str:
+        record = activity(source_id)
+        record = replace(
+            record, provenance=replace(record.provenance, provider=provider)
+        )
+        canonical_store.upsert_activity_record(
+            self.db,
+            record,
+            local_date=date(2026, 6, 3),
+            mapper_version=1,
+            fetched_at=STAMP,
+            now=STAMP,
+        )
+        canonical_store.upsert_provider_record(
+            self.db,
+            provider=provider.value,
+            record_kind=ACTIVITY_RECORD_KIND,
+            source_record_id=source_id,
+            payload={"id": source_id},
+            mapper_version=1,
+            fetched_at=STAMP,
+            now=STAMP,
+        )
+        return str(
+            self.one(
+                "SELECT activity_id FROM activity_records "
+                "WHERE provider = ? AND provider_activity_id = ?",
+                (provider.value, source_id),
+            )[0]
+        )
+
+    def merge_duplicate(self) -> tuple[str, str]:
+        keep_id = self.seed("wahoo-1", ProviderId.WAHOO)
+        dup_id = self.seed("garmin-1", ProviderId.INTERVALS)
+        self.assertTrue(
+            canonical_store.merge_activity_session(
+                self.db, activity_id=dup_id, into=keep_id, now=STAMP
+            )
+        )
+        self.assertEqual(
+            self.one(
+                "SELECT state, merged_into FROM activity_sessions WHERE activity_id = ?",
+                (dup_id,),
+            ),
+            ("duplicate", keep_id),
+        )
+        return keep_id, dup_id
+
+    def test_deleting_a_merged_alias_clears_its_merge_link(self) -> None:
+        keep_id, dup_id = self.merge_duplicate()
+        self.assertTrue(
+            canonical_store.mark_activity_deleted(
+                self.db,
+                "intervals",
+                record_kind=ACTIVITY_RECORD_KIND,
+                provider_activity_id="garmin-1",
+                now=LATER,
+            )
+        )
+        self.assertEqual(
+            self.one(
+                "SELECT state, merged_into FROM activity_sessions WHERE activity_id = ?",
+                (dup_id,),
+            ),
+            ("deleted", None),
+        )
+        self.assertEqual(
+            self.one(
+                "SELECT state FROM activity_records WHERE provider_activity_id = ?",
+                ("garmin-1",),
+            ),
+            ("deleted",),
+        )
+        self.assertEqual(
+            self.one(
+                "SELECT state, merged_into FROM activity_sessions WHERE activity_id = ?",
+                (keep_id,),
+            ),
+            ("active", None),
+        )
+
+    def test_missing_merged_alias_in_the_window_is_deleted_without_error(self) -> None:
+        _, dup_id = self.merge_duplicate()
+        deleted = canonical_store.mark_missing_deleted(
+            self.db,
+            "intervals",
+            record_kind=ACTIVITY_RECORD_KIND,
+            window_start=date(2026, 6, 1),
+            window_end=date(2026, 6, 30),
+            present_ids=frozenset(),
+            now=LATER,
+        )
+        self.assertEqual(deleted, 1)
+        self.assertEqual(
+            self.one(
+                "SELECT state, merged_into FROM activity_sessions WHERE activity_id = ?",
+                (dup_id,),
+            ),
+            ("deleted", None),
+        )
+
+
 class FetchRowTests(unittest.TestCase):
     def test_tuple_rows_are_named_from_the_cursor_description(self) -> None:
         db = sqlite3.connect(":memory:")

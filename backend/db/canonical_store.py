@@ -802,8 +802,10 @@ def _delete_activity(
             provider_activity_id,
         ),
     )
+    # A deleted merged alias also leaves its merge: the schema allows merged_into
+    # only on duplicate sessions.
     db.execute(
-        "UPDATE activity_sessions SET state = ?, updated_at = ? "
+        "UPDATE activity_sessions SET state = ?, merged_into = NULL, updated_at = ? "
         "WHERE activity_id = ? AND primary_provider = ? "
         "AND primary_provider_activity_id = ?",
         (
