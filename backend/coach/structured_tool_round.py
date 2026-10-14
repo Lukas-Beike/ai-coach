@@ -192,7 +192,7 @@ class CoachStructuredToolRoundService:
                             "plan_effect_key": plan_effect_key,
                             "request": action.get("request"),
                             "result": result,
-                            **({"changes": changes} if changes else {}),
+                            "changes": changes,
                         }
                     )
                     self._jobs.merge_receipt(

@@ -68,6 +68,37 @@ class ChangeSummaryTests(unittest.TestCase):
         )
         self.assertFalse(summary["undoable"])
 
+    def test_a_write_with_untracked_effects_is_listed_without_turn_undo(
+        self,
+    ) -> None:
+        summary = change_summary(
+            [
+                _step("update_profile", changes=[_PROFILE_CHANGE]),
+                _step("apply_training_patch", changes=[_LIBRARY_CHANGE]),
+            ]
+        )
+
+        assert summary is not None
+        self.assertEqual(len(summary["labels"]), 2)
+        self.assertFalse(summary["undoable"])
+
+    def test_an_applied_history_undo_is_listed_and_blocks_turn_undo(self) -> None:
+        summary = change_summary(
+            [
+                _step("update_profile", changes=[_PROFILE_CHANGE]),
+                _step("undo_training_change", {"ok": True, "status": "applied"}),
+            ]
+        )
+
+        self.assertEqual(
+            summary,
+            {
+                "labels": ["Profil aktualisiert", "Lokale Änderung zurückgenommen"],
+                "undoable": False,
+                "undone_at": None,
+            },
+        )
+
     def test_reads_failures_proposals_and_previews_are_not_changes(self) -> None:
         self.assertIsNone(
             change_summary(
@@ -81,7 +112,7 @@ class ChangeSummaryTests(unittest.TestCase):
                     _step("cancel_coach_request", {"ok": True, "status": "cancelled"}),
                     _step("preview_adaptive_replan", {"ok": True, "id": "preview"}),
                     _step("stage_training_plan"),
-                    _step("undo_training_change"),
+                    _step("undo_training_change", {"ok": True, "proposed_action": {}}),
                     _step("save_competition", "malformed"),
                     {"tool": "save_competition"},
                 ]
