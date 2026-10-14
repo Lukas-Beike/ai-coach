@@ -254,7 +254,7 @@ class SessionAuthReadPathTests(unittest.TestCase):
     def test_due_cleanup_runs_once_per_interval(self) -> None:
         self.add_session("gone", expires_in=-10)
         token, _ = self.add_session("live")
-        self.auth._last_cleanup_monotonic = 0.0
+        self.auth._last_cleanup_monotonic = None
         self.assertTrue(self.auth.authenticated_session(handler_for(token)))
         with self.manager.reader() as db:
             self.assertEqual(

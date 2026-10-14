@@ -110,7 +110,9 @@ class SessionAuthService:
         self._rate_limiter = rate_limiter
         self._sessions = sessions or AthleteSessionService()
         self._session_lock = threading.RLock()
-        self._last_cleanup_monotonic = 0.0
+        # None means no cleanup has run yet, so the first check is always due
+        # regardless of how long the monotonic clock has been running.
+        self._last_cleanup_monotonic: float | None = None
 
     @property
     def session_lock(self) -> threading.RLock:
@@ -157,9 +159,9 @@ class SessionAuthService:
         return deleted
 
     def _cleanup_due(self) -> bool:
+        last = self._last_cleanup_monotonic
         return (
-            time.monotonic() - self._last_cleanup_monotonic
-            >= SESSION_CLEANUP_INTERVAL_SECONDS
+            last is None or time.monotonic() - last >= SESSION_CLEANUP_INTERVAL_SECONDS
         )
 
     def _write_if_idle(self, write: Callable[[Any], object]) -> bool:
