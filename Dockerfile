@@ -16,7 +16,8 @@ RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r /app/requ
     && addgroup --system app \
     && adduser --system --ingroup app app \
     && mkdir -p /data \
-    && chown -R app:app /app /data
+    && chown -R app:app /data \
+    && chmod -R a-w /app
 USER app
 EXPOSE 8090
 VOLUME ["/data"]
