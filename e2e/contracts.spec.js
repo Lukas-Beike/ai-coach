@@ -45,6 +45,8 @@ async function controlled(page) {
     const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
     fixture.push = (event, payload) => fixture.controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
     window.__contract = fixture;
+    // The caller assertions need frames beyond V8's default ten-frame stack.
+    Error.stackTraceLimit = 50;
     window.fetch = (path, options) => {
       if (path === "/api/chat/stream") {
         fixture.streamCalls++;
