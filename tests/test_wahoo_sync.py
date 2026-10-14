@@ -18,6 +18,7 @@ from backend.sync.wahoo_sync import (
     LAST_ERROR_KEY,
     LAST_SYNC_KEY,
     SYNC_FAILED_MESSAGE,
+    WahooSyncClock,
     WahooSyncService,
 )
 from tests.wahoo_sync_fixture import (
@@ -187,8 +188,7 @@ class WindowAndResetGateTests(WahooSyncCase):
             daily_markers=lambda: self.markers,
             observer=lambda: self.observer,
             registry=DEFAULT_PROVIDER_REGISTRY,
-            zone_provider=lambda: ZONE,
-            now=lambda: self.now,
+            clock=WahooSyncClock(lambda: self.now, lambda: ZONE),
             logger=self.logger,
             lock=self.lock,
             gate=gate,

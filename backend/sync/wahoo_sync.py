@@ -17,6 +17,7 @@ import logging
 import threading
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any, Final, Protocol
 
@@ -62,6 +63,14 @@ class WahooWorkoutSource(Protocol):
     ) -> WahooWorkoutFetch: ...
 
 
+@dataclass(frozen=True)
+class WahooSyncClock:
+    """The current instant and the athlete's local zone, resolved per run."""
+
+    now: Callable[[], datetime]
+    zone: Callable[[], tzinfo | None]
+
+
 class WahooConnectionStatus(Protocol):
     """The token-free connection status the sync consults."""
 
@@ -99,8 +108,7 @@ class WahooSyncService:
         daily_markers: Callable[[], DailySyncMarkerService],
         observer: Callable[[], SyncOperationObserver],
         registry: ProviderRegistry,
-        zone_provider: Callable[[], tzinfo | None],
-        now: Callable[[], datetime],
+        clock: WahooSyncClock,
         logger: logging.Logger,
         lock: Any | None = None,
         gate: ProviderResyncGate | None = None,
@@ -115,8 +123,7 @@ class WahooSyncService:
         self._daily_markers = daily_markers
         self._observer = observer
         self._registry = registry
-        self._zone_provider = zone_provider
-        self._now = now
+        self._clock = clock
         self._logger = logger
         self._lock = lock if lock is not None else WAHOO_SYNC_LOCK
         self._gate = gate
@@ -170,8 +177,8 @@ class WahooSyncService:
             self._lock.release()
 
     def _sync_locked(self, days: int) -> dict[str, Any]:
-        zone = self._zone_provider() or UTC
-        synced_at = self._now()
+        zone = self._clock.zone() or UTC
+        synced_at = self._clock.now()
         fetch = self._source().list_workouts(
             since=synced_at - timedelta(days=days), until=synced_at
         )
