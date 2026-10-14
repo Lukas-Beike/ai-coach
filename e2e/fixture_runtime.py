@@ -283,6 +283,11 @@ def fixture_coach_response(payload, **kwargs):
             "remote_write": False,
             "sync_scope": None,
         }
+        if current_message == "E2E nutrition: update meal":
+            # Editing a saved meal needs its exact template scope.
+            arguments["_request"]["scope"].append(
+                "nutrition_template:" + str(templates[0]["id"])
+            )
     elif context.get("pending_request"):
         name = "save_checkin"
         arguments = {
