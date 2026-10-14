@@ -27,6 +27,7 @@ from backend.sync import queue as sync_queue
 from backend.sync.intervals import IntervalsSyncService
 
 server = fixtures.server
+WRITE_DOMAINS = "write_domains"  # name of the write gate's classifier schema
 
 
 class DialogueHarness:
@@ -58,6 +59,9 @@ class DialogueHarness:
         dialogue_clock.start()
         self.addCleanup(dialogue_clock.stop)
         self.counter = 0
+        # Domains the write gate's fallback classifier reports when the
+        # athlete's wording has no domain stem (empty: the classifier abstains).
+        self.gate_domains = frozenset()
         # Most legacy behavior tests exercise effects after explicitly simulating
         # the athlete clicking the new remote-approval card. Security tests turn
         # this off and assert the proposal remains inert.
@@ -126,6 +130,12 @@ class DialogueHarness:
         self.counter += 1
 
         def response(payload, *args, **extra):
+            if payload.get("text", {}).get("format", {}).get("name") == WRITE_DOMAINS:
+                # The write gate's fallback classifier is a separate model call;
+                # it must not consume a scripted Coach response.
+                return {
+                    "output_text": json.dumps({"domains": sorted(self.gate_domains)})
+                }
             step = next(steps)
             return step(payload) if callable(step) else step
 
@@ -482,6 +492,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             executed.append(name)
             return original_execute(dispatcher, name, arguments, **kwargs)
 
+        self.gate_domains = frozenset({"profile"})  # no domain stem in the wording
         with patch.object(CoachToolDispatchService, "execute", traced_execute):
             result, _ = self.turn(
                 "Speichere meinen Namen",
@@ -590,7 +601,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             )
 
         result, _ = self.turn(
-            "Bitte dauerhaft merken",
+            "Bitte dauerhaft im Profil merken",
             [
                 lambda _: self.call(
                     "update_profile", {"changes": changes}, ["local_profile"]
@@ -672,7 +683,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         before = server.ATHLETE_DATA.profile().get()
         for changes, scope in cases:
             result, _ = self.turn(
-                "Bitte speichern",
+                "Bitte im Profil speichern",
                 [
                     lambda _, c=changes, s=scope: self.call(
                         "update_profile", {"changes": c}, s
@@ -871,7 +882,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                     "UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],)
                 )
             result, _ = self.turn(
-                "Bitte nochmal versuchen",
+                "Bitte den Sync nochmal versuchen",
                 [
                     lambda _, j=job: self.call(
                         "resolve_training_sync_conflict",
@@ -886,7 +897,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "failed"
             )
             result, _ = self.turn(
-                "Ja, bei dem Anbieter nochmal versuchen",
+                "Ja, bei dem Anbieter den Sync nochmal versuchen",
                 [
                     lambda _, j=job: self.call("get_sync_job", {"job_id": j["id"]}),
                     lambda _, j=job, p=provider, r=remote, s=scope: self.call(
@@ -1763,6 +1774,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         competition_id = competition.get("competition", competition).get("id")
         if not competition_id:
             competition_id = server.PLANNING_DATA.competition().list()[0]["id"]
+        self.gate_domains = frozenset({"competition"})  # pronoun, no domain stem
         result, _ = self.turn(
             "Den bitte einen Tag später",
             [
@@ -1796,7 +1808,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             )
         one, two = server.PLANNING_DATA.competition().list()
         result, _ = self.turn(
-            "Den ersten entfernen",
+            "Den ersten Wettkampf entfernen",
             [
                 lambda _: self.call(
                     "delete_competition",
@@ -1965,7 +1977,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             [self.workout("2026-09-08"), self.workout("2026-09-09")]
         )
         result, _ = self.turn(
-            "Alle offenen Einheiten übertragen",
+            "Alle offenen Einheiten zu Intervals übertragen",
             [
                 lambda _: self.call(
                     "start_intervals_plan_sync",
@@ -1987,7 +1999,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         )[0]
         entry = server.SYNC_COMMANDS.authority().pending_plan_push_entries()[0]
         result, _ = self.turn(
-            "Nur diese Einheit übertragen",
+            "Nur diese Einheit zu Intervals übertragen",
             [
                 lambda _: self.call(
                     "start_intervals_plan_sync",
@@ -2343,7 +2355,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             return call
 
         result, _ = self.turn(
-            "Ja, so ?bernehmen", [commit, {"output_text": "Gespeichert."}]
+            "Ja, so übernehmen", [commit, {"output_text": "Gespeichert."}]
         )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(len(self.state()["planned_units"]), 1)

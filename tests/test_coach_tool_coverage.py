@@ -13,6 +13,7 @@ from unittest.mock import patch
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.training_patch import CoachTrainingPatchService
+from backend.coach.write_gate import TOOL_DOMAIN
 from backend.planning import library as planning_library
 from backend.providers import http as provider_http
 from backend.providers import intervals_client as intervals_client_module
@@ -36,6 +37,22 @@ def covers(*cases):
         return checked
 
     return decorate
+
+
+# Athlete wording that names the tool's write domain, as the write gate requires.
+DOMAIN_MESSAGES = {
+    "planning": "Bitte im Trainingsplan so ausführen.",
+    "profile": "Bitte im Profil so ausführen.",
+    "competition": "Bitte beim Wettkampf so ausführen.",
+    "checkin": "Bitte im Check-in so ausführen.",
+    "nutrition": "Bitte bei der Mahlzeit so ausführen.",
+    "undo": "Bitte rückgängig machen.",
+    "remote_intervals": "Bitte mit Intervals synchronisieren.",
+}
+
+
+def message_for(tool):
+    return DOMAIN_MESSAGES.get(TOOL_DOMAIN.get(tool), "Bitte so ausführen.")
 
 
 REQUIRED_VARIANTS = {
@@ -161,11 +178,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                     self.observed.add(step["tool"] + ":" + variant)
         return receipt, model
 
-    def run_tool(
-        self, name, arguments=None, scope=None, message="Bitte so ausführen.", **kwargs
-    ):
+    def run_tool(self, name, arguments=None, scope=None, message=None, **kwargs):
         receipt, _ = self.turn(
-            message,
+            message or message_for(name),
             [
                 lambda _: self.call(name, arguments, scope, **kwargs),
                 {"output_text": "Synthetischer Ergebnistext."},
@@ -276,6 +291,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 ["local_profile"],
             )
 
+        # The reply names no domain; the fallback classifier resolves it from the
+        # preceding assistant question about the profile.
+        self.gate_domains = frozenset({"profile"})
         receipt, _ = self.turn(
             "Ja, bitte dauerhaft hinzufügen.",
             [
@@ -508,7 +526,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             },
             ["local_plan"],
             period=period,
-            message="Erstelle zunächst nur einen Entwurf.",
+            message="Erstelle zunächst nur einen Plan als Entwurf.",
         )
         self.assertEqual(self.state()["planned_units"], [])
         source = [
@@ -529,6 +547,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             response["output"][0]["arguments"] = json.dumps(args)
             return response
 
+        self.gate_domains = frozenset({"planning"})  # "Entwurf" is no domain stem
         result, _ = self.turn(
             "Ja, diesen Entwurf speichern.", [commit, {"output_text": "Gespeichert."}]
         )
@@ -609,7 +628,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 }
             },
             ["activity_feedback"],
-            message="Notiere zum gestrigen Lauf: entspanntes Ende.",
+            message="Notiere als Feedback zum gestrigen Lauf: entspanntes Ende.",
         )
         self.assertEqual(
             server.ATHLETE_DATA.activity_feedback().list()[0]["notes"],
@@ -619,7 +638,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "delete_activity_feedback",
             {"activity_id": "synthetic-run"},
             ["activity_feedback"],
-            message="Entferne diese Notiz wieder.",
+            message="Entferne dieses Feedback wieder.",
         )
         self.assertEqual(server.ATHLETE_DATA.activity_feedback().list(), [])
         self.assertEqual(server.ATHLETE_DATA.checkin().list()[0]["soreness"], 6)
@@ -649,7 +668,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "save_competition",
             {"payload": {"competition_id": competition_id, "event_date": "2026-10-04"}},
             ["competition:" + competition_id],
-            message="Den bitte einen Tag später.",
+            message="Den Wettkampf bitte einen Tag später.",
         )
         self.assertEqual(
             server.PLANNING_DATA.competition().list()[0]["event_date"], "2026-10-04"
@@ -756,7 +775,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     def test_new_plan_sync_and_later_selected_sync_use_real_ids(self):
         period = {"start": "2026-09-09", "end": "2026-09-09"}
         result, _ = self.turn(
-            "Mittwoch locker trainieren und anschließend übertragen.",
+            "Mittwoch locker trainieren und anschließend zu Intervals übertragen.",
             [
                 lambda _: self.call(
                     "apply_training_patch",
@@ -795,7 +814,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             target="intervals",
             remote_write=True,
             sync_scope="selected",
-            message="Nur diese Einheit erneut übertragen.",
+            message="Nur diese Einheit erneut zu Intervals übertragen.",
         )
         self.assertEqual(selected["entries"], 1)
         with server.database_manager().unit_of_work() as db:
@@ -814,7 +833,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             target="intervals",
             remote_write=True,
             sync_scope="all_pending",
-            message="Jetzt alle offenen Einheiten übertragen.",
+            message="Jetzt alle offenen Einheiten zu Intervals übertragen.",
         )
         self.assertEqual(all_pending["entries"], 2)
 
@@ -1655,7 +1674,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             self.assertEqual(result["command_receipts"], [])
             self.assertEqual(self.athlete_state(), before)
 
-    def test_model_misreading_negated_sync_cannot_queue_before_athlete_approval(self):
+    def test_model_misreading_negated_sync_cannot_queue_or_propose(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
         before_jobs = server.SYNC_JOB_QUEUE.service().list()
         self.auto_approve_remote_proposals = False
@@ -1677,12 +1696,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             ],
         )
 
-        result = receipt["command_receipts"][0]["result"]
-        self.assertEqual(result["status"], "approval_required")
+        # The write gate refuses the sync before it can even become a proposal.
+        self.assertEqual(receipt["command_receipts"], [])
+        self.assertEqual(receipt["proposed_actions"], [])
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), before_jobs)
         proposals = server.COACH_PROPOSALS.read_service().current("synthetic-session")
-        self.assertEqual(len(proposals), 1)
-        self.assertEqual(proposals[0]["action_type"], "remote_coach_write")
+        self.assertEqual(proposals, [])
 
     def test_all_pending_approval_does_not_expand_to_units_added_after_preview(self):
         first = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
@@ -2104,7 +2123,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 if kwargs.get("remote_write"):
                     self.auto_approve_remote_proposals = False
                 result, _ = self.turn(
-                    "Synthetischer Auftrag mit ungültigem Argument.",
+                    message_for(name),
                     [
                         lambda _, n=name, a=args, s=scope, k=kwargs: self.call(
                             n, a, s, **k
@@ -2142,7 +2161,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             )
 
         result, _ = self.turn(
-            "Zeig mir eine mögliche Entlastung.",
+            "Zeig mir eine mögliche Entlastung im Plan.",
             [
                 lambda _: self.call("preview_adaptive_replan", {}, ["adaptive_replan"]),
                 premature,
