@@ -2,6 +2,7 @@ import hashlib
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -983,6 +984,35 @@ class SyncJobStoreTests(unittest.TestCase):
             )
             self.assertTrue(created)
             self.assertNotEqual(manual["id"], first["id"])
+
+    def test_concurrent_automatic_enqueues_create_exactly_one_job(self):
+        for job_type, payload in (
+            ("refresh", {"reason": "daily"}),
+            ("historical_backfill", {"days": 30}),
+        ):
+            workers = 8
+            barrier = threading.Barrier(workers)
+
+            def enqueue(index, job_type=job_type, payload=payload, barrier=barrier):
+                barrier.wait(timeout=5)
+                return self.store.enqueue(
+                    {"provider": "intervals", "type": job_type, "payload": payload},
+                    "scheduler" if index % 2 else "startup",
+                    None,
+                    None,
+                )
+
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                results = list(executor.map(enqueue, range(workers)))
+
+            self.assertEqual(sum(created for _job, created in results), 1)
+            self.assertEqual(len({job["id"] for job, _created in results}), 1)
+            with self.manager.unit_of_work() as db:
+                count = db.execute(
+                    "SELECT COUNT(*) AS count FROM sync_jobs WHERE provider=? AND type=?",
+                    ("intervals", job_type),
+                ).fetchone()["count"]
+            self.assertEqual(count, 1)
 
     def test_backfill_continuation_keeps_its_cursor_while_a_chunk_runs(self):
         running, created = self.store.enqueue(

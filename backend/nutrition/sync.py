@@ -72,15 +72,9 @@ class IntervalsNutritionSyncService:
         endpoint = f"/athlete/{athlete}/wellness/{meal_date}"
         try:
             remote_record = self._api_client.put(endpoint, payload)
-            has_unknown_macros = any(
-                summary.get(field) is None
-                for field in ("total_carbs_g", "total_protein_g", "total_fat_g")
-            )
-            current = (
-                False
-                if has_unknown_macros
-                else self._diary_service.mark_date_synced(meal_date, revision)
-            )
+            # Unknown macros are simply not sent. A later edit that adds them
+            # bumps the day's revision and re-queues it as pending.
+            current = self._diary_service.mark_date_synced(meal_date, revision)
             return {
                 "ok": True,
                 "date": meal_date,

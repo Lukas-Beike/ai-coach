@@ -224,7 +224,7 @@ class NutritionMealTimeTests(unittest.TestCase):
         self.assertIsNone(item["total_protein_g"])
         self.assertIsNone(item["total_fat_g"])
 
-    def test_sync_never_writes_partial_macros_and_keeps_day_pending(self) -> None:
+    def test_sync_never_writes_partial_macros_and_marks_day_synced(self) -> None:
         self.log_full_macros()
         self.log_without_macros()
         sync, api = self.sync_service()
@@ -234,8 +234,8 @@ class NutritionMealTimeTests(unittest.TestCase):
         self.assertEqual(
             api.put.call_args.args[1], {"id": "2026-09-24", "kcalConsumed": 600}
         )
-        self.assertTrue(result["pending"])
-        self.assertEqual(self.service.list_unsynced_dates(), ["2026-09-24"])
+        self.assertFalse(result["pending"])
+        self.assertEqual(self.service.list_unsynced_dates(), [])
 
     def test_complete_macros_are_written_and_day_is_synced(self) -> None:
         self.log_full_macros()
