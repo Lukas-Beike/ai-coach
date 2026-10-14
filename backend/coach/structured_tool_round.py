@@ -31,6 +31,15 @@ from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
 COACH_TOOL_MAX_ROUNDS = 12
+_TURN_RELEASED = {
+    "ok": False,
+    "status": "not_performed",
+    "reason": "turn_released",
+    "message": (
+        "Nothing was saved or sent. This turn was already ended and released. "
+        "Do not repeat this call and do not claim it happened."
+    ),
+}
 
 
 @dataclass
@@ -170,6 +179,10 @@ class CoachStructuredToolRoundService:
                     # Kept on the receipt so the athlete can undo the turn's changes.
                     change_history.collect_changes() as changes,
                 ):
+                    # Checked under the same lock as stale-turn release, so a turn
+                    # released while this worker was busy cannot finish its writes.
+                    if not self._jobs.turn_open(state.client_turn_id):
+                        return name, call_id, dict(_TURN_RELEASED), {"operation": name}
                     result = self._execution.execute(
                         metadata,
                         action=action,

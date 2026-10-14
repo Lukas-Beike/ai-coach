@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -397,6 +398,7 @@ class CoachPlanningContextReader:
         return {
             "provider": "iCalendar",
             "read_only": True,
+            "trust": "untrusted_external_text",
             "events": self._external_calendar_reader.list_events(
                 limit=50, training_relevant_only=True
             ),
@@ -766,6 +768,14 @@ def _compact_coach_library_workout(
     return compacted
 
 
+_FENCE_MARKER = re.compile(r"untrusted\s+external\s+data", re.IGNORECASE)
+
+
+def _defanged(text: str) -> str:
+    """Stop serialized external text from reproducing the untrusted-data fence."""
+    return _FENCE_MARKER.sub("untrusted-external-data", text)
+
+
 def coach_context_json_size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
 
@@ -968,9 +978,11 @@ class CoachTrainingContextService:
                     "omitted_sections": sorted(CONTEXT_SECTIONS - selection.sections),
                 }
             )
-        library_text = json.dumps(library, ensure_ascii=False, separators=(",", ":"))
-        structured_text = json.dumps(
-            prompt_context, ensure_ascii=False, separators=(",", ":")
+        library_text = _defanged(
+            json.dumps(library, ensure_ascii=False, separators=(",", ":"))
+        )
+        structured_text = _defanged(
+            json.dumps(prompt_context, ensure_ascii=False, separators=(",", ":"))
         )
         context_prefix = (
             COACH_PROMPT
@@ -1049,8 +1061,8 @@ class CoachTrainingContextService:
                     if key != "projection"
                 },
             }
-            structured_text = json.dumps(
-                prompt_context, ensure_ascii=False, separators=(",", ":")
+            structured_text = _defanged(
+                json.dumps(prompt_context, ensure_ascii=False, separators=(",", ":"))
             )
             context = context_prefix + structured_text + context_suffix
             LOGGER.warning(

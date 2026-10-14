@@ -170,6 +170,34 @@ class CoachTurnOpeningTests(unittest.TestCase):
                 db.execute("SELECT COUNT(*) FROM coach_commands").fetchone()[0], 1
             )
 
+    def test_same_turn_id_with_different_text_is_rejected_without_writes(self) -> None:
+        first = self._open()
+        with self.assertRaises(AppError) as raised:
+            self._open(message="Delete my whole plan")
+
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (409, "client_turn_text_mismatch"),
+        )
+        with self.manager.reader() as db:
+            messages = db.execute("SELECT content FROM messages").fetchall()
+            command = db.execute("SELECT receipt FROM coach_commands").fetchone()
+        self.assertEqual([row["content"] for row in messages], ["Plan a relaxed ride"])
+        self.assertEqual(json.loads(command["receipt"]), first)
+
+    def test_same_turn_id_with_same_text_stays_idempotent(self) -> None:
+        first = self._open()
+
+        again = self._open(message="Plan a relaxed ride")
+        padded = self._open(message="\n  Plan a relaxed ride\t")
+
+        self.assertEqual(again, first)
+        self.assertEqual(padded, first)
+        with self.manager.reader() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 1
+            )
+
     def test_foreign_session_is_rejected_without_writes(self) -> None:
         foreign_receipt = {"session_key": coach_session_key("another-session")}
         with self.manager.unit_of_work() as db:

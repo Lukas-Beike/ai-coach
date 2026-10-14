@@ -43,6 +43,10 @@ BASE_SECTIONS = frozenset(
         "source_policy",
     }
 )
+# A vague follow-up gets the stable core plus the plan sections. Time-bound and
+# external sections (calendar, external calendar, weather, recovery) are loaded on
+# demand through read_coach_context instead of riding along on every "ok".
+FALLBACK_SECTIONS = BASE_SECTIONS | {"planning", "training_plans"}
 # Provider-named section names from before the domain grouping. They stay accepted
 # on input (tool arguments, persisted selections) and resolve to one canonical name.
 SECTION_ALIASES: Mapping[str, str] = {
@@ -240,7 +244,7 @@ def select_coach_context(
         is_pending_active, continuation, pronoun, matched, normalized
     ):
         return CoachContextSelection(
-            "fallback", retain_pending_request=is_pending_active
+            "fallback", FALLBACK_SECTIONS, retain_pending_request=is_pending_active
         )
     name = matched[0] if matched else "general_coaching"
     sections = set(BASE_SECTIONS)
@@ -297,7 +301,8 @@ def _pending_request_is_active(
     if pending_domain and message_domain and pending_domain != message_domain:
         return False
     if status == "failed":
-        return bool(retry or continuation)
+        # A retry re-runs the athlete's stored request, so it needs that provenance.
+        return bool((retry or continuation) and _source_message_ids(pending))
     return bool(
         continuation
         or retry
@@ -305,6 +310,25 @@ def _pending_request_is_active(
         or re.search(CLARIFICATION_ANSWER_PATTERN, normalized)
         or _is_concise_clarification_answer(pending, normalized, message_domain)
     )
+
+
+def _source_message_ids(pending: dict[str, Any]) -> list[int]:
+    ids = pending.get("source_message_ids")
+    return [item for item in ids if type(item) is int] if isinstance(ids, list) else []
+
+
+def pending_origin_messages(
+    pending: Mapping[str, Any], messages: object, current_id: object = None
+) -> list[dict[str, Any]]:
+    """Return the stored athlete messages a pending request was created from."""
+    wanted = set(_source_message_ids(dict(pending))) - {current_id}
+    return [
+        item
+        for item in (messages if isinstance(messages, list) else [])
+        if isinstance(item, dict)
+        and item.get("role") == "user"
+        and item.get("id") in wanted
+    ]
 
 
 def _is_concise_clarification_answer(
@@ -376,4 +400,23 @@ def compact_coach_dialogue(
         and not selection.retain_pending_request
     ):
         result["pending_request"] = None
+    elif isinstance(pending, dict) and pending.get("status") == "failed":
+        result["pending_request"] = _grounded_failed_request(context, pending)
     return result
+
+
+def _grounded_failed_request(
+    context: dict[str, Any], pending: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Show a retried request as the athlete's stored words, never a model summary."""
+    origins = pending_origin_messages(
+        pending, context.get("messages"), context.get("current_user_message_id")
+    )
+    if not origins:
+        return None
+    text = "\n".join(str(item.get("content") or "") for item in origins)
+    return {
+        **pending,
+        "summary": text[:2000],
+        "summary_source": "athlete_message",
+    }

@@ -146,6 +146,37 @@ def _refresh_notes(effects: list[dict[str, Any]]) -> list[str]:
     ]
 
 
+def _athlete_request(
+    request: dict[str, Any],
+    context: dict[str, Any],
+    message: str,
+    *,
+    retained: bool,
+) -> tuple[list[int], str]:
+    """Return the source ids and the athlete's own words for a failed request.
+
+    The model's `_request.summary` is never stored: a later "retry" re-runs this
+    text, so it must be what the athlete wrote, read back from stored messages.
+    """
+    current_id = context["current_user_message_id"]
+    ids = request.get("source_message_ids")
+    ids = sorted(
+        {item for item in ids if type(item) is int} if isinstance(ids, list) else ()
+    )
+    if retained:
+        # A bare "retry" or answer is not part of the request it continues.
+        ids = [item for item in ids if item != current_id]
+    ids = ids or [current_id]
+    stored = {
+        item["id"]: str(item.get("content") or "")
+        for item in context.get("messages") or []
+        if isinstance(item, dict) and item.get("role") == "user"
+    }
+    stored.setdefault(current_id, message)
+    summary = "\n".join(stored[item] for item in ids if item in stored)
+    return ids, (summary or message)[:2000]
+
+
 def _pending_value(
     command_receipts: list[dict[str, Any]],
     effects: list[dict[str, Any]],
@@ -180,13 +211,17 @@ def _pending_value(
             if isinstance(entry, dict) and "tool" in entry
         ]
         request = last_request or pending_request
-        summary = request.get("summary") or message
+        source_ids, summary = _athlete_request(
+            request,
+            context,
+            message,
+            retained=selection.retain_pending_request and bool(pending_request),
+        )
         domain = request.get("domain") or infer_coach_domain(summary, tools=tool_names)
         return json.dumps(
             {
                 "summary": summary,
-                "source_message_ids": request.get("source_message_ids")
-                or [context["current_user_message_id"]],
+                "source_message_ids": source_ids,
                 "status": "failed",
                 "domain": domain,
                 "question": None,

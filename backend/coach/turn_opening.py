@@ -13,6 +13,7 @@ from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository
+from backend.errors import AppError
 
 
 class CoachTurnOpeningService:
@@ -52,6 +53,7 @@ class CoachTurnOpeningService:
             receipt = command_receipt(existing["receipt"]) if existing else {}
             if existing:
                 self._receipt_service.require_owner(receipt, session_csrf_hash)
+                self._require_same_message(db, client_turn_id, message)
             else:
                 user = self._chat_repository.add(
                     db, "user", message, client_turn_id=client_turn_id
@@ -78,3 +80,18 @@ class CoachTurnOpeningService:
                     ),
                 )
         return receipt
+
+    @staticmethod
+    def _require_same_message(db: Any, client_turn_id: str, message: str) -> None:
+        """Refuse to run new text under a turn id that stored different text."""
+        stored = db.execute(
+            "SELECT content FROM messages WHERE client_turn_id=? AND role='user'",
+            (client_turn_id,),
+        ).fetchone()
+        if stored is not None and stored["content"] != message.strip():
+            raise AppError(
+                409,
+                "Diese Anfrage-ID gehört bereits zu einer anderen Nachricht. "
+                "Bitte sende die Nachricht erneut.",
+                reason="client_turn_text_mismatch",
+            )

@@ -142,6 +142,9 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
         )
         self.assertTrue(result["external_calendar"]["read_only"])
         self.assertEqual(result["external_calendar"]["provider"], "iCalendar")
+        self.assertEqual(
+            result["external_calendar"]["trust"], "untrusted_external_text"
+        )
         self.assertEqual(result["activities"]["synced_at"], self.snapshot["synced_at"])
         self.assertNotIn("raw_secret", result["activities"])
         self.assertNotIn("intervals", result)

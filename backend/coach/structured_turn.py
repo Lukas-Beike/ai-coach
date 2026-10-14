@@ -279,6 +279,7 @@ class CoachStructuredTurnService:
             if isinstance(exc, AppError) and exc.reason in {
                 "command_scope_denied",
                 "client_turn_in_progress",
+                "client_turn_text_mismatch",
             }:
                 raise
             self._deps.logger.warning(

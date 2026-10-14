@@ -1282,6 +1282,12 @@ class ServerCoachTests(ServerTestCase):
 
         self.assertEqual(replay, first)
         self.assertEqual(foreign_replay.exception.reason, "command_scope_denied")
+        with server.database_manager().unit_of_work() as db:
+            stored_intent = db.execute(
+                "SELECT intent FROM coach_commands WHERE client_turn_id=?",
+                ("turn-background-idempotent",),
+            ).fetchone()["intent"]
+        self.assertEqual(json.loads(stored_intent), {"allow_mutations": True})
         publish.assert_called_once()
         register_event.assert_called_once()
         wake_worker.assert_called_once()

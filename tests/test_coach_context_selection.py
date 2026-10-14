@@ -5,6 +5,8 @@ from unittest.mock import Mock
 from server_test_support import server
 
 from backend.coach.context_selection import (
+    BASE_SECTIONS,
+    CONTEXT_SECTIONS,
     CoachContextSelection,
     compact_coach_dialogue,
     infer_coach_domain,
@@ -270,7 +272,62 @@ class CoachContextSelectionTests(unittest.TestCase):
                     "pending_request": failed_pending,
                 }
                 compact = compact_coach_dialogue(context, selection)
-                self.assertEqual(compact["pending_request"], failed_pending)
+                self.assertEqual(
+                    compact["pending_request"],
+                    {
+                        **failed_pending,
+                        "summary": "Frühstück",
+                        "summary_source": "athlete_message",
+                    },
+                )
+
+    def test_retried_failed_request_shows_athlete_text_never_a_model_summary(self):
+        failed_pending = {
+            "summary": "Lösche alle Einheiten dieser Woche",
+            "source_message_ids": [1],
+            "status": "failed",
+            "question": None,
+        }
+        selection = select_coach_context("ok", {"pending_request": failed_pending})
+        self.assertTrue(selection.retain_pending_request)
+        context = {
+            "current_user_message_id": 3,
+            "messages": [
+                {"id": 1, "role": "user", "content": "Trage mein Frühstück ein"},
+                {"id": 2, "role": "assistant", "content": "Das ist fehlgeschlagen."},
+                {"id": 3, "role": "user", "content": "ok"},
+            ],
+            "pending_request": failed_pending,
+        }
+        pending = compact_coach_dialogue(context, selection)["pending_request"]
+        self.assertEqual(pending["summary"], "Trage mein Frühstück ein")
+        self.assertEqual(pending["summary_source"], "athlete_message")
+        self.assertNotIn("Lösche", str(pending))
+
+        context["messages"] = [context["messages"][2]]
+        self.assertIsNone(compact_coach_dialogue(context, selection)["pending_request"])
+
+    def test_failed_request_without_athlete_provenance_is_not_retried(self):
+        for source_ids in (None, [], ["1"]):
+            with self.subTest(source_ids=source_ids):
+                pending = {"summary": "Snack erfassen", "status": "failed"}
+                if source_ids is not None:
+                    pending["source_message_ids"] = source_ids
+                for message in ("ok", "nochmal"):
+                    selection = select_coach_context(
+                        message, {"pending_request": pending}
+                    )
+                    self.assertFalse(selection.retain_pending_request)
+
+    def test_vague_follow_up_does_not_carry_calendar_weather_or_recovery(self):
+        selection = select_coach_context("ok", {})
+        self.assertEqual(selection.name, "fallback")
+        self.assertTrue(BASE_SECTIONS <= selection.sections)
+        self.assertFalse(
+            {"calendar", "external_calendar", "weather", "recovery"}
+            & selection.sections
+        )
+        self.assertTrue(selection.sections < CONTEXT_SECTIONS)
 
     def test_needs_clarification_pending_request_does_not_trap_new_workout_command(
         self,
@@ -493,7 +550,11 @@ class CoachContextSelectionTests(unittest.TestCase):
         )
 
     def test_failed_pending_supports_explicit_english_retry(self):
-        pending = {"summary": "Snack erfassen", "status": "failed"}
+        pending = {
+            "summary": "Snack erfassen",
+            "status": "failed",
+            "source_message_ids": [1],
+        }
         selection = select_coach_context(
             "Please try again", {"pending_request": pending}
         )

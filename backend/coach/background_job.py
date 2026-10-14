@@ -8,7 +8,7 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from backend.coach.chat_turn import CoachChatTurnService
-from backend.coach.job_store import CoachJobStore
+from backend.coach.job_store import MAX_FAILED_ATTEMPTS, CoachJobStore
 from backend.coach.morning import ManualMorningCheckinService
 from backend.coach.morning_completion import MorningCoachJobCompletionService
 from backend.coach.streams import ChatStreamRegistry
@@ -59,7 +59,42 @@ class CoachBackgroundJobRunner:
                 self._run_claimed(job)
         except AppError as exc:
             if exc.reason not in {"operation_invalidated", "maintenance"}:
+                self._end_exhausted_job(job)
                 raise
+        except Exception:
+            self._end_exhausted_job(job)
+            raise
+
+    def _end_exhausted_job(self, job: dict[str, Any]) -> None:
+        """Count a failure that escaped job handling and end a job that keeps failing.
+
+        The worker re-queues interrupted jobs after such a failure; without a bound a
+        job that fails before its own error handling would be retried forever.
+        """
+        client_turn_id = str(job.get("client_turn_id") or "")
+        try:
+            if self._jobs.record_failed_attempt(client_turn_id) < MAX_FAILED_ATTEMPTS:
+                return
+            failed = self._failures().persist(
+                client_turn_id,
+                {},
+                AppError(
+                    500,
+                    "Der Coach-Auftrag ist mehrfach fehlgeschlagen und wurde beendet.",
+                    reason="background_job_exhausted",
+                ),
+            )
+            stored = job.get("receipt")
+            operation_id = (
+                stored.get("operation_id") if isinstance(stored, dict) else ""
+            )
+            if failed and operation_id:
+                self._publish_receipt(str(operation_id), failed)
+        except Exception:  # the original failure is re-raised to the worker
+            self._logger.exception(
+                "Coach background job could not be ended after repeated failures",
+                extra={"event": "coach_background_job_exhaustion_failed"},
+            )
 
     def _run_claimed(self, job: dict[str, Any]) -> None:
         receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
