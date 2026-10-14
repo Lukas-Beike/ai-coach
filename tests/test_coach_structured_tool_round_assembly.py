@@ -11,6 +11,7 @@ from backend.coach.structured_tool_round_assembly import (
     StructuredToolRoundServices,
     StructuredToolRoundState,
 )
+from backend.coach.write_gate import ImpactVerdict
 
 
 class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
@@ -142,7 +143,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
     def test_write_gate_uses_read_only_tools_logger_and_lazy_transport(self):
         assembly, deps = self.make_assembly()
         deps["response_transport"].return_value.request.return_value = {
-            "output_text": '{"domains": ["planning"]}'
+            "output_text": '{"domains": ["planning"], "delete": false, "bulk": true}'
         }
 
         gate = assembly.service()._write_gate
@@ -151,7 +152,10 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
         self.assertIs(gate._logger, deps["logger"])
         deps["response_transport"].assert_not_called()
         classifier = gate._classifier_factory("synthetic-model")
-        self.assertEqual(classifier("Plan ändern", ""), frozenset({"planning"}))
+        self.assertEqual(
+            classifier("Plan neu aufbauen", "", ""),
+            ImpactVerdict(frozenset({"planning"}), bulk=True),
+        )
         payload = deps["response_transport"].return_value.request.call_args.args[0]
         self.assertEqual(payload["model"], "synthetic-model")
         self.assertEqual(payload["reasoning"], {"effort": "low"})

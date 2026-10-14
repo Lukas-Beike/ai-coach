@@ -16,7 +16,7 @@ from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.coach.turn_write_gate import CoachWriteGateService
-from backend.coach.write_gate import DomainClassifier, build_openai_domain_classifier
+from backend.coach.write_gate import ImpactClassifier, build_openai_impact_classifier
 
 
 @dataclass(frozen=True)
@@ -132,9 +132,9 @@ class CoachStructuredToolRoundAssembly:
         )
 
     def write_gate_service(self) -> CoachWriteGateService:
-        def classifier(model: str) -> DomainClassifier:
+        def classifier(model: str) -> ImpactClassifier:
             # Same Responses transport (and OPENAI_BASE_URL) as the Coach turn.
-            return build_openai_domain_classifier(
+            return build_openai_impact_classifier(
                 self._response_transport().request,
                 model=model,
                 reasoning_effort="low",

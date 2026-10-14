@@ -10,13 +10,13 @@ from backend.coach.context_selection import select_coach_context
 from backend.coach.write_gate import (
     TOOL_DOMAIN,
     UNGATED_TOOLS,
-    DomainClassifier,
     GateDecision,
+    ImpactClassifier,
+    ImpactVerdict,
     PendingOrigin,
     TurnGateState,
     build_turn_authority,
     check_write,
-    requested_domains,
 )
 
 _RETRYABLE_PENDING_STATUSES = frozenset({"needs_clarification", "failed"})
@@ -25,9 +25,15 @@ _NOT_PERFORMED = (
     "happened."
 )
 _DENIAL_GUIDANCE = {
-    "generic_save_needs_clarification": (
-        "The athlete asked to save something without naming what. Ask exactly one "
-        "concise question with clarify_coach_request about what should be saved."
+    "impact_not_confirmed": (
+        "Deleting or archiving records, replacing or committing a whole plan, and "
+        "changing many records at once need the athlete's explicit request for "
+        "exactly that. Ask one concise question with clarify_coach_request that "
+        "names what would be deleted, replaced or changed."
+    ),
+    "remote_not_requested": (
+        "The athlete's message does not ask to write to Intervals.icu. Keep the "
+        "change local and offer the sync instead."
     ),
     "cap_exceeded": (
         "This turn already made the maximum number of changes. Tell the athlete "
@@ -35,9 +41,8 @@ _DENIAL_GUIDANCE = {
     ),
 }
 _DEFAULT_GUIDANCE = (
-    "The athlete's own message does not ask for this kind of change. Answer without "
-    "saving. If a change might be wanted, say that nothing was changed and offer to "
-    "save it on request."
+    "This change is not available in this turn. Answer without saving and say "
+    "that nothing was changed."
 )
 
 
@@ -87,9 +92,7 @@ def _pending_origin(
         return None
     return PendingOrigin(
         origin_message_id=max(item["id"] for item in origins),
-        origin_domains=requested_domains(
-            "\n".join(str(item.get("content") or "") for item in origins)
-        ),
+        origin_text="\n".join(str(item.get("content") or "") for item in origins),
     )
 
 
@@ -104,7 +107,7 @@ class CoachTurnWriteGate:
         model: str | None,
         command_receipts: list[dict[str, Any]],
         read_only_tools: frozenset[str],
-        classifier_factory: Callable[[str], DomainClassifier],
+        classifier_factory: Callable[[str], ImpactClassifier],
         logger: logging.Logger,
     ) -> None:
         self._message = message
@@ -118,24 +121,32 @@ class CoachTurnWriteGate:
                 message, context, current_id if isinstance(current_id, int) else 0
             ),
         )
-        # A resumed turn already spent part of its write budget.
+        # A resumed turn already spent part of its write and bulk budget.
+        writes = [
+            entry for entry in command_receipts if entry.get("tool") in TOOL_DOMAIN
+        ]
         self._state = TurnGateState(
-            writes_count=sum(
-                1 for entry in command_receipts if entry.get("tool") in TOOL_DOMAIN
-            )
+            writes_count=len(writes),
+            records_count=sum(
+                len(changes)
+                for entry in writes
+                if isinstance(changes := entry.get("changes"), list)
+            ),
         )
         self._model = model
         self._read_only_tools = read_only_tools
         self._classifier_factory = classifier_factory
-        self._classifier: DomainClassifier | None = None
+        self._classifier: ImpactClassifier | None = None
         self._logger = logger
 
-    def _classify(self, current_text: str, previous_text: str) -> frozenset[str]:
+    def _classify(
+        self, current_text: str, previous_text: str, origin_text: str
+    ) -> ImpactVerdict:
         if not self._model:
-            return frozenset()
+            raise LookupError("no Coach model for the impact classifier")
         if self._classifier is None:
             self._classifier = self._classifier_factory(self._model)
-        return self._classifier(current_text, previous_text)
+        return self._classifier(current_text, previous_text, origin_text)
 
     def denial(
         self, tool_name: str, arguments: Mapping[str, Any] | None
@@ -188,7 +199,7 @@ class CoachWriteGateService:
     def __init__(
         self,
         read_only_tools: frozenset[str],
-        classifier_factory: Callable[[str], DomainClassifier],
+        classifier_factory: Callable[[str], ImpactClassifier],
         logger: logging.Logger,
     ) -> None:
         self._read_only_tools = read_only_tools
