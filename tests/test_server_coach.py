@@ -1227,13 +1227,16 @@ class ServerCoachTests(ServerTestCase):
     def test_coach_reset_clears_local_state_when_remote_delete_fails(self):
         server.key_value_service().set("openai_conversation_id", "conv-reset-failure")
         server.COACH_CONVERSATION.message_service().add("user", "Clear this message")
+        service = server.COACH_CONVERSATION.reset_service()
         with patch.object(
             openai_provider.OpenAIResponsesClient,
             "delete_conversation",
             side_effect=RuntimeError("synthetic remote failure"),
-        ):
-            result = server.COACH_CONVERSATION.reset_service().reset()
-        self.assertFalse(result["remote_conversation_deleted"])
+        ) as delete_conversation:
+            result = service.reset()
+            service.remote_delete_thread.join(5)
+        delete_conversation.assert_called_once_with("conv-reset-failure")
+        self.assertIsNone(result["remote_conversation_deleted"])
         self.assertEqual(server.key_value_service().get("openai_conversation_id"), "")
         self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
 

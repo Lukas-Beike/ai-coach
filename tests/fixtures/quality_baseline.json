@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "5f6a705e3facc8dfcedc2dc6b249c0eb90de36df",
+  "base": "e23d4c0bf2a91f002f84b243f3154e8d1b7b6574",
   "versions": {
     "ruff": "0.16.10",
     "mypy": "2.4.0"
@@ -932,12 +932,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_coach_conversation_reset.py",
-      "code": "arg-type",
-      "message_sha256": "6a429cf6d88f82d32e60b6416efc8a28c2595c057c1acbd53fd432f308438b04"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_coach_message_service.py",
       "code": "arg-type",
       "message_sha256": "6a6d74a3b7b18fe02592519e3346c8c82f8796be800cfd590723c85c46630604"
@@ -1097,12 +1091,6 @@
       "path": "tests/test_coach_structured_response.py",
       "code": "arg-type",
       "message_sha256": "a8aae951b62781ca74a2a3bb84841f4e84c6ba070500cdd249b3d99baa43033d"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_conversation_reset.py",
-      "code": "arg-type",
-      "message_sha256": "aa86d9820f47bc76dd2f58b52f317e0fa17f587affef1b2ee9e7f772867330eb"
     },
     {
       "tool": "mypy",
@@ -2429,12 +2417,6 @@
       "path": "backend/performance/current_metrics.py",
       "code": "return-value",
       "message_sha256": "d2d361e1e19a2a5feedd3f4f61895c083eb513533d6fff273ee9cb1e7758c57b"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_conversation_reset.py",
-      "code": "return-value",
-      "message_sha256": "f4c04c73f25c4752bb822b7ae29f94fde7b20c87eb7f3581fdd754a2cc1fa0a8"
     },
     {
       "tool": "mypy",
