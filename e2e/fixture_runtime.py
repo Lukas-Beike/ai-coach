@@ -179,6 +179,7 @@ def fixture_coach_response(payload, **kwargs):
     }:
         nutrition = server.NUTRITION_ASSEMBLY.meal_library_service()
         templates = nutrition.list_templates()
+        scope = ["local_nutrition"]
         if current_message == "E2E nutrition: mixed meal":
             product = nutrition.save_product(
                 {
@@ -270,6 +271,8 @@ def fixture_coach_response(payload, **kwargs):
             arguments = {"payload": {**templates[0], "kcal": 600}}
             arguments["payload"].pop("updated_at", None)
             arguments["payload"].pop("nutrition_basis", None)
+            # Editing a saved meal needs its exact template scope.
+            scope.append(f"nutrition_template:{templates[0]['id']}")
         else:
             name = "delete_nutrition_template"
             arguments = {"id": templates[0]["id"]}
@@ -277,17 +280,12 @@ def fixture_coach_response(payload, **kwargs):
             "summary": "Synthetic nutrition request",
             "source_message_ids": [current_id],
             "target": "local",
-            "scope": ["local_nutrition"],
+            "scope": scope,
             "period": None,
             "constraints": [],
             "remote_write": False,
             "sync_scope": None,
         }
-        if current_message == "E2E nutrition: update meal":
-            # Editing a saved meal needs its exact template scope.
-            arguments["_request"]["scope"].append(
-                "nutrition_template:" + str(templates[0]["id"])
-            )
     elif context.get("pending_request"):
         name = "save_checkin"
         arguments = {
