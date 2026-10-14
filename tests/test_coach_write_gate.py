@@ -117,6 +117,80 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(gate.normalize("übernimm"), "uebernimm")
 
 
+class ApprovalTierTests(unittest.TestCase):
+    TOOL = "apply_adaptive_replan"
+
+    def test_acknowledgement_or_unrelated_message_does_not_approve_a_preview(self):
+        for text in ("danke", "Wie war mein Schlaf?", "👍", ""):
+            with self.subTest(text=text):
+                classifier = _Classifier()
+                decision = _check(self.TOOL, text, classifier=classifier)
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.reason, "approval_not_confirmed")
+                self.assertEqual(decision.domain, "planning")
+                self.assertTrue(decision.classifier_used)
+                self.assertEqual(len(classifier.calls), 1)
+
+    def test_no_classifier_or_a_failing_one_fails_closed(self):
+        text = "Ja, übernimm die Anpassung"
+        self.assertFalse(_check(self.TOOL, text).allowed)
+        for classifier in (
+            _Classifier(error=RuntimeError("synthetic")),
+            _Classifier(result=None),
+            _Classifier(result=_verdict(["nutrition"])),
+        ):
+            with self.subTest(classifier=classifier.result):
+                self.assertFalse(_check(self.TOOL, text, classifier=classifier).allowed)
+
+    def test_a_confirming_verdict_approves_the_preview(self):
+        decision = _check(
+            self.TOOL,
+            "Ja, übernimm die Anpassung",
+            classifier=_Classifier(_verdict(["planning"])),
+        )
+        self.assertTrue(decision.allowed, decision)
+        self.assertEqual(decision.domain, "planning")
+
+    def test_the_turn_verdict_is_reused_across_writes(self):
+        classifier = _Classifier(_verdict(["planning", "competition"]))
+        authority = _authority("Ja, übernimm die Anpassung")
+        state = gate.TurnGateState()
+        for tool in (self.TOOL, "update_profile", self.TOOL):
+            self.assertTrue(
+                _check(
+                    tool,
+                    "Ja, übernimm die Anpassung",
+                    authority=authority,
+                    state=state,
+                    classifier=classifier,
+                ).allowed
+            )
+        self.assertEqual(len(classifier.calls), 1)
+
+    def test_the_classifier_never_grants_the_illness_sync_to_intervals(self):
+        classifier = _Classifier(_verdict(sorted(gate.DOMAINS), True, True))
+        flagged = {"sync_illness_to_intervals": True}
+        text = "Ja, übernimm die Anpassung"
+        decision = _check(self.TOOL, text, arguments=flagged, classifier=classifier)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "remote_not_requested")
+        self.assertEqual(classifier.calls, [])
+
+    def test_a_named_sync_still_needs_the_classifier_to_confirm_the_approval(self):
+        flagged = {"sync_illness_to_intervals": True}
+        named = "Übernimm die Pause und synchronisier sie mit Intervals"
+        denied = _check(self.TOOL, named, arguments=flagged, classifier=_Classifier())
+        self.assertFalse(denied.allowed)
+        self.assertEqual(denied.reason, "approval_not_confirmed")
+        allowed = _check(
+            self.TOOL,
+            named,
+            arguments=flagged,
+            classifier=_Classifier(_verdict(["planning"])),
+        )
+        self.assertTrue(allowed.allowed, allowed)
+
+
 class LocalTierTests(unittest.TestCase):
     def test_reversible_local_writes_need_no_domain_wording(self):
         local_tools = (
@@ -125,6 +199,8 @@ class LocalTierTests(unittest.TestCase):
             - {
                 "replace_training_plan",
                 "commit_training_plan",
+                # Applying a preview needs the classifier; see ApprovalTierTests.
+                "apply_adaptive_replan",
             }
         )
         for text in ("danke", "Das war gestern lecker", "👍", ""):
@@ -428,10 +504,15 @@ class RemoteTierTests(unittest.TestCase):
 
     def test_remote_flags_on_local_tools_need_a_named_sync(self):
         text = "Schieb den Lauf auf Mittwoch"
-        self.assertTrue(_check("apply_adaptive_replan", text).allowed)
+        confirming = _Classifier(_verdict(["planning"]))
+        self.assertTrue(
+            _check("apply_adaptive_replan", text, classifier=confirming).allowed
+        )
         flagged = {"sync_illness_to_intervals": True}
         self.assertFalse(
-            _check("apply_adaptive_replan", text, arguments=flagged).allowed
+            _check(
+                "apply_adaptive_replan", text, arguments=flagged, classifier=confirming
+            ).allowed
         )
         remote_request = {"_request": {"remote_write": True}}
         self.assertFalse(
@@ -439,7 +520,9 @@ class RemoteTierTests(unittest.TestCase):
         )
         named = text + " und synchronisier es mit Intervals"
         self.assertTrue(
-            _check("apply_adaptive_replan", named, arguments=flagged).allowed
+            _check(
+                "apply_adaptive_replan", named, arguments=flagged, classifier=confirming
+            ).allowed
         )
         self.assertTrue(
             _check("apply_training_patch", named, arguments=remote_request).allowed

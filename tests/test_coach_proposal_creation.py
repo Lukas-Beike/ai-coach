@@ -472,6 +472,88 @@ class CoachProposalCreationTests(unittest.TestCase):
             ],
         )
 
+    def _stored_preview(self, **pause: Any) -> None:
+        payload = {
+            "changes": [{"library_workout_id": "unit-1"}, {"library_workout_id": "u2"}],
+            "illness_pause": {
+                "illness": "Synthetic cold",
+                "start_date": "2026-09-23",
+                "end_date": "2026-09-27",
+                **pause,
+            },
+        }
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO plan_adjustments (id, payload, status, created_at) "
+                "VALUES ('adjustment-1', ?, 'preview', '2026-09-23T10:00:00+00:00')",
+                (json.dumps(payload),),
+            )
+
+    def _illness_sync(self, **arguments: Any) -> dict[str, Any]:
+        intent = {
+            "operation": "apply_adaptive_replan",
+            "intent": "remote_sync",
+            "target_system": "intervals",
+            "authorization_scope": ["adaptive_replan:adjustment-1", "intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [7]},
+        }
+        return self._service().create_remote_write(
+            "apply_adaptive_replan",
+            {"adjustment_id": "adjustment-1", "sync_illness_to_intervals": True}
+            | arguments,
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+
+    def test_illness_sync_proposal_is_built_from_the_stored_preview(self) -> None:
+        self._stored_preview()
+        result = self._illness_sync(
+            illness_pause={"start_date": "2030-01-01", "end_date": "2030-12-31"},
+            changes=[{"library_workout_id": "other"}],
+            sync_all=True,
+        )
+
+        stored = json.loads(str(self._rows()[0]["payload"]))["arguments"]
+        self.assertEqual(
+            stored,
+            {
+                "adjustment_id": "adjustment-1",
+                "sync_illness_to_intervals": True,
+                "_approval_manifest": {
+                    "adjustment_id": "adjustment-1",
+                    "changes": 2,
+                    "illness_pause": {
+                        "start_date": "2026-09-23",
+                        "end_date": "2026-09-27",
+                    },
+                },
+            },
+        )
+        shown = json.dumps(result["proposed_action"]["diff"])
+        self.assertIn("2026-09-23", shown)
+        self.assertIn("2026-09-27", shown)
+        self.assertNotIn("2030", shown)
+
+    def test_illness_sync_proposal_rejects_a_preview_that_is_not_the_latest(
+        self,
+    ) -> None:
+        self._stored_preview()
+        with self.assertRaises(AppError) as raised:
+            self._illness_sync(adjustment_id="adjustment-older")
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(self._rows(), [])
+
+    def test_illness_sync_proposal_needs_a_pending_pause_in_the_preview(
+        self,
+    ) -> None:
+        self._stored_preview(approved=True)
+        with self.assertRaises(AppError) as raised:
+            self._illness_sync()
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(self._rows(), [])
+
     def test_plan_approval_shows_each_concrete_workout(self) -> None:
         raw_payload = json.dumps(
             {"name": "Tempo ride", "date": "2026-10-02", "sport": "Ride"}

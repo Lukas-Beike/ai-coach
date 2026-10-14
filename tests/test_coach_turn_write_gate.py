@@ -155,11 +155,26 @@ class TurnWriteGateTests(unittest.TestCase):
         self.assertIsNotNone(
             gate.denial("apply_adaptive_replan", {"sync_illness_to_intervals": True})
         )
-        self.assertIsNone(gate.denial("apply_adaptive_replan", {}))
         factory.assert_not_called()
 
         named, _factory = make_gate("Synchronisier den Plan mit Intervals")
         self.assertIsNone(named.denial("start_intervals_plan_sync", {}))
+
+    def test_applying_a_preview_needs_the_classifier_to_confirm_the_request(
+        self,
+    ) -> None:
+        gate, factory = make_gate("danke")
+        denial = denied(gate, "apply_adaptive_replan", {})
+        self.assertEqual(denial["gate_reason"], "approval_not_confirmed")
+        self.assertIn("preview_adaptive_replan", denial["message"])
+        factory.assert_called_once_with("synthetic-model")
+
+        classifier = Mock(return_value=verdict(["planning"]))
+        gate, factory = make_gate("Ja, übernimm die Anpassung", classifier=classifier)
+        self.assertIsNone(gate.denial("apply_adaptive_replan", {}))
+        self.assertIsNone(gate.denial("update_profile", {}))
+        factory.assert_called_once_with("synthetic-model")
+        classifier.assert_called_once()
 
     def test_bare_affirmation_inherits_directly_preceding_sync_offer(self) -> None:
         offer = "Soll ich den Plan zu Intervals synchronisieren?"

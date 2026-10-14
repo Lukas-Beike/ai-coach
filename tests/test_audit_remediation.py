@@ -39,6 +39,7 @@ class AuditRemediationTests(unittest.TestCase):
     request = dialogue.CoachDialogueTests.request
     call = dialogue.CoachDialogueTests.call
     turn = dialogue.CoachDialogueTests.turn
+    confirm_impact = dialogue.CoachDialogueTests.confirm_impact
 
     def competition(self):
         item = server.PLANNING_DATA.competition().save(
@@ -406,6 +407,7 @@ with patch.object(Path, 'read_text', deny):
                 scope=["adaptive_replan:" + latest["id"]],
             )
 
+        self.confirm_impact("planning")
         first, _ = self.turn(
             "Show a preview, do not apply it.",
             [preview, apply, {"output_text": "Preview ready."}],
