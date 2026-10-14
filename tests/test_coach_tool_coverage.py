@@ -1674,7 +1674,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             self.assertEqual(result["command_receipts"], [])
             self.assertEqual(self.athlete_state(), before)
 
-    def test_model_misreading_negated_sync_cannot_queue_before_athlete_approval(self):
+    def test_model_misreading_negated_sync_cannot_queue_or_propose(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
         before_jobs = server.SYNC_JOB_QUEUE.service().list()
         self.auto_approve_remote_proposals = False
@@ -1696,12 +1696,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             ],
         )
 
-        result = receipt["command_receipts"][0]["result"]
-        self.assertEqual(result["status"], "approval_required")
+        # The write gate refuses the sync before it can even become a proposal.
+        self.assertEqual(receipt["command_receipts"], [])
+        self.assertEqual(receipt["proposed_actions"], [])
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), before_jobs)
         proposals = server.COACH_PROPOSALS.read_service().current("synthetic-session")
-        self.assertEqual(len(proposals), 1)
-        self.assertEqual(proposals[0]["action_type"], "remote_coach_write")
+        self.assertEqual(proposals, [])
 
     def test_all_pending_approval_does_not_expand_to_units_added_after_preview(self):
         first = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(

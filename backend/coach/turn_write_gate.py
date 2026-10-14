@@ -16,7 +16,7 @@ from backend.coach.write_gate import (
     TurnGateState,
     build_turn_authority,
     check_write,
-    stem_domains,
+    requested_domains,
 )
 
 _RETRYABLE_PENDING_STATUSES = frozenset({"needs_clarification", "failed"})
@@ -87,7 +87,7 @@ def _pending_origin(
         return None
     return PendingOrigin(
         origin_message_id=max(item["id"] for item in origins),
-        origin_domains=stem_domains(
+        origin_domains=requested_domains(
             "\n".join(str(item.get("content") or "") for item in origins)
         ),
     )

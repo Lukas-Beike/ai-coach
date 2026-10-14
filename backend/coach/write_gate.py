@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -202,8 +202,8 @@ def stem_domains(text: str) -> frozenset[str]:
 
 
 _NEGATION = re.compile(
-    r"(?<![a-z])(?:nein|nee|nicht|no|nope|nie|niemals|kein|keine|keinen|"
-    r"stop|stopp|nix)(?![a-z])"
+    r"(?<![a-z])(?:nein|nee|nicht|nichts|no|not|nope|nie|niemals|kein|keine|"
+    r"keinen|stop|stopp|nix|never|nothing|don'?t)(?![a-z])"
 )
 _QUESTION = re.compile(r"[?？]")
 _AFFIRMATION_ANCHORS = frozenset(
@@ -220,6 +220,44 @@ _AFFIRMATION_MAX_TOKENS = 5
 
 def _blocked(value: str) -> bool:
     return bool(_NEGATION.search(value) or _QUESTION.search(value))
+
+
+_REFUSABLE_DOMAINS = frozenset({PLANNING, REMOTE_INTERVALS})
+_SENTENCE = re.compile(r"[^.!?？]+[.!?？]*")
+_CLAUSE_BREAK = re.compile(r"[,;:]|(?<![a-z])(?:aber|sondern|but)(?![a-z])")
+_INFORMATION_QUESTION = re.compile(
+    r"^\s*(?:wie|was|wann|wo|woher|wohin|wer|wem|wen|welche[mnrs]?|warum|"
+    r"wieso|weshalb|wozu|what|how|when|where|which|why|who)(?![a-z])"
+)
+_POLITE_REQUEST = re.compile(
+    r"(?<![a-z])(?:wuerdest|kannst|koenntest|solltest|willst|would|could|can)"
+    r"(?![a-z])"
+)
+
+
+def requested_domains(text: str) -> frozenset[str]:
+    """Domains the athlete's own text asks for.
+
+    Information questions ("Wie sieht mein Plan aus?") grant nothing unless
+    they address the coach with a request verb ("Was würdest du anpassen?"); a
+    negated clause ("nicht zu Intervals syncen") grants no plan change or sync;
+    the classifier decides those. Other negations describe facts ("nicht gut
+    geschlafen"), and "doch nicht" is an undo request.
+    """
+    domains: set[str] = set()
+    for sentence in _SENTENCE.findall(normalize(text)):
+        if (
+            sentence.rstrip().endswith(("?", "？"))
+            and _INFORMATION_QUESTION.search(sentence)
+            and not _POLITE_REQUEST.search(sentence)
+        ):
+            continue
+        for clause in _CLAUSE_BREAK.split(sentence):
+            found = stem_domains(clause)
+            if _NEGATION.search(clause.replace("doch nicht", "")):
+                found -= _REFUSABLE_DOMAINS
+            domains |= found
+    return frozenset(domains)
 
 
 def is_bare_affirmation(text: str) -> bool:
@@ -301,7 +339,7 @@ def build_turn_authority(
     pending_origin: PendingOrigin | None = None,
 ) -> TurnAuthority:
     """Derive the turn's footing from the athlete's typed text only."""
-    domains = stem_domains(current_text)
+    domains = requested_domains(current_text)
     if is_bare_affirmation(current_text):
         domains |= stem_domains(previous_assistant_text[-_HISTORY_TAIL:])
     message_ids = {current_message_id}
@@ -414,7 +452,9 @@ CLASSIFIER_INSTRUCTIONS = (
     "domains the athlete explicitly asks to change or record in the athlete "
     "message. The previous assistant message only clarifies what a short reply "
     "such as 'yes' refers to. Return an empty list for questions, discussion, "
-    "advice, thanks, refusals or negations. Domains: planning (training plan, "
+    "advice, thanks, or refusals such as 'don't change the plan'; a request "
+    "phrased as a question ('Kannst du ...?') or a negated fact such as "
+    "'didn't sleep well' still counts. Domains: planning (training plan, "
     "workouts, schedule), profile (athlete profile, weight, FTP, goals, "
     "availability, equipment), competition (races, events), checkin (sleep, "
     "health, mood, symptoms, activity feedback), nutrition (meals, food, "
@@ -434,20 +474,25 @@ CLASSIFIER_SCHEMA: dict[str, Any] = {
 }
 
 
+def _text_value(value: Any) -> str:
+    return value if isinstance(value, str) and value.strip() else ""
+
+
+def _item_texts(item: Any) -> Iterator[str]:
+    content = item.get("content") if isinstance(item, Mapping) else None
+    for part in content if isinstance(content, list) else ():
+        yield _text_value(part.get("text") if isinstance(part, Mapping) else None)
+
+
 def _response_text(response: Any) -> str:
     if not isinstance(response, Mapping):
         return ""
-    direct = response.get("output_text")
-    if isinstance(direct, str) and direct.strip():
+    direct = _text_value(response.get("output_text"))
+    if direct:
         return direct
     output = response.get("output")
-    for item in output if isinstance(output, list) else ():
-        content = item.get("content") if isinstance(item, Mapping) else None
-        for part in content if isinstance(content, list) else ():
-            text = part.get("text") if isinstance(part, Mapping) else None
-            if isinstance(text, str) and text.strip():
-                return text
-    return ""
+    items = output if isinstance(output, list) else ()
+    return next((text for item in items for text in _item_texts(item) if text), "")
 
 
 def build_openai_domain_classifier(

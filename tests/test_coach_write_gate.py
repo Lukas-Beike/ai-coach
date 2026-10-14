@@ -175,6 +175,56 @@ class StemDomainTests(unittest.TestCase):
         self.assertEqual(gate.stem_domains("intervals"), {"remote_intervals"})
 
 
+class NegationAndQuestionTests(unittest.TestCase):
+    def test_negated_sync_request_grants_no_remote_write(self):
+        for text in (
+            "Do not sync anything to Intervals",
+            "Synchronisier nichts mit Intervals",
+            "Bitte nicht zu Intervals hochladen",
+            "Don't upload it to Intervals",
+        ):
+            with self.subTest(text=text):
+                self.assertNotIn("remote_intervals", gate.requested_domains(text))
+                decision = _check(
+                    "start_intervals_plan_sync", text, classifier=_Classifier()
+                )
+                self.assertFalse(decision.allowed)
+
+    def test_information_question_grants_no_domain(self):
+        text = "Wie sieht mein Trainingsplan aus?"
+        self.assertEqual(gate.requested_domains(text), frozenset())
+        decision = _check("stage_training_plan", text, classifier=_Classifier())
+        self.assertFalse(decision.allowed)
+        self.assertTrue(decision.classifier_used)
+
+    def test_requests_and_unnegated_clauses_still_grant(self):
+        for text, domain in (
+            ("Kannst du meinen Plan für nächste Woche anpassen?", "planning"),
+            ("Ich kann Dienstag nicht, verschieb den Lauf auf Mittwoch", "planning"),
+            ("Nicht zu Intervals hochladen, aber den Plan anpassen", "planning"),
+            ("Ach, doch nicht", "undo"),
+            ("Ich habe nicht gut geschlafen", "checkin"),
+            ("Kein Frühstück heute, nur Kaffee", "nutrition"),
+        ):
+            with self.subTest(text=text):
+                self.assertIn(domain, gate.requested_domains(text))
+        self.assertNotIn(
+            "remote_intervals",
+            gate.requested_domains(
+                "Nicht zu Intervals hochladen, aber den Plan anpassen"
+            ),
+        )
+
+    def test_negated_domain_is_left_to_the_classifier(self):
+        text = "Ändere den Plan nicht zu stark, nur die Dauer"
+        self.assertNotIn("planning", gate.requested_domains(text))
+        decision = _check(
+            "stage_training_plan", text, classifier=_Classifier({"planning"})
+        )
+        self.assertTrue(decision.allowed)
+        self.assertTrue(decision.classifier_used)
+
+
 class DenyWithoutFootingTests(unittest.TestCase):
     def test_thanks_and_praise_deny_every_write(self):
         for text in ("danke", "super", "👍", "top", "cool"):
