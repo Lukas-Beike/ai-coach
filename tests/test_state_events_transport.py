@@ -37,6 +37,31 @@ class StateEventTransportTests(unittest.TestCase):
         )
         self.assertEqual(calls, [])
 
+    def _cursor_rejection(self, request_target):
+        calls = []
+        with self.assertRaises(AppError) as raised:
+            StateEventTransport(FakeEventBuffer([])).handle(
+                request_target,
+                send_headers=lambda: calls.append("headers"),
+                send_event=lambda *args: calls.append(args),
+                set_connection_timeout=lambda value: calls.append(("timeout", value)),
+                session_is_active=lambda: True,
+            )
+        return raised.exception, calls
+
+    def test_non_ascii_digit_cursors_are_invalid_cursor_not_server_error(self):
+        # U+00B2 SUPERSCRIPT TWO (int() rejects it) and U+0663 ARABIC-INDIC DIGIT THREE
+        for raw_since in ("%C2%B2", "%D9%A3"):
+            with self.subTest(raw_since=raw_since):
+                error, calls = self._cursor_rejection(
+                    f"/api/state/events?since={raw_since}"
+                )
+
+                self.assertEqual(
+                    (error.status, error.reason), (400, "invalid_event_cursor")
+                )
+                self.assertEqual(calls, [])
+
     def test_initial_events_are_sent_before_ready_and_disconnect_ends_loop(self):
         buffer = FakeEventBuffer(
             [

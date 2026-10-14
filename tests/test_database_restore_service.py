@@ -213,6 +213,44 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.sync_jobs.resume_interrupted.assert_not_called()
         self.assertFalse(self.gate.state()["active"])
 
+    def test_resume_failure_after_replace_reports_restored_and_still_wakes_workers(
+        self,
+    ) -> None:
+        self.sync_jobs.resume_interrupted.side_effect = RuntimeError(
+            "sensitive resume detail"
+        )
+
+        with self.assertRaises(AppError) as raised:
+            self.service.restore(b"replacement database")
+
+        self.assertEqual(raised.exception.status, 500)
+        self.assertEqual(raised.exception.reason, "restored_resume_failed")
+        self.assertIn("wiederhergestellt", raised.exception.message)
+        self.assertIn("App neu", raised.exception.message)
+        self.assertNotIn("konnte nicht validiert", raised.exception.message)
+        self.assertNotIn("sensitive resume detail", raised.exception.message)
+        self.assertEqual(self.database_path.read_bytes(), b"replacement database")
+        self.assertFalse((self.data_dir / "staged.db").exists())
+        self.coach_jobs.resume_interrupted.assert_not_called()
+        self.sync_wake.set.assert_called_once_with()
+        self.coach_wake.set.assert_called_once_with()
+        self.assertFalse(self.gate.state()["active"])
+
+    def test_coach_resume_failure_after_replace_still_wakes_both_workers(self) -> None:
+        self.coach_jobs.resume_interrupted.side_effect = RuntimeError(
+            "synthetic coach resume failure"
+        )
+
+        with self.assertRaises(AppError) as raised:
+            self.service.restore(b"replacement database")
+
+        self.assertEqual(raised.exception.status, 500)
+        self.assertEqual(raised.exception.reason, "restored_resume_failed")
+        self.assertEqual(self.database_path.read_bytes(), b"replacement database")
+        self.sync_wake.set.assert_called_once_with()
+        self.coach_wake.set.assert_called_once_with()
+        self.assertFalse(self.gate.state()["active"])
+
 
 if __name__ == "__main__":
     unittest.main()

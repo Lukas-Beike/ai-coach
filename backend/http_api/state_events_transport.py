@@ -41,7 +41,7 @@ class StateEventTransport:
     ) -> None:
         query = parse_qs(urlparse(request_target).query)
         raw_since = query.get("since", ["0"])[0]
-        if not str(raw_since).isdigit():
+        if not (raw_since.isascii() and raw_since.isdigit()):
             raise AppError(
                 400, "Die Event-ID ist ungültig.", reason="invalid_event_cursor"
             )
