@@ -61,7 +61,7 @@ provider-keyed.
 | POST | `/api/planning/commands` | Apply an approved local planning command | CSRF |
 | POST | `/api/feedback`, `/api/activities/{id}/feedback` | Save athlete feedback | CSRF |
 | POST | `/api/sync/jobs`, `/api/sync/jobs/{id}/resolve` | Queue or resolve a sync job | CSRF |
-| POST | `/api/sync`, `/api/garmin/sync`, `/api/intervals/full-resync`, `/api/garmin/full-resync` | Queue provider synchronization | CSRF |
+| POST | `/api/sync`, `/api/garmin/sync`, `/api/wahoo/sync`, `/api/intervals/full-resync`, `/api/garmin/full-resync`, `/api/wahoo/full-resync` | Queue provider synchronization | CSRF |
 | POST | `/api/performance/refresh`, `/api/external-calendar/sync`, `/api/weather/sync` | Queue or run a targeted refresh | CSRF |
 | POST | `/api/change-history/undo/preview`, `/api/change-history/undo` | Preview or apply an undo | CSRF |
 | POST | `/api/privacy/delete`, `/api/privacy/restore` | Delete or restore privacy data | CSRF |

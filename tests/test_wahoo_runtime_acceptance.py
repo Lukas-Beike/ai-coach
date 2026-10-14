@@ -27,6 +27,7 @@ from backend.sync.daily import daily_marker_key
 from backend.sync.executor import SyncJobExecutor, WahooJobAdapter
 from backend.sync.freshness import ProviderFreshnessService
 from backend.sync.freshness_sources import DEFAULT_FRESHNESS_SOURCES
+from backend.sync.gates import ProviderResyncGate
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import SyncJobStore
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
@@ -40,7 +41,7 @@ from backend.sync.scheduler import (
 )
 from backend.sync.status import SyncPublicStateService
 from backend.sync.wahoo_connection import WAHOO_TOKENS_KEY, WahooConnectionService
-from backend.sync.wahoo_sync import WahooSyncService
+from backend.sync.wahoo_sync import WahooSyncClock, WahooSyncService
 from tests.wahoo_sync_fixture import (
     EARLIER_UTC,
     LATE_EVENING_UTC,
@@ -97,8 +98,7 @@ class WahooOrchestrationCase(WahooSyncCase):
             daily_markers=lambda: self.markers,
             observer=lambda: self.observer,
             registry=REGISTRY,
-            zone_provider=lambda: ZONE,
-            now=lambda: self.now,
+            clock=WahooSyncClock(lambda: self.now, lambda: ZONE),
             logger=self.logger,
             lock=threading.Lock(),
         )
@@ -144,6 +144,7 @@ class WahooOrchestrationCase(WahooSyncCase):
             sync_state=sync_state,
             sync_period_defaults={WAHOO_ID: 84},
             all_sync_days=-1,
+            resync_gate=ProviderResyncGate("Wahoo"),
         )
         self.freshness = ProviderFreshnessService(
             self.config,

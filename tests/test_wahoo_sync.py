@@ -2,22 +2,29 @@
 
 from __future__ import annotations
 
+import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
+from backend.providers.descriptors import WAHOO_ID
 from backend.providers.wahoo_client import WahooWorkoutFetch
 from backend.sync.canonical_coverage_store import coverage_key
+from backend.sync.gates import ProviderResyncGate
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.schedule_policies import WahooSchedulePolicy
 from backend.sync.wahoo_sync import (
     LAST_ERROR_KEY,
     LAST_SYNC_KEY,
     SYNC_FAILED_MESSAGE,
+    WahooSyncClock,
     WahooSyncService,
 )
 from tests.wahoo_sync_fixture import (
     EARLIER_UTC,
     LATE_EVENING_UTC,
+    ZONE,
     WahooSyncCase,
     workout,
 )
@@ -167,6 +174,72 @@ class SkipTests(WahooSyncCase):
 
         self.assertEqual({"status": "already_running"}, result)
         self.assertEqual([], self.source.windows)
+
+
+class WindowAndResetGateTests(WahooSyncCase):
+    def _gated_service(self, gate: ProviderResyncGate) -> WahooSyncService:
+        return WahooSyncService(
+            config=lambda: self.config,
+            connection=lambda: self.connection,
+            source=lambda: self.source,
+            database_manager=lambda: self.database,
+            database_lock=threading.RLock(),
+            key_values=self.key_values,
+            daily_markers=lambda: self.markers,
+            observer=lambda: self.observer,
+            registry=DEFAULT_PROVIDER_REGISTRY,
+            clock=WahooSyncClock(lambda: self.now, lambda: ZONE),
+            logger=self.logger,
+            lock=self.lock,
+            gate=gate,
+        )
+
+    def test_all_sentinel_and_zero_mean_the_descriptor_maximum(self) -> None:
+        maximum = DEFAULT_PROVIDER_REGISTRY.max_sync_days(WAHOO_ID)
+
+        self.assertEqual(maximum, self.service.sync(days=-1)["window_days"])
+        self.assertEqual(maximum, self.service.sync(days=0)["window_days"])
+
+    def test_reset_in_progress_blocks_a_concurrent_sync_before_the_source(
+        self,
+    ) -> None:
+        gate = ProviderResyncGate("Wahoo")
+        service = self._gated_service(gate)
+        self.assertTrue(gate.begin_reset())
+        rejections: list[AppError] = []
+
+        def run_sync() -> None:
+            try:
+                service.sync(reason="manual")
+            except AppError as error:
+                rejections.append(error)
+
+        try:
+            worker = threading.Thread(target=run_sync)
+            worker.start()
+            worker.join(timeout=5)
+        finally:
+            gate.end_reset()
+
+        self.assertEqual(1, len(rejections))
+        self.assertEqual(409, rejections[0].status)
+        self.assertEqual([], self.source.windows)
+
+    def test_schedule_policy_is_blocked_only_while_resetting(self) -> None:
+        gate = ProviderResyncGate("Wahoo")
+        policy = WahooSchedulePolicy(
+            configured=lambda: True,
+            sync_state=Mock(),
+            sync_period_defaults={WAHOO_ID: 84},
+            all_sync_days=-1,
+            resync_gate=gate,
+        )
+
+        self.assertFalse(policy.blocked())
+        self.assertTrue(gate.begin_reset())
+        self.assertTrue(policy.blocked())
+        gate.end_reset()
+        self.assertFalse(policy.blocked())
 
 
 if __name__ == "__main__":

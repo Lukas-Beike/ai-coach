@@ -1298,8 +1298,9 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   .connection-card .secondary-button { width: auto; min-width: 0; margin: 0; padding-right: 10px; padding-left: 10px; white-space: normal; }
   .connection-card .sync-period { grid-column: 1 / -1; grid-row: 2; width: 100%; }
   .connection-card .sync-period input { width: 82px; }
-  .connection-card .connection-resync-status { grid-column: 1 / -1; grid-row: 4; }
-  .connection-card .provider-setup-hint { grid-column: 1 / -1; grid-row: 5; }
+  .connection-card .connection-actions.connection-sync-actions { grid-row: 4; }
+  .connection-card .connection-resync-status { grid-column: 1 / -1; grid-row: 5; }
+  .connection-card .provider-setup-hint { grid-column: 1 / -1; grid-row: 6; }
   .provider-attention-banner { align-items: flex-start; flex-direction: column; }
   .provider-attention-banner a { min-height: 44px; display: inline-flex; align-items: center; }
   .settings-message { overflow-wrap: anywhere; }

@@ -13,6 +13,7 @@ from backend.providers.descriptors import (
     DEFAULT_PROVIDER_DESCRIPTORS,
     GARMIN_ID,
     INTERVALS_ID,
+    WAHOO_ID,
 )
 
 _Function = TypeVar("_Function", bound=Callable[..., Any])
@@ -74,18 +75,27 @@ _PROVIDER_LABELS = {
 }
 INTERVALS_RESYNC_GATE = ProviderResyncGate(_PROVIDER_LABELS[INTERVALS_ID])
 GARMIN_RESYNC_GATE = ProviderResyncGate(_PROVIDER_LABELS[GARMIN_ID])
+WAHOO_RESYNC_GATE = ProviderResyncGate(_PROVIDER_LABELS[WAHOO_ID])
 DEFAULT_RESYNC_GATES: Mapping[str, ProviderResyncGate] = {
     INTERVALS_ID: INTERVALS_RESYNC_GATE,
     GARMIN_ID: GARMIN_RESYNC_GATE,
+    WAHOO_ID: WAHOO_RESYNC_GATE,
 }
 
 
 def resync_gate(
     provider: str, gates: Mapping[str, ProviderResyncGate] | None = None
 ) -> ProviderResyncGate:
-    """Return a provider's gate; a provider without a mapped gate uses the Garmin gate."""
+    """Return a provider's gate; a provider without a mapped gate is rejected.
+
+    Callers name only providers with a registered handler, so the rejection
+    matches the unknown-provider error of the full resync service.
+    """
     mapping = DEFAULT_RESYNC_GATES if gates is None else gates
-    return mapping.get(provider, GARMIN_RESYNC_GATE)
+    gate = mapping.get(provider)
+    if gate is None:
+        raise AppError(400, "Unbekannte Anbindung.")
+    return gate
 
 
 def provider_operation(provider: str) -> AbstractContextManager[None]:

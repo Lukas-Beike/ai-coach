@@ -423,7 +423,12 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             ),
         ),
         max_sync_days=DEFAULT_MAX_SYNC_DAYS,
-        resync_keys=(),
+        resync_keys=(
+            "wahoo_full_resync_running",
+            "wahoo_full_resync_status",
+            "wahoo_full_resync_at",
+            "wahoo_full_resync_error",
+        ),
         # plan_push is the explicit library export; backend/sync/jobs.py checks it.
         job_types=frozenset({"refresh", "plan_push"}),
         refresh_fields=frozenset({"days", "reason"}),
@@ -432,5 +437,13 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         schedule=SchedulePolicy(daily_rank=4, startup_rank=4, daily_marker=True),
         coach_rank=5,
         not_configured_message=WAHOO_NOT_CONFIGURED_MESSAGE,
+        # Manual refresh uses the window of the handler's default, not the stored
+        # period, so the route does not read a sync period.
+        manual_sync=ManualSyncRoute(
+            path="/api/wahoo/sync",
+            uses_sync_period=False,
+            payload=(("reason", "manual"),),
+        ),
+        full_resync_path="/api/wahoo/full-resync",
     ),
 )

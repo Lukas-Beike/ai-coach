@@ -8,30 +8,37 @@ import unittest
 from provider_runtime_fakes import ACME_ID
 
 from backend.errors import AppError
-from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
+from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
+    WAHOO_RESYNC_GATE,
     ProviderResyncGate,
     resync_gate,
 )
 
 
 class ResyncGateMappingTests(unittest.TestCase):
-    def test_default_mapping_selects_intervals_and_garmin_gates(self) -> None:
+    def test_default_mapping_selects_each_provider_gate(self) -> None:
         self.assertIs(resync_gate(INTERVALS_ID), INTERVALS_RESYNC_GATE)
         self.assertIs(resync_gate(GARMIN_ID), GARMIN_RESYNC_GATE)
+        self.assertIs(resync_gate(WAHOO_ID), WAHOO_RESYNC_GATE)
 
-    def test_unmapped_provider_falls_back_to_garmin_gate(self) -> None:
-        self.assertIs(resync_gate(ACME_ID), GARMIN_RESYNC_GATE)
-        self.assertIs(resync_gate(INTERVALS_ID, {}), GARMIN_RESYNC_GATE)
+    def test_unmapped_provider_is_rejected_instead_of_falling_back(self) -> None:
+        with self.assertRaises(AppError) as raised:
+            resync_gate(ACME_ID)
+        self.assertEqual(400, raised.exception.status)
+        with self.assertRaises(AppError) as raised:
+            resync_gate(INTERVALS_ID, {})
+        self.assertEqual(400, raised.exception.status)
 
-    def test_injected_mapping_replaces_defaults_and_keeps_garmin_fallback(self) -> None:
+    def test_injected_mapping_replaces_defaults(self) -> None:
         acme_gate = ProviderResyncGate("Acme mock")
         gates = {ACME_ID: acme_gate}
 
         self.assertIs(resync_gate(ACME_ID, gates), acme_gate)
-        self.assertIs(resync_gate(INTERVALS_ID, gates), GARMIN_RESYNC_GATE)
+        with self.assertRaises(AppError):
+            resync_gate(INTERVALS_ID, gates)
 
 
 class ProviderResyncGateTests(unittest.TestCase):

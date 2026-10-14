@@ -129,7 +129,7 @@ class WahooSchedulePolicy:
     """Scheduled once Wahoo is configured and the athlete connected it.
 
     The window is the stored Wahoo sync period, clamped by the owner to the
-    descriptor limits.
+    descriptor limits. ``blocked`` reports a Wahoo resync reset.
     """
 
     def __init__(
@@ -139,17 +139,19 @@ class WahooSchedulePolicy:
         sync_state: SyncStateRepository,
         sync_period_defaults: Mapping[str, int],
         all_sync_days: int,
+        resync_gate: ProviderResyncGate,
     ) -> None:
         self._configured = configured
         self._sync_state = sync_state
         self._sync_period_defaults = sync_period_defaults
         self._all_sync_days = all_sync_days
+        self._resync_gate = resync_gate
 
     def configured(self) -> bool:
         return self._configured()
 
     def blocked(self) -> bool:
-        return False
+        return self._resync_gate.is_resetting()
 
     def refresh_payload(self, _trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
         days = self._sync_state.sync_period(

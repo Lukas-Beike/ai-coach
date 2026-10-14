@@ -26,7 +26,9 @@ class ProductionProviderWiringTests(unittest.TestCase):
 
         self.assertEqual(expected, tuple(runtime.job_owners()))
         self.assertEqual(expected, tuple(runtime.freshness_sources()))
-        self.assertEqual((INTERVALS_ID, GARMIN_ID), tuple(runtime.resync_handlers()))
+        self.assertEqual(
+            (INTERVALS_ID, GARMIN_ID, WAHOO_ID), tuple(runtime.resync_handlers())
+        )
         self.assertIs(DEFAULT_PROVIDER_REGISTRY, runtime.static)
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, SQLCIPHER_SKIP_REASON)

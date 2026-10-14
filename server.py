@@ -348,6 +348,7 @@ from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
+    WAHOO_RESYNC_GATE,
 )
 from backend.sync.intervals_assembly import (
     IntervalsLibraryDependencies,
@@ -568,6 +569,7 @@ def provider_runtime() -> ProviderRuntimeRegistry:
                 wahoo=WahooRuntimeDependencies(
                     sync_service=WAHOO_SYNC.sync_service,
                     plan_push_service=WAHOO_SYNC.plan_push_service,
+                    resync_gate=WAHOO_RESYNC_GATE,
                 ),
             )
         ),
@@ -1096,6 +1098,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         now=lambda: datetime.now(UTC),
         logger=LOGGER,
         redactor=REDACTOR.redact_text,
+        resync_gate=WAHOO_RESYNC_GATE,
     )
 )
 NUTRITION_ASSEMBLY = NutritionAssembly(

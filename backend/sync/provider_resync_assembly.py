@@ -12,7 +12,11 @@ from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
-from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
+from backend.providers.descriptors import (
+    GARMIN_ID,
+    INTERVALS_ID,
+    WAHOO_NOT_CONFIGURED_MESSAGE,
+)
 from backend.runtime.events import StateEventBuffer
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.sync.full_resync import (
@@ -29,6 +33,7 @@ from backend.sync.gates import ProviderResyncGate, resync_gate
 from backend.sync.intervals import IntervalsSyncService
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_runtime import FullResyncHandler, ProviderRuntimeRegistry
+from backend.sync.wahoo_sync import WahooSyncService
 
 
 @dataclass(frozen=True)
@@ -131,6 +136,52 @@ class GarminFullResync:
             operation_id=operation_id,
             reason=FULL_RESYNC_LABEL,
         )
+
+
+class WahooFullResync:
+    """Full Wahoo read resync over the complete sync window.
+
+    A skipped or contended run is a failed resync, so the state records it
+    instead of reporting success.
+    """
+
+    def __init__(self, *, sync_service: WahooSyncService, all_sync_days: int) -> None:
+        self._sync_service = sync_service
+        self._all_sync_days = all_sync_days
+
+    def configured(self) -> bool:
+        return self._sync_service.configured()
+
+    def not_configured_error(self) -> AppError:
+        return AppError(503, WAHOO_NOT_CONFIGURED_MESSAGE, reason="not_configured")
+
+    def run(
+        self, operation_id: str, _observer: SyncOperationObserver
+    ) -> dict[str, Any]:
+        result = self._sync_service.sync(
+            days=self._all_sync_days,
+            reason=FULL_RESYNC_LABEL,
+            operation_id=operation_id,
+        )
+        status = result.get("status")
+        if status == "not_configured":
+            raise self.not_configured_error()
+        if status == "already_running":
+            raise AppError(
+                409,
+                "Die Wahoo-Synchronisierung läuft bereits. Bitte warten.",
+                reason="already_running",
+            )
+        if status == "partial":
+            # The newest workouts are stored, so nothing is lost, but the window
+            # was not read completely and must not be reported as a full resync.
+            raise AppError(
+                502,
+                "Wahoo hat mehr Einheiten geliefert, als ein Durchlauf abrufen kann. "
+                "Die neuesten wurden gespeichert, ältere fehlen noch.",
+                reason="partial_resync",
+            )
+        return result
 
 
 def full_resync_handlers(
