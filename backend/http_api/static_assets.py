@@ -40,6 +40,7 @@ ASSET_SERVICE_WORKER_JS = "service-worker.js"
 ASSET_MANIFEST = "manifest.webmanifest"
 ASSET_LOGO = "logo.png"
 ASSET_ICON = "icon.svg"
+ASSET_APPLE_TOUCH_ICON = "apple-touch-icon.png"
 STATIC_TARGETS = (
     ASSET_INDEX_HTML,
     ASSET_API_JS,
@@ -71,6 +72,7 @@ STATIC_TARGETS = (
     ASSET_MANIFEST,
     ASSET_LOGO,
     ASSET_ICON,
+    ASSET_APPLE_TOUCH_ICON,
 )
 VERSIONED_STATIC_ASSETS = frozenset(
     {
@@ -101,6 +103,7 @@ VERSIONED_STATIC_ASSETS = frozenset(
         ASSET_STYLES_CSS,
         ASSET_LOGO,
         ASSET_ICON,
+        ASSET_APPLE_TOUCH_ICON,
     }
 )
 STATIC_REVALIDATE_ASSETS = frozenset(

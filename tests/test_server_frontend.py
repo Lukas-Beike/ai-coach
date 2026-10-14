@@ -1324,7 +1324,7 @@ class ServerFrontendTests(ServerTestCase):
             )
         )
         self.assertNotIn("Tag(en)", notifications)
-        self.assertIn("function competitionCountdownText(name, days)", notifications)
+        self.assertIn("function competitionCountdownText(days)", notifications)
         self.assertIn("ist heute.", notifications)
         self.assertIn("ist morgen.", notifications)
         self.assertIn("ist in ${days} Tagen.", notifications)
