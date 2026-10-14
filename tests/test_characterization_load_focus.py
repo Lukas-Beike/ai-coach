@@ -499,6 +499,17 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         self.assertEqual(result["zones"][0]["seconds"], {"Z1": 600.0})
         self.assertEqual(result["zones"][0]["training_seconds"], 7200)
 
+    def test_days_argument_sets_the_window_start(self) -> None:
+        snapshot = {
+            "recent_activities": [
+                _ride("before", start=f"{_day(-14)}T08:00:00", icu_hr_zone_times=[900]),
+                _ride("first", start=f"{_day(-13)}T08:00:00", icu_hr_zone_times=[300]),
+            ]
+        }
+        result = training_focus(snapshot, {}, TODAY, days=14)
+        self.assertEqual(result["start"], _day(-13))
+        self.assertEqual(result["zones"][0]["seconds"], {"Z1": 300.0})
+
     def test_zone_timezone_moves_absolute_start_into_the_requested_day(self) -> None:
         ride = _ride(
             "r",

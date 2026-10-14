@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=314">
+  <link rel="stylesheet" href="/styles.css?v=315">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -127,12 +127,13 @@
           <a href="#analysis/body" data-analysis-segment="body">Body</a>
           <a href="#analysis/recovery" data-analysis-segment="recovery">Erholung</a>
         </nav>
+        <div id="analysisLoadPeriod" hidden></div>
+        <section id="sessionPerformance"class="analysis-chart-card" aria-label="Trainingsfokus"></section>
         <section id="bodyAnalysisCharts" class="analysis-history-charts" aria-label="Body-Analyse" hidden></section>
         <section id="personalRecovery" class="analysis-history-charts" aria-label="Persönliche Erholung" hidden></section>
         <div id="analysisLoadCharts" class="analysis-history-charts" aria-label="Garmin-Trainingsbelastung" hidden></div>
         <section id="currentPerformance" class="analysis-chart-card" aria-label="Aktuelle Leistungswerte" hidden></section>
         <section id="performanceEnduranceCharts" class="analysis-history-charts" aria-label="Ausdauer-Score" hidden></section>
-        <section id="sessionPerformance" class="analysis-chart-card" aria-label="Trainingsfokus"></section>
         <div id="trainingZoneCharts" class="analysis-history-charts" aria-label="Trainingszonen" hidden></div>
         <div id="analysisHistoryCharts" class="analysis-history-charts" aria-label="Leistungsentwicklung der letzten 12 Wochen"></div>
         <section id="performancePredictions" class="analysis-chart-card" aria-label="Laufprognosen" hidden></section>
@@ -144,7 +145,6 @@
         <nav class="plan-segment-nav" aria-label="Ernährungsbereiche">
           <a href="#nutrition/diary" data-nutrition-segment="diary">Tagebuch</a>
           <a href="#nutrition/week" data-nutrition-segment="week">Letzte 7 Tage</a>
-          <a href="#nutrition/meals" data-nutrition-segment="meals">Meine Mahlzeiten</a>
           <a href="#nutrition/products" data-nutrition-segment="products">Produkte</a>
         </nav>
         <output id="nutritionStatus" class="tab-sync-detail"></output>
@@ -184,9 +184,6 @@
           <div class="nutrition-toolbar"><button class="secondary-button" type="button" id="nutritionPrevious" aria-label="Vorheriger Tag">←</button><label>Tag <input type="date" id="nutritionDate"></label><button class="secondary-button" type="button" id="nutritionNext" aria-label="Nächster Tag">→</button><button class="secondary-button" type="button" id="nutritionToday">Heute</button></div>
           <div id="nutritionTotals" class="nutrition-totals"></div>
           <div id="nutritionEntries" class="nutrition-list"></div>
-        </section>
-        <section id="nutritionMeals" aria-label="Gespeicherte Mahlzeiten" hidden>
-          <div id="nutritionTemplates" class="nutrition-list"></div>
         </section>
       </section>
 
@@ -464,23 +461,23 @@
     </div>
   </dialog>
   <script src="/api.js?v=224" defer></script>
-  <script src="/navigation.js?v=232" defer></script>
+  <script src="/navigation.js?v=233" defer></script>
   <script src="/state.js?v=221" defer></script>
   <script src="/views.js?v=226" defer></script>
   <script src="/plan-views.js?v=9" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=21" defer></script>
+  <script src="/coach.js?v=22" defer></script>
   <script src="/shared.js?v=11" defer></script>
   <script src="/auth.js?v=4" defer></script>
   <script src="/sync-status.js?v=9" defer></script>
   <script src="/notifications.js?v=3" defer></script>
-  <script src="/nutrition.js?v=28" defer></script>
-  <script src="/analysis.js?v=115" defer></script>
+  <script src="/nutrition.js?v=29" defer></script>
+  <script src="/analysis.js?v=116" defer></script>
   <script src="/activity-details.js?v=13" defer></script>
-  <script src="/performance-view.js?v=9" defer></script>
-  <script src="/diagnostics.js?v=3" defer></script>
-  <script src="/state-loader.js?v=5" defer></script>
+  <script src="/performance-view.js?v=10" defer></script>
+  <script src="/diagnostics.js?v=4" defer></script>
+  <script src="/state-loader.js?v=6" defer></script>
   <script src="/sync-actions.js?v=4" defer></script>
   <script src="/wahoo-connection.js?v=2" defer></script>
   <script src="/settings.js?v=3" defer></script>

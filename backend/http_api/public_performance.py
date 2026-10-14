@@ -18,6 +18,7 @@ from backend.performance.canonical_inputs import (
     resolve_reader,
 )
 from backend.performance.chart_history import analysis_history
+from backend.performance.training_focus import training_focus
 from backend.runtime.ports import ObservationReader
 
 
@@ -89,18 +90,34 @@ class PublicPerformanceStateService:
         body: CanonicalBodyInputs | None,
         today: date,
     ) -> dict[str, Any]:
+        profile = self._profile_service.get()
         performance = performance_context.current_performance_context(
             snapshot,
             garmin,
-            self._profile_service.get(),
+            profile,
             today,
             **performance_options(canonical),
         )
+        timezone = str(profile.get("timezone") or "UTC")
         performance = {
             **performance,
             "history": analysis_history(
                 snapshot, garmin, today, canonical_body=body, canonical=canonical
             ),
+            # UI-only: the load tab's period selection picks the matching window.
+            "training_focus_periods": {
+                period: training_focus(
+                    snapshot,
+                    garmin,
+                    today,
+                    timezone,
+                    activity_rows=None
+                    if canonical is None
+                    else canonical.activity_rows,
+                    days=days,
+                )
+                for period, days in (("fortnight", 14), ("twelveWeeks", 84))
+            },
         }
         return {
             "performance": performance,

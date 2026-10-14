@@ -37,8 +37,9 @@ def training_focus(
     timezone: str = "UTC",
     *,
     activity_rows: Sequence[Any] | None = None,
+    days: int = 28,
 ) -> dict[str, Any]:
-    start = (today - timedelta(days=27)).isoformat()
+    start = (today - timedelta(days=days - 1)).isoformat()
     end = today.isoformat()
     activities, _ = (
         canonical_rows(snapshot or {})

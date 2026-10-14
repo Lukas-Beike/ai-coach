@@ -2977,7 +2977,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 2085,
+      "line": 2100,
       "column": 0,
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
@@ -3081,7 +3081,7 @@
     {
       "tool": "mypy",
       "path": "e2e/fixture_runtime.py",
-      "line": 2003,
+      "line": 2018,
       "column": 21,
       "code": "misc",
       "message_sha256": "0ba1e959a9929a580b50012a0a160f4a70e2714e7183d6bc45b46b3eb2904c2c"
