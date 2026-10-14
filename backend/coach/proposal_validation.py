@@ -188,10 +188,30 @@ def _remote_write_summary(
             delete=str(manifest.get("duplicate_id") or "")[:80],
         )
     elif tool == "apply_adaptive_replan":
-        entry["date"] = (
-            "Adaptive Vorschau " + str(arguments.get("adjustment_id") or "")[:36]
-        )
+        return _adaptive_write_summary(entry, approval_manifest)
     return [entry]
+
+
+def _adaptive_write_summary(
+    entry: dict[str, str], approval_manifest: Any
+) -> list[dict[str, str]]:
+    """Describe the stored preview that the approval applies, not model arguments."""
+    manifest = approval_manifest if isinstance(approval_manifest, dict) else {}
+    pause = manifest.get("illness_pause")
+    pause = pause if isinstance(pause, dict) else {}
+    entry["date"] = "Adaptive Vorschau " + str(manifest.get("adjustment_id") or "")[:36]
+    entry["units"] = f"{int(manifest.get('changes') or 0)} lokale Einheit(en) anpassen"
+    start, end = (
+        _summary_date(pause.get("start_date")),
+        _summary_date(pause.get("end_date")),
+    )
+    return [
+        entry,
+        {
+            "name": "Krankheitspause in Intervals.icu eintragen",
+            "date": f"{start} bis {end}" if start and end else "",
+        },
+    ]
 
 
 def _summary_date(value: Any) -> str:

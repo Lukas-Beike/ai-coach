@@ -17,7 +17,12 @@ from backend.sync.adaptive import IllnessPauseSyncService
 
 
 class CoachAdaptiveApplyService:
-    """Own the authorization and later-turn approval boundary for adaptive apply."""
+    """Own the authorization and next-message approval boundary for adaptive apply.
+
+    The write gate's classifier confirms that the athlete's message asks to apply
+    the change; this service enforces that it is the first athlete message after
+    the preview was published, so no later message can approve an older preview.
+    """
 
     def __init__(
         self,
@@ -73,16 +78,26 @@ class CoachAdaptiveApplyService:
                 "SELECT id FROM messages WHERE id=? AND role='assistant'",
                 (latest.get("published_message_id"),),
             ).fetchone()
+            first_reply = (
+                db.execute(
+                    "SELECT MIN(id) AS id FROM messages WHERE role='user' AND id>?",
+                    (publication["id"],),
+                ).fetchone()
+                if publication
+                else None
+            )
         if (
             not current_user
-            or not publication
-            or current_user["id"] <= publication["id"]
+            or not first_reply
+            or current_user["id"] != first_reply["id"]
             or current_user["id"]
             not in (intent.get("request") or {}).get("source_message_ids", [])
         ):
             raise AppError(
                 403,
-                "Die Vorschau muss zuerst angezeigt und in einer folgenden Nachricht freigegeben werden.",
+                "Die Vorschau muss zuerst angezeigt und in der darauf folgenden "
+                "Nachricht ausdrücklich freigegeben werden. Bitte eine neue Vorschau "
+                "erstellen und erneut fragen.",
                 reason="adaptive_approval_required",
             )
         return {

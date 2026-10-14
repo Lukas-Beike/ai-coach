@@ -125,10 +125,11 @@ class DialogueHarness:
             ]
         }
 
-    def confirm_impact(self, domain, *, delete=False, bulk=False):
+    def confirm_impact(self, domain, *, delete=False, bulk=False, accepts=False):
         """Let the gate's classifier confirm an explicitly requested delete/bulk."""
         self.gate_verdict = {
-            "requests": [{"domain": domain, "delete": delete, "bulk": bulk}]
+            "requests": [{"domain": domain, "delete": delete, "bulk": bulk}],
+            "accepts_proposal": accepts,
         }
 
     def turn(self, message, steps, turn=None, **kwargs):

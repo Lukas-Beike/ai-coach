@@ -31,6 +31,12 @@ _DENIAL_GUIDANCE = {
         "exactly that. Ask one concise question with clarify_coach_request that "
         "names what would be deleted, replaced or changed."
     ),
+    "approval_not_confirmed": (
+        "The athlete's message does not ask to apply the previewed plan change. "
+        "Do not apply it. Only the athlete's very next message after a preview "
+        "can approve it, so create a fresh preview with preview_adaptive_replan "
+        "now and ask once, in your answer, whether to apply it."
+    ),
     "remote_not_requested": (
         "The athlete's message does not ask to write to Intervals.icu. Keep the "
         "change local and offer the sync instead."

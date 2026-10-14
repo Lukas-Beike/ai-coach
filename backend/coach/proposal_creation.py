@@ -31,6 +31,7 @@ from backend.coach.proposal_validation import (
     validated_coach_action_preview_input,
 )
 from backend.db.manager import DatabaseManager
+from backend.db.repositories import PlanAdjustmentRepository
 from backend.errors import AppError
 from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
@@ -326,7 +327,52 @@ def _approved_remote_arguments(
         )
     if tool == "sync_nutrition":
         return _nutrition_approval_arguments(arguments, nutrition_diary_service)
+    if tool == "apply_adaptive_replan":
+        return _adaptive_approval_arguments(arguments, database_manager)
     return dict(arguments)
+
+
+def _adaptive_approval_arguments(
+    arguments: dict[str, Any], database_manager: DatabaseManager
+) -> dict[str, Any]:
+    """Bind the illness sync to the stored preview, never to the model's arguments.
+
+    Only the adjustment id is read from the model; it must name the latest stored
+    preview, and every other argument is dropped. The pause that the athlete
+    approves is taken from the stored preview as the manifest.
+    """
+    with database_manager.reader() as db:
+        latest = PlanAdjustmentRepository().latest(db)
+    try:
+        stored = json.loads(latest["payload"]) if latest else {}
+    except TypeError, ValueError:
+        stored = {}
+    pause = stored.get("illness_pause") if isinstance(stored, dict) else None
+    if (
+        not latest
+        or latest["status"] != "preview"
+        or str(latest["id"]) != str(arguments.get("adjustment_id") or "").strip()
+    ):
+        raise AppError(
+            409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen."
+        )
+    if not isinstance(pause, dict) or pause.get("approved"):
+        raise AppError(
+            409,
+            "Die adaptive Vorschau enthält keine Krankheitspause zum Synchronisieren.",
+        )
+    changes = stored.get("changes")
+    return {
+        "adjustment_id": str(latest["id"]),
+        "sync_illness_to_intervals": True,
+        "_approval_manifest": {
+            "adjustment_id": str(latest["id"]),
+            "changes": len(changes) if isinstance(changes, list) else 0,
+            "illness_pause": {
+                key: pause.get(key) for key in ("start_date", "end_date")
+            },
+        },
+    }
 
 
 def _approved_plan_sync_arguments(
