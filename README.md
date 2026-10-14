@@ -267,7 +267,7 @@ All configuration is loaded from container environment variables or a local `.en
 | `DATA_RETENTION_DAYS` | `-1` | No | `-1` (or any value ≤ 0) retains data indefinitely; positive values are clamped to 30–3650 days and remove older chat messages and snapshots at startup. |
 | `PORT` | `8090` | No | Internal HTTP port the application listens on. |
 | `DATA_DIR` | `/data` | No | Path to the directory where the encrypted database and tokens are stored. |
-| `TZ` | `UTC` | No | Container timezone (e.g., `Europe/Berlin`). Crucial for accurate daily scheduling and sleep windows. |
+| `TZ` | `Europe/Berlin` | No | IANA timezone (e.g., `Europe/Berlin`) used as the default athlete timezone when none is saved and as the container's local timezone. Crucial for accurate daily scheduling and sleep windows. |
 
 ---
 

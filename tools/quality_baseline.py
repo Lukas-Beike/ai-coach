@@ -15,6 +15,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "tests/fixtures/quality_baseline.json"
+# Line and column are reported for humans but are not debt identity, so an
+# unrelated edit that moves a known diagnostic does not fail the ratchet.
+IDENTITY_FIELDS = ("tool", "path", "code", "message_sha256")
 NON_SOURCE_DIRECTORIES = {
     ".git",
     ".venv",
@@ -122,13 +125,27 @@ def collect(root: Path) -> tuple[dict[str, str], list[dict]]:
     )
 
 
+def identity(item: dict) -> dict:
+    return {field: item[field] for field in IDENTITY_FIELDS}
+
+
+def identity_key(item: dict) -> str:
+    return json.dumps(identity(item), sort_keys=True)
+
+
 def compare(expected: list[dict], actual: list[dict]) -> tuple[list[dict], list[dict]]:
-    baseline = Counter(json.dumps(item, sort_keys=True) for item in expected)
-    observed = Counter(json.dumps(item, sort_keys=True) for item in actual)
-    return (
-        [json.loads(item) for item in (observed - baseline).elements()],
-        [json.loads(item) for item in (baseline - observed).elements()],
-    )
+    remaining = Counter(identity_key(item) for item in expected)
+    added: list[dict] = []
+    for item in actual:
+        key = identity_key(item)
+        if remaining[key]:
+            remaining[key] -= 1
+        else:
+            added.append(item)
+    obsolete = [
+        json.loads(key) for key, count in remaining.items() for _ in range(count)
+    ]
+    return added, obsolete
 
 
 def check(baseline: dict, versions: dict[str, str], diagnostics: list[dict]) -> int:
@@ -142,9 +159,10 @@ def check(baseline: dict, versions: dict[str, str], diagnostics: list[dict]) -> 
     added, obsolete = compare(baseline["diagnostics"], diagnostics)
     for label, items in (("NEW", added), ("OBSOLETE", obsolete)):
         for item in items:
-            print(
-                f"{label} {item['tool']} {item['path']}:{item.get('line', 1)} {item['code']}"
+            location = (
+                f"{item['path']}:{item['line']}" if "line" in item else item["path"]
             )
+            print(f"{label} {item['tool']} {location} {item['code']}")
     print(
         f"Quality ratchet: {len(diagnostics)} existing, {len(added)} new, {len(obsolete)} obsolete"
     )
@@ -173,7 +191,10 @@ def main() -> int:
                     "schema": 1,
                     "base": args.base,
                     "versions": versions,
-                    "diagnostics": diagnostics,
+                    "diagnostics": [
+                        identity(item)
+                        for item in sorted(diagnostics, key=identity_key)
+                    ],
                     "coverage_evidence": current.get("coverage_evidence"),
                 },
                 indent=2,

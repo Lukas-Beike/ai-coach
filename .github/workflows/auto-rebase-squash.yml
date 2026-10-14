@@ -33,7 +33,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -t pull_requests < <(
+          # Capture gh output before parsing: a failed gh call must fail this
+          # step, which a process substitution would silently ignore.
+          pull_request_rows="$(
             gh pr list \
               --repo "$REPOSITORY" \
               --base develop \
@@ -48,7 +50,11 @@ jobs:
                 | [.number, .headRefName]
                 | @tsv
               '
-          )
+          )"
+          pull_requests=()
+          if [[ -n "$pull_request_rows" ]]; then
+            mapfile -t pull_requests <<< "$pull_request_rows"
+          fi
 
           if ((${#pull_requests[@]} == 0)); then
             echo "No open same-repository PR with squash auto-merge found."
