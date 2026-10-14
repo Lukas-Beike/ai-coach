@@ -16,6 +16,7 @@ from urllib.parse import urlencode
 
 import test_coach_dialogue as dialogue
 
+from backend.coach import dialogue as coach_dialogue
 from backend.coach import streams as coach_streams
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.http_api import server as http_server_module
@@ -480,11 +481,13 @@ with patch.object(Path, 'read_text', deny):
             )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(context.call_count, 2)
-        self.assertTrue(
-            transport_factory.return_value.request.call_args.args[0][
-                "instructions"
-            ].startswith("Fresh Garmin data")
-        )
+        instructions = transport_factory.return_value.request.call_args.args[0][
+            "instructions"
+        ]
+        # The refreshed context replaces the stale one; static rules lead for
+        # prompt caching and the per-turn context follows them.
+        self.assertTrue(instructions.startswith(coach_dialogue.INSTRUCTIONS))
+        self.assertIn("\n\nFresh Garmin data", instructions)
 
     def test_restart_job_observes_cancel_during_session_restore(self):
         server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(

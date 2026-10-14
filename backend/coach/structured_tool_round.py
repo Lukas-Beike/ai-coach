@@ -12,9 +12,12 @@ from backend import change_history
 from backend.coach.authorization import coach_execution_scope
 from backend.coach.context import CoachTrainingContextService
 from backend.coach.context_selection import select_coach_context
-from backend.coach.dialogue import INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS
 from backend.coach.job_store import CoachJobStore
 from backend.coach.proposal_models import coach_action_hash
+from backend.coach.request_payload import (
+    LOCAL_ATTACHMENT_SUMMARY_NOTICE,
+    compose_model_instructions,
+)
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.tool_call_metadata import structured_tool_call_metadata
@@ -252,7 +255,7 @@ class CoachStructuredToolRoundService:
         return result
 
     def _refreshed_instructions(self, state: StructuredCoachRoundState) -> str:
-        instructions = (
+        return compose_model_instructions(
             self._training_context.build(
                 selection=select_coach_context(
                     state.message,
@@ -263,13 +266,11 @@ class CoachStructuredToolRoundService:
                     has_receipts=True,
                 ),
                 local_date=state.context.get("local_date", ""),
-            )
-            + "\n\n"
-            + COACH_DIALOGUE_INSTRUCTIONS
+            ),
+            allow_mutations=state.allow_mutations,
+            attachment_summary=LOCAL_ATTACHMENT_SUMMARY_NOTICE
+            in state.model_instructions,
         )
-        if not state.allow_mutations:
-            instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
-        return instructions
 
     def _update_plan_scope(
         self, state: StructuredCoachRoundState, action: dict[str, Any]

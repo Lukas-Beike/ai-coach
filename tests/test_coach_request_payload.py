@@ -6,6 +6,7 @@ import json
 import unittest
 from unittest.mock import Mock
 
+from backend.coach import dialogue
 from backend.coach.request_payload import CoachRequestPayloadService
 
 
@@ -71,6 +72,53 @@ class CoachRequestPayloadTests(unittest.TestCase):
         )
         self.assertIn(advisory, model_instructions)
         self.assertIn(advisory, payload["instructions"])
+
+    def test_static_instructions_precede_dynamic_training_context(self) -> None:
+        self.training_context.build.return_value = "dynamic training context 2026-09-23"
+        for allow_mutations in (True, False):
+            for prior in (False, True):
+                with self.subTest(allow_mutations=allow_mutations, prior=prior):
+                    model_instructions, payload = self.build(
+                        allow_mutations=allow_mutations,
+                        has_prior_openai_attachments=prior,
+                    )
+                    instructions = payload["instructions"]
+                    context_at = instructions.index("dynamic training context")
+                    self.assertTrue(instructions.startswith(dialogue.INSTRUCTIONS))
+                    self.assertLess(
+                        instructions.index("untrusted evidence"), context_at
+                    )
+                    self.assertEqual(
+                        "Earlier image pixels are unavailable" in instructions, prior
+                    )
+                    if prior:
+                        self.assertGreater(
+                            instructions.index("Earlier image pixels"), context_at
+                        )
+                    # Tool-round follow-ups resend exactly this text.
+                    self.assertEqual(model_instructions, instructions)
+                    advisory = "This is an automatic advisory run."
+                    self.assertEqual(advisory in instructions, not allow_mutations)
+                    if not allow_mutations:
+                        self.assertGreater(instructions.index(advisory), context_at)
+
+    def test_instruction_prefix_is_identical_when_only_the_context_changes(
+        self,
+    ) -> None:
+        self.training_context.build.return_value = "context for Monday"
+        _, monday = self.build()
+        self.training_context.build.return_value = "context for Tuesday, longer"
+        _, tuesday = self.build()
+
+        prefix = monday["instructions"].index("context for Monday")
+        self.assertEqual(
+            monday["instructions"][:prefix], tuesday["instructions"][:prefix]
+        )
+
+    def test_tool_round_instructions_keep_the_attachment_policy(self) -> None:
+        model_instructions, _ = self.build()
+
+        self.assertIn("untrusted evidence", model_instructions)
 
     def test_settings_fallback_and_output_limit(self) -> None:
         _, payload = self.build(model=None, thinking_level=None)
