@@ -1,5 +1,7 @@
 """Compact activity projection shared by the planning and performance readers.
 
+It also reads which device recorded an Intervals.icu row (Wahoo or Garmin).
+
 ``ACTIVITY_FIELDS`` is the Intervals.icu compact ``recent_activities`` row shape. It lives here,
 below both domains, so the performance readers can derive that shape from raw
 activity rows without importing the planning package.
@@ -8,6 +10,8 @@ activity rows without importing the planning package.
 from __future__ import annotations
 
 from typing import Any
+
+from backend.canonical.vocabulary import RecordingOrigin
 
 ACTIVITY_FIELDS = (
     "id",
@@ -69,3 +73,26 @@ def selected(item: Any, fields: tuple[str, ...]) -> dict[str, Any]:
     if not isinstance(item, dict):
         return {}
     return {key: item[key] for key in fields if key in item and item[key] is not None}
+
+
+# Wire fields that name the device or app which recorded an activity.
+_DEVICE_SOURCE_FIELDS = ("source", "device_name", "external_id")
+
+
+def intervals_activity_device_source(activity: Any) -> RecordingOrigin | None:
+    """Return explicit Wahoo or Garmin provenance from an Intervals.icu activity."""
+    if not isinstance(activity, dict):
+        return None
+    provenance = " ".join(
+        str(activity.get(key) or "") for key in _DEVICE_SOURCE_FIELDS
+    ).casefold()
+    if RecordingOrigin.WAHOO in provenance or "elemnt" in provenance:
+        return RecordingOrigin.WAHOO
+    if RecordingOrigin.GARMIN in provenance:
+        return RecordingOrigin.GARMIN
+    return None
+
+
+def intervals_activity_recorded_by_wahoo(activity: Any) -> bool:
+    """Return True when an Intervals.icu activity names a Wahoo recording device."""
+    return intervals_activity_device_source(activity) == RecordingOrigin.WAHOO

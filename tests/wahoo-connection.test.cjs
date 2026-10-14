@@ -105,6 +105,7 @@ test("stored tokens stay disconnectable after the configuration was removed", ()
 test("a rejected token (auth_required freshness) asks for a reconnect", () => {
   const view = wahooConnectionView({
     wahoo: { configured: true, connected: false },
+    provider_ids: { wahoo: "wahoo" },
     provider_freshness: [{ provider: "intervals", error_code: "auth_required" }, authRequired],
   });
   assert.equal(view.reconnect, true);

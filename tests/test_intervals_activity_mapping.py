@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from backend.activities.identity import activity_kind, intervals_activity_device_source
+from backend.activities.identity import activity_kind
 from backend.canonical.mapping import IssueReason, MappingIssue, MappingResult
 from backend.canonical.records import ActivityRecord
 from backend.canonical.sports import legacy_activity_family
@@ -22,6 +22,7 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.planning.workouts import INTERVALS_WORKOUT_TYPES
+from backend.providers.intervals_activity_fields import intervals_activity_device_source
 from backend.providers.intervals_activity_mapping import (
     INTERVALS_ACTIVITY_TYPES,
     INTERVALS_LABEL,

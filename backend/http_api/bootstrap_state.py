@@ -276,7 +276,7 @@ class PublicBootstrapService:
                     ),
                     "external_calendar": bool(deps.config.calendar_ical_url),
                 },
-                "wahoo": connection_status(
+                ProviderId.WAHOO.value: connection_status(
                     deps.config,
                     deps.key_values.get_in_transaction(db, WAHOO_TOKENS_KEY),
                 ),

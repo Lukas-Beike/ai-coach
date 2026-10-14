@@ -18,6 +18,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.providers.snapshot_projection import intervals_snapshot_is_stripped
+from backend.providers.source_labels import SourceView, provider_label
 from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
 
 
@@ -80,7 +81,7 @@ class DuplicateActivityService:
             "status": "deleted",
             "deleted_activity_id": duplicate_id,
             "kept_activity_id": canonical_id,
-            "kept_source": "Wahoo",
+            "kept_source": provider_label(ProviderId.WAHOO, SourceView.DUPLICATE),
         }
 
     def _save_snapshot(self, db: Any, snapshot: dict[str, Any], synced_at: Any) -> None:
