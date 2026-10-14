@@ -50,6 +50,27 @@ class WeatherForecastTests(unittest.TestCase):
             },
         )
 
+    def test_merge_keeps_base_values_when_short_values_are_null_or_non_finite(self):
+        long_forecast = {
+            "hourly": {
+                "time": ["2026-09-01T00:00", "2026-09-01T01:00", "2026-09-01T02:00"],
+                "temperature_2m": [10, 11, 12],
+                "wind_speed_10m": [1.0, 2.0, 3.0],
+            }
+        }
+        short_forecast = {
+            "hourly": {
+                "time": ["2026-09-01T00:00", "2026-09-01T01:00", "2026-09-01T02:00"],
+                "temperature_2m": [None, float("nan"), 13],
+                "wind_speed_10m": [float("inf"), None, 4.5],
+            }
+        }
+
+        merged = merge_weather_forecasts(long_forecast, short_forecast)
+
+        self.assertEqual(merged["hourly"]["temperature_2m"], [10, 11, 13])
+        self.assertEqual(merged["hourly"]["wind_speed_10m"], [1.0, 2.0, 4.5])
+
     def test_merge_deep_copies_and_ignores_missing_or_malformed_series(self):
         long_forecast = {
             "hourly": {

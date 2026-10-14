@@ -169,8 +169,13 @@ def read_stream_response(
     data_lines: list[str] = []
     read_state = state or StreamReadState()
     check_cancelled()
-    for raw_line in response:
+    while True:
+        # Bound each line by the remaining budget (plus one byte to detect overflow)
+        # so an overlong line is never buffered whole before the budget check.
+        raw_line = response.readline(max(1, max_bytes - read_state.response_bytes + 1))
         check_cancelled()
+        if not raw_line:
+            break
         read_state.response_bytes += len(raw_line)
         if read_state.response_bytes > max_bytes:
             raise provider_http.ProviderResponseTooLarge(

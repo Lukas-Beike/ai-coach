@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 _HOURLY_FIELDS = (
@@ -31,8 +32,12 @@ def _overlay_weather_values(base: dict[str, Any], short: dict[str, Any]) -> None
             continue
         for short_index, timestamp in enumerate(short_times):
             base_index = positions.get(str(timestamp))
-            if base_index is not None and short_index < len(short_values):
-                base_values[base_index] = short_values[short_index]
+            if base_index is None or short_index >= len(short_values):
+                continue
+            value = short_values[short_index]
+            if value is None or (isinstance(value, float) and not math.isfinite(value)):
+                continue
+            base_values[base_index] = value
 
 
 def merge_weather_forecasts(

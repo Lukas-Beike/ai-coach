@@ -108,11 +108,14 @@ def poll_background_response(
     active_response_id = response_id(initial_response.get("id"))
     current = initial_response
 
-    def abort(error: AppError) -> None:
+    def cancel_best_effort() -> None:
         try:
             cancel(active_response_id)
         except Exception:  # noqa: BLE001, S110 - remote cancellation is best effort
             pass
+
+    def abort(error: AppError) -> None:
+        cancel_best_effort()
         raise error
 
     while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
@@ -132,7 +135,13 @@ def poll_background_response(
                     reason="provider_timeout",
                 )
             )
-        current = retrieve(active_response_id)
+        try:
+            current = retrieve(active_response_id)
+        except Exception:
+            # A failed poll would otherwise leave the background response running
+            # remotely with no further polling; cancel it once, then re-raise.
+            cancel_best_effort()
+            raise
     return current
 
 
