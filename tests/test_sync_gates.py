@@ -93,6 +93,16 @@ class ProviderResyncGateTests(unittest.TestCase):
             gate.end_reset()
         self.assertEqual(gate.active, 0)
 
+    def test_reset_inside_own_operation_fails_fast_instead_of_deadlocking(self) -> None:
+        gate = ProviderResyncGate("Synthetic")
+        with gate.operation():
+            with self.assertRaisesRegex(RuntimeError, "inside a provider operation"):
+                gate.begin_reset()
+            self.assertFalse(gate.is_resetting())
+        self.assertEqual(gate.active, 0)
+        self.assertTrue(gate.begin_reset())
+        gate.end_reset()
+
     def test_operation_cleanup_runs_after_exception(self) -> None:
         gate = ProviderResyncGate("Synthetic")
         with self.assertRaisesRegex(RuntimeError, "boom"), gate.operation():

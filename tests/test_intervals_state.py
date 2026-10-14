@@ -5,11 +5,25 @@ from backend.sync.intervals_state import (
     calendar_window,
     connection_state,
     decode_pagination,
+    latest_library_timestamp,
     public_state,
 )
 
 
 class IntervalsStateTests(unittest.TestCase):
+    def test_latest_library_timestamp_prefers_newest_import_or_push(self):
+        self.assertIsNone(latest_library_timestamp(None, ""))
+        self.assertEqual(
+            latest_library_timestamp("2026-03-13T08:00:00+00:00", None),
+            "2026-03-13T08:00:00+00:00",
+        )
+        self.assertEqual(
+            latest_library_timestamp(
+                "2026-03-13T08:00:00+00:00", "2026-03-14T08:00:00+00:00"
+            ),
+            "2026-03-14T08:00:00+00:00",
+        )
+
     def test_connection_state_priority_and_all_states(self):
         self.assertEqual(
             connection_state(False, True, "error", "sync", "library"), "not_configured"

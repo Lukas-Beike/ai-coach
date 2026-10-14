@@ -128,6 +128,11 @@ class RecordingOutcomes:
         self.complete_calls: list[tuple[str, Any]] = []
         self.failure_calls: list[tuple[dict[str, Any], BaseException]] = []
         self.complete_error: Exception | None = None
+        self.failure_error: Exception | None = None
+        self.update_calls: list[tuple[str, str]] = []
+
+    def update(self, job_id: str, status: str, **_: Any) -> None:
+        self.update_calls.append((job_id, status))
 
     def complete(self, job_id: str, result: Any) -> str:
         self.complete_calls.append((job_id, result))
@@ -137,6 +142,8 @@ class RecordingOutcomes:
 
     def record_failure(self, job: dict[str, Any], error: BaseException) -> None:
         self.failure_calls.append((job, error))
+        if self.failure_error:
+            raise self.failure_error
 
 
 class RecordingQueue:
@@ -348,12 +355,12 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertEqual(self.observer.scopes[0].result, {"status": "ok", "count": 2})
         self.assertEqual(self.gate.events, ["enter", "exit"])
 
-    def test_competition_error_makes_intervals_partial_and_busy_skips_competitions(
+    def test_competition_error_keeps_core_status_and_busy_skips_competitions(
         self,
     ) -> None:
         self.competitions.error = RuntimeError("fake competition failure")
         result = self.executor.execute(self.job("intervals"))
-        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["status"], "ok")
         self.assertEqual(result["competitions"], {"status": "error"})
 
         self.intervals.result = {"status": "already_running"}
@@ -506,6 +513,36 @@ class SyncJobExecutorTests(unittest.TestCase):
             ],
         )
         self.assertEqual(self.outcomes.failure_calls, [])
+
+    def test_run_continues_historical_chain_after_partial_chunk(self) -> None:
+        self.outcomes.fallback_status = "partial"
+        self.intervals.result = {"status": "partial"}
+        job = self.job(
+            "intervals",
+            "historical_backfill",
+            {"days": 90, "end_date": "2026-09-01"},
+        )
+
+        self.executor.run(job)
+
+        self.assertEqual(len(self.queue.calls), 1)
+        self.assertEqual(self.queue.calls[0][0][2]["end_date"], "2026-06-03")
+
+        self.queue.calls.clear()
+        self.outcomes.fallback_status = "failed"
+        self.executor.run(job)
+        self.assertEqual(self.queue.calls, [])
+
+    def test_run_survives_failure_while_recording_failure(self) -> None:
+        self.intervals.error = RuntimeError("provider failure")
+        self.outcomes.failure_error = RuntimeError("store failure")
+        job = self.job("intervals")
+
+        with self.assertLogs("backend.sync.executor", level="ERROR") as logs:
+            self.executor.run(job)
+
+        self.assertEqual(self.outcomes.update_calls, [("job-123", "failed")])
+        self.assertNotIn("store failure", " ".join(logs.output))
 
     def test_run_records_execution_failure_without_reraising(self) -> None:
         failure = RuntimeError("isolated provider failure")

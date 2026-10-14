@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any, Protocol
@@ -39,6 +40,8 @@ from backend.sync.queue import SyncJobQueueService
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync.state import SyncStateRepository
 from backend.sync.weather import WeatherSyncService
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class HistoricalSyncJobOwner:
@@ -115,7 +118,7 @@ class HistoricalSyncJobOwner:
     ) -> None:
         if not (
             job.get("type") == "historical_backfill"
-            and fallback_status == "completed"
+            and fallback_status in {"completed", "partial"}
             and isinstance(result, dict)
             and result.get("historical_next_end")
         ):
@@ -208,8 +211,10 @@ class IntervalsSyncJobOwner:
             result["competitions"] = self._sync_competitions(
                 reason, push_local=False, operation_id=job["id"]
             )
-        except Exception:  # noqa: BLE001 - competition failure remains a partial refresh
-            result["status"] = "partial"
+        except Exception:  # noqa: BLE001 - competition failure is a section error
+            # The core Intervals status is kept: a failed competitions section
+            # must not mark the whole sync partial (that would also fail waiting
+            # performance refreshes and stop the historical backfill chain).
             result["competitions"] = {"status": "error"}
         return result
 
@@ -526,7 +531,26 @@ class SyncJobExecutor:
             fallback_status = self._outcome_service.complete(job["id"], result)
             self._historical_sync.queue_next(job, result, fallback_status)
         except Exception as exc:  # noqa: BLE001 - runner persists every execution failure
-            self._outcome_service.record_failure(job, exc)
+            try:
+                self._outcome_service.record_failure(job, exc)
+            except Exception as secondary:  # noqa: BLE001 - the worker must survive
+                _LOGGER.error(
+                    "sync job failure could not be recorded",
+                    extra={
+                        "event": "sync_job_failure_record_failed",
+                        "job_id": job.get("id"),
+                        "error_class": type(secondary).__name__,
+                    },
+                )
+                try:
+                    self._outcome_service.update(
+                        job["id"], "failed", error_class=type(exc).__name__
+                    )
+                except Exception:  # noqa: BLE001 - restart recovery requeues it
+                    _LOGGER.error(
+                        "sync job could not be marked failed",
+                        extra={"event": "sync_job_last_resort_failed"},
+                    )
 
     def execute(self, job: dict[str, Any]) -> dict[str, Any]:
         """Normalize and dispatch a persisted provider-job envelope."""

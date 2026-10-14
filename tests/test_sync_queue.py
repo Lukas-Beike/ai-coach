@@ -59,6 +59,9 @@ class SyncQueueFixtureMixin:
                     UNIQUE(job_id, item_key),
                     FOREIGN KEY(job_id) REFERENCES sync_jobs(id) ON DELETE CASCADE
                 );
+                CREATE TABLE kv (
+                    key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL
+                );
                 """
             )
         self.identifiers = iter(f"job-{index}" for index in range(1, 100))
