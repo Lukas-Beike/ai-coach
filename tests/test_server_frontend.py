@@ -315,7 +315,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('api("/api/activities?limit=250")', app)
         self.assertIn("api(`/api/plan${query}`)", app)
         self.assertIn(
-            "render(payload);\n      // A stored snapshot may already have revealed the shell.\n"
+            "render(payload);\n      state.dataFromSnapshot = false;\n      // A stored snapshot may already have revealed the shell.\n"
             '      if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();',
             app,
         )

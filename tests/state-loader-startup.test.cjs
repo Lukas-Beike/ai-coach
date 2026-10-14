@@ -21,7 +21,8 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
   const calls = [];
   const responses = new Map();
   const renders = [];
-  const shell = { classList: { contains: () => false, add() {}, remove() {} }, hidden: false };
+  const shell = { loading: false, hidden: false };
+  shell.classList = { contains: () => shell.loading, add() {}, remove() {} };
   const state = {
     data: null,
     sessionGeneration: 0,
@@ -33,6 +34,7 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
     loadingAreas: new Set(),
     loadedAreas: new Set(),
     initialStateLoaded: false,
+    dataFromSnapshot: false,
   };
   const context = vm.createContext({
     state,
@@ -61,7 +63,7 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
     responses.set(requestPath, response);
     response.resolve(body);
   };
-  return { context, state, calls, renders, respond, storage };
+  return { context, state, shell, calls, renders, respond, storage };
 }
 
 test("area reads start before the bootstrap response arrives", async () => {
@@ -110,4 +112,19 @@ test("the state snapshot is saved only after a full load and only for the same a
   assert.equal(loader({ storage: first.storage, asset: "/state-loader.js?v=2" }).context.readStateSnapshot(), null);
   first.context.clearStateSnapshot();
   assert.equal(first.context.readStateSnapshot(), null);
+});
+
+test("snapshot data never overrides the startup bootstrap or claims its versions", async () => {
+  const { context, state, shell, respond } = loader();
+  shell.loading = true;
+  const loading = context.load("/api/bootstrap?local=1", ["performance"]);
+  context.render({ planned: [{ id: "stale" }], weather: { days: ["stale"] }, state_versions: { plan: 1 } });
+  state.dataFromSnapshot = true;
+  respond("/api/bootstrap?local=1", { planned: [{ id: "fresh" }], state_versions: { plan: 2, performance: 5 } });
+  respond("/api/performance", { performance: { ctl: 40 } });
+  await loading;
+  assert.deepEqual(plain(state.data.planned), [{ id: "fresh" }]);
+  assert.equal(state.data.weather, undefined);
+  assert.deepEqual(plain(state.data.state_versions), { plan: 2, performance: 5 });
+  assert.equal(state.dataFromSnapshot, false);
 });

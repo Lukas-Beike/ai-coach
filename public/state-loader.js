@@ -117,13 +117,15 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     // Startup syncs and the one-time canonical backfill can keep the server busy for longer than the default timeout.
     const bootstrap = liveAreasOnly ? {} : await api(path, { timeoutMs: 90_000 });
     if (sessionGeneration !== state.sessionGeneration) return;
-    const existing = state.data || {};
+    // Snapshot data is only a placeholder: the bootstrap's values and versions replace it.
+    const existing = state.dataFromSnapshot && !liveAreasOnly ? {} : state.data || {};
     const payload = { ...existing, ...bootstrap };
     ["messages", "messages_next_cursor", "library", "library_next_cursor", "plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", providerIds().garmin, "checkins", "local_feedback", "activity_feedback"].filter(Boolean).forEach((key) => {
       if (existing[key] !== undefined) payload[key] = existing[key];
     });
     if (initialLoad && requestSequence === state.loadSequence) {
       render(payload);
+      state.dataFromSnapshot = false;
       // A stored snapshot may already have revealed the shell.
       if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
     }
@@ -133,7 +135,10 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     payload.messages = state.data?.messages || [];
     const { failures, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
     applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration);
-    if (requestSequence === state.loadSequence) render(payload);
+    if (requestSequence === state.loadSequence) {
+      render(payload);
+      state.dataFromSnapshot = false;
+    }
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
     if (sessionGeneration !== state.sessionGeneration || error?.status === 401 || /Authentication/.test(error.message)) return;

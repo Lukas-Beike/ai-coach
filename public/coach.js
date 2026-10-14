@@ -209,6 +209,7 @@ async function loadInitialState() {
   const snapshot = state.data ? null : readStateSnapshot();
   if (snapshot) {
     render(snapshot);
+    state.dataFromSnapshot = true;
     finishAppShellLoading();
   }
   await loading;
