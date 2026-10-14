@@ -242,7 +242,10 @@ def build_structured_tool_schemas(
         _canonical_coach_tool(
             "list_recent_activities",
             "Read completed activities from the latest local snapshot without refreshing a provider.",
-            {"days": {"type": "integer"}, "limit": {"type": "integer"}},
+            {
+                "days": {"type": "integer", "minimum": 1, "maximum": 3660},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+            },
         ),
         _canonical_coach_tool(
             "get_activity_details",
@@ -289,12 +292,18 @@ def build_structured_tool_schemas(
         _canonical_coach_tool(
             "list_planned_workouts",
             "Read future locally scheduled workouts.",
-            {"limit": {"type": "integer"}},
+            {
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": COACH_TRAINING_CHANGE_LIMIT,
+                },
+            },
         ),
         _canonical_coach_tool(
             "list_change_history",
             "Read local change-history references that can be used to request an undo preview.",
-            {"limit": {"type": "integer"}},
+            {"limit": {"type": "integer", "minimum": 1, "maximum": 500}},
         ),
         _canonical_coach_tool(
             "list_competitions", "Read locally stored target competitions."
@@ -459,7 +468,12 @@ def build_structured_tool_schemas(
                             "type": {"type": "string"},
                             "sport": {"type": "string"},
                             "expected_payload_hash": {"type": "string"},
+                            "plan_id": {"type": "string"},
+                            "rationale": {"type": "string"},
+                            "environment": {"type": "string"},
+                            "sport_detail": {"type": "string"},
                         },
+                        "additionalProperties": False,
                     },
                 },
                 "expected_revision": {
@@ -674,7 +688,10 @@ def build_structured_tool_schemas(
             "Queue an explicitly requested read-only provider refresh. For a Garmin catch-up after an outage or when the athlete asks for a 30-day refresh, pass days=30; otherwise use the saved provider window.",
             {
                 "days": {
-                    "type": "integer",
+                    "anyOf": [
+                        {"type": "integer", "enum": [-1]},
+                        {"type": "integer", "minimum": 1, "maximum": 365},
+                    ],
                     "description": "Requested history window in days. Set to 30 for an explicitly requested Garmin catch-up.",
                 },
                 "reason": {"type": "string"},

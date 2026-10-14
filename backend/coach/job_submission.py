@@ -10,6 +10,7 @@ from typing import Any
 
 from backend.coach.attachments import (
     MAX_ATTACHMENT_STORAGE_BYTES,
+    AttachmentRequestTooLarge,
     validate_attachments,
 )
 from backend.coach.authorization import coach_execution_scope, coach_session_key
@@ -180,6 +181,12 @@ class CoachJobSubmissionService:
             )
         try:
             attachments = validate_attachments(attachments)
+        except AttachmentRequestTooLarge:
+            raise AppError(
+                413,
+                "Die Anhänge sind zusammen zu groß für eine Coach-Anfrage. Bitte sende weniger oder kleinere Dateien.",
+                reason="attachment_request_too_large",
+            ) from None
         except ValueError:
             raise AppError(
                 400,

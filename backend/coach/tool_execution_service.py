@@ -7,7 +7,6 @@ from contextlib import nullcontext
 from typing import Any
 
 from backend.activities.duplicate_inspection import DuplicateInspector
-from backend.activities.duplicates import duplicate_delete_action
 from backend.coach.clarification import CoachClarificationService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.tool_dispatch import CoachToolDispatchService
@@ -94,14 +93,7 @@ class CoachStructuredToolExecutionService:
                 return {**proposal, "ok": True, "status": "approval_required"}
             if name == "inspect_activity_duplicates":
                 duplicate = self._duplicate_inspector.latest()
-                result = {"ok": True, "duplicate": duplicate}
-                if duplicate and session_csrf_hash:
-                    result.update(
-                        self._proposal_creation.create(
-                            duplicate_delete_action(duplicate), session_csrf_hash
-                        )
-                    )
-                return result
+                return {"ok": True, "duplicate": duplicate}
             if (
                 action.get("intent") == "remote_sync"
                 and (action.get("request") or {}).get("remote_write") is True
