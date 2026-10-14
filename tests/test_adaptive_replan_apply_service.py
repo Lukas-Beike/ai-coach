@@ -43,6 +43,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
                 (NOW,),
             )
         self.repository = PlanAdjustmentRepository()
+        self._previews_created = 0
         self.revisions = PlanningRevisionService(PlanningStateRepository(), lambda: NOW)
         self.service = self.make_service()
 
@@ -90,9 +91,12 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
 
     def add_preview(self, payload, adjustment_id=None):
         adjustment_id = adjustment_id or str(uuid.uuid4())
+        self._previews_created += 1
+        # Distinct, increasing creation times keep "latest preview" unambiguous.
+        created_at = f"2026-09-20T08:00:{self._previews_created:02d}+00:00"
         with self.manager.unit_of_work() as db:
             self.repository.create_preview(
-                db, adjustment_id, json.dumps(payload, ensure_ascii=False), NOW
+                db, adjustment_id, json.dumps(payload, ensure_ascii=False), created_at
             )
         return adjustment_id
 
@@ -121,7 +125,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         replacement = self.workout(
             workout_id,
             "2026-09-21",
-            name="Recovery ride",
+            name="Tempo ride",
             duration_minutes=25,
             description="- 25m 50% Easy",
             workout_doc={"new": True},
@@ -184,7 +188,8 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         )
         saved = json.loads(planned["payload"])
         self.assertEqual((planned["sync_dirty"], planned["sync_state"]), (1, "local"))
-        self.assertEqual(saved["name"], "Recovery ride")
+        self.assertEqual(saved["description"], "- 25m 50% Easy")
+        self.assertEqual(saved["duration_minutes"], 25)
         self.assertEqual(saved["moving_time"], 1500)
         for key in ("workout_doc", "icu_training_load", "icu_intensity"):
             self.assertNotIn(key, saved)
@@ -213,7 +218,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         )
         self.assertEqual(audit["source"], "adaptive_replan")
         self.assertNotEqual(audit["before_hash"], audit["after_hash"])
-        self.assertIn("Tempo ride", audit["diff"])
+        self.assertIn("- 30m 80%", audit["diff"])
         applied = json.loads(
             self.row("SELECT payload FROM plan_adjustments WHERE id=?", (preview_id,))[
                 "payload"
@@ -414,6 +419,93 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
                     self.assertEqual(
                         result["stale"][0]["reason"], "calendar_constraint_changed"
                     )
+
+    def test_apply_keeps_athlete_edits_outside_the_replaced_fields(self):
+        workout_id = str(uuid.uuid4())
+        original = self.workout(
+            workout_id,
+            "2026-09-21",
+            start_date_local="2026-09-21T06:30:00",
+            plan_id="plan-a",
+            plan_name="Plan A",
+            external_id="ext-old",
+        )
+        self.add_workout(workout_id, original)
+        preview_id = self.add_preview(
+            {
+                "changes": [
+                    {
+                        "library_workout_id": workout_id,
+                        "source_fingerprint": adaptive.adaptive_workout_fingerprint(
+                            original
+                        ),
+                        "payload": {
+                            **original,
+                            "duration_minutes": 20,
+                            "description": "- 20m 50% Easy",
+                            "start_date_local": "2026-09-21T06:30:00",
+                        },
+                    }
+                ]
+            }
+        )
+        edited = {
+            **original,
+            "start_date_local": "2026-09-21T18:00:00",
+            "plan_id": "plan-b",
+            "plan_name": "Plan B",
+            "external_id": "ext-new",
+        }
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET payload=? WHERE local_id=?",
+                (json.dumps(edited), workout_id),
+            )
+
+        result = self.service.apply(preview_id)
+
+        self.assertEqual((result["status"], result["updated"]), ("applied", 1))
+        saved = json.loads(
+            self.row(
+                "SELECT payload FROM planned_units WHERE local_id=?", (workout_id,)
+            )["payload"]
+        )
+        self.assertEqual(saved["description"], "- 20m 50% Easy")
+        self.assertEqual(saved["duration_minutes"], 20)
+        for key in (
+            "start_date_local",
+            "plan_id",
+            "plan_name",
+            "external_id",
+        ):
+            self.assertEqual(saved[key], edited[key], key)
+
+    def test_only_the_latest_preview_can_be_applied(self):
+        workout_id = str(uuid.uuid4())
+        original = self.workout(workout_id, "2026-09-21")
+        self.add_workout(workout_id, original)
+        change = {
+            "library_workout_id": workout_id,
+            "source_fingerprint": adaptive.adaptive_workout_fingerprint(original),
+            "payload": {**original, "duration_minutes": 20, "description": "- 20m 50%"},
+        }
+        older_id = self.add_preview({"changes": [change]})
+        newer_id = self.add_preview({"changes": [change]})
+        before = self._state_snapshot()
+
+        with self.assertRaises(AppError) as superseded:
+            self.service.apply(older_id)
+
+        self.assertEqual(superseded.exception.status, 409)
+        self.assertEqual(self._state_snapshot(), before)
+        self.assertEqual(self.service.apply(newer_id)["status"], "applied")
+        self.assertEqual(
+            self.service.apply(newer_id),
+            {"status": "already_applied", "id": newer_id},
+        )
+        # A superseded preview that was never applied stays rejected afterwards.
+        with self.assertRaises(AppError):
+            self.service.apply(older_id)
 
     def test_invalid_uuid_and_missing_preview_raise_app_errors(self):
         with self.assertRaises(AppError) as invalid:
