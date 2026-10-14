@@ -440,7 +440,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual(result, {"status": "completed", "answer": "done"})
         self.assertEqual(retrieved_ids, ["resp_poll", "resp_poll", "resp_poll"])
-        self.assertEqual(waits, [2, 2, 2])
+        self.assertEqual(waits, [0.25, 0.5, 1.0])
 
     def test_poll_background_response_cancels_before_wait(self):
         class Event:
@@ -464,7 +464,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             )
 
         self.assertEqual(cancelled, ["resp_cancel"])
-        self.assertEqual(waits, [3])
+        self.assertEqual(waits, [0.25])
         self.assertEqual(
             (
                 raised.exception.status,
@@ -503,7 +503,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             )
 
         self.assertEqual(cancelled, ["resp_cancel_after_wait"])
-        self.assertEqual(waits, [3])
+        self.assertEqual(waits, [0.25])
         self.assertEqual(raised.exception.reason, "chat_cancelled")
 
     def test_poll_background_response_times_out_from_function_entry(self):
@@ -526,7 +526,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 monotonic=lambda: next(times),
             )
 
-        self.assertEqual(sleeps, [1])
+        self.assertEqual(sleeps, [0.25])
         self.assertEqual(cancelled, ["resp_timeout"])
         self.assertEqual(
             (
@@ -633,6 +633,93 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 )
             self.assertIs(raised.exception, retrieve_error)
             self.assertEqual(cancelled, [])
+
+    def test_poll_background_response_backs_off_up_to_configured_interval(self):
+        statuses = iter(["in_progress"] * 5 + ["completed"])
+        waits = []
+
+        result = poll_background_response(
+            {"id": "resp_backoff", "status": "queued"},
+            retrieve=lambda _response_id: {"status": next(statuses)},
+            cancel=lambda _response_id: self.fail("polling must not be cancelled"),
+            poll_seconds=2,
+            max_seconds=60,
+            monotonic=lambda: 0,
+            wait=waits.append,
+        )
+
+        self.assertEqual(result, {"status": "completed"})
+        self.assertEqual(waits, [0.25, 0.5, 1.0, 2, 2, 2])
+
+    def test_poll_background_response_never_waits_longer_than_configured_interval(
+        self,
+    ):
+        statuses = iter(["in_progress", "in_progress", "completed"])
+        waits = []
+
+        poll_background_response(
+            {"id": "resp_short_interval", "status": "queued"},
+            retrieve=lambda _response_id: {"status": next(statuses)},
+            cancel=lambda _response_id: self.fail("polling must not be cancelled"),
+            poll_seconds=0.1,
+            max_seconds=60,
+            monotonic=lambda: 0,
+            wait=waits.append,
+        )
+
+        self.assertEqual(waits, [0.1, 0.1, 0.1])
+
+    def test_poll_background_response_cancel_is_honored_during_backoff(self):
+        waits = []
+        cancelled = []
+        retrieved = []
+
+        class Event:
+            def wait(self, seconds):
+                waits.append(seconds)
+                return len(waits) == 3
+
+        with self.assertRaises(AppError) as raised:
+            poll_background_response(
+                {"id": "resp_cancel_backoff", "status": "queued"},
+                retrieve=lambda response_id: (
+                    retrieved.append(response_id),
+                    {"status": "in_progress"},
+                )[1],
+                cancel=cancelled.append,
+                cancel_event=Event(),
+                poll_seconds=30,
+                max_seconds=60,
+                monotonic=lambda: 0,
+            )
+
+        self.assertEqual(waits, [0.25, 0.5, 1.0])
+        self.assertEqual(len(retrieved), 2)
+        self.assertEqual(cancelled, ["resp_cancel_backoff"])
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+
+    def test_poll_background_response_deadline_is_enforced_during_backoff(self):
+        clock = iter((0.0, 0.3, 0.9, 1.6))
+        waits = []
+        cancelled = []
+
+        with self.assertRaises(AppError) as raised:
+            poll_background_response(
+                {"id": "resp_deadline_backoff", "status": "queued"},
+                retrieve=lambda _response_id: {"status": "in_progress"},
+                cancel=cancelled.append,
+                poll_seconds=30,
+                max_seconds=1.5,
+                monotonic=lambda: next(clock),
+                wait=waits.append,
+            )
+
+        self.assertEqual(waits, [0.25, 0.5, 1.0])
+        self.assertEqual(cancelled, ["resp_deadline_backoff"])
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (504, "provider_timeout"),
+        )
 
     def test_poll_background_response_rejects_invalid_initial_response_id(self):
         with self.assertRaises(AppError) as raised:
@@ -1770,7 +1857,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(notified, ["resp_bg"])
-        self.assertEqual(waits, [2])
+        self.assertEqual(waits, [0.25])
         self.assertEqual([entry[2] for entry in state.usage], ["responses_background"])
         self.assertEqual(len(state.usage), 1)
 
@@ -1796,7 +1883,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             (raised.exception.status, raised.exception.reason),
             (504, "provider_timeout"),
         )
-        self.assertEqual(waits, [2])
+        self.assertEqual(waits, [0.25])
         self.assertEqual(
             http.calls[-1][0][:2],
             ("POST", "https://api.example.test/v1/responses/resp_bg/cancel"),

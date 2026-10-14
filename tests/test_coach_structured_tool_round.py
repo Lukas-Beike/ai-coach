@@ -6,6 +6,8 @@ import threading
 import unittest
 from unittest.mock import MagicMock, Mock, patch
 
+from backend.coach.dialogue import INSTRUCTIONS
+from backend.coach.request_payload import compose_model_instructions
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
@@ -286,6 +288,38 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.assertIn(
             "Do not change data or pending requests.", state.model_instructions
         )
+        # Static rules first, per-turn context last (provider prompt caching).
+        self.assertTrue(state.model_instructions.startswith(INSTRUCTIONS))
+        self.assertLess(
+            state.model_instructions.index("fresh synthetic context"),
+            state.model_instructions.index("Do not change data or pending requests."),
+        )
+
+    def test_refresh_rebuild_keeps_turn_attachment_notices(self) -> None:
+        state = self.state()
+        state.allow_mutations = True
+        state.model_instructions = compose_model_instructions(
+            "stale synthetic context", allow_mutations=True, attachment_summary=True
+        )
+        self.execution.execute.return_value = {
+            "ok": True,
+            "synchronous_refresh": True,
+        }
+        with patch.object(
+            self.service._training_context,
+            "build",
+            return_value="fresh synthetic context",
+        ):
+            self.service._execute_tool_call(
+                self.call(), state=state, question="", cancelled=False
+            )
+        self.assertEqual(
+            state.model_instructions,
+            compose_model_instructions(
+                "fresh synthetic context", allow_mutations=True, attachment_summary=True
+            ),
+        )
+        self.assertIn("untrusted evidence", state.model_instructions)
 
     def test_refresh_rebuild_preserves_attachment_context(self) -> None:
         state = self.state()
