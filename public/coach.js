@@ -1427,16 +1427,18 @@ async function executeCoachActionProposal(proposal, button) {
     const receipt = coachActionReceipt(proposal, result);
     addCoachReceipt(receipt);
     toast(receipt.message);
-    if (state.route === originalRoute) {
-      if (receipt.nutritionProductWrite) await AppRouter.navigate("nutrition/products", { historyMode: "push" });
-      else if (receipt.localWrite) await AppRouter.navigate("nutrition/diary", { historyMode: "push" });
-      else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
-    }
+    if (state.route === originalRoute) await showCoachReceiptArea(receipt);
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);
   } catch (error) {
     if (executeSent && !executeResponded && !isHttpClientRejection(error)) lockUnknownCoachActionOutcome(proposal, error);
     else rejectCoachActionProposal(proposal, button, error);
   }
+}
+
+async function showCoachReceiptArea(receipt) {
+  if (receipt.nutritionProductWrite) await AppRouter.navigate("nutrition/products", { historyMode: "push" });
+  else if (receipt.localWrite) await AppRouter.navigate("nutrition/diary", { historyMode: "push" });
+  else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
 }
 
 // The action may have run; keep the button locked until the server state is known.
