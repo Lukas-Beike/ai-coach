@@ -5,8 +5,8 @@ kinds of findings, each keyed by (rule, repository-relative posix path, token):
 
 - ``icu_identifier``: any ``icu_*`` name in the raw text, including comments.
 - ``garmin_wire_key``: a quoted string equal to a Garmin-only wire key.
-- ``provider_literal``: a quoted string equal to "intervals" or "garmin"
-  (case-insensitive).
+- ``provider_literal``: a quoted string equal to "intervals", "garmin" or
+  "wahoo" (case-insensitive).
 
 Python literals come from the AST, so f-strings and implicit concatenation are
 seen while comments are ignored. JavaScript literals come from a small lexer
@@ -99,7 +99,7 @@ GARMIN_WIRE_KEYS = frozenset(
         "weeklyAvg",
     }
 )
-PROVIDER_LITERALS = frozenset({"intervals", "garmin"})
+PROVIDER_LITERALS = frozenset({"intervals", "garmin", "wahoo"})
 
 # Adapters and the canonical model may name providers and use provider keys.
 ADAPTER_PREFIXES = ("backend/providers/", "backend/canonical/")

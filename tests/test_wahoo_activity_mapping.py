@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from datetime import UTC, date, datetime
 from typing import Any
@@ -17,6 +18,8 @@ from backend.canonical.vocabulary import (
 )
 from backend.providers.canonical_plans import (
     current_mapper_versions,
+    reprojection_mapper_version,
+    reprojection_plan,
     wahoo_ingest_plan,
 )
 from backend.providers.wahoo_activity_mapping import (
@@ -298,6 +301,196 @@ class IngestPlanTests(unittest.TestCase):
             with self.subTest(payload=payload):
                 plan = wahoo_ingest_plan(payload, zone=UTC)
                 self.assertEqual((), plan.activities)
+
+
+class SummaryMetricTests(unittest.TestCase):
+    def test_summary_metrics_map_from_decimal_text(self) -> None:
+        record = mapped(
+            row(
+                workout_summary={
+                    "duration_active_accum": "3600.4",
+                    "ascent_accum": "412.5",
+                    "cadence_avg": "88.4",
+                    "power_bike_np_last": "231.7",
+                    "work_accum": "1500000",
+                    "power_bike_tss_last": "76.3",
+                }
+            )
+        ).records[0]
+
+        self.assertEqual(3600.4, record.moving_duration_s)
+        self.assertEqual(412.5, record.elevation_gain_m)
+        self.assertEqual(88.4, record.avg_cadence)
+        self.assertEqual(231.7, record.normalized_power)
+        self.assertEqual(1500.0, record.energy_kj)
+        self.assertEqual(76.3, record.load)
+        self.assertIs(LoadModel.TSS, record.load_model)
+
+    def test_tss_is_a_load_only_when_it_is_positive(self) -> None:
+        for value in ("0", 0, None, ""):
+            with self.subTest(value=value):
+                record = mapped(
+                    row(workout_summary={"power_bike_tss_last": value})
+                ).records[0]
+                self.assertIsNone(record.load)
+                self.assertIs(LoadModel.UNKNOWN, record.load_model)
+
+    def test_zero_cadence_power_and_energy_are_not_measurements(self) -> None:
+        record = mapped(
+            row(
+                workout_summary={
+                    "cadence_avg": "0",
+                    "power_bike_np_last": "0",
+                    "work_accum": "0",
+                    "ascent_accum": "0",
+                }
+            )
+        ).records[0]
+
+        self.assertIsNone(record.avg_cadence)
+        self.assertIsNone(record.normalized_power)
+        self.assertIsNone(record.energy_kj)
+        self.assertEqual(0.0, record.elevation_gain_m)
+
+    def test_missing_summary_metrics_are_none_without_issues(self) -> None:
+        result = mapped(row(workout_summary=None))
+        record = result.records[0]
+
+        self.assertEqual((), result.issues)
+        for field in (
+            "moving_duration_s",
+            "elevation_gain_m",
+            "normalized_power",
+            "avg_cadence",
+            "energy_kj",
+            "load",
+        ):
+            with self.subTest(field=field):
+                self.assertIsNone(getattr(record, field))
+
+    def test_invalid_summary_metrics_become_none_with_value_free_issues(self) -> None:
+        summary = {
+            "ascent_accum": "x",
+            "cadence_avg": "400",
+            "power_bike_np_last": "-1",
+            "work_accum": "1,5",
+            "power_bike_tss_last": "NaN",
+        }
+        result = mapped(row(workout_summary=summary))
+        record = result.records[0]
+
+        self.assertIsNone(record.elevation_gain_m)
+        self.assertIsNone(record.avg_cadence)
+        self.assertIsNone(record.normalized_power)
+        self.assertIsNone(record.energy_kj)
+        self.assertIsNone(record.load)
+        self.assertEqual(
+            {
+                "ascent_accum",
+                "cadence_avg",
+                "power_bike_np_last",
+                "work_accum",
+                "power_bike_tss_last",
+            },
+            {issue.field for issue in result.issues},
+        )
+        rendered = repr(result.issues)
+        for value in ("400", "-1", "1,5", "NaN"):
+            self.assertNotIn(value, rendered)
+
+    def test_zero_active_duration_falls_back_to_total_without_moving_time(self) -> None:
+        record = mapped(
+            row(
+                workout_summary={
+                    "duration_active_accum": "0",
+                    "duration_total_accum": "3900",
+                }
+            )
+        ).records[0]
+
+        self.assertEqual(3900.0, record.duration_s)
+        self.assertIsNone(record.moving_duration_s)
+
+    def test_calories_and_speed_stay_out_of_the_canonical_record(self) -> None:
+        record = mapped(
+            row(workout_summary={"calories_accum": "700", "speed_avg": "8.2"})
+        ).records[0]
+
+        self.assertIsNone(record.energy_kj)
+        self.assertNotIn("700", repr(record))
+        self.assertNotIn("8.2", repr(record))
+
+
+class StoredRawRecordTests(unittest.TestCase):
+    def test_stored_raw_record_drops_the_summary_file_url_only(self) -> None:
+        workout = row(
+            workout_summary={
+                "file": {
+                    "url": "https://files.example.invalid/w.fit?sig=placeholder",
+                    "name": "w.fit",
+                },
+                "calories_accum": "700",
+                "ascent_accum": "412.5",
+            }
+        )
+        payload = {"synced_at": "2026-10-12T08:00:00Z", "workouts": [workout]}
+
+        plan = wahoo_ingest_plan(payload, zone=UTC)
+
+        stored = plan.raw_records[0].payload
+        self.assertNotIn("file", stored["workout_summary"])
+        self.assertNotIn("example.invalid", repr(stored))
+        self.assertEqual("700", stored["workout_summary"]["calories_accum"])
+        self.assertEqual("412.5", stored["workout_summary"]["ascent_accum"])
+        self.assertEqual(412.5, plan.activities[0].record.elevation_gain_m)
+        self.assertIn("file", workout["workout_summary"])
+
+    def test_rows_without_a_summary_file_are_stored_unchanged(self) -> None:
+        workout = row()
+        payload = {"synced_at": "2026-10-12T08:00:00Z", "workouts": [workout]}
+
+        plan = wahoo_ingest_plan(payload, zone=UTC)
+
+        self.assertEqual(workout, plan.raw_records[0].payload)
+
+
+class ReprojectionTests(unittest.TestCase):
+    def test_mapper_version_is_two_and_newer_than_the_stored_version_one(self) -> None:
+        self.assertEqual(2, MAPPER_VERSION)
+        self.assertEqual(2, reprojection_mapper_version("wahoo", "activity"))
+
+    def test_a_stored_version_one_row_reprojects_the_new_metrics(self) -> None:
+        stored = {
+            "provider": "wahoo",
+            "record_kind": "activity",
+            "source_record_id": "100",
+            "payload": json.dumps(
+                row(
+                    workout_summary={
+                        "duration_active_accum": "3600",
+                        "ascent_accum": "412.5",
+                        "cadence_avg": "88.4",
+                        "power_bike_np_last": "231.7",
+                        "work_accum": "1500000",
+                        "power_bike_tss_last": "76.3",
+                    }
+                )
+            ),
+            "fetched_at": "2026-10-12T08:00:00Z",
+        }
+
+        plan = reprojection_plan(stored, zone=UTC)
+
+        assert plan is not None
+        self.assertEqual(1, len(plan.activities))
+        item = plan.activities[0]
+        self.assertEqual(MAPPER_VERSION, item.mapper_version)
+        self.assertEqual(412.5, item.record.elevation_gain_m)
+        self.assertEqual(88.4, item.record.avg_cadence)
+        self.assertEqual(231.7, item.record.normalized_power)
+        self.assertEqual(1500.0, item.record.energy_kj)
+        self.assertEqual(76.3, item.record.load)
+        self.assertIs(LoadModel.TSS, item.record.load_model)
 
 
 if __name__ == "__main__":

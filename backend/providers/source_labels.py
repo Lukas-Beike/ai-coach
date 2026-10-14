@@ -15,7 +15,7 @@ An unknown combination falls back to ``provider_label``. An observation without
 a provider returns an empty string. Neither function raises for valid input.
 
 Not mapped here, because no canonical observation carries the value or because
-the value is not a provider label: "Manuell", "Aus Aktivitäten", "Wahoo", the
+the value is not a provider label: "Manuell", "Aus Aktivitäten", the
 Garmin activity-derived max-HR labels "Garmin Connect Radaktivitäten" and
 "Garmin Connect Laufaktivitäten", "Garmin Connect Laufprognose", the wellness
 max-HR label "Intervals.icu Wellness" in current metrics, derived and estimated
@@ -156,11 +156,17 @@ def _garmin_fine(observation: Observation, view: SourceView) -> str | None:
     return _GARMIN_KIND_NOTES.get((kind, observation.sport))
 
 
+def _wahoo_fine(observation: Observation, view: SourceView) -> str | None:
+    """Wahoo shows its base label in every view, so it never refines it."""
+    return None
+
+
 _FINE_RULES: Final[
     Mapping[ProviderId, Callable[[Observation, SourceView], str | None]]
 ] = {
     ProviderId.INTERVALS: _intervals_fine,
     ProviderId.GARMIN: _garmin_fine,
+    ProviderId.WAHOO: _wahoo_fine,
 }
 
 

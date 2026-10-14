@@ -6,28 +6,36 @@ const WAHOO_RETURN_OUTCOMES = Object.freeze({
   error: ["Die Wahoo-Verbindung konnte nicht hergestellt werden. Bitte erneut versuchen.", true],
 });
 
-// The OAuth callback redirects to /?wahoo=connected|error. Remember the outcome
-// word once and drop it from the address bar so a reload does not repeat it.
-let pendingWahooReturn = (() => {
-  if (globalThis.location === undefined) return null;
+// The OAuth callback redirects to /?wahoo=connected|error. The parameter is named by
+// the Wahoo provider id from the bootstrap JSON, which is not loaded yet when this
+// script runs, so the address is read on the first render that knows the id. The
+// outcome word is then dropped from the address bar so a reload does not repeat it.
+let pendingWahooReturn = null;
+let wahooReturnRead = false;
+
+function takeWahooReturnOutcome() {
+  if (wahooReturnRead || globalThis.location === undefined) return;
+  const key = providerIds().wahoo;
+  if (!key) return;
+  wahooReturnRead = true;
   const params = new URLSearchParams(globalThis.location.search);
-  const outcome = params.get("wahoo");
-  if (outcome === null) return null;
-  params.delete("wahoo");
+  const outcome = params.get(key);
+  if (outcome === null) return;
+  params.delete(key);
   const query = params.toString();
   // Land on the connections segment unless the address already names a route.
   const hash = globalThis.location.hash || "#more/connections";
   const search = query ? "?" + query : "";
   globalThis.history.replaceState(globalThis.history.state, "", globalThis.location.pathname + search + hash);
-  return Object.hasOwn(WAHOO_RETURN_OUTCOMES, outcome) ? outcome : null;
-})();
+  pendingWahooReturn = Object.hasOwn(WAHOO_RETURN_OUTCOMES, outcome) ? outcome : null;
+}
 
 // True while the browser is being sent to Wahoo; keeps polling re-renders from
 // re-enabling the button or resetting its label.
 let wahooRedirecting = false;
 
 function wahooProviderLabel(data) {
-  return data?.provider_labels?.wahoo || "Wahoo";
+  return data?.provider_labels?.[data?.provider_ids?.wahoo] || "";
 }
 
 // Pure projection of the state JSON into what the card shows.
@@ -38,8 +46,9 @@ function wahooConnectionView(data) {
   const connected = Boolean(wahoo.connected);
   const freshness = Array.isArray(data?.provider_freshness) ? data.provider_freshness : [];
   // A rejected refresh token is deleted server-side and surfaces as auth_required.
+  const wahooId = data?.provider_ids?.wahoo;
   const reconnect = configured && !connected
-    && freshness.some((entry) => entry?.provider === "wahoo" && entry.error_code === "auth_required");
+    && freshness.some((entry) => Boolean(wahooId) && entry?.provider === wahooId && entry.error_code === "auth_required");
   let status = "Nicht verbunden";
   if (connected) status = "Verbunden";
   else if (!configured) status = "Nicht konfiguriert";
@@ -55,8 +64,45 @@ function wahooConnectionView(data) {
     connectLabel: reconnect ? "Wahoo erneut verbinden" : "Wahoo verbinden",
     canConnect: configured && !connected,
     canDisconnect: connected,
+    // Manual and full sync only make sense for a connected account.
+    canSync: connected,
     showSetupHint: !configured,
   };
+}
+
+// Status line of the full resync; the same precedence as the Garmin and Intervals.icu lines.
+function wahooFullResyncView(fullResync = {}, running = false) {
+  const error = Boolean(fullResync?.last_error);
+  if (running && fullResync?.status) return { text: fullResync.status, error };
+  if (error) return { text: fullResync.last_error, error };
+  if (fullResync?.last_resync_at) return { text: "Letzter vollständiger Resync: " + formatTime(fullResync.last_resync_at), error };
+  return { text: "Lädt die letzten 90 Tage Wahoo-Einheiten neu; lokal gespeicherte Einheiten bleiben erhalten.", error };
+}
+
+function renderWahooSyncControls(data, view) {
+  const actions = $("#wahooSyncActions");
+  if (actions) actions.hidden = !view.canSync;
+  const fullResync = data?.provider_resync?.[providerIds().wahoo] || {};
+  const syncRunning = Boolean(state.localSync?.wahoo);
+  const fullRunning = Boolean(fullResync.running || state.localSync?.wahooFull);
+  const busy = syncRunning || fullRunning;
+  const syncButton = $("#wahooSyncButton");
+  if (syncButton) {
+    syncButton.disabled = busy || !view.canSync;
+    syncButton.textContent = syncRunning ? "Synchronisierung läuft…" : "Jetzt synchronisieren";
+  }
+  const fullButton = $("#wahooFullResyncButton");
+  if (fullButton) {
+    fullButton.disabled = busy || !view.canSync;
+    fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Vollständig neu synchronisieren";
+  }
+  const status = $("#wahooFullResyncStatus");
+  if (status) {
+    const line = wahooFullResyncView(fullResync, fullRunning);
+    status.hidden = !view.canSync;
+    status.classList.toggle("error", line.error);
+    status.textContent = line.text;
+  }
 }
 
 function renderWahooConnection(data) {
@@ -78,11 +124,13 @@ function renderWahooConnection(data) {
   if (actions) actions.hidden = !view.canConnect && !view.canDisconnect;
   const hint = $("#wahooSetupHint");
   if (hint) hint.hidden = !view.showSetupHint;
+  renderWahooSyncControls(data, view);
   showWahooReturnOutcome();
   return view;
 }
 
 function showWahooReturnOutcome() {
+  takeWahooReturnOutcome();
   if (!pendingWahooReturn) return;
   const [message, isError] = WAHOO_RETURN_OUTCOMES[pendingWahooReturn];
   pendingWahooReturn = null;
@@ -140,4 +188,4 @@ async function disconnectWahoo() {
   }
 }
 
-if (typeof module !== "undefined") module.exports = { wahooConnectionView, safeWahooAuthorizeUrl };
+if (typeof module !== "undefined") module.exports = { wahooConnectionView, wahooFullResyncView, safeWahooAuthorizeUrl };

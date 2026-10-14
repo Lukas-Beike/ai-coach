@@ -428,7 +428,6 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                     default_profile_json="{}",
                     provider_resync_keys=(),
                     retention_days=-1,
-                    all_sync_days=-1,
                 )
                 connection.commit()
                 self.assertEqual(

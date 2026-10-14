@@ -40,6 +40,10 @@ from backend.providers.wahoo_oauth import WAHOO_API_BASE, WAHOO_SERVICE
 WORKOUTS_PATH: Final = "/v1/workouts"
 USER_PATH: Final = "/v1/user"
 PLANS_PATH: Final = "/v1/plans"
+POWER_ZONES_PATH: Final = "/v1/power_zones"
+# The OAuth scopes that allow reading the power zones and the user profile.
+POWER_ZONES_SCOPE: Final = "power_zones_read"
+USER_SCOPE: Final = "user_read"
 FORM_CONTENT_TYPE: Final = "application/x-www-form-urlencoded"
 PLAN_DATA_URI_PREFIX: Final = "data:application/json;base64,"
 REQUEST_TIMEOUT_SECONDS: Final = 30
@@ -220,6 +224,15 @@ class WahooClient:
     def list_plans(self) -> tuple[Mapping[str, Any], ...]:
         """Return the plans this app uploaded."""
         payload = self._get(PLANS_PATH)
+        if not isinstance(payload, list) or not all(
+            isinstance(row, dict) for row in payload
+        ):
+            raise _invalid_response()
+        return tuple(payload)
+
+    def power_zones(self) -> tuple[Mapping[str, Any], ...]:
+        """Return the athlete's power zone sets, one row per zone set."""
+        payload = self._get(POWER_ZONES_PATH)
         if not isinstance(payload, list) or not all(
             isinstance(row, dict) for row in payload
         ):

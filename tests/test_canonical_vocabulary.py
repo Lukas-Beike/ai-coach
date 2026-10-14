@@ -60,6 +60,7 @@ class CanonicalVocabularyTests(unittest.TestCase):
             {
                 "intervals_training_load",
                 "garmin_training_load",
+                "tss",
                 "trimp",
                 "unknown",
             },

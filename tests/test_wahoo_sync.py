@@ -2,25 +2,140 @@
 
 from __future__ import annotations
 
+import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.errors import AppError
+from backend.providers.descriptors import WAHOO_ID
 from backend.providers.wahoo_client import WahooWorkoutFetch
 from backend.sync.canonical_coverage_store import coverage_key
+from backend.sync.gates import ProviderResyncGate
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.schedule_policies import WahooSchedulePolicy
 from backend.sync.wahoo_sync import (
     LAST_ERROR_KEY,
     LAST_SYNC_KEY,
     SYNC_FAILED_MESSAGE,
+    WahooSyncClock,
     WahooSyncService,
 )
 from tests.wahoo_sync_fixture import (
     EARLIER_UTC,
     LATE_EVENING_UTC,
+    ZONE,
+    FakeConnection,
     WahooSyncCase,
     workout,
 )
+
+ALL_SCOPES = "workouts_read power_zones_read user_read"
+CYCLING_ZONE_SET = {
+    "id": 1,
+    "workout_type_family_id": 0,  # biking family
+    "ftp": 250,
+    "updated_at": "2026-10-01T10:00:00Z",
+}
+
+
+def upstream_status(status: int) -> AppError:
+    return AppError(
+        502, "Upstream failed", reason="upstream_rejected", upstream_status=status
+    )
+
+
+class ThresholdSyncTests(WahooSyncCase):
+    """Power zones and profile are read only when their scopes were granted."""
+
+    def grant(self, scope: str = ALL_SCOPES) -> None:
+        self.connection = FakeConnection(scope=scope)
+        self.source.fetch = WahooWorkoutFetch((workout(1, LATE_EVENING_UTC),))
+        self.source.power_zone_rows = (dict(CYCLING_ZONE_SET),)
+        self.source.profile = {"weight": 78.5}
+
+    def stored_kinds(self) -> list[str]:
+        # The workout's own record is kind "activity"; only threshold kinds count here.
+        rows = self.rows(
+            "SELECT record_kind FROM provider_records WHERE provider = 'wahoo' "
+            "AND record_kind <> 'activity' ORDER BY record_kind"
+        )
+        return [row["record_kind"] for row in rows]
+
+    def test_granted_scopes_read_and_store_the_threshold_rows(self) -> None:
+        self.grant()
+
+        result = self.service.sync()
+
+        self.assertEqual("ok", result["status"])
+        self.assertNotIn("skipped_sources", result)
+        self.assertEqual(["power_zones", "user"], self.source.threshold_reads)
+        self.assertEqual(["power_zones", "user"], self.stored_kinds())
+        metrics = self.rows(
+            "SELECT metric, value FROM observations WHERE provider = 'wahoo' "
+            "ORDER BY metric"
+        )
+        self.assertEqual(
+            [
+                (MetricKind.FTP.value, 250.0),
+                (MetricKind.WEIGHT.value, 78.5),
+            ],
+            [(row["metric"], row["value"]) for row in metrics],
+        )
+        self.assertEqual(1, len(self._activity_rows()))
+
+    def test_ungranted_scopes_are_skipped_and_the_workouts_are_still_stored(
+        self,
+    ) -> None:
+        self.grant(scope="workouts_read")
+
+        result = self.service.sync()
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual([], self.source.threshold_reads)
+        self.assertEqual(
+            {"power_zones": "scope", "user": "scope"}, result["skipped_sources"]
+        )
+        self.assertEqual([], self.stored_kinds())
+        self.assertEqual(1, len(self._activity_rows()))
+
+    def test_a_forbidden_power_zones_read_is_non_fatal_and_keeps_the_workouts(
+        self,
+    ) -> None:
+        self.grant()
+        self.source.power_zones_error = upstream_status(403)
+
+        result = self.service.sync()
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual({"power_zones": "rejected"}, result["skipped_sources"])
+        self.assertEqual(["user"], self.stored_kinds())
+        self.assertEqual(1, len(self._activity_rows()))
+        self.assertFalse(self._value(LAST_ERROR_KEY))
+        self.assertEqual(["success"], self._refresh_statuses())
+
+    def test_a_missing_user_read_is_non_fatal_and_keeps_the_zone_sets(self) -> None:
+        self.grant()
+        self.source.user_error = upstream_status(404)
+
+        result = self.service.sync()
+
+        self.assertEqual({"user": "rejected"}, result["skipped_sources"])
+        self.assertEqual(["power_zones"], self.stored_kinds())
+        self.assertEqual(1, len(self._activity_rows()))
+
+    def test_other_threshold_failures_stop_the_run_before_anything_is_written(
+        self,
+    ) -> None:
+        self.grant()
+        self.source.power_zones_error = upstream_status(500)
+
+        with self.assertRaises(AppError):
+            self.service.sync()
+
+        self.assertEqual([], self._activity_rows())
+        self.assertEqual([], self.stored_kinds())
+        self.assertIsNone(self._marker())
 
 
 class IngestTests(WahooSyncCase):
@@ -167,6 +282,72 @@ class SkipTests(WahooSyncCase):
 
         self.assertEqual({"status": "already_running"}, result)
         self.assertEqual([], self.source.windows)
+
+
+class WindowAndResetGateTests(WahooSyncCase):
+    def _gated_service(self, gate: ProviderResyncGate) -> WahooSyncService:
+        return WahooSyncService(
+            config=lambda: self.config,
+            connection=lambda: self.connection,
+            source=lambda: self.source,
+            database_manager=lambda: self.database,
+            database_lock=threading.RLock(),
+            key_values=self.key_values,
+            daily_markers=lambda: self.markers,
+            observer=lambda: self.observer,
+            registry=DEFAULT_PROVIDER_REGISTRY,
+            clock=WahooSyncClock(lambda: self.now, lambda: ZONE),
+            logger=self.logger,
+            lock=self.lock,
+            gate=gate,
+        )
+
+    def test_all_sentinel_and_zero_mean_the_descriptor_maximum(self) -> None:
+        maximum = DEFAULT_PROVIDER_REGISTRY.max_sync_days(WAHOO_ID)
+
+        self.assertEqual(maximum, self.service.sync(days=-1)["window_days"])
+        self.assertEqual(maximum, self.service.sync(days=0)["window_days"])
+
+    def test_reset_in_progress_blocks_a_concurrent_sync_before_the_source(
+        self,
+    ) -> None:
+        gate = ProviderResyncGate("Wahoo")
+        service = self._gated_service(gate)
+        self.assertTrue(gate.begin_reset())
+        rejections: list[AppError] = []
+
+        def run_sync() -> None:
+            try:
+                service.sync(reason="manual")
+            except AppError as error:
+                rejections.append(error)
+
+        try:
+            worker = threading.Thread(target=run_sync)
+            worker.start()
+            worker.join(timeout=5)
+        finally:
+            gate.end_reset()
+
+        self.assertEqual(1, len(rejections))
+        self.assertEqual(409, rejections[0].status)
+        self.assertEqual([], self.source.windows)
+
+    def test_schedule_policy_is_blocked_only_while_resetting(self) -> None:
+        gate = ProviderResyncGate("Wahoo")
+        policy = WahooSchedulePolicy(
+            configured=lambda: True,
+            sync_state=Mock(),
+            sync_period_defaults={WAHOO_ID: 84},
+            all_sync_days=-1,
+            resync_gate=gate,
+        )
+
+        self.assertFalse(policy.blocked())
+        self.assertTrue(gate.begin_reset())
+        self.assertTrue(policy.blocked())
+        gate.end_reset()
+        self.assertFalse(policy.blocked())
 
 
 if __name__ == "__main__":

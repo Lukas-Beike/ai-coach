@@ -1,7 +1,17 @@
 import copy
 import unittest
+from datetime import UTC, date, datetime
 
-from backend.performance.current_metrics import current_performance_metrics
+from backend.performance.canonical_current import CanonicalCurrentInputs
+from backend.performance.current_metrics import (
+    PROVIDER_INTERVALS_NAME,
+    current_performance_metrics,
+)
+from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
+from backend.providers.wahoo_threshold_mapping import (
+    map_wahoo_power_zones,
+    map_wahoo_user,
+)
 
 
 def empty_garmin(**overrides):
@@ -208,6 +218,128 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
         self.assertEqual(result["body_fat_pct"]["value"], 20)
         self.assertEqual(result["run_threshold_pace_seconds_per_km"]["value"], 10000)
         self.assertEqual((snapshot, profile, garmin), before)
+
+
+RETRIEVED = datetime(2026, 10, 12, 8, 0, tzinfo=UTC)
+
+
+def wahoo_canonical(*, ftp=None, weight=None):
+    """Canonical inputs holding only Wahoo fallbacks, mapped by the real mapper."""
+    wahoo_ftp = None
+    if ftp is not None:
+        zones = map_wahoo_power_zones(
+            [
+                {
+                    "id": 1,
+                    "workout_type_family_id": 0,  # biking family
+                    "ftp": ftp,
+                    "updated_at": "2026-10-01T10:00:00Z",
+                }
+            ],
+            zone=UTC,
+            retrieved_at=RETRIEVED,
+        )
+        wahoo_ftp = zones.records[0]
+    wahoo_weight = None
+    if weight is not None:
+        profile = map_wahoo_user(
+            {"weight": weight},
+            observed_on=date(2026, 10, 12),
+            retrieved_at=RETRIEVED,
+        )
+        wahoo_weight = profile.records[0]
+    return CanonicalCurrentInputs(
+        bike_threshold_hr=(),
+        run_threshold_hr=(),
+        athlete_threshold_hr=None,
+        cycling_vo2max=(),
+        running_vo2max=(),
+        wellness_weight=None,
+        athlete_weight=None,
+        wahoo_ftp=wahoo_ftp,
+        wahoo_weight=wahoo_weight,
+    )
+
+
+def snapshot_with(athlete=None):
+    return {
+        "athlete": athlete or {},
+        "recent_wellness": [],
+        "recent_activities": [],
+    }
+
+
+class WahooFallbackPrecedenceTests(unittest.TestCase):
+    def test_wahoo_ftp_fills_in_only_when_intervals_has_no_ftp(self):
+        result = current_performance_metrics(
+            snapshot_with(), {}, empty_garmin(), canonical=wahoo_canonical(ftp=250)
+        )
+
+        ftp = result["cycling_ftp_watts"]
+        self.assertEqual(250, ftp["value"])
+        self.assertEqual(WAHOO_LABEL, ftp["source"])
+        self.assertEqual("wahoo", ftp["source_provider"])
+
+    def test_intervals_ftp_beats_wahoo_ftp(self):
+        snapshot = snapshot_with({"sport_settings": [{"types": ["Ride"], "ftp": 240}]})
+
+        result = current_performance_metrics(
+            snapshot, {}, empty_garmin(), canonical=wahoo_canonical(ftp=300)
+        )
+
+        self.assertEqual(240, result["cycling_ftp_watts"]["value"])
+        self.assertEqual(PROVIDER_INTERVALS_NAME, result["cycling_ftp_watts"]["source"])
+
+    def test_garmin_ftp_beats_intervals_and_wahoo_ftp(self):
+        garmin = empty_garmin(
+            cycling_ftp_watts={
+                "value": 302,
+                "unit": "W",
+                "source": "Garmin Connect",
+                "note": "ftp",
+            }
+        )
+        snapshot = snapshot_with({"sport_settings": [{"types": ["Ride"], "ftp": 240}]})
+
+        result = current_performance_metrics(
+            snapshot, {}, garmin, canonical=wahoo_canonical(ftp=300)
+        )
+
+        self.assertEqual(302, result["cycling_ftp_watts"]["value"])
+
+    def test_manual_profile_weight_beats_wahoo_weight(self):
+        result = current_performance_metrics(
+            snapshot_with(),
+            {"weight_kg": 80},
+            empty_garmin(),
+            canonical=wahoo_canonical(weight=78.5),
+        )
+
+        self.assertEqual(80, result["weight_kg"]["value"])
+        self.assertEqual("Manuell", result["weight_kg"]["source"])
+
+    def test_wahoo_weight_is_used_when_nothing_else_is_stored(self):
+        result = current_performance_metrics(
+            snapshot_with(),
+            {},
+            empty_garmin(),
+            canonical=wahoo_canonical(weight=78.5),
+        )
+
+        self.assertEqual(78.5, result["weight_kg"]["value"])
+        self.assertEqual(WAHOO_LABEL, result["weight_kg"]["source"])
+        self.assertEqual("wahoo", result["weight_kg"]["source_provider"])
+
+    def test_intervals_weight_beats_wahoo_weight(self):
+        result = current_performance_metrics(
+            snapshot_with({"weight": 77}),
+            {},
+            empty_garmin(),
+            canonical=wahoo_canonical(weight=78.5),
+        )
+
+        self.assertEqual(77, result["weight_kg"]["value"])
+        self.assertEqual(PROVIDER_INTERVALS_NAME, result["weight_kg"]["source"])
 
 
 if __name__ == "__main__":

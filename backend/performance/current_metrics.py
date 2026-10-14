@@ -371,6 +371,12 @@ def _performance_body_metrics(
                 ProviderId.INTERVALS,
             ),
             (profile.get("weight_kg"), "Manuell", None),
+            _canonical_or_legacy(
+                None if canonical is None else canonical.wahoo_weight,
+                None,
+                "",
+                ProviderId.WAHOO,
+            ),
         )
     )
     body_fat_value, body_fat_source, body_fat_provider = _first_performance_source(
@@ -424,6 +430,19 @@ def _preferred_performance_metric(
     return current if current["value"] is not None else fallback
 
 
+def _cycling_ftp_fallback(
+    intervals: dict[str, Any], canonical: CanonicalCurrentInputs | None
+) -> dict[str, Any]:
+    """Return the Intervals cycling FTP, else the stored Wahoo FTP, labelled as Wahoo."""
+    if (
+        intervals["value"] is not None
+        or canonical is None
+        or canonical.wahoo_ftp is None
+    ):
+        return intervals
+    return _canonical_metric(canonical.wahoo_ftp, "W")
+
+
 def _performance_threshold_metrics(
     athlete: dict[str, Any],
     ride: dict[str, Any],
@@ -464,15 +483,18 @@ def _performance_threshold_metrics(
         "cycling_ftp_watts": _preferred_performance_metric(
             garmin_metrics,
             "cycling_ftp_watts",
-            metric(
-                _first_present(ride, ("ftp", "indoor_ftp"))
-                or _first_present(wellness_ride, ("ftp", "indoor_ftp"))
-                or _first_present(
-                    athlete, intervals_perf_fields.CONFIGURED_FTP_ALIASES
+            _cycling_ftp_fallback(
+                metric(
+                    _first_present(ride, ("ftp", "indoor_ftp"))
+                    or _first_present(wellness_ride, ("ftp", "indoor_ftp"))
+                    or _first_present(
+                        athlete, intervals_perf_fields.CONFIGURED_FTP_ALIASES
+                    ),
+                    "W",
+                    PROVIDER_INTERVALS_NAME,
+                    provider=ProviderId.INTERVALS,
                 ),
-                "W",
-                PROVIDER_INTERVALS_NAME,
-                provider=ProviderId.INTERVALS,
+                canonical,
             ),
         ),
         "run_threshold_watts": _preferred_performance_metric(

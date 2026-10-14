@@ -875,6 +875,19 @@ def coach_context_projection_meta(
     }
 
 
+_TOTAL_BUDGET_NOTE_MARGIN = 32
+
+
+def coach_context_total_budget_note(
+    omitted_sections: list[str], truncated_sections: list[str]
+) -> dict[str, Any]:
+    return {
+        "total_budget_applied": True,
+        "total_budget_omitted_sections": omitted_sections,
+        "total_budget_truncated_sections": truncated_sections,
+    }
+
+
 class CoachTrainingContextService:
     """Assemble the exact bounded prompt context from local read services."""
 
@@ -989,13 +1002,53 @@ class CoachTrainingContextService:
             },
         )
         if len(context) > self._total_char_limit:
+            note_reserve = (
+                coach_context_json_size(
+                    coach_context_total_budget_note(
+                        sorted(prompt_context), sorted(prompt_context)
+                    )
+                )
+                + _TOTAL_BUDGET_NOTE_MARGIN
+            )
             structured_limit = max(
                 0,
-                self._total_char_limit - len(context_prefix) - len(context_suffix),
+                self._total_char_limit
+                - len(context_prefix)
+                - len(context_suffix)
+                - note_reserve,
             )
-            prompt_context = bounded_coach_context_value(
+            clipped_context = bounded_coach_context_value(
                 prompt_context, structured_limit
             )
+            if not isinstance(clipped_context, dict):
+                clipped_context = {}
+            omitted_sections = sorted(
+                key for key in prompt_context if key not in clipped_context
+            )
+            truncated_sections = sorted(
+                key
+                for key in prompt_context
+                if key in clipped_context
+                and coach_context_json_size(clipped_context[key])
+                != coach_context_json_size(prompt_context[key])
+            )
+            clipped_projection = clipped_context.get("projection")
+            budget_note = coach_context_total_budget_note(
+                omitted_sections, truncated_sections
+            )
+            projection = (
+                {**clipped_projection, **budget_note}
+                if isinstance(clipped_projection, dict)
+                else budget_note
+            )
+            prompt_context = {
+                "projection": projection,
+                **{
+                    key: value
+                    for key, value in clipped_context.items()
+                    if key != "projection"
+                },
+            }
             structured_text = json.dumps(
                 prompt_context, ensure_ascii=False, separators=(",", ":")
             )
@@ -1006,6 +1059,7 @@ class CoachTrainingContextService:
                     "event": "coach_context_budget_applied",
                     "characters": len(context),
                     "budget": self._total_char_limit,
+                    "omitted_section_count": len(omitted_sections),
                 },
             )
         return context

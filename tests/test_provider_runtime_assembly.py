@@ -29,6 +29,7 @@ from provider_runtime_fakes import (
 )
 
 from backend.errors import AppError
+from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.providers.descriptors import (
     CALENDAR_ID,
     DEFAULT_PROVIDER_DESCRIPTORS,
@@ -52,13 +53,22 @@ from backend.sync.command_assembly import (
 from backend.sync.execution_assembly import SyncJobExecutionAssembly
 from backend.sync.executor import dispatch_provider_job
 from backend.sync.freshness_sources import DEFAULT_FRESHNESS_SOURCES
+from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_resync_assembly import (
+    CompetitionSyncOwners,
+    ProviderResyncAssembly,
+    ProviderResyncPersistence,
+    ProviderResyncRuntime,
+    ResyncProviderOwners,
+)
 from backend.sync.provider_runtime import (
     ProviderRuntimeBinding,
     ProviderRuntimeRegistry,
 )
 from backend.sync.provider_runtime_assembly import (
     ProviderRuntimeDependencies,
+    WahooRuntimeDependencies,
     build_provider_runtime,
     builtin_bindings,
 )
@@ -225,7 +235,9 @@ class BuiltinBindingTests(unittest.TestCase):
         )
 
         self.assertEqual(set(runtime.job_owners()), BUILTIN_IDS)
-        self.assertEqual(set(runtime.resync_handlers()), {INTERVALS_ID, GARMIN_ID})
+        self.assertEqual(
+            set(runtime.resync_handlers()), {INTERVALS_ID, GARMIN_ID, WAHOO_ID}
+        )
         self.assertEqual(
             set(runtime.synchronous_refreshes()), {INTERVALS_ID, GARMIN_ID}
         )
@@ -448,6 +460,92 @@ class DispatchRoutingTests(unittest.TestCase):
 
         self.assertEqual(result, {"status": "completed"})
         self.assertEqual(owner.calls[0]["reason"], "Coach")
+
+
+class PlanPushAdmissionTests(unittest.TestCase):
+    """Bug A: a Wahoo plan push must reach the connection check, not "unknown"."""
+
+    def _endpoint(self, *, connected: bool) -> SyncCommandEndpoint:
+        wahoo_sync = mock.Mock(name="wahoo_sync")
+        wahoo_sync.configured.return_value = connected
+        wahoo_sync.running.return_value = False
+        wahoo = WahooRuntimeDependencies(
+            sync_service=lambda: wahoo_sync,
+            plan_push_service=lambda: mock.Mock(name="plan_push"),
+            resync_gate=ProviderResyncGate("Wahoo"),
+        )
+        deps = dataclasses.replace(_builtin_deps(), wahoo=wahoo)
+        runtime = build_provider_runtime(
+            DEFAULT_PROVIDER_REGISTRY, builtin_bindings(deps)
+        )
+        full_resync = ProviderResyncAssembly(
+            dependencies=ProviderResyncAssembly.Inputs(
+                competition=CompetitionSyncOwners(
+                    config=mock.Mock(return_value=mock.Mock()),
+                    intervals_client=mock.Mock(),
+                    competition_service=mock.Mock(),
+                ),
+                resync=ResyncProviderOwners(
+                    config=mock.Mock(return_value=mock.Mock()),
+                    intervals_sync_service=mock.Mock(),
+                    garmin_sync_service=mock.Mock(),
+                    intervals_resync_gate=ProviderResyncGate("Intervals.icu"),
+                    garmin_resync_gate=ProviderResyncGate("Garmin"),
+                    all_sync_days=-1,
+                ),
+                persistence=ProviderResyncPersistence(
+                    database_manager=mock.Mock(),
+                    key_values=mock.Mock(),
+                    event_buffer=mock.Mock(),
+                    redactor=mock.Mock(),
+                ),
+                runtime=ProviderResyncRuntime(
+                    logger=logging.getLogger("test.plan_push.admission"),
+                    utc_now=mock.Mock(),
+                    uuid_factory=mock.Mock(),
+                    monotonic=mock.Mock(),
+                    operation_observer=mock.Mock(),
+                ),
+            ),
+            provider_runtime=lambda: runtime,
+        ).full_resync_service()
+        self.queue = mock.Mock()
+        self.queue.enqueue.return_value = {"id": "job-1"}
+        return SyncCommandEndpoint(
+            self.queue,
+            mock.Mock(),
+            mock.Mock(),
+            full_resync,
+            lambda: "operation-1",
+            {"intervals": 90},
+            -1,
+            registry=DEFAULT_PROVIDER_REGISTRY,
+        )
+
+    def _body(self) -> dict[str, Any]:
+        return {
+            "provider": "wahoo",
+            "type": "plan_push",
+            "payload": {"entries": [{"hash": "h1", "date": "2026-10-12"}]},
+        }
+
+    def test_connected_wahoo_plan_push_is_admitted_through_the_real_resync(
+        self,
+    ) -> None:
+        status, _ = self._endpoint(connected=True).execute(
+            "/api/sync/jobs", self._body()
+        )
+
+        self.assertEqual(202, status)
+        self.queue.enqueue.assert_called_once()
+
+    def test_unconnected_wahoo_plan_push_reports_not_configured(self) -> None:
+        with self.assertRaises(AppError) as caught:
+            self._endpoint(connected=False).execute("/api/sync/jobs", self._body())
+
+        self.assertEqual(409, caught.exception.status)
+        self.assertEqual("not_configured", caught.exception.reason)
+        self.queue.enqueue.assert_not_called()
 
 
 if __name__ == "__main__":

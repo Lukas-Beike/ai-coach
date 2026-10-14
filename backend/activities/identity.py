@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from backend.canonical.sports import classify_sport_text, legacy_activity_family
-from backend.canonical.vocabulary import RecordingOrigin
 
 _UTC_OFFSET_SUFFIX = "+00:00"
 _ACTIVITY_KIND_FIELDS = (
@@ -17,7 +16,6 @@ _ACTIVITY_KIND_FIELDS = (
     "activityName",
     "name",
 )
-_DEVICE_SOURCE_FIELDS = ("source", "device_name", "external_id")
 
 
 def activity_datetime(value: Any) -> datetime | None:
@@ -41,17 +39,3 @@ def activity_kind(activity: Any) -> str:
         str(activity.get(key) or "") for key in _ACTIVITY_KIND_FIELDS
     ).casefold()
     return legacy_activity_family(classify_sport_text(value))
-
-
-def intervals_activity_device_source(activity: Any) -> str | None:
-    """Return explicit Wahoo or Garmin provenance from an activity."""
-    if not isinstance(activity, dict):
-        return None
-    provenance = " ".join(
-        str(activity.get(key) or "") for key in _DEVICE_SOURCE_FIELDS
-    ).casefold()
-    if RecordingOrigin.WAHOO in provenance or "elemnt" in provenance:
-        return RecordingOrigin.WAHOO
-    if RecordingOrigin.GARMIN in provenance:
-        return RecordingOrigin.GARMIN
-    return None

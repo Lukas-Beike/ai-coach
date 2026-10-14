@@ -28,6 +28,7 @@ class StateEventTransportTests(unittest.TestCase):
                 send_headers=lambda: calls.append("headers"),
                 send_event=lambda *args: calls.append(args),
                 set_connection_timeout=lambda value: calls.append(("timeout", value)),
+                session_is_active=lambda: True,
             )
 
         self.assertEqual(
@@ -72,6 +73,7 @@ class StateEventTransportTests(unittest.TestCase):
             send_headers=lambda: headers.append(True),
             send_event=send_event,
             set_connection_timeout=timeouts.append,
+            session_is_active=lambda: True,
         )
 
         self.assertEqual(timeouts, [None])
@@ -107,6 +109,7 @@ class StateEventTransportTests(unittest.TestCase):
             send_headers=lambda: None,
             send_event=send_event,
             set_connection_timeout=lambda _value: None,
+            session_is_active=lambda: True,
         )
 
         self.assertEqual(
@@ -127,9 +130,84 @@ class StateEventTransportTests(unittest.TestCase):
             send_headers=lambda: (_ for _ in ()).throw(ClientDisconnected()),
             send_event=lambda *_args: self.fail("no event should be sent"),
             set_connection_timeout=timeout_calls.append,
+            session_is_active=lambda: True,
         )
 
         self.assertEqual(timeout_calls, [None])
+
+    def test_inactive_session_ends_stream_before_sending_pending_events(self):
+        buffer = FakeEventBuffer(
+            [
+                {"events": [], "latest_event_id": 3, "gap": False},
+                {
+                    "events": [
+                        {
+                            "event_id": 4,
+                            "event": "job",
+                            "data": {"status": "completed"},
+                        }
+                    ],
+                    "latest_event_id": 4,
+                    "gap": False,
+                },
+            ]
+        )
+        session_checks = []
+
+        def session_is_active():
+            session_checks.append(True)
+            return False
+
+        events = []
+        StateEventTransport(buffer).handle(
+            "/api/state/events?since=3",
+            send_headers=lambda: None,
+            send_event=lambda *event: events.append(event),
+            set_connection_timeout=lambda _value: None,
+            session_is_active=session_is_active,
+        )
+
+        self.assertEqual(events, [("ready", {"latest_event_id": 3}, 3)])
+        self.assertEqual(buffer.wait_timeouts, [15])
+        self.assertEqual(len(session_checks), 1)
+
+    def test_session_expiry_after_heartbeat_stops_further_events(self):
+        buffer = FakeEventBuffer(
+            [
+                {"events": [], "latest_event_id": 3, "gap": False},
+                {"events": [], "latest_event_id": 3, "gap": False},
+                {
+                    "events": [
+                        {
+                            "event_id": 4,
+                            "event": "job",
+                            "data": {"status": "completed"},
+                        }
+                    ],
+                    "latest_event_id": 4,
+                    "gap": False,
+                },
+            ]
+        )
+        session_states = iter([True, False])
+        events = []
+
+        StateEventTransport(buffer).handle(
+            "/api/state/events?since=3",
+            send_headers=lambda: None,
+            send_event=lambda *event: events.append(event),
+            set_connection_timeout=lambda _value: None,
+            session_is_active=lambda: next(session_states),
+        )
+
+        self.assertEqual(
+            events,
+            [
+                ("ready", {"latest_event_id": 3}, 3),
+                ("heartbeat", {"latest_event_id": 3}),
+            ],
+        )
+        self.assertEqual(buffer.wait_timeouts, [15, 15])
 
 
 if __name__ == "__main__":

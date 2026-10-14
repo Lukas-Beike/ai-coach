@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock
 
 from backend.http_api.state_events_get import StateEventsGetRoutes
 
@@ -28,7 +28,24 @@ class StateEventsGetRoutesTests(unittest.TestCase):
             send_headers=self.handler.send_sse_headers,
             send_event=self.handler.send_sse_event,
             set_connection_timeout=self.handler.connection.settimeout,
+            session_is_active=ANY,
         )
+
+    def test_session_callback_reflects_authenticated_session_lookup(self) -> None:
+        self.routes.handle(self.handler, "/api/state/events")
+        session_is_active = self.transport.handle.call_args.kwargs["session_is_active"]
+
+        self.auth.authenticated_session.return_value = {
+            "csrf_hash": "fake-csrf-hash",
+            "expires_at": 4102444800.0,
+        }
+        self.assertTrue(session_is_active())
+        self.auth.authenticated_session.return_value = None
+        self.assertFalse(session_is_active())
+
+        self.assertEqual(self.auth.authenticated_session.call_count, 2)
+        self.auth.authenticated_session.assert_called_with(self.handler)
+        self.auth.require_auth.assert_called_once_with(self.handler)
 
     def test_auth_denial_precedes_connection_and_transport_access(self) -> None:
         denied = RuntimeError("denied")

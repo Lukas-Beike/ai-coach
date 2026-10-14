@@ -205,7 +205,7 @@ class DefaultDescriptorParityTests(unittest.TestCase):
                 )
 
     def test_resync_keys_match_full_resync_table(self) -> None:
-        for provider_id in ("intervals", "garmin"):
+        for provider_id in ("intervals", "garmin", "wahoo"):
             with self.subTest(provider_id=provider_id):
                 keys = PROVIDER_RESYNC_KEYS[provider_id]
                 self.assertEqual(
@@ -232,6 +232,13 @@ class DefaultDescriptorParityTests(unittest.TestCase):
         self.assertEqual(("weather",), registry.ids_with(Capability.WEATHER_FORECAST))
         self.assertEqual(("calendar",), registry.ids_with(Capability.PUBLIC_CALENDAR))
         self.assertEqual(("intervals",), registry.ids_with(Capability.PLANNED_EVENTS))
+        # Wahoo reads body and threshold values only as lowest-priority fallbacks.
+        self.assertEqual(
+            ("intervals", "garmin", "wahoo"), registry.ids_with(Capability.BODY)
+        )
+        self.assertEqual(
+            ("intervals", "garmin", "wahoo"), registry.ids_with(Capability.THRESHOLDS)
+        )
 
     def test_registry_exposes_default_descriptors_unchanged(self) -> None:
         self.assertEqual(DEFAULT_PROVIDER_DESCRIPTORS, DEFAULT_PROVIDER_REGISTRY.all())
@@ -414,10 +421,12 @@ PREVIOUS_MANUAL_ROUTES: tuple[tuple[str, str], ...] = (
     ("/api/garmin/sync", "garmin"),
     ("/api/weather/sync", "weather"),
     ("/api/external-calendar/sync", "calendar"),
+    ("/api/wahoo/sync", "wahoo"),
 )
 PREVIOUS_FULL_RESYNC_ROUTES: tuple[tuple[str, str], ...] = (
     ("/api/intervals/full-resync", "intervals"),
     ("/api/garmin/full-resync", "garmin"),
+    ("/api/wahoo/full-resync", "wahoo"),
 )
 PREVIOUS_PERIOD_MESSAGES = {
     "intervals": (
@@ -551,6 +560,7 @@ class OrchestrationParityTests(unittest.TestCase):
             "garmin": (True, (("reason", "manual"),)),
             "calendar": (False, (("reason", "manuell"),)),
             "weather": (False, (("reason", "manuell"), ("force", True))),
+            "wahoo": (False, (("reason", "manual"),)),
         }
         for provider_id, (uses_period, payload) in expected.items():
             with self.subTest(provider_id=provider_id):
@@ -611,10 +621,10 @@ class CustomOrchestrationDescriptorTests(unittest.TestCase):
             areas=(_area("activities", "Wahoo mock · Training"),),
             max_sync_days=30,
             resync_keys=(
-                "wahoo_full_resync_running",
-                "wahoo_full_resync_status",
-                "wahoo_full_resync_at",
-                "wahoo_full_resync_error",
+                "wahoo_mock_full_resync_running",
+                "wahoo_mock_full_resync_status",
+                "wahoo_mock_full_resync_at",
+                "wahoo_mock_full_resync_error",
             ),
         )
         self.mock = dataclasses.replace(
@@ -625,11 +635,11 @@ class CustomOrchestrationDescriptorTests(unittest.TestCase):
             schedule=SchedulePolicy(daily_rank=5, startup_rank=0, daily_marker=True),
             coach_rank=10,
             manual_sync=ManualSyncRoute(
-                path="/api/wahoo/sync",
+                path="/api/wahoo-mock/sync",
                 uses_sync_period=True,
                 payload=(("reason", "manual"),),
             ),
-            full_resync_path="/api/wahoo/full-resync",
+            full_resync_path="/api/wahoo-mock/full-resync",
         )
         self.plain = _descriptor("plain-mock")
         self.registry = ProviderRegistry(
@@ -662,19 +672,19 @@ class CustomOrchestrationDescriptorTests(unittest.TestCase):
         )
         self.assertEqual(
             (
-                "wahoo_full_resync_running",
-                "wahoo_full_resync_status",
-                "wahoo_full_resync_at",
-                "wahoo_full_resync_error",
+                "wahoo_mock_full_resync_running",
+                "wahoo_mock_full_resync_status",
+                "wahoo_mock_full_resync_at",
+                "wahoo_mock_full_resync_error",
             ),
             registry.resync_key_map()["wahoo-mock"],
         )
         self.assertEqual(
-            ("/api/wahoo/sync", "wahoo-mock"),
+            ("/api/wahoo-mock/sync", "wahoo-mock"),
             registry.manual_routes()[-1],
         )
         self.assertEqual(
-            ("/api/wahoo/full-resync", "wahoo-mock"),
+            ("/api/wahoo-mock/full-resync", "wahoo-mock"),
             registry.full_resync_routes()[-1],
         )
         self.assertEqual(
@@ -704,7 +714,7 @@ class CustomOrchestrationDescriptorTests(unittest.TestCase):
             "wahoo-mock", DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets()
         )
         self.assertNotIn(
-            "/api/wahoo/sync",
+            "/api/wahoo-mock/sync",
             [path for path, _ in DEFAULT_PROVIDER_REGISTRY.manual_routes()],
         )
 

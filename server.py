@@ -348,6 +348,7 @@ from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
+    WAHOO_RESYNC_GATE,
 )
 from backend.sync.intervals_assembly import (
     IntervalsLibraryDependencies,
@@ -447,7 +448,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.0"
+APP_VERSION = "1.13.1"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -568,6 +569,7 @@ def provider_runtime() -> ProviderRuntimeRegistry:
                 wahoo=WahooRuntimeDependencies(
                     sync_service=WAHOO_SYNC.sync_service,
                     plan_push_service=WAHOO_SYNC.plan_push_service,
+                    resync_gate=WAHOO_RESYNC_GATE,
                 ),
             )
         ),
@@ -856,7 +858,6 @@ def initialise_database() -> None:
             default_profile_json=json.dumps(DEFAULT_PROFILE),
             provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
             retention_days=int(getattr(CONFIG, "data_retention_days", -1)),
-            all_sync_days=ALL_SYNC_DAYS,
         )
 
 
@@ -1097,6 +1098,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         now=lambda: datetime.now(UTC),
         logger=LOGGER,
         redactor=REDACTOR.redact_text,
+        resync_gate=WAHOO_RESYNC_GATE,
     )
 )
 NUTRITION_ASSEMBLY = NutritionAssembly(

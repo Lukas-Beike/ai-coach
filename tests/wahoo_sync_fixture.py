@@ -15,6 +15,7 @@ import tempfile
 import threading
 import unittest
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -32,7 +33,7 @@ from backend.sync.daily import DailySyncMarkerService, daily_marker_key
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.refresh import ProviderRefreshTracker
-from backend.sync.wahoo_sync import WahooSyncService
+from backend.sync.wahoo_sync import WahooSyncClock, WahooSyncService
 
 NOW = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
 ZONE = ZoneInfo("Europe/Berlin")
@@ -64,7 +65,13 @@ def make_config(*, wahoo: bool = True) -> Config:
     )
 
 
-def workout(number: int, starts: str, **changes: Any) -> dict[str, Any]:
+def workout(
+    number: int,
+    starts: str,
+    *,
+    summary: Mapping[str, Any] | None = None,
+    **changes: Any,
+) -> dict[str, Any]:
     row: dict[str, Any] = {
         "id": number,
         "starts": starts,
@@ -76,6 +83,8 @@ def workout(number: int, starts: str, **changes: Any) -> dict[str, Any]:
             "heart_rate_avg": "140",
         },
     }
+    if summary is not None:
+        row["workout_summary"] = {**row["workout_summary"], **summary}
     row.update(changes)
     return row
 
@@ -88,6 +97,11 @@ class FakeWahooSource:
         self.error: BaseException | None = None
         self.windows: list[datetime] = []
         self.upper_bounds: list[datetime | None] = []
+        self.power_zone_rows: tuple[Mapping[str, Any], ...] = ()
+        self.profile: Mapping[str, Any] = {}
+        self.power_zones_error: BaseException | None = None
+        self.user_error: BaseException | None = None
+        self.threshold_reads: list[str] = []
 
     def list_workouts(
         self, *, since: datetime, until: datetime | None = None
@@ -98,15 +112,31 @@ class FakeWahooSource:
             raise self.error
         return self.fetch
 
+    def power_zones(self) -> tuple[Mapping[str, Any], ...]:
+        self.threshold_reads.append("power_zones")
+        if self.power_zones_error is not None:
+            raise self.power_zones_error
+        return self.power_zone_rows
+
+    def user(self) -> Mapping[str, Any]:
+        self.threshold_reads.append("user")
+        if self.user_error is not None:
+            raise self.user_error
+        return self.profile
+
 
 class FakeConnection:
-    """Token-free connection status, switchable between connected and not."""
+    """Token-free connection status, switchable between connected and not.
 
-    def __init__(self, connected: bool = True) -> None:
+    ``scope`` is the space-separated OAuth scope string the status reports.
+    """
+
+    def __init__(self, connected: bool = True, scope: str = "") -> None:
         self.connected = connected
+        self.scope = scope
 
     def status(self) -> dict[str, Any]:
-        return {"configured": True, "connected": self.connected}
+        return {"configured": True, "connected": self.connected, "scope": self.scope}
 
 
 class WahooSyncCase(unittest.TestCase):
@@ -149,8 +179,7 @@ class WahooSyncCase(unittest.TestCase):
             daily_markers=lambda: self.markers,
             observer=lambda: self.observer,
             registry=DEFAULT_PROVIDER_REGISTRY,
-            zone_provider=lambda: ZONE,
-            now=lambda: self.now,
+            clock=WahooSyncClock(lambda: self.now, lambda: ZONE),
             logger=self.logger,
             lock=self.lock,
         )

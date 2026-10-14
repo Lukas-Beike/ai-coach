@@ -125,6 +125,82 @@ def _day_values(result: Mapping[date, Observation]) -> dict[date, float]:
     return {day: observation.value.value for day, observation in result.items()}
 
 
+def _wahoo_ftp(value: float, day: date = LATEST_DAY) -> Observation:
+    return _obs(MetricKind.FTP, value, day, ProviderId.WAHOO, sport=Sport.RIDE)
+
+
+class WahooLowestPriorityTests(unittest.TestCase):
+    """Wahoo FTP and weight only ever fill in after Garmin and Intervals."""
+
+    def test_ftp_and_weight_orders_put_wahoo_last(self) -> None:
+        expected = (GARMIN, INTERVALS, ProviderId.WAHOO)
+        self.assertEqual(expected, CURRENT_RULES[MetricKind.FTP].order)
+        self.assertEqual(expected, CURRENT_RULES[MetricKind.WEIGHT].order)
+
+    def test_wahoo_ftp_is_used_only_when_intervals_has_none(self) -> None:
+        only_wahoo = [_wahoo_ftp(250)]
+        self.assertEqual(
+            250,
+            _values(
+                select_current(
+                    only_wahoo,
+                    MetricKind.FTP,
+                    sport=Sport.RIDE,
+                    latest_wellness_day=LATEST_DAY,
+                )
+            ),
+        )
+        with_intervals = [
+            *only_wahoo,
+            _obs(MetricKind.FTP, 240, LATEST_DAY, INTERVALS, sport=Sport.RIDE),
+        ]
+        self.assertEqual(
+            240,
+            _values(
+                select_current(
+                    with_intervals,
+                    MetricKind.FTP,
+                    sport=Sport.RIDE,
+                    latest_wellness_day=LATEST_DAY,
+                )
+            ),
+        )
+
+    def test_wahoo_ftp_outside_the_bounds_is_not_selected(self) -> None:
+        self.assertIsNone(
+            select_current(
+                [_wahoo_ftp(800)],
+                MetricKind.FTP,
+                sport=Sport.RIDE,
+                latest_wellness_day=LATEST_DAY,
+            )
+        )
+
+    def test_wahoo_weight_is_used_only_when_intervals_has_none(self) -> None:
+        wahoo_weight = _obs(MetricKind.WEIGHT, 78.5, LATEST_DAY, ProviderId.WAHOO)
+        self.assertEqual(
+            78.5,
+            _values(
+                select_current(
+                    [wahoo_weight],
+                    MetricKind.WEIGHT,
+                    latest_wellness_day=LATEST_DAY,
+                )
+            ),
+        )
+        intervals_weight = _obs(MetricKind.WEIGHT, 77.0, LATEST_DAY, INTERVALS)
+        self.assertEqual(
+            77.0,
+            _values(
+                select_current(
+                    [wahoo_weight, intervals_weight],
+                    MetricKind.WEIGHT,
+                    latest_wellness_day=LATEST_DAY,
+                )
+            ),
+        )
+
+
 class SourceRuleTableTests(unittest.TestCase):
     def test_current_table_covers_the_legacy_metric_set(self) -> None:
         self.assertEqual(set(CURRENT_RULES), CURRENT_KINDS)

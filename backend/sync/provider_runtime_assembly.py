@@ -52,7 +52,11 @@ from backend.sync.freshness_sources import (
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import ProviderRegistry
-from backend.sync.provider_resync_assembly import GarminFullResync, IntervalsFullResync
+from backend.sync.provider_resync_assembly import (
+    GarminFullResync,
+    IntervalsFullResync,
+    WahooFullResync,
+)
 from backend.sync.provider_runtime import (
     ProviderJobOwner,
     ProviderRuntimeBinding,
@@ -76,6 +80,7 @@ class WahooRuntimeDependencies:
 
     sync_service: Callable[[], WahooSyncService]
     plan_push_service: Callable[[], WahooPlanPushService]
+    resync_gate: ProviderResyncGate
 
 
 @dataclass(frozen=True)
@@ -214,6 +219,7 @@ def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
     The same adapter runs the explicit library export (``plan_push``).
     """
     wahoo = deps.wahoo
+    all_sync_days = deps.historical.all_sync_days
 
     def job_owner() -> ProviderJobOwner:
         return WahooJobAdapter(
@@ -225,15 +231,23 @@ def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
             configured=lambda: wahoo.sync_service().configured(),
             sync_state=deps.state.sync_state_repository(),
             sync_period_defaults=deps.historical.sync_period_defaults,
-            all_sync_days=deps.historical.all_sync_days,
+            all_sync_days=all_sync_days,
+            resync_gate=wahoo.resync_gate,
+        )
+
+    def full_resync() -> WahooFullResync:
+        return WahooFullResync(
+            sync_service=wahoo.sync_service(), all_sync_days=all_sync_days
         )
 
     return ProviderRuntimeBinding(
         provider_id=WAHOO_ID,
         job_owner=job_owner,
         configured=lambda: wahoo.sync_service().configured(),
+        gate=wahoo.resync_gate,
         schedule=schedule,
         freshness=DEFAULT_FRESHNESS_SOURCES[WAHOO_ID],
+        full_resync=full_resync,
         running_probe=lambda: wahoo.sync_service().running(),
     )
 

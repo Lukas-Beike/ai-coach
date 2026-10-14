@@ -59,15 +59,12 @@ async function prepareNutritionImage(file, { maxEdge = MAX_NUTRITION_IMAGE_EDGE,
 
 function renderNutritionSegments(route) {
   const week = route === "nutrition/week";
-  const meals = route === "nutrition/meals";
   const products = route === "nutrition/products";
-  document.querySelector("#nutritionDiary").hidden = week || meals || products;
+  document.querySelector("#nutritionDiary").hidden = week || products;
   document.querySelector("#nutritionWeek").hidden = !week;
-  document.querySelector("#nutritionMeals").hidden = !meals;
   document.querySelector("#nutritionProductsPanel").hidden = !products;
   document.querySelectorAll("[data-nutrition-segment]").forEach((link) => {
     let activeSegment = "diary";
-    if (meals) activeSegment = "meals";
     if (week) activeSegment = "week";
     if (products) activeSegment = "products";
     const active = link.dataset.nutritionSegment === activeSegment;
@@ -236,17 +233,24 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
   const totalValue = document.createElement("strong");
   totalValue.textContent = formatKcal(expenditure?.total_kcal);
   const totalCaption = document.createElement("span");
-  totalCaption.textContent = "Gesamtverbrauch";
-  totalTile.append(totalValue, totalCaption);
-
-  const componentDetails = document.createElement("details");
-  componentDetails.style.gridColumn = "1 / -1";
-  const componentSummary = document.createElement("summary");
-  componentSummary.textContent = "Aktiv- und Ruheenergie anzeigen";
-  const componentText = document.createElement("p");
-  componentText.textContent = `Aktiv: ${formatKcal(expenditure?.active_kcal)} · Ruhe: ${formatKcal(expenditure?.resting_kcal)}`;
-  componentDetails.append(componentSummary, componentText);
-  totals.replaceChildren(totalTile, componentDetails);
+  totalCaption.textContent = expenditure?.provisional ? "Tagesverbrauch (vorläufig)" : "Tagesverbrauch";
+  totalTile.append(totalValue, totalCaption);
+
+  const componentTile = (rawValue, caption) => {
+    const tile = document.createElement("div");
+    tile.className = "nutrition-total";
+    const value = document.createElement("strong");
+    value.textContent = formatKcal(rawValue);
+    const label = document.createElement("span");
+    label.textContent = caption;
+    tile.append(value, label);
+    return tile;
+  };
+  totals.replaceChildren(
+    totalTile,
+    componentTile(expenditure?.active_kcal, "Aktivkalorien"),
+    componentTile(expenditure?.resting_kcal, expenditure?.provisional ? "Grundumsatz (vorläufig)" : "Grundumsatz"),
+  );
 
   const measuredDate = expenditure?.measured_date || expenditure?.date || selectedDate || "";
   const fetchedAt = nutritionExpenditureTimestamp(expenditure?.fetched_at);
@@ -373,14 +377,10 @@ async function loadNutrition() {
   status.textContent = "Ernährung wird geladen…";
   clearNutritionExpenditure();
   document.querySelector("#nutritionEntries").replaceChildren();
-  document.querySelector("#nutritionTemplates").replaceChildren();
   document.querySelector("#nutritionTotals").replaceChildren();
   try {
     const dateQuery = dateInput.value ? `?date=${encodeURIComponent(dateInput.value)}` : "";
-    const [day, saved] = await Promise.all([
-      api(`/api/nutrition/day${dateQuery}`),
-      api("/api/nutrition/templates"),
-    ]);
+    const day = await api(`/api/nutrition/day${dateQuery}`);
     if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;
     dateInput.value = day.date;
     renderNutritionExpenditure(day.energy_expenditure, day.date);
@@ -389,9 +389,6 @@ async function loadNutrition() {
     appendNutritionTotals(totals, day);
     appendNutritionMacroNote(totals, Number(day.entries_without_macros) || 0);
     document.querySelector("#nutritionEntries").replaceChildren(...day.entries.map((item) => nutritionCard(item, false)));
-    const templates = document.querySelector("#nutritionTemplates");
-    templates.replaceChildren(...saved.templates.map((item) => nutritionCard(item, true)));
-    if (!saved.templates.length) templates.textContent = "Noch keine gespeicherten Mahlzeiten. Definiere dein erstes Standardfrühstück mit dem Coach.";
   } catch (error) {
     if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) {
       status.textContent = `Ernährung konnte nicht geladen werden: ${error.message}`;
@@ -422,7 +419,7 @@ function resetNutritionView() {
   document.querySelector("#nutritionProductUseDialog")?.close();
   nutritionProductForUse = null;
   document.querySelector("#nutritionDate").value = "";
-  for (const id of ["nutritionWeekPeriod", "nutritionWeekStatus", "nutritionWeekTotals", "nutritionWeekDays", "nutritionWeekChart", "nutritionEntries", "nutritionTemplates", "nutritionTotals", "nutritionStatus", "nutritionProducts", "nutritionProductStatus", "nutritionExpenditureTotals", "nutritionExpenditureStatus", "nutritionExpenditureDate"]) document.getElementById(id)?.replaceChildren();
+  for (const id of ["nutritionWeekPeriod", "nutritionWeekStatus", "nutritionWeekTotals", "nutritionWeekDays", "nutritionWeekChart", "nutritionEntries", "nutritionTotals", "nutritionStatus", "nutritionProducts", "nutritionProductStatus", "nutritionExpenditureTotals", "nutritionExpenditureStatus", "nutritionExpenditureDate"]) document.getElementById(id)?.replaceChildren();
   document.querySelector("#nutritionWeekChartSection").hidden = true;
   const editor = document.querySelector("#nutritionExtraction"); if (editor) { editor.replaceChildren(); editor.hidden = true; }
   const query = document.querySelector("#nutritionProductQuery"); if (query) query.value = "";

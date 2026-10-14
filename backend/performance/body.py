@@ -28,6 +28,7 @@ from backend.providers.source_labels import SourceView, provider_label
 
 INTERVALS_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY)
 GARMIN_SOURCE = provider_label(ProviderId.GARMIN, SourceView.BODY_HISTORY)
+WAHOO_SOURCE = provider_label(ProviderId.WAHOO, SourceView.BODY_HISTORY)
 # Body history keys its eFTP-derived FTP series by this label, not the wellness label.
 INTERVALS_FTP_SOURCE = "Intervals.icu"
 _MEASUREMENT_SOURCES = {
@@ -37,6 +38,7 @@ _MEASUREMENT_SOURCES = {
 _FTP_SOURCES = {
     ProviderId.INTERVALS: INTERVALS_FTP_SOURCE,
     ProviderId.GARMIN: GARMIN_SOURCE,
+    ProviderId.WAHOO: WAHOO_SOURCE,
 }
 
 

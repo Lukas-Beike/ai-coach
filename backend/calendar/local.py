@@ -44,8 +44,20 @@ def _local_calendar_competition(competition: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _external_event_is_relevant(event: dict[str, Any]) -> bool:
+    """Mirror the external-calendar SQL filter, which keeps blocking markers."""
+    if int(event.get("training_relevant") or 0) == 1:
+        return True
+    if any(
+        int(event.get(column) or 0) == 1
+        for column in ("no_training", "no_intensity", "short_only")
+    ):
+        return True
+    return "[NO_TRAINING]" in str(event.get("name") or "").upper()
+
+
 def _local_calendar_external_event(event: Any) -> dict[str, Any] | None:
-    if not isinstance(event, dict) or int(event.get("training_relevant") or 0) != 1:
+    if not isinstance(event, dict) or not _external_event_is_relevant(event):
         return None
     try:
         event_date = LocalDate.parse(event.get("event_date")).isoformat()

@@ -130,7 +130,7 @@ test("@responsive Garmin acute load switches fourteen days and twelve weeks with
   await expect(root).not.toContainText("KW ");
   await expect(root.locator("path[data-series='0']")).toHaveAttribute("d", /M.*L/);
   await expect(root).not.toContainText("Fitness");
-  await loadRoot.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
+  await page.locator("#analysisLoadPeriod").getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(14);
   for (const chart of await loadRoot.locator(".analysis-chart-card").all()) {
     await expect(chart.locator(".analysis-point-value[data-value-series]")).toHaveCount(14);
@@ -142,7 +142,7 @@ test("@responsive Garmin acute load switches fourteen days and twelve weeks with
       expect(boxes.slice(index + 1).some((other) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top)).toBe(false);
     }
   }
-  await loadRoot.getByRole("button", { name: "12 Wochen", exact: true }).click();
+  await page.locator("#analysisLoadPeriod").getByRole("button", { name: "12 Wochen", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(11);
   for (const svg of await loadRoot.locator("svg").all()) {
     const geometry = await svg.evaluate((element) => {
@@ -265,7 +265,7 @@ test("@responsive performance keeps dated FTP values and weekly medians independ
   await pace.getByText("Werte ansehen", { exact: true }).click();
   await expect(pace.locator("tbody td:nth-child(2)")).toHaveText([/4:50 min\/km/, /4:50 min\/km/]);
   await page.evaluate(async () => { await AppRouter.navigate("analysis/load", { historyMode: "replace" }); });
-  await page.locator("#analysisLoadCharts").getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
+  await page.locator("#analysisLoadPeriod").getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await page.evaluate(async () => { await AppRouter.navigate("analysis/performance", { historyMode: "replace" }); });
   await expect(ftp.locator("tbody tr")).toHaveCount(7);
 });

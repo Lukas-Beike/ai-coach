@@ -74,14 +74,51 @@ async function syncWeather() {
   }
 }
 
+async function syncWahoo() {
+  const button = $("#wahooSyncButton");
+  if (!button) return;
+  state.localSync.wahoo = true;
+  button.disabled = true;
+  button.textContent = "Synchronisierung läuft…";
+  try {
+    const result = await api("/api/wahoo/sync", { method: "POST", body: "{}" });
+    if (!result?.id) throw new Error("Die Jobbestätigung fehlt.");
+    const completed = await waitForSyncJob(result.id);
+    if (completed.status === "failed") throw new Error(providerJobErrorDetail(completed) || globalThis.AppApi.messageForReason(completed.reason, "Wahoo-Synchronisierung fehlgeschlagen."));
+    toast(`Wahoo ${completed.status === "partial" ? "teilweise " : ""}synchronisiert`);
+    invalidateContextPreview();
+    await load();
+  } catch (error) { toast(error.message, true); await load(); }
+  finally { state.localSync.wahoo = false; renderSettings(state.data || {}); }
+}
+
+// Each full-resync control is found by provider id: Intervals.icu keeps its system-card button.
+function fullResyncButtonSelector(source) {
+  return source === providerIds().intervals ? "#systemIntervalsFullResyncButton" : `#${source}FullResyncButton`;
+}
+
+// Wahoo's full resync re-reads the last 90 days and deletes nothing; the wording must say so.
+function fullResyncConfirmation(source, providerLabel) {
+  if (source === providerIds().wahoo) {
+    return {
+      title: `${providerLabel} vollständig neu synchronisieren?`,
+      message: `Die ${providerLabel}-Einheiten der letzten 90 Tage werden erneut aus ${providerLabel} geladen. Lokal gespeicherte Einheiten werden nicht gelöscht; ${providerLabel} wird nicht verändert.`,
+    };
+  }
+  return {
+    title: `${providerLabel}-Daten vollständig neu laden?`,
+    message: `Alle lokal gespeicherten ${providerLabel}-Daten löschen und vollständig neu laden? Die Daten in ${providerLabel} bleiben unverändert.`,
+  };
+}
+
 async function fullResync(source) {
   if (!source) return;
-  const isGarmin = source === providerIds().garmin;
-  const button = $(isGarmin ? "#garminFullResyncButton" : "#systemIntervalsFullResyncButton");
+  const button = $(fullResyncButtonSelector(source));
   if (!button) return;
   const providerLabel = coachProviderLabel(source);
-  if (!await requestConfirmation(`Alle lokal gespeicherten ${providerLabel}-Daten löschen und vollständig neu laden? Die Daten in ${providerLabel} bleiben unverändert.`, { title: `${providerLabel}-Daten vollständig neu laden?` })) return;
-  const stateKey = isGarmin ? "garminFull" : "intervalsFull";
+  const confirmation = fullResyncConfirmation(source, providerLabel);
+  if (!await requestConfirmation(confirmation.message, { title: confirmation.title })) return;
+  const stateKey = `${source}Full`;
   state.localSync[stateKey] = true;
   button.disabled = true;
   button.classList.add("busy");

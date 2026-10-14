@@ -16,7 +16,8 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Mapping
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any, Final, Protocol
 
@@ -25,18 +26,25 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.providers.canonical_plans import (
+    WAHOO_POWER_ZONES_KEY,
     WAHOO_SYNCED_AT_KEY,
+    WAHOO_USER_KEY,
     WAHOO_WORKOUTS_KEY,
     wahoo_ingest_plan,
 )
 from backend.providers.descriptors import WAHOO_ID, WAHOO_NOT_CONFIGURED_MESSAGE
-from backend.providers.wahoo_client import WahooWorkoutFetch
+from backend.providers.wahoo_client import (
+    POWER_ZONES_SCOPE,
+    USER_SCOPE,
+    WahooWorkoutFetch,
+)
 from backend.sync.canonical_coverage_store import (
     CanonicalCoverageStore,
     wahoo_payload_coverage,
 )
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import ProviderRegistry
 
@@ -44,6 +52,9 @@ FRESHNESS_AREA: Final = "activities"
 LAST_SYNC_KEY: Final = "last_wahoo_sync_at"
 LAST_ERROR_KEY: Final = "last_wahoo_sync_error"
 SYNC_FAILED_MESSAGE: Final = "Die Wahoo-Synchronisierung ist fehlgeschlagen."
+# Wahoo refuses an endpoint with these statuses when the athlete's grant does not
+# cover it; the run goes on without that source and its stored rows stay as they are.
+OPTIONAL_SOURCE_STATUSES: Final = frozenset({403, 404})
 
 WAHOO_SYNC_LOCK = threading.Lock()
 
@@ -60,6 +71,18 @@ class WahooWorkoutSource(Protocol):
         self, *, since: datetime, until: datetime | None = None
     ) -> WahooWorkoutFetch: ...
 
+    def power_zones(self) -> tuple[Mapping[str, Any], ...]: ...
+
+    def user(self) -> Mapping[str, Any]: ...
+
+
+@dataclass(frozen=True)
+class WahooSyncClock:
+    """The current instant and the athlete's local zone, resolved per run."""
+
+    now: Callable[[], datetime]
+    zone: Callable[[], tzinfo | None]
+
 
 class WahooConnectionStatus(Protocol):
     """The token-free connection status the sync consults."""
@@ -70,13 +93,17 @@ class WahooConnectionStatus(Protocol):
 def sync_window_days(registry: ProviderRegistry, requested: object) -> int:
     """Clamp a requested window to the descriptor's limits.
 
-    A missing or invalid request uses the descriptor's default window.
+    A missing or invalid request uses the descriptor's default window. Any
+    integer of zero or below is the "all" sentinel (``-1``) and means the
+    descriptor maximum, as it does for the other providers.
     """
     maximum = registry.max_sync_days(WAHOO_ID)
     default = registry.sync_period_defaults().get(WAHOO_ID, maximum)
     if isinstance(requested, bool) or not isinstance(requested, int):
         return max(1, min(default, maximum))
-    return max(1, min(requested, maximum))
+    if requested <= 0:
+        return maximum
+    return min(requested, maximum)
 
 
 class WahooSyncService:
@@ -94,10 +121,10 @@ class WahooSyncService:
         daily_markers: Callable[[], DailySyncMarkerService],
         observer: Callable[[], SyncOperationObserver],
         registry: ProviderRegistry,
-        zone_provider: Callable[[], tzinfo | None],
-        now: Callable[[], datetime],
+        clock: WahooSyncClock,
         logger: logging.Logger,
         lock: Any | None = None,
+        gate: ProviderResyncGate | None = None,
     ) -> None:
         self._config = config
         self._connection = connection
@@ -109,10 +136,10 @@ class WahooSyncService:
         self._daily_markers = daily_markers
         self._observer = observer
         self._registry = registry
-        self._zone_provider = zone_provider
-        self._now = now
+        self._clock = clock
         self._logger = logger
         self._lock = lock if lock is not None else WAHOO_SYNC_LOCK
+        self._gate = gate
 
     def running(self) -> bool:
         return self._lock.locked()
@@ -132,7 +159,12 @@ class WahooSyncService:
         with self._observer().observe(
             WAHOO_ID, FRESHNESS_AREA, reason, operation_id
         ) as scope:
-            result = self._sync(days, reason)
+            # A running resync reset rejects the work before any state changes.
+            operation = (
+                self._gate.operation() if self._gate is not None else nullcontext()
+            )
+            with operation:
+                result = self._sync(days, reason)
             scope.result = result
             return result
 
@@ -158,14 +190,17 @@ class WahooSyncService:
             self._lock.release()
 
     def _sync_locked(self, days: int) -> dict[str, Any]:
-        zone = self._zone_provider() or UTC
-        synced_at = self._now()
-        fetch = self._source().list_workouts(
+        zone = self._clock.zone() or UTC
+        synced_at = self._clock.now()
+        source = self._source()
+        fetch = source.list_workouts(
             since=synced_at - timedelta(days=days), until=synced_at
         )
+        threshold, skipped_sources = self._threshold_fetch(source)
         payload = {
             WAHOO_SYNCED_AT_KEY: synced_at.isoformat(),
             WAHOO_WORKOUTS_KEY: list(fetch.workouts),
+            **threshold,
         }
         plan = wahoo_ingest_plan(payload, zone=zone)
         with self._database_lock, self._database_manager().unit_of_work() as db:
@@ -178,7 +213,7 @@ class WahooSyncService:
             self._key_values.set(db, LAST_SYNC_KEY, synced_at.isoformat())
             self._key_values.set(db, LAST_ERROR_KEY, "")
             self._daily_markers().mark_in_transaction(db, WAHOO_ID)
-        return {
+        result: dict[str, Any] = {
             "status": "partial" if fetch.truncated else "ok",
             "synced_at": synced_at.isoformat(),
             "activities": len(plan.activities),
@@ -186,6 +221,44 @@ class WahooSyncService:
             "skipped": fetch.skipped + counters.skipped_invalid,
             "canonical": counters.as_dict(),
         }
+        if skipped_sources:
+            result["skipped_sources"] = skipped_sources
+        return result
+
+    def _threshold_fetch(
+        self, source: WahooWorkoutSource
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        """Read the power zones and the profile the granted scopes allow.
+
+        Returns the fetched payload keys and, for each skipped source, the reason:
+        ``scope`` when the athlete did not grant it, ``rejected`` when Wahoo refused
+        it. Any other failure stops the run, as it does for the workouts.
+        """
+        scopes = self._granted_scopes()
+        requests: tuple[tuple[str, str, Callable[[], Any]], ...] = (
+            (WAHOO_POWER_ZONES_KEY, POWER_ZONES_SCOPE, lambda: source.power_zones()),
+            (WAHOO_USER_KEY, USER_SCOPE, lambda: source.user()),
+        )
+        fetched: dict[str, Any] = {}
+        skipped: dict[str, str] = {}
+        for key, scope, read in requests:
+            if scope not in scopes:
+                skipped[key] = "scope"
+                continue
+            try:
+                fetched[key] = read()
+            except AppError as error:
+                if getattr(error, "upstream_status", None) not in (
+                    OPTIONAL_SOURCE_STATUSES
+                ):
+                    raise
+                skipped[key] = "rejected"
+        return fetched, skipped
+
+    def _granted_scopes(self) -> frozenset[str]:
+        """Return the OAuth scopes of the connected athlete; none when not connected."""
+        scope = self._connection().status().get("scope")
+        return frozenset(scope.split()) if isinstance(scope, str) else frozenset()
 
     def _record_error(self, message: str) -> None:
         """Store the content-free error text; a failed write never hides the cause."""

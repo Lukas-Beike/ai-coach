@@ -486,5 +486,74 @@ class FetchRowTests(unittest.TestCase):
         self.assertIsNone(canonical_store._fetch_row(_MappingDb([]), "SELECT a", ()))
 
 
+class ActivityMetricStoreTests(StoreFixture):
+    def test_summary_metrics_round_trip_and_zero_is_stored_as_null(self) -> None:
+        record = replace(
+            activity("wahoo-1", load=76.3),
+            provenance=replace(
+                provenance("wahoo-1", provider=ProviderId.WAHOO),
+                recorded_by=RecordingOrigin.WAHOO,
+            ),
+            load_model=LoadModel.TSS,
+            moving_duration_s=3600.4,
+            elevation_gain_m=412.5,
+            normalized_power=231.7,
+            avg_cadence=88.4,
+            energy_kj=1500.0,
+        )
+        canonical_store.upsert_activity_record(
+            self.db,
+            record,
+            local_date=date(2026, 6, 1),
+            mapper_version=2,
+            fetched_at=STAMP,
+            now=STAMP,
+        )
+        self.db.commit()
+
+        rows = canonical_store.active_activity_rows(self.db)
+
+        self.assertEqual(1, len(rows))
+        self.assertEqual(
+            (3600.4, 412.5, 231.7, 88.4, 1500.0),
+            tuple(
+                rows[0][column]
+                for column in (
+                    "moving_duration_s",
+                    "elevation_gain_m",
+                    "normalized_power",
+                    "avg_cadence",
+                    "energy_kj",
+                )
+            ),
+        )
+        self.assertEqual("tss", rows[0]["load_model"])
+        self.assertEqual(76.3, rows[0]["load"])
+
+    def test_absent_metrics_are_stored_as_null_and_round_trip_as_none(self) -> None:
+        canonical_store.upsert_activity_record(
+            self.db,
+            activity("plain-1"),
+            local_date=date(2026, 6, 1),
+            mapper_version=1,
+            fetched_at=STAMP,
+            now=STAMP,
+        )
+        self.db.commit()
+
+        rows = canonical_store.active_activity_rows(self.db)
+
+        self.assertEqual(1, len(rows))
+        for column in (
+            "moving_duration_s",
+            "elevation_gain_m",
+            "normalized_power",
+            "avg_cadence",
+            "energy_kj",
+        ):
+            with self.subTest(column=column):
+                self.assertIsNone(rows[0][column])
+
+
 if __name__ == "__main__":
     unittest.main()

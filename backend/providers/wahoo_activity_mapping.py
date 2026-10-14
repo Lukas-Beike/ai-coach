@@ -14,14 +14,21 @@ Field rules:
   the plan from the athlete zone, not from the workout's own ``time_zone``.
 * duration: the summary's ``duration_active_accum`` before ``duration_total_accum``.
   The workout's own ``minutes`` is the PLANNED duration and is never used.
-* distance (m), average heart rate and average power come from the summary,
-  which arrives as decimal text and may be null until Wahoo has processed the
-  workout. A missing summary is not an error.
+* distance (m), average heart rate, average power, ascent, average cadence,
+  normalized power, energy and moving duration come from the summary, which
+  arrives as decimal text and may be null until Wahoo has processed the workout.
+  A missing summary is not an error. A zero cadence, normalized power, energy or
+  training stress score means "not measured" and becomes None; a zero ascent is
+  a real flat course and stays 0.
 * sport and environment come from ``workout_type_id``. An id this table does
   not know maps to ``Sport.OTHER`` with an unknown environment.
+* load: ``power_bike_tss_last`` is a Training Stress Score, modelled as
+  ``LoadModel.TSS`` so it is never mixed with another provider's load. Without a
+  positive value the load stays unknown.
 
-The training load stays unknown: the summary has no load in a canonical model.
-Calories, ascent and the other summary fields stay in the sanitized raw record.
+Calories, speed and the workout file location stay out of the canonical record.
+The stored raw record drops the summary ``file`` object, which carries a
+download URL; see ``raw_workout_for_storage``.
 """
 
 from __future__ import annotations
@@ -40,8 +47,12 @@ from backend.canonical.mapping import (
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.validation import (
     HEART_RATE_BOUNDS,
+    MAX_ACTIVITY_CADENCE_RPM,
     MAX_ACTIVITY_DISTANCE_M,
     MAX_ACTIVITY_DURATION_S,
+    MAX_ACTIVITY_ELEVATION_M,
+    MAX_ACTIVITY_ENERGY_KJ,
+    MAX_ACTIVITY_LOAD,
     MAX_ACTIVITY_POWER_W,
 )
 from backend.canonical.vocabulary import (
@@ -53,17 +64,25 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-MAPPER_VERSION: Final = 1
+MAPPER_VERSION: Final = 2
 WAHOO_LABEL: Final = "Wahoo"
 MAX_NAME_LENGTH: Final = 200
 MAX_WORKOUT_ID: Final = 2**63 - 1
 # Same minimum as the other activity mappers: a zero duration is not usable.
 _MIN_DURATION_S: Final = 1.0
 
-_DURATION_KEYS: Final = ("duration_active_accum", "duration_total_accum")
+_MOVING_DURATION_KEYS: Final = ("duration_active_accum",)
+_TOTAL_DURATION_KEYS: Final = ("duration_total_accum",)
 _DISTANCE_KEYS: Final = ("distance_accum",)
 _AVERAGE_HR_KEYS: Final = ("heart_rate_avg",)
 _AVERAGE_POWER_KEYS: Final = ("power_avg",)
+_ELEVATION_KEYS: Final = ("ascent_accum",)
+_CADENCE_KEYS: Final = ("cadence_avg",)
+_NORMALIZED_POWER_KEYS: Final = ("power_bike_np_last",)
+_WORK_JOULES_KEYS: Final = ("work_accum",)
+_TSS_KEYS: Final = ("power_bike_tss_last",)
+_SUMMARY_FILE_KEY: Final = "file"
+_JOULES_PER_KJ: Final = 1000.0
 
 _OUTDOOR: Final = Environment.OUTDOOR
 _INDOOR: Final = Environment.INDOOR
@@ -110,6 +129,30 @@ WAHOO_WORKOUT_TYPES: Final[Mapping[int, tuple[Sport, Environment]]] = {
 
 def _issue(ref: str | None, field: str, reason: IssueReason) -> MappingIssue:
     return MappingIssue(ref, field, reason)
+
+
+def _positive(value: float | None) -> float | None:
+    """Zero means "not measured" for cadence, power, energy and load."""
+    return value if value else None
+
+
+def raw_workout_for_storage(row: object) -> object:
+    """Return the workout as it is stored in the raw record.
+
+    The summary ``file`` object carries a download URL, so it is never stored.
+    Every other field is copied unchanged. A row without a summary ``file``, or
+    one that is not an object, is returned as it is.
+    """
+    if not isinstance(row, Mapping):
+        return row
+    summary = row.get("workout_summary")
+    if not isinstance(summary, Mapping) or _SUMMARY_FILE_KEY not in summary:
+        return row
+    stored = dict(row)
+    stored["workout_summary"] = {
+        key: value for key, value in summary.items() if key != _SUMMARY_FILE_KEY
+    }
+    return stored
 
 
 class _WorkoutRow:
@@ -214,6 +257,20 @@ def _map_row(
         return None
     reader.read_summary()
     sport, environment = reader.sport_and_environment()
+    moving_duration = reader.number(
+        _MOVING_DURATION_KEYS, _MIN_DURATION_S, MAX_ACTIVITY_DURATION_S
+    )
+    duration = (
+        moving_duration
+        if moving_duration is not None
+        else reader.number(
+            _TOTAL_DURATION_KEYS, _MIN_DURATION_S, MAX_ACTIVITY_DURATION_S
+        )
+    )
+    tss = _positive(reader.number(_TSS_KEYS, 0.0, MAX_ACTIVITY_LOAD))
+    joules = reader.number(
+        _WORK_JOULES_KEYS, 0.0, MAX_ACTIVITY_ENERGY_KJ * _JOULES_PER_KJ
+    )
     return ActivityRecord(
         activity_id=workout_id,
         provenance=Provenance(
@@ -227,15 +284,22 @@ def _map_row(
         sport=sport,
         environment=environment,
         started_at=started_at,
-        duration_s=reader.number(
-            _DURATION_KEYS, _MIN_DURATION_S, MAX_ACTIVITY_DURATION_S
-        ),
+        duration_s=duration,
         distance_m=reader.number(_DISTANCE_KEYS, 0.0, MAX_ACTIVITY_DISTANCE_M),
-        load=None,
-        load_model=LoadModel.UNKNOWN,
+        load=tss,
+        load_model=LoadModel.TSS if tss is not None else LoadModel.UNKNOWN,
         avg_hr=reader.number(_AVERAGE_HR_KEYS, *HEART_RATE_BOUNDS),
         avg_power=reader.number(_AVERAGE_POWER_KEYS, 0.0, MAX_ACTIVITY_POWER_W),
         name=reader.name(),
+        moving_duration_s=moving_duration,
+        elevation_gain_m=reader.number(_ELEVATION_KEYS, 0.0, MAX_ACTIVITY_ELEVATION_M),
+        normalized_power=_positive(
+            reader.number(_NORMALIZED_POWER_KEYS, 0.0, MAX_ACTIVITY_POWER_W)
+        ),
+        avg_cadence=_positive(
+            reader.number(_CADENCE_KEYS, 0.0, MAX_ACTIVITY_CADENCE_RPM)
+        ),
+        energy_kj=_positive(None if joules is None else joules / _JOULES_PER_KJ),
     )
 
 

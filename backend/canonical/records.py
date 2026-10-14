@@ -8,8 +8,11 @@ from typing import Final
 
 from backend.canonical.validation import (
     HEART_RATE_BOUNDS,
+    MAX_ACTIVITY_CADENCE_RPM,
     MAX_ACTIVITY_DISTANCE_M,
     MAX_ACTIVITY_DURATION_S,
+    MAX_ACTIVITY_ELEVATION_M,
+    MAX_ACTIVITY_ENERGY_KJ,
     MAX_ACTIVITY_LOAD,
     MAX_ACTIVITY_POWER_W,
     finite_number,
@@ -118,6 +121,11 @@ class ActivityRecord:
     avg_hr: float | None
     avg_power: float | None
     name: str | None
+    moving_duration_s: float | None = None
+    elevation_gain_m: float | None = None
+    normalized_power: float | None = None
+    avg_cadence: float | None = None
+    energy_kj: float | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
@@ -155,6 +163,44 @@ class ActivityRecord:
             "avg_power",
             optional_bounded_number(
                 self.avg_power, "avg_power", 0.0, MAX_ACTIVITY_POWER_W
+            ),
+        )
+        object.__setattr__(
+            self,
+            "moving_duration_s",
+            optional_bounded_number(
+                self.moving_duration_s,
+                "moving_duration_s",
+                0.0,
+                MAX_ACTIVITY_DURATION_S,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "elevation_gain_m",
+            optional_bounded_number(
+                self.elevation_gain_m, "elevation_gain_m", 0.0, MAX_ACTIVITY_ELEVATION_M
+            ),
+        )
+        object.__setattr__(
+            self,
+            "normalized_power",
+            optional_bounded_number(
+                self.normalized_power, "normalized_power", 0.0, MAX_ACTIVITY_POWER_W
+            ),
+        )
+        object.__setattr__(
+            self,
+            "avg_cadence",
+            optional_bounded_number(
+                self.avg_cadence, "avg_cadence", 0.0, MAX_ACTIVITY_CADENCE_RPM
+            ),
+        )
+        object.__setattr__(
+            self,
+            "energy_kj",
+            optional_bounded_number(
+                self.energy_kj, "energy_kj", 0.0, MAX_ACTIVITY_ENERGY_KJ
             ),
         )
         optional_text(self.name, "name", max_length=200)

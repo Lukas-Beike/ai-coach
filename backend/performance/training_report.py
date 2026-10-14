@@ -12,11 +12,14 @@ from backend.activities.duplicates import (
     deduplicate_api_records,
     intervals_cycling_activities_match,
 )
-from backend.activities.identity import intervals_activity_device_source
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import RecordingOrigin
 from backend.providers import intervals_performance_fields as intervals_perf_fields
+from backend.providers.intervals_activity_fields import (
+    intervals_activity_device_source,
+    intervals_activity_recorded_by_wahoo,
+)
 
 METHOD = "local-training-report-v1"
 
@@ -35,7 +38,7 @@ def deduplicated_rows(rows: Sequence[Any]) -> tuple[list[dict[str, Any]], int]:
     unique = [
         row for row in deduplicate_api_records(list(rows)) if isinstance(row, dict)
     ]
-    wahoo = [row for row in unique if intervals_activity_device_source(row) == "wahoo"]
+    wahoo = [row for row in unique if intervals_activity_recorded_by_wahoo(row)]
     kept = [
         row
         for row in unique

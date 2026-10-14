@@ -684,7 +684,22 @@ def seed_training_features():
                 ],
             }
         )
-        _save_garmin_snapshot(db, garmin_full)
+        # Merge into the stored payload so later demo-only keys (endurance
+        # score, running tolerance, FTP history, sleep, body battery) and
+        # freshness entries survive when features are re-seeded on demand.
+        stored = server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot")
+        try:
+            existing = json.loads(stored) if stored else {}
+        except ValueError:
+            existing = {}
+        if not isinstance(existing, dict):
+            existing = {}
+        merged = {**existing, **garmin_full}
+        merged["source_freshness"] = {
+            **(existing.get("source_freshness") or {}),
+            **(garmin_full.get("source_freshness") or {}),
+        }
+        _save_garmin_snapshot(db, merged)
     targets = {
         "steps": [{"duration": 3600, "target": "200W", "kind": "power"}],
         "basis": {},

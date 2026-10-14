@@ -248,9 +248,9 @@ class NutritionMealTimeTests(unittest.TestCase):
             {
                 "id": "2026-09-24",
                 "kcalConsumed": 400,
-                "carbs": 60.0,
+                "carbohydrates": 60.0,
                 "protein": 15.0,
-                "fat": 10.0,
+                "fatTotal": 10.0,
             },
         )
         self.assertFalse(result["pending"])

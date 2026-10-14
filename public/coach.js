@@ -274,14 +274,15 @@ function chatRequestIsCurrent(sessionGeneration, chatGeneration) {
 }
 
 async function chatStreamResponse(message, requestKind, attachments, clientTurnId, stream) {
-  const generation = state.sessionGeneration;
   try {
+    // No unauthorized callback here: showLogin() would supersede this request before
+    // rejectChatStreamResponse() can restore the draft. That function owns the 401 path.
     return await globalThis.AppApi.stream("/api/chat/stream", {
       method: "POST",
       signal: stream.controller.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message, client_turn_id: clientTurnId, request_kind: requestKind, attachments }),
-    }, () => { if (generation === state.sessionGeneration) showLogin(); });
+    });
   } catch (error) {
     if (error.status) {
       stream.serverError = true;
@@ -295,7 +296,10 @@ function rejectChatStreamResponse(error, context) {
   const { attachments, chatGeneration, clientTurnId, message, sessionGeneration, stream } = context;
   stream.serverError = true;
   stream.rejected = true;
-  if (!chatRequestIsCurrent(sessionGeneration, chatGeneration)) return false;
+  if (!chatRequestIsCurrent(sessionGeneration, chatGeneration)) {
+    if (error.status === 401 && sessionGeneration === state.sessionGeneration) showLogin();
+    return false;
+  }
   if (error.status === 401) {
     const rejectedAttachments = [...(attachments || [])];
     showLogin();
@@ -1362,7 +1366,7 @@ async function executeCoachActionProposal(proposal, button) {
     toast(receipt.message);
     if (state.route === originalRoute) {
       if (receipt.nutritionProductWrite) await AppRouter.navigate("nutrition/products", { historyMode: "push" });
-      else if (receipt.localWrite) await AppRouter.navigate("nutrition/meals", { historyMode: "push" });
+      else if (receipt.localWrite) await AppRouter.navigate("nutrition/diary", { historyMode: "push" });
       else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
     }
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);

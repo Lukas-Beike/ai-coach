@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
@@ -14,6 +15,8 @@ from backend.db.schema import (
     initialize_schema,
 )
 
+LOGGER = logging.getLogger("intervals_coach")
+
 
 def initialize_application_database(
     db: Any,
@@ -24,7 +27,6 @@ def initialize_application_database(
     default_profile_json: str,
     provider_resync_keys: Iterable[Mapping[str, str]],
     retention_days: int,
-    all_sync_days: int,
 ) -> None:
     """Create and validate the application schema, then apply startup state."""
     if db.execute("PRAGMA user_version").fetchone()[
@@ -50,8 +52,24 @@ def initialize_application_database(
         key_values.set(db, provider_keys["running"], "0")
         key_values.set(db, provider_keys["status"], "")
 
-    if retention_days != all_sync_days:
+    # Values <= 0 (including the documented -1) retain data indefinitely.
+    if retention_days > 0:
         bounded_retention_days = max(30, min(retention_days, 3650))
         cutoff = (current_time - timedelta(days=bounded_retention_days)).isoformat()
-        db.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
-        db.execute("DELETE FROM snapshots WHERE created_at < ?", (cutoff,))
+        messages_deleted = db.execute(
+            "DELETE FROM messages WHERE created_at < ?", (cutoff,)
+        ).rowcount
+        snapshots_deleted = db.execute(
+            "DELETE FROM snapshots WHERE created_at < ?", (cutoff,)
+        ).rowcount
+        LOGGER.info(
+            "Data retention purge completed",
+            extra={
+                "event": "data_retention_purged",
+                "context": {
+                    "retention_days": bounded_retention_days,
+                    "messages_deleted": messages_deleted,
+                    "snapshots_deleted": snapshots_deleted,
+                },
+            },
+        )

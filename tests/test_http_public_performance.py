@@ -7,6 +7,7 @@ from backend.http_api.public_performance import (
     PublicPerformanceStateService,
 )
 from backend.performance.chart_history import analysis_history
+from backend.performance.training_focus import training_focus
 
 
 class PublicPerformanceStateTests(unittest.TestCase):
@@ -45,6 +46,14 @@ class PublicPerformanceStateTests(unittest.TestCase):
                 "performance": {
                     **performance,
                     "history": analysis_history(snapshot, garmin, today),
+                    "training_focus_periods": {
+                        "fortnight": training_focus(
+                            snapshot, garmin, today, "Europe/Berlin", days=14
+                        ),
+                        "twelveWeeks": training_focus(
+                            snapshot, garmin, today, "Europe/Berlin", days=84
+                        ),
+                    },
                 },
                 "garmin": garmin_state,
             },
@@ -96,8 +105,16 @@ class PublicPerformanceStateTests(unittest.TestCase):
 
     def test_performance_state_reuses_snapshot_from_composite_state(self):
         sync_state_repository = Mock()
+        garmin_payload_service = Mock()
+        garmin_payload_service.snapshot.return_value = {}
+        profile_service = Mock()
+        profile_service.get.return_value = {}
         service = PublicPerformanceStateService(
-            sync_state_repository, Mock(), Mock(), Mock(), lambda: date(2026, 9, 23)
+            sync_state_repository,
+            garmin_payload_service,
+            profile_service,
+            Mock(),
+            lambda: date(2026, 9, 23),
         )
 
         with patch(

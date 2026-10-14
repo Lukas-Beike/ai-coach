@@ -10,7 +10,6 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
-from backend.activities.identity import intervals_activity_device_source
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
 from backend.performance.canonical_inputs import (
@@ -29,6 +28,7 @@ from backend.performance.training_report import (
     deduplicated_rows,
     training_report,
 )
+from backend.providers.intervals_activity_fields import intervals_activity_device_source
 
 
 class TrainingRecordsService:
