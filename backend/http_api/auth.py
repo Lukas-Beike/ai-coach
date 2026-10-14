@@ -207,8 +207,12 @@ class SessionAuthService:
         with self._database_manager.read_snapshot() as db:
             row = self._sessions.get(db, token_hash)
         expires_at = float(row["expires_at"]) if row else 0.0
-        if self._cleanup_due():
-            self._write_if_idle(lambda db: self.cleanup_expired_sessions(db, now))
+        if self._cleanup_due() and not self._write_if_idle(
+            lambda db: self.cleanup_expired_sessions(db, now)
+        ):
+            # Back off until the next interval so a long busy writer does not
+            # make every request wait for the cleanup attempt.
+            self._last_cleanup_monotonic = time.monotonic()
         if not row:
             return None
         if expires_at <= now:

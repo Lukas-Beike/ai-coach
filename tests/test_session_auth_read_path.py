@@ -267,6 +267,24 @@ class SessionAuthReadPathTests(unittest.TestCase):
                 db.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"], 2
             )
 
+    def test_skipped_cleanup_backs_off_until_the_next_interval(self) -> None:
+        self.add_session("gone", expires_in=-10)
+        token, _ = self.add_session("live")
+        self.auth._last_cleanup_monotonic = None
+        stop = self.hold_writer()
+        with patch.object(http_auth, "SESSION_MAINTENANCE_WAIT_SECONDS", 0.05):
+            self.assertTrue(
+                self.run_blocking(
+                    lambda: self.auth.authenticated_session(handler_for(token))
+                )
+            )
+        stop()
+        self.assertFalse(self.auth._cleanup_due())
+        with self.manager.reader() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"], 2
+            )
+
     def test_restore_coach_session_csrf_hash_reads_without_the_writer(self) -> None:
         _, csrf = self.add_session("coach")
         key = self.auth.session_token_hash(self.auth.session_token_hash(csrf))

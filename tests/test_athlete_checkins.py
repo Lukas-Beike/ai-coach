@@ -47,7 +47,7 @@ class FakeManager:
 
         return UnitOfWork()
 
-    def reader(self):
+    def read_snapshot(self):
         return self.unit_of_work()
 
     def close(self):
