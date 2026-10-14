@@ -74,40 +74,52 @@ class HistoryUndoService:
             else ""
         )
         with self._database_manager.unit_of_work() as db:
-            _, history = self._load_history(db, change_id)
-            entity_type = history["entity_type"]
-            entity_id = history["entity_id"]
-            current, current_projection = self._history_service.current(
-                db, entity_type, entity_id
-            )
-            current_hash = change_history.audit_hash(current_projection)
-            self._require_current_hash(
-                current_hash, history["after_hash"], expected_hash
-            )
-            target, _ = self._history_service.target(history)
-            after = self._restore(
-                db, entity_type, entity_id, current, target, history["action"]
-            )
-            if entity_type in {"planned_unit", "training_plan"}:
-                self._planning_revision_service.bump(db)
-            change_history.record_change(
-                db,
-                entity_type,
-                entity_id,
-                "undo",
-                current,
-                after,
-                source="undo",
-            )
-            result = {
-                "status": "undone",
-                "change_id": history["id"],
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-                "remote_untouched": True,
-            }
+            return self._apply_one(db, change_id, expected_hash)
 
-        return result
+    def apply_many(
+        self, db: Any, changes: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Undo changes newest first inside the caller's transaction.
+
+        Each change must still be the record's latest state, so one record
+        edited since aborts the caller's whole transaction.
+        """
+        return [
+            self._apply_one(db, change.get("id"), str(change.get("after_hash") or ""))
+            for change in reversed(changes)
+        ]
+
+    def _apply_one(self, db: Any, change_id: Any, expected_hash: str) -> dict[str, Any]:
+        _, history = self._load_history(db, change_id)
+        entity_type = history["entity_type"]
+        entity_id = history["entity_id"]
+        current, current_projection = self._history_service.current(
+            db, entity_type, entity_id
+        )
+        current_hash = change_history.audit_hash(current_projection)
+        self._require_current_hash(current_hash, history["after_hash"], expected_hash)
+        target, _ = self._history_service.target(history)
+        after = self._restore(
+            db, entity_type, entity_id, current, target, history["action"]
+        )
+        if entity_type in {"planned_unit", "training_plan"}:
+            self._planning_revision_service.bump(db)
+        change_history.record_change(
+            db,
+            entity_type,
+            entity_id,
+            "undo",
+            current,
+            after,
+            source="undo",
+        )
+        return {
+            "status": "undone",
+            "change_id": history["id"],
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "remote_untouched": True,
+        }
 
     @staticmethod
     def _load_history(db: Any, change_id: Any) -> tuple[str, dict[str, Any]]:

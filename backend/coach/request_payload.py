@@ -16,6 +16,16 @@ from backend.coach.context_selection import (
 from backend.settings import SettingsService
 
 
+def model_confirmed_steps(
+    command_receipts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Receipts as the model sees them; undo references stay local."""
+    return [
+        {key: value for key, value in entry.items() if key != "changes"}
+        for entry in command_receipts
+    ]
+
+
 class CoachRequestPayloadService:
     """Build a structured Coach request from explicit inputs and owner services."""
 
@@ -63,12 +73,12 @@ class CoachRequestPayloadService:
         dialogue_input = {
             "dialogue": projected_dialogue,
             "current_message": message,
-            "confirmed_steps": command_receipts,
+            "confirmed_steps": model_confirmed_steps(command_receipts),
         }
         if retain_openai_attachment_context and has_prior_openai_attachments:
             dialogue_input = {
                 "current_message": message,
-                "confirmed_steps": command_receipts,
+                "confirmed_steps": model_confirmed_steps(command_receipts),
                 **{
                     key: projected_dialogue[key]
                     for key in (

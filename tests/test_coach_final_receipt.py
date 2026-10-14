@@ -159,6 +159,61 @@ class CoachFinalReceiptTests(unittest.TestCase):
             },
         )
 
+    def test_turn_changes_are_summarized_on_the_receipt_and_the_answer(
+        self,
+    ) -> None:
+        self.db.execute.side_effect = lambda sql, _values: Mock(
+            fetchone=lambda: {"status": "running"}
+        )
+        steps = [
+            {
+                "tool": "update_profile",
+                "result": {"ok": True},
+                "changes": [{"id": "change-1"}],
+            }
+        ]
+        final = self.service.build(
+            {"text": "Fertig"},
+            status="completed",
+            response={},
+            client_turn_id="turn-1",
+            command_receipts=steps,
+            sync_job_ids=[],
+            intent={},
+            rounds=1,
+            failures=[],
+            awaiting_clarification=False,
+        )
+        summary = {
+            "labels": ["Profil aktualisiert"],
+            "undoable": True,
+            "undone_at": None,
+        }
+        self.assertEqual(final["change_summary"], summary)
+
+        result = self.service.persist(
+            final, client_turn_id="turn-1", command_receipts=steps
+        )
+
+        self.assertEqual(result["message"]["coach_changes"], summary)
+        update = next(
+            call
+            for call in self.db.execute.call_args_list
+            if call.args[0].startswith("UPDATE coach_commands")
+        )
+        self.assertEqual(json.loads(update.args[1][0])["change_summary"], summary)
+
+    def test_a_turn_without_changes_adds_no_summary_to_the_answer(self) -> None:
+        self.db.execute.side_effect = lambda sql, _values: Mock(
+            fetchone=lambda: {"status": "running"}
+        )
+        result = self.service.persist(
+            {"text": "Fertig", "change_summary": None},
+            client_turn_id="turn-1",
+            command_receipts=[],
+        )
+        self.assertNotIn("coach_changes", result["message"])
+
     def test_failed_command_update_rolls_back_without_event(self) -> None:
         def execute(sql, _values):
             if sql.startswith("SELECT status, receipt"):

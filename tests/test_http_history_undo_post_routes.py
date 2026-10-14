@@ -14,7 +14,10 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
         self.proposal_factory = Mock(return_value=self.proposal)
         self.handler = Mock()
         self.session = {"csrf_hash": "synthetic-session-hash"}
-        self.routes = HistoryUndoPostRoutes(self.undo_factory, self.proposal_factory)
+        self.turn_undo = Mock()
+        self.routes = HistoryUndoPostRoutes(
+            self.undo_factory, self.proposal_factory, self.turn_undo
+        )
 
     def test_preview_creates_session_bound_proposal_and_projects_response(self) -> None:
         request = {"change_id": "synthetic-change-id"}
@@ -74,6 +77,23 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
         self.undo.apply.assert_called_once_with(payload)
         self.proposal_factory.assert_not_called()
         self.handler.read_json.assert_called_once_with()
+        self.handler.send_json.assert_called_once_with(200, result)
+
+    def test_turn_undo_passes_only_the_turn_id(self) -> None:
+        result = {"status": "undone", "remote_untouched": True}
+        self.handler.read_json.return_value = {
+            "client_turn_id": "turn-1",
+            "change_id": "ignored",
+        }
+        self.turn_undo.undo.return_value = result
+
+        handled = self.routes.handle(
+            self.handler, "/api/change-history/undo-turn", self.session
+        )
+
+        self.assertTrue(handled)
+        self.turn_undo.undo.assert_called_once_with("turn-1")
+        self.undo_factory.assert_not_called()
         self.handler.send_json.assert_called_once_with(200, result)
 
     def test_unknown_path_has_no_side_effects(self) -> None:

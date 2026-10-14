@@ -1681,6 +1681,7 @@ function renderMessageNode(message) {
     }
   }
   appendMessageRetry(node, message);
+  appendMessageChanges(node, message);
   const actions = document.createElement("div");
   actions.className = "message-actions";
   const copy = messageActionButton("copy", "Nachricht kopieren");
@@ -1707,6 +1708,51 @@ function renderMessageNode(message) {
   return node;
 }
 
+// What the Coach turn changed locally, with one undo for the whole turn.
+function appendMessageChanges(node, message) {
+  const changes = message.role === "assistant" ? message.coach_changes : null;
+  if (!Array.isArray(changes?.labels) || !changes.labels.length) return;
+  const line = document.createElement("div");
+  line.className = "message-changes";
+  const text = document.createElement("span");
+  text.textContent = `${changes.undone_at ? "Zurückgenommen" : "Geändert"}: ${changes.labels.join(" · ")}`;
+  line.append(text);
+  if (changes.undoable && !changes.undone_at && message.client_turn_id) {
+    const undo = document.createElement("button");
+    undo.type = "button";
+    undo.className = "message-undo";
+    undo.textContent = "Rückgängig";
+    undo.addEventListener("click", () => undoCoachTurn(message.client_turn_id, undo));
+    line.append(undo);
+  }
+  node.append(line);
+}
+
+async function undoCoachTurn(clientTurnId, button) {
+  if (button.disabled) return;
+  button.disabled = true;
+  const confirmed = await requestConfirmation("Alle lokalen Änderungen dieser Coach-Antwort zurücknehmen? Intervals.icu bleibt unverändert.", { title: "Änderungen zurücknehmen?", confirmLabel: "Zurücknehmen" });
+  if (!confirmed) {
+    button.disabled = false;
+    return;
+  }
+  try {
+    const result = await api("/api/change-history/undo-turn", {
+      method: "POST",
+      body: JSON.stringify({ client_turn_id: clientTurnId }),
+    });
+    (state.data?.messages || []).forEach((item) => {
+      if (item.role === "assistant" && item.client_turn_id === clientTurnId) item.coach_changes = result.coach_changes;
+    });
+    renderMessages(state.data?.messages || [], false, true);
+    toast("Änderungen zurückgenommen");
+    await load("/api/bootstrap?local=1", ["plan", "library", "profile"]);
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message, true);
+  }
+}
+
 function appendChatStream(root, streamVisible) {
   const phase = state.chatRequest?.phase;
   if (!streamVisible) return false;
@@ -1722,7 +1768,7 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));
   const visibleMessages = messages || [];
   const signature = JSON.stringify([
-    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.attachment_names, message.error]),
+    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.attachment_names, message.error, message.coach_changes || null]),
     appShellLoading, state.data?.messages_next_cursor, state.chatStreamText, state.chatServerOperationId,
     state.chatResponseStarted, state.chatRequest?.phase || null, state.chatRequest?.responseMessageId || null,
     state.chatRequest?.responseMessageReceived || false,

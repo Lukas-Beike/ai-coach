@@ -554,6 +554,10 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .message-action:hover { color: var(--ink); background-color: var(--surface-raised); }
 .message-action:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .message-action svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.message-changes { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; margin-top: 8px; color: var(--muted); font-size: .78rem; }
+.message-undo { min-height: 44px; margin: -8px 0; padding: 0 8px; border: 0; color: var(--accent-bright); background: var(--transparent); font: inherit; font-weight: 650; }
+.message-undo:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.message-undo:disabled { color: var(--subtle); }
 .empty { margin: auto; padding: 48px 24px; color: var(--muted); text-align: center; }
 .empty strong { display: block; margin-bottom: 8px; color: var(--ink); font-size: 1.35rem; letter-spacing: -.03em; }
 

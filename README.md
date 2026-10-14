@@ -880,7 +880,7 @@ Calendar cards include a compact interval profile when explicit timed workout st
 
 Die Ernährungsnavigation enthält das Tagebuch, gespeicherte Mahlzeiten und die Produktbibliothek. Das Erfassen eines lokalen Produkts erstellt einen bearbeitbaren Coach-Entwurf; es wird nichts automatisch gesendet oder gespeichert. Coach-Anfragen bleiben über die Hauptnavigation verfügbar.
 
-Trainingsverpflegung hat keine eigene Anzeige, API oder Coach-Aktion mehr. Die lokale Änderungshistorie erscheint ebenfalls nicht in der Oberfläche; Aufzeichnung und Coach-Undo bleiben erhalten. Der Diagnoseexport enthält weiterhin technische Ereignisse und Coach-Befehlsstatus sowie die Anzahl gespeicherter Änderungen, ohne deren Athleteninhalte offenzulegen.
+Trainingsverpflegung hat keine eigene Anzeige, API oder Coach-Aktion mehr. Die lokale Änderungshistorie erscheint ebenfalls nicht als eigene Ansicht; Aufzeichnung und Coach-Undo bleiben erhalten. Unter einer Coach-Antwort, die lokale Daten geändert hat, steht „Geändert: …“. Wenn jede Änderung dieser Antwort im Verlauf erfasst ist, nimmt „Rückgängig“ nach Bestätigung alle zusammen in einer Transaktion zurück; wurde ein Datensatz danach weiter geändert, bleibt alles unverändert. Intervals.icu und Garmin werden dabei nicht verändert. Der Diagnoseexport enthält weiterhin technische Ereignisse und Coach-Befehlsstatus sowie die Anzahl gespeicherter Änderungen, ohne deren Athleteninhalte offenzulegen.
 
 #### Lokale Produkte und Verpackungsfotos
 
