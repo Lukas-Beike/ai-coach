@@ -89,11 +89,13 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
                 ),
             )
 
-    def add_preview(self, payload, adjustment_id=None):
+    def add_preview(self, payload, adjustment_id=None, created_at=None):
         adjustment_id = adjustment_id or str(uuid.uuid4())
         self._previews_created += 1
         # Distinct, increasing creation times keep "latest preview" unambiguous.
-        created_at = f"2026-09-20T08:00:{self._previews_created:02d}+00:00"
+        created_at = (
+            created_at or f"2026-09-20T08:00:{self._previews_created:02d}+00:00"
+        )
         with self.manager.unit_of_work() as db:
             self.repository.create_preview(
                 db, adjustment_id, json.dumps(payload, ensure_ascii=False), created_at
@@ -506,6 +508,24 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         # A superseded preview that was never applied stays rejected afterwards.
         with self.assertRaises(AppError):
             self.service.apply(older_id)
+
+    def test_previews_with_the_same_timestamp_resolve_to_the_newest(self):
+        workout_id = str(uuid.uuid4())
+        original = self.workout(workout_id, "2026-09-21")
+        self.add_workout(workout_id, original)
+        change = {
+            "library_workout_id": workout_id,
+            "source_fingerprint": adaptive.adaptive_workout_fingerprint(original),
+            "payload": {**original, "duration_minutes": 20, "description": "- 20m 50%"},
+        }
+        older_id = self.add_preview({"changes": [change]}, created_at=NOW)
+        newer_id = self.add_preview({"changes": [change]}, created_at=NOW)
+
+        with self.assertRaises(AppError) as superseded:
+            self.service.apply(older_id)
+
+        self.assertEqual(superseded.exception.status, 409)
+        self.assertEqual(self.service.apply(newer_id)["status"], "applied")
 
     def test_invalid_uuid_and_missing_preview_raise_app_errors(self):
         with self.assertRaises(AppError) as invalid:

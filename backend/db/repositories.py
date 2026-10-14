@@ -537,13 +537,14 @@ class PlanAdjustmentRepository:
 
     def latest(self, db: Any) -> dict[str, Any] | None:
         row = db.execute(
-            "SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at DESC LIMIT 1"
+            # rowid breaks created_at ties so the last inserted preview is the latest.
+            "SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at DESC, rowid DESC LIMIT 1"
         ).fetchone()
         return dict(row) if row else None
 
     def list_recent(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT payload, status FROM plan_adjustments ORDER BY created_at DESC LIMIT ?",
+            "SELECT payload, status FROM plan_adjustments ORDER BY created_at DESC, rowid DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
