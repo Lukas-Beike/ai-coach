@@ -130,6 +130,7 @@ jobs:
           --volume "${GITHUB_WORKSPACE}/e2e:/app/e2e:ro"
           --volume "${GITHUB_WORKSPACE}/e2e:/review/e2e:ro"
           --volume "${GITHUB_WORKSPACE}/.github:/review/.github:ro"
+          --volume "${GITHUB_WORKSPACE}/scripts:/review/scripts:ro"
           --env PYTHONPATH=/app:/review/tests --workdir /app ai-coach:test
           python /review/tests/run_tests.py
 
@@ -285,6 +286,7 @@ jobs:
               --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
               --pids-limit=256 --memory=1g --cpus=2 --tmpfs /data:uid=100,gid=101,mode=0700 --tmpfs /tmp \
               --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
+              --env AI_COACH_DISPOSABLE_FIXTURE=1 \
               --volume "${GITHUB_WORKSPACE}/e2e:/app/e2e:ro" \
               ai-coach:e2e python /app/e2e/fixture_runtime.py >/dev/null
             for attempt in {1..90}; do

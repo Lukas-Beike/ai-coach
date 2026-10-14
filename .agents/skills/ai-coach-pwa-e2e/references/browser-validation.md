@@ -6,8 +6,10 @@ Run from the repository root. Follow the current isolated runtime commands in
 
 1. Build `ai-coach:e2e` from the current source. Choose a unique disposable
    container name and an unused loopback port; do not stop an existing app.
-2. Run `python /app/e2e/fixture_runtime.py` with the read-only `e2e/` mount,
-   writable ephemeral `/data` and `/tmp`, and the image user's UID/GID as in CI.
+2. Run `python /app/e2e/fixture_runtime.py` with `--env AI_COACH_DISPOSABLE_FIXTURE=1`
+   (required; the fixture refuses to start without it, and only disposable fixture
+   containers may set it), the read-only `e2e/` mount, writable ephemeral `/data`
+   and `/tmp`, and the image user's UID/GID as in CI.
    Use the fake fixture password, not a production password. Preserve non-root,
    read-only-rootfs, dropped capabilities, and no-new-privileges settings.
 3. Wait for `/api/health` with a bounded timeout. Set `E2E_BASE_URL` to the

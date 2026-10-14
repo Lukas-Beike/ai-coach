@@ -296,6 +296,8 @@ docker run -d \
 
 *Note: Never run `docker rm -v`, as the `/data` volume contains your encrypted database and token stores.*
 
+The image runs as the non-root `app` user. Application code under `/app` is owned by root and is not writable by that user; only `/data` is writable.
+
 ### Docker Compose
 
 Create a `docker-compose.yml` file:
@@ -714,7 +716,11 @@ add their synthetic activities to the existing snapshot instead of replacing
 it. Run it with
 `powershell -ExecutionPolicy Bypass -File scripts/demo-container.ps1`; add
 `-Persist` to keep the data in a named volume and `-Port`/`-Name` to adjust the
-container. The login password is the fixture password
+container. `-Name` must start with `demo` or `fixture` (optionally after an
+`ai-coach-` prefix); the production container `ai-coach` and every other name are
+refused before anything is built, stopped or removed. The fixture refuses to
+start unless `AI_COACH_DISPOSABLE_FIXTURE=1` is set; only the demo script and the
+CI fixture container set it. The login password is the fixture password
 `e2e-fixture-password-1234`. Never point it at a real `/data` directory.
 
 #### Optional local CLIProxyAPI probes

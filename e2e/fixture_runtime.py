@@ -15,6 +15,22 @@ FIXTURE_TRAINING_FEATURES_SEED_VERSION = "1"
 FIXTURE_OPENAI_MODES = ("canned", "offline")
 
 # This file is mounted only in disposable test containers, never normal startup.
+# The published fixture password is only acceptable in a container that explicitly
+# declares itself disposable; the guard runs before any environment or server state.
+DISPOSABLE_FIXTURE_MARKER = "AI_COACH_DISPOSABLE_FIXTURE"
+
+
+def require_disposable_fixture_marker() -> None:
+    """Refuse to start the fixture unless the disposable-container marker is exactly 1."""
+    if os.environ.get(DISPOSABLE_FIXTURE_MARKER) != "1":
+        raise SystemExit(
+            f"Refusing to start the browser fixture: {DISPOSABLE_FIXTURE_MARKER}=1 "
+            "is required and is set only by disposable fixture containers."
+        )
+
+
+if __name__ == "__main__":
+    require_disposable_fixture_marker()
 os.environ.update(
     {
         "DATA_DIR": "/data/coach-fixture-data",

@@ -16,13 +16,19 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
+# Only disposable demo/fixture containers may be replaced. The production container
+# (ai-coach) and every other name are refused before anything is built, stopped or removed.
+if ($Name -eq "ai-coach" -or $Name -notmatch '^(ai-coach-)?(demo|fixture)') {
+    throw "Refusing container name '$Name': use a demo or fixture name such as ai-coach-demo."
+}
+
 if (-not $SkipBuild) { docker build -q -t ai-coach:local . | Out-Null }
 if (docker ps -aq --filter "name=^$Name$") {
     docker stop $Name | Out-Null
     docker rm $Name | Out-Null   # never -v
 }
 $dockerArguments = @("run", "-d", "--name", $Name, "-p", "127.0.0.1:${Port}:8090",
-    "-e", "FIXTURE_AUTO_SEED=1", "-v", "${PWD}\e2e:/app/e2e:ro")
+    "-e", "FIXTURE_AUTO_SEED=1", "-e", "AI_COACH_DISPOSABLE_FIXTURE=1", "-v", "${PWD}\e2e:/app/e2e:ro")
 if ($Persist) { $dockerArguments += @("-v", "${Name}-data:/data") }
 $dockerArguments += @("ai-coach:local", "python", "/app/e2e/fixture_runtime.py")
 docker @dockerArguments | Out-Null
