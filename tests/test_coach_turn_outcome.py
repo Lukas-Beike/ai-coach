@@ -580,6 +580,38 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(pending["summary"], "Plane Dienstag locker")
         self.assertEqual(pending["source_message_ids"], [15])
 
+    def test_retry_that_fails_again_keeps_original_athlete_request(self):
+        pending = {
+            "summary": "Plane Dienstag locker",
+            "source_message_ids": [15],
+            "status": "failed",
+            "domain": "training",
+        }
+        server.key_value_service().set("coach_pending_request", json.dumps(pending))
+        context = {
+            "current_user_message_id": 17,
+            "messages": [
+                {"id": 15, "role": "user", "content": "Plane Dienstag locker"},
+                {"id": 17, "role": "user", "content": "nochmal"},
+            ],
+            "pending_request": pending,
+        }
+        # The model only cites the bare retry message as its request source.
+        request = {
+            "summary": "Retry",
+            "source_message_ids": [17],
+            "scope": ["plan"],
+        }
+        self.finalize(
+            self.response("Ignored"),
+            [self.failure(request=request)],
+            context=context,
+            message="nochmal",
+        )
+        stored = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(stored["summary"], "Plane Dienstag locker")
+        self.assertEqual(stored["source_message_ids"], [15])
+
     def test_question_keeps_existing_pending_request_and_text(self):
         server.key_value_service().set(
             "coach_pending_request", '{"summary":"previous"}'
