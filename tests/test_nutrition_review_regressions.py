@@ -79,6 +79,50 @@ class NutritionReviewRegressionTests(unittest.TestCase):
         )
         meal_library.food_database.lookup.assert_not_called()
 
+    def test_omitted_text_source_uses_bls_and_never_queries_open_food_facts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = DatabaseManager(
+                Path(temporary) / "nutrition.db", sqlite3, row_factory=sqlite3.Row
+            )
+            try:
+                with manager.unit_of_work() as db:
+                    initialize_schema(db)
+                _diary, meal_library = build_nutrition_services(
+                    manager,
+                    threading.Lock(),
+                    lambda: "2026-10-05T12:00:00+00:00",
+                    lambda: datetime(2026, 10, 5, tzinfo=UTC),
+                )
+                off_client = Mock()
+                off_client.search.return_value = [{"id": "off:1"}]
+                off_client.product.return_value = {"id": "off:1"}
+                meal_library.food_database._off = off_client
+                service = CoachReadToolService(
+                    Mock(),
+                    Mock(),
+                    Mock(),
+                    Mock(),
+                    Mock(),
+                    Mock(),
+                    Mock(),
+                    Mock(),
+                    training_change_limit=366,
+                    nutrition_meal_library=Mock(return_value=meal_library),
+                )
+
+                result = service.execute("lookup_food", {"query": "Haferflocken"})
+            finally:
+                manager.close()
+
+        assert isinstance(result, dict)
+        self.assertFalse(result["local"])
+        self.assertTrue(result["foods"])
+        self.assertTrue(all(food["id"].startswith("bls:") for food in result["foods"]))
+        off_client.search.assert_not_called()
+        off_client.product.assert_not_called()
+
     def test_archived_products_cannot_be_calculated_or_logged(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             manager = DatabaseManager(

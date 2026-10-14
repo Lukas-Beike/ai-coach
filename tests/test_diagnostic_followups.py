@@ -354,7 +354,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                     self.assertIn("6 Tage alt", metric["note"])
                 self.assertEqual(json.dumps(snapshot, sort_keys=True), original)
 
-    def test_duplicate_inspection_returns_confirmation_preview_without_remote_deletion(
+    def test_duplicate_inspection_returns_facts_without_proposal_or_remote_deletion(
         self,
     ):
         activities = [
@@ -398,11 +398,9 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertTrue(output["ok"])
         self.assertEqual(output["duplicate"]["canonical_id"], "synthetic-wahoo")
         self.assertEqual(output["duplicate"]["duplicate_id"], "synthetic-garmin")
-        self.assertEqual(output["status"], "preview")
-        self.assertEqual(
-            result["proposed_actions"][0]["action_type"],
-            "delete_duplicate_intervals_activity",
-        )
+        self.assertNotIn("status", output)
+        self.assertNotIn("proposal", output)
+        self.assertFalse(result.get("proposed_actions"))
 
     def test_failed_tool_is_diagnosable_without_session_credentials(self):
         private = "synthetic-private-content-never-export"

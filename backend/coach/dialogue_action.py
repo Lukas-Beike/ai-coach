@@ -413,6 +413,13 @@ class CoachDialogueActionService:
                 )
             else:
                 require_coach_scope(action, "local_nutrition")
+            if name == "save_nutrition_template":
+                payload = arguments.get("payload")
+                template_id = (
+                    str(payload.get("id") or "") if isinstance(payload, dict) else ""
+                )
+                if template_id:
+                    require_coach_scope(action, f"nutrition_template:{template_id}")
             if name in {"delete_nutrition_template", "log_nutrition_template"}:
                 template_id = str(arguments.get("id") or "")
                 require_coach_scope(action, f"nutrition_template:{template_id}")

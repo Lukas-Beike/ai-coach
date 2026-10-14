@@ -156,7 +156,7 @@ class CoachAthleteRecordToolService:
         if not self._nutrition_diary or not self._nutrition_meal_library:
             raise AppError(500, _NUTRITION_UNAVAILABLE)
         if name == "save_nutrition_template":
-            return self._save_nutrition_template(arguments)
+            return self._save_nutrition_template(arguments, intent)
         if name == "save_nutrition_product":
             return self._save_nutrition_product(arguments, intent)
         if name == "delete_nutrition_template":
@@ -246,10 +246,15 @@ class CoachAthleteRecordToolService:
         if not require_operation(intent, operation):
             raise AppError(403, message, reason="intent_scope_denied")
 
-    def _save_nutrition_template(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    def _save_nutrition_template(
+        self, arguments: dict[str, Any], intent: dict[str, Any]
+    ) -> dict[str, Any]:
         meal_library = self._nutrition_meal_library_service()
         template_payload = structured_action_payload(arguments)
-        if not template_payload.get("id"):
+        template_id = str(template_payload.get("id") or "")
+        if template_id:
+            require_coach_scope(intent, f"nutrition_template:{template_id}")
+        else:
             template_payload.setdefault("source", "coach")
         return {
             "ok": True,

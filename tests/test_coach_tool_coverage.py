@@ -1066,11 +1066,8 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )
         self.assertIsNotNone(result["duplicate"])
         self.assertEqual(result["duplicate"]["canonical_id"], "synthetic-wahoo")
-        self.assertEqual(
-            result["proposed_action"]["action_type"],
-            "delete_duplicate_intervals_activity",
-        )
-        self.assertEqual(result["proposed_action"]["status"], "preview")
+        self.assertNotIn("proposed_action", result)
+        self.assertNotIn("proposal", result)
         self.assertEqual(
             server.SYNC_PERSISTENCE.state_repository().latest_snapshot()[
                 "recent_activities"

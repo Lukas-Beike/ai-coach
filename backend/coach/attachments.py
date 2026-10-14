@@ -718,12 +718,22 @@ def _validated_attachment(item):
     return {"name": name, "type": "image", "mime": mime, "data": encoded}
 
 
+class AttachmentRequestTooLarge(ValueError):
+    """Validated attachments exceed the outgoing provider request budget."""
+
+
 def validate_attachments(value):
     if value is None:
         return []
     if not isinstance(value, list) or len(value) > MAX_FILES:
         raise ValueError("Too many attachments")
-    return [_validated_attachment(item) for item in value]
+    attachments = [_validated_attachment(item) for item in value]
+    # FIT uploads are re-encoded for the provider, so the outgoing payload can be
+    # larger than the uploaded bytes; the request budget applies to what is sent.
+    outgoing_bytes = sum(len(openai_attachment_data(item)[0]) for item in attachments)
+    if outgoing_bytes > MAX_REQUEST_BYTES:
+        raise AttachmentRequestTooLarge("Attachment request too large")
+    return attachments
 
 
 def model_input(text, attachments):
