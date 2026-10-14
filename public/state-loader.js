@@ -24,6 +24,33 @@ function render(data) {
   updateVoiceButton();
 }
 
+// Path key for an area-only refresh: it reads live provider-backed areas such as
+// weather without recomputing the whole bootstrap a second time.
+const LIVE_AREA_REFRESH = "live-areas";
+// The last rendered state for this tab, so a reload shows data at once while the
+// fresh state loads. Session-scoped, keyed to the asset version, and cleared by
+// showLogin on logout, 401 and an unauthenticated start.
+const STATE_SNAPSHOT_KEY = "coach-state-snapshot";
+const STATE_SNAPSHOT_ASSET = document.currentScript?.src || "";
+
+function saveStateSnapshot() {
+  if (!state.initialStateLoaded || !state.data) return;
+  try {
+    sessionStorage.setItem(STATE_SNAPSHOT_KEY, JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: state.data }));
+  } catch { clearStateSnapshot(); }
+}
+
+function readStateSnapshot() {
+  try {
+    const snapshot = JSON.parse(sessionStorage.getItem(STATE_SNAPSHOT_KEY) || "null");
+    return snapshot?.asset === STATE_SNAPSHOT_ASSET && snapshot.data && typeof snapshot.data === "object" ? snapshot.data : null;
+  } catch { return null; }
+}
+
+function clearStateSnapshot() {
+  try { sessionStorage.removeItem(STATE_SNAPSHOT_KEY); } catch { }
+}
+
 function loadStateRequests(areas, query) {
   const requests = [];
   if (areas.has("chat")) requests.push(["chat", api("/api/chat/history?limit=100")]);
@@ -82,21 +109,23 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const chatContentVersion = state.chatContentVersion;
   const initialLoad = $("#appShell").classList.contains("is-loading");
   try {
-    const localOnly = path.includes("local=1");
-    const query = localOnly ? "?local=1" : "";
+    const liveAreasOnly = path === LIVE_AREA_REFRESH;
+    const query = path.includes("local=1") ? "?local=1" : "";
+    const areas = new Set(requestedAreas || ["chat", "plan", "library", "performance", "feedback", "profile"]);
+    // The area reads do not depend on the bootstrap, so they run alongside it.
+    const domainData = loadStateRequests(areas, query);
     // Startup syncs and the one-time canonical backfill can keep the server busy for longer than the default timeout.
-    const bootstrap = await api(path, { timeoutMs: 90_000 });
+    const bootstrap = liveAreasOnly ? {} : await api(path, { timeoutMs: 90_000 });
     if (sessionGeneration !== state.sessionGeneration) return;
     const existing = state.data || {};
     const payload = { ...existing, ...bootstrap };
     ["messages", "messages_next_cursor", "library", "library_next_cursor", "plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", providerIds().garmin, "checkins", "local_feedback", "activity_feedback"].filter(Boolean).forEach((key) => {
       if (existing[key] !== undefined) payload[key] = existing[key];
     });
-    const areas = new Set(requestedAreas || ["chat", "plan", "library", "performance", "feedback", "profile"]);
-    const domainData = loadStateRequests(areas, query);
     if (initialLoad && requestSequence === state.loadSequence) {
       render(payload);
-      finishAppShellLoading();
+      // A stored snapshot may already have revealed the shell.
+      if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
     }
     const results = await domainData;
     if (sessionGeneration !== state.sessionGeneration || requestSequence !== state.loadSequence) return;
@@ -118,6 +147,10 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   }
 }
 
+function areaLoading(area) {
+  return state.loadingAreas.has(area) || [...state.pendingLoads.values()].some((areas) => areas.has(area));
+}
+
 function load(path = "/api/bootstrap", requestedAreas = null) {
   const areas = state.pendingLoads.get(path) || new Set();
   (requestedAreas || currentPlanLoadAreas()).forEach((area) => areas.add(area));
@@ -128,7 +161,9 @@ function load(path = "/api/bootstrap", requestedAreas = null) {
     while (state.pendingLoads.size && generation === state.sessionGeneration) {
       const [nextPath, nextAreas] = state.pendingLoads.entries().next().value;
       state.pendingLoads.delete(nextPath);
-      await loadState(nextPath, [...nextAreas]);
+      state.loadingAreas = nextAreas;
+      try { await loadState(nextPath, [...nextAreas]); }
+      finally { state.loadingAreas = new Set(); }
     }
   })();
   const tracked = promise.finally(() => {

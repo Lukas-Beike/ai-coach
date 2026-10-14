@@ -87,6 +87,7 @@ $("#logoutButton").addEventListener("click", logout);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     savePwaActivity();
+    saveStateSnapshot();
     stopChatStatusPoll();
   } else {
     checkPwaReturn();
@@ -109,6 +110,7 @@ globalThis.addEventListener("pageshow", () => {
 globalThis.visualViewport?.addEventListener("resize", scheduleMobileViewportLayout, { passive: true });
 globalThis.visualViewport?.addEventListener("scroll", scheduleMobileViewportLayout, { passive: true });
 globalThis.addEventListener("pagehide", savePwaActivity);
+globalThis.addEventListener("pagehide", saveStateSnapshot);
 globalThis.addEventListener("pagehide", disconnectStateEvents);
 globalThis.addEventListener("beforeunload", (event) => {
   if (!hasUnsavedChanges()) return;

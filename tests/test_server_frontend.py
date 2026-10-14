@@ -314,7 +314,11 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("markdownToHtml(state.chatStreamText)", coach)
         self.assertNotIn('api("/api/activities?limit=250")', app)
         self.assertIn("api(`/api/plan${query}`)", app)
-        self.assertIn("render(payload);\n      finishAppShellLoading();", app)
+        self.assertIn(
+            "render(payload);\n      // A stored snapshot may already have revealed the shell.\n"
+            '      if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();',
+            app,
+        )
         self.assertIn(
             'const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));',
             coach,

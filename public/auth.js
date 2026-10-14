@@ -8,6 +8,7 @@ let loginDialogRequired = false;
 
 function showLogin() {
   state.sessionGeneration += 1;
+  clearStateSnapshot();
   state.voiceAcquiring = false;
   stopVoiceRecording();
   stopVoiceCapture();

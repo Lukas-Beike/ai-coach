@@ -205,12 +205,19 @@ async function loadInitialState() {
   const areas = ["chat", "performance", "feedback", "profile"];
   areas.push("weather");
   if (AppRouter.baseRoute(route) === "plan") areas.push("plan", "library");
-  await load("/api/bootstrap?local=1", areas);
+  const loading = load("/api/bootstrap?local=1", areas);
+  const snapshot = state.data ? null : readStateSnapshot();
+  if (snapshot) {
+    render(snapshot);
+    finishAppShellLoading();
+  }
+  await loading;
   if (sessionGeneration !== state.sessionGeneration) return;
   state.initialStateLoaded = true;
   if (state.chatInitialScrollPending && AppRouter.baseRoute() === "coach") scrollChatToLatest();
+  // Refresh stale weather in the background; the local bootstrap is already current.
   if (state.data?.profile?.weather_location) {
-    await load("/api/bootstrap", state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
+    void load(LIVE_AREA_REFRESH, state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
   }
   connectStateEvents();
   scheduleChatStatusPoll(0);
