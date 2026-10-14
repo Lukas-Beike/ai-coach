@@ -75,6 +75,15 @@ class CoachCancellationServiceTests(unittest.TestCase):
         self.jobs.merge_receipt.assert_called_once()
         self.assertIsNone(self.streams.get_background_event(operation_id))
 
+    def test_registration_keeps_a_cancellation_recorded_before_it(self):
+        self.streams.cancel_background_event("queued-operation")
+        event = threading.Event()
+
+        self.streams.set_background_event("queued-operation", event)
+
+        self.assertIs(self.streams.get_background_event("queued-operation"), event)
+        self.assertTrue(event.is_set())
+
     def test_no_active_job_does_not_create_or_write_cancel_state(self):
         self.submissions.active.return_value = None
         self.assertEqual(self.service.cancel("session"), {"status": "not_running"})
