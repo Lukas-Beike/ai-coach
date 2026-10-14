@@ -25,6 +25,7 @@ from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
+from backend.coach.turn_write_gate import CoachTurnWriteGate, CoachWriteGateService
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
@@ -49,6 +50,8 @@ class StructuredCoachRoundState:
     background_owned: bool
     on_text_delta: Callable[[str], None] | None
     recovery_state: dict[str, bool]
+    # Opened once per turn by CoachStructuredToolRoundService.
+    write_gate: CoachTurnWriteGate | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,7 @@ class CoachStructuredToolRoundService:
         jobs: CoachJobStore,
         training_context: CoachTrainingContextService,
         response: CoachStructuredResponseService,
+        write_gate: CoachWriteGateService,
         limits: CoachStructuredToolRoundLimits,
     ) -> None:
         self._database_manager = database_manager
@@ -86,7 +90,19 @@ class CoachStructuredToolRoundService:
         self._jobs = jobs
         self._training_context = training_context
         self._response = response
+        self._write_gate = write_gate
         self._limits = limits
+
+    def _turn_write_gate(self, state: StructuredCoachRoundState) -> CoachTurnWriteGate:
+        """Open the turn's single write gate, seeded from its existing receipts."""
+        if state.write_gate is None:
+            state.write_gate = self._write_gate.open_turn(
+                message=state.message,
+                context=state.context,
+                model=state.request_payload.get("model"),
+                command_receipts=state.command_receipts,
+            )
+        return state.write_gate
 
     def _execute_tool_call(
         self,
@@ -130,6 +146,14 @@ class CoachStructuredToolRoundService:
                     allow_mutations=state.allow_mutations,
                     paused=paused,
                 )
+                # The one write choke point: a denied call is not executed, leaves
+                # no receipt (so it never becomes a failure or pending request)
+                # and only tells the model that nothing was done.
+                denial = self._turn_write_gate(state).denial(
+                    name, {**metadata["arguments"], "_request": action.get("request")}
+                )
+                if denial is not None:
+                    return name, call_id, denial, {"operation": name}
 
                 local_transaction = name not in {
                     "start_provider_refresh",
@@ -280,6 +304,7 @@ class CoachStructuredToolRoundService:
         state: StructuredCoachRoundState,
     ) -> tuple[dict[str, Any], int, str, bool, str]:
         """Run bounded tool rounds while preserving durable replay checkpoints."""
+        self._turn_write_gate(state)
         while rounds < self._limits.max_rounds:
             calls = self._journal.function_calls(response)
             if not calls:

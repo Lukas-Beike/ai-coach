@@ -1685,6 +1685,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
         conversation=StructuredToolRoundConversation(
             training_context_service=lambda: COACH_CONTEXT.training_context_service(),
             response_service=lambda: COACH_TURNS.structured_response_service(),
+            response_transport=lambda: COACH_CONVERSATION.response_transport(),
         ),
     )
 )

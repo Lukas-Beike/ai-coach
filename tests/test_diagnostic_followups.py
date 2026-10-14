@@ -412,7 +412,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             side_effect=RuntimeError(private),
         ):
             result, _ = self.turn(
-                private,
+                f"Feedback: {private}",
                 [
                     lambda _: self.call(
                         "save_activity_feedback",

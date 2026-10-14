@@ -33,6 +33,8 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.jobs = Mock()
         self.response = Mock()
         self.response.respond.return_value = {"output": []}
+        self.write_gate = Mock()
+        self.write_gate.open_turn.return_value.denial.return_value = None
         self.service = CoachStructuredToolRoundService(
             lambda: self.manager,
             self.lock,
@@ -44,6 +46,7 @@ class StructuredToolRoundTests(unittest.TestCase):
             self.jobs,
             Mock(),
             self.response,
+            self.write_gate,
             CoachStructuredToolRoundLimits(
                 max_rounds=1,
                 background_horizon_days=7,

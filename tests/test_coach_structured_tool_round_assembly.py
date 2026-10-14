@@ -29,6 +29,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
             "planning_authority",
             "training_context",
             "response",
+            "response_transport",
             "limits",
         )
         dependencies = {name: Mock(name=name) for name in names}
@@ -70,6 +71,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
                 conversation=StructuredToolRoundConversation(
                     training_context_service=dependencies["training_context"],
                     response_service=dependencies["response"],
+                    response_transport=dependencies["response_transport"],
                 ),
             )
         )
@@ -101,6 +103,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
             "planning_authority",
             "training_context",
             "response",
+            "response_transport",
             "limits",
         ):
             deps[name].assert_not_called()
@@ -133,8 +136,25 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
         self.assertIs(service._limits, deps["limits"].return_value)
         self.assertEqual(deps["database_manager"].call_count, 2)
         self.assertEqual(deps["job_store"].call_count, 2)
-        self.assertEqual(deps["read_only_tools"].call_count, 2)
+        self.assertEqual(deps["read_only_tools"].call_count, 3)
         self.assertEqual(deps["tool_names"].call_count, 1)
+
+    def test_write_gate_uses_read_only_tools_logger_and_lazy_transport(self):
+        assembly, deps = self.make_assembly()
+        deps["response_transport"].return_value.request.return_value = {
+            "output_text": '{"domains": ["planning"]}'
+        }
+
+        gate = assembly.service()._write_gate
+
+        self.assertEqual(gate._read_only_tools, frozenset({"read_tool"}))
+        self.assertIs(gate._logger, deps["logger"])
+        deps["response_transport"].assert_not_called()
+        classifier = gate._classifier_factory("synthetic-model")
+        self.assertEqual(classifier("Plan ändern", ""), frozenset({"planning"}))
+        payload = deps["response_transport"].return_value.request.call_args.args[0]
+        self.assertEqual(payload["model"], "synthetic-model")
+        self.assertEqual(payload["reasoning"], {"effort": "low"})
 
 
 if __name__ == "__main__":
