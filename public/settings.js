@@ -247,6 +247,12 @@ async function deletePrivacyData() {
       resultNotice.textContent = `Lokale Datenklassen gelöscht: ${deleted || "keine"}. Remote-Providerdaten bleiben unverändert.`;
     }
     toast("Lokale Daten gelöscht");
+    // Deleted records must neither stay on screen nor reach the session snapshot.
+    clearStateSnapshot();
+    // Loads that started before the deletion are dropped instead of rendered.
+    state.loadSequence += 1;
+    state.replaceDataOnLoad = true;
+    state.loadedAreas.clear();
     await load();
   } catch (error) { toast(error.message, true); }
 }
