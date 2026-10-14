@@ -162,6 +162,78 @@ class CoachChatTurnTests(unittest.TestCase):
             )
         )
 
+    def _resume_background(self, receipt: dict, intent: str, origin: object):
+        row = {
+            "status": "queued",
+            "receipt": json.dumps({"mode": "background", **receipt}),
+            "conversation_id": "persisted-conversation",
+            "intent": intent,
+        }
+        self.db.execute.side_effect = [
+            Mock(fetchone=Mock(return_value=row)),
+            Mock(fetchone=Mock(return_value=origin)),
+            Mock(),
+        ]
+        self.service.run(
+            "synthetic",
+            client_turn_id="turn",
+            session_csrf_hash="owner",
+            background_job=True,
+        )
+        persisted = [
+            call.args[1]
+            for call in self.db.execute.call_args_list
+            if "UPDATE coach_commands SET conversation_id" in call.args[0]
+        ]
+        return self.structured.run.call_args.kwargs["intent"], persisted
+
+    def test_background_resume_writes_for_the_stored_athlete_message(self) -> None:
+        intent, persisted = self._resume_background(
+            {"user_message_id": 7}, '{"allow_mutations": true}', {"1": 1}
+        )
+
+        self.assertEqual(intent, {"allow_mutations": True})
+        self.assertEqual(json.loads(persisted[0][1]), {"allow_mutations": True})
+        origin_query = self.db.execute.call_args_list[1]
+        self.assertIn("role='user'", origin_query.args[0])
+        self.assertEqual(origin_query.args[1], (7, "turn"))
+
+    def test_background_resume_without_stored_athlete_message_is_read_only(
+        self,
+    ) -> None:
+        for receipt, origin in (
+            ({}, None),
+            ({"user_message_id": "7"}, None),
+            ({"user_message_id": True}, None),
+            ({"user_message_id": 7}, None),
+        ):
+            with self.subTest(receipt=receipt):
+                intent, persisted = self._resume_background(
+                    receipt, '{"allow_mutations": true}', origin
+                )
+
+                self.assertEqual(intent, {"allow_mutations": False})
+                self.assertEqual(json.loads(persisted[0][1]), intent)
+
+    def test_background_resume_keeps_a_withheld_write_grant_withheld(self) -> None:
+        intent, _ = self._resume_background(
+            {"user_message_id": 7}, '{"allow_mutations": false}', {"1": 1}
+        )
+
+        self.assertEqual(intent, {"allow_mutations": False})
+
+    def test_explicit_allow_mutations_argument_is_not_overridden(self) -> None:
+        self.service.run(
+            "synthetic",
+            client_turn_id="turn",
+            allow_mutations=False,
+            background_job=True,
+        )
+
+        self.assertEqual(
+            self.structured.run.call_args.kwargs["intent"], {"allow_mutations": False}
+        )
+
     def test_stale_synchronous_turn_is_released_before_idempotent_read(self) -> None:
         row = {
             "status": "running",

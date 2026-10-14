@@ -31,6 +31,15 @@ from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
 COACH_TOOL_MAX_ROUNDS = 12
+_TURN_RELEASED = {
+    "ok": False,
+    "status": "not_performed",
+    "reason": "turn_released",
+    "message": (
+        "Nothing was saved or sent. This turn was already ended and released. "
+        "Do not repeat this call and do not claim it happened."
+    ),
+}
 
 
 @dataclass
@@ -156,52 +165,9 @@ class CoachStructuredToolRoundService:
                 if denial is not None:
                     return name, call_id, denial, {"operation": name}
 
-                local_transaction = name not in {
-                    "start_provider_refresh",
-                    "apply_adaptive_replan",
-                    "delete_duplicate_intervals_activity",
-                    *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
-                }
-                with (
-                    self._database_lock if local_transaction else nullcontext(),
-                    self._database_manager().unit_of_work()
-                    if local_transaction
-                    else nullcontext(),
-                    # Kept on the receipt so the athlete can undo the turn's changes.
-                    change_history.collect_changes() as changes,
-                ):
-                    result = self._execution.execute(
-                        metadata,
-                        action=action,
-                        context=state.context,
-                        conversation_id=state.conversation_id,
-                        client_turn_id=state.client_turn_id,
-                        session_csrf_hash=state.session_csrf_hash,
-                        sync_job_ids=state.sync_job_ids,
-                        cancel_event=state.cancel_event,
-                    )
-                    state.command_receipts.append(
-                        {
-                            "call_id": call_id,
-                            "tool": name,
-                            "effect_key": effect_key,
-                            "step_key": step_key,
-                            "repair_key": repair_key,
-                            "scope_repair_key": scope_repair_key,
-                            "request_binding_key": request_binding_key,
-                            "plan_effect_key": plan_effect_key,
-                            "request": action.get("request"),
-                            "result": result,
-                            "changes": changes,
-                        }
-                    )
-                    self._jobs.merge_receipt(
-                        state.client_turn_id,
-                        {
-                            "command_receipts": state.command_receipts,
-                            "sync_job_ids": state.sync_job_ids,
-                        },
-                    )
+                result = self._execute_and_record(metadata, action, state)
+                if result is None:
+                    return name, call_id, dict(_TURN_RELEASED), {"operation": name}
             if result.get("synchronous_refresh") or (
                 name == "get_sync_job" and result.get("ok")
             ):
@@ -224,6 +190,66 @@ class CoachStructuredToolRoundService:
             )
         state.model_instructions = model_instructions
         return name, call_id, result, action
+
+    def _execute_and_record(
+        self,
+        metadata: dict[str, Any],
+        action: dict[str, Any],
+        state: StructuredCoachRoundState,
+    ) -> dict[str, Any] | None:
+        """Execute one prepared call and append its receipt; None if the turn is released."""
+        name = metadata["name"]
+        local_transaction = name not in {
+            "start_provider_refresh",
+            "apply_adaptive_replan",
+            "delete_duplicate_intervals_activity",
+            *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
+        }
+        with (
+            self._database_lock if local_transaction else nullcontext(),
+            self._database_manager().unit_of_work()
+            if local_transaction
+            else nullcontext(),
+            # Kept on the receipt so the athlete can undo the turn's changes.
+            change_history.collect_changes() as changes,
+        ):
+            # Checked under the same lock as stale-turn release, so a turn
+            # released while this worker was busy cannot finish its writes.
+            if not self._jobs.turn_open(state.client_turn_id):
+                return None
+            result = self._execution.execute(
+                metadata,
+                action=action,
+                context=state.context,
+                conversation_id=state.conversation_id,
+                client_turn_id=state.client_turn_id,
+                session_csrf_hash=state.session_csrf_hash,
+                sync_job_ids=state.sync_job_ids,
+                cancel_event=state.cancel_event,
+            )
+            state.command_receipts.append(
+                {
+                    "call_id": metadata["call_id"],
+                    "tool": name,
+                    "effect_key": metadata["effect_key"],
+                    "step_key": metadata["step_key"],
+                    "repair_key": metadata["repair_key"],
+                    "scope_repair_key": metadata["scope_repair_key"],
+                    "request_binding_key": metadata["request_binding_key"],
+                    "plan_effect_key": metadata["plan_effect_key"],
+                    "request": action.get("request"),
+                    "result": result,
+                    "changes": changes,
+                }
+            )
+            self._jobs.merge_receipt(
+                state.client_turn_id,
+                {
+                    "command_receipts": state.command_receipts,
+                    "sync_job_ids": state.sync_job_ids,
+                },
+            )
+        return result
 
     def _refreshed_instructions(self, state: StructuredCoachRoundState) -> str:
         instructions = (

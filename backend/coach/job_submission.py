@@ -308,10 +308,13 @@ class CoachJobSubmissionService:
                 }
                 db.execute(
                     "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) "
-                    "VALUES (?, ?, NULL, '{}', 'local', 'queued', ?, ?, ?)",
+                    "VALUES (?, ?, NULL, ?, 'local', 'queued', ?, ?, ?)",
                     (
                         uuid.uuid4().hex,
                         client_turn_id,
+                        # The stored athlete message started this turn, so it may
+                        # write locally; a resume reads this instead of assuming it.
+                        json.dumps({"allow_mutations": True}),
                         json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
                         now,
                         now,

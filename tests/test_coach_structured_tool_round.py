@@ -110,6 +110,35 @@ class StructuredToolRoundTests(unittest.TestCase):
             {"command_receipts": state.command_receipts, "sync_job_ids": []},
         )
 
+    def test_released_turn_cannot_execute_tools_or_record_receipts(self) -> None:
+        state = self.state()
+        self.jobs.turn_open.return_value = False
+
+        name, call_id, result, action = self.service._execute_tool_call(
+            self.call(), state=state, question="", cancelled=False
+        )
+
+        self.assertEqual((name, call_id), ("read_profile", "call-one"))
+        self.assertEqual(
+            (result["ok"], result["status"], result["reason"]),
+            (False, "not_performed", "turn_released"),
+        )
+        self.assertEqual(action, {"operation": "read_profile"})
+        self.jobs.turn_open.assert_called_once_with("synthetic-turn")
+        self.execution.execute.assert_not_called()
+        self.assertEqual(state.command_receipts, [])
+        self.jobs.merge_receipt.assert_not_called()
+
+    def test_open_turn_still_executes_its_tool(self) -> None:
+        self.jobs.turn_open.return_value = True
+
+        _name, _call_id, result, _action = self.service._execute_tool_call(
+            self.call(), state=self.state(), question="", cancelled=False
+        )
+
+        self.assertTrue(result["ok"])
+        self.execution.execute.assert_called_once()
+
     def test_food_lookup_runs_outside_outer_transaction_and_persists_receipt(
         self,
     ) -> None:

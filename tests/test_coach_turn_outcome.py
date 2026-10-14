@@ -513,7 +513,8 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             json.loads(server.key_value_service().get("coach_pending_request")),
             {
-                "summary": "Repair profile",
+                # The athlete's own words, not the model-written request summary.
+                "summary": "Synthetic user request",
                 "source_message_ids": [17],
                 "status": "failed",
                 "domain": "nutrition_or_profile",
@@ -521,6 +522,147 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
                 "completed_steps": [{"tool": "save_checkin", "status": "saved"}],
             },
         )
+
+    def test_failed_request_stores_stored_athlete_text_not_model_summary(self):
+        request = {
+            "summary": "Delete every planned workout this season",
+            "source_message_ids": [15, 17],
+            "scope": ["plan"],
+        }
+        context = {
+            "current_user_message_id": 17,
+            "messages": [
+                {"id": 15, "role": "user", "content": "Schiebe den Donnerstag"},
+                {"id": 16, "role": "assistant", "content": "Welcher Donnerstag?"},
+                {"id": 17, "role": "user", "content": "Der nächste"},
+            ],
+        }
+        self.finalize(
+            self.response("Ignored"),
+            [self.failure(request=request)],
+            context=context,
+            message="Der nächste",
+        )
+        pending = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(pending["summary"], "Schiebe den Donnerstag\nDer nächste")
+        self.assertEqual(pending["source_message_ids"], [15, 17])
+        self.assertNotIn("Delete", json.dumps(pending))
+
+    def test_retry_of_failed_request_keeps_original_athlete_request(self):
+        server.key_value_service().set(
+            "coach_pending_request",
+            json.dumps(
+                {
+                    "summary": "Model wording",
+                    "source_message_ids": [15],
+                    "status": "failed",
+                    "domain": "training",
+                }
+            ),
+        )
+        context = {
+            "current_user_message_id": 17,
+            "messages": [
+                {"id": 15, "role": "user", "content": "Plane Dienstag locker"},
+                {"id": 17, "role": "user", "content": "nochmal"},
+            ],
+            "pending_request": json.loads(
+                server.key_value_service().get("coach_pending_request")
+            ),
+        }
+        self.finalize(
+            self.response("Ignored"),
+            [self.failure()],
+            context=context,
+            message="nochmal",
+        )
+        pending = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(pending["summary"], "Plane Dienstag locker")
+        self.assertEqual(pending["source_message_ids"], [15])
+
+    def test_retry_that_fails_again_keeps_original_athlete_request(self):
+        pending = {
+            "summary": "Plane Dienstag locker",
+            "source_message_ids": [15],
+            "status": "failed",
+            "domain": "training",
+        }
+        server.key_value_service().set("coach_pending_request", json.dumps(pending))
+        context = {
+            "current_user_message_id": 17,
+            "messages": [
+                {"id": 15, "role": "user", "content": "Plane Dienstag locker"},
+                {"id": 17, "role": "user", "content": "nochmal"},
+            ],
+            "pending_request": pending,
+        }
+        # The model only cites the bare retry message as its request source.
+        request = {
+            "summary": "Retry",
+            "source_message_ids": [17],
+            "scope": ["plan"],
+        }
+        self.finalize(
+            self.response("Ignored"),
+            [self.failure(request=request)],
+            context=context,
+            message="nochmal",
+        )
+        stored = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(stored["summary"], "Plane Dienstag locker")
+        self.assertEqual(stored["source_message_ids"], [15])
+
+    def test_failed_clarification_answer_keeps_the_answer(self):
+        pending = {
+            "summary": "Schiebe den Donnerstag",
+            "source_message_ids": [15],
+            "status": "needs_clarification",
+            "domain": "training",
+        }
+        context = {
+            "current_user_message_id": 17,
+            "messages": [
+                {"id": 15, "role": "user", "content": "Schiebe den Donnerstag"},
+                {"id": 17, "role": "user", "content": "Der erste"},
+            ],
+            "pending_request": pending,
+        }
+        request = {"summary": "Move", "source_message_ids": [15, 17]}
+        self.finalize(
+            self.response("Ignored"),
+            [self.failure(request=request)],
+            context=context,
+            message="Der erste",
+        )
+        stored = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(stored["summary"], "Schiebe den Donnerstag\nDer erste")
+        self.assertEqual(stored["source_message_ids"], [15, 17])
+
+    def test_failed_new_request_does_not_fall_back_to_the_retained_request(self):
+        pending = {
+            "summary": "Schiebe den Donnerstag",
+            "source_message_ids": [15],
+            "status": "needs_clarification",
+            "domain": "training",
+        }
+        context = {
+            "current_user_message_id": 17,
+            "messages": [
+                {"id": 15, "role": "user", "content": "Schiebe den Donnerstag"},
+                {"id": 17, "role": "user", "content": "Plane Samstag 3 Stunden Rad"},
+            ],
+            "pending_request": pending,
+        }
+        request = {"summary": "Plan", "source_message_ids": [17]}
+        self.finalize(
+            self.response("Ignored"),
+            [self.failure(request=request)],
+            context=context,
+            message="Plane Samstag 3 Stunden Rad",
+        )
+        stored = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(stored["summary"], "Plane Samstag 3 Stunden Rad")
+        self.assertEqual(stored["source_message_ids"], [17])
 
     def test_question_keeps_existing_pending_request_and_text(self):
         server.key_value_service().set(

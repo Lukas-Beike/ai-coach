@@ -6,7 +6,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from backend.coach.context_selection import infer_coach_domain, select_coach_context
+from backend.coach.context_selection import (
+    infer_coach_domain,
+    is_bare_follow_up,
+    select_coach_context,
+)
 from backend.coach.outcomes import (
     coach_effect_label,
     coach_failure_lines,
@@ -146,6 +150,45 @@ def _refresh_notes(effects: list[dict[str, Any]]) -> list[str]:
     ]
 
 
+def _message_ids(request: dict[str, Any]) -> list[int]:
+    ids = request.get("source_message_ids")
+    return sorted(
+        {item for item in ids if type(item) is int} if isinstance(ids, list) else ()
+    )
+
+
+def _athlete_request(
+    request: dict[str, Any],
+    context: dict[str, Any],
+    message: str,
+    *,
+    retained: dict[str, Any] | None,
+) -> tuple[list[int], str]:
+    """Return the source ids and the athlete's own words for a failed request.
+
+    The model's `_request.summary` is never stored: a later "retry" re-runs this
+    text, so it must be what the athlete wrote, read back from stored messages.
+    `retained` is the failed request a bare retry of this turn re-runs, if any.
+    """
+    current_id = context["current_user_message_id"]
+    ids = _message_ids(request)
+    if retained is not None:
+        # A bare "retry" is not part of the request it re-runs; a retry that
+        # fails again keeps pointing at the original request.
+        ids = [item for item in ids if item != current_id] or [
+            item for item in _message_ids(retained) if item != current_id
+        ]
+    ids = ids or [current_id]
+    stored = {
+        item["id"]: str(item.get("content") or "")
+        for item in context.get("messages") or []
+        if isinstance(item, dict) and item.get("role") == "user"
+    }
+    stored.setdefault(current_id, message)
+    summary = "\n".join(stored[item] for item in ids if item in stored)
+    return ids, (summary or message)[:2000]
+
+
 def _pending_value(
     command_receipts: list[dict[str, Any]],
     effects: list[dict[str, Any]],
@@ -180,13 +223,22 @@ def _pending_value(
             if isinstance(entry, dict) and "tool" in entry
         ]
         request = last_request or pending_request
-        summary = request.get("summary") or message
+        source_ids, summary = _athlete_request(
+            request,
+            context,
+            message,
+            retained=(
+                pending_request
+                if pending_request.get("status") == "failed"
+                and is_bare_follow_up(message)
+                else None
+            ),
+        )
         domain = request.get("domain") or infer_coach_domain(summary, tools=tool_names)
         return json.dumps(
             {
                 "summary": summary,
-                "source_message_ids": request.get("source_message_ids")
-                or [context["current_user_message_id"]],
+                "source_message_ids": source_ids,
                 "status": "failed",
                 "domain": domain,
                 "question": None,

@@ -221,6 +221,47 @@ class CoachJobStoreTests(unittest.TestCase):
             )
         )
 
+    def test_turn_open_is_true_only_for_queued_or_running_commands(self):
+        self._insert("queued", {"mode": "background"}, status="queued")
+        self._insert("running", {"mode": "background"}, status="running")
+        self._insert("released", {"mode": "background"}, status="completed")
+
+        self.assertTrue(self.store.turn_open("queued"))
+        self.assertTrue(self.store.turn_open("running"))
+        self.assertFalse(self.store.turn_open("released"))
+        self.assertFalse(self.store.turn_open("missing"))
+
+    def test_record_failed_attempt_counts_only_open_commands(self):
+        self._insert("job", {"mode": "background", "phase": "preparing"})
+        self._insert("done", {"mode": "background"}, status="completed")
+
+        self.assertEqual(self.store.record_failed_attempt("job"), 1)
+        self.assertEqual(self.store.record_failed_attempt("job"), 2)
+        self.assertEqual(self.store.record_failed_attempt("missing"), 0)
+        self.store.record_failed_attempt("done")
+
+        with self.manager.reader() as db:
+            receipts = {
+                row["client_turn_id"]: json.loads(row["receipt"])
+                for row in db.execute(
+                    "SELECT client_turn_id, receipt FROM coach_commands"
+                ).fetchall()
+            }
+        self.assertEqual(receipts["job"]["failed_attempts"], 2)
+        self.assertEqual(receipts["job"]["phase"], "preparing")
+        self.assertNotIn("failed_attempts", receipts["done"])
+
+    def test_contention_requeue_does_not_count_as_a_failed_attempt(self):
+        self._insert("job", {"mode": "background"}, status="running")
+
+        self.store.requeue("job", "chat_queue_full")
+
+        with self.manager.reader() as db:
+            receipt = json.loads(
+                db.execute("SELECT receipt FROM coach_commands").fetchone()["receipt"]
+            )
+        self.assertNotIn("failed_attempts", receipt)
+
     def test_restart_recovery_uses_replaced_manager_and_does_not_wake_without_jobs(
         self,
     ):
