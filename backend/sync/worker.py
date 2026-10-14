@@ -80,8 +80,19 @@ class SyncJobWorker:
         if thread is not None:
             thread.join(timeout)
 
+    @staticmethod
+    def _log_iteration_failure(exc: Exception) -> None:
+        _LOGGER.error(
+            "Synchronization worker iteration failed",
+            extra={
+                "event": "sync_worker_iteration_failed",
+                "error_class": type(exc).__name__,
+                "reason": getattr(exc, "reason", None),
+            },
+        )
+
     def run_loop(self) -> None:
-        """Run claims until stopped; non-maintenance errors remain visible."""
+        """Run claims until stopped; failures are logged and retried after a poll."""
         while not self._stop_event.is_set():
             try:
                 with self._maintenance_gate.operation():
@@ -94,16 +105,9 @@ class SyncJobWorker:
                         continue
             except AppError as exc:
                 if exc.reason != "maintenance":
-                    raise
+                    self._log_iteration_failure(exc)
             except Exception as exc:  # noqa: BLE001 - survive transient claim failures
-                _LOGGER.error(
-                    "Synchronization worker iteration failed",
-                    extra={
-                        "event": "sync_worker_iteration_failed",
-                        "error_class": type(exc).__name__,
-                        "reason": getattr(exc, "reason", None),
-                    },
-                )
+                self._log_iteration_failure(exc)
 
             self._wake_event.wait(self._poll_seconds)
             self._wake_event.clear()

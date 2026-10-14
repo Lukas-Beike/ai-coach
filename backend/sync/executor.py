@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any, Protocol
@@ -39,6 +40,8 @@ from backend.sync.queue import SyncJobQueueService
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync.state import SyncStateRepository
 from backend.sync.weather import WeatherSyncService
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class HistoricalSyncJobOwner:
@@ -113,11 +116,24 @@ class HistoricalSyncJobOwner:
     def queue_next(
         self, job: dict[str, Any], result: Any, fallback_status: str
     ) -> None:
+        # A partial chunk stops the chain: providers advance their historical
+        # cursor only for complete windows, so continuing would skip the gap. Only
+        # a failed section outside the window (competitions) may still continue.
         if not (
             job.get("type") == "historical_backfill"
-            and fallback_status == "completed"
             and isinstance(result, dict)
             and result.get("historical_next_end")
+            and (
+                fallback_status == "completed"
+                or (fallback_status == "partial" and result.get("window_complete"))
+            )
+        ):
+            return
+        next_end = result["historical_next_end"]
+        # A retried partial chunk already continued its chain on the first run;
+        # queuing again would start a second chain over the remaining history.
+        if self._queue_service.backfill_continued(
+            job["provider"], next_end, str(job.get("created_at") or "")
         ):
             return
         self._queue_service.enqueue(
@@ -125,7 +141,7 @@ class HistoricalSyncJobOwner:
             "historical_backfill",
             {
                 "days": self._sync_chunk_days,
-                "end_date": result["historical_next_end"],
+                "end_date": next_end,
                 "reason": "fortgesetzter historischer Backfill",
             },
             requested_by="backfill",
@@ -209,6 +225,9 @@ class IntervalsSyncJobOwner:
                 reason, push_local=False, operation_id=job["id"]
             )
         except Exception:  # noqa: BLE001 - competition failure remains a partial refresh
+            # The job stays partial so the competitions section can be retried;
+            # the flag records whether the Intervals window itself was complete.
+            result["window_complete"] = result.get("status") == "ok"
             result["status"] = "partial"
             result["competitions"] = {"status": "error"}
         return result
@@ -526,7 +545,26 @@ class SyncJobExecutor:
             fallback_status = self._outcome_service.complete(job["id"], result)
             self._historical_sync.queue_next(job, result, fallback_status)
         except Exception as exc:  # noqa: BLE001 - runner persists every execution failure
-            self._outcome_service.record_failure(job, exc)
+            try:
+                self._outcome_service.record_failure(job, exc)
+            except Exception as secondary:  # noqa: BLE001 - the worker must survive
+                _LOGGER.error(
+                    "sync job failure could not be recorded",
+                    extra={
+                        "event": "sync_job_failure_record_failed",
+                        "job_id": job.get("id"),
+                        "error_class": type(secondary).__name__,
+                    },
+                )
+                try:
+                    self._outcome_service.update(
+                        job["id"], "failed", error_class=type(exc).__name__
+                    )
+                except Exception:  # noqa: BLE001 - restart recovery requeues it
+                    _LOGGER.error(
+                        "sync job could not be marked failed",
+                        extra={"event": "sync_job_last_resort_failed"},
+                    )
 
     def execute(self, job: dict[str, Any]) -> dict[str, Any]:
         """Normalize and dispatch a persisted provider-job envelope."""

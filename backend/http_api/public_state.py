@@ -106,6 +106,12 @@ class PublicStateService:
         with deps.database_lock, manager.unit_of_work() as db:
             return deps.key_values.get_in_transaction(db, key)
 
+    def _library_activity_at(self, manager: DatabaseManager) -> str | None:
+        return intervals_state.latest_library_timestamp(
+            self._get_value("last_library_sync_at", manager),
+            self._get_value("last_library_push_at", manager),
+        )
+
     def read(self, local_only: bool = False) -> dict[str, Any]:
         deps = self._deps
         registry = getattr(deps, "provider_registry", DEFAULT_PROVIDER_REGISTRY)
@@ -166,9 +172,7 @@ class PublicStateService:
                     status=self._get_value("sync_status", manager) or None,
                     last_sync_at=self._get_value("last_sync_at", manager),
                     last_sync_error=self._get_value("last_sync_error", manager) or None,
-                    last_library_sync_at=self._get_value(
-                        "last_library_sync_at", manager
-                    ),
+                    last_library_sync_at=self._library_activity_at(manager),
                     last_library_sync_error=self._get_value(
                         "last_library_sync_error", manager
                     )
@@ -191,7 +195,7 @@ class PublicStateService:
                 },
                 "sync": sync,
                 "library_sync": {
-                    "last_sync_at": self._get_value("last_library_sync_at", manager),
+                    "last_sync_at": self._library_activity_at(manager),
                     "last_error": self._get_value("last_library_sync_error", manager)
                     or None,
                     "state": deps.workout_library_sync_state.summary(),

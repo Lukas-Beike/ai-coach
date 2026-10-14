@@ -28,6 +28,7 @@ class ProviderResyncGate:
         self.active = 0
         self.resetting = False
         self.owner_thread_id: int | None = None
+        self._held = threading.local()
 
     @contextmanager
     def operation(self) -> Iterator[None]:
@@ -40,16 +41,23 @@ class ProviderResyncGate:
                 )
             if not self.resetting:
                 self.active += 1
+                self._held.count = getattr(self._held, "count", 0) + 1
         try:
             yield
         finally:
             with self.condition:
                 if not self.resetting or self.owner_thread_id != current_thread_id:
+                    self._held.count = getattr(self._held, "count", 1) - 1
                     self.active -= 1
                     self.condition.notify_all()
 
     def begin_reset(self) -> bool:
         with self.condition:
+            if getattr(self._held, "count", 0) > 0:
+                # Waiting for our own counted operation to finish can never end.
+                raise RuntimeError(
+                    "A provider reset cannot start inside a provider operation."
+                )
             if self.resetting:
                 return False
             self.resetting = True

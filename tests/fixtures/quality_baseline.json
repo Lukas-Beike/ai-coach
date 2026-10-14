@@ -566,12 +566,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_sync_worker.py",
-      "code": "arg-type",
-      "message_sha256": "197cf02cc28324d81cd944715a85befacf58c62f567adceeb29340a7f2b878aa"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_executor.py",
       "code": "arg-type",
       "message_sha256": "1c1223a819a3f355d8614d19c65050a86f894f1560a2804db67a22aaee5bb9d9"
@@ -1013,12 +1007,6 @@
       "path": "tests/test_sync_executor.py",
       "code": "arg-type",
       "message_sha256": "93f580915935ffcecc3ffe353b11913a61138e55b14029dde8c21676c38ed70b"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_worker.py",
-      "code": "arg-type",
-      "message_sha256": "9e8ce1442287821b4f0d2ca2083d3068ea77a09ac3df0d50decfb04c10781f49"
     },
     {
       "tool": "mypy",

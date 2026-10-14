@@ -454,9 +454,18 @@ class PlannedCalendarRepairService:
                 "Die Planung hat sich seit dem Reparaturauftrag geändert.",
                 reason="planning_revision_conflict",
             )
-        workout = json.loads(row["payload"])
+        try:
+            workout = json.loads(row["payload"])
+            if not isinstance(workout, dict):
+                raise TypeError("planned payload is not an object")
+            planned_date = date.fromisoformat(str(workout.get("date") or ""))
+        except (TypeError, ValueError) as exc:
+            raise AppError(
+                409,
+                "Die Planung ist ungültig und kann nicht repariert werden.",
+                reason="planning_revision_conflict",
+            ) from exc
         today = self._today()
-        planned_date = date.fromisoformat(str(workout.get("date") or ""))
         if planned_date < today:
             raise AppError(
                 400,
@@ -706,6 +715,9 @@ class PlannedCalendarRepairService:
     ) -> None:
         for event in related:
             event_id = context.export.event_identity(event)
+            if not event_id:
+                # Never issue a delete without a concrete remote identity.
+                continue
             if not context.removing and event_id == context.remote_id:
                 continue
             self._recheck(context, PLANNED_CALENDAR_RECHECK_ERROR)

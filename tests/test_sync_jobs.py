@@ -596,6 +596,9 @@ class SyncJobStoreTests(unittest.TestCase):
                     UNIQUE(job_id, item_key),
                     FOREIGN KEY(job_id) REFERENCES sync_jobs(id) ON DELETE CASCADE
                 );
+                CREATE TABLE kv (
+                    key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL
+                );
                 """
             )
         self.current_now = self.now
@@ -845,6 +848,202 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual(items["running"]["attempts"], 2)
         self.assertEqual(items["already-done"]["attempts"], 1)
 
+    def _set_item_statuses(self, job_id, status, **statuses):
+        with self.manager.unit_of_work() as db:
+            db.execute("UPDATE sync_jobs SET status=? WHERE id=?", (status, job_id))
+            for item_key, item_status in statuses.items():
+                db.execute(
+                    "UPDATE sync_job_items SET status=? WHERE job_id=? AND item_key=?",
+                    (item_status, job_id, item_key.replace("_", "-")),
+                )
+
+    def test_failure_and_requeue_never_overwrite_completed_items(self):
+        job, _ = self.enqueue(
+            "intervals",
+            "plan_push",
+            {"entries": []},
+            [
+                {"item_key": "done", "operation": "push"},
+                {"item_key": "retry", "operation": "push"},
+            ],
+        )
+        self.store.claim()
+        self._set_item_statuses(job["id"], "running", done="completed", retry="running")
+
+        self.store.update(job["id"], "failed", "provider_error", "boom")
+        items = {i["item_key"]: i for i in self.store.state(job["id"])["items"]}
+        self.assertEqual(items["done"]["status"], "completed")
+        self.assertIsNone(items["done"]["error_class"])
+        self.assertEqual(items["retry"]["status"], "failed")
+
+        resolved = self.store.resolve(job["id"])
+        self.assertEqual(resolved["status"], "queued")
+        claimed = self.store.claim()
+        self.assertEqual(claimed["id"], job["id"])
+        self.assertTrue(
+            self.store.requeue(
+                {"id": job["id"], "attempts": 1},
+                "timeout",
+                "safe",
+                "2026-09-20T12:05:00+00:00",
+            )
+        )
+        items = {i["item_key"]: i for i in self.store.state(job["id"])["items"]}
+        self.assertEqual(items["done"]["status"], "completed")
+        self.assertEqual(items["retry"]["status"], "queued")
+
+    def test_items_keep_numeric_order_beyond_ten_entries(self):
+        operations = [
+            {"item_key": f"item-{index}", "operation": "push"} for index in range(12)
+        ]
+        job, _ = self.enqueue("intervals", "plan_push", {"entries": []}, operations)
+        keys = [item["item_key"] for item in self.store.state(job["id"])["items"]]
+        self.assertEqual(keys, [f"item-{index}" for index in range(12)])
+        self.store.claim()
+        results = [
+            {"item_key": f"item-{index}", "status": "synced"} for index in range(12)
+        ]
+        snapshot = self.store.update_from_result(
+            job["id"], {"results": results}, "completed", str
+        )
+        self.assertEqual(snapshot["status"], "completed")
+
+    def test_unkeyed_results_map_by_position_only_when_counts_match(self):
+        operations = [
+            {"item_key": f"item-{index}", "operation": "push"} for index in range(11)
+        ]
+        job, _ = self.enqueue("intervals", "plan_push", {"entries": []}, operations)
+        self.store.claim()
+        results = [{"status": "synced"} for _ in range(11)]
+        results[10] = {"status": "error", "error": "bad"}
+        self.store.update_from_result(job["id"], {"results": results}, "completed", str)
+        items = self.store.state(job["id"])["items"]
+        self.assertEqual(items[10]["item_key"], "item-10")
+        self.assertEqual(items[10]["status"], "failed")
+        self.assertEqual(items[2]["status"], "completed")
+
+        short_job, _ = self.enqueue(
+            "intervals",
+            "plan_push",
+            {"entries": []},
+            [
+                {"item_key": "a", "operation": "push"},
+                {"item_key": "b", "operation": "push"},
+            ],
+        )
+        self.store.claim()
+        snapshot = self.store.update_from_result(
+            short_job["id"], {"results": [{"status": "synced"}]}, "completed", str
+        )
+        states = [i["status"] for i in self.store.state(short_job["id"])["items"]]
+        self.assertEqual(states, ["failed", "failed"])
+        self.assertEqual(snapshot["status"], "failed")
+
+    def test_resume_interrupted_resets_stale_performance_running_marker(self):
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO kv(key, value, updated_at) VALUES "
+                "('performance_refresh_running', '1', ?), ('other', '1', ?)",
+                (self.now, self.now),
+            )
+        self.store.resume_interrupted()
+        with self.manager.unit_of_work() as db:
+            values = {
+                row["key"]: row["value"]
+                for row in db.execute("SELECT key, value FROM kv").fetchall()
+            }
+        self.assertEqual(values, {"performance_refresh_running": "0", "other": "1"})
+
+    def test_automatic_refresh_and_backfill_requests_coalesce_atomically(self):
+        for job_type, payload in (
+            ("refresh", {"reason": "daily"}),
+            ("historical_backfill", {"days": 30}),
+        ):
+            first, created = self.store.enqueue(
+                {"provider": "intervals", "type": job_type, "payload": payload},
+                "scheduler",
+                None,
+                None,
+            )
+            self.assertTrue(created)
+            for requester in ("scheduler", "startup"):
+                again, created = self.store.enqueue(
+                    {"provider": "intervals", "type": job_type, "payload": payload},
+                    requester,
+                    None,
+                    None,
+                )
+                self.assertFalse(created)
+                self.assertEqual(again["id"], first["id"])
+            manual, created = self.store.enqueue(
+                {"provider": "intervals", "type": job_type, "payload": payload},
+                "user",
+                None,
+                None,
+            )
+            self.assertTrue(created)
+            self.assertNotEqual(manual["id"], first["id"])
+
+    def test_backfill_continuation_keeps_its_cursor_while_a_chunk_runs(self):
+        running, created = self.store.enqueue(
+            {
+                "provider": "intervals",
+                "type": "historical_backfill",
+                "payload": {"days": 30},
+            },
+            "scheduler",
+            None,
+            None,
+        )
+        self.assertTrue(created)
+        self.assertEqual(self.store.claim()["id"], running["id"])
+        following, created = self.store.enqueue(
+            {
+                "provider": "intervals",
+                "type": "historical_backfill",
+                "payload": {"days": 30, "end_date": "2025-12-01"},
+            },
+            "backfill",
+            None,
+            None,
+        )
+        self.assertTrue(created)
+        self.assertNotEqual(following["id"], running["id"])
+        self.assertEqual(following["payload"]["end_date"], "2025-12-01")
+
+    def test_backfill_continuation_is_found_only_after_its_parent(self):
+        self.current_now = "2026-09-20T12:05:00+00:00"
+        self.store.enqueue(
+            {
+                "provider": "intervals",
+                "type": "historical_backfill",
+                "payload": {"days": 30, "end_date": "2025-12-01"},
+            },
+            "backfill",
+            None,
+            None,
+        )
+
+        found = self.store.has_backfill_continuation
+        self.assertTrue(found("intervals", "2025-12-01", self.now))
+        self.assertFalse(found("intervals", "2025-11-01", self.now))
+        self.assertFalse(found("garmin", "2025-12-01", self.now))
+        self.assertFalse(found("intervals", "2025-12-01", "2026-09-20T12:06:00+00:00"))
+
+    def test_concurrent_scheduler_enqueues_create_a_single_job(self):
+        def enqueue_once(_):
+            return self.store.enqueue(
+                {"provider": "garmin", "type": "refresh", "payload": {}},
+                "scheduler",
+                None,
+                None,
+            )
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(enqueue_once, range(6)))
+        self.assertEqual(sum(1 for _, created in results if created), 1)
+        self.assertEqual(len({job["id"] for job, _ in results}), 1)
+
     def test_update_returns_event_snapshot_and_bounds_details(self):
         job, _ = self.enqueue()
         self.store.claim()
@@ -907,7 +1106,8 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual(len(state["items"][0]["error_detail"]), 500)
         self.assertEqual(state["items"][1]["status"], "completed")
         self.assertEqual(state["items"][1]["remote_id"], "remote-b")
-        self.assertEqual(state["items"][2]["status"], "completed")
+        # An unknown key never maps by position onto an unrelated item.
+        self.assertEqual(state["items"][2]["status"], "failed")
         self.assertEqual(state["error_class"], "plan_push_error")
 
     def test_result_without_item_results_uses_fallback_status(self):
