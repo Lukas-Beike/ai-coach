@@ -26,7 +26,10 @@ READ_ONLY = frozenset({"read_profile"})
 
 
 def verdict(domains=(), delete=False, bulk=False) -> ImpactVerdict:
-    return ImpactVerdict(frozenset(domains), delete, bulk)
+    listed = frozenset(domains)
+    return ImpactVerdict(
+        listed, listed if delete else frozenset(), listed if bulk else frozenset()
+    )
 
 
 def context(

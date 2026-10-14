@@ -139,9 +139,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         # Every covered call stands for an explicit athlete request, so the write
         # gate's classifier confirms deletes and bulk changes.
         self.gate_verdict = {
-            "domains": sorted(CLASSIFIER_DOMAINS),
-            "delete": True,
-            "bulk": True,
+            "requests": [
+                {"domain": domain, "delete": True, "bulk": True}
+                for domain in sorted(CLASSIFIER_DOMAINS)
+            ]
         }
         self.observed = set()
         self.issued = {}

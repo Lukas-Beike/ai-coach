@@ -82,9 +82,12 @@ Use [README.md](README.md) for setup and operational commands.
   Intervals.icu, Garmin, derived values, and AI estimates.
 - Confirmed local profile/competition records are authoritative; OpenAI Conversation
   state is dialogue continuity only. Durable profile, competition, check-in, and
-  planning mutations require an explicit athlete request in the current Coach
-  Chat turn or an explicit API/UI action, never a silent or inferred chat effect.
-  Coach writes need no extra UI confirmation; guard them server-side instead.
+  planning mutations come from an explicit API/UI action or from a Coach turn
+  started by the athlete's own stored message, never from an unattended turn.
+  Coach writes need no extra UI confirmation; guard them server-side by impact:
+  each change shows a receipt with undo, deletes/archives and bulk changes need
+  a confirmed request in their own domain, and Intervals.icu writes need the
+  athlete to name the sync.
 - Explicit current-data requests refresh through existing sync before coaching
   where supported; do not refresh every chat unconditionally.
 - Preserve explicit model selection; verify options/defaults against provider code

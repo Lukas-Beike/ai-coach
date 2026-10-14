@@ -61,7 +61,7 @@ class DialogueHarness:
         self.counter = 0
         # What the write gate's delete/bulk classifier confirms; nothing by
         # default, so destructive calls must be confirmed explicitly.
-        self.gate_verdict = {"domains": [], "delete": False, "bulk": False}
+        self.gate_verdict = {"requests": []}
         # Most legacy behavior tests exercise effects after explicitly simulating
         # the athlete clicking the new remote-approval card. Security tests turn
         # this off and assert the proposal remains inert.
@@ -127,7 +127,9 @@ class DialogueHarness:
 
     def confirm_impact(self, domain, *, delete=False, bulk=False):
         """Let the gate's classifier confirm an explicitly requested delete/bulk."""
-        self.gate_verdict = {"domains": [domain], "delete": delete, "bulk": bulk}
+        self.gate_verdict = {
+            "requests": [{"domain": domain, "delete": delete, "bulk": bulk}]
+        }
 
     def turn(self, message, steps, turn=None, **kwargs):
         steps = iter(steps)

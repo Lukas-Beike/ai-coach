@@ -143,7 +143,8 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
     def test_write_gate_uses_read_only_tools_logger_and_lazy_transport(self):
         assembly, deps = self.make_assembly()
         deps["response_transport"].return_value.request.return_value = {
-            "output_text": '{"domains": ["planning"], "delete": false, "bulk": true}'
+            "output_text": '{"requests": [{"domain": "planning", '
+            '"delete": false, "bulk": true}]}'
         }
 
         gate = assembly.service()._write_gate
@@ -154,7 +155,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
         classifier = gate._classifier_factory("synthetic-model")
         self.assertEqual(
             classifier("Plan neu aufbauen", "", ""),
-            ImpactVerdict(frozenset({"planning"}), bulk=True),
+            ImpactVerdict(frozenset({"planning"}), bulk=frozenset({"planning"})),
         )
         payload = deps["response_transport"].return_value.request.call_args.args[0]
         self.assertEqual(payload["model"], "synthetic-model")

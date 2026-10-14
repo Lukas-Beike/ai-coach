@@ -36,7 +36,10 @@ def _check(tool, text, previous="", **kwargs):
 
 
 def _verdict(domains=(), delete=False, bulk=False):
-    return gate.ImpactVerdict(frozenset(domains), delete, bulk)
+    listed = frozenset(domains)
+    return gate.ImpactVerdict(
+        listed, listed if delete else frozenset(), listed if bulk else frozenset()
+    )
 
 
 class _Classifier:
@@ -189,6 +192,44 @@ class DestructiveTierTests(unittest.TestCase):
                     tool, "weg damit", classifier=_Classifier(_verdict([domain], True))
                 )
                 self.assertTrue(confirmed.allowed, confirmed)
+
+    def test_delete_confirmation_is_bound_to_its_domain(self):
+        verdict = gate.ImpactVerdict(
+            frozenset({"competition", "nutrition"}), delete=frozenset({"nutrition"})
+        )
+        mixed = _Classifier(verdict)
+        self.assertFalse(_check("delete_competition", "x", classifier=mixed).allowed)
+        self.assertTrue(_check("delete_nutrition_entry", "x", classifier=mixed).allowed)
+        bulk = _Classifier(
+            gate.ImpactVerdict(
+                frozenset({"planning", "nutrition"}), bulk=frozenset({"nutrition"})
+            )
+        )
+        self.assertFalse(_check("replace_training_plan", "x", classifier=bulk).allowed)
+
+    def test_archiving_equipment_is_a_delete(self):
+        archive = {"status": "archived"}
+        self.assertEqual(gate.call_impact("save_equipment", archive), {"delete"})
+        self.assertEqual(
+            gate.call_impact("save_equipment", {"status": "active"}), set()
+        )
+        self.assertTrue(_check("save_equipment", "Neues Rad").allowed)
+        self.assertFalse(
+            _check(
+                "save_equipment",
+                "Das Rad ist gut",
+                arguments=archive,
+                classifier=_Classifier(_verdict(["profile"])),
+            ).allowed
+        )
+        self.assertTrue(
+            _check(
+                "save_equipment",
+                "Archivier das alte Rad",
+                arguments=archive,
+                classifier=_Classifier(_verdict(["profile"], delete=True)),
+            ).allowed
+        )
 
     def test_removing_actions_inside_plan_tools_are_deletes(self):
         for tool, arguments in (
@@ -475,13 +516,20 @@ class OpenAIClassifierTests(unittest.TestCase):
         calls = []
         response = {
             "output_text": json.dumps(
-                {"domains": ["profile", "undo"], "delete": True, "bulk": False}
+                {
+                    "requests": [
+                        {"domain": "profile", "delete": True, "bulk": False},
+                        {"domain": "undo", "delete": False, "bulk": False},
+                    ]
+                }
             )
         }
         classify = self._classifier(response, calls)
         self.assertEqual(
             classify("Lösch mein Rad", "Okay", ""),
-            gate.ImpactVerdict(frozenset({"profile", "undo"}), True, False),
+            gate.ImpactVerdict(
+                frozenset({"profile", "undo"}), delete=frozenset({"profile"})
+            ),
         )
         (payload,) = calls
         self.assertEqual(payload["model"], "test-model")
@@ -494,9 +542,14 @@ class OpenAIClassifierTests(unittest.TestCase):
         self.assertIs(fmt["strict"], True)
         schema = fmt["schema"]
         self.assertIs(schema["additionalProperties"], False)
-        self.assertEqual(schema["required"], ["domains", "delete", "bulk"])
-        items = schema["properties"]["domains"]["items"]
-        self.assertEqual(set(items["enum"]), gate.DOMAINS - {"remote_intervals"})
+        self.assertEqual(schema["required"], ["requests"])
+        items = schema["properties"]["requests"]["items"]
+        self.assertIs(items["additionalProperties"], False)
+        self.assertEqual(items["required"], ["domain", "delete", "bulk"])
+        self.assertEqual(
+            set(items["properties"]["domain"]["enum"]),
+            gate.DOMAINS - {"remote_intervals"},
+        )
         self.assertIn("data", payload["instructions"])
         self.assertIn("explicitly", payload["instructions"])
         self.assertEqual(
@@ -523,7 +576,7 @@ class OpenAIClassifierTests(unittest.TestCase):
         self.assertNotIn("reasoning", calls[0])
 
     def test_output_items_are_parsed(self):
-        text = '{"domains":["planning"],"delete":false,"bulk":true}'
+        text = '{"requests":[{"domain":"planning","delete":false,"bulk":true}]}'
         response = {
             "output": [
                 {"type": "reasoning", "summary": []},
@@ -532,7 +585,7 @@ class OpenAIClassifierTests(unittest.TestCase):
         }
         self.assertEqual(
             self._classifier(response, [])("x", "", ""),
-            gate.ImpactVerdict(frozenset({"planning"}), False, True),
+            gate.ImpactVerdict(frozenset({"planning"}), bulk=frozenset({"planning"})),
         )
 
     def test_invalid_output_confirms_nothing(self):
@@ -542,15 +595,20 @@ class OpenAIClassifierTests(unittest.TestCase):
             "text",
             {"output_text": "not json"},
             {"output_text": "[]"},
-            {"output_text": '{"domains":"profile","delete":true}'},
-            {"output_text": '{"other":["profile"]}'},
-            {"output_text": '{"domains":["remote_intervals","admin",3]}'},
+            {"output_text": '{"requests":"profile"}'},
+            {"output_text": '{"domains":["profile"],"delete":true,"bulk":true}'},
+            {
+                "output_text": '{"requests":[{"domain":"remote_intervals",'
+                '"delete":true},{"domain":"admin"},{"domain":["profile"]},3]}'
+            },
         ):
             with self.subTest(response=response):
                 self.assertEqual(
                     self._classifier(response, [])("x", "", ""), gate.NO_IMPACT
                 )
-        flags = {"output_text": '{"domains":["profile"],"delete":"yes","bulk":1}'}
+        flags = {
+            "output_text": '{"requests":[{"domain":"profile","delete":"yes","bulk":1}]}'
+        }
         self.assertEqual(
             self._classifier(flags, [])("x", "", ""),
             gate.ImpactVerdict(frozenset({"profile"})),
@@ -575,7 +633,10 @@ class OpenAIClassifierTests(unittest.TestCase):
 
     def test_end_to_end_through_the_gate(self):
         classify = self._classifier(
-            {"output_text": '{"domains":["competition"],"delete":true,"bulk":false}'},
+            {
+                "output_text": '{"requests":[{"domain":"competition",'
+                '"delete":true,"bulk":false}]}'
+            },
             [],
         )
         decision = _check("delete_competition", "Lösch das Rennen", classifier=classify)
