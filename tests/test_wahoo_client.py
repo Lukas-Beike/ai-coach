@@ -281,6 +281,23 @@ class SingleReadTests(ClientCase):
         with self.assertRaises(AppError):
             self.client.user()
 
+    def test_power_zones_reads_the_zone_rows_as_a_tuple(self) -> None:
+        rows = [{"id": 1, "workout_type_family_id": 0, "ftp": 250}]
+        self.request.side_effect = [rows]
+
+        self.assertEqual(tuple(rows), self.client.power_zones())
+
+        url = self.request.call_args.args[1]
+        self.assertTrue(url.endswith("/v1/power_zones"))
+
+    def test_power_zones_rejects_a_non_list_or_non_object_rows(self) -> None:
+        self.request.side_effect = [{"id": 1}, [{"id": 1}, "text"]]
+
+        for _ in range(2):
+            with self.assertRaises(AppError) as context:
+                self.client.power_zones()
+            self.assertEqual("wahoo_invalid_response", context.exception.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

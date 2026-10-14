@@ -32,6 +32,10 @@ the rule's order that has an observation that day. Within a provider the first
 input record wins and timestamps are ignored, matching the planning overwrite.
 Daily rules have no bounds.
 
+Wahoo is the lowest-priority provider for current FTP and weight: it follows
+Garmin and Intervals, and it ranks after them in both rules. Its FTP is the newest
+stored cycling zone set, and its weight is the newest stored profile weight.
+
 Values that this module does not see, and must stay with the caller: profile and
 manual values, per-sport settings from the wellness row, Intervals eFTP, the
 generic top-level FTP and threshold-HR fallbacks, and activity-derived fallbacks
@@ -60,6 +64,7 @@ from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 
 _GARMIN: Final = ProviderId.GARMIN
 _INTERVALS: Final = ProviderId.INTERVALS
+_WAHOO: Final = ProviderId.WAHOO
 _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
 _NO_DATE: Final = date.min
 
@@ -89,9 +94,12 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
         rule.kind: rule
         for rule in (
             # current_metrics: Garmin's newest weight wins even when older than the
-            # Intervals wellness row. Body fat ignores Garmin entirely.
+            # Intervals wellness row. Body fat ignores Garmin entirely. Wahoo, which
+            # has no wellness row, is the last resort for weight.
             SourceRule(
-                MetricKind.WEIGHT, (_GARMIN, _INTERVALS), latest_intervals_row=True
+                MetricKind.WEIGHT,
+                (_GARMIN, _INTERVALS, _WAHOO),
+                latest_intervals_row=True,
             ),
             SourceRule(MetricKind.BODY_FAT, (_INTERVALS,), latest_intervals_row=True),
             # recovery_context: newest in-bounds Garmin value, else Intervals latest.
@@ -124,11 +132,15 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
                 (_INTERVALS, _GARMIN),
                 latest_intervals_row=True,
             ),
-            # current_metrics: Garmin before Intervals sportSettings, per sport.
+            # current_metrics: Garmin before Intervals sportSettings, per sport. Wahoo
+            # power zones are the last resort, with the same plausibility band.
             SourceRule(
                 MetricKind.FTP,
-                (_GARMIN, _INTERVALS),
-                (ProviderBounds(_GARMIN, 50.0, 700.0),),
+                (_GARMIN, _INTERVALS, _WAHOO),
+                (
+                    ProviderBounds(_GARMIN, 50.0, 700.0),
+                    ProviderBounds(_WAHOO, 50.0, 700.0),
+                ),
             ),
             SourceRule(
                 MetricKind.THRESHOLD_HR,

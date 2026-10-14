@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import unittest
 from dataclasses import replace
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
 
 from canonical_consumer_cases import (
@@ -31,11 +31,16 @@ from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance.canonical_current import (
     CanonicalCurrentInputs,
     read_current_inputs,
+    read_wahoo_fallbacks,
 )
 from backend.performance.canonical_inputs import read_performance_inputs
 from backend.performance.context import current_performance_context
 from backend.performance.current_metrics import current_performance_metrics
 from backend.providers.source_labels import SourceView, observation_source_label
+from backend.providers.wahoo_threshold_mapping import (
+    map_wahoo_power_zones,
+    map_wahoo_user,
+)
 from backend.runtime.ports import ObservationReader
 
 SYNC_DAY = date(2026, 10, 12)
@@ -269,12 +274,15 @@ class CanonicalCurrentInputTests(unittest.TestCase):
             reader.calls[:3],
             [(kind, None, None, None) for kind in SYNC_KINDS],
         )
+        # The Wahoo fallbacks are read last, unwindowed: stored FTP, then weight.
         self.assertEqual(
             reader.calls[3:],
             [
                 (MetricKind.THRESHOLD_HR, *window, None),
                 (MetricKind.VO2MAX, *window, None),
                 (MetricKind.WEIGHT, *window, None),
+                (MetricKind.FTP, None, None, None),
+                (MetricKind.WEIGHT, None, None, None),
             ],
         )
 
@@ -282,9 +290,10 @@ class CanonicalCurrentInputTests(unittest.TestCase):
         case = _case("intervals_only")
         reader = ObservationStub(_observations(case))
         read_current_inputs(reader, None, latest_wellness_day=date(2026, 10, 1))
-        self.assertEqual(
-            reader.calls[-1],
+        # The Intervals weight read is windowed; the Wahoo weight read follows it.
+        self.assertIn(
             (MetricKind.WEIGHT, date(2026, 10, 1), SYNC_DAY + timedelta(days=1), None),
+            reader.calls,
         )
 
     def test_observations_without_an_intervals_sync_instant_yield_none(self) -> None:
@@ -370,3 +379,66 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
             self.intervals, self.garmin, {}, TODAY, canonical=inputs
         )
         self.assertEqual(canonical["metrics"], legacy["metrics"])
+
+
+def _wahoo_ftp(value: float, sport_family: int = 0) -> Observation:
+    (record,) = map_wahoo_power_zones(
+        [
+            {
+                "id": 1,
+                "workout_type_family_id": sport_family,
+                "ftp": value,
+                "updated_at": "2026-10-01T10:00:00Z",
+            }
+        ],
+        zone=UTC,
+        retrieved_at=RETRIEVED_AT,
+    ).records
+    return record
+
+
+def _wahoo_weight(value: float) -> Observation:
+    (record,) = map_wahoo_user(
+        {"weight": value}, observed_on=SYNC_DAY, retrieved_at=RETRIEVED_AT
+    ).records
+    return record
+
+
+class WahooFallbackReadTests(unittest.TestCase):
+    def test_stored_wahoo_ftp_and_weight_are_the_only_current_inputs(self) -> None:
+        reader = ObservationStub((_wahoo_ftp(250), _wahoo_weight(78.5)))
+
+        inputs = read_wahoo_fallbacks(reader, None)
+
+        assert inputs is not None
+        assert inputs.wahoo_ftp is not None
+        assert inputs.wahoo_weight is not None
+        self.assertEqual((), inputs.bike_threshold_hr)
+        self.assertIsNone(inputs.athlete_weight)
+        self.assertEqual(250, inputs.wahoo_ftp.value.value)
+        self.assertEqual(78.5, inputs.wahoo_weight.value.value)
+
+    def test_only_a_wahoo_ride_ftp_is_read(self) -> None:
+        wahoo_ftp = _wahoo_ftp(300)
+        intervals_ftp = replace(
+            wahoo_ftp,
+            provenance=replace(wahoo_ftp.provenance, provider=ProviderId.INTERVALS),
+        )
+        run_ftp = _wahoo_ftp(280, sport_family=1)
+
+        self.assertIsNone(read_wahoo_fallbacks(ObservationStub((intervals_ftp,)), None))
+        self.assertIsNone(read_wahoo_fallbacks(ObservationStub((run_ftp,)), None))
+
+    def test_no_stored_wahoo_rows_yields_none(self) -> None:
+        self.assertIsNone(read_wahoo_fallbacks(ObservationStub(()), None))
+
+    def test_wahoo_rows_alone_feed_the_current_inputs(self) -> None:
+        reader = ObservationStub((_wahoo_ftp(250), _wahoo_weight(78.5)))
+
+        inputs = read_current_inputs(reader, None)
+
+        assert inputs is not None
+        assert inputs.wahoo_ftp is not None
+        assert inputs.wahoo_weight is not None
+        self.assertEqual(250, inputs.wahoo_ftp.value.value)
+        self.assertEqual(78.5, inputs.wahoo_weight.value.value)

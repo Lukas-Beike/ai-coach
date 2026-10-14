@@ -411,9 +411,17 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
     ProviderDescriptor(
         provider_id=WAHOO_ID,
         label="Wahoo",
-        # Workout ingest, plus plan export of local library workouts that only
-        # runs on the athlete's explicit library sync with Wahoo as the target.
-        capabilities=frozenset({Capability.ACTIVITIES, Capability.WORKOUT_EXPORT}),
+        # Workout ingest, the granted power zones and profile as lowest-priority
+        # threshold and body sources, plus plan export of local library workouts
+        # that only runs on the athlete's explicit library sync with Wahoo as the target.
+        capabilities=frozenset(
+            {
+                Capability.ACTIVITIES,
+                Capability.BODY,
+                Capability.THRESHOLDS,
+                Capability.WORKOUT_EXPORT,
+            }
+        ),
         freshness_areas=(
             FreshnessArea(
                 area="activities",

@@ -232,6 +232,13 @@ class DefaultDescriptorParityTests(unittest.TestCase):
         self.assertEqual(("weather",), registry.ids_with(Capability.WEATHER_FORECAST))
         self.assertEqual(("calendar",), registry.ids_with(Capability.PUBLIC_CALENDAR))
         self.assertEqual(("intervals",), registry.ids_with(Capability.PLANNED_EVENTS))
+        # Wahoo reads body and threshold values only as lowest-priority fallbacks.
+        self.assertEqual(
+            ("intervals", "garmin", "wahoo"), registry.ids_with(Capability.BODY)
+        )
+        self.assertEqual(
+            ("intervals", "garmin", "wahoo"), registry.ids_with(Capability.THRESHOLDS)
+        )
 
     def test_registry_exposes_default_descriptors_unchanged(self) -> None:
         self.assertEqual(DEFAULT_PROVIDER_DESCRIPTORS, DEFAULT_PROVIDER_REGISTRY.all())
