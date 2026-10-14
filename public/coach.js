@@ -1366,7 +1366,7 @@ async function executeCoachActionProposal(proposal, button) {
     toast(receipt.message);
     if (state.route === originalRoute) {
       if (receipt.nutritionProductWrite) await AppRouter.navigate("nutrition/products", { historyMode: "push" });
-      else if (receipt.localWrite) await AppRouter.navigate("nutrition/meals", { historyMode: "push" });
+      else if (receipt.localWrite) await AppRouter.navigate("nutrition/diary", { historyMode: "push" });
       else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
     }
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);

@@ -84,7 +84,8 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   try {
     const localOnly = path.includes("local=1");
     const query = localOnly ? "?local=1" : "";
-    const bootstrap = await api(path);
+    // Startup syncs and the one-time canonical backfill can keep the server busy for longer than the default timeout.
+    const bootstrap = await api(path, { timeoutMs: 90_000 });
     if (sessionGeneration !== state.sessionGeneration) return;
     const existing = state.data || {};
     const payload = { ...existing, ...bootstrap };

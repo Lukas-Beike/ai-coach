@@ -509,6 +509,15 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("/api/logs/download", app)
         self.assertIn("/api/logs/delete", app)
         self.assertIn('downloadRequest("/api/diagnostics"', app)
+        self.assertRegex(
+            app,
+            r'downloadRequest\(\s*"/api/diagnostics",[^;]*130_000\)',
+        )
+        self.assertRegex(
+            app,
+            r'downloadRequest\(\s*"/api/logs/download",[^;]*130_000\)',
+        )
+        self.assertIn("await api(path, { timeoutMs: 90_000 })", app)
         self.assertIn("/api/diagnostics/delete", app)
         self.assertIn("globalThis.AppApi.download(path", app)
         self.assertNotIn("JSON.stringify(report, null, 2)", app)

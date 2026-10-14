@@ -24,7 +24,7 @@ async function downloadServerLogs() {
   const button = $("#logsDownloadButton");
   button.disabled = true;
   try {
-    const url = URL.createObjectURL(await downloadRequest("/api/logs/download", "Server-Logs konnten nicht heruntergeladen werden."));
+    const url = URL.createObjectURL(await downloadRequest("/api/logs/download", "Server-Logs konnten nicht heruntergeladen werden.", 130_000));
     const link = document.createElement("a");
     link.href = url;
     link.download = `intervals-coach-server-logs-${todayIso()}.jsonl`;
@@ -62,7 +62,7 @@ async function downloadDiagnostics() {
   button.textContent = "Wird vorbereitet…";
   try {
     renderConnectivityStatus(true);
-    const blob = await downloadRequest("/api/diagnostics", "Diagnose konnte nicht heruntergeladen werden.");
+    const blob = await downloadRequest("/api/diagnostics", "Diagnose konnte nicht heruntergeladen werden.", 130_000);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;

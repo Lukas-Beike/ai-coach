@@ -724,6 +724,8 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .composer .attachment-button:hover { border-color: var(--focus-accent-border); background: var(--surface); }
 .composer .attachment-button svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
 .training-focus-distribution { margin: 18px 0; }
+#analysisLoadPeriod { margin-bottom: 16px; }
+#sessionPerformance { margin-bottom: 16px; }
 #sessionPerformance > h3 { display: flex; align-items: center; gap: 8px; }
 .training-focus-share { display: flex; height: 22px; overflow: hidden; border-radius: 11px; margin-top: 18px; background: var(--surface-raised); }
 .training-focus-share [data-color="0"] { background: var(--training-zone-2); }

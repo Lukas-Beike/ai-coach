@@ -40,7 +40,16 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await page.evaluate(async () => { await AppRouter.navigate("analysis/load", { historyMode: "replace" }); });
   const report = page.locator("#sessionPerformance");
   await expect(report.getByRole("heading", { name: /^Trainingsfokus/ })).toBeVisible();
-  expect((await report.boundingBox()).y).toBeGreaterThan((await page.locator("#analysisLoadCharts").boundingBox()).y);
+  const periodControls = page.locator("#analysisLoadPeriod .analysis-period-controls");
+  const controlsBox = await periodControls.boundingBox();
+  const reportBox = await report.boundingBox();
+  expect(controlsBox.y).toBeLessThan(reportBox.y);
+  expect(reportBox.y - (controlsBox.y + controlsBox.height)).toBeGreaterThanOrEqual(8);
+  expect(reportBox.y).toBeLessThan((await page.locator("#analysisLoadCharts").boundingBox()).y);
+  await periodControls.getByRole("button", { name: "Letzte 14 Tage" }).click();
+  await expect(report.getByText(/Letzte 14 Tage:/)).toHaveCount(1);
+  await periodControls.getByRole("button", { name: "12 Wochen" }).click();
+  await expect(report.getByText(/Letzte 12 Wochen:/)).toHaveCount(1);
   await expect(page.locator("#analysisHistoryCharts .analysis-period-controls")).toHaveCount(0);
   await expect(report.getByText("Leicht aerob", { exact: true })).toBeVisible();
   await expect(report.getByText("Hoch aerob", { exact: true })).toBeVisible();

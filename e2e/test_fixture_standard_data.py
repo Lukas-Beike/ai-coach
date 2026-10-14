@@ -612,11 +612,13 @@ class StandardFixtureDataTests(unittest.TestCase):
                     fixture_runtime.initialise_fixture()
                     restarted = counts()
                 demo_ids = self._snapshot_activity_ids(server)
+                demo_garmin = self._garmin_snapshot(server)
 
                 fixture_runtime.seed_training_features()
                 fixture_runtime.seed_training_features()
                 features = counts()
                 feature_ids = self._snapshot_activity_ids(server)
+                feature_garmin = self._garmin_snapshot(server)
             finally:
                 DATABASE_MANAGER_CACHE.reset()
                 server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH = (
@@ -631,6 +633,15 @@ class StandardFixtureDataTests(unittest.TestCase):
         self.assertEqual(features["competitions"], first["competitions"])
         self.assertEqual(features["units"], first["units"])
         self.assertEqual(feature_ids, demo_ids)
+        for key in ("endurance_score", "running_tolerance", "cycling_ftp_history"):
+            self.assertTrue(demo_garmin.get(key), key)
+            self.assertEqual(feature_garmin.get(key), demo_garmin.get(key), key)
+            self.assertIn(key, feature_garmin["source_freshness"])
+
+    @staticmethod
+    def _garmin_snapshot(server):
+        with server.database_manager().unit_of_work() as db:
+            return json.loads(server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot"))
 
     @contextmanager
     def _temporary_fixture_database(self, prefix):

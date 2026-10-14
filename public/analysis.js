@@ -653,7 +653,8 @@ function renderAnalysisHistory(history) { // NOSONAR
   predictions.classList.add("analysis-subchart");
   renderBodyAnalysis(history?.body);
   const openDetails = new Set([...root.querySelectorAll("details[open]"), ...loadRoot.querySelectorAll("details[open]"), ...enduranceRoot.querySelectorAll("details[open]")].map((details) => `${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`));
-  root.replaceChildren(); loadRoot.replaceChildren(); enduranceRoot.replaceChildren();
+  const periodRoot = document.getElementById("analysisLoadPeriod");
+  root.replaceChildren(); loadRoot.replaceChildren(); enduranceRoot.replaceChildren(); periodRoot.replaceChildren();
   if (!history?.start || !history?.end) {
     const running = makeAnalysisSectionCollapsible(analysisChartGroup("Laufen", [], [], ""), "development-Lauf");
     running.querySelector(".analysis-section-content").append(predictions);
@@ -665,7 +666,11 @@ function renderAnalysisHistory(history) { // NOSONAR
   const end = history.end;
   const weekStart = addDateKey(end, -((new Date(`${end}T12:00:00Z`).getUTCDay() + 6) % 7));
   const start = analysisHistoryPeriod === "fortnight" ? addDateKey(end, -13) : addDateKey(weekStart, -77);
-  loadRoot.append(analysisPeriodControls("Zeitraum für Belastung", analysisHistoryPeriod, (period) => { analysisHistoryPeriod = period; renderAnalysisHistory(history); }));
+  periodRoot.append(analysisPeriodControls("Zeitraum für Belastung", analysisHistoryPeriod, (period) => {
+    analysisHistoryPeriod = period;
+    renderAnalysisHistory(history);
+    renderTrainingFocus(state.data?.performance?.training_focus_periods?.[period] || state.data?.performance?.training_focus);
+  }));
   const performanceStart = addDateKey(weekStart, -77);
   const load = history.load || { points: [] };
   const loadSeries = [{ label: "Akute Belastung", legendLabel: "Akute Belastung", source: "Garmin Connect", unit: "", color: 0, bars: true, connected: true,
@@ -1026,6 +1031,7 @@ function renderAnalysisSegments(route = state.route) {
   endurance.hidden = segment !== "performance" || !endurance.childElementCount;
   document.getElementById("bodyAnalysisCharts").hidden = segment !== "body";
   document.getElementById("performancePredictions").hidden = segment !== "performance" || !document.getElementById("performancePredictions").childElementCount;
+  document.getElementById("analysisLoadPeriod").hidden = segment !== "load";
   document.getElementById("sessionPerformance").hidden = segment !== "load";
   document.getElementById("trainingZoneCharts").hidden = segment !== "load";
   document.getElementById("analysisLoadCharts").hidden = segment !== "load";
@@ -1116,6 +1122,11 @@ function reportNode(tag, text, className) {
   return element;
 }
 
+function trainingFocusPeriodLabel(report) {
+  const days = Math.round((Date.parse(report.end) - Date.parse(report.start)) / 86400000) + 1;
+  return { 14: "Letzte 14 Tage", 84: "Letzte 12 Wochen" }[days] || `Letzte ${days} Tage`;
+}
+
 function renderTrainingFocus(report) {
   const root = document.getElementById("sessionPerformance");
   const zones = document.getElementById("trainingZoneCharts");
@@ -1126,7 +1137,7 @@ function renderTrainingFocus(report) {
   const categories = [["low_aerobic", "Leicht aerob"], ["high_aerobic", "Hoch aerob"], ["anaerobic", "Anaerob"]];
   const info = reportNode("button", "i", "analysis-legend-info");
   info.type = "button"; info.setAttribute("aria-label", "Trainingsfokus: Informationen");
-  const explanation = reportNode("div", `Letzte 4 Wochen: ${dateLabel(report.start)} bis ${dateLabel(report.end)}. ${report.coverage?.known_sessions ?? 0} erfasste Garmin-Einheiten im Zeitraum${report.coverage?.observed_start && report.coverage?.observed_end ? ` · erfasste Daten ${dateLabel(report.coverage.observed_start)} bis ${dateLabel(report.coverage.observed_end)}` : ""}. Garmin: aufgezeichnete Belastung nach der Hauptwirkung der Einheit (Training Effect). Keine aus Zonen abgeleitete Einteilung und nicht Garmins separat berechnete Load-Focus-Metrik. ${report.unclassified_sessions || 0} Einheiten ohne bekannte Wirkung oder Belastung bleiben ausgeschlossen.`, "analysis-info-tooltip"); // NOSONAR
+  const explanation = reportNode("div", `${trainingFocusPeriodLabel(report)}: ${dateLabel(report.start)} bis ${dateLabel(report.end)}. ${report.coverage?.known_sessions ?? 0} erfasste Garmin-Einheiten im Zeitraum${report.coverage?.observed_start && report.coverage?.observed_end ? ` · erfasste Daten ${dateLabel(report.coverage.observed_start)} bis ${dateLabel(report.coverage.observed_end)}` : ""}. Garmin: aufgezeichnete Belastung nach der Hauptwirkung der Einheit (Training Effect). Keine aus Zonen abgeleitete Einteilung und nicht Garmins separat berechnete Load-Focus-Metrik. ${report.unclassified_sessions || 0} Einheiten ohne bekannte Wirkung oder Belastung bleiben ausgeschlossen.`, "analysis-info-tooltip"); // NOSONAR
   explanation.id = `focus-info-${++analysisInfoId}`;
   bindAnalysisPopover(info, explanation); root.firstChild.append(info); root.append(explanation);
   appendTrainingFocusShare(report, categories, root);
@@ -1447,7 +1458,7 @@ function appendTrainingFocusZones(report, details) {
     for (const item of matching) for (const [zone, value] of Object.entries(item.seconds)) seconds.set(zone, (seconds.get(zone) || 0) + value);
     if (![...seconds.values()].some((value) => value > 0)) { details.append(reportNode("p", `${title}: keine aufgezeichneten Zonenzeiten.`, "muted")); continue; }
     details.append(trainingFocusDistribution(title, [...seconds.entries()].sort(([a], [b]) => Number(a.slice(1)) - Number(b.slice(1))).map(([label, value]) => ({label, value})), "seconds",
-      `Intervals.icu: aufgezeichnete Zonenzeiten aller Sportarten in den letzten vier Wochen. HF und Power werden separat summiert; eine Einheit kann in beiden Ansichten vorkommen. Zonen beziehen sich auf die jeweils aufgezeichneten sportartspezifischen Schwellen. Fehlende Messungen werden nicht als null gewertet.`));
+      `Intervals.icu: aufgezeichnete Zonenzeiten aller Sportarten im Zeitraum (${trainingFocusPeriodLabel(report).toLowerCase()}). HF und Power werden separat summiert; eine Einheit kann in beiden Ansichten vorkommen. Zonen beziehen sich auf die jeweils aufgezeichneten sportartspezifischen Schwellen. Fehlende Messungen werden nicht als null gewertet.`));
   }
   if (!zones.length) details.append(reportNode("p", "Noch keine aufgezeichneten HF- oder Power-Zonenzeiten vorhanden.", "muted"));
 }

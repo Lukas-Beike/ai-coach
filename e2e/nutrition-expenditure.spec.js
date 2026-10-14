@@ -48,7 +48,6 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
       energy_expenditure: energyExpenditure,
     } });
   });
-  await page.route("**/api/nutrition/templates", (route) => route.fulfill({ json: { templates: [] } }));
 
   await page.goto("/#nutrition/diary");
   const expenditure = page.locator("#nutritionExpenditure");
@@ -63,11 +62,12 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
   await expect(expenditure).toContainText("2.100 kcal");
   await expect(expenditure).toContainText("Abgerufen: 06.10.2026");
   await expect(expenditure).toContainText("Garmin-Sync: 06.10.2026");
-  const componentDetails = expenditure.locator("details");
-  await expect(componentDetails).not.toHaveAttribute("open", "");
-  await componentDetails.locator("summary").click();
-  await expect(componentDetails).toContainText("600 kcal");
-  await expect(componentDetails).toContainText("1.500 kcal");
+  const totals = expenditure.locator("#nutritionExpenditureTotals");
+  await expect(totals).toContainText("Tagesverbrauch (vorläufig)");
+  await expect(totals).toContainText("Aktivkalorien");
+  await expect(totals).toContainText("Grundumsatz (vorläufig)");
+  await expect(totals).toContainText("600 kcal");
+  await expect(totals).toContainText("1.500 kcal");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   responseMode = "unavailable";

@@ -166,7 +166,7 @@ test("action destination precedes a slow refresh and preserves newer navigation"
       { disabled: false },
     );
     await refreshing;
-    assert.deepEqual(routes, navigateDuringExecution ? [] : ["nutrition/meals"]);
+    assert.deepEqual(routes, navigateDuringExecution ? [] : ["nutrition/diary"]);
     context.state.route = "coach";
     releaseRefresh();
     await action;
