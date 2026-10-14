@@ -142,7 +142,8 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "requests": [
                 {"domain": domain, "delete": True, "bulk": True}
                 for domain in sorted(CLASSIFIER_DOMAINS)
-            ]
+            ],
+            "accepts_proposal": True,
         }
         self.observed = set()
         self.issued = {}
@@ -961,7 +962,8 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.gate_verdict = {"requests": []}
         self.turn("Wie war mein Schlaf?", [{"output_text": "Gut."}])
         self.gate_verdict = {
-            "requests": [{"domain": "planning", "delete": False, "bulk": False}]
+            "requests": [{"domain": "planning", "delete": False, "bulk": False}],
+            "accepts_proposal": True,
         }
 
         output = self.apply_after_preview("Ja, übernimm die Anpassung.", preview)

@@ -35,10 +35,13 @@ def _check(tool, text, previous="", **kwargs):
     )
 
 
-def _verdict(domains=(), delete=False, bulk=False):
+def _verdict(domains=(), delete=False, bulk=False, accepts=False):
     listed = frozenset(domains)
     return gate.ImpactVerdict(
-        listed, listed if delete else frozenset(), listed if bulk else frozenset()
+        listed,
+        listed if delete else frozenset(),
+        listed if bulk else frozenset(),
+        accepts,
     )
 
 
@@ -146,13 +149,32 @@ class ApprovalTierTests(unittest.TestCase):
         decision = _check(
             self.TOOL,
             "Ja, übernimm die Anpassung",
-            classifier=_Classifier(_verdict(["planning"])),
+            classifier=_Classifier(_verdict(["planning"], accepts=True)),
         )
         self.assertTrue(decision.allowed, decision)
         self.assertEqual(decision.domain, "planning")
 
+    def test_a_new_planning_request_instead_of_the_preview_does_not_approve_it(self):
+        text = "Übernimm das nicht, verschieb stattdessen den Dienstag"
+        decision = _check(
+            self.TOOL,
+            text,
+            previous="Vorschlag: Intervalle am Donnerstag kürzen. Übernehmen?",
+            classifier=_Classifier(_verdict(["planning"], delete=True, bulk=True)),
+        )
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "approval_not_confirmed")
+        # The same verdict still confirms ordinary planning writes in that turn.
+        self.assertTrue(
+            _check(
+                "apply_training_patch",
+                text,
+                classifier=_Classifier(_verdict(["planning"])),
+            ).allowed
+        )
+
     def test_the_turn_verdict_is_reused_across_writes(self):
-        classifier = _Classifier(_verdict(["planning", "competition"]))
+        classifier = _Classifier(_verdict(["planning", "competition"], accepts=True))
         authority = _authority("Ja, übernimm die Anpassung")
         state = gate.TurnGateState()
         for tool in (self.TOOL, "update_profile", self.TOOL):
@@ -186,7 +208,7 @@ class ApprovalTierTests(unittest.TestCase):
             self.TOOL,
             named,
             arguments=flagged,
-            classifier=_Classifier(_verdict(["planning"])),
+            classifier=_Classifier(_verdict(["planning"], accepts=True)),
         )
         self.assertTrue(allowed.allowed, allowed)
 
@@ -504,7 +526,7 @@ class RemoteTierTests(unittest.TestCase):
 
     def test_remote_flags_on_local_tools_need_a_named_sync(self):
         text = "Schieb den Lauf auf Mittwoch"
-        confirming = _Classifier(_verdict(["planning"]))
+        confirming = _Classifier(_verdict(["planning"], accepts=True))
         self.assertTrue(
             _check("apply_adaptive_replan", text, classifier=confirming).allowed
         )
@@ -625,7 +647,8 @@ class OpenAIClassifierTests(unittest.TestCase):
         self.assertIs(fmt["strict"], True)
         schema = fmt["schema"]
         self.assertIs(schema["additionalProperties"], False)
-        self.assertEqual(schema["required"], ["requests"])
+        self.assertEqual(schema["required"], ["requests", "accepts_proposal"])
+        self.assertEqual(schema["properties"]["accepts_proposal"], {"type": "boolean"})
         items = schema["properties"]["requests"]["items"]
         self.assertIs(items["additionalProperties"], False)
         self.assertEqual(items["required"], ["domain", "delete", "bulk"])
@@ -696,6 +719,21 @@ class OpenAIClassifierTests(unittest.TestCase):
             self._classifier(flags, [])("x", "", ""),
             gate.ImpactVerdict(frozenset({"profile"})),
         )
+
+    def test_only_a_boolean_true_accepts_the_proposal(self):
+        request = '{"requests":[{"domain":"planning","delete":false,"bulk":false}]'
+        for suffix, accepts in (
+            (',"accepts_proposal":true}', True),
+            (',"accepts_proposal":false}', False),
+            (',"accepts_proposal":"true"}', False),
+            ("}", False),
+        ):
+            with self.subTest(suffix=suffix):
+                verdict = self._classifier({"output_text": request + suffix}, [])(
+                    "Ja, übernehmen", "Übernehmen?", ""
+                )
+                self.assertEqual(verdict.domains, frozenset({"planning"}))
+                self.assertIs(verdict.accepts_proposal, accepts)
 
     def test_transport_error_fails_closed_through_the_gate(self):
         def broken(_payload):

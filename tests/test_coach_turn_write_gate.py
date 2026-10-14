@@ -25,10 +25,13 @@ from backend.coach.write_gate import (
 READ_ONLY = frozenset({"read_profile"})
 
 
-def verdict(domains=(), delete=False, bulk=False) -> ImpactVerdict:
+def verdict(domains=(), delete=False, bulk=False, accepts=False) -> ImpactVerdict:
     listed = frozenset(domains)
     return ImpactVerdict(
-        listed, listed if delete else frozenset(), listed if bulk else frozenset()
+        listed,
+        listed if delete else frozenset(),
+        listed if bulk else frozenset(),
+        accepts,
     )
 
 
@@ -169,7 +172,7 @@ class TurnWriteGateTests(unittest.TestCase):
         self.assertIn("preview_adaptive_replan", denial["message"])
         factory.assert_called_once_with("synthetic-model")
 
-        classifier = Mock(return_value=verdict(["planning"]))
+        classifier = Mock(return_value=verdict(["planning"], accepts=True))
         gate, factory = make_gate("Ja, übernimm die Anpassung", classifier=classifier)
         self.assertIsNone(gate.denial("apply_adaptive_replan", {}))
         self.assertIsNone(gate.denial("update_profile", {}))
