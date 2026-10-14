@@ -129,12 +129,19 @@ class HistoricalSyncJobOwner:
             )
         ):
             return
+        next_end = result["historical_next_end"]
+        # A retried partial chunk already continued its chain on the first run;
+        # queuing again would start a second chain over the remaining history.
+        if self._queue_service.backfill_continued(
+            job["provider"], next_end, str(job.get("created_at") or "")
+        ):
+            return
         self._queue_service.enqueue(
             job["provider"],
             "historical_backfill",
             {
                 "days": self._sync_chunk_days,
-                "end_date": result["historical_next_end"],
+                "end_date": next_end,
                 "reason": "fortgesetzter historischer Backfill",
             },
             requested_by="backfill",

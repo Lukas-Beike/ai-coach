@@ -153,6 +153,14 @@ class RecordingQueue:
     def enqueue(self, *args: Any, **kwargs: Any) -> None:
         self.calls.append((args, kwargs))
 
+    def backfill_continued(
+        self, provider: str, end_date: str, created_since: str
+    ) -> bool:
+        return any(
+            args[0] == provider and args[2]["end_date"] == end_date
+            for args, _kwargs in self.calls
+        )
+
 
 def build_historical_sync(state: Any, queue: Any) -> HistoricalSyncJobOwner:
     return HistoricalSyncJobOwner(
@@ -541,6 +549,11 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         self.assertEqual(len(self.queue.calls), 1)
         self.assertEqual(self.queue.calls[0][0][2]["end_date"], "2026-06-03")
+
+        self.outcomes.fallback_status = "completed"
+        self.competitions.error = None
+        self.executor.run(job)
+        self.assertEqual(len(self.queue.calls), 1)
 
         self.queue.calls.clear()
         self.outcomes.fallback_status = "failed"

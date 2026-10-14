@@ -1011,6 +1011,25 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertNotEqual(following["id"], running["id"])
         self.assertEqual(following["payload"]["end_date"], "2025-12-01")
 
+    def test_backfill_continuation_is_found_only_after_its_parent(self):
+        self.current_now = "2026-09-20T12:05:00+00:00"
+        self.store.enqueue(
+            {
+                "provider": "intervals",
+                "type": "historical_backfill",
+                "payload": {"days": 30, "end_date": "2025-12-01"},
+            },
+            "backfill",
+            None,
+            None,
+        )
+
+        found = self.store.has_backfill_continuation
+        self.assertTrue(found("intervals", "2025-12-01", self.now))
+        self.assertFalse(found("intervals", "2025-11-01", self.now))
+        self.assertFalse(found("garmin", "2025-12-01", self.now))
+        self.assertFalse(found("intervals", "2025-12-01", "2026-09-20T12:06:00+00:00"))
+
     def test_concurrent_scheduler_enqueues_create_a_single_job(self):
         def enqueue_once(_):
             return self.store.enqueue(

@@ -611,6 +611,19 @@ class SyncJobStore:
         with self._database_manager.unit_of_work() as db:
             return has_active_job(db, provider, job_type)
 
+    def has_backfill_continuation(
+        self, provider: str, end_date: str, created_since: str
+    ) -> bool:
+        """Report whether a backfill chain already continued to ``end_date``."""
+        with self._database_manager.unit_of_work() as db:
+            row = db.execute(
+                "SELECT 1 FROM sync_jobs WHERE provider=? AND type='historical_backfill' "
+                "AND requested_by='backfill' AND json_extract(payload, '$.end_date')=? "
+                "AND created_at>=? LIMIT 1",
+                (provider, end_date, created_since),
+            ).fetchone()
+            return row is not None
+
     def pending_performance_job_id(self, provider: str) -> str | None:
         with self._database_manager.unit_of_work() as db:
             row = db.execute(
