@@ -133,22 +133,35 @@ def garmin_recovery_window_values(
     end_date: date,
     transform: Callable[[Any], float | int | None] | None = None,
 ) -> list[tuple[date, float]]:
-    """Dated numbers of the window that the Garmin 7-day average is taken from."""
+    """Dated numbers of the window that the Garmin 7-day average is taken from.
+
+    Each day contributes at most one number, the one ``garmin_recovery_metric``
+    reads for that day: a record wrapping a dated record of the same day (an
+    injected ``calendarDate`` around ``dailySleepDTO``) or a second same-day
+    record would otherwise count the day twice.
+    """
     normalized_keys = {_garmin_key(key) for key in keys}
     cutoff = end_date - timedelta(days=days - 1)
     values: list[tuple[date, float]] = []
-    for record_date, record in dated_garmin_recovery_records(snapshot.get(section)):
+    counted: set[date] = set()
+    records = sorted(
+        dated_garmin_recovery_records(snapshot.get(section)),
+        key=lambda item: item[0],
+        reverse=True,
+    )
+    for record_date, record in records:
         try:
             current = date.fromisoformat(iso_date_prefix(record_date))
         except ValueError:
             continue
-        if not cutoff <= current <= end_date:
+        if not cutoff <= current <= end_date or current in counted:
             continue
         value = _garmin_last_numeric(record, normalized_keys)
         if transform:
             value = transform(value)
         number = _as_number(value)
         if number is not None:
+            counted.add(current)
             values.append((current, float(number)))
     return values
 

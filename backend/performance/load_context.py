@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 from typing import Any
 
+from backend.canonical.decimal_text import provider_number
 from backend.performance import load as performance_load
 from backend.performance import wellness as performance_wellness
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
@@ -58,9 +59,11 @@ def performance_load_context(
     }
     if canonical is not None and canonical.wellness_day is not None:
         # Only CTL and ATL come from canonical observations; the rest of the
-        # latest wellness row stays on the legacy path.
-        load["ctl"] = canonical.ctl
-        load["atl"] = canonical.atl
+        # latest wellness row stays on the legacy path. An observation that is
+        # missing does not erase a valid number of the latest row; both come from
+        # the same Intervals.icu wellness day, so the load block's source holds.
+        for key, observed in (("ctl", canonical.ctl), ("atl", canonical.atl)):
+            load[key] = observed if observed is not None else provider_number(load[key])
     return {
         "load": load,
         "last_7": last_7,

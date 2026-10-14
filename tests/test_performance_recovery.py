@@ -6,6 +6,7 @@ from backend.performance.recovery import (
     dated_garmin_recovery_records,
     garmin_recovery_average,
     garmin_recovery_metric,
+    garmin_recovery_window_values,
 )
 
 
@@ -111,6 +112,59 @@ class GarminRecoveryTests(unittest.TestCase):
                 transform=lambda value: float(value) / 3,
             ),
             0.5,
+        )
+
+    def test_average_counts_each_day_once_for_a_wrapped_same_day_record(self):
+        # A day whose record wraps a dated record of the same day (an injected
+        # calendarDate around dailySleepDTO) holds one reading, not two.
+        snapshot = {
+            "sleep": [
+                {
+                    "calendarDate": "2026-08-30",
+                    "dailySleepDTO": {
+                        "calendarDate": "2026-08-30",
+                        "sleepTimeSeconds": 36000,
+                    },
+                },
+                {"calendarDate": "2026-08-31", "sleepTimeSeconds": 18000},
+            ]
+        }
+        keys = ("sleepTimeSeconds",)
+        self.assertEqual(
+            sorted(
+                garmin_recovery_window_values(
+                    snapshot, "sleep", keys, 7, date(2026, 8, 31)
+                )
+            ),
+            [(date(2026, 8, 30), 36000.0), (date(2026, 8, 31), 18000.0)],
+        )
+        self.assertEqual(
+            garmin_recovery_average(snapshot, "sleep", keys, 7, date(2026, 8, 31)),
+            27000.0,
+        )
+
+    def test_average_takes_the_value_the_metric_reads_for_a_repeated_day(self):
+        snapshot = {
+            "recovery": [
+                {"date": "2026-08-30", "score": 10},
+                {"date": "2026-08-31", "score": 50},
+                {"id": "second", "date": "2026-08-31", "score": 70},
+                {"id": "empty", "date": "2026-08-31", "score": None},
+            ]
+        }
+        current, observed = garmin_recovery_metric(snapshot, "recovery", ("score",))
+        self.assertEqual((current, observed), (70, "2026-08-31"))
+        self.assertEqual(
+            garmin_recovery_window_values(
+                snapshot, "recovery", ("score",), 7, date(2026, 8, 31)
+            ),
+            [(date(2026, 8, 31), 70.0), (date(2026, 8, 30), 10.0)],
+        )
+        self.assertEqual(
+            garmin_recovery_average(
+                snapshot, "recovery", ("score",), 7, date(2026, 8, 31)
+            ),
+            40.0,
         )
 
     def test_inputs_are_not_mutated(self):

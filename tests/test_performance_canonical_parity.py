@@ -447,6 +447,19 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
 
     def test_canonical_inputs_replace_only_ctl_and_atl_in_the_load_block(self) -> None:
         rows = [{"id": PARITY_DAY, "ctl": "55", "atl": 65, "tsb": 3, "rampRate": "1.5"}]
+        inputs = CanonicalPerformanceInputs(wellness_day=PARITY_TODAY, ctl=1.0, atl=2.0)
+        load = performance_load_context(
+            [], rows, _latest(rows), PARITY_TODAY, canonical=inputs
+        )["load"]
+        self.assertEqual(
+            load,
+            {"id": PARITY_DAY, "ctl": 1.0, "atl": 2.0, "tsb": 3, "rampRate": "1.5"},
+        )
+
+    def test_missing_canonical_value_keeps_the_valid_latest_row_value(self) -> None:
+        # A newer source overrides only what it provides: the latest row's ATL
+        # survives a missing observation, as a number like the canonical values.
+        rows = [{"id": PARITY_DAY, "ctl": "55", "atl": 65, "tsb": 3, "rampRate": "1.5"}]
         inputs = CanonicalPerformanceInputs(
             wellness_day=PARITY_TODAY, ctl=1.0, atl=None
         )
@@ -455,8 +468,54 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         )["load"]
         self.assertEqual(
             load,
-            {"id": PARITY_DAY, "ctl": 1.0, "atl": None, "tsb": 3, "rampRate": "1.5"},
+            {"id": PARITY_DAY, "ctl": 1.0, "atl": 65, "tsb": 3, "rampRate": "1.5"},
         )
+        inputs = CanonicalPerformanceInputs(
+            wellness_day=PARITY_TODAY, ctl=None, atl=2.0
+        )
+        load = performance_load_context(
+            [], rows, _latest(rows), PARITY_TODAY, canonical=inputs
+        )["load"]
+        self.assertEqual((load["ctl"], load["atl"]), (55, 2.0))
+
+    def test_missing_canonical_value_never_falls_back_to_unusable_or_absent(
+        self,
+    ) -> None:
+        inputs = CanonicalPerformanceInputs(
+            wellness_day=PARITY_TODAY, ctl=None, atl=None
+        )
+        cases: dict[str, list[dict[str, Any]]] = {
+            "unusable_text": [{"id": PARITY_DAY, "ctl": "invalid", "atl": "n/a"}],
+            "absent_in_latest_row": [
+                {"id": EARLIER_DAY, "ctl": 40, "atl": 45},
+                {"id": PARITY_DAY},
+            ],
+        }
+        for name, rows in cases.items():
+            with self.subTest(name):
+                load = performance_load_context(
+                    [], rows, _latest(rows), PARITY_TODAY, canonical=inputs
+                )["load"]
+                self.assertEqual((load["ctl"], load["atl"]), (None, None))
+
+    def test_partial_observations_keep_the_other_value_from_the_snapshot_row(
+        self,
+    ) -> None:
+        rows = [{"id": PARITY_DAY, "ctl": 50, "atl": 60}]
+        snapshot = _snapshot(rows)
+        reader = StubObservationReader(
+            tuple(
+                observation
+                for observation in _observations(snapshot)
+                if observation.kind is MetricKind.ATL
+            )
+        )
+        canonical = read_performance_inputs(reader, "db", snapshot)
+        load = performance_load_context(
+            [], rows, _latest(rows), PARITY_TODAY, canonical=canonical
+        )["load"]
+        self.assertIsNone(_present(canonical).ctl)
+        self.assertEqual((load["ctl"], load["atl"]), (50, 60.0))
 
     def test_missing_canonical_observation_yields_none_for_that_value(self) -> None:
         snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
