@@ -1384,6 +1384,8 @@ async function reconcileCoachActionProposal(proposalId) {
       addCoachReceipt({ title: "Nicht ausgeführt", message: "Die Aktion wurde nicht ausgeführt und kann erneut geprüft und freigegeben werden." });
     } else {
       addCoachReceipt({ title: "Ausführung prüfen", message: "Die Freigabe wurde bereits verbraucht. Bitte den Ausführungsbeleg prüfen.", status: "error" });
+      // A consumed approval may have run the action, so reload the areas it can change.
+      void load("/api/bootstrap?local=1", ["plan", "library", "profile", "feedback", "performance"]);
     }
     renderCoachActionReview();
   } catch (error) {

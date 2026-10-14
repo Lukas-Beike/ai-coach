@@ -127,6 +127,7 @@ function coachContext(apiImpl) {
   const receipts = [];
   const toasts = [];
   const apiCalls = [];
+  const loads = [];
   let renders = 0;
   const context = vm.createContext({
     state,
@@ -138,10 +139,10 @@ function coachContext(apiImpl) {
     renderCoachActionReview: () => { renders += 1; },
     toast: (message, isError) => toasts.push({ message, isError: Boolean(isError) }),
     AppRouter: { navigate: async () => {} },
-    load: async () => {},
+    load: async (path, areas) => { loads.push({ path, areas }); },
   });
   vm.runInContext(slice(coachSource, "function isHttpClientRejection", "\nfunction createPendingMessage"), context);
-  return { context, state, receipts, toasts, apiCalls, renders: () => renders };
+  return { context, state, receipts, toasts, apiCalls, loads, renders: () => renders };
 }
 
 function confirmThen(executeError) {
@@ -187,7 +188,7 @@ test("a 409 rejection after execute was sent is a known failure and unlocks the 
 });
 
 test("reconcile reports a proposal the server already consumed and keeps it locked", async () => {
-  const { context, state, receipts } = coachContext(async (path) => {
+  const { context, state, receipts, loads } = coachContext(async (path) => {
     if (path === "/api/chat/history?limit=1") return { proposed_actions: [{ id: "p1", status: "used" }] };
     throw new Error("unexpected call");
   });
@@ -196,14 +197,16 @@ test("reconcile reports a proposal the server already consumed and keeps it lock
   assert.equal(state.coachActionUnknownIds.has("p1"), false);
   assert.deepEqual(plain(state.coachActionProposals), [{ id: "p1", status: "used" }]);
   assert.equal(receipts.at(-1).title, "Ausführung prüfen");
+  assert.deepEqual(plain(loads), [{ path: "/api/bootstrap?local=1", areas: ["plan", "library", "profile", "feedback", "performance"] }]);
 });
 
 test("reconcile re-enables a proposal the server still reports as confirmable", async () => {
-  const { context, state, receipts } = coachContext(async () => ({ proposed_actions: [{ id: "p1", status: "ready" }] }));
+  const { context, state, receipts, loads } = coachContext(async () => ({ proposed_actions: [{ id: "p1", status: "ready" }] }));
   state.coachActionUnknownIds.add("p1");
   await context.reconcileCoachActionProposal("p1");
   assert.equal(state.coachActionUnknownIds.has("p1"), false);
   assert.equal(receipts.at(-1).title, "Nicht ausgeführt");
+  assert.equal(loads.length, 0);
 });
 
 test("a failed reconcile keeps the unknown-outcome lock", async () => {
