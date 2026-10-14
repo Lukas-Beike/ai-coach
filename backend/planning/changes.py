@@ -376,7 +376,17 @@ class StructuredTrainingChangeValidator:
                 "Eine vollständige Planänderung benötigt die gelesene Planrevision.",
                 reason="planning_revision_required",
             )
-        if expected_revision is not None and int(expected_revision) != current_revision:
+        if expected_revision is None:
+            return current_revision
+        try:
+            expected_number = int(expected_revision)
+        except TypeError, ValueError:
+            raise AppError(
+                400,
+                "Eine vollständige Planänderung benötigt die gelesene Planrevision.",
+                reason="planning_revision_required",
+            ) from None
+        if expected_number != current_revision:
             raise AppError(
                 409,
                 STALE_PLANNING_REVISION_ERROR,

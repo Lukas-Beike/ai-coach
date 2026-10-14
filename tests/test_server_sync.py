@@ -2550,13 +2550,14 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
         self.assertEqual(metrics["cycling_eftp_watts"]["value"], 309)
         self.assertEqual(metrics["cycling_eftp_watts"]["source"], "Intervals.icu")
-        self.assertEqual(performance["comparisons"]["cycling_eftp_30d"]["average"], 287)
+        # One value per day: the same-day wellness eFTP wins over the activity.
+        self.assertEqual(performance["comparisons"]["cycling_eftp_30d"]["average"], 274)
         eftp_reference = next(
             item
             for item in performance["activity_validation"]["provider_references"]
             if item["metric"] == "cycling_eftp_watts"
         )
-        self.assertEqual(eftp_reference["historical_comparison"]["average"], 287)
+        self.assertEqual(eftp_reference["historical_comparison"]["average"], 274)
         self.assertEqual(
             performance["activity_validation"]["direct_activity_estimates"][
                 "activity_configured_ftp_watts"

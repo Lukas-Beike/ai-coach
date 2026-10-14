@@ -3,7 +3,7 @@ import unittest
 from datetime import date, timedelta
 from inspect import signature
 
-from backend.performance.eftp import eftp_30_day_average
+from backend.performance.eftp import eftp_30_day_average, eftp_daily_values
 
 
 class EftpAggregationTests(unittest.TestCase):
@@ -84,6 +84,34 @@ class EftpAggregationTests(unittest.TestCase):
             {"start_date_local": "2026-09-08", "type": "Run", "eFTP": 300},
         ]
         self.assertIsNone(eftp_30_day_average(rows, activities, anchor))
+
+    def test_same_day_wellness_and_activity_eftp_count_once_with_wellness_precedence(
+        self,
+    ):
+        anchor = date(2026, 9, 30)
+        wellness = [
+            {"id": "2026-09-10", "sportInfo": [{"types": ["Ride"], "eFTP": 250}]},
+            {"id": "2026-09-20", "sportInfo": [{"types": ["Ride"], "eFTP": 260}]},
+        ]
+        activities = [
+            {"start_date_local": "2026-09-10", "type": "Ride", "icu_eftp": 270},
+        ]
+        self.assertEqual(eftp_30_day_average(wellness, activities, anchor), 255.0)
+
+    def test_daily_values_skip_non_dict_activities(self):
+        self.assertEqual(
+            eftp_daily_values(
+                [],
+                [
+                    None,
+                    "junk",
+                    {"start_date_local": "2026-09-10", "type": "Ride", "eFTP": 260},
+                ],
+                date(2026, 9, 1),
+                date(2026, 9, 30),
+            ),
+            {"2026-09-10": 260.0},
+        )
 
     def test_bounded_values_round_average_and_do_not_mutate_inputs(self):
         anchor = date(2026, 9, 30)
