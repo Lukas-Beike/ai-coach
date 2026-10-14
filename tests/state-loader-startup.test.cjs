@@ -149,3 +149,17 @@ test("placeholder data is never saved and only a bootstrap load replaces it", as
   context.saveStateSnapshot();
   assert.equal(storage.size, 1);
 });
+
+test("a load that started before a privacy deletion is dropped", async () => {
+  const { context, state, respond } = loader();
+  state.data = { planned: [{ id: "deleted" }] };
+  const loading = context.load("/api/bootstrap", ["plan"]);
+  state.loadSequence += 1;
+  state.replaceDataOnLoad = true;
+  respond("/api/bootstrap", { state_versions: {} });
+  respond("/api/plan", { planned: [{ id: "deleted" }] });
+  await loading;
+  assert.equal(state.replaceDataOnLoad, true);
+  assert.equal(state.loadedAreas.has("plan"), false);
+  assert.deepEqual(plain(state.data.planned), [{ id: "deleted" }]);
+});
