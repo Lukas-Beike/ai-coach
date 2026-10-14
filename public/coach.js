@@ -191,7 +191,7 @@ async function pollChatStatus() {
     if (running) showRunningChatStatus(status);
     else await finishRecoveredChatStatus();
   } catch (error) {
-    authFailed = /Authentication/.test(error.message);
+    authFailed = error?.status === 401 || /Authentication/.test(error.message);
   } finally {
     settleChatStatusPoll(pollRequest, authFailed, running);
   }
@@ -621,6 +621,11 @@ function steerCurrentChat(event) {
 
 async function resetCoachChat() {
   const button = $("#openaiChatResetButton");
+  // Reset clears the local queue; wait for queued messages instead of silently dropping them.
+  if (state.chatQueue?.length) {
+    toast("Bitte warte, bis die wartenden Nachrichten gesendet sind. Danach kannst du den Chat zurücksetzen.", true);
+    return;
+  }
   if (!button || !await requestConfirmation("Coach-Chat wirklich zurücksetzen und eine neue Unterhaltung beginnen?", { title: "Coach-Chat zurücksetzen?" })) return;
   button.disabled = true;
   button.textContent = "Wird zurückgesetzt…";
@@ -1290,6 +1295,23 @@ function coachActionCard(proposal) {
   const description = document.createElement("p");
   description.textContent = coachActionDescription(proposal);
   card.append(description);
+  if (state.coachActionUnknownIds?.has(proposal.id)) {
+    const status = document.createElement("p");
+    status.textContent = "Ausführung unklar. Die Freigabe bleibt gesperrt, bis der Status geprüft ist.";
+    const check = document.createElement("button");
+    check.type = "button";
+    check.className = "secondary-button";
+    check.textContent = "Status prüfen";
+    check.addEventListener("click", () => {
+      check.disabled = true;
+      void reconcileCoachActionProposal(proposal.id);
+    });
+    const actions = document.createElement("div");
+    actions.className = "coach-action-card-actions";
+    actions.append(check);
+    card.append(status, actions);
+    return card;
+  }
   if (!["preview", "ready"].includes(proposal.status)) {
     const status = document.createElement("p");
     status.textContent = coachActionStatus(proposal);
@@ -1345,19 +1367,48 @@ function coachActionReceipt(proposal, result) {
   return { title, message, details, duplicateDelete, undo, remoteWrite, localWrite, nutritionProductWrite };
 }
 
+// A 4xx answer proves the server did not run the action; anything else after execute was sent may have run it.
+function isHttpClientRejection(error) {
+  return Number.isInteger(error?.status) && error.status >= 400 && error.status < 500;
+}
+
+// Re-reads the server's proposal list and lifts the unknown-outcome lock only when the server still reports the proposal as confirmable.
+async function reconcileCoachActionProposal(proposalId) {
+  try {
+    const history = await api("/api/chat/history?limit=1");
+    const proposals = Array.isArray(history?.proposed_actions) ? history.proposed_actions : [];
+    const current = proposals.find((item) => item.id === proposalId);
+    state.coachActionUnknownIds.delete(proposalId);
+    state.coachActionProposals = proposals;
+    if (current && ["preview", "ready"].includes(current.status)) {
+      addCoachReceipt({ title: "Nicht ausgeführt", message: "Die Aktion wurde nicht ausgeführt und kann erneut geprüft und freigegeben werden." });
+    } else {
+      addCoachReceipt({ title: "Ausführung prüfen", message: "Die Freigabe wurde bereits verbraucht. Bitte den Ausführungsbeleg prüfen.", status: "error" });
+    }
+    renderCoachActionReview();
+  } catch (error) {
+    toast(error.message, true);
+    renderCoachActionReview();
+  }
+}
+
 async function executeCoachActionProposal(proposal, button) {
-  if (!proposal?.id || button.disabled || !["preview", "ready"].includes(proposal.status)) return;
+  if (!proposal?.id || button.disabled || state.coachActionUnknownIds?.has(proposal.id) || !["preview", "ready"].includes(proposal.status)) return;
   const originalRoute = state.route;
+  let executeSent = false;
+  let executeResponded = false;
   button.disabled = true;
   try {
     const confirmed = await api("/api/coach/actions/confirm", {
       method: "POST",
       body: JSON.stringify({ proposal_id: proposal.id }),
     });
+    executeSent = true;
     const result = await api("/api/coach/actions/execute", {
       method: "POST",
       body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
     });
+    executeResponded = true;
     if (proposal.action_type === "undo_change" && result.status !== "undone") throw new Error("Die Undo-Bestätigung fehlt; bitte den aktuellen Stand prüfen.");
     state.coachActionProposals = (state.coachActionProposals || []).filter((item) => item.id !== proposal.id);
     renderCoachActionReview();
@@ -1371,6 +1422,14 @@ async function executeCoachActionProposal(proposal, button) {
     }
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);
   } catch (error) {
+    if (executeSent && !executeResponded && !isHttpClientRejection(error)) {
+      // The action may have run; keep the button locked until the server state is known.
+      state.coachActionUnknownIds.add(proposal.id);
+      addCoachReceipt({ title: "Ausführung unklar", message: "Die Antwort zur Freigabe ist nicht angekommen. Die Freigabe bleibt gesperrt, bis der Status geprüft ist.", status: "error" });
+      renderCoachActionReview();
+      toast(error.message, true);
+      return;
+    }
     addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
     if (error.reason === "proposal_expired") {
       proposal.status = "expired";

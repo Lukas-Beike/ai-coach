@@ -1479,6 +1479,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "ASSET_MANIFEST",
             "ASSET_LOGO",
             "ASSET_ICON",
+            "ASSET_APPLE_TOUCH_ICON",
             "STATIC_TARGETS",
             "VERSIONED_STATIC_ASSETS",
             "STATIC_REVALIDATE_ASSETS",

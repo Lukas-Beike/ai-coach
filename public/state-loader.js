@@ -107,7 +107,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     if (requestSequence === state.loadSequence) render(payload);
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
-    if (sessionGeneration !== state.sessionGeneration || /Authentication/.test(error.message)) return;
+    if (sessionGeneration !== state.sessionGeneration || error?.status === 401 || /Authentication/.test(error.message)) return;
     const statusCard = $("#statusCard");
     statusCard.hidden = false;
     statusCard.classList.add("warning");

@@ -30,7 +30,7 @@ function handleStateEvent(event) {
   // A submitted Coach turn (possibly from another device) starts status polling once.
   if (event.type === "coach" && payload.role === "user") scheduleChatStatusPoll(0);
   const areas = {
-    coach: ["chat"],
+    coach: ["chat", "profile"],
     planning: ["plan", "library"],
     provider: (() => {
       if (payload.status === "loading") return [];
@@ -187,11 +187,12 @@ async function pollSyncStatus() {
     scheduleSyncPoll(SYNC_POLL_RETRY_MS);
     return;
   }
+  // Check the in-flight poll before taking the lease so an early return cannot leave a lease behind.
+  if (state.syncPoll.controller) return;
   if (!syncPollLeaseAvailable()) {
     scheduleSyncPoll(SYNC_POLL_RETRY_MS);
     return;
   }
-  if (state.syncPoll.controller) return;
   const controller = new AbortController();
   state.syncPoll.controller = controller;
   try {

@@ -105,9 +105,11 @@ function fullResyncConfirmation(source, providerLabel) {
       message: `Die ${providerLabel}-Einheiten der letzten 90 Tage werden erneut aus ${providerLabel} geladen. Lokal gespeicherte Einheiten werden nicht gelöscht; ${providerLabel} wird nicht verändert.`,
     };
   }
+  // The destructive branch requires the athlete to type the provider name before local data is deleted.
   return {
     title: `${providerLabel}-Daten vollständig neu laden?`,
     message: `Alle lokal gespeicherten ${providerLabel}-Daten löschen und vollständig neu laden? Die Daten in ${providerLabel} bleiben unverändert.`,
+    expectedText: providerLabel,
   };
 }
 
@@ -117,7 +119,11 @@ async function fullResync(source) {
   if (!button) return;
   const providerLabel = coachProviderLabel(source);
   const confirmation = fullResyncConfirmation(source, providerLabel);
-  if (!await requestConfirmation(confirmation.message, { title: confirmation.title })) return;
+  if (!await requestConfirmation(confirmation.message, {
+    title: confirmation.title,
+    expectedText: confirmation.expectedText || "",
+    inputLabel: "Name des Anbieters",
+  })) return;
   const stateKey = `${source}Full`;
   state.localSync[stateKey] = true;
   button.disabled = true;
