@@ -34,7 +34,7 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
     loadingAreas: new Set(),
     loadedAreas: new Set(),
     initialStateLoaded: false,
-    dataFromSnapshot: false,
+    replaceDataOnLoad: false,
   };
   const context = vm.createContext({
     state,
@@ -119,12 +119,33 @@ test("snapshot data never overrides the startup bootstrap or claims its versions
   shell.loading = true;
   const loading = context.load("/api/bootstrap?local=1", ["performance"]);
   context.render({ planned: [{ id: "stale" }], weather: { days: ["stale"] }, state_versions: { plan: 1 } });
-  state.dataFromSnapshot = true;
+  state.replaceDataOnLoad = true;
   respond("/api/bootstrap?local=1", { planned: [{ id: "fresh" }], state_versions: { plan: 2, performance: 5 } });
   respond("/api/performance", { performance: { ctl: 40 } });
   await loading;
   assert.deepEqual(plain(state.data.planned), [{ id: "fresh" }]);
   assert.equal(state.data.weather, undefined);
   assert.deepEqual(plain(state.data.state_versions), { plan: 2, performance: 5 });
-  assert.equal(state.dataFromSnapshot, false);
+  assert.equal(state.replaceDataOnLoad, false);
+});
+
+test("placeholder data is never saved and only a bootstrap load replaces it", async () => {
+  const { context, state, storage, respond } = loader();
+  state.initialStateLoaded = true;
+  state.data = { planned: [{ id: "deleted" }], profile: { weather_location: "Berlin" } };
+  state.replaceDataOnLoad = true;
+  context.saveStateSnapshot();
+  assert.equal(storage.size, 0);
+  const live = context.load(vm.runInContext("LIVE_AREA_REFRESH", context), ["weather"]);
+  respond("/api/weather", { days: [] });
+  await live;
+  assert.equal(state.replaceDataOnLoad, true);
+  const full = context.load("/api/bootstrap", ["performance"]);
+  respond("/api/bootstrap", { planned: [], state_versions: {} });
+  respond("/api/performance", { performance: {} });
+  await full;
+  assert.deepEqual(plain(state.data.planned), []);
+  assert.equal(state.replaceDataOnLoad, false);
+  context.saveStateSnapshot();
+  assert.equal(storage.size, 1);
 });

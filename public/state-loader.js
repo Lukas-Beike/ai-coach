@@ -34,7 +34,7 @@ const STATE_SNAPSHOT_KEY = "coach-state-snapshot";
 const STATE_SNAPSHOT_ASSET = document.currentScript?.src || "";
 
 function saveStateSnapshot() {
-  if (!state.initialStateLoaded || !state.data) return;
+  if (!state.initialStateLoaded || !state.data || state.replaceDataOnLoad) return;
   try {
     sessionStorage.setItem(STATE_SNAPSHOT_KEY, JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: state.data }));
   } catch { clearStateSnapshot(); }
@@ -102,6 +102,23 @@ function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGenerati
   }
 }
 
+// Areas the bootstrap does not cover keep their loaded values, unless the current
+// data is only a placeholder (a startup snapshot or data from before a privacy
+// deletion) that the next bootstrap must replace.
+function bootstrapPayload(bootstrap, liveAreasOnly) {
+  const existing = state.replaceDataOnLoad && !liveAreasOnly ? {} : state.data || {};
+  const payload = { ...existing, ...bootstrap };
+  ["messages", "messages_next_cursor", "library", "library_next_cursor", "plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", providerIds().garmin, "checkins", "local_feedback", "activity_feedback"].filter(Boolean).forEach((key) => {
+    if (existing[key] !== undefined) payload[key] = existing[key];
+  });
+  return payload;
+}
+
+function renderLoadedState(payload, liveAreasOnly) {
+  render(payload);
+  if (!liveAreasOnly) state.replaceDataOnLoad = false;
+}
+
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
   const sessionGeneration = state.sessionGeneration;
@@ -117,15 +134,9 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     // Startup syncs and the one-time canonical backfill can keep the server busy for longer than the default timeout.
     const bootstrap = liveAreasOnly ? {} : await api(path, { timeoutMs: 90_000 });
     if (sessionGeneration !== state.sessionGeneration) return;
-    // Snapshot data is only a placeholder: the bootstrap's values and versions replace it.
-    const existing = state.dataFromSnapshot && !liveAreasOnly ? {} : state.data || {};
-    const payload = { ...existing, ...bootstrap };
-    ["messages", "messages_next_cursor", "library", "library_next_cursor", "plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", providerIds().garmin, "checkins", "local_feedback", "activity_feedback"].filter(Boolean).forEach((key) => {
-      if (existing[key] !== undefined) payload[key] = existing[key];
-    });
+    const payload = bootstrapPayload(bootstrap, liveAreasOnly);
     if (initialLoad && requestSequence === state.loadSequence) {
-      render(payload);
-      state.dataFromSnapshot = false;
+      renderLoadedState(payload, liveAreasOnly);
       // A stored snapshot may already have revealed the shell.
       if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
     }
@@ -135,10 +146,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     payload.messages = state.data?.messages || [];
     const { failures, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
     applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration);
-    if (requestSequence === state.loadSequence) {
-      render(payload);
-      state.dataFromSnapshot = false;
-    }
+    if (requestSequence === state.loadSequence) renderLoadedState(payload, liveAreasOnly);
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
     if (sessionGeneration !== state.sessionGeneration || error?.status === 401 || /Authentication/.test(error.message)) return;

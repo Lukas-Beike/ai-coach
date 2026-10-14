@@ -18,7 +18,7 @@ globalThis.AppState = (() => {
     loadPromise: null,
     pendingLoads: new Map(),
     loadingAreas: new Set(),
-    dataFromSnapshot: false,
+    replaceDataOnLoad: false,
     sessionGeneration: 0,
     chatGeneration: 0,
     chatContentVersion: 0,
