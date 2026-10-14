@@ -711,7 +711,16 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(len(first["synced_dates"]), 14)
         self.assertEqual(first["pending_dates"], [])
         sent = api.put.call_args_list[0].args[1]
-        self.assertEqual(sent, {"id": "2026-09-01", "kcalConsumed": 500})
+        self.assertEqual(
+            sent,
+            {
+                "id": "2026-09-01",
+                "kcalConsumed": 500,
+                "carbohydrates": -1,
+                "protein": -1,
+                "fatTotal": -1,
+            },
+        )
         self.assertEqual(self.service.list_unsynced_dates(), ["2026-09-20"])
 
         second = sync.sync_pending(limit=14)
@@ -750,6 +759,50 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
                 "carbohydrates": 90,
                 "protein": 20,
                 "fatTotal": 10,
+            },
+        )
+        self.assertEqual(self.service.list_unsynced_dates(), [])
+
+    def test_unknown_macro_after_full_sync_clears_remote_value_and_syncs(self) -> None:
+        self.service.log_meal(
+            {
+                "meal_date": "2026-09-24",
+                "meal_type": "lunch",
+                "description": "Pasta",
+                "kcal": 600,
+                "carbs_g": 90,
+                "protein_g": 20,
+                "fat_g": 10,
+            }
+        )
+        api = Mock()
+        config = Mock(spec=Config)
+        config.intervals_athlete_id = "i12345"
+        sync = IntervalsNutritionSyncService(config, api, self.service)
+        self.assertTrue(sync.sync_day("2026-09-24")["ok"])
+        self.assertEqual(api.put.call_args.args[1]["carbohydrates"], 90)
+        self.assertEqual(self.service.list_unsynced_dates(), [])
+
+        self.service.log_meal(
+            {
+                "meal_date": "2026-09-24",
+                "meal_type": "snack",
+                "description": "Riegel",
+                "kcal": 200,
+            }
+        )
+
+        self.assertEqual(self.service.list_unsynced_dates(), ["2026-09-24"])
+        result = sync.sync_pending()
+        self.assertEqual(result["synced_dates"], ["2026-09-24"])
+        self.assertEqual(
+            api.put.call_args.args[1],
+            {
+                "id": "2026-09-24",
+                "kcalConsumed": 800,
+                "carbohydrates": -1,
+                "protein": -1,
+                "fatTotal": -1,
             },
         )
         self.assertEqual(self.service.list_unsynced_dates(), [])

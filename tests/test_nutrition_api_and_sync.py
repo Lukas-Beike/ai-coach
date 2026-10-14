@@ -365,7 +365,7 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
         )
         nutrition.mark_date_synced.assert_called_once_with("2026-09-24", 7)
 
-    def test_sync_marks_date_synced_when_macro_totals_are_unknown(self) -> None:
+    def test_sync_clears_unknown_macros_remotely_and_marks_date_synced(self) -> None:
         config = Mock(spec=Config)
         config.intervals_athlete_id = "i12345"
         api = Mock()
@@ -389,8 +389,16 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
         self.assertFalse(result["pending"])
         self.assertEqual(
             api.put.call_args.args[1],
-            {"id": "2026-09-24", "kcalConsumed": 500, "protein": 20, "fatTotal": 10},
+            {
+                "id": "2026-09-24",
+                "kcalConsumed": 500,
+                "carbohydrates": -1,
+                "protein": 20,
+                "fatTotal": 10,
+            },
         )
+        self.assertIsNone(result["synced_summary"]["carbs"])
+        self.assertEqual(result["synced_summary"]["protein"], 20)
         nutrition.mark_date_synced.assert_called_once_with("2026-09-24", 7)
 
     def test_sync_pending_processes_all_dates(self) -> None:

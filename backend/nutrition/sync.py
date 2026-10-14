@@ -19,6 +19,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("ai_coach.nutrition.sync")
 
+# Intervals.icu clears a numeric wellness field when it receives -1.
+UNSET_REMOTE_NUMBER = -1
+
 
 class IntervalsNutritionSyncService:
     """Synchronize aggregated daily calories and macronutrients to Intervals.icu wellness."""
@@ -62,18 +65,22 @@ class IntervalsNutritionSyncService:
             "id": meal_date,
             "kcalConsumed": summary["total_kcal"],
         }
-        if summary.get("total_carbs_g") is not None:
-            payload["carbohydrates"] = summary["total_carbs_g"]
-        if summary.get("total_protein_g") is not None:
-            payload["protein"] = summary["total_protein_g"]
-        if summary.get("total_fat_g") is not None:
-            payload["fatTotal"] = summary["total_fat_g"]
+        # Intervals.icu only updates the fields that are sent, so an unknown
+        # macro must be sent as -1 ("unset") to clear a value synced earlier.
+        for field, key in (
+            ("carbohydrates", "total_carbs_g"),
+            ("protein", "total_protein_g"),
+            ("fatTotal", "total_fat_g"),
+        ):
+            value = summary.get(key)
+            payload[field] = UNSET_REMOTE_NUMBER if value is None else value
 
         endpoint = f"/athlete/{athlete}/wellness/{meal_date}"
         try:
             remote_record = self._api_client.put(endpoint, payload)
-            # Unknown macros are simply not sent. A later edit that adds them
-            # bumps the day's revision and re-queues it as pending.
+            # Unknown macros were cleared remotely above, so the day is synced.
+            # A later edit that completes them bumps the revision and re-queues
+            # the day as pending.
             current = self._diary_service.mark_date_synced(meal_date, revision)
             return {
                 "ok": True,
