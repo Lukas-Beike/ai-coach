@@ -114,7 +114,9 @@ class DatabaseManager:
                 try:
                     yield connection
                     connection.commit()
-                except Exception:
+                except BaseException:
+                    # Also covers KeyboardInterrupt and task cancellation, which
+                    # must not leave an open transaction on the persistent writer.
                     connection.rollback()
                     raise
                 finally:

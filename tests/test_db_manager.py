@@ -121,6 +121,25 @@ class DatabaseManagerTests(unittest.TestCase):
                 self.assertEqual(id(second), first_id)
             manager.close()
 
+    def test_unit_of_work_rolls_back_on_base_exceptions_before_reuse(self):
+        class Interrupted(BaseException):
+            """Stands in for KeyboardInterrupt or a cancelled task."""
+
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        manager = self.make_manager(temporary.name)
+        self.addCleanup(manager.close)
+        with manager.unit_of_work() as db:
+            db.execute("CREATE TABLE records (value TEXT NOT NULL)")
+        with self.assertRaises(Interrupted), manager.unit_of_work() as db:
+            db.execute("INSERT INTO records(value) VALUES (?)", ("discarded",))
+            raise Interrupted
+        with manager.unit_of_work() as db:
+            self.assertFalse(db.in_transaction)
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 0
+            )
+
     def test_writer_is_serialized(self):
         with tempfile.TemporaryDirectory() as root:
             manager = self.make_manager(root)
@@ -249,6 +268,30 @@ class DatabaseManagerTests(unittest.TestCase):
                 initialize_schema(db)
                 self.assertTrue(database_schema_is_current(db))
             manager.close()
+
+    def test_failed_fresh_schema_creation_leaves_no_partial_tables(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        db = sqlite3.connect(Path(temporary.name) / "fresh.db")
+        self.addCleanup(db.close)
+        # The script creates kv first; a conflicting snapshots table fails it midway.
+        db.execute("CREATE TABLE snapshots (blocked INTEGER)")
+        db.commit()
+
+        with self.assertRaises(sqlite3.OperationalError):
+            initialize_schema(db)
+
+        self.assertFalse(db.in_transaction)
+        self.assertEqual(
+            {
+                row[0]
+                for row in db.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                )
+            },
+            {"snapshots"},
+        )
 
 
 if __name__ == "__main__":

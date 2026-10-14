@@ -650,10 +650,25 @@ REMOTE_LINKS_DDL = """
 
 
 def initialize_schema(db: Any) -> None:
-    """Create the exact current schema on a new database connection."""
+    """Create the exact current schema on a new database connection, atomically.
+
+    executescript() would commit each statement on its own, so an interrupted
+    creation could leave a partial schema. The statements run in one transaction.
+    """
+    try:
+        _create_schema_statements(db)
+        db.execute("COMMIT")
+    except BaseException:
+        if db.in_transaction:
+            db.execute("ROLLBACK")
+        raise
+
+
+def _create_schema_statements(db: Any) -> None:
     db.executescript(
         """
     PRAGMA journal_mode=WAL;
+    BEGIN IMMEDIATE;
     CREATE TABLE kv (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,

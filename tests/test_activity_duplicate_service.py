@@ -1,14 +1,30 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import tempfile
 import unittest
 from contextlib import contextmanager
+from datetime import UTC, date, datetime
+from pathlib import Path
 from unittest.mock import Mock
 
 from activity_row_support import SnapshotActivityRows
 
 from backend.activities.duplicate_service import DuplicateActivityService
+from backend.canonical.records import ActivityRecord, Provenance
+from backend.canonical.vocabulary import (
+    Environment,
+    LoadModel,
+    ProviderId,
+    RecordingOrigin,
+    SourceKind,
+    Sport,
+)
+from backend.db import canonical_store
+from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 
 
 class _Manager:
@@ -195,6 +211,128 @@ class DuplicateActivityServiceTests(unittest.TestCase):
             updates, ["activity_records", "provider_records", "activity_sessions"]
         )
         self.assertEqual(self.manager.transactions, 2)
+
+
+class _SqliteManager:
+    """Runs each unit of work on a real temporary SQLite connection and commits it."""
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self.db = db
+
+    @contextmanager
+    def unit_of_work(self):
+        yield self.db
+        self.db.commit()
+
+
+class MergedDuplicateDeleteTests(unittest.TestCase):
+    """Deleting a merged duplicate must write a schema-valid tombstone in one transaction."""
+
+    STAMP = "2026-09-20T10:00:00+00:00"
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.db = sqlite3.connect(Path(temporary.name) / "canonical.db")
+        self.addCleanup(self.db.close)
+        self.db.execute("PRAGMA foreign_keys = ON")
+        initialize_schema(self.db)
+        self.db.commit()
+        self.snapshots = _Snapshots(_snapshot())
+        self.intervals = _Intervals()
+        self.events = _Events()
+        self.service = DuplicateActivityService(
+            _SqliteManager(self.db),
+            self.snapshots,
+            self.snapshots,
+            SnapshotActivityRows(self.snapshots),
+            lambda: "2026-09-20T11:00:00+00:00",
+            self.events,
+        )
+        self.keep_id = self.seed("wahoo-1", ProviderId.WAHOO)
+        self.duplicate_id = self.seed("garmin-1", ProviderId.INTERVALS)
+        self.assertTrue(
+            canonical_store.merge_activity_session(
+                self.db,
+                activity_id=self.duplicate_id,
+                into=self.keep_id,
+                now=self.STAMP,
+            )
+        )
+
+    def seed(self, source_id: str, provider: ProviderId) -> str:
+        record = ActivityRecord(
+            activity_id="unused",
+            provenance=Provenance(
+                provider=provider,
+                source_kind=SourceKind.PROVIDER_REPORTED,
+                source_record_id=source_id,
+                recorded_by=RecordingOrigin.UNKNOWN,
+                retrieved_at=datetime(2026, 9, 20, 10, 0, tzinfo=UTC),
+                label=None,
+            ),
+            sport=Sport.RIDE,
+            environment=Environment.OUTDOOR,
+            started_at=datetime(2026, 9, 20, 7, 0, tzinfo=UTC),
+            duration_s=3600.0,
+            distance_m=30000.0,
+            load=50.0,
+            load_model=LoadModel.INTERVALS_TRAINING_LOAD,
+            avg_hr=140.0,
+            avg_power=210.0,
+            name="Synthetic ride",
+        )
+        canonical_store.upsert_activity_record(
+            self.db,
+            record,
+            local_date=date(2026, 9, 20),
+            mapper_version=1,
+            fetched_at=self.STAMP,
+            now=self.STAMP,
+        )
+        canonical_store.upsert_provider_record(
+            self.db,
+            provider=provider.value,
+            record_kind=ACTIVITY_RECORD_KIND,
+            source_record_id=source_id,
+            payload={"id": source_id},
+            mapper_version=1,
+            fetched_at=self.STAMP,
+            now=self.STAMP,
+        )
+        row = self.db.execute(
+            "SELECT activity_id FROM activity_records "
+            "WHERE provider = ? AND provider_activity_id = ?",
+            (provider.value, source_id),
+        ).fetchone()
+        return str(row[0])
+
+    def test_confirmed_delete_tombstones_the_merged_duplicate_session(self):
+        result = self.service.delete(
+            {
+                "canonical_id": "wahoo-1",
+                "duplicate_id": "garmin-1",
+                "snapshot_synced_at": "2026-09-20T10:00:00+00:00",
+            },
+            self.intervals,
+        )
+
+        self.assertEqual(result["deleted_activity_id"], "garmin-1")
+        self.assertEqual(self.intervals.deleted, ["garmin-1"])
+        self.assertEqual(
+            self.db.execute(
+                "SELECT state, merged_into FROM activity_sessions WHERE activity_id = ?",
+                (self.duplicate_id,),
+            ).fetchone(),
+            ("deleted", None),
+        )
+        self.assertEqual(
+            self.db.execute(
+                "SELECT state FROM activity_records WHERE provider_activity_id = ?",
+                ("garmin-1",),
+            ).fetchone(),
+            ("deleted",),
+        )
 
 
 if __name__ == "__main__":

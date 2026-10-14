@@ -11,7 +11,7 @@ from pathlib import Path
 
 import backend
 from backend.db.bootstrap import initialize_application_database
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     database_schema_is_current,
@@ -481,6 +481,25 @@ class DatabaseBootstrapTests(unittest.TestCase):
                 "snapshots_deleted": 1,
             },
         )
+
+    def test_retention_keeps_the_newest_snapshot_after_a_long_sync_gap(self):
+        db = self.make_connection()
+        self.addCleanup(db.close)
+        self.bootstrap(db)
+        older = (self.current_time - timedelta(days=90)).isoformat()
+        old = (self.current_time - timedelta(days=45)).isoformat()
+        db.executemany(
+            "INSERT INTO snapshots(payload, created_at) VALUES (?, ?)",
+            [("older", older), ("newest-but-old", old)],
+        )
+
+        self.bootstrap(db, retention_days=30)
+
+        self.assertEqual(
+            [row["payload"] for row in db.execute("SELECT payload FROM snapshots")],
+            ["newest-but-old"],
+        )
+        self.assertEqual(SnapshotRepository().latest_payload(db), "newest-but-old")
 
     def test_import_has_no_database_side_effects(self):
         with tempfile.TemporaryDirectory() as root:

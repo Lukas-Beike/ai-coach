@@ -12,6 +12,9 @@ $serverFile = Join-Path $repositoryRoot "server.py"
 $e2eDirectory = Join-Path $repositoryRoot "e2e"
 $playwrightConfig = Join-Path $repositoryRoot "playwright.config.cjs"
 $githubDirectory = Join-Path $repositoryRoot ".github"
+$toolsDirectory = Join-Path $repositoryRoot "tools"
+$pyprojectFile = Join-Path $repositoryRoot "pyproject.toml"
+$dockerfile = Join-Path $repositoryRoot "Dockerfile"
 
 Write-Host "Building isolated SQLCipher test image: $ImageTag"
 & docker build --tag $ImageTag $repositoryRoot
@@ -34,6 +37,12 @@ Write-Host "Running the container unit-test suite with a read-only source mount.
     --tmpfs /tmp `
     --tmpfs /data `
     --volume "${testsDirectory}:/review/tests:ro" `
+    --volume "${dockerfile}:/review/Dockerfile:ro" `
+    --volume "${repositoryRoot}/requirements.in:/review/requirements.in:ro" `
+    --volume "${repositoryRoot}/requirements.txt:/review/requirements.txt:ro" `
+    --volume "${repositoryRoot}/requirements-dev.in:/review/requirements-dev.in:ro" `
+    --volume "${repositoryRoot}/requirements-dev.txt:/review/requirements-dev.txt:ro" `
+    --volume "${pyprojectFile}:/review/pyproject.toml:ro" `
     --volume "${docsDirectory}:/review/docs:ro" `
     --volume "${publicDirectory}:/review/public:ro" `
     --volume "${serverFile}:/review/server.py:ro" `
@@ -42,6 +51,8 @@ Write-Host "Running the container unit-test suite with a read-only source mount.
     --volume "${e2eDirectory}:/app/e2e:ro" `
     --volume "${e2eDirectory}:/review/e2e:ro" `
     --volume "${githubDirectory}:/review/.github:ro" `
+    --volume "${toolsDirectory}:/review/tools:ro" `
+    --volume "${toolsDirectory}:/app/tools:ro" `
     --env "PYTHONPATH=/app:/review/tests" `
     --workdir /app `
     $ImageTag `
