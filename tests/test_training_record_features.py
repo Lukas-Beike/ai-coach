@@ -36,6 +36,9 @@ class MemoryManager:
 
         return Unit()
 
+    def reader(self):
+        return self.unit_of_work()
+
 
 class TrainingRecordFeatureTests(unittest.TestCase):
     def test_garmin_components_and_running_shoes_have_supported_types(self):

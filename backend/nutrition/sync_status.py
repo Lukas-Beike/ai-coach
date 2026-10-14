@@ -34,7 +34,7 @@ class NutritionSyncStatusService:
 
     def get_day_summary(self, meal_date: str) -> dict[str, Any]:
         validated_date = validate_iso_date(meal_date)
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             summary = self._nutrition_repository.day_summary(db, validated_date)
             serialized_garmin = self._key_value_repository.get(db, "garmin_snapshot")
         try:
@@ -59,7 +59,7 @@ class NutritionSyncStatusService:
         dates = [
             (today - timedelta(days=offset)).isoformat() for offset in range(7, 0, -1)
         ]
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             summaries = [
                 self._nutrition_repository.day_summary(db, day) for day in dates
             ]

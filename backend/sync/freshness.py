@@ -208,8 +208,12 @@ def provider_freshness_state(
     max_rows: int = PROVIDER_REFRESH_MAX_ROWS,
     freshness_sources: Mapping[str, Mapping[str, FreshnessSource]] | None = None,
     registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
+    cleanup: bool = True,
 ) -> list[dict[str, Any]]:
     """Build the provider freshness projection on a caller-owned connection.
+
+    ``cleanup=False`` skips the retention delete so the projection is a pure
+    read that also works on a query-only snapshot.
 
     A provider without freshness sources is omitted, as it is from the runtime
     registry. A provider with sources must supply exactly its declared areas;
@@ -236,7 +240,8 @@ def provider_freshness_state(
         },
     )
     cutoff = (current_time - timedelta(days=retention_days)).isoformat()
-    cleanup_refresh_history(db, cutoff=cutoff, max_rows=max_rows)
+    if cleanup:
+        cleanup_refresh_history(db, cutoff=cutoff, max_rows=max_rows)
     result: list[dict[str, Any]] = []
     for provider_id, area in registry.freshness_areas():
         provider_sources = sources.get(provider_id)
@@ -281,9 +286,16 @@ class ProviderFreshnessService:
         profile: Mapping[str, Any],
         garmin_has_core_error: bool,
         garmin_tokenstore_exists: bool,
+        read_only: bool = False,
     ) -> list[dict[str, Any]]:
+        """Project freshness; ``read_only`` uses a reader and skips cleanup."""
         now = self._now()
-        with self._database_manager.unit_of_work() as db:
+        lease = (
+            self._database_manager.reader
+            if read_only
+            else self._database_manager.unit_of_work
+        )
+        with lease() as db:
             return provider_freshness_state(
                 db,
                 config=self._config,
@@ -294,4 +306,5 @@ class ProviderFreshnessService:
                 now=now,
                 freshness_sources=self._freshness_sources,
                 registry=self._registry,
+                cleanup=not read_only,
             )

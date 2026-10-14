@@ -100,7 +100,7 @@ class CheckinService:
 
     def list(self, limit: int = 30) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 365))
-        with self._manager.unit_of_work() as db:
+        with self._manager.reader() as db:
             rows = self._repository.list(db, bounded_limit)
             for row in rows:
                 tags = db.execute(

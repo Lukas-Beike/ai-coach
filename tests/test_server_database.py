@@ -1233,7 +1233,7 @@ class ServerDatabaseTests(ServerTestCase):
             server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(connect.call_count, 1)
 
-    def test_bootstrap_resolves_database_manager_inside_shared_lock(self):
+    def test_bootstrap_reads_a_snapshot_without_the_shared_lock(self):
         real_manager = server.database_manager
         lock_states = []
 
@@ -1245,7 +1245,7 @@ class ServerDatabaseTests(ServerTestCase):
             server.PUBLIC_STATE.bootstrap_service().read()
 
         self.assertTrue(lock_states)
-        self.assertTrue(all(lock_states))
+        self.assertFalse(any(lock_states))
 
     def test_backup_export_helpers_are_dependency_light_and_preserve_bounds(self):
         from backend.backup import export as backup_export

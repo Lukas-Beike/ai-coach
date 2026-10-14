@@ -37,9 +37,12 @@ class FakeDatabaseManager:
         self.opened = 0
 
     @contextmanager
-    def unit_of_work(self):
+    def reader(self):
         self.opened += 1
         yield self.database
+
+    def unit_of_work(self):
+        raise AssertionError("status is a pure read and must not take the writer")
 
 
 class CoachJobStatusTests(unittest.TestCase):

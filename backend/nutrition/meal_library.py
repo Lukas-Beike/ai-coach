@@ -149,7 +149,7 @@ class NutritionMealLibraryService:
         return {**payload, "nutrition_basis": {"kind": kind}}
 
     def list_templates(self) -> list[dict[str, Any]]:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             return self._templates.list(db)
 
     def get_template(self, template_id: str) -> dict[str, Any]:

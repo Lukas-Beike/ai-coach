@@ -14,15 +14,20 @@ class KeyValueServiceTests(unittest.TestCase):
             def unit_of_work(inner_self):
                 yield self.db
 
+            @contextmanager
+            def reader(inner_self):
+                yield self.reader_db
+
+        self.reader_db = object()
         self.repository = Mock()
         self.service = KeyValueService(Database(), self.repository)
 
-    def test_get_reads_inside_database_unit_of_work(self):
+    def test_get_reads_on_a_reader_without_the_writer(self):
         self.repository.get.return_value = "stored"
 
         self.assertEqual(self.service.get("setting"), "stored")
 
-        self.repository.get.assert_called_once_with(self.db, "setting")
+        self.repository.get.assert_called_once_with(self.reader_db, "setting")
 
     def test_set_writes_inside_database_unit_of_work(self):
         self.service.set("setting", "value")

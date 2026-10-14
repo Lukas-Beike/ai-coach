@@ -53,6 +53,8 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             "_refreshed": False,
         }
         services["manager"].unit_of_work.return_value = MagicMock()
+        services["manager"].reader.return_value = MagicMock()
+        services["manager"].read_snapshot.return_value = MagicMock()
         services["manager_factory"] = Mock(return_value=services["manager"])
         services["key_values"].get.return_value = "{}"
         services["plans"].list.return_value = []
@@ -209,12 +211,25 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             "backend.http_api.public_plan.calendar_read_model.project_planning_calendar",
             return_value={},
         ):
-            service.read(local_only=True)
+            service.read()
 
         services["manager_factory"].assert_called_once_with()
         self.assertEqual(resolved_while_locked, [True])
-        self.assertFalse(services["db_lock"].locked())
+        services["manager"].unit_of_work.assert_called_once_with()
+        services["manager"].read_snapshot.assert_not_called()
 
+    def test_local_read_uses_one_snapshot_without_lock_or_writer(self):
+        service, services, _projection, *_ = self.make_service()
+        locked = []
+        services["manager_factory"].side_effect = lambda: (
+            locked.append(services["db_lock"].locked()) or services["manager"]
+        )
+        with patch(
+            "backend.http_api.public_plan.calendar_read_model.project_planning_calendar",
+            return_value={},
+        ):
+            service.read(local_only=True)
 
-if __name__ == "__main__":
-    unittest.main()
+        self.assertFalse(any(locked))
+        services["manager"].read_snapshot.assert_called_once_with()
+        services["manager"].unit_of_work.assert_not_called()

@@ -31,7 +31,7 @@ class WeatherCacheStore:
         self._profile_service = profile_service
 
     def read(self) -> tuple[str, Any, Any]:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             query = self._location(db)
             return (
                 query,

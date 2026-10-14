@@ -58,6 +58,9 @@ class DatabaseManager:
         self._reader_context: ContextVar[Any | None] = ContextVar(
             f"database_manager_reader_{id(self)}", default=None
         )
+        self._snapshot_context: ContextVar[Any | None] = ContextVar(
+            f"database_manager_snapshot_{id(self)}", default=None
+        )
         self._reader_slots = threading.BoundedSemaphore(self.reader_count)
 
     def _connect(self) -> Any:
@@ -93,14 +96,24 @@ class DatabaseManager:
                 self._state.notify_all()
 
     @contextmanager
-    def unit_of_work(self) -> Iterator[Any]:
-        """Lease the single writer and commit or roll back atomically."""
+    def unit_of_work(self, *, timeout: float | None = None) -> Iterator[Any]:
+        """Lease the single writer and commit or roll back atomically.
+
+        ``timeout`` bounds the wait for the writer; it defaults to the manager
+        timeout. Inside ``read_snapshot`` the read-only snapshot is reused, so a
+        nested read helper keeps the snapshot while a write fails loudly.
+        """
         current = self._unit_of_work.get()
         if current is not None:
             yield current
             return
+        current = self._snapshot_context.get()
+        if current is not None:
+            yield current
+            return
         with self._lease():
-            if not self._writer_lock.acquire(timeout=self.timeout):
+            wait = self.timeout if timeout is None else timeout
+            if not self._writer_lock.acquire(timeout=wait):
                 raise TimeoutError("database writer limit reached")
             try:
                 connection = (
@@ -161,6 +174,58 @@ class DatabaseManager:
                             self._readers.put_nowait(connection)
                         except queue.Full:
                             connection.close()
+            finally:
+                self._reader_slots.release()
+
+    @contextmanager
+    def read_snapshot(self) -> Iterator[Any]:
+        """Lease a reader pinned to one read-only WAL snapshot.
+
+        Every query in the block sees the same committed state, so a handler
+        that composes several reads is consistent without the writer lock. The
+        connection is ``query_only`` for the block: a nested ``unit_of_work`` or
+        ``reader`` reuses it, and any write fails instead of silently racing.
+        """
+        current = self._unit_of_work.get()
+        if current is not None:
+            yield current
+            return
+        current = self._snapshot_context.get() or self._reader_context.get()
+        if current is not None:
+            yield current
+            return
+        with self._lease():
+            if not self._reader_slots.acquire(timeout=self.timeout):
+                raise TimeoutError("database reader limit reached")
+            try:
+                try:
+                    connection = self._readers.get_nowait()
+                except queue.Empty:
+                    connection = self._connect()
+                reusable = False
+                try:
+                    connection.execute("PRAGMA query_only = ON")
+                    connection.execute("BEGIN")
+                    snapshot_token = self._snapshot_context.set(connection)
+                    reader_token = self._reader_context.set(connection)
+                    try:
+                        yield connection
+                    finally:
+                        self._reader_context.reset(reader_token)
+                        self._snapshot_context.reset(snapshot_token)
+                        connection.rollback()
+                        connection.execute("PRAGMA query_only = OFF")
+                        reusable = True
+                finally:
+                    with self._state:
+                        draining = self._draining or self._closed
+                    if reusable and self.persist_connections and not draining:
+                        try:
+                            self._readers.put_nowait(connection)
+                        except queue.Full:
+                            connection.close()
+                    else:
+                        connection.close()
             finally:
                 self._reader_slots.release()
 
@@ -287,6 +352,22 @@ class DatabaseManagerCache:
         token = self._current_manager.set(manager)
         try:
             with manager.reader() as db:
+                yield db
+        finally:
+            self._current_manager.reset(token)
+
+    @contextmanager
+    def read_snapshot(self) -> Iterator[Any]:
+        """Use a pinned read-only snapshot on the current manager."""
+        manager = self._current_manager.get()
+        if manager is None:
+            with self._lock:
+                manager = self.manager
+            if manager is None:
+                raise RuntimeError("database manager is not initialized")
+        token = self._current_manager.set(manager)
+        try:
+            with manager.read_snapshot() as db:
                 yield db
         finally:
             self._current_manager.reset(token)

@@ -84,13 +84,13 @@ class ActivityFeedbackService:
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 500))
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             return self._feedback_repository.list(db, bounded_limit)
 
     def for_activity_ids(
         self, activity_ids: builtins.list[str]
     ) -> builtins.list[dict[str, Any]]:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             return self._feedback_repository.for_activity_ids(db, activity_ids)
 
     def save(self, activity_id: Any, value: Any) -> dict[str, Any]:

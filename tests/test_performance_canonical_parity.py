@@ -140,6 +140,12 @@ class RecordingManager:
             self.events.append("exit")
 
     @contextmanager
+    def read_snapshot(self) -> Iterator[str]:
+        """A read-only snapshot is recorded as the same lease."""
+        with self.unit_of_work() as db:
+            yield db
+
+    @contextmanager
     def reader(self) -> Iterator[str]:
         self.events.append("reader")
         try:
