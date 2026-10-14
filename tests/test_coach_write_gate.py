@@ -119,6 +119,8 @@ class StemDomainTests(unittest.TestCase):
         ("Meine HRV war heute Nacht niedrig, Ruhepuls 52", "checkin", "save_checkin"),
         ("Ich fühle mich erkältet, leichtes Fieber", "checkin", "save_checkin"),
         ("Das Training war ein RPE 8", "checkin", "save_activity_feedback"),
+        ("Heute fühle ich mich nicht fit.", "checkin", "save_checkin"),
+        ("Meine Tagesform ist mies, total schlapp", "checkin", "save_checkin"),
         ("Trag den Halbmarathon in Berlin am 12.4. ein", "competition", "save_competition"),
         ("Meld mich für den Triathlon in Roth an", "competition", "save_competition"),
         ("Das Rennen am 3. Mai streichst du", "competition", "delete_competition"),
@@ -141,6 +143,7 @@ class StemDomainTests(unittest.TestCase):
         ("Please move tomorrow's run to Friday", "planning", "stage_training_plan"),
         ("I weigh 72 kg now", "profile", "update_profile"),
         ("I slept badly", "checkin", "save_checkin"),
+        ("I feel exhausted today", "checkin", "save_checkin"),
         ("Please undo that", "undo", "undo_training_change"),
     )  # fmt: skip
 
@@ -370,6 +373,25 @@ class ContinuationTests(unittest.TestCase):
         self.assertEqual(authority.allowed_message_ids, {3, 7})
         self.assertIn("competition", authority.domains)
         self.assertEqual(_authority("hallo").allowed_message_ids, {7})
+
+    def test_answer_to_a_clarification_inherits_the_negated_checkin(self):
+        # "nicht" refuses only plan and sync changes, not a check-in statement.
+        origin_domains = gate.requested_domains("Heute fühle ich mich nicht fit.")
+        self.assertEqual(origin_domains, {"checkin"})
+        authority = _authority(
+            "Ziemlich schwer.",
+            "Wie fühlen sich deine Beine an?",
+            pending_origin=gate.PendingOrigin(3, origin_domains),
+        )
+        decision = gate.check_write(
+            "save_checkin", authority, current_text="Ziemlich schwer."
+        )
+        self.assertTrue(decision.allowed, decision)
+        self.assertFalse(
+            gate.check_write(
+                "stage_training_plan", authority, current_text="Ziemlich schwer."
+            ).allowed
+        )
 
     def test_authority_is_frozen(self):
         authority = _authority("ja", "Einheit kürzen?")

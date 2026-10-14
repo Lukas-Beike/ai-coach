@@ -152,7 +152,8 @@ _STEMS: dict[str, list[str]] = {
         "krank,erkaelt,fieber,schmerz,stimmung,erschoepf,energie,feedback,"
         "^rpe,anstreng,gefuehl,verletz,muskelkater,beine,motivation,stress,"
         "grippe,husten,schnupf,kopfweh,ausgeruht,wehwehchen,sleep,slept,"
-        "tired,sick,pain,mood,fever,fatigue,injur,^ill"
+        "fühl,^fit,tagesform,schlapp,tired,sick,pain,mood,fever,fatigue,"
+        "injur,^ill,^feel,^felt"
     ),
     NUTRITION: _words(
         "ernaehr,mahlzeit,^essen,gegessen,getrunken,trink,fruehstueck,"
