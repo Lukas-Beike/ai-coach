@@ -1,4 +1,4 @@
-"""Coach write gate: a high-recall veto, never a grant of authority."""
+"""Coach write gate: impact tiers, never a grant of authority."""
 
 import json
 import unittest
@@ -12,13 +12,20 @@ from backend.coach.proposal_models import (
 )
 from backend.coach.tool_registry import build_tool_contracts
 
+_DELETE_TOOLS = (
+    "delete_competition",
+    "delete_activity_feedback",
+    "delete_nutrition_entry",
+    "delete_nutrition_template",
+)
+
 
 def _authority(text, previous="", message_id=7, pending_origin=None):
     return gate.build_turn_authority(message_id, text, previous, pending_origin)
 
 
 def _check(tool, text, previous="", **kwargs):
-    authority = _authority(text, previous)
+    authority = kwargs.pop("authority", None) or _authority(text, previous)
     return gate.check_write(
         tool,
         authority,
@@ -28,14 +35,21 @@ def _check(tool, text, previous="", **kwargs):
     )
 
 
+def _verdict(domains=(), delete=False, bulk=False):
+    listed = frozenset(domains)
+    return gate.ImpactVerdict(
+        listed, listed if delete else frozenset(), listed if bulk else frozenset()
+    )
+
+
 class _Classifier:
-    def __init__(self, result=frozenset(), error=None):
+    def __init__(self, result=gate.NO_IMPACT, error=None):
         self.result = result
         self.error = error
         self.calls = []
 
-    def __call__(self, current_text, previous_assistant_text):
-        self.calls.append((current_text, previous_assistant_text))
+    def __call__(self, current_text, previous_assistant_text, origin_text):
+        self.calls.append((current_text, previous_assistant_text, origin_text))
         if self.error:
             raise self.error
         return self.result
@@ -70,6 +84,8 @@ class RegistryCoverageTests(unittest.TestCase):
             self.assertEqual(gate.TOOL_DOMAIN[tool], "remote_intervals", tool)
         self.assertEqual(gate.TOOL_DOMAIN["apply_adaptive_replan"], "planning")
         self.assertEqual(gate.TOOL_DOMAIN["undo_training_change"], "undo")
+        for tool in _DELETE_TOOLS:
+            self.assertIn(tool, gate.TOOL_DOMAIN)
 
     def test_unknown_non_read_tool_is_denied(self):
         decision = _check("brand_new_write_tool", "Schieb den Lauf auf Mittwoch")
@@ -98,194 +114,319 @@ class NormalizeTests(unittest.TestCase):
                 self.assertEqual(gate.normalize(left), gate.normalize(right))
 
     def test_decomposed_umlauts_match(self):
-        self.assertEqual(gate.normalize("übernimm"), "uebernimm")
+        self.assertEqual(gate.normalize("übernimm"), "uebernimm")
 
 
-class StemDomainTests(unittest.TestCase):
-    PASSING = (
-        ("Schieb den Dienstag-Lauf auf Mittwoch", "planning", "planning"),
-        ("Mach die lange Einheit am Sonntag kürzer", "planning", "planning"),
-        ("Verschiebe das Intervalltraining auf Freitag", "planning", "planning"),
-        ("Streich bitte das Schwimmen morgen", "planning", "planning"),
-        ("Ersetz den Ruhetag durch eine lockere Einheit", "planning", "planning"),
-        ("Plane nächste Woche zwei Radtouren mehr ein", "planning", "planning"),
-        ("loesch den Lauf morgen", "planning", "planning"),
-        ("Passt, übernimm die Änderungen", "planning", "planning"),
-        ("Speichere das als Vorlage", "planning", "manage_training_templates"),
-        ("Speichere das als Vorlage", "nutrition", "save_nutrition_template"),
-        ("Pass den Trainingsplan an mein Wochenende an", "planning", "planning"),
-        ("Ich bin krank", "checkin", "save_checkin"),
-        ("Heute schlecht geschlafen", "checkin", "save_checkin"),
-        ("Meine HRV war heute Nacht niedrig, Ruhepuls 52", "checkin", "save_checkin"),
-        ("Ich fühle mich erkältet, leichtes Fieber", "checkin", "save_checkin"),
-        ("Das Training war ein RPE 8", "checkin", "save_activity_feedback"),
-        ("Heute fühle ich mich nicht fit.", "checkin", "save_checkin"),
-        ("Meine Tagesform ist mies, total schlapp", "checkin", "save_checkin"),
-        ("Trag den Halbmarathon in Berlin am 12.4. ein", "competition", "save_competition"),
-        ("Meld mich für den Triathlon in Roth an", "competition", "save_competition"),
-        ("Das Rennen am 3. Mai streichst du", "competition", "delete_competition"),
-        ("Ich wiege jetzt 72 kg", "profile", "update_profile"),
-        ("Meine FTP ist 250", "profile", "update_profile"),
-        ("Ich habe nur noch 6 Stunden pro Woche Zeit", "profile", "update_profile"),
-        ("Mein Ziel ist Sub-3 im Marathon", "profile", "update_profile"),
-        ("Neue Schuhe, bitte eintragen", "profile", "save_equipment"),
-        ("Frühstück waren 2 Eier", "nutrition", "save_nutrition_entry"),
-        ("Zum Mittagessen gab es Nudeln mit Tomatensoße", "nutrition", "save_nutrition_entry"),
-        ("Ich habe 600 kcal gegessen", "nutrition", "save_nutrition_entry"),
-        ("Neues Produkt: Haferriegel, 120 kcal", "nutrition", "save_nutrition_product"),
-        ("Mach das rückgängig", "undo", "undo_training_change"),
-        ("Mach das ruckgangig", "undo", "undo_training_change"),
-        ("Nimm die letzte Änderung bitte zurück", "undo", None),
-        ("Synchronisier den Plan mit Intervals", "remote_intervals", "start_intervals_plan_sync"),
-        ("Sync die Wettkämpfe zu Intervals.icu", "remote_intervals", "sync_competitions"),
-        ("Übertrag die Ernährung in den Intervals Kalender", "remote_intervals", "sync_nutrition"),
-        ("Lösche die Dublette bei Intervals", "remote_intervals", "delete_duplicate_intervals_activity"),
-        ("Please move tomorrow's run to Friday", "planning", "stage_training_plan"),
-        ("I weigh 72 kg now", "profile", "update_profile"),
-        ("I slept badly", "checkin", "save_checkin"),
-        ("I feel exhausted today", "checkin", "save_checkin"),
-        ("Please undo that", "undo", "undo_training_change"),
-    )  # fmt: skip
-
-    def test_expected_domain_is_found(self):
-        for text, domain, _tool in self.PASSING:
-            with self.subTest(text=text, domain=domain):
-                self.assertIn(domain, gate.stem_domains(text))
-
-    def test_write_tools_pass_for_matching_text(self):
-        for text, domain, tool in self.PASSING:
-            if tool is None:
-                continue
-            with self.subTest(text=text, tool=tool):
-                if tool in gate.TOOL_DOMAIN:
-                    self.assertEqual(gate.TOOL_DOMAIN[tool], domain)
-                    decision = _check(tool, text)
+class LocalTierTests(unittest.TestCase):
+    def test_reversible_local_writes_need_no_domain_wording(self):
+        local_tools = (
+            set(gate.TOOL_DOMAIN)
+            - set(_DELETE_TOOLS)
+            - {
+                "replace_training_plan",
+                "commit_training_plan",
+            }
+        )
+        for text in ("danke", "Das war gestern lecker", "👍", ""):
+            for tool in sorted(local_tools):
+                if gate.TOOL_DOMAIN[tool] == "remote_intervals":
+                    continue
+                with self.subTest(text=text, tool=tool):
+                    decision = _check(tool, text, classifier=_Classifier())
                     self.assertTrue(decision.allowed, decision)
-                    self.assertEqual(decision.reason, "ok")
+                    self.assertEqual(decision.domain, gate.TOOL_DOMAIN[tool])
                     self.assertFalse(decision.classifier_used)
 
-    def test_no_domain_for_chitchat(self):
-        for text in ("danke", "super", "👍", "cool", "nice", "Danke dir!", ""):
+    def test_a_turn_without_a_stored_athlete_message_writes_nothing(self):
+        authority = _authority("Schieb den Lauf auf Mittwoch", message_id=0)
+        self.assertFalse(authority.athlete_started)
+        decision = gate.check_write("update_profile", authority)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "no_athlete_message")
+
+    def test_small_edits_and_creates_stay_local(self):
+        arguments = {
+            "changes": [
+                {"local_id": "a", "action": "update", "date": "2026-10-15"},
+                {"local_id": "b", "action": "restore"},
+            ],
+            "workouts": [{"date": "2026-10-16"}],
+        }
+        self.assertEqual(gate.call_impact("apply_training_patch", arguments), set())
+        self.assertTrue(
+            _check("apply_training_patch", "ok", arguments=arguments).allowed
+        )
+        create = {"templates": [{"action": "create"}, {"action": "update"}]}
+        self.assertTrue(
+            _check("manage_training_templates", "ok", arguments=create).allowed
+        )
+        plan = {"payload": {"plan_id": "p", "name": "Neu", "status": "active"}}
+        self.assertTrue(_check("update_training_plan", "ok", arguments=plan).allowed)
+
+    def test_authority_is_frozen(self):
+        authority = _authority("ja", "Einheit kürzen?")
+        with self.assertRaises(FrozenInstanceError):
+            authority.remote_requested = True  # type: ignore[misc]
+
+
+class DestructiveTierTests(unittest.TestCase):
+    def test_delete_tools_need_a_confirmed_delete(self):
+        for tool in _DELETE_TOOLS:
+            domain = gate.TOOL_DOMAIN[tool]
+            with self.subTest(tool=tool):
+                self.assertEqual(gate.call_impact(tool, {}), {"delete"})
+                self.assertEqual(
+                    _check(tool, "weg damit").reason, "impact_not_confirmed"
+                )
+                for verdict in (
+                    _verdict([domain]),
+                    _verdict([], delete=True),
+                    _verdict(["planning" if domain != "planning" else "profile"], True),
+                ):
+                    decision = _check(
+                        tool, "weg damit", classifier=_Classifier(verdict)
+                    )
+                    self.assertFalse(decision.allowed)
+                    self.assertTrue(decision.classifier_used)
+                confirmed = _check(
+                    tool, "weg damit", classifier=_Classifier(_verdict([domain], True))
+                )
+                self.assertTrue(confirmed.allowed, confirmed)
+
+    def test_delete_confirmation_is_bound_to_its_domain(self):
+        verdict = gate.ImpactVerdict(
+            frozenset({"competition", "nutrition"}), delete=frozenset({"nutrition"})
+        )
+        mixed = _Classifier(verdict)
+        self.assertFalse(_check("delete_competition", "x", classifier=mixed).allowed)
+        self.assertTrue(_check("delete_nutrition_entry", "x", classifier=mixed).allowed)
+        bulk = _Classifier(
+            gate.ImpactVerdict(
+                frozenset({"planning", "nutrition"}), bulk=frozenset({"nutrition"})
+            )
+        )
+        self.assertFalse(_check("replace_training_plan", "x", classifier=bulk).allowed)
+
+    def test_archiving_equipment_is_a_delete(self):
+        # save_equipment wraps its fields in payload like the other record tools.
+        archive = {"payload": {"name": "Altes Rad", "status": "archived"}}
+        active = {"payload": {"name": "Neues Rad", "status": "active"}}
+        self.assertEqual(gate.call_impact("save_equipment", archive), {"delete"})
+        self.assertEqual(gate.call_impact("save_equipment", active), set())
+        self.assertTrue(_check("save_equipment", "Neues Rad").allowed)
+        self.assertFalse(
+            _check(
+                "save_equipment",
+                "Das Rad ist gut",
+                arguments=archive,
+                classifier=_Classifier(_verdict(["profile"])),
+            ).allowed
+        )
+        self.assertTrue(
+            _check(
+                "save_equipment",
+                "Archivier das alte Rad",
+                arguments=archive,
+                classifier=_Classifier(_verdict(["profile"], delete=True)),
+            ).allowed
+        )
+
+    def test_removing_actions_inside_plan_tools_are_deletes(self):
+        for tool, arguments in (
+            ("apply_training_changes", {"changes": [{"action": "archive"}]}),
+            ("apply_training_patch", {"changes": [{"action": "delete"}]}),
+            ("manage_training_templates", {"templates": [{"action": "delete"}]}),
+            ("manage_training_templates", {"templates": [{"action": "archive"}]}),
+            ("update_training_plan", {"payload": {"action": "delete"}}),
+            ("update_training_plan", {"payload": {"status": "archived"}}),
+        ):
+            with self.subTest(tool=tool, arguments=arguments):
+                self.assertIn("delete", gate.call_impact(tool, arguments))
+                self.assertFalse(
+                    _check(
+                        tool,
+                        "Mach das",
+                        arguments=arguments,
+                        classifier=_Classifier(_verdict(["planning"])),
+                    ).allowed
+                )
+                self.assertTrue(
+                    _check(
+                        tool,
+                        "Lösch das",
+                        arguments=arguments,
+                        classifier=_Classifier(_verdict(["planning"], delete=True)),
+                    ).allowed
+                )
+
+    def test_whole_plan_tools_need_a_confirmed_bulk_change(self):
+        for tool in ("replace_training_plan", "commit_training_plan"):
+            with self.subTest(tool=tool):
+                self.assertEqual(gate.call_impact(tool, {}), {"bulk"})
+                self.assertFalse(
+                    _check(
+                        tool, "ok", classifier=_Classifier(_verdict(["planning"]))
+                    ).allowed
+                )
+                self.assertTrue(
+                    _check(
+                        tool,
+                        "Erstell mir einen Plan für acht Wochen",
+                        classifier=_Classifier(_verdict(["planning"], bulk=True)),
+                    ).allowed
+                )
+
+    def test_many_records_in_one_turn_need_a_confirmed_bulk_change(self):
+        week = {"changes": [{"action": "update"}] * gate.BULK_THRESHOLD}
+        self.assertEqual(gate.call_impact("apply_training_changes", week), set())
+        more = {"changes": [{"action": "update"}] * (gate.BULK_THRESHOLD + 1)}
+        self.assertEqual(gate.call_impact("apply_training_changes", more), {"bulk"})
+        library = {"entries": [{}] * (gate.BULK_THRESHOLD + 1)}
+        self.assertEqual(
+            gate.call_impact("apply_workout_library_plan", library), {"bulk"}
+        )
+
+        # Small calls add up across the turn.
+        authority = _authority("Verschieb alles")
+        classifier = _Classifier()
+        state = gate.TurnGateState()
+        for _ in range(gate.BULK_THRESHOLD):
+            self.assertTrue(
+                gate.check_write(
+                    "update_profile", authority, state=state, classifier=classifier
+                ).allowed
+            )
+        self.assertEqual(state.records_count, gate.BULK_THRESHOLD)
+        decision = gate.check_write(
+            "update_profile", authority, state=state, classifier=classifier
+        )
+        self.assertEqual(decision.reason, "impact_not_confirmed")
+        self.assertEqual(state.records_count, gate.BULK_THRESHOLD)
+
+    def test_drafts_previews_and_adaptive_apply_count_no_records(self):
+        for tool in (
+            "stage_training_plan",
+            "preview_adaptive_replan",
+            "apply_adaptive_replan",
+        ):
+            with self.subTest(tool=tool):
+                self.assertEqual(gate.record_count(tool, {"workouts": [{}] * 50}), 0)
+                self.assertEqual(gate.call_impact(tool, {}, 100), set())
+
+    def test_no_classifier_and_failures_fail_closed(self):
+        tool = "delete_competition"
+        self.assertFalse(_check(tool, "Lösch das Rennen").allowed)
+        for classifier in (
+            _Classifier(error=RuntimeError("synthetic")),
+            _Classifier(result=frozenset({"competition"})),
+            _Classifier(result=None),
+        ):
+            with self.subTest(classifier=classifier.result):
+                decision = _check(tool, "Lösch das Rennen", classifier=classifier)
+                self.assertFalse(decision.allowed)
+                self.assertTrue(decision.classifier_used)
+
+    def test_classifier_runs_once_per_turn_and_only_for_high_impact(self):
+        classifier = _Classifier(_verdict(["competition"], delete=True))
+        authority = _authority("Lösch das Rennen", "Soll ich es löschen?")
+        state = gate.TurnGateState()
+        kwargs = {
+            "state": state,
+            "classifier": classifier,
+            "current_text": "Lösch das Rennen",
+            "previous_assistant_text": "Soll ich es löschen?",
+        }
+        self.assertTrue(gate.check_write("update_profile", authority, **kwargs).allowed)
+        self.assertEqual(classifier.calls, [])
+        self.assertTrue(
+            gate.check_write("delete_competition", authority, **kwargs).allowed
+        )
+        self.assertFalse(
+            gate.check_write("delete_nutrition_entry", authority, **kwargs).allowed
+        )
+        self.assertEqual(
+            classifier.calls, [("Lösch das Rennen", "Soll ich es löschen?", "")]
+        )
+        self.assertFalse(gate.TurnGateState().classifier_used)
+
+    def test_classifier_sees_the_original_pending_request(self):
+        classifier = _Classifier(_verdict(["competition"], delete=True))
+        origin = gate.PendingOrigin(3, "Lösch den Wettkampf in Roth")
+        authority = _authority("Ja, den", "Welchen meinst du?", pending_origin=origin)
+        self.assertEqual(authority.allowed_message_ids, {3, 7})
+        decision = _check(
+            "delete_competition",
+            "Ja, den",
+            "Welchen meinst du?",
+            authority=authority,
+            classifier=classifier,
+        )
+        self.assertTrue(decision.allowed)
+        self.assertEqual(
+            classifier.calls,
+            [("Ja, den", "Welchen meinst du?", "Lösch den Wettkampf in Roth")],
+        )
+
+    def test_classifier_output_outside_its_domains_is_ignored(self):
+        classifier = _Classifier(_verdict(["remote_intervals", "admin"], True, True))
+        decision = _check("delete_competition", "x", classifier=classifier)
+        self.assertFalse(decision.allowed)
+
+
+class RemoteTierTests(unittest.TestCase):
+    REMOTE = (
+        ("Synchronisier den Plan mit Intervals", "start_intervals_plan_sync"),
+        ("Sync die Wettkämpfe zu Intervals.icu", "sync_competitions"),
+        ("Übertrag die Ernährung in den Intervals Kalender", "sync_nutrition"),
+        ("Lösche die Dublette bei Intervals", "delete_duplicate_intervals_activity"),
+        ("Kannst du meinen Plan zu Intervals hochladen?", "start_intervals_plan_sync"),
+        ("Please upload it to my calendar", "start_intervals_plan_sync"),
+        ("Bitte den Konflikt reparieren", "resolve_training_sync_conflict"),
+    )
+
+    def test_named_sync_requests_allow_remote_tools_without_the_classifier(self):
+        for text, tool in self.REMOTE:
             with self.subTest(text=text):
-                self.assertEqual(gate.stem_domains(text), frozenset())
+                self.assertTrue(gate.remote_requested(text))
+                classifier = _Classifier()
+                decision = _check(tool, text, classifier=classifier)
+                self.assertTrue(decision.allowed, decision)
+                self.assertEqual(classifier.calls, [])
 
-    def test_word_start_stems_do_not_match_mid_word(self):
-        self.assertNotIn("planning", gate.stem_domains("Das ist ein Parade-Beispiel"))
-        self.assertNotIn("nutrition", gate.stem_domains("Ich habe es vergessen"))
-        self.assertNotIn("profile", gate.stem_domains("Das ist ein Zugriff"))
-
-    def test_intervals_service_does_not_imply_interval_training(self):
-        self.assertEqual(gate.stem_domains("intervals"), {"remote_intervals"})
-
-
-class NegationAndQuestionTests(unittest.TestCase):
-    def test_negated_sync_request_grants_no_remote_write(self):
+    def test_unnamed_negated_or_asked_syncs_are_denied(self):
         for text in (
+            "Schieb den Lauf auf Mittwoch",
+            "danke",
             "Do not sync anything to Intervals",
             "Synchronisier nichts mit Intervals",
             "Bitte nicht zu Intervals hochladen",
             "Don't upload it to Intervals",
             "Lade das doch nicht zu Intervals hoch",
-            "Synchronisier den Plan doch nicht",
-        ):
-            with self.subTest(text=text):
-                self.assertNotIn("remote_intervals", gate.requested_domains(text))
-                decision = _check(
-                    "start_intervals_plan_sync", text, classifier=_Classifier()
-                )
-                self.assertFalse(decision.allowed)
-
-    def test_information_question_grants_no_domain(self):
-        for question in (
             "How can I sync my plan to Intervals?",
             "Wie kann ich meinen Plan zu Intervals synchronisieren?",
         ):
-            with self.subTest(text=question):
-                self.assertEqual(gate.requested_domains(question), frozenset())
-        text = "Wie sieht mein Trainingsplan aus?"
-        self.assertEqual(gate.requested_domains(text), frozenset())
-        decision = _check("stage_training_plan", text, classifier=_Classifier())
-        self.assertFalse(decision.allowed)
-        self.assertTrue(decision.classifier_used)
-
-    def test_requests_and_unnegated_clauses_still_grant(self):
-        for text, domain in (
-            ("Kannst du meinen Plan für nächste Woche anpassen?", "planning"),
-            ("Was würdest du an meinem Plan anpassen?", "planning"),
-            ("How could you adjust my plan?", "planning"),
-            ("Ich kann Dienstag nicht, verschieb den Lauf auf Mittwoch", "planning"),
-            ("Nicht zu Intervals hochladen, aber den Plan anpassen", "planning"),
-            ("Ach, doch nicht", "undo"),
-            ("Ich habe nicht gut geschlafen", "checkin"),
-            ("Kein Frühstück heute, nur Kaffee", "nutrition"),
-        ):
             with self.subTest(text=text):
-                self.assertIn(domain, gate.requested_domains(text))
-        self.assertNotIn(
-            "remote_intervals",
-            gate.requested_domains(
-                "Nicht zu Intervals hochladen, aber den Plan anpassen"
-            ),
-        )
-
-    def test_negated_domain_is_left_to_the_classifier(self):
-        text = "Ändere den Plan nicht zu stark, nur die Dauer"
-        self.assertNotIn("planning", gate.requested_domains(text))
-        decision = _check(
-            "stage_training_plan", text, classifier=_Classifier({"planning"})
-        )
-        self.assertTrue(decision.allowed)
-        self.assertTrue(decision.classifier_used)
-
-
-class DenyWithoutFootingTests(unittest.TestCase):
-    def test_thanks_and_praise_deny_every_write(self):
-        for text in ("danke", "super", "👍", "top", "cool"):
-            for tool in gate.TOOL_DOMAIN:
-                with self.subTest(text=text, tool=tool):
-                    decision = _check(tool, text)
-                    self.assertFalse(decision.allowed)
-                    self.assertEqual(decision.reason, "domain_not_requested")
-                    self.assertFalse(decision.classifier_used)
-
-    def test_generic_save_needs_clarification(self):
-        for text in (
-            "speicher das",
-            "Speichere das bitte",
-            "Trag das ein",
-            "Notier dir das",
-            "Merk dir das",
-            "save this",
-        ):
-            with self.subTest(text=text):
-                authority = _authority(text)
-                self.assertTrue(authority.generic_save_without_domain)
-                decision = gate.check_write(
-                    "save_checkin", authority, current_text=text
+                self.assertFalse(gate.remote_requested(text))
+                decision = _check(
+                    "start_intervals_plan_sync",
+                    text,
+                    classifier=_Classifier(_verdict(sorted(gate.DOMAINS), True, True)),
                 )
                 self.assertFalse(decision.allowed)
-                self.assertEqual(decision.reason, "generic_save_needs_clarification")
+                self.assertEqual(decision.reason, "remote_not_requested")
+                self.assertFalse(decision.classifier_used)
 
-    def test_save_verb_with_domain_is_not_generic(self):
-        for text in ("Speichere mein Gewicht: 72 kg", "Trag den Marathon ein"):
-            with self.subTest(text=text):
-                self.assertFalse(_authority(text).generic_save_without_domain)
+    def test_unnegated_clause_still_requests_the_sync(self):
+        self.assertTrue(
+            gate.remote_requested("Ändere den Plan nicht, aber sync ihn zu Intervals")
+        )
+        self.assertFalse(
+            gate.remote_requested(
+                "Nicht zu Intervals hochladen, aber den Plan anpassen"
+            )
+        )
 
-    def test_wrong_domain_is_denied(self):
-        for tool, text in (
-            ("update_profile", "Schieb den Lauf auf Mittwoch"),
-            ("save_competition", "Ich bin krank"),
-            ("save_nutrition_entry", "Meine FTP ist 250"),
-            ("save_checkin", "Trag den Marathon ein"),
-            ("undo_training_change", "Ich wiege 72 kg"),
-        ):
-            with self.subTest(tool=tool):
-                decision = _check(tool, text)
-                self.assertFalse(decision.allowed)
-                self.assertEqual(decision.reason, "domain_not_requested")
-                self.assertEqual(decision.domain, gate.TOOL_DOMAIN[tool])
-
-    def test_remote_flags_require_a_named_sync_request(self):
+    def test_remote_flags_on_local_tools_need_a_named_sync(self):
         text = "Schieb den Lauf auf Mittwoch"
         self.assertTrue(_check("apply_adaptive_replan", text).allowed)
         flagged = {"sync_illness_to_intervals": True}
@@ -306,50 +447,20 @@ class DenyWithoutFootingTests(unittest.TestCase):
         local = {"_request": {"remote_write": False}}
         self.assertTrue(_check("apply_training_patch", text, arguments=local).allowed)
 
-
-class ContinuationTests(unittest.TestCase):
-    def test_affirmation_inherits_preceding_assistant_domains(self):
-        previous = "Soll ich die Einheit am Dienstag kürzen?"
-        for reply in ("ja", "Ja!", "jo", "ok", "Okay", "passt", "gerne", "mach das",
-                      "Mach es", "klingt gut", "einverstanden", "yes", "go", "los",
-                      "mach", "Ja, bitte"):  # fmt: skip
+    def test_affirmation_inherits_a_sync_offer(self):
+        previous = "Soll ich den Plan zu Intervals synchronisieren?"
+        for reply in ("ja", "Ja!", "ok", "passt", "mach das", "Ja, bitte", "yes"):
             with self.subTest(reply=reply):
-                authority = _authority(reply, previous)
-                self.assertIn("planning", authority.domains)
-                self.assertTrue(
-                    gate.check_write(
-                        "apply_training_patch", authority, current_text=reply
-                    ).allowed
-                )
-
-    def test_affirmation_after_unrelated_assistant_text_grants_nothing(self):
-        authority = _authority("ja", "Schön, dass es dir gut geht!")
-        self.assertEqual(authority.domains, frozenset())
-        self.assertFalse(
-            gate.check_write(
-                "apply_training_patch", authority, current_text="ja"
-            ).allowed
-        )
-
-    def test_negations_never_inherit(self):
-        previous = "Soll ich die Einheit am Dienstag kürzen?"
-        for reply in ("nein", "doch nicht", "lieber nicht", "nicht jetzt", "no",
-                      "ja, lieber nicht", "ja?", "Nein danke", "stopp"):  # fmt: skip
+                self.assertTrue(_authority(reply, previous).remote_requested)
+        for reply in ("nein", "doch nicht", "lieber nicht", "ja?", "danke",
+                      "ja ich glaube schon dass das gut ist"):  # fmt: skip
             with self.subTest(reply=reply):
-                authority = _authority(reply, previous)
-                self.assertNotIn("planning", authority.domains)
-                self.assertFalse(gate.is_bare_affirmation(reply))
+                self.assertFalse(_authority(reply, previous).remote_requested)
+        self.assertFalse(_authority("ja", "Soll ich den Lauf kürzen?").remote_requested)
 
-    def test_long_or_non_affirming_replies_do_not_inherit(self):
-        previous = "Soll ich die Einheit am Dienstag kürzen?"
-        for reply in (
-            "danke",
-            "super",
-            "Wie lange dauert das?",
-            "ja ich glaube schon dass das gut ist",
-        ):
-            with self.subTest(reply=reply):
-                self.assertNotIn("planning", _authority(reply, previous).domains)
+    def test_pending_origin_carries_a_sync_request(self):
+        origin = gate.PendingOrigin(3, "Sync den Plan zu Intervals")
+        self.assertTrue(_authority("nochmal", pending_origin=origin).remote_requested)
 
     def test_bare_affirmation_table(self):
         for text, expected in (
@@ -367,213 +478,18 @@ class ContinuationTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(gate.is_bare_affirmation(text), expected)
 
-    def test_pending_origin_merges_for_explicit_retry(self):
-        origin = gate.PendingOrigin(3, frozenset({"competition"}))
-        authority = _authority("versuch es nochmal", "", pending_origin=origin)
-        self.assertEqual(authority.allowed_message_ids, {3, 7})
-        self.assertIn("competition", authority.domains)
-        self.assertEqual(_authority("hallo").allowed_message_ids, {7})
-
-    def test_answer_to_a_clarification_inherits_the_negated_checkin(self):
-        # "nicht" refuses only plan and sync changes, not a check-in statement.
-        origin_domains = gate.requested_domains("Heute fühle ich mich nicht fit.")
-        self.assertEqual(origin_domains, {"checkin"})
-        authority = _authority(
-            "Ziemlich schwer.",
-            "Wie fühlen sich deine Beine an?",
-            pending_origin=gate.PendingOrigin(3, origin_domains),
-        )
-        decision = gate.check_write(
-            "save_checkin", authority, current_text="Ziemlich schwer."
-        )
-        self.assertTrue(decision.allowed, decision)
-        self.assertFalse(
-            gate.check_write(
-                "stage_training_plan", authority, current_text="Ziemlich schwer."
-            ).allowed
-        )
-
-    def test_authority_is_frozen(self):
-        authority = _authority("ja", "Einheit kürzen?")
-        with self.assertRaises(FrozenInstanceError):
-            authority.domains = frozenset()
-        self.assertFalse(authority.classifier_used)
-
-
-class ApprovalTests(unittest.TestCase):
-    def test_approval_table(self):
-        for text, expected in (
-            ("ja, übernehmen", True), ("Passt, übernimm die Änderungen", True),
-            ("ok", True), ("Okay, freigeben", True), ("bestätigt", True),
-            ("anwenden bitte", True), ("einverstanden", True), ("mach", True),
-            ("Ja, das passt so", True), ("uebernimm das", True),
-            ("danke", False), ("super", False), ("top", False), ("cool", False),
-            ("👍", False), ("nice", False), ("Danke, super!", False),
-            ("ja?", False), ("Soll ich ja sagen?", False),
-            ("nein", False), ("nicht übernehmen", False),
-            ("ja, aber nicht die Dienstag-Einheit", False),
-            ("doch nicht", False), ("", False),
-        ):  # fmt: skip
-            with self.subTest(text=text):
-                self.assertEqual(gate.is_approval(text), expected)
-
-
-class ClassifierFallbackTests(unittest.TestCase):
-    TEXT = "Ich spiele neuerdings Gitarre"  # no stem in any domain
-
-    def test_not_called_when_stems_hit(self):
-        classifier = _Classifier(frozenset({"profile"}))
-        decision = _check(
-            "save_checkin", "Heute schlecht geschlafen", classifier=classifier
-        )
-        self.assertTrue(decision.allowed)
-        self.assertFalse(decision.classifier_used)
-        self.assertEqual(classifier.calls, [])
-
-    def test_not_called_for_ungated_or_unknown_tools(self):
-        classifier = _Classifier(frozenset({"profile"}))
-        _check("brand_new_write_tool", self.TEXT, classifier=classifier)
-        _check("start_provider_refresh", self.TEXT, classifier=classifier)
-        self.assertEqual(classifier.calls, [])
-
-    def test_used_on_stem_miss_and_sees_only_typed_and_assistant_text(self):
-        classifier = _Classifier(frozenset({"profile"}))
-        previous = "Verstanden."
-        decision = _check("update_profile", self.TEXT, previous, classifier=classifier)
-        self.assertTrue(decision.allowed)
-        self.assertTrue(decision.classifier_used)
-        self.assertEqual(classifier.calls, [(self.TEXT, previous)])
-
-    def test_classifier_must_contain_the_tools_domain(self):
-        classifier = _Classifier(frozenset({"nutrition"}))
-        decision = _check("update_profile", self.TEXT, classifier=classifier)
-        self.assertFalse(decision.allowed)
-        self.assertEqual(decision.reason, "domain_not_requested")
-        self.assertTrue(decision.classifier_used)
-
-    def test_result_is_cached_per_turn_without_mutating_authority(self):
-        classifier = _Classifier(frozenset({"profile", "planning"}))
-        authority = _authority(self.TEXT)
-        state = gate.TurnGateState()
-        for tool in ("update_profile", "apply_training_patch", "save_checkin"):
-            gate.check_write(
-                tool,
-                authority,
-                state=state,
-                classifier=classifier,
-                current_text=self.TEXT,
-            )
-        self.assertEqual(len(classifier.calls), 1)
-        self.assertTrue(state.classifier_used)
-        self.assertEqual(state.classifier_domains, {"profile", "planning"})
-        self.assertEqual(authority.domains, frozenset())
-        self.assertFalse(authority.classifier_used)
-
-    def test_a_new_turn_state_calls_the_classifier_again(self):
-        classifier = _Classifier(frozenset({"profile"}))
-        _check("update_profile", self.TEXT, classifier=classifier)
-        _check("update_profile", self.TEXT, classifier=classifier)
-        self.assertEqual(len(classifier.calls), 2)
-
-    def test_failures_and_invalid_output_fail_closed(self):
-        for label, classifier in (
-            ("error", _Classifier(error=RuntimeError("boom"))),
-            ("timeout", _Classifier(error=TimeoutError())),
-            ("string", _Classifier("profile")),
-            ("none", _Classifier(None)),
-            ("dict", _Classifier({"domains": ["profile"]})),
-            ("unknown", _Classifier(frozenset({"admin", 5}))),
-        ):
-            with self.subTest(label=label):
-                decision = _check("update_profile", self.TEXT, classifier=classifier)
-                self.assertFalse(decision.allowed)
-                self.assertEqual(decision.reason, "domain_not_requested")
-
-    def test_failure_is_cached_and_not_retried(self):
-        classifier = _Classifier(error=RuntimeError("boom"))
-        authority = _authority(self.TEXT)
-        state = gate.TurnGateState()
-        for _ in range(3):
-            gate.check_write(
-                "update_profile",
-                authority,
-                state=state,
-                classifier=classifier,
-                current_text=self.TEXT,
-            )
-        self.assertEqual(len(classifier.calls), 1)
-
-    def test_remote_intervals_is_never_granted_by_the_classifier(self):
-        classifier = _Classifier(frozenset(gate.DOMAINS))
-        text = "Schieb den Lauf auf Mittwoch"
-        for tool in (
-            "start_intervals_plan_sync",
-            "sync_competitions",
-            "sync_nutrition",
-            "resolve_training_sync_conflict",
-            "delete_duplicate_intervals_activity",
-        ):
-            with self.subTest(tool=tool):
-                decision = _check(tool, text, classifier=classifier)
-                self.assertFalse(decision.allowed)
-                self.assertEqual(decision.reason, "domain_not_requested")
-        flagged = _check(
-            "apply_training_patch",
-            text,
-            classifier=classifier,
-            arguments={"_request": {"remote_write": True}},
-        )
-        self.assertFalse(flagged.allowed)
-        self.assertEqual(classifier.calls, [])
-
-    def test_remote_filtered_from_classifier_output(self):
-        classifier = _Classifier(frozenset({"remote_intervals", "profile"}))
-        state = gate.TurnGateState()
-        gate.check_write(
-            "update_profile",
-            _authority(self.TEXT),
-            state=state,
-            classifier=classifier,
-            current_text=self.TEXT,
-        )
-        self.assertEqual(state.classifier_domains, {"profile"})
-
-    def test_generic_save_with_classifier_resolves_or_asks(self):
-        text = "speicher das"
-        previous = "Dein Frühstück: 2 Eier und Brot."
-        authority = _authority(text, previous)
-        self.assertTrue(authority.generic_save_without_domain)
-        allowed = gate.check_write(
-            "save_nutrition_entry",
-            authority,
-            classifier=_Classifier(frozenset({"nutrition"})),
-            current_text=text,
-            previous_assistant_text=previous,
-        )
-        self.assertTrue(allowed.allowed)
-        denied = gate.check_write(
-            "save_nutrition_entry",
-            authority,
-            classifier=_Classifier(frozenset()),
-            current_text=text,
-            previous_assistant_text=previous,
-        )
-        self.assertFalse(denied.allowed)
-        self.assertEqual(denied.reason, "generic_save_needs_clarification")
-
 
 class WriteCapTests(unittest.TestCase):
     def test_cap_is_25_and_counts_allowed_writes(self):
         self.assertEqual(gate.WRITE_CAP, 25)
-        text = "Schieb den Lauf auf Mittwoch"
-        authority = _authority(text)
+        authority = _authority("Schieb den Lauf auf Mittwoch")
         state = gate.TurnGateState()
         for _ in range(gate.WRITE_CAP):
             self.assertTrue(
-                gate.check_write("apply_training_patch", authority, state=state).allowed
+                gate.check_write("stage_training_plan", authority, state=state).allowed
             )
         self.assertEqual(state.writes_count, 25)
-        decision = gate.check_write("apply_training_patch", authority, state=state)
+        decision = gate.check_write("stage_training_plan", authority, state=state)
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason, "cap_exceeded")
         self.assertEqual(state.writes_count, 25)
@@ -581,8 +497,9 @@ class WriteCapTests(unittest.TestCase):
     def test_denied_calls_do_not_count(self):
         authority = _authority("danke")
         state = gate.TurnGateState()
-        gate.check_write("update_profile", authority, state=state)
-        self.assertEqual(state.writes_count, 0)
+        gate.check_write("delete_competition", authority, state=state)
+        gate.check_write("sync_competitions", authority, state=state)
+        self.assertEqual((state.writes_count, state.records_count), (0, 0))
 
 
 class OpenAIClassifierTests(unittest.TestCase):
@@ -591,15 +508,29 @@ class OpenAIClassifierTests(unittest.TestCase):
             calls.append(payload)
             return response
 
-        return gate.build_openai_domain_classifier(
+        return gate.build_openai_impact_classifier(
             create_response, model="test-model", reasoning_effort="low"
         )
 
     def test_payload_uses_strict_schema_without_remote_domain(self):
         calls = []
-        response = {"output_text": json.dumps({"domains": ["profile", "undo"]})}
+        response = {
+            "output_text": json.dumps(
+                {
+                    "requests": [
+                        {"domain": "profile", "delete": True, "bulk": False},
+                        {"domain": "undo", "delete": False, "bulk": False},
+                    ]
+                }
+            )
+        }
         classify = self._classifier(response, calls)
-        self.assertEqual(classify("Ich spiele Gitarre", "Okay"), {"profile", "undo"})
+        self.assertEqual(
+            classify("Lösch mein Rad", "Okay", ""),
+            gate.ImpactVerdict(
+                frozenset({"profile", "undo"}), delete=frozenset({"profile"})
+            ),
+        )
         (payload,) = calls
         self.assertEqual(payload["model"], "test-model")
         self.assertEqual(payload["reasoning"], {"effort": "low"})
@@ -607,79 +538,108 @@ class OpenAIClassifierTests(unittest.TestCase):
         self.assertNotIn("tools", payload)
         fmt = payload["text"]["format"]
         self.assertEqual(fmt["type"], "json_schema")
+        self.assertEqual(fmt["name"], "write_impact")
         self.assertIs(fmt["strict"], True)
         schema = fmt["schema"]
         self.assertIs(schema["additionalProperties"], False)
-        self.assertEqual(schema["required"], ["domains"])
-        items = schema["properties"]["domains"]["items"]
-        self.assertEqual(set(items["enum"]), gate.DOMAINS - {"remote_intervals"})
+        self.assertEqual(schema["required"], ["requests"])
+        items = schema["properties"]["requests"]["items"]
+        self.assertIs(items["additionalProperties"], False)
+        self.assertEqual(items["required"], ["domain", "delete", "bulk"])
+        self.assertEqual(
+            set(items["properties"]["domain"]["enum"]),
+            gate.DOMAINS - {"remote_intervals"},
+        )
         self.assertIn("data", payload["instructions"])
         self.assertIn("explicitly", payload["instructions"])
-        sent = json.loads(payload["input"])
         self.assertEqual(
-            sent,
-            {
-                "athlete_message": "Ich spiele Gitarre",
-                "previous_assistant_message": "Okay",
-            },
+            json.loads(payload["input"]),
+            {"athlete_message": "Lösch mein Rad", "previous_assistant_message": "Okay"},
+        )
+
+    def test_original_request_is_sent_only_when_present(self):
+        calls = []
+        classify = self._classifier({"output_text": "{}"}, calls)
+        classify("ja", "Welches?", "Lösch das Rennen")
+        self.assertEqual(
+            json.loads(calls[0]["input"])["original_athlete_request"],
+            "Lösch das Rennen",
         )
 
     def test_reasoning_is_omitted_without_effort(self):
         calls = []
-        classify = gate.build_openai_domain_classifier(
-            lambda payload: calls.append(payload) or {"output_text": '{"domains":[]}'},
+        classify = gate.build_openai_impact_classifier(
+            lambda payload: calls.append(payload) or {"output_text": "{}"},
             model="m",
         )
-        classify("x", "y")
+        classify("x", "y", "")
         self.assertNotIn("reasoning", calls[0])
 
     def test_output_items_are_parsed(self):
+        text = '{"requests":[{"domain":"planning","delete":false,"bulk":true}]}'
         response = {
             "output": [
                 {"type": "reasoning", "summary": []},
-                {
-                    "type": "message",
-                    "content": [
-                        {"type": "output_text", "text": '{"domains":["checkin"]}'}
-                    ],
-                },
+                {"type": "message", "content": [{"type": "output_text", "text": text}]},
             ]
         }
-        self.assertEqual(self._classifier(response, [])("x", ""), {"checkin"})
+        self.assertEqual(
+            self._classifier(response, [])("x", "", ""),
+            gate.ImpactVerdict(frozenset({"planning"}), bulk=frozenset({"planning"})),
+        )
 
-    def test_invalid_output_yields_no_domains(self):
+    def test_invalid_output_confirms_nothing(self):
         for response in (
             {},
             None,
             "text",
             {"output_text": "not json"},
             {"output_text": "[]"},
-            {"output_text": '{"domains":"profile"}'},
-            {"output_text": '{"other":["profile"]}'},
-            {"output_text": '{"domains":["remote_intervals","admin",3]}'},
+            {"output_text": '{"requests":"profile"}'},
+            {"output_text": '{"domains":["profile"],"delete":true,"bulk":true}'},
+            {
+                "output_text": '{"requests":[{"domain":"remote_intervals",'
+                '"delete":true},{"domain":"admin"},{"domain":["profile"]},3]}'
+            },
         ):
             with self.subTest(response=response):
-                self.assertEqual(self._classifier(response, [])("x", ""), frozenset())
+                self.assertEqual(
+                    self._classifier(response, [])("x", "", ""), gate.NO_IMPACT
+                )
+        flags = {
+            "output_text": '{"requests":[{"domain":"profile","delete":"yes","bulk":1}]}'
+        }
+        self.assertEqual(
+            self._classifier(flags, [])("x", "", ""),
+            gate.ImpactVerdict(frozenset({"profile"})),
+        )
 
     def test_transport_error_fails_closed_through_the_gate(self):
         def broken(_payload):
             raise OSError("network down")
 
-        classify = gate.build_openai_domain_classifier(broken, model="m")
-        decision = _check("update_profile", "Ich spiele Gitarre", classifier=classify)
+        classify = gate.build_openai_impact_classifier(broken, model="m")
+        decision = _check("delete_competition", "Lösch das", classifier=classify)
         self.assertFalse(decision.allowed)
 
     def test_input_is_bounded(self):
         calls = []
-        classify = self._classifier({"output_text": '{"domains":[]}'}, calls)
-        classify("a" * 10000, "b" * 10000)
+        classify = self._classifier({"output_text": "{}"}, calls)
+        classify("a" * 10000, "b" * 10000, "c" * 10000)
         sent = json.loads(calls[0]["input"])
         self.assertLessEqual(len(sent["athlete_message"]), 2000)
         self.assertLessEqual(len(sent["previous_assistant_message"]), 1200)
+        self.assertLessEqual(len(sent["original_athlete_request"]), 2000)
 
     def test_end_to_end_through_the_gate(self):
-        classify = self._classifier({"output_text": '{"domains":["profile"]}'}, [])
-        decision = _check("update_profile", "Ich spiele Gitarre", classifier=classify)
+        classify = self._classifier(
+            {
+                "output_text": '{"requests":[{"domain":"competition",'
+                '"delete":true,"bulk":false}]}'
+            },
+            [],
+        )
+        decision = _check("delete_competition", "Lösch das Rennen", classifier=classify)
         self.assertTrue(decision.allowed)
         self.assertTrue(decision.classifier_used)
 

@@ -15,9 +15,21 @@ from backend.coach.structured_tool_round import (
 )
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.coach.turn_write_gate import CoachTurnWriteGate, CoachWriteGateService
-from backend.coach.write_gate import WRITE_CAP
+from backend.coach.write_gate import (
+    BULK_THRESHOLD,
+    DOMAINS,
+    WRITE_CAP,
+    ImpactVerdict,
+)
 
 READ_ONLY = frozenset({"read_profile"})
+
+
+def verdict(domains=(), delete=False, bulk=False) -> ImpactVerdict:
+    listed = frozenset(domains)
+    return ImpactVerdict(
+        listed, listed if delete else frozenset(), listed if bulk else frozenset()
+    )
 
 
 def context(
@@ -42,7 +54,7 @@ def make_gate(
     receipts: list[dict[str, Any]] | None = None,
     logger: logging.Logger | None = None,
 ) -> tuple[CoachTurnWriteGate, Mock]:
-    factory = Mock(return_value=classifier or Mock(return_value=frozenset()))
+    factory = Mock(return_value=classifier or Mock(return_value=verdict()))
     gate = CoachWriteGateService(
         READ_ONLY, factory, logger or Mock(spec=logging.Logger)
     ).open_turn(
@@ -69,14 +81,22 @@ class TurnWriteGateTests(unittest.TestCase):
         self.assertIsNone(gate.denial("read_profile", {}))
         factory.assert_not_called()
 
-    def test_stem_in_typed_message_allows_and_denies_other_domains(self) -> None:
-        gate, _factory = make_gate("Trag meinen Wettkampf am 12.5. ein")
-        self.assertIsNone(gate.denial("save_competition", {}))
+    def test_reversible_local_writes_pass_without_the_classifier(self) -> None:
+        gate, factory = make_gate("Das war gestern lecker")
+        self.assertIsNone(gate.denial("save_nutrition_entry", {}))
+        self.assertIsNone(gate.denial("update_profile", {}))
+        self.assertIsNone(
+            gate.denial("apply_training_patch", {"changes": [{"action": "update"}]})
+        )
+        factory.assert_not_called()
+
+    def test_turn_without_a_stored_athlete_message_writes_nothing(self) -> None:
+        gate, _factory = make_gate("Hallo", context(current=0))
         denial = denied(gate, "update_profile", {})
         self.assertEqual(denial["status"], "not_performed")
         self.assertFalse(denial["ok"])
         self.assertEqual(denial["reason"], "write_not_authorized")
-        self.assertEqual(denial["gate_reason"], "domain_not_requested")
+        self.assertEqual(denial["gate_reason"], "no_athlete_message")
         self.assertIn("Nothing was saved", denial["message"])
 
     def test_unknown_non_read_tool_fails_closed(self) -> None:
@@ -84,100 +104,116 @@ class TurnWriteGateTests(unittest.TestCase):
         denial = denied(gate, "brand_new_write_tool", {})
         self.assertEqual(denial["gate_reason"], "unknown_tool")
 
-    def test_bare_affirmation_inherits_directly_preceding_assistant_text(self) -> None:
+    def test_delete_asks_once_unless_the_classifier_confirms_it(self) -> None:
+        gate, _factory = make_gate("Weg mit dem Rennen")
+        denial = denied(gate, "delete_competition", {})
+        self.assertEqual(denial["gate_reason"], "impact_not_confirmed")
+        self.assertIn("clarify_coach_request", denial["message"])
+
+        confirmed = Mock(return_value=verdict(["competition"], delete=True))
+        gate, _factory = make_gate("Lösch das Rennen in Roth", classifier=confirmed)
+        self.assertIsNone(gate.denial("delete_competition", {}))
+
+    def test_classifier_runs_lazily_once_with_turn_model(self) -> None:
+        classifier = Mock(return_value=verdict(["nutrition"], delete=True))
+        gate, factory = make_gate("Lösch das Frühstück", classifier=classifier)
+        self.assertIsNone(gate.denial("save_nutrition_entry", {}))
+        factory.assert_not_called()
+        self.assertIsNone(gate.denial("delete_nutrition_entry", {}))
+        self.assertIsNone(gate.denial("delete_nutrition_template", {}))
+        factory.assert_called_once_with("synthetic-model")
+        classifier.assert_called_once_with("Lösch das Frühstück", "", "")
+        self.assertIsNotNone(gate.denial("delete_competition", {}))
+        classifier.assert_called_once()
+
+    def test_classifier_failure_or_missing_model_fails_closed(self) -> None:
+        broken = Mock(side_effect=RuntimeError("synthetic transport failure"))
+        gate, _factory = make_gate("Lösch das Frühstück", classifier=broken)
+        self.assertEqual(
+            denied(gate, "delete_nutrition_entry", {})["reason"],
+            "write_not_authorized",
+        )
+        no_model, factory = make_gate("Lösch das Frühstück", model=None)
+        self.assertIsNotNone(no_model.denial("delete_nutrition_entry", {}))
+        factory.assert_not_called()
+
+    def test_bulk_budget_includes_records_of_resumed_receipts(self) -> None:
+        receipts = [
+            {"tool": "apply_training_patch", "changes": [{}] * BULK_THRESHOLD},
+            {"tool": "read_profile", "changes": [{}] * 50},
+        ]
+        gate, _factory = make_gate("Verschieb die Woche", receipts=receipts)
+        denial = denied(gate, "update_profile", {})
+        self.assertEqual(denial["gate_reason"], "impact_not_confirmed")
+
+    def test_remote_writes_need_a_named_sync_and_never_the_classifier(self) -> None:
+        classifier = Mock(return_value=verdict(sorted(DOMAINS), True, True))
+        gate, factory = make_gate("Passt das so?", classifier=classifier)
+        denial = denied(gate, "start_intervals_plan_sync", {})
+        self.assertEqual(denial["gate_reason"], "remote_not_requested")
+        self.assertIn("offer the sync", denial["message"])
+        self.assertIsNotNone(
+            gate.denial("apply_adaptive_replan", {"sync_illness_to_intervals": True})
+        )
+        self.assertIsNone(gate.denial("apply_adaptive_replan", {}))
+        factory.assert_not_called()
+
+        named, _factory = make_gate("Synchronisier den Plan mit Intervals")
+        self.assertIsNone(named.denial("start_intervals_plan_sync", {}))
+
+    def test_bare_affirmation_inherits_directly_preceding_sync_offer(self) -> None:
+        offer = "Soll ich den Plan zu Intervals synchronisieren?"
         messages = [
             {"id": 8, "role": "user", "content": "Wie sieht meine Woche aus?"},
-            {
-                "id": 9,
-                "role": "assistant",
-                "content": "Soll ich den Trainingsplan für die Woche anpassen?",
-            },
+            {"id": 9, "role": "assistant", "content": offer},
             {"id": 10, "role": "user", "content": "ja"},
         ]
         gate, _factory = make_gate("ja", context(messages))
-        self.assertIsNone(gate.denial("apply_training_patch", {}))
-        self.assertIsNotNone(gate.denial("update_profile", {}))
+        self.assertIsNone(gate.denial("start_intervals_plan_sync", {}))
 
-    def test_affirmation_after_user_message_has_no_inherited_domain(self) -> None:
-        messages = [
-            {"id": 8, "role": "assistant", "content": "Soll ich den Plan ändern?"},
+        interrupted = [
+            {"id": 8, "role": "assistant", "content": offer},
             {"id": 9, "role": "user", "content": "Moment"},
             {"id": 10, "role": "user", "content": "ja"},
         ]
-        gate, _factory = make_gate("ja", context(messages))
-        self.assertIsNotNone(gate.denial("apply_training_patch", {}))
+        gate, _factory = make_gate("ja", context(interrupted))
+        self.assertIsNotNone(gate.denial("start_intervals_plan_sync", {}))
 
-    def test_generic_save_asks_once_instead_of_writing(self) -> None:
-        gate, _factory = make_gate("speicher das")
-        denial = denied(gate, "save_checkin", {})
-        self.assertEqual(denial["gate_reason"], "generic_save_needs_clarification")
-        self.assertIn("clarify_coach_request", denial["message"])
-
-    def test_pending_retry_inherits_original_request_domain(self) -> None:
+    def test_pending_retry_inherits_original_request(self) -> None:
         messages = [
-            {
-                "id": 4,
-                "role": "user",
-                "content": "Trag meinen Wettkampf am 12.5. ein",
-            },
+            {"id": 4, "role": "user", "content": "Sync den Plan zu Intervals"},
             {"id": 5, "role": "assistant", "content": "Das hat nicht geklappt."},
             {"id": 10, "role": "user", "content": "nochmal"},
         ]
         pending = {"status": "failed", "source_message_ids": [4]}
         gate, _factory = make_gate("nochmal", context(messages, pending=pending))
-        self.assertIsNone(gate.denial("save_competition", {}))
-        self.assertIsNotNone(gate.denial("update_profile", {}))
+        self.assertIsNone(gate.denial("start_intervals_plan_sync", {}))
         unrelated, _factory = make_gate("nochmal", context(messages))
-        self.assertIsNotNone(unrelated.denial("save_competition", {}))
+        self.assertIsNotNone(unrelated.denial("start_intervals_plan_sync", {}))
 
-    def test_classifier_runs_lazily_once_with_turn_model_and_only_on_stem_miss(
-        self,
-    ) -> None:
-        classifier = Mock(return_value=frozenset({"nutrition"}))
-        gate, factory = make_gate("Das war gestern lecker", classifier=classifier)
-        self.assertIsNone(gate.denial("save_nutrition_entry", {}))
-        self.assertIsNone(gate.denial("log_nutrition_template", {}))
-        factory.assert_called_once_with("synthetic-model")
-        classifier.assert_called_once_with("Das war gestern lecker", "")
-        self.assertIsNotNone(gate.denial("update_profile", {}))
-        classifier.assert_called_once()
-
-        stem_hit, factory = make_gate("Speichere meine Mahlzeit")
-        self.assertIsNone(stem_hit.denial("save_nutrition_entry", {}))
-        factory.assert_not_called()
-
-    def test_classifier_failure_or_missing_model_fails_closed(self) -> None:
-        broken = Mock(side_effect=RuntimeError("synthetic transport failure"))
-        gate, _factory = make_gate("Das war gestern lecker", classifier=broken)
-        self.assertEqual(
-            denied(gate, "save_nutrition_entry", {})["reason"], "write_not_authorized"
+        classifier = Mock(return_value=verdict(["competition"], delete=True))
+        messages[0] = {"id": 4, "role": "user", "content": "Lösch das Rennen"}
+        gate, _factory = make_gate(
+            "nochmal", context(messages, pending=pending), classifier=classifier
         )
-        no_model, factory = make_gate("Das war gestern lecker", model=None)
-        self.assertIsNotNone(no_model.denial("save_nutrition_entry", {}))
-        factory.assert_not_called()
-
-    def test_classifier_never_grants_remote_intervals_writes(self) -> None:
-        classifier = Mock(return_value=frozenset({"planning", "remote_intervals"}))
-        gate, _factory = make_gate("Passt das so?", classifier=classifier)
-        self.assertIsNotNone(gate.denial("start_intervals_plan_sync", {}))
-        self.assertIsNotNone(
-            gate.denial("apply_adaptive_replan", {"sync_illness_to_intervals": True})
+        self.assertIsNone(gate.denial("delete_competition", {}))
+        classifier.assert_called_once_with(
+            "nochmal", "Das hat nicht geklappt.", "Lösch das Rennen"
         )
-        self.assertIsNone(gate.denial("apply_adaptive_replan", {}))
 
     def test_cap_counts_allowed_calls_and_resumed_receipts(self) -> None:
         gate, _factory = make_gate("Trainingsplan anpassen")
         for _ in range(WRITE_CAP):
-            self.assertIsNone(gate.denial("apply_training_patch", {}))
-        capped = denied(gate, "apply_training_patch", {})
+            self.assertIsNone(gate.denial("stage_training_plan", {}))
+        capped = denied(gate, "stage_training_plan", {})
         self.assertEqual(capped["reason"], "write_cap_exceeded")
 
-        receipts = [{"tool": "apply_training_patch"} for _ in range(WRITE_CAP - 1)]
+        receipts = [{"tool": "stage_training_plan"} for _ in range(WRITE_CAP - 1)]
         receipts.append({"tool": "read_profile"})
         resumed, _factory = make_gate("Trainingsplan anpassen", receipts=receipts)
-        self.assertIsNone(resumed.denial("apply_training_patch", {}))
+        self.assertIsNone(resumed.denial("stage_training_plan", {}))
         self.assertEqual(
-            denied(resumed, "apply_training_patch", {})["reason"], "write_cap_exceeded"
+            denied(resumed, "stage_training_plan", {})["reason"], "write_cap_exceeded"
         )
 
     def test_denial_is_logged_with_tool_domain_and_reason_only(self) -> None:
@@ -185,15 +221,15 @@ class TurnWriteGateTests(unittest.TestCase):
         gate, _factory = make_gate(
             "Wie war mein Schlaf? synthetic-secret-token", logger=logger
         )
-        gate.denial("update_profile", {"note": "synthetic-secret-token"})
+        gate.denial("delete_competition", {"note": "synthetic-secret-token"})
         logger.warning.assert_called_once_with(
             "Coach write denied",
             extra={
                 "event": "coach_write_denied",
                 "context": {
-                    "tool": "update_profile",
-                    "domain": "profile",
-                    "reason": "domain_not_requested",
+                    "tool": "delete_competition",
+                    "domain": "competition",
+                    "reason": "impact_not_confirmed",
                 },
             },
         )
@@ -222,7 +258,7 @@ class ChokePointTests(unittest.TestCase):
         self.jobs = Mock()
         self.response = Mock()
         self.response.respond.return_value = {"output": []}
-        self.classifier = Mock(return_value=frozenset())
+        self.classifier = Mock(return_value=verdict())
         self.logger = Mock(spec=logging.Logger)
         self.service = CoachStructuredToolRoundService(
             lambda: self.manager,
@@ -295,9 +331,9 @@ class ChokePointTests(unittest.TestCase):
     def test_denied_write_does_not_execute_record_or_open_a_transaction(self) -> None:
         state = self.state("Wie war mein Schlaf?")
 
-        name, call_id, result, _action = self.execute(state, "save_competition")
+        name, call_id, result, _action = self.execute(state, "delete_competition")
 
-        self.assertEqual((name, call_id), ("save_competition", "call-one"))
+        self.assertEqual((name, call_id), ("delete_competition", "call-one"))
         self.assertEqual(result["status"], "not_performed")
         self.assertFalse(result["ok"])
         self.execution.execute.assert_not_called()
@@ -378,7 +414,7 @@ class ChokePointTests(unittest.TestCase):
             "output": [
                 {
                     "type": "function_call",
-                    "name": "save_competition",
+                    "name": "delete_competition",
                     "call_id": "call-one",
                     "arguments": "{}",
                 }
@@ -386,7 +422,7 @@ class ChokePointTests(unittest.TestCase):
         }
         with patch(
             "backend.coach.structured_tool_round.structured_tool_call_metadata",
-            return_value=self.metadata(),
+            return_value=self.metadata("delete_competition"),
         ):
             result = self.service.run(
                 response, rounds=0, question="", cancelled=False, state=state
@@ -396,6 +432,8 @@ class ChokePointTests(unittest.TestCase):
         followup = self.response.respond.call_args.args[0]
         output = json.loads(followup["input"][0]["output"])
         self.assertEqual(output["status"], "not_performed")
+        self.assertEqual(output["gate_reason"], "impact_not_confirmed")
+        self.classifier.assert_called_once()
         self.execution.execute.assert_not_called()
         self.assertEqual(state.command_receipts, [])
 

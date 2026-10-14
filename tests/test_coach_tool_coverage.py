@@ -13,7 +13,7 @@ from unittest.mock import patch
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.training_patch import CoachTrainingPatchService
-from backend.coach.write_gate import TOOL_DOMAIN
+from backend.coach.write_gate import CLASSIFIER_DOMAINS, TOOL_DOMAIN
 from backend.planning import library as planning_library
 from backend.providers import http as provider_http
 from backend.providers import intervals_client as intervals_client_module
@@ -39,20 +39,11 @@ def covers(*cases):
     return decorate
 
 
-# Athlete wording that names the tool's write domain, as the write gate requires.
-DOMAIN_MESSAGES = {
-    "planning": "Bitte im Trainingsplan so ausführen.",
-    "profile": "Bitte im Profil so ausführen.",
-    "competition": "Bitte beim Wettkampf so ausführen.",
-    "checkin": "Bitte im Check-in so ausführen.",
-    "nutrition": "Bitte bei der Mahlzeit so ausführen.",
-    "undo": "Bitte rückgängig machen.",
-    "remote_intervals": "Bitte mit Intervals synchronisieren.",
-}
-
-
+# Remote writes need athlete wording that names the sync.
 def message_for(tool):
-    return DOMAIN_MESSAGES.get(TOOL_DOMAIN.get(tool), "Bitte so ausführen.")
+    if TOOL_DOMAIN.get(tool) == "remote_intervals":
+        return "Bitte mit Intervals synchronisieren."
+    return "Bitte so ausführen."
 
 
 REQUIRED_VARIANTS = {
@@ -145,6 +136,14 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     def setUp(self):
         super().setUp()
+        # Every covered call stands for an explicit athlete request, so the write
+        # gate's classifier confirms deletes and bulk changes.
+        self.gate_verdict = {
+            "requests": [
+                {"domain": domain, "delete": True, "bulk": True}
+                for domain in sorted(CLASSIFIER_DOMAINS)
+            ]
+        }
         self.observed = set()
         self.issued = {}
         for owner, name in (
@@ -291,9 +290,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 ["local_profile"],
             )
 
-        # The reply names no domain; the fallback classifier resolves it from the
-        # preceding assistant question about the profile.
-        self.gate_domains = frozenset({"profile"})
         receipt, _ = self.turn(
             "Ja, bitte dauerhaft hinzufügen.",
             [
@@ -547,7 +543,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             response["output"][0]["arguments"] = json.dumps(args)
             return response
 
-        self.gate_domains = frozenset({"planning"})  # "Entwurf" is no domain stem
         result, _ = self.turn(
             "Ja, diesen Entwurf speichern.", [commit, {"output_text": "Gespeichert."}]
         )
