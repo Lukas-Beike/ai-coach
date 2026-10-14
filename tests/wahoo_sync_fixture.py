@@ -15,6 +15,7 @@ import tempfile
 import threading
 import unittest
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -64,7 +65,13 @@ def make_config(*, wahoo: bool = True) -> Config:
     )
 
 
-def workout(number: int, starts: str, **changes: Any) -> dict[str, Any]:
+def workout(
+    number: int,
+    starts: str,
+    *,
+    summary: Mapping[str, Any] | None = None,
+    **changes: Any,
+) -> dict[str, Any]:
     row: dict[str, Any] = {
         "id": number,
         "starts": starts,
@@ -76,6 +83,8 @@ def workout(number: int, starts: str, **changes: Any) -> dict[str, Any]:
             "heart_rate_avg": "140",
         },
     }
+    if summary is not None:
+        row["workout_summary"] = {**row["workout_summary"], **summary}
     row.update(changes)
     return row
 

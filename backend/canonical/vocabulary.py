@@ -61,6 +61,7 @@ class LoadModel(StrEnum):
     INTERVALS_TRAINING_LOAD = "intervals_training_load"
     GARMIN_TRAINING_LOAD = "garmin_training_load"
     TRIMP = "trimp"
+    TSS = "tss"
     UNKNOWN = "unknown"
 
 
