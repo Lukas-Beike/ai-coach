@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 DATABASE_MANAGER_CLOSED_MESSAGE = "database manager is closed"
+DATABASE_MANAGER_UNINITIALIZED_MESSAGE = "database manager is not initialized"
 
 # The application lock coordinates larger transactions and restore work that
 # span multiple repositories. DatabaseManager keeps its own connection locks.
@@ -332,7 +333,7 @@ class DatabaseManagerCache:
             with self._lock:
                 manager = self.manager
             if manager is None:
-                raise RuntimeError("database manager is not initialized")
+                raise RuntimeError(DATABASE_MANAGER_UNINITIALIZED_MESSAGE)
         token = self._current_manager.set(manager)
         try:
             with manager.unit_of_work() as db:
@@ -348,7 +349,7 @@ class DatabaseManagerCache:
             with self._lock:
                 manager = self.manager
             if manager is None:
-                raise RuntimeError("database manager is not initialized")
+                raise RuntimeError(DATABASE_MANAGER_UNINITIALIZED_MESSAGE)
         token = self._current_manager.set(manager)
         try:
             with manager.reader() as db:
@@ -364,7 +365,7 @@ class DatabaseManagerCache:
             with self._lock:
                 manager = self.manager
             if manager is None:
-                raise RuntimeError("database manager is not initialized")
+                raise RuntimeError(DATABASE_MANAGER_UNINITIALIZED_MESSAGE)
         token = self._current_manager.set(manager)
         try:
             with manager.read_snapshot() as db:
