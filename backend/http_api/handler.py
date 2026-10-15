@@ -179,8 +179,16 @@ class RequestHandler(BaseHTTPRequestHandler):
             ):
                 return
             with self.dependencies.maintenance_gate.operation():
+                # A restore may complete between the first check and entering
+                # the gate and delete the session. Re-validate the session here
+                # without repeating require_auth, which would spend a second
+                # rate-limit slot for the same request.
+                current = self.auth_service.authenticated_session(self)
+                if not current:
+                    raise AppError(401, "Anmeldung erforderlich.")
+                self.auth_service.require_csrf(self, current)
                 self.dependencies.post_dispatcher.handle_authenticated(
-                    self, path, session
+                    self, path, current
                 )
         except AppError as exc:
             self._send_app_error(exc, "POST")
