@@ -17,7 +17,11 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import PlanningStateRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.history.service import ChangeHistoryService
+from backend.history.undo_service import HistoryUndoService
 from backend.planning import planned_units
+from backend.planning.calendar_service import CalendarConflictService
+from backend.planning.changes import StructuredTrainingChangeValidator
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
 
@@ -1064,6 +1068,285 @@ class PlannedUnitServiceTests(unittest.TestCase):
         stored = json.loads(self.state()[0][0]["payload"])
         self.assertEqual(stored["name"], "Vorher")
         self.assertEqual(self.state()[1:], ([], 0))
+
+
+class _ExternalCalendarFake:
+    def __init__(self):
+        self.events = []
+
+    def list_events(self, _limit, training_relevant_only=False):
+        return list(self.events)
+
+
+class PlannedUnitTimeWindowTests(unittest.TestCase):
+    """Time-window edits: audit, undo, and same-day collision checks."""
+
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.manager = DatabaseManager(
+            Path(self.temporary_directory.name) / "time-windows.db",
+            sqlite3,
+            row_factory=row_factory,
+        )
+        with self.manager.unit_of_work() as db:
+            initialize_schema(db)
+            db.execute(
+                "INSERT INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
+                (NOW,),
+            )
+        self.ids = (uuid.UUID(int=number) for number in range(1, 100))
+        self.external = _ExternalCalendarFake()
+        self.conflicts = CalendarConflictService(self.manager, self.external)
+        self.revisions = PlanningRevisionService(PlanningStateRepository(), lambda: NOW)
+        self.service = PlannedUnitService(
+            self.manager,
+            self.revisions,
+            lambda: NOW,
+            lambda: TODAY,
+            lambda: next(self.ids),
+            lambda value: value,
+            self.conflicts,
+            lambda: None,
+        )
+
+    def tearDown(self):
+        self.manager.close()
+        self.temporary_directory.cleanup()
+
+    def unit(self, start, duration=60, **overrides):
+        entry = self.service.create(
+            {
+                "date": "2026-09-21",
+                "sport": "Run",
+                "name": "Lauf",
+                "description": f"- {duration}m 60% locker",
+                "duration_minutes": duration,
+                "start_date_local": start,
+                **overrides,
+            }
+        )
+        return entry["id"]
+
+    def stored(self, local_id):
+        with self.manager.reader() as db:
+            row = db.execute(
+                "SELECT payload FROM planned_units WHERE local_id=?", (local_id,)
+            ).fetchone()
+        return json.loads(row["payload"])
+
+    def history_rows(self):
+        with self.manager.reader() as db:
+            return [
+                dict(row)
+                for row in db.execute(
+                    "SELECT action, diff FROM change_history ORDER BY created_at"
+                ).fetchall()
+            ]
+
+    def test_time_only_edit_records_history(self):
+        local_id = self.unit("2026-09-21T10:00:00")
+        before = len(self.history_rows())
+
+        self.service.update(local_id, {"start_date_local": "2026-09-21T08:30:00"})
+
+        rows = self.history_rows()[before:]
+        self.assertEqual([row["action"] for row in rows], ["update"])
+        self.assertEqual(
+            list(json.loads(rows[0]["diff"])["fields"]), ["start_date_local"]
+        )
+
+    def test_same_day_start_collision_is_rejected(self):
+        self.unit("2026-09-21T08:00:00")
+        local_id = self.unit("2026-09-21T10:00:00")
+
+        with self.assertRaises(AppError) as caught:
+            self.service.update(local_id, {"start_date_local": "2026-09-21T08:30:00"})
+
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(
+            self.stored(local_id)["start_date_local"], "2026-09-21T10:00:00"
+        )
+
+    def test_same_day_duration_collision_is_rejected(self):
+        self.unit("2026-09-21T10:00:00")
+        local_id = self.unit("2026-09-21T08:00:00", duration=30)
+
+        with self.assertRaises(AppError) as caught:
+            self.service.update(local_id, {"duration_minutes": 150})
+
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(self.stored(local_id)["duration_minutes"], 30)
+
+    def test_non_overlapping_time_change_is_allowed(self):
+        self.unit("2026-09-21T08:00:00")
+        local_id = self.unit("2026-09-21T10:00:00")
+
+        self.service.update(local_id, {"start_date_local": "2026-09-21T09:30:00"})
+
+        self.assertEqual(
+            self.stored(local_id)["start_date_local"], "2026-09-21T09:30:00"
+        )
+
+    def test_name_only_edit_is_not_blocked_by_existing_external_overlap(self):
+        local_id = self.unit("2026-09-21T10:00:00")
+        self.external.events = [
+            {
+                "id": "race-1",
+                "name": "Wettkampf",
+                "start_date_local": "2026-09-21T10:00:00",
+                "duration_minutes": 60,
+            }
+        ]
+
+        self.service.update(local_id, {"name": "Umbenannt"})
+        self.assertEqual(self.stored(local_id)["name"], "Umbenannt")
+
+        with self.assertRaises(AppError) as caught:
+            self.service.update(local_id, {"start_date_local": "2026-09-21T10:30:00"})
+        self.assertEqual(caught.exception.status, 409)
+
+    def test_name_and_time_edit_undo_restores_exact_timestamp(self):
+        local_id = self.unit("2026-09-21T10:00:00")
+        self.service.update(
+            local_id,
+            {"name": "Neu", "start_date_local": "2026-09-21T08:15:00"},
+        )
+        undo = HistoryUndoService(
+            self.manager,
+            ChangeHistoryService(self.manager, None),
+            None,
+            None,
+            None,
+            self.service,
+            None,
+            self.revisions,
+        )
+        preview = undo.preview(self._update_change_id())
+        undo.apply(preview["proposal"]["payload"])
+
+        stored = self.stored(local_id)
+        self.assertEqual(stored["start_date_local"], "2026-09-21T10:00:00")
+        self.assertEqual(stored["name"], "Lauf")
+
+    def _update_change_id(self):
+        with self.manager.reader() as db:
+            return db.execute(
+                "SELECT id FROM change_history WHERE action='update' "
+                "ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()["id"]
+
+    def test_legacy_row_without_start_field_stays_undoable(self):
+        local_id = self.unit("2026-09-21T10:00:00")
+        self.service.update(local_id, {"name": "Neu"})
+        stored = self.stored(local_id)
+        legacy_projection = {
+            key: value for key, value in stored.items() if key != "start_date_local"
+        }
+        legacy_projection = change_history.audit_projection(
+            "planned_unit", legacy_projection
+        )
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE change_history SET after_hash=? WHERE action='update'",
+                (change_history.audit_hash(legacy_projection),),
+            )
+        undo = HistoryUndoService(
+            self.manager,
+            ChangeHistoryService(self.manager, None),
+            None,
+            None,
+            None,
+            self.service,
+            None,
+            self.revisions,
+        )
+
+        preview = undo.preview(self._update_change_id())
+        undo.apply(preview["proposal"]["payload"])
+
+        self.assertEqual(self.stored(local_id)["name"], "Lauf")
+        self.assertEqual(
+            self.stored(local_id)["start_date_local"], "2026-09-21T10:00:00"
+        )
+
+    def test_restore_takes_target_time_component_on_the_restored_date(self):
+        local_id = self.unit("2026-09-21T10:00:00")
+        with self.manager.unit_of_work() as db:
+            current = dict(
+                db.execute(
+                    "SELECT * FROM planned_units WHERE local_id=?", (local_id,)
+                ).fetchone()
+            )
+            self.service.restore_in_transaction(
+                db,
+                local_id,
+                current,
+                {
+                    "date": "2026-09-21",
+                    "start_date_local": "2026-09-21T07:15:00",
+                    "name": "Lauf",
+                },
+                "update",
+            )
+
+        self.assertEqual(
+            self.stored(local_id)["start_date_local"], "2026-09-21T07:15:00"
+        )
+
+    def _validator(self):
+        return StructuredTrainingChangeValidator(
+            PlanningStateRepository(), self.conflicts
+        )
+
+    def test_structured_batch_time_collision_is_rejected(self):
+        self.unit("2026-09-21T08:00:00")
+        local_id = self.unit("2026-09-21T10:00:00")
+
+        with (
+            self.manager.unit_of_work() as db,
+            self.assertRaises(AppError) as caught,
+        ):
+            self._validator().validate_batch(
+                [
+                    {
+                        "action": "update",
+                        "local_id": local_id,
+                        "start_date_local": "2026-09-21T08:30:00",
+                    }
+                ],
+                db,
+            )
+
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(caught.exception.reason, "plan_date_conflict")
+
+    def test_structured_batch_allows_non_overlapping_and_name_only_changes(self):
+        self.unit("2026-09-21T08:00:00")
+        local_id = self.unit("2026-09-21T10:00:00")
+        self.external.events = [
+            {
+                "id": "race-1",
+                "name": "Wettkampf",
+                "start_date_local": "2026-09-21T10:00:00",
+                "duration_minutes": 60,
+            }
+        ]
+
+        with self.manager.unit_of_work() as db:
+            self._validator().validate_batch(
+                [{"action": "update", "local_id": local_id, "name": "Umbenannt"}],
+                db,
+            )
+            self._validator().validate_batch(
+                [
+                    {
+                        "action": "update",
+                        "local_id": local_id,
+                        "start_date_local": "2026-09-21T06:30:00",
+                    }
+                ],
+                db,
+            )
 
 
 if __name__ == "__main__":

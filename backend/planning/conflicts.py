@@ -83,6 +83,13 @@ def _calendar_interval(
     return start, max(end, start + timedelta(minutes=1)), True
 
 
+def calendar_item_window(
+    item: dict[str, Any],
+) -> tuple[datetime, datetime, bool] | None:
+    """Return the local interval conflict checks use for one calendar item."""
+    return _calendar_interval(item)
+
+
 def calendar_items_conflict(
     candidate: dict[str, Any], existing: dict[str, Any]
 ) -> tuple[bool, str]:
@@ -177,6 +184,7 @@ def calendar_conflicts_for_items(
 
 __all__ = [
     "calendar_conflicts_for_items",
+    "calendar_item_window",
     "calendar_items_conflict",
     "calendar_items_share_local_day",
 ]
