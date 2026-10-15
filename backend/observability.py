@@ -270,21 +270,51 @@ def _redact_url(match: re.Match[str]) -> str:
         return "[REDACTED_URL]" + trailing
 
 
-_QUERY_PARAM_RE = re.compile(r"([?&])([^=&?\s\"'#]+)=([^&\s\"'#]*)")
+_QUERY_PARAM_RE = re.compile(r"([?&])([^=&?\s\"'#]+)(=[^&\s\"'#]*)?")
+# Technical request parameters used by this app's routes. Every other value is
+# free text or identifier-like data, so it is masked in logs.
+LOG_SAFE_QUERY_KEYS = frozenset(
+    {
+        "client_turn_id",
+        "cursor",
+        "date",
+        "days",
+        "end",
+        "limit",
+        "local",
+        "since",
+        "start",
+        "v",
+    }
+)
+_LOG_SAFE_QUERY_VALUE_RE = re.compile(r"[A-Za-z0-9._:-]{0,128}")
+_LOG_SAFE_QUERY_KEY_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 
 def redact_request_query(value: str) -> str:
-    """Mask credential-bearing query values in a request target or request line.
+    """Mask request-target query values unless they are allowlisted technical values.
 
-    Unlike ``redact_text`` this also handles relative targets such as the OAuth
+    Credential-named keys are always masked. Other values are kept only for the
+    ``LOG_SAFE_QUERY_KEYS`` allowlist with identifier-like content. Unlike
+    ``redact_text`` this also handles relative targets such as the OAuth
     callback path, which never carry a scheme or host.
     """
 
     def _mask(match: re.Match[str]) -> str:
-        key = unquote(match.group(2)).casefold().replace("-", "_")
-        if key in REDACTED_URL_QUERY_KEYS:
-            return f"{match.group(1)}{match.group(2)}={_REDACTED}"
-        return match.group(0)
+        separator, raw_key, equals_value = match.group(1, 2, 3)
+        key = unquote(raw_key)
+        if not _LOG_SAFE_QUERY_KEY_RE.fullmatch(key):
+            return f"{separator}{_REDACTED}"
+        normalized = key.casefold().replace("-", "_")
+        if normalized in REDACTED_URL_QUERY_KEYS:
+            return f"{separator}{raw_key}={_REDACTED}"
+        if equals_value is None:
+            return match.group(0)
+        if normalized in LOG_SAFE_QUERY_KEYS and _LOG_SAFE_QUERY_VALUE_RE.fullmatch(
+            unquote(equals_value[1:])
+        ):
+            return match.group(0)
+        return f"{separator}{raw_key}={_REDACTED}"
 
     return _QUERY_PARAM_RE.sub(_mask, str(value or ""))
 

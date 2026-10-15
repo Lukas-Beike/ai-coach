@@ -740,6 +740,34 @@ class HttpAccessLogLevelTests(unittest.TestCase):
         self.assertEqual(error_extra["event"], "http_access")
         self.assertEqual(error_extra["context"]["path"], "/api/state/events")
 
+    def test_access_log_masks_free_text_query_on_success_and_error_paths(self):
+        logger = _RecordingLogger()
+        handler = RequestHandler.__new__(RequestHandler)
+        handler.command = "GET"
+        target = (
+            "/api/chat/history?q=secret-marker&limit=20&cursor=abc123"
+            "&code=SECRETCODE&access_token=SECRETTOKEN"
+        )
+        handler.path = target
+        handler.requestline = f"GET {target} HTTP/1.1"
+        handler.dependencies = SimpleNamespace(logger=logger)
+
+        handler.log_request(200)
+        handler.log_request(404)
+        handler.log_error('"%s" %s', handler.requestline, "404")
+
+        self.assertEqual(len(logger.records), 3)
+        for _level, message, extra in logger.records:
+            with self.subTest(message=message):
+                self.assertNotIn("secret-marker", message)
+                self.assertNotIn("SECRETCODE", message)
+                self.assertNotIn("SECRETTOKEN", message)
+                self.assertIn("limit=20", message)
+                self.assertIn("cursor=abc123", message)
+                self.assertIn("q=[REDACTED]", message)
+                self.assertNotIn("secret-marker", repr(extra))
+                self.assertEqual(extra["context"]["path"], "/api/chat/history")
+
 
 if __name__ == "__main__":
     unittest.main()

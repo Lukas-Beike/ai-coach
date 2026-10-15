@@ -847,7 +847,6 @@ def external_call(
                 "operation": operation,
                 "duration_ms": duration_ms,
                 "error": observability.safe_diagnostic_error(exc),
-                "exception_message": str(exc),
             },
         )
         raise
@@ -872,7 +871,6 @@ def external_call(
                 "operation": operation,
                 "duration_ms": duration_ms,
                 "error": observability.safe_diagnostic_error(exc),
-                "exception_message": str(exc),
             },
         )
         raise provider_error(service, "client") from exc

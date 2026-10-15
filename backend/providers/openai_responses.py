@@ -19,7 +19,11 @@ __all__ = [
     "response_failure_reason",
     "response_text",
     "validate_response",
+    "without_free_text",
 ]
+
+# Provider free text (for example error messages) is never persisted in diagnostics.
+_FREE_TEXT_KEYS = frozenset({"message"})
 
 
 def response_failure_reason(
@@ -159,7 +163,11 @@ def response_diagnostic_details(response: Any) -> dict[str, str]:
 
 
 def response_diagnostic_content(response: Any) -> dict[str, Any]:
-    """Expose provider error content for the bounded, redacted diagnostic store."""
+    """Expose provider error content for the bounded, redacted diagnostic store.
+
+    Free-text ``message`` fields are never kept; code, type, param and the
+    other structured fields remain.
+    """
     if not isinstance(response, dict):
         return {}
     error = _response_error_object(response)
@@ -169,17 +177,29 @@ def response_diagnostic_content(response: Any) -> dict[str, Any]:
             ("code", "provider_error_code_raw"),
             ("type", "provider_error_type"),
             ("param", "provider_error_parameter"),
-            ("message", "provider_error_message"),
         )
         if isinstance(error.get(source), str) and error[source].strip()
     }
     incomplete = response.get("incomplete_details")
     if isinstance(incomplete, dict):
-        content["incomplete_details"] = incomplete
+        content["incomplete_details"] = without_free_text(incomplete)
     last_error = response.get("last_error")
     if isinstance(last_error, dict):
-        content["last_error"] = last_error
+        content["last_error"] = without_free_text(last_error)
     return content
+
+
+def without_free_text(value: Any) -> Any:
+    """Return a copy of a provider payload without free-text ``message`` fields."""
+    if isinstance(value, dict):
+        return {
+            key: without_free_text(item)
+            for key, item in value.items()
+            if key not in _FREE_TEXT_KEYS
+        }
+    if isinstance(value, list):
+        return [without_free_text(item) for item in value]
+    return value
 
 
 def _response_error_object(response: dict[str, Any]) -> dict[str, Any]:
