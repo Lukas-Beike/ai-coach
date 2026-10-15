@@ -183,7 +183,7 @@ class WeatherRecommendationsTests(unittest.TestCase):
         self.assertEqual(result["wind_gusts"], 35)
         self.assertIn("Böen bis 35 km/h", result["reason"])
 
-    def test_all_missing_gusts_fall_back_to_zero(self):
+    def test_all_missing_gusts_stay_unknown(self):
         target = date(2026, 9, 5)
         forecast = forecast_for(target)
         forecast["hourly"]["wind_gusts_10m"] = [None] * 24
@@ -191,8 +191,38 @@ class WeatherRecommendationsTests(unittest.TestCase):
             {"type": "Ride", "date": target.isoformat(), "moving_time": 3600},
             forecast,
         )
-        self.assertEqual(result["wind_gusts"], 0)
-        self.assertIn("Böen bis 0 km/h", result["reason"])
+        self.assertIsNone(result["wind_gusts"])
+        self.assertNotIn("Böen", result["reason"])
+
+    def test_all_measurements_missing_yield_no_recommendation(self):
+        target = date(2026, 9, 5)
+        forecast = forecast_for(target)
+        for key in forecast["hourly"]:
+            if key != "time":
+                forecast["hourly"][key] = [None] * 24
+        result = weather_recommendation(
+            {"type": "Ride", "date": target.isoformat(), "moving_time": 7200},
+            forecast,
+        )
+        self.assertIsNone(result)
+
+    def test_missing_wind_keeps_precipitation_and_temperature_recommendation(self):
+        target = date(2026, 9, 5)
+        forecast = forecast_for(target)
+        for key in ("wind_speed_10m", "wind_gusts_10m", "wind_direction_10m"):
+            forecast["hourly"][key] = [None] * 24
+        result = weather_recommendation(
+            {"type": "Ride", "date": target.isoformat(), "moving_time": 3600},
+            forecast,
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["precipitation_probability"], 5)
+        self.assertEqual(result["apparent_temperature"], 18)
+        self.assertIsNone(result["wind_speed"])
+        self.assertIsNone(result["wind_direction"])
+        self.assertIsNone(result["wind_gusts"])
+        self.assertNotIn("km/h Wind", result["reason"])
+        self.assertNotIn("Böen", result["reason"])
 
 
 if __name__ == "__main__":
