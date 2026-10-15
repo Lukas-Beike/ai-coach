@@ -146,7 +146,8 @@ class GarminDailyHealthTests(unittest.TestCase):
                 {"date": "2026-10-14", "bmrKilocalories": 2332},
                 {"date": "2026-10-13", "bmrKilocalories": 2324},
                 {"date": "2026-10-01", "bmrKilocalories": 3000},
-            ]
+            ],
+            "source_freshness": {"daily_stats": {"freshness": "current"}},
         }
 
         result = garmin_daily_expenditure(snapshot, "2026-10-15", date(2026, 10, 15))
@@ -187,11 +188,46 @@ class GarminDailyHealthTests(unittest.TestCase):
         for name, daily_stats in cases.items():
             with self.subTest(name):
                 result = garmin_daily_expenditure(
-                    {"daily_stats": daily_stats}, "2026-10-15", date(2026, 10, 15)
+                    {
+                        "daily_stats": daily_stats,
+                        "source_freshness": {"daily_stats": {"freshness": "current"}},
+                    },
+                    "2026-10-15",
+                    date(2026, 10, 15),
                 )
                 self.assertIsNone(result["projected_total_kcal"])
                 self.assertIsNone(result["projection_resting_kcal"])
                 self.assertIsNone(result["projection_reference_date"])
+
+    def test_running_day_projection_ignores_records_retained_by_a_partial_read(self):
+        daily_stats = [
+            {
+                "date": "2026-10-15",
+                "activeKilocalories": 23,
+                "bmrKilocalories": 1180,
+                "totalKilocalories": 1203,
+            },
+            # Yesterday's midday value, kept because a refresh did not complete.
+            {"date": "2026-10-14", "bmrKilocalories": 1200},
+        ]
+        freshness_cases = {
+            "partial": {"daily_stats": {"freshness": "partial"}},
+            "stale": {"daily_stats": {"freshness": "stale"}},
+            "unknown": {},
+            "malformed": {"daily_stats": "current"},
+        }
+        for name, source_freshness in freshness_cases.items():
+            with self.subTest(name):
+                result = garmin_daily_expenditure(
+                    {
+                        "daily_stats": daily_stats,
+                        "source_freshness": source_freshness,
+                    },
+                    "2026-10-15",
+                    date(2026, 10, 15),
+                )
+                self.assertIsNone(result["projected_total_kcal"])
+                self.assertEqual(result["total_kcal"], 1203)
 
     def test_nested_records_aliases_and_same_date_merge(self):
         snapshot = {

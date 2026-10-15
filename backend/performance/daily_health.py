@@ -179,6 +179,39 @@ def garmin_daily_health_metrics(
     return result
 
 
+def _projection_reference(
+    snapshot: dict[str, Any], current_date: date
+) -> tuple[date, float | int] | None:
+    """Return the resting calories of the latest complete day within a week.
+
+    Retained records from a partial or failed refresh may still hold a day's
+    running value, so a reference needs a fully current daily-stats read.
+    """
+    freshness = snapshot.get("source_freshness")
+    daily_stats = freshness.get("daily_stats") if isinstance(freshness, dict) else None
+    if not isinstance(daily_stats, dict) or daily_stats.get("freshness") != "current":
+        return None
+    reference: tuple[date, float | int] | None = None
+    for record_date, record in performance_recovery.dated_garmin_recovery_records(
+        snapshot.get("daily_stats")
+    ):
+        try:
+            record_day = date.fromisoformat(record_date)
+        except ValueError:
+            continue
+        resting = _as_number(
+            _first_present(record, GARMIN_DAILY_EXPENDITURE_FIELDS["resting_kcal"])
+        )
+        if (
+            0 < (current_date - record_day).days <= 7
+            and resting is not None
+            and resting > 0
+            and (reference is None or record_day > reference[0])
+        ):
+            reference = (record_day, resting)
+    return reference
+
+
 def _projected_expenditure(
     snapshot: dict[str, Any],
     values: dict[str, Any],
@@ -199,23 +232,7 @@ def _projected_expenditure(
     active = values["active_kcal"]
     if day != current_date or active is None:
         return projection
-    reference: tuple[date, float | int] | None = None
-    for record_date, record in performance_recovery.dated_garmin_recovery_records(
-        snapshot.get("daily_stats")
-    ):
-        try:
-            record_day = date.fromisoformat(record_date)
-        except ValueError:
-            continue
-        if not 0 < (current_date - record_day).days <= 7:
-            continue
-        resting = _as_number(
-            _first_present(record, GARMIN_DAILY_EXPENDITURE_FIELDS["resting_kcal"])
-        )
-        if resting is None or resting <= 0:
-            continue
-        if reference is None or record_day > reference[0]:
-            reference = (record_day, resting)
+    reference = _projection_reference(snapshot, current_date)
     if reference is None:
         return projection
     projected = reference[1] + active
