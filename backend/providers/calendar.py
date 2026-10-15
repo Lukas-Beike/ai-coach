@@ -845,12 +845,13 @@ def _ical_overlaps(
 def _ical_source_window(first: date, last: date, days_before: int) -> tuple[date, date]:
     """Widen a local window so source-zone recurrence dates are never missed.
 
-    Recurrences are expanded in the DTSTART zone, whose calendar date can differ
-    from the athlete-local date by one day; the local overlap check filters later.
+    Recurrences are expanded in the DTSTART zone. UTC offsets span up to 26 hours,
+    so its calendar date can differ from the athlete-local date by two days; the
+    local overlap check filters the extra instances later.
     """
     return (
         date.fromordinal(max(1, first.toordinal() - days_before)),
-        date.fromordinal(min(date.max.toordinal(), last.toordinal() + 1)),
+        date.fromordinal(min(date.max.toordinal(), last.toordinal() + 2)),
     )
 
 

@@ -646,6 +646,28 @@ class CalendarProviderTests(unittest.TestCase):
             ["2026-10-19T09:00:00+02:00", "2026-10-26T09:00:00+01:00"],
         )
 
+    def test_source_zone_two_days_ahead_keeps_the_last_local_day(self):
+        # Kiritimati (UTC+14) is 25 hours ahead of Pago Pago (UTC-11): the
+        # occurrence on the last local day falls two source-zone days later.
+        daily = parse(
+            feed(
+                "UID:kiritimati\r\nDTSTART;TZID=Pacific/Kiritimati:20261018T003000"
+                "\r\nDTEND;TZID=Pacific/Kiritimati:20261018T010000\r\nRRULE:FREQ=DAILY"
+            ),
+            start=date(2026, 10, 18),
+            end=date(2026, 10, 21),
+            zone=ZoneInfo("Pacific/Pago_Pago"),
+        )
+        self.assertEqual(
+            [item["start_local"] for item in daily],
+            [
+                "2026-10-18T23:30:00-11:00",
+                "2026-10-19T23:30:00-11:00",
+                "2026-10-20T23:30:00-11:00",
+                "2026-10-21T23:30:00-11:00",
+            ],
+        )
+
     def test_floating_recurrence_keeps_local_wall_time_across_dst(self):
         floating = parse(
             feed("UID:floating\r\nDTSTART:20261019T090000\r\nRRULE:FREQ=WEEKLY"),
