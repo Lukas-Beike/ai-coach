@@ -247,6 +247,7 @@ class PrivacyDeleteDependencies:
     planning_revision_service: PlanningRevisionService
     openai_client: OpenAIResponsesClient
     logger: logging.Logger
+    discard_diagnostic_cache: Callable[[], None]
 
 
 class PrivacyDeleteService:
@@ -336,6 +337,9 @@ class PrivacyDeleteService:
                     db, "profile", json.dumps(DEFAULT_PROFILE)
                 )
                 dependencies.planning_revision_service.mark_reset_pending()
+            # The KV rows are gone; drop the process-wide diagnostic cache so deleted
+            # entries are neither served nor written back on the next flush.
+            dependencies.discard_diagnostic_cache()
             return {
                 "status": "ok",
                 "local_data_deleted": True,
@@ -381,6 +385,7 @@ class PrivacyStateDependencies:
     planning_revision_service: PlanningRevisionService
     openai_client: Callable[[], OpenAIResponsesClient]
     logger: logging.Logger
+    discard_diagnostic_cache: Callable[[], None]
 
 
 @dataclass(frozen=True)
@@ -428,6 +433,7 @@ class PrivacyAssembly:
         self._planning_revision_service = state.planning_revision_service
         self._openai_client = state.openai_client
         self._logger = state.logger
+        self._discard_diagnostic_cache = state.discard_diagnostic_cache
         self._data_dir = archive.data_dir
         self._database_path = archive.database_path
         self._maximum_export_bytes = archive.maximum_export_bytes
@@ -462,6 +468,7 @@ class PrivacyAssembly:
                 planning_revision_service=self._planning_revision_service,
                 openai_client=self._openai_client(),
                 logger=self._logger,
+                discard_diagnostic_cache=self._discard_diagnostic_cache,
             )
         )
 

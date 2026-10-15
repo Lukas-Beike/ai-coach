@@ -797,6 +797,7 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
             planning_revision_service=PLANNING_REVISION_SERVICE,
             openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
             logger=LOGGER,
+            discard_diagnostic_cache=lambda: DIAGNOSTIC_CAPTURE.discard_cache(),
         ),
         archive=PrivacyArchiveSettings(
             data_dir=lambda: DATA_DIR,
@@ -835,6 +836,8 @@ BACKUP_ASSEMBLY = BackupAssembly(
             sync_wake_event=shared_sync_job_wake_event,
             coach_wake_event=COACH_JOB_WORKER.wake_event,
             redact=REDACTOR.redact_text,
+            discard_diagnostic_cache=lambda: DIAGNOSTIC_CAPTURE.discard_cache(),
+            canonical_backfill_start=lambda: CANONICAL_BACKFILL.worker.start(),
         ),
     )
 )

@@ -58,6 +58,7 @@ class PrivacyAssemblyTests(unittest.TestCase):
                     planning_revision_service=Mock(),
                     openai_client=Mock(return_value=Mock()),
                     logger=Mock(),
+                    discard_diagnostic_cache=Mock(),
                 ),
                 archive=PrivacyArchiveSettings(
                     data_dir=Mock(return_value=Path("temporary-data")),
@@ -132,6 +133,8 @@ class BackupAssemblyTests(unittest.TestCase):
                         sync_wake_event=lambda: sync_wake,
                         coach_wake_event=coach_wake,
                         redact=Mock(),
+                        discard_diagnostic_cache=Mock(),
+                        canonical_backfill_start=Mock(),
                     ),
                 )
             )

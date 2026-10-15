@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
 from backend.errors import AppError
+from backend.observability import DiagnosticCapture
 from backend.privacy import (
     PRIVACY_DELETE_CONFIRMATION_TEXT,
     PrivacyDeleteDependencies,
@@ -29,6 +31,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
             planning_revision_service=Mock(),
             openai_client=Mock(),
             logger=Mock(),
+            discard_diagnostic_cache=Mock(),
         )
         return PrivacyDeleteService(PrivacyDeleteDependencies(**vars(mocks))), mocks
 
@@ -76,6 +79,63 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
         self.assertEqual(dependencies.database_manager.reader.call_count, 1)
         self.assertEqual(dependencies.database_manager.unit_of_work.call_count, 1)
         dependencies.planning_revision_service.mark_reset_pending.assert_called_once_with()
+        dependencies.discard_diagnostic_cache.assert_called_once_with()
+
+    def test_deleted_diagnostic_entries_do_not_return_or_resurrect_after_delete(
+        self,
+    ) -> None:
+        # A real capture whose unflushed entry lives only in the process cache.
+        stored: dict[str, str] = {}
+        redactor = Mock()
+        redactor.sanitize_diagnostic_value.side_effect = lambda value: value
+        capture = DiagnosticCapture(
+            stored.get, stored.__setitem__, redactor, batch_size=50
+        )
+        capture.capture("before_delete_marker", {"text": "synthetic before"})
+
+        def execute(sql, *_params):
+            if sql == "DELETE FROM kv":
+                stored.clear()
+            result = MagicMock()
+            result.fetchone.return_value = {"count": 0}
+            return result
+
+        db = MagicMock()
+        db.execute.side_effect = execute
+        database_manager = MagicMock()
+        database_manager.unit_of_work.return_value.__enter__.return_value = db
+        key_values = Mock()
+        key_values.get.return_value = ""
+        service = PrivacyDeleteService(
+            PrivacyDeleteDependencies(
+                database_manager=database_manager,
+                database_lock=MagicMock(),
+                key_value_repository=key_values,
+                maintenance_gate=MagicMock(),
+                planning_revision_service=Mock(),
+                openai_client=Mock(),
+                logger=Mock(),
+                discard_diagnostic_cache=capture.discard_cache,
+            )
+        )
+
+        service.delete(PRIVACY_DELETE_CONFIRMATION_TEXT)
+
+        self.assertEqual(capture.entries(), [])
+        self.assertEqual(capture.status()["entries"], 0)
+        capture.capture("after_delete_marker", {"text": "synthetic after"})
+        capture.flush()
+        self.assertEqual(
+            [
+                entry["event"]
+                for entry in json.loads(stored["diagnostic_capture_entries"])
+            ],
+            ["after_delete_marker"],
+        )
+        self.assertEqual(
+            [entry["event"] for entry in capture.entries()],
+            ["after_delete_marker"],
+        )
 
 
 class PrivacyDeleteDialogTextContractTests(unittest.TestCase):

@@ -792,31 +792,38 @@ class DiagnosticCapture:
         self._total_bytes = 2
         self._entries_cache: list[dict[str, Any]] | None = None
         self._dirty_count = 0
+        # Bumped by discard_cache(); a read that started before a discard must not
+        # install its stale KV snapshot as the cache.
+        self._generation = 0
         self._lock = threading.RLock()
         self._flush_lock = threading.Lock()
 
     def _load_entries(self) -> list[dict[str, Any]]:
-        with self._lock:
-            if self._entries_cache is not None:
+        while True:
+            with self._lock:
+                if self._entries_cache is not None:
+                    return self._entries_cache
+                generation = self._generation
+            try:
+                raw = json.loads(self._get_kv(self._entries_key) or "[]")
+            except TypeError, ValueError:
+                raw = []
+            if not isinstance(raw, list):
+                raw = []
+            loaded_entries = [
+                self._bounded_entry(entry) for entry in raw if isinstance(entry, dict)
+            ][-self._max_entries :]
+            with self._lock:
+                if self._generation != generation:
+                    continue
+                if self._entries_cache is None:
+                    self._entries_cache = loaded_entries
+                    self._entry_sizes = [
+                        self._entry_bytes(entry) for entry in loaded_entries
+                    ]
+                    self._total_bytes = 2 + sum(self._entry_sizes)
+                    self._trim()
                 return self._entries_cache
-        try:
-            raw = json.loads(self._get_kv(self._entries_key) or "[]")
-        except TypeError, ValueError:
-            raw = []
-        if not isinstance(raw, list):
-            raw = []
-        loaded_entries = [
-            self._bounded_entry(entry) for entry in raw if isinstance(entry, dict)
-        ][-self._max_entries :]
-        with self._lock:
-            if self._entries_cache is None:
-                self._entries_cache = loaded_entries
-                self._entry_sizes = [
-                    self._entry_bytes(entry) for entry in loaded_entries
-                ]
-                self._total_bytes = 2 + sum(self._entry_sizes)
-                self._trim()
-            return self._entries_cache
 
     @staticmethod
     def _entry_bytes(entry: dict[str, Any]) -> int:
@@ -949,9 +956,21 @@ class DiagnosticCapture:
                 self._dirty_count = 0
         return {"ok": True, "entries": 0}
 
+    def discard_cache(self) -> None:
+        """Forget the in-memory entries after the stored state was cleared or replaced.
+
+        Unflushed entries are dropped, and the next read reloads the stored entries.
+        Nothing is written to the store.
+        """
+        with self._flush_lock, self._lock:
+            self._generation += 1
+            self._entries_cache = None
+            self._entry_sizes = []
+            self._total_bytes = 2
+            self._dirty_count = 0
+
     def capture(self, event: str, details: dict[str, Any]) -> None:
         """Redact content before it reaches the in-memory cache or database."""
-        self._load_entries()
         entry = self._bounded_entry(
             {
                 "timestamp": datetime.now(UTC).isoformat(),
@@ -959,15 +978,22 @@ class DiagnosticCapture:
                 "details": details,
             }
         )
-        with self._lock:
-            entries = self._entries_cache
-            assert entries is not None
-            entries.append(entry)
-            size = self._entry_bytes(entry)
-            self._entry_sizes.append(size)
-            self._total_bytes += size
-            self._trim()
-            self._dirty_count += 1
-            should_flush = self._dirty_count >= min(self._batch_size, self._max_entries)
+        while True:
+            entries = self._load_entries()
+            with self._lock:
+                # A discard between the load and the append would leave the entry
+                # in a list that is no longer the cache; load again instead.
+                if self._entries_cache is not entries:
+                    continue
+                entries.append(entry)
+                size = self._entry_bytes(entry)
+                self._entry_sizes.append(size)
+                self._total_bytes += size
+                self._trim()
+                self._dirty_count += 1
+                should_flush = self._dirty_count >= min(
+                    self._batch_size, self._max_entries
+                )
+            break
         if should_flush or event.endswith("_failed"):
             self.flush()

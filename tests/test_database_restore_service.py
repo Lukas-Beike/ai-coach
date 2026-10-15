@@ -39,6 +39,8 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.coach_failures = Mock()
         self.sync_wake = Mock()
         self.coach_wake = Mock()
+        self.discard_diagnostic_cache = Mock()
+        self.canonical_backfill_start = Mock()
         self.calls: list[str] = []
 
         def stage(payload: bytes | Iterable[bytes]) -> Path:
@@ -79,6 +81,12 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         )
         self.sync_wake.set.side_effect = lambda: self.calls.append("sync-wake")
         self.coach_wake.set.side_effect = lambda: self.calls.append("coach-wake")
+        self.discard_diagnostic_cache.side_effect = lambda: self.calls.append(
+            "diagnostics-discard"
+        )
+        self.canonical_backfill_start.side_effect = lambda: self.calls.append(
+            "backfill-start"
+        )
         self.service = DatabaseRestoreService(
             RestoreDependencies(
                 validation=self.validation,
@@ -93,6 +101,8 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
                 coach_wake=self.coach_wake,
                 config=DatabaseRestoreConfig(self.data_dir, self.database_path),
                 redact=lambda _message: "redacted",
+                discard_diagnostic_cache=self.discard_diagnostic_cache,
+                canonical_backfill_start=self.canonical_backfill_start,
             )
         )
 
@@ -121,14 +131,36 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
                 "validate",
                 "checkpoint",
                 "drain",
+                "diagnostics-discard",
                 "sync-resume",
                 "coach-resume",
+                "backfill-start",
                 "sync-wake",
                 "coach-wake",
             ],
         )
         self.coach_jobs.resume_interrupted.assert_called_once_with(self.coach_failures)
         self.assertFalse(self.gate.state()["active"])
+
+    def test_restore_restarts_the_canonical_backfill_worker_once_after_the_swap(
+        self,
+    ) -> None:
+        # The worker may already have exited (done or failed) before the restore.
+        self.service.restore(b"replacement database")
+
+        self.canonical_backfill_start.assert_called_once_with()
+        self.discard_diagnostic_cache.assert_called_once_with()
+
+    def test_invalid_backup_neither_restarts_backfill_nor_discards_diagnostics(
+        self,
+    ) -> None:
+        self.validation.validate.side_effect = AppError(400, "invalid backup")
+
+        with self.assertRaises(AppError):
+            self.service.restore(b"replacement database")
+
+        self.canonical_backfill_start.assert_not_called()
+        self.discard_diagnostic_cache.assert_not_called()
 
     def test_chunked_upload_restores_like_whole_bytes(self) -> None:
         chunks = iter([b"replacement ", b"database"])

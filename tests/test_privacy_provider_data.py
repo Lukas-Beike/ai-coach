@@ -385,6 +385,7 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
                 planning_revision_service=_PlanningRevision(),
                 openai_client=_OpenAI(),
                 logger=logging.getLogger("test.privacy.provider"),
+                discard_diagnostic_cache=lambda: None,
             )
         )
 

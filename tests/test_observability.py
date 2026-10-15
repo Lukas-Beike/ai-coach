@@ -769,5 +769,69 @@ class HttpAccessLogLevelTests(unittest.TestCase):
                 self.assertEqual(extra["context"]["path"], "/api/chat/history")
 
 
+class DiagnosticCaptureDiscardTests(unittest.TestCase):
+    def test_discarded_cache_drops_unflushed_entries_and_never_writes_them_back(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), batch_size=50
+        )
+        capture.capture("before_delete_marker", {"text": "synthetic before"})
+        self.assertEqual(capture.status()["entries"], 1)
+
+        # Privacy deletion clears the store, then the cache is discarded.
+        with store.lock:
+            store.values.clear()
+        capture.discard_cache()
+
+        self.assertEqual(capture.status()["entries"], 0)
+        self.assertEqual(capture.entries(), [])
+        capture.flush()
+        self.assertNotIn("diagnostic_capture_entries", store.values)
+
+        capture.capture("after_delete_marker", {"text": "synthetic after"})
+        capture.flush()
+        stored = json.loads(store.get("diagnostic_capture_entries"))
+        self.assertEqual([entry["event"] for entry in stored], ["after_delete_marker"])
+        self.assertEqual(
+            [entry["event"] for entry in capture.entries()], ["after_delete_marker"]
+        )
+
+    def test_restore_swap_shows_only_restored_entries_after_discard(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), batch_size=1
+        )
+        capture.capture("before_restore_marker", {"text": "synthetic before"})
+        self.assertEqual(
+            [entry["event"] for entry in capture.entries()], ["before_restore_marker"]
+        )
+
+        # The swapped-in database carries its own captured diagnostics.
+        restored = [
+            {
+                "timestamp": "2026-10-01T00:00:00+00:00",
+                "event": "restored_marker",
+                "details": {"text": "synthetic restored"},
+            }
+        ]
+        with store.lock:
+            store.values.clear()
+            store.values["diagnostic_capture_entries"] = json.dumps(restored)
+        capture.discard_cache()
+
+        self.assertEqual(
+            [entry["event"] for entry in capture.entries()], ["restored_marker"]
+        )
+        capture.capture("after_restore_marker", {"text": "synthetic after"})
+        stored = json.loads(store.get("diagnostic_capture_entries"))
+        self.assertEqual(
+            [entry["event"] for entry in stored],
+            ["restored_marker", "after_restore_marker"],
+        )
+        self.assertNotIn(
+            "before_restore_marker", store.get("diagnostic_capture_entries")
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -41,6 +41,8 @@ class RestoreDependencies:
     coach_wake: Any
     config: DatabaseRestoreConfig
     redact: Callable[[str], str]
+    discard_diagnostic_cache: Callable[[], None]
+    canonical_backfill_start: Callable[[], None]
 
 
 class DatabaseRestoreService:
@@ -79,6 +81,9 @@ class DatabaseRestoreService:
         try:
             dependencies.sync_jobs.resume_interrupted()
             dependencies.coach_jobs.resume_interrupted(dependencies.coach_failures)
+            # Restored canonical backfill state may be unfinished; the worker exits
+            # once done or failed, so restart it (idempotent while alive).
+            dependencies.canonical_backfill_start()
         finally:
             dependencies.sync_wake.set()
             dependencies.coach_wake.set()
@@ -122,6 +127,7 @@ class DatabaseRestoreService:
                 # The live database is already replaced here; failures must not be
                 # reported as validation errors.
                 try:
+                    self._dependencies.discard_diagnostic_cache()
                     self._resume()
                 except Exception as exc:
                     raise AppError(
