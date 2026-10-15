@@ -573,6 +573,8 @@ class RemoteTierTests(unittest.TestCase):
             "Ja, bitte übertrage die drei Einheiten dorthin.",
             "Ja, mach das bitte für diese drei Einheiten.",
             "Ja, bitte.",
+            "Ja, lade 3 Einheiten hoch.",
+            "Yes, please upload the three sessions.",
         ):
             with self.subTest(reply=reply):
                 self.assertTrue(_authority(reply, previous).remote_requested)
@@ -604,6 +606,13 @@ class RemoteTierTests(unittest.TestCase):
             "Ja, zunächst nur in die Bibliothek.",
             "Mach lieber eine Pause-Woche daraus.",
             "Ja, stattdessen die Kraftwoche planen.",
+            # Unrelated instructions after a yes or a verb anchor, without any
+            # qualifier word, must not count as naming the sync.
+            "Ja, in der Bibliothek lassen.",
+            "Mach eine Pause-Woche daraus.",
+            "Klingt nach zu viel, kürze die Woche.",
+            "Ja, kürze auf 45 Minuten.",
+            "Genau, plane die Kraftwoche.",
         ):
             with self.subTest(reply=reply):
                 self.assertFalse(gate.is_contextual_affirmation(reply))

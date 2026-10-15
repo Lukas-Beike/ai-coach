@@ -260,80 +260,36 @@ def is_bare_affirmation(text: str) -> bool:
     )
 
 
-# A reply that starts with an affirmation and adds detail, such as "Ja, bitte
-# übertrage die drei Einheiten dorthin.", accepts a sync offer in the previous
-# assistant message. Any qualifier, hedge, question or negation keeps it denied.
+# A reply that starts with a plain yes and only names what to transfer, such as
+# "Ja, bitte übertrage die drei Einheiten dorthin.", accepts a sync offer in the
+# previous assistant message. It fails closed: every word after the yes must be
+# filler, a scope or reference word, or a transfer verb, so any other
+# instruction ("Ja, in der Bibliothek lassen.") never grants a remote write.
 _CONTEXT_AFFIRMATION_MAX_TOKENS = 15
-_CONTEXT_BLOCKERS = frozenset(
+_CONTEXT_ANCHORS = frozenset(
+    {"ja", "jo", "jap", "jup", "yes", "yep", "ok", "okay", "gerne", "gern",
+     "einverstanden"}
+)  # fmt: skip
+_CONTEXT_DETAIL = frozenset(
     normalize(word)
     for word in (
-        "aber",
-        "sondern",
-        "but",
-        "nur",
-        "only",
-        "lokal",
-        "local",
-        "lokale",
-        "lokalen",
-        "lokales",
-        "lokaler",
-        "erst",
-        "erstmal",
-        "zunächst",
-        "vorerst",
-        "first",
-        "später",
-        "later",
-        "lieber",
-        "stattdessen",
-        "instead",
-        "warte",
-        "wait",
-        "vielleicht",
-        "eventuell",
-        "maybe",
-        "glaube",
-        "glaub",
-        "denke",
-        "falls",
-        "wenn",
-        "if",
-        "morgen",
-        "wie",
-        "was",
-        "wann",
-        "wo",
-        "woher",
-        "wohin",
-        "wer",
-        "wem",
-        "wen",
-        "welche",
-        "welcher",
-        "welches",
-        "welchen",
-        "welchem",
-        "warum",
-        "wieso",
-        "weshalb",
-        "wozu",
-        "what",
-        "how",
-        "when",
-        "where",
-        "which",
-        "why",
-        "who",
+        "mach", "machen", "die", "den", "der", "dem", "diese", "diesen",
+        "dieser", "alle", "beide", "beiden", "zwei", "drei", "vier", "fünf",
+        "einheit", "einheiten", "für", "dorthin", "dahin", "hin", "rüber",
+        "übertrag", "übertrage", "übertragen", "lade", "laden", "hoch",
+        "hochladen", "sync", "synce", "syncen", "synchronisiere",
+        "synchronisieren", "please", "do", "it", "them", "the", "these",
+        "those", "all", "both", "two", "three", "four", "five", "session",
+        "sessions", "workout", "workouts", "there", "upload", "push",
     )
-)
+)  # fmt: skip
 
 
 def is_contextual_affirmation(text: str) -> bool:
-    """Short reply that starts with an affirmation and adds no qualification.
+    """Short reply: a plain yes followed only by transfer scope or filler.
 
-    Only meaningful after a sync offer; it fails closed on negation, questions,
-    information questions, deferral, locality and hedging anywhere in the reply.
+    Only meaningful after a sync offer; negation, questions and any word outside
+    the allowlist keep it denied.
     """
     value = normalize(text)
     if _NEGATION.search(value) or _QUESTION.search(value) or "doch nicht" in value:
@@ -341,8 +297,14 @@ def is_contextual_affirmation(text: str) -> bool:
     tokens = re.findall(r"[a-z0-9]+", value)
     return (
         0 < len(tokens) <= _CONTEXT_AFFIRMATION_MAX_TOKENS
-        and tokens[0] in _AFFIRMATION_ANCHORS
-        and not any(token in _CONTEXT_BLOCKERS for token in tokens)
+        and tokens[0] in _CONTEXT_ANCHORS
+        and all(
+            token.isdigit()
+            or token in _CONTEXT_ANCHORS
+            or token in _AFFIRMATION_FILLER
+            or token in _CONTEXT_DETAIL
+            for token in tokens[1:]
+        )
     )
 
 
