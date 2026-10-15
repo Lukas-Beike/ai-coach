@@ -402,9 +402,13 @@ function renderNutritionDay(day) {
   document.querySelector("#nutritionEntries").replaceChildren(...day.entries.map((item) => nutritionCard(item, false)));
 }
 
-async function loadNutrition() {  const sequence = ++nutritionLoadSequence;  const generation = state.sessionGeneration;
+async function loadNutrition() {
+  const sequence = ++nutritionLoadSequence;
+  const generation = state.sessionGeneration;
   if (state.route === "nutrition/week") { void loadNutritionWeek(sequence, generation); return; }
-  const dateInput = document.querySelector("#nutritionDate");  const status = document.querySelector("#nutritionStatus");  const path = `/api/nutrition/day${dateInput.value ? `?date=${encodeURIComponent(dateInput.value)}` : ""}`;
+  const dateInput = document.querySelector("#nutritionDate");
+  const status = document.querySelector("#nutritionStatus");
+  const path = `/api/nutrition/day${dateInput.value ? `?date=${encodeURIComponent(dateInput.value)}` : ""}`;
   const cached = showCachedNutritionView(path, renderNutritionDay);
   if (!cached) {
     status.textContent = "Ernährung wird geladen…";
@@ -412,8 +416,10 @@ async function loadNutrition() {  const sequence = ++nutritionLoadSequence;  c
     document.querySelector("#nutritionEntries").replaceChildren();
     document.querySelector("#nutritionTotals").replaceChildren();
   }
-  try {    const day = await api(path);
-    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;    renderNutritionDay(day);
+  try {
+    const day = await api(path);
+    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;
+    renderNutritionDay(day);
     rememberViewCache(path, day);
   } catch (error) {
     if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) {

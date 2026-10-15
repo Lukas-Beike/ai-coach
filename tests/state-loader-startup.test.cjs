@@ -195,3 +195,20 @@ test("a load that started before a privacy deletion is dropped", async () => {
   assert.equal(state.loadedAreas.has("plan"), false);
   assert.deepEqual(plain(state.data.planned), [{ id: "deleted" }]);
 });
+
+test("a full storage drops the view cache before the state snapshot", () => {
+  // Storage that has room for the snapshot only once the view cache is gone.
+  class FullStorage extends Map {
+    set(key, value) {
+      if (key === "coach-state-snapshot" && this.has("coach-view-cache")) throw new Error("QuotaExceededError");
+      return super.set(key, value);
+    }
+  }
+  const { context, state, storage } = loader({ storage: new FullStorage() });
+  state.data = { messages: [{ id: 1 }] };
+  context.rememberViewCache("/api/nutrition/week", { days: [1] });
+  state.initialStateLoaded = true;
+  context.saveStateSnapshot();
+  assert.equal(storage.has("coach-view-cache"), false);
+  assert.deepEqual(plain(context.readStateSnapshot().data), { messages: [{ id: 1 }] });
+});

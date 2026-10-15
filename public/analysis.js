@@ -1014,7 +1014,7 @@ async function renderSeasonPreparation() {
     renderSeasonEvents(season, generation);
     rememberViewCache(path, season);
   } catch (error) {
-    if (generation === seasonGeneration && session === state.sessionGeneration && !cached) document.getElementById("seasonPreparation").append(reportNode("p", error.message));
+    if (generation === seasonGeneration && session === state.sessionGeneration) document.getElementById("seasonPreparation").append(reportNode("p", cached ? `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}` : error.message));
   }
 }
 

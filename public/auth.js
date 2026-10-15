@@ -232,6 +232,23 @@ function finishAppShellLoading() {
   void AppRouter.navigate(AppRouter.routeFromHash(), { historyMode: AppRouter.hashContainsKnownRoute() ? "none" : "replace" });
 }
 
+// The server can be unreachable while the device stays online, so the session
+// check also retries after a delay, not only when the connection returns.
+const BOOTSTRAP_RETRY_MS = 15_000;
+
+function retryBootstrapAuth() {
+  let started = false;
+  const retry = () => {
+    if (started) return;
+    started = true;
+    clearTimeout(timer);
+    globalThis.removeEventListener("online", retry);
+    void bootstrapAuth();
+  };
+  const timer = setTimeout(retry, BOOTSTRAP_RETRY_MS);
+  globalThis.addEventListener("online", retry, { once: true });
+}
+
 async function bootstrapAuth() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -255,9 +272,8 @@ async function bootstrapAuth() {
   } catch {
     renderConnectivityStatus(false);
     if (shellShown || (updated && showStateSnapshot(snapshot))) {
-      // An offline start keeps the stored data and checks the session once the
-      // connection returns.
-      globalThis.addEventListener("online", () => void bootstrapAuth(), { once: true });
+      // An offline start keeps the stored data and checks the session again later.
+      retryBootstrapAuth();
       return;
     }
     $("#loginError").textContent = "Server nicht erreichbar.";

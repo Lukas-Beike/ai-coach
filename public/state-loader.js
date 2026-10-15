@@ -42,9 +42,16 @@ function saveStateSnapshot() {
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
   if (!state.initialStateLoaded || !state.data || state.replaceDataOnLoad) return;
+  const snapshot = JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: state.data });
   try {
-    localStorage.setItem(STATE_SNAPSHOT_KEY, JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: state.data }));
-  } catch { clearStateSnapshot(); }
+    localStorage.setItem(STATE_SNAPSHOT_KEY, snapshot);
+  } catch {
+    // The view cache gives way to the state snapshot when storage is full.
+    try {
+      localStorage.removeItem(VIEW_CACHE_KEY);
+      localStorage.setItem(STATE_SNAPSHOT_KEY, snapshot);
+    } catch { clearStateSnapshot(); }
+  }
 }
 
 // Coalesces the saves after loaded state, so an app closed by the system still
