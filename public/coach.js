@@ -202,23 +202,17 @@ async function loadInitialState() {
   state.initialStateLoaded = false;
   const route = AppRouter.routeFromHash();
   AppState.setPlanSegment(AppRouter.planSegmentFromRoute(route));
-  const areas = ["chat", "performance", "feedback", "profile"];
-  areas.push("weather");
-  if (AppRouter.baseRoute(route) === "plan") areas.push("plan", "library");
-  const loading = load("/api/bootstrap?local=1", areas);
-  const snapshot = state.data ? null : readStateSnapshot();
-  if (snapshot) {
-    render(snapshot);
-    state.replaceDataOnLoad = true;
-    finishAppShellLoading();
-  }
-  await loading;
+  // The calendar and library load with the start, so opening them shows data at once.
+  await load("/api/bootstrap?local=1", ["chat", "performance", "feedback", "profile", "plan", "library"]);
   if (sessionGeneration !== state.sessionGeneration) return;
+  // An update start whose fresh data failed shows the stored data and retries.
+  if (!state.data && showStateSnapshot(readStateSnapshot())) { retryBootstrapAuth(); return; }
   state.initialStateLoaded = true;
+  scheduleStateSnapshotSave();
   if (state.chatInitialScrollPending && AppRouter.baseRoute() === "coach") scrollChatToLatest();
   // Refresh stale weather in the background; the local bootstrap is already current.
   if (state.data?.profile?.weather_location) {
-    void load(LIVE_AREA_REFRESH, state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
+    void load(LIVE_AREA_REFRESH, AppRouter.baseRoute() === "plan" ? ["plan"] : ["weather"]);
   }
   connectStateEvents();
   scheduleChatStatusPoll(0);

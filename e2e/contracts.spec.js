@@ -197,8 +197,8 @@ test("history barriers preserve optimistic and completed messages through naviga
     __contract.controller.close();
     __contract.histories.shift()([]);
   });
-  await expect.poll(() => page.evaluate(() => __contract.planCalls)).toBeGreaterThan(0);
-  await expect.poll(() => page.evaluate(() => __contract.libraryCalls)).toBeGreaterThan(0);
+  // The calendar and library already loaded with the start.
+  await expect.poll(() => page.evaluate(() => state.loadedAreas.has("plan") && state.loadedAreas.has("library"))).toBe(true);
   await page.getByRole("link", { name: "Coach", exact: true }).click();
   await expect(page.locator(".message.user")).toHaveCount(1);
   await expect(page.locator(".message.assistant")).toHaveCount(1);
@@ -424,8 +424,15 @@ test("fresh service worker keeps the current shell available offline", async ({ 
   await ready(page);
   await page.evaluate(() => navigator.serviceWorker.ready);
   expect(await page.evaluate(() => caches.keys())).toEqual([SERVICE_WORKER_CACHE]);
+  await expect.poll(() => page.evaluate(() => Boolean(localStorage.getItem("coach-state-snapshot")))).toBe(true);
   await page.context().setOffline(true);
   try {
+    // The device snapshot starts the cached shell without the server.
+    await page.reload();
+    await expect(page.locator("#appShell")).toBeVisible();
+    await expect(page.locator("#loginDialog")).not.toBeVisible();
+    // Without stored data the offline start offers the login instead.
+    await page.evaluate(() => localStorage.clear());
     await page.reload();
     await expect(page.locator("#loginDialog")).toBeVisible();
     await expect(page.locator("#loginPassword")).toBeEditable();

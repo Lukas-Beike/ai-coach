@@ -246,8 +246,13 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
     tile.append(value, label);
     return tile;
   };
+  const projected = expenditure?.projected_total_kcal;
+  const hasProjection = projected != null && Number.isFinite(Number(projected));
+  const projectionTile = hasProjection ? componentTile(projected, "Prognose Tagesverbrauch (abgeleitet)") : null;
+  if (projectionTile) projectionTile.style.gridColumn = "1 / -1";
   totals.replaceChildren(
     totalTile,
+    ...(projectionTile ? [projectionTile] : []),
     componentTile(expenditure?.active_kcal, "Aktivkalorien"),
     componentTile(expenditure?.resting_kcal, expenditure?.provisional ? "Grundumsatz (vorläufig)" : "Grundumsatz"),
   );
@@ -261,6 +266,9 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
   ].filter(Boolean).join(" · ");
   const dateParts = ["Messdatum: " + nutritionExpenditureDate(measuredDate)];
   if (measured && expenditure.provisional) dateParts.push("Vorläufiger Tageswert");
+  if (hasProjection) {
+    dateParts.push(`Prognose: Grundumsatz vom ${nutritionExpenditureDate(expenditure.projection_reference_date)} (${formatKcal(expenditure.projection_resting_kcal)}) + bisherige Aktivkalorien (${formatKcal(expenditure.active_kcal)}), eigene Schätzung`);
+  }
   if (!measured) dateParts.push("Status: nicht verfügbar");
   if (timestamps) dateParts.push(timestamps);
   date.textContent = dateParts.join(" · ");
@@ -350,49 +358,82 @@ function renderNutritionWeek(week) {
   document.querySelector("#nutritionWeekDetails").hidden = false;
 }
 
-async function loadNutritionWeek(sequence, generation) {
-  const status = document.querySelector("#nutritionWeekStatus");
-  status.textContent = "Wochenübersicht wird geladen…";
-  document.querySelector("#nutritionWeekTotals").replaceChildren();
-  document.querySelector("#nutritionWeekDays").replaceChildren();
-  document.querySelector("#nutritionWeekChart").replaceChildren();
-  document.querySelector("#nutritionWeekChartSection").hidden = true;
-  document.querySelector("#nutritionWeekPeriod").textContent = "";
-  document.querySelector("#nutritionWeekDetails").hidden = true;
+// Renders the last loaded response at once; the fresh response replaces it.
+function showCachedNutritionView(path, renderView) {
+  const cached = readViewCache(path);
+  if (!cached) return false;
   try {
-    const week = await api("/api/nutrition/week");
-    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) renderNutritionWeek(week);
+    renderView(cached);
+    return true;
+  } catch { return false; }
+}
+
+async function loadNutritionWeek(sequence, generation) {
+  const path = "/api/nutrition/week";
+  const cacheEpoch = viewCacheEpoch;
+  const status = document.querySelector("#nutritionWeekStatus");
+  const cached = showCachedNutritionView(path, renderNutritionWeek);
+  if (!cached) {
+    status.textContent = "Wochenübersicht wird geladen…";
+    document.querySelector("#nutritionWeekTotals").replaceChildren();
+    document.querySelector("#nutritionWeekDays").replaceChildren();
+    document.querySelector("#nutritionWeekChart").replaceChildren();
+    document.querySelector("#nutritionWeekChartSection").hidden = true;
+    document.querySelector("#nutritionWeekPeriod").textContent = "";
+    document.querySelector("#nutritionWeekDetails").hidden = true;
+  }
+  try {
+    const week = await api(path);
+    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration || cacheEpoch !== viewCacheEpoch) return;
+    renderNutritionWeek(week);
+    rememberViewCache(path, week, cacheEpoch);
   } catch (error) {
-    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) status.textContent = `Wochenübersicht konnte nicht geladen werden: ${error.message}`;
+    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) status.textContent = cached ? `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}` : `Wochenübersicht konnte nicht geladen werden: ${error.message}`;
   }
 }
 
-async function loadNutrition() {
-  const sequence = ++nutritionLoadSequence;
-  const generation = state.sessionGeneration;
+function renderNutritionDay(day) {
+  document.querySelector("#nutritionDate").value = day.date;
+  renderNutritionExpenditure(day.energy_expenditure, day.date);
+  document.querySelector("#nutritionStatus").textContent = day.entry_count ? "" : "Noch keine Mahlzeiten erfasst. Das bedeutet nicht, dass du nichts gegessen hast.";
+  const totals = document.querySelector("#nutritionTotals");
+  totals.replaceChildren();
+  appendNutritionTotals(totals, day);
+  appendNutritionMacroNote(totals, Number(day.entries_without_macros) || 0);
+  document.querySelector("#nutritionEntries").replaceChildren(...day.entries.map((item) => nutritionCard(item, false)));
+}
 
+async function loadNutrition() {
+  const sequence = ++nutritionLoadSequence;
+  const generation = state.sessionGeneration;
   if (state.route === "nutrition/week") { void loadNutritionWeek(sequence, generation); return; }
-  const dateInput = document.querySelector("#nutritionDate");
-  const status = document.querySelector("#nutritionStatus");
-  status.textContent = "Ernährung wird geladen…";
-  clearNutritionExpenditure();
-  document.querySelector("#nutritionEntries").replaceChildren();
-  document.querySelector("#nutritionTotals").replaceChildren();
-  try {
-    const dateQuery = dateInput.value ? `?date=${encodeURIComponent(dateInput.value)}` : "";
-    const day = await api(`/api/nutrition/day${dateQuery}`);
-    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;
-    dateInput.value = day.date;
-    renderNutritionExpenditure(day.energy_expenditure, day.date);
-    status.textContent = day.entry_count ? "" : "Noch keine Mahlzeiten erfasst. Das bedeutet nicht, dass du nichts gegessen hast.";
-    const totals = document.querySelector("#nutritionTotals");
-    appendNutritionTotals(totals, day);
-    appendNutritionMacroNote(totals, Number(day.entries_without_macros) || 0);
-    document.querySelector("#nutritionEntries").replaceChildren(...day.entries.map((item) => nutritionCard(item, false)));
+  const dateInput = document.querySelector("#nutritionDate");
+  const status = document.querySelector("#nutritionStatus");
+  const path = dateInput.value ? `/api/nutrition/day?date=${encodeURIComponent(dateInput.value)}` : "/api/nutrition/day";
+  // A start without a date asks for today, so its cached view is keyed by today.
+  const cacheEpoch = viewCacheEpoch;
+  const cacheKey = `/api/nutrition/day?date=${encodeURIComponent(dateInput.value || todayIso())}`;
+  const cached = showCachedNutritionView(cacheKey, renderNutritionDay);
+  if (!cached) {
+    status.textContent = "Ernährung wird geladen…";
+    clearNutritionExpenditure();
+    document.querySelector("#nutritionEntries").replaceChildren();
+    document.querySelector("#nutritionTotals").replaceChildren();
+  }
+  try {
+    const day = await api(path);
+    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration || cacheEpoch !== viewCacheEpoch) return;
+    renderNutritionDay(day);
+    rememberViewCache(`/api/nutrition/day?date=${encodeURIComponent(day.date)}`, day, cacheEpoch);
   } catch (error) {
     if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) {
-      status.textContent = `Ernährung konnte nicht geladen werden: ${error.message}`;
-      clearNutritionExpenditure(`Tagesverbrauch konnte nicht geladen werden: ${error.message}`);
+      if (cached) {
+        status.textContent = `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}`;
+        nutritionExpenditureSection().querySelector("#nutritionExpenditureStatus").textContent = `Gespeicherter Stand. Tagesverbrauch konnte nicht aktualisiert werden: ${error.message}`;
+      } else {
+        status.textContent = `Ernährung konnte nicht geladen werden: ${error.message}`;
+        clearNutritionExpenditure(`Tagesverbrauch konnte nicht geladen werden: ${error.message}`);
+      }
     }
   }
 }

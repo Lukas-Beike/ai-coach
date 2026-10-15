@@ -864,6 +864,12 @@ def _fixture_demo_garmin(today, history):
     return {
         "source": FIXTURE_SOURCE,
         "synced_at": server.runtime_clock.utc_now(),
+        "provider_sync": {
+            "read_window": {
+                "start": (today - timedelta(days=89)).isoformat(),
+                "end": today.isoformat(),
+            }
+        },
         "source_freshness": {
             source: {
                 "freshness": "current",
