@@ -409,7 +409,7 @@ async function loadNutrition() {
   if (state.route === "nutrition/week") { void loadNutritionWeek(sequence, generation); return; }
   const dateInput = document.querySelector("#nutritionDate");
   const status = document.querySelector("#nutritionStatus");
-  const path = `/api/nutrition/day${dateInput.value ? `?date=${encodeURIComponent(dateInput.value)}` : ""}`;
+  const path = dateInput.value ? `/api/nutrition/day?date=${encodeURIComponent(dateInput.value)}` : "/api/nutrition/day";
   // A start without a date asks for today, so its cached view is keyed by today.
   const cacheEpoch = viewCacheEpoch;
   const cacheKey = `/api/nutrition/day?date=${encodeURIComponent(dateInput.value || todayIso())}`;

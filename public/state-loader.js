@@ -174,6 +174,13 @@ function renderLoadedState(payload, liveAreasOnly) {
   render(payload);
 }
 
+// Renders the merged areas and stores them unless an area failed to load.
+function renderCompletedState(payload, liveAreasOnly, failed) {
+  renderLoadedState(payload, liveAreasOnly);
+  if (!liveAreasOnly) stateSnapshotIncomplete = failed;
+  scheduleStateSnapshotSave();
+}
+
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
   const sessionGeneration = state.sessionGeneration;
@@ -201,11 +208,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     payload.messages = state.data?.messages || [];
     const { failures, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
     applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration);
-    if (requestSequence === state.loadSequence) {
-      renderLoadedState(payload, liveAreasOnly);
-      if (!liveAreasOnly) stateSnapshotIncomplete = failures.length > 0;
-      scheduleStateSnapshotSave();
-    }
+    if (requestSequence === state.loadSequence) renderCompletedState(payload, liveAreasOnly, failures.length > 0);
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
     if (sessionGeneration !== state.sessionGeneration || error?.status === 401 || /Authentication/.test(error.message)) return;
