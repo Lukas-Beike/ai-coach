@@ -558,6 +558,16 @@ async function drainChatQueue(firstMessage, requestKind = null, attachments = []
 // One cancel request at a time: an overlapping call would race the first one's failure handling.
 let chatCancelInFlight = false;
 
+// The server job may still be running, so keep the stream alive and let the athlete retry.
+// A deferred cancel (requested before the operation id arrived) must also become retryable.
+function restoreChatCancelAfterFailure(stream, request, previousPhase) {
+  if (stream) stream.cancelRequested = false;
+  if (!request) return;
+  request.cancelRequested = false;
+  // Keep a phase that completion or a background handover set while the request was pending.
+  if (request.phase === "recovering" && !request.background && state.chatStream === stream) request.phase = previousPhase;
+}
+
 async function cancelChat() {
   if (chatCancelInFlight) return;
   const stream = state.chatStream;
@@ -576,14 +586,7 @@ async function cancelChat() {
       body: JSON.stringify({ operation_id: operationId }),
     });
   } catch (error) {
-    // The server job may still be running, so keep the stream alive and let the athlete retry.
-    // A deferred cancel (requested before the operation id arrived) must also become retryable.
-    if (stream) stream.cancelRequested = false;
-    if (request) {
-      request.cancelRequested = false;
-      // Keep a phase that completion or a background handover set while the request was pending.
-      if (request.phase === "recovering" && !request.background && state.chatStream === stream) request.phase = previousPhase;
-    }
+    restoreChatCancelAfterFailure(stream, request, previousPhase);
     updateChatControls();
     if (error?.name !== "AbortError") toast("Stoppen fehlgeschlagen. Bitte erneut versuchen.", true);
     return;

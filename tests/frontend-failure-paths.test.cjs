@@ -184,6 +184,7 @@ function cancelHarness() {
   // updateChatControls is reduced to the cancel button, which is the part under test.
   vm.runInContext([
     "let chatCancelInFlight = false;",
+    extractFunction(coachSource, "restoreChatCancelAfterFailure"),
     extractFunction(coachSource, "cancelChat"),
     extractFunction(coachSource, "updateChatCancelButton"),
     "function updateChatControls() { controlCalls.push(1); updateChatCancelButton($('#cancelChatButton'), { reconciling: false }); }",
