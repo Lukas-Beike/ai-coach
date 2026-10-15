@@ -36,7 +36,7 @@ globalThis.addEventListener("fetch", (event) => {
   event.respondWith(new Promise((resolve, reject) => {
     let settled = false;
     const settle = (response) => { if (response && !settled) { settled = true; resolve(response); } };
-    const timer = setTimeout(() => cached().then(settle), NAVIGATION_TIMEOUT_MS);
+    const timer = setTimeout(() => cached().then(settle).catch(() => {}), NAVIGATION_TIMEOUT_MS);
     network.then((response) => { clearTimeout(timer); settle(response); }).catch(async () => {
       clearTimeout(timer);
       const response = await cached();

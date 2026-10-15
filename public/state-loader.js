@@ -6,7 +6,8 @@ function render(data) {
   renderCoachOverview(data);
   renderCoachReceipts();
   renderQuickMessageTemplates();
-  notifyState(data);
+  // Device snapshot data may be outdated, so only loaded state notifies.
+  if (!state.replaceDataOnLoad) notifyState(data);
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderPlanned(data.training_calendar || data.planned || []);
@@ -37,11 +38,13 @@ const VIEW_CACHE_LIMIT = 24;
 const STATE_SNAPSHOT_SAVE_DELAY_MS = 1000;
 const STATE_SNAPSHOT_ASSET = Array.from(document.scripts || [], (script) => script.src).join(" ") || document.currentScript?.src || "";
 let stateSnapshotSaveTimer = null;
+// A load with failed areas keeps the previous snapshot instead of storing partial state.
+let stateSnapshotIncomplete = false;
 
 function saveStateSnapshot() {
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
-  if (!state.initialStateLoaded || !state.data || state.replaceDataOnLoad) return;
+  if (!state.initialStateLoaded || !state.data || state.replaceDataOnLoad || stateSnapshotIncomplete) return;
   const snapshot = JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: state.data });
   try {
     localStorage.setItem(STATE_SNAPSHOT_KEY, snapshot);
@@ -163,8 +166,8 @@ function bootstrapPayload(bootstrap, liveAreasOnly) {
 }
 
 function renderLoadedState(payload, liveAreasOnly) {
-  render(payload);
   if (!liveAreasOnly) state.replaceDataOnLoad = false;
+  render(payload);
 }
 
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
@@ -196,6 +199,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration);
     if (requestSequence === state.loadSequence) {
       renderLoadedState(payload, liveAreasOnly);
+      if (!liveAreasOnly) stateSnapshotIncomplete = failures.length > 0;
       scheduleStateSnapshotSave();
     }
     if (failures.length) throw new Error(failures.join("; "));

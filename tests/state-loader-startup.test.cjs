@@ -212,3 +212,34 @@ test("a full storage drops the view cache before the state snapshot", () => {
   assert.equal(storage.has("coach-view-cache"), false);
   assert.deepEqual(plain(context.readStateSnapshot().data), { messages: [{ id: 1 }] });
 });
+
+test("a load with failed areas keeps the previous snapshot", async () => {
+  const { context, state, respond } = loader();
+  state.initialStateLoaded = true;
+  state.data = { performance: { ctl: 40 } };
+  context.saveStateSnapshot();
+  const failing = context.load("/api/bootstrap", ["performance", "library"]);
+  respond("/api/bootstrap", { state_versions: {} });
+  respond("/api/performance", { performance: { ctl: 41 } });
+  respond("/api/library?limit=100", Promise.reject(new Error("offline")));
+  await failing;
+  context.saveStateSnapshot();
+  assert.deepEqual(plain(context.readStateSnapshot().data), { performance: { ctl: 40 } });
+  const complete = context.load("/api/bootstrap?local=1", ["performance"]);
+  respond("/api/bootstrap?local=1", { state_versions: {} });
+  await complete;
+  context.saveStateSnapshot();
+  assert.equal(context.readStateSnapshot().data.performance.ctl, 41);
+});
+
+test("loaded state renders as real data, so it may notify", async () => {
+  const { context, state, respond } = loader();
+  const flags = [];
+  context.render = (data) => { state.data = data; flags.push(state.replaceDataOnLoad); };
+  state.replaceDataOnLoad = true;
+  const loading = context.load("/api/bootstrap", ["performance"]);
+  respond("/api/bootstrap", { state_versions: {} });
+  respond("/api/performance", { performance: {} });
+  await loading;
+  assert.deepEqual(flags, [false]);
+});

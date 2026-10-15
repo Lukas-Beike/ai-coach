@@ -7,6 +7,7 @@ function cookie(name) {
 let loginDialogRequired = false;
 
 function showLogin() {
+  cancelBootstrapRetry();
   state.sessionGeneration += 1;
   clearStateSnapshot();
   state.voiceAcquiring = false;
@@ -206,15 +207,16 @@ function showAppShellLoading({ updated = false } = {}) {
 // clears it through showLogin.
 function showStateSnapshot(snapshot) {
   if (!snapshot) return false;
+  state.replaceDataOnLoad = true;
   try {
     render(snapshot.data);
   } catch {
     // A snapshot from earlier assets may not fit the current views.
     clearStateSnapshot();
     state.data = null;
+    state.replaceDataOnLoad = false;
     return false;
   }
-  state.replaceDataOnLoad = true;
   finishAppShellLoading();
   return true;
 }
@@ -236,17 +238,21 @@ function finishAppShellLoading() {
 // check also retries after a delay, not only when the connection returns.
 const BOOTSTRAP_RETRY_MS = 15_000;
 
+let cancelBootstrapRetry = () => {};
+
 function retryBootstrapAuth() {
-  let started = false;
+  cancelBootstrapRetry();
   const retry = () => {
-    if (started) return;
-    started = true;
-    clearTimeout(timer);
-    globalThis.removeEventListener("online", retry);
+    cancelBootstrapRetry();
     void bootstrapAuth();
   };
   const timer = setTimeout(retry, BOOTSTRAP_RETRY_MS);
   globalThis.addEventListener("online", retry, { once: true });
+  cancelBootstrapRetry = () => {
+    clearTimeout(timer);
+    globalThis.removeEventListener("online", retry);
+    cancelBootstrapRetry = () => {};
+  };
 }
 
 async function bootstrapAuth() {

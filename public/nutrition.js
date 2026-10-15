@@ -409,7 +409,9 @@ async function loadNutrition() {
   const dateInput = document.querySelector("#nutritionDate");
   const status = document.querySelector("#nutritionStatus");
   const path = `/api/nutrition/day${dateInput.value ? `?date=${encodeURIComponent(dateInput.value)}` : ""}`;
-  const cached = showCachedNutritionView(path, renderNutritionDay);
+  // A start without a date asks for today, so its cached view is keyed by today.
+  const cacheKey = `/api/nutrition/day?date=${encodeURIComponent(dateInput.value || todayIso())}`;
+  const cached = showCachedNutritionView(cacheKey, renderNutritionDay);
   if (!cached) {
     status.textContent = "Ernährung wird geladen…";
     clearNutritionExpenditure();
@@ -420,7 +422,7 @@ async function loadNutrition() {
     const day = await api(path);
     if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;
     renderNutritionDay(day);
-    rememberViewCache(path, day);
+    rememberViewCache(`/api/nutrition/day?date=${encodeURIComponent(day.date)}`, day);
   } catch (error) {
     if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) {
       if (cached) {
