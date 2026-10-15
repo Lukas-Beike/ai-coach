@@ -557,18 +557,34 @@ async function drainChatQueue(firstMessage, requestKind = null, attachments = []
 
 async function cancelChat() {
   const stream = state.chatStream;
+  const request = state.chatRequest;
   const operationId = stream?.operationId || state.chatServerOperationId;
+  const previous = {
+    streamCancel: stream?.cancelRequested ?? false,
+    requestCancel: request?.cancelRequested ?? false,
+    phase: request?.phase,
+  };
   if (stream) stream.cancelRequested = true;
-  if (state.chatRequest) state.chatRequest.cancelRequested = true;
+  if (request) request.cancelRequested = true;
   if (!operationId) { updateChatControls(); return; }
-  if (state.chatRequest) {
-    state.chatRequest.cancelRequested = true;
-    state.chatRequest.phase = "recovering";
+  if (request) request.phase = "recovering";
+  try {
+    await api("/api/chat/cancel", {
+      method: "POST",
+      body: JSON.stringify({ operation_id: operationId }),
+    });
+  } catch (error) {
+    // The server job may still be running, so keep the stream alive and let the athlete retry.
+    if (stream) stream.cancelRequested = previous.streamCancel;
+    if (request) {
+      request.cancelRequested = previous.requestCancel;
+      // Keep a phase that completion or a background handover set while the request was pending.
+      if (request.phase === "recovering" && !request.background && state.chatStream === stream) request.phase = previous.phase;
+    }
+    updateChatControls();
+    if (error?.name !== "AbortError") toast("Stoppen fehlgeschlagen. Bitte erneut versuchen.", true);
+    return;
   }
-  await api("/api/chat/cancel", {
-    method: "POST",
-    body: JSON.stringify({ operation_id: operationId }),
-  }).catch(() => {});
   stream?.controller.abort();
   scheduleChatStatusPoll(0);
 }
