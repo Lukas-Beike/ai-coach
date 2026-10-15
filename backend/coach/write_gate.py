@@ -260,6 +260,92 @@ def is_bare_affirmation(text: str) -> bool:
     )
 
 
+# A reply that starts with an affirmation and adds detail, such as "Ja, bitte
+# übertrage die drei Einheiten dorthin.", accepts a sync offer in the previous
+# assistant message. Any qualifier, hedge, question or negation keeps it denied.
+_CONTEXT_AFFIRMATION_MAX_TOKENS = 15
+_CONTEXT_BLOCKERS = frozenset(
+    normalize(word)
+    for word in (
+        "aber",
+        "sondern",
+        "but",
+        "nur",
+        "only",
+        "lokal",
+        "local",
+        "lokale",
+        "lokalen",
+        "lokales",
+        "lokaler",
+        "erst",
+        "erstmal",
+        "zunächst",
+        "vorerst",
+        "first",
+        "später",
+        "later",
+        "lieber",
+        "stattdessen",
+        "instead",
+        "warte",
+        "wait",
+        "vielleicht",
+        "eventuell",
+        "maybe",
+        "glaube",
+        "glaub",
+        "denke",
+        "falls",
+        "wenn",
+        "if",
+        "morgen",
+        "wie",
+        "was",
+        "wann",
+        "wo",
+        "woher",
+        "wohin",
+        "wer",
+        "wem",
+        "wen",
+        "welche",
+        "welcher",
+        "welches",
+        "welchen",
+        "welchem",
+        "warum",
+        "wieso",
+        "weshalb",
+        "wozu",
+        "what",
+        "how",
+        "when",
+        "where",
+        "which",
+        "why",
+        "who",
+    )
+)
+
+
+def is_contextual_affirmation(text: str) -> bool:
+    """Short reply that starts with an affirmation and adds no qualification.
+
+    Only meaningful after a sync offer; it fails closed on negation, questions,
+    information questions, deferral, locality and hedging anywhere in the reply.
+    """
+    value = normalize(text)
+    if _NEGATION.search(value) or _QUESTION.search(value) or "doch nicht" in value:
+        return False
+    tokens = re.findall(r"[a-z0-9]+", value)
+    return (
+        0 < len(tokens) <= _CONTEXT_AFFIRMATION_MAX_TOKENS
+        and tokens[0] in _AFFIRMATION_ANCHORS
+        and not any(token in _CONTEXT_BLOCKERS for token in tokens)
+    )
+
+
 @dataclass(frozen=True)
 class PendingOrigin:
     """Origin of a pending request, for an explicit retry or answer only."""
@@ -286,8 +372,10 @@ def build_turn_authority(
 ) -> TurnAuthority:
     """Derive the turn's footing from the athlete's typed text only."""
     remote = remote_requested(current_text) or (
-        is_bare_affirmation(current_text)
-        and _mentions_remote(previous_assistant_text[-_HISTORY_TAIL:])
+        _mentions_remote(previous_assistant_text[-_HISTORY_TAIL:])
+        and (
+            is_bare_affirmation(current_text) or is_contextual_affirmation(current_text)
+        )
     )
     message_ids = {current_message_id}
     origin_text = ""
