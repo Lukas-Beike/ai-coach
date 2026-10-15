@@ -246,8 +246,13 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
     tile.append(value, label);
     return tile;
   };
+  const projected = expenditure?.projected_total_kcal;
+  const hasProjection = projected != null && Number.isFinite(Number(projected));
+  const projectionTile = hasProjection ? componentTile(projected, "Prognose Tagesverbrauch (abgeleitet)") : null;
+  if (projectionTile) projectionTile.style.gridColumn = "1 / -1";
   totals.replaceChildren(
     totalTile,
+    ...(projectionTile ? [projectionTile] : []),
     componentTile(expenditure?.active_kcal, "Aktivkalorien"),
     componentTile(expenditure?.resting_kcal, expenditure?.provisional ? "Grundumsatz (vorläufig)" : "Grundumsatz"),
   );
@@ -261,6 +266,9 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
   ].filter(Boolean).join(" · ");
   const dateParts = ["Messdatum: " + nutritionExpenditureDate(measuredDate)];
   if (measured && expenditure.provisional) dateParts.push("Vorläufiger Tageswert");
+  if (hasProjection) {
+    dateParts.push(`Prognose: Grundumsatz vom ${nutritionExpenditureDate(expenditure.projection_reference_date)} (${formatKcal(expenditure.projection_resting_kcal)}) + bisherige Aktivkalorien (${formatKcal(expenditure.active_kcal)}), eigene Schätzung`);
+  }
   if (!measured) dateParts.push("Status: nicht verfügbar");
   if (timestamps) dateParts.push(timestamps);
   date.textContent = dateParts.join(" · ");

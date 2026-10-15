@@ -20,6 +20,9 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
         total_kcal: 2100,
         active_kcal: 600,
         resting_kcal: 1500,
+        projected_total_kcal: 2350,
+        projection_resting_kcal: 1750,
+        projection_reference_date: "2026-10-05",
         source: "Garmin Connect",
         measured_date: requestedDate,
         date: requestedDate,
@@ -68,6 +71,9 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
   await expect(totals).toContainText("Grundumsatz (vorläufig)");
   await expect(totals).toContainText("600 kcal");
   await expect(totals).toContainText("1.500 kcal");
+  await expect(totals).toContainText("Prognose Tagesverbrauch (abgeleitet)");
+  await expect(totals).toContainText("2.350 kcal");
+  await expect(expenditure.locator("#nutritionExpenditureDate")).toContainText("Prognose: Grundumsatz vom 05.10.2026 (1.750 kcal) + bisherige Aktivkalorien (600 kcal), eigene Schätzung");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   responseMode = "unavailable";

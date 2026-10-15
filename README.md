@@ -101,7 +101,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 - **Overnight Body Battery Tracking**: Targeted extraction of resting stress metrics capturing the final level before sleep and the initial waking level within one hour of rising.
 - **Bounded Sleep Retry Engine**: Three-tier exponential retry schedule (15-minute intervals, max 3 attempts) handling delayed Garmin cloud sleep processing.
 - **Garmin-Specific Metric Labeling**: Clear source labeling distinguishing Garmin-calculated FTP, running threshold power, threshold HR, threshold pace, and VO2 max from Intervals.icu metrics.
-- **Daily Wellness Summaries**: Calendar-integrated daily summaries tracking total steps, floors climbed, active calories, resting heart rate, and overnight HRV. Garmin's dated daily energy expenditure is also shown alongside the nutrition diary, with current-day values marked provisional.
+- **Daily Wellness Summaries**: Calendar-integrated daily summaries tracking total steps, floors climbed, active calories, resting heart rate, and overnight HRV. Garmin's dated daily energy expenditure is also shown alongside the nutrition diary, with current-day values marked provisional. For the running day, a separately labelled derived projection of the full-day total (resting calories of the last complete day plus active calories so far) is added.
 - **Rolling Health Averages**: Automated calculation of 7-day rolling health baselines displayed alongside acute readings on the performance dashboard.
 - **Transparent Metric Fallback**: Resilient metric aggregation preserving Intervals.icu values as labeled fallbacks when Garmin biometric readings are absent.
 
@@ -853,7 +853,7 @@ Der Coach bevorzugt **BLS 4.0** für Grundnahrungsmittel und **Open Food Facts**
 
 Ernährungseinträge bleiben lokal; eine Übertragung der Tagessummen zu Intervals.icu erfolgt nur nach explizitem Auftrag und Freigabe. Vorlagen und Quellenangaben gehören zu Datenschutzexport, verschlüsseltem Backup und der Löschkategorie Ernährung. Release 1.12.21 migriert das vorhandene SQLCipher-Schema von 1.12.19 und 1.12.20 automatisch beim Start; ein leeres Datenverzeichnis ist für dieses Update nicht erforderlich.
 
-Garmins Tagesverbrauch (für heute vorläufig) mit Aktivkalorien und Grundumsatz wird für das ausgewählte Tagebuchdatum getrennt von der erfassten Nahrungsaufnahme angezeigt. Datum, Quelle und Aktualität bleiben sichtbar; Werte für heute sind vorläufig, solange Garmins Tagesdatensatz noch ergänzt wird. Fehlende Komponenten bleiben unbekannt und werden nicht zu einem erfundenen Gesamtwert addiert.
+Garmins Tagesverbrauch (für heute vorläufig) mit Aktivkalorien und Grundumsatz wird für das ausgewählte Tagebuchdatum getrennt von der erfassten Nahrungsaufnahme angezeigt. Datum, Quelle und Aktualität bleiben sichtbar; Werte für heute sind vorläufig, solange Garmins Tagesdatensatz noch ergänzt wird. Fehlende Komponenten bleiben unbekannt und werden nicht zu einem erfundenen Gesamtwert addiert. Garmins eigener Tagesverbrauchs-Prognosewert ist über die API nicht abrufbar; für heute zeigt die App deshalb zusätzlich eine klar als „Prognose Tagesverbrauch (abgeleitet)“ gekennzeichnete eigene Schätzung: Grundumsatz des letzten abgeschlossenen Tages (höchstens sieben Tage zurück) plus die bisherigen Aktivkalorien, mit sichtbarer Rechnung. Sie weicht typischerweise um wenige kcal von Garmin Connect ab und entfällt, wenn Aktivkalorien oder ein plausibler Referenztag fehlen.
 
 ### Analysis history
 
