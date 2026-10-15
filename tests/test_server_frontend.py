@@ -245,7 +245,10 @@ class ServerFrontendTests(ServerTestCase):
         )
         self.assertIn("await refreshChatHistoryState()", coach)
         self.assertIn("api(`/api/weather${query}`)", app)
-        self.assertIn('areas.push("weather")', coach)
+        self.assertIn(
+            'load("/api/bootstrap?local=1", ["chat", "performance", "feedback", "profile", "plan", "library"])',
+            coach,
+        )
         self.assertIn('AppApi.stream("/api/chat/stream"', coach)
         self.assertIn('api("/api/chat/status")', coach)
         self.assertIn("new EventSource(`/api/state/events?since=", app)

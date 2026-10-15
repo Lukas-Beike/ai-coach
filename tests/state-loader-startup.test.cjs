@@ -39,7 +39,9 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
   const context = vm.createContext({
     state,
     document: { currentScript: { src: asset } },
-    sessionStorage: {
+    setTimeout,
+    clearTimeout,
+    localStorage: {
       getItem: (key) => (storage.has(key) ? storage.get(key) : null),
       setItem: (key, value) => storage.set(key, String(value)),
       removeItem: (key) => storage.delete(key),
@@ -101,17 +103,52 @@ test("an area is reported loading only while a request for it is in flight", asy
   assert.equal(context.areaLoading("plan"), false);
 });
 
-test("the state snapshot is saved only after a full load and only for the same assets", () => {
+test("the state snapshot is saved only after a full load and marks an update across assets", () => {
   const first = loader();
   first.state.data = { messages: [{ id: 1 }] };
   first.context.saveStateSnapshot();
   assert.equal(first.storage.size, 0);
   first.state.initialStateLoaded = true;
   first.context.saveStateSnapshot();
-  assert.deepEqual(plain(loader({ storage: first.storage }).context.readStateSnapshot()), { messages: [{ id: 1 }] });
-  assert.equal(loader({ storage: first.storage, asset: "/state-loader.js?v=2" }).context.readStateSnapshot(), null);
+  assert.deepEqual(plain(loader({ storage: first.storage }).context.readStateSnapshot()), { data: { messages: [{ id: 1 }] }, updated: false });
+  assert.deepEqual(plain(loader({ storage: first.storage, asset: "/state-loader.js?v=2" }).context.readStateSnapshot()), { data: { messages: [{ id: 1 }] }, updated: true });
   first.context.clearStateSnapshot();
   assert.equal(first.context.readStateSnapshot(), null);
+});
+
+test("a completed load schedules one coalesced snapshot save", async () => {
+  const { context, state, storage, respond } = loader();
+  state.initialStateLoaded = true;
+  const loading = context.load("/api/bootstrap", ["performance"]);
+  respond("/api/bootstrap", { state_versions: {} });
+  respond("/api/performance", { performance: { ctl: 40 } });
+  await loading;
+  assert.equal(storage.size, 0);
+  await new Promise((done) => setTimeout(done, vm.runInContext("STATE_SNAPSHOT_SAVE_DELAY_MS", context) + 50));
+  assert.deepEqual(plain(context.readStateSnapshot().data.performance), { ctl: 40 });
+});
+
+test("the view cache keeps recent reads for the same assets and is cleared with the snapshot", () => {
+  const first = loader();
+  first.context.rememberViewCache("/api/nutrition/week", { days: [1] }, 0);
+  assert.equal(first.storage.size, 0);
+  first.state.data = {};
+  first.context.rememberViewCache("/api/nutrition/week", { days: [1] }, 0);
+  first.context.rememberViewCache("/api/nutrition/week", { days: [2] }, 0);
+  assert.deepEqual(plain(first.context.readViewCache("/api/nutrition/week")), { days: [2] });
+  assert.equal(first.context.readViewCache("/api/analysis/season"), null);
+  assert.equal(loader({ storage: first.storage, asset: "/state-loader.js?v=2" }).context.readViewCache("/api/nutrition/week"), null);
+  const limit = vm.runInContext("VIEW_CACHE_LIMIT", first.context);
+  for (let index = 0; index <= limit; index += 1) first.context.rememberViewCache(`/view/${index}`, index, 0);
+  assert.equal(first.context.readViewCache("/view/0"), null);
+  assert.equal(first.context.readViewCache(`/view/${limit}`), limit);
+  first.context.clearStateSnapshot();
+  assert.equal(first.storage.size, 0);
+  // A read that started before the clear does not store its response.
+  first.context.rememberViewCache("/api/nutrition/week", { days: [3] }, 0);
+  assert.equal(first.context.readViewCache("/api/nutrition/week"), null);
+  first.context.rememberViewCache("/api/nutrition/week", { days: [3] }, vm.runInContext("viewCacheEpoch", first.context));
+  assert.deepEqual(plain(first.context.readViewCache("/api/nutrition/week")), { days: [3] });
 });
 
 test("snapshot data never overrides the startup bootstrap or claims its versions", async () => {
@@ -162,4 +199,52 @@ test("a load that started before a privacy deletion is dropped", async () => {
   assert.equal(state.replaceDataOnLoad, true);
   assert.equal(state.loadedAreas.has("plan"), false);
   assert.deepEqual(plain(state.data.planned), [{ id: "deleted" }]);
+});
+
+test("a full storage drops the view cache before the state snapshot", () => {
+  // Storage that has room for the snapshot only once the view cache is gone.
+  class FullStorage extends Map {
+    set(key, value) {
+      if (key === "coach-state-snapshot" && this.has("coach-view-cache")) throw new Error("QuotaExceededError");
+      return super.set(key, value);
+    }
+  }
+  const { context, state, storage } = loader({ storage: new FullStorage() });
+  state.data = { messages: [{ id: 1 }] };
+  context.rememberViewCache("/api/nutrition/week", { days: [1] }, 0);
+  state.initialStateLoaded = true;
+  context.saveStateSnapshot();
+  assert.equal(storage.has("coach-view-cache"), false);
+  assert.deepEqual(plain(context.readStateSnapshot().data), { messages: [{ id: 1 }] });
+});
+
+test("a load with failed areas keeps the previous snapshot", async () => {
+  const { context, state, respond } = loader();
+  state.initialStateLoaded = true;
+  state.data = { performance: { ctl: 40 } };
+  context.saveStateSnapshot();
+  const failing = context.load("/api/bootstrap", ["performance", "library"]);
+  respond("/api/bootstrap", { state_versions: {} });
+  respond("/api/performance", { performance: { ctl: 41 } });
+  respond("/api/library?limit=100", Promise.reject(new Error("offline")));
+  await failing;
+  context.saveStateSnapshot();
+  assert.deepEqual(plain(context.readStateSnapshot().data), { performance: { ctl: 40 } });
+  const complete = context.load("/api/bootstrap?local=1", ["performance"]);
+  respond("/api/bootstrap?local=1", { state_versions: {} });
+  await complete;
+  context.saveStateSnapshot();
+  assert.equal(context.readStateSnapshot().data.performance.ctl, 41);
+});
+
+test("loaded state renders as real data, so it may notify", async () => {
+  const { context, state, respond } = loader();
+  const flags = [];
+  context.render = (data) => { state.data = data; flags.push(state.replaceDataOnLoad); };
+  state.replaceDataOnLoad = true;
+  const loading = context.load("/api/bootstrap", ["performance"]);
+  respond("/api/bootstrap", { state_versions: {} });
+  respond("/api/performance", { performance: {} });
+  await loading;
+  assert.deepEqual(flags, [false]);
 });

@@ -1001,26 +1001,42 @@ async function renderTrainingRecords() { // NOSONAR
 }
 
 async function renderSeasonPreparation() {
-  const root = document.getElementById("seasonPreparation");
+  const path = "/api/analysis/season";
+  const cacheEpoch = viewCacheEpoch;
   const generation = ++seasonGeneration;
-  root.replaceChildren(reportNode("h3", "Saison und Wettkampfvorbereitung"));
+  const session = state.sessionGeneration;
+  const cached = readViewCache(path);
   try {
-    const season = await api("/api/analysis/season");
-    if (generation !== seasonGeneration) return;
-    const events = season.events || [];
-    if (!events.length) { root.append(reportNode("p", "Noch keine Wettkämpfe im Athletenprofil bestätigt.")); return; }
-    const upcoming = events.filter((event) => event.phase !== "completed");
-    const past = events.filter((event) => event.phase === "completed");
-    if (!upcoming.length) root.append(reportNode("p", "Kein anstehender Wettkampf bestätigt."));
-    // The backend sorts events by date, so the first upcoming card is the nearest competition.
-    upcoming.forEach((event, index) => root.append(seasonEventCard(event, generation, { open: index === 0 })));
-    if (past.length) {
-      const archive = reportNode("details", null, "season-archive");
-      archive.append(reportNode("summary", `Vergangene Wettkämpfe (${past.length})`));
-      for (const event of past.reverse()) archive.append(seasonEventCard(event, generation));
-      root.append(archive);
-    }
-  } catch (error) { if (generation === seasonGeneration) root.append(reportNode("p", error.message)); }
+    renderSeasonEvents(cached, generation);
+  } catch { renderSeasonEvents(null, generation); }
+  try {
+    const season = await api(path);
+    if (generation !== seasonGeneration || session !== state.sessionGeneration || cacheEpoch !== viewCacheEpoch) return;
+    renderSeasonEvents(season, generation);
+    rememberViewCache(path, season, cacheEpoch);
+  } catch (error) {
+    if (generation === seasonGeneration && session === state.sessionGeneration) document.getElementById("seasonPreparation").append(reportNode("p", cached ? `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}` : error.message));
+  }
+}
+
+// Without a loaded season only the heading is shown.
+function renderSeasonEvents(season, generation) {
+  const root = document.getElementById("seasonPreparation");
+  root.replaceChildren(reportNode("h3", "Saison und Wettkampfvorbereitung"));
+  if (!season) return;
+  const events = season.events || [];
+  if (!events.length) { root.append(reportNode("p", "Noch keine Wettkämpfe im Athletenprofil bestätigt.")); return; }
+  const upcoming = events.filter((event) => event.phase !== "completed");
+  const past = events.filter((event) => event.phase === "completed");
+  if (!upcoming.length) root.append(reportNode("p", "Kein anstehender Wettkampf bestätigt."));
+  // The backend sorts events by date, so the first upcoming card is the nearest competition.
+  upcoming.forEach((event, index) => root.append(seasonEventCard(event, generation, { open: index === 0 })));
+  if (past.length) {
+    const archive = reportNode("details", null, "season-archive");
+    archive.append(reportNode("summary", `Vergangene Wettkämpfe (${past.length})`));
+    for (const event of past.reverse()) archive.append(seasonEventCard(event, generation));
+    root.append(archive);
+  }
 }
 
 function renderAnalysisSegments(route = state.route) {

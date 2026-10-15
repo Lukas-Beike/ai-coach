@@ -7,6 +7,7 @@ function cookie(name) {
 let loginDialogRequired = false;
 
 function showLogin() {
+  cancelBootstrapRetry();
   state.sessionGeneration += 1;
   clearStateSnapshot();
   state.voiceAcquiring = false;
@@ -183,20 +184,41 @@ async function runConfirmationSecondaryAction(onClick) {
   }
 }
 
-function showAppShellLoading() {
+// After an app update the loading screen says that the update is processed.
+function showAppShellLoading({ updated = false } = {}) {
   const shell = $("#appShell");
   const statusCard = $("#statusCard");
   const loader = $("#authLoading");
+  const title = updated ? "Update wird verarbeitet…" : "Trainingsbereich wird geladen…";
   loader.hidden = false;
-  loader.textContent = "Trainingsbereich wird geladen…";
+  loader.textContent = title;
   shell.hidden = true;
   shell.classList.add("is-loading");
   shell.setAttribute("aria-busy", "true");
   statusCard.hidden = false;
   statusCard.classList.remove("warning");
   statusCard.classList.add("working");
-  $("#statusTitle").textContent = "Trainingsbereich wird geladen…";
-  $("#statusDetail").textContent = "Deine Trainingsdaten werden im Hintergrund geladen";
+  $("#statusTitle").textContent = title;
+  $("#statusDetail").textContent = updated ? "Die App wurde aktualisiert. Deine Trainingsdaten werden neu geladen." : "Deine Trainingsdaten werden im Hintergrund geladen";
+}
+
+// Shows the device snapshot before the session check, so a start does not wait
+// for the network. The fresh bootstrap replaces it; an unauthenticated start
+// clears it through showLogin.
+function showStateSnapshot(snapshot) {
+  if (!snapshot) return false;
+  state.replaceDataOnLoad = true;
+  try {
+    render(snapshot.data);
+  } catch {
+    // A snapshot from earlier assets may not fit the current views.
+    clearStateSnapshot();
+    state.data = null;
+    state.replaceDataOnLoad = false;
+    return false;
+  }
+  finishAppShellLoading();
+  return true;
 }
 
 function finishAppShellLoading() {
@@ -212,9 +234,36 @@ function finishAppShellLoading() {
   void AppRouter.navigate(AppRouter.routeFromHash(), { historyMode: AppRouter.hashContainsKnownRoute() ? "none" : "replace" });
 }
 
+// The server can be unreachable while the device stays online, so the session
+// check also retries after a delay, not only when the connection returns.
+const BOOTSTRAP_RETRY_MS = 15_000;
+
+let cancelBootstrapRetry = () => {};
+
+function retryBootstrapAuth() {
+  cancelBootstrapRetry();
+  const retry = () => {
+    cancelBootstrapRetry();
+    void bootstrapAuth();
+  };
+  const timer = setTimeout(retry, BOOTSTRAP_RETRY_MS);
+  globalThis.addEventListener("online", retry, { once: true });
+  cancelBootstrapRetry = () => {
+    clearTimeout(timer);
+    globalThis.removeEventListener("online", retry);
+    cancelBootstrapRetry = () => {};
+  };
+}
+
 async function bootstrapAuth() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
+  const snapshot = state.data ? null : readStateSnapshot();
+  // A snapshot from earlier assets waits behind the update loading screen, so the
+  // new views start with fresh data.
+  const updated = Boolean(snapshot?.updated);
+  const shellShown = Boolean(state.data) || (!updated && showStateSnapshot(snapshot));
+  if (updated) showAppShellLoading({ updated });
   try {
     const status = await globalThis.AppApi.request("/api/auth/status", { cache: "no-store", signal: controller.signal });
     renderMaintenanceStatus(status.maintenance);
@@ -222,12 +271,17 @@ async function bootstrapAuth() {
       $("#authLoading").hidden = true;
       loginDialogRequired = false;
       $("#loginDialog").close();
-      showAppShellLoading();
+      if (!shellShown) showAppShellLoading({ updated });
       notePwaActivity();
       await loadInitialState();
     } else showLogin();
   } catch {
     renderConnectivityStatus(false);
+    if (shellShown || (updated && showStateSnapshot(snapshot))) {
+      // An offline start keeps the stored data and checks the session again later.
+      retryBootstrapAuth();
+      return;
+    }
     $("#loginError").textContent = "Server nicht erreichbar.";
     showLogin();
   } finally { clearTimeout(timeout); }
