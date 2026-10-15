@@ -12,14 +12,17 @@ WORKFLOW = (
     Path(__file__).resolve().parents[1] / ".github/workflows/validate-conventions.yml"
 )
 
+# A shell function prepended to the step, not an executable on PATH: the CI
+# container runs tests with a noexec /tmp.
 FAKE_GH = textwrap.dedent(
     """\
-    #!/usr/bin/env bash
-    if [[ "${FAKE_GH_MODE:-ok}" == "fail" ]]; then
-      echo "synthetic gh api failure" >&2
-      exit 1
-    fi
-    printf '%s\\n' "${FAKE_GH_SUBJECTS:-}"
+    gh() {
+      if [[ "${FAKE_GH_MODE:-ok}" == "fail" ]]; then
+        echo "synthetic gh api failure" >&2
+        return 1
+      fi
+      printf '%s\\n' "${FAKE_GH_SUBJECTS:-}"
+    }
     """
 )
 
@@ -63,15 +66,9 @@ class ValidateConventionsWorkflowTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         root = Path(self._tmp.name)
         self.script = root / "validate.sh"
-        self.script.write_text(validation_script(), encoding="utf-8")
-        bin_dir = root / "bin"
-        bin_dir.mkdir()
-        gh = bin_dir / "gh"
-        gh.write_text(FAKE_GH, encoding="utf-8")
-        gh.chmod(0o755)
+        self.script.write_text(FAKE_GH + validation_script(), encoding="utf-8")
         self.env = {
             **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
             "GH_TOKEN": "synthetic-token",
             "PR_NUMBER": "7",
             "REPOSITORY": "example/ai-coach",
@@ -92,6 +89,7 @@ class ValidateConventionsWorkflowTests(unittest.TestCase):
     def test_failing_gh_api_fails_the_step(self):
         result = self.run_step(mode="fail")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("synthetic gh api failure", result.stderr)
 
     def test_empty_commit_listing_fails_the_step(self):
         result = self.run_step(subjects="")
