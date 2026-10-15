@@ -29,13 +29,19 @@ jobs:
             exit 1
           fi
 
+          subjects="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER/commits" --paginate --jq '.[].commit.message | split("\n")[0]')"
+          if [[ -z "$subjects" ]]; then
+            echo "No commit subjects returned for the pull request."
+            exit 1
+          fi
+
           invalid=0
           while IFS= read -r subject; do
             if [[ ! "$subject" =~ $conventional_regex ]]; then
               echo "Invalid commit subject: $subject"
               invalid=1
             fi
-          done < <(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER/commits" --paginate --jq '.[].commit.message | split("\n")[0]')
+          done <<< "$subjects"
 
           if [[ "$invalid" -ne 0 ]]; then
             exit 1

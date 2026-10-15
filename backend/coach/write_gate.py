@@ -260,6 +260,54 @@ def is_bare_affirmation(text: str) -> bool:
     )
 
 
+# A reply that starts with a plain yes and only names what to transfer, such as
+# "Ja, bitte übertrage die drei Einheiten dorthin.", accepts a sync offer in the
+# previous assistant message. It fails closed: every word after the yes must be
+# filler, a scope or reference word, or a transfer verb, so any other
+# instruction ("Ja, in der Bibliothek lassen.") never grants a remote write.
+_CONTEXT_AFFIRMATION_MAX_TOKENS = 15
+_CONTEXT_ANCHORS = frozenset(
+    {"ja", "jo", "jap", "jup", "yes", "yep", "ok", "okay", "gerne", "gern",
+     "einverstanden"}
+)  # fmt: skip
+_CONTEXT_DETAIL = frozenset(
+    normalize(word)
+    for word in (
+        "mach", "machen", "die", "den", "der", "dem", "diese", "diesen",
+        "dieser", "alle", "beide", "beiden", "zwei", "drei", "vier", "fünf",
+        "einheit", "einheiten", "für", "dorthin", "dahin", "hin", "rüber",
+        "übertrag", "übertrage", "übertragen", "lade", "laden", "hoch",
+        "hochladen", "sync", "synce", "syncen", "synchronisiere",
+        "synchronisieren", "please", "do", "it", "them", "the", "these",
+        "those", "all", "both", "two", "three", "four", "five", "session",
+        "sessions", "workout", "workouts", "there", "upload", "push",
+    )
+)  # fmt: skip
+
+
+def is_contextual_affirmation(text: str) -> bool:
+    """Short reply: a plain yes followed only by transfer scope or filler.
+
+    Only meaningful after a sync offer; negation, questions and any word outside
+    the allowlist keep it denied.
+    """
+    value = normalize(text)
+    if _NEGATION.search(value) or _QUESTION.search(value) or "doch nicht" in value:
+        return False
+    tokens = re.findall(r"[a-z0-9]+", value)
+    return (
+        0 < len(tokens) <= _CONTEXT_AFFIRMATION_MAX_TOKENS
+        and tokens[0] in _CONTEXT_ANCHORS
+        and all(
+            token.isdigit()
+            or token in _CONTEXT_ANCHORS
+            or token in _AFFIRMATION_FILLER
+            or token in _CONTEXT_DETAIL
+            for token in tokens[1:]
+        )
+    )
+
+
 @dataclass(frozen=True)
 class PendingOrigin:
     """Origin of a pending request, for an explicit retry or answer only."""
@@ -286,8 +334,10 @@ def build_turn_authority(
 ) -> TurnAuthority:
     """Derive the turn's footing from the athlete's typed text only."""
     remote = remote_requested(current_text) or (
-        is_bare_affirmation(current_text)
-        and _mentions_remote(previous_assistant_text[-_HISTORY_TAIL:])
+        _mentions_remote(previous_assistant_text[-_HISTORY_TAIL:])
+        and (
+            is_bare_affirmation(current_text) or is_contextual_affirmation(current_text)
+        )
     )
     message_ids = {current_message_id}
     origin_text = ""

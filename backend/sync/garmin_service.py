@@ -531,8 +531,10 @@ class GarminSyncService:
             self._record_failure(operation_id, reason, error)
             raise
         finally:
-            self._lifecycle_state.set_sync_status("")
-            self._coordination.release()
+            try:
+                self._lifecycle_state.set_sync_status("")
+            finally:
+                self._coordination.release()
 
     def _execute(
         self,
