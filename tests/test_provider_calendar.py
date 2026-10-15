@@ -603,6 +603,75 @@ class CalendarProviderTests(unittest.TestCase):
             ["2026-09-02", "2026-09-07", "2026-09-09", "2026-09-14"],
         )
 
+    def test_utc_recurrence_follows_source_zone_across_dst(self):
+        daily = parse(
+            feed("UID:utc\r\nDTSTART:20261020T090000Z\r\nRRULE:FREQ=DAILY"),
+            start=date(2026, 10, 24),
+            end=date(2026, 10, 26),
+            zone=ZoneInfo("Europe/Berlin"),
+        )
+        self.assertEqual(
+            [item["start_local"] for item in daily],
+            [
+                "2026-10-24T11:00:00+02:00",
+                "2026-10-25T10:00:00+01:00",
+                "2026-10-26T10:00:00+01:00",
+            ],
+        )
+        excluded = parse(
+            feed(
+                "UID:utc\r\nDTSTART:20261020T090000Z\r\nRRULE:FREQ=DAILY\r\n"
+                "EXDATE:20261025T090000Z"
+            ),
+            start=date(2026, 10, 24),
+            end=date(2026, 10, 26),
+            zone=ZoneInfo("Europe/Berlin"),
+        )
+        self.assertEqual(
+            [item["event_date"] for item in excluded],
+            ["2026-10-24", "2026-10-26"],
+        )
+
+    def test_tzid_weekly_recurrence_keeps_source_wall_time_across_dst(self):
+        weekly = parse(
+            feed(
+                "UID:berlin\r\nDTSTART;TZID=Europe/Berlin:20261019T090000\r\nRRULE:FREQ=WEEKLY"
+            ),
+            start=date(2026, 10, 19),
+            end=date(2026, 10, 27),
+            zone=ZoneInfo("Europe/Berlin"),
+        )
+        self.assertEqual(
+            [item["start_local"] for item in weekly],
+            ["2026-10-19T09:00:00+02:00", "2026-10-26T09:00:00+01:00"],
+        )
+
+    def test_floating_recurrence_keeps_local_wall_time_across_dst(self):
+        floating = parse(
+            feed("UID:floating\r\nDTSTART:20261019T090000\r\nRRULE:FREQ=WEEKLY"),
+            start=date(2026, 10, 19),
+            end=date(2026, 10, 27),
+            zone=ZoneInfo("Europe/Berlin"),
+        )
+        self.assertEqual(
+            [item["start_local"] for item in floating],
+            ["2026-10-19T09:00:00+02:00", "2026-10-26T09:00:00+01:00"],
+        )
+
+    def test_weekly_byday_is_emitted_in_week_start_order(self):
+        events = parse(
+            feed(
+                "UID:wkst\r\nDTSTART;VALUE=DATE:20261018\r\n"
+                "RRULE:FREQ=WEEKLY;WKST=SU;BYDAY=SU,MO;COUNT=3"
+            ),
+            start=date(2026, 10, 18),
+            end=date(2026, 10, 31),
+        )
+        self.assertEqual(
+            [item["event_date"] for item in events],
+            ["2026-10-18", "2026-10-19", "2026-10-25"],
+        )
+
     def test_monthly_yearly_filters_and_bounds(self):
         monthly = parse(
             feed(

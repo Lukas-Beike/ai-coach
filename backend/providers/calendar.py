@@ -428,7 +428,7 @@ def _ical_temporal_value(
                 )
             except ZoneInfoNotFoundError, ValueError:
                 parsed = parsed.replace(tzinfo=local_zone)
-        return parsed.astimezone(local_zone), False
+        return parsed, False
     except TypeError, ValueError:
         return None
 
@@ -683,7 +683,9 @@ def _ical_weekly_slot(
     occurrences: int,
 ) -> tuple[list[datetime], int, bool]:
     starts: list[datetime] = []
-    for weekday, _ordinal in sorted(bydays):
+    for weekday, _ordinal in sorted(
+        bydays, key=lambda item: (item[0] - rule["wkst"]) % 7
+    ):
         day = week + timedelta(days=(weekday - rule["wkst"]) % 7)
         if day < base_date or not _ical_matches_date_filters(
             day, {**rule, "bydays": []}
@@ -840,6 +842,18 @@ def _ical_overlaps(
     )
 
 
+def _ical_source_window(first: date, last: date, days_before: int) -> tuple[date, date]:
+    """Widen a local window so source-zone recurrence dates are never missed.
+
+    Recurrences are expanded in the DTSTART zone, whose calendar date can differ
+    from the athlete-local date by one day; the local overlap check filters later.
+    """
+    return (
+        date.fromordinal(max(1, first.toordinal() - days_before)),
+        date.fromordinal(min(date.max.toordinal(), last.toordinal() + 1)),
+    )
+
+
 def _ical_base_starts(
     event: dict[str, Any],
     duration: timedelta,
@@ -848,16 +862,20 @@ def _ical_base_starts(
     local_zone: tzinfo,
 ) -> list[datetime]:
     if not event.get("rrules"):
-        start = event["start"]
-        return [start] if _ical_overlaps(start, duration, first, last) else []
+        return [event["start"]]
     if event.get("unsupported_recurrence"):
         raise AppError(400, "Diese Kalender-Wiederholung wird nicht unterstützt.")
     starts = []
-    recurrence_first = first - timedelta(days=duration.days + 1)
+    recurrence_first, recurrence_last = _ical_source_window(
+        first, last, duration.days + 2
+    )
     for raw in event["rrules"]:
         starts.extend(
             _ical_recurrence_starts(
-                event, _ical_rrule(raw, local_zone), recurrence_first, last
+                event,
+                _ical_rrule(raw, local_zone),
+                recurrence_first,
+                recurrence_last,
             )
         )
     return sorted(set(starts))
@@ -874,11 +892,14 @@ def _ical_instances(
     starts = _ical_base_starts(event, duration, first, last, local_zone)
     excluded_values = set(event.get("exdates", [])) | set(excluded or ())
     seen: set[datetime] = set()
-    for start in chain(starts, event.get("rdates", [])):
-        if start in seen:
+    for source_start in chain(starts, event.get("rdates", [])):
+        if source_start in seen:
             continue
-        seen.add(start)
-        if start in excluded_values or not _ical_overlaps(start, duration, first, last):
+        seen.add(source_start)
+        if source_start in excluded_values:
+            continue
+        start = source_start.astimezone(local_zone)
+        if not _ical_overlaps(start, duration, first, last):
             continue
         end = start + duration
         yield {
