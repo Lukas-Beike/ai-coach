@@ -200,6 +200,8 @@ class StandardFixtureDataTests(unittest.TestCase):
         self.assertIsNotNone(today["active_kcal"])
         self.assertIsNotNone(today["resting_kcal"])
         self.assertIsNotNone(today["total_kcal"])
+        self.assertEqual(today["projected_total_kcal"], 1548 + 420)
+        self.assertIsNone(zero_day["projected_total_kcal"])
         self.assertEqual(
             (zero_day["active_kcal"], zero_day["resting_kcal"], zero_day["total_kcal"]),
             (0, 0, 0),

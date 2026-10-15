@@ -93,7 +93,9 @@ def garmin_daily_expenditure(
     """Return Garmin's measured daily calorie components for one local date.
 
     Total expenditure is only reported when Garmin supplied a total directly;
-    active and resting components are not summed to manufacture a total.
+    active and resting components are not summed to manufacture a total. For the
+    running day, a separate derived projection is added (see
+    ``_projected_expenditure``).
     """
     if not isinstance(snapshot, dict):
         snapshot = {}
@@ -115,6 +117,7 @@ def garmin_daily_expenditure(
         freshness = {}
     result = {
         **values,
+        **_projected_expenditure(snapshot, values, day, current_date),
         "source": GARMIN_PERFORMANCE_SOURCE if has_measurement else None,
         "measured_date": requested_date if has_measurement else None,
         "freshness": freshness.get("freshness", "unknown"),
@@ -174,6 +177,59 @@ def garmin_daily_health_metrics(
             current_date,
         )
     return result
+
+
+def _projected_expenditure(
+    snapshot: dict[str, Any],
+    values: dict[str, Any],
+    day: date | None,
+    current_date: date,
+) -> dict[str, Any]:
+    """Derive the full-day total for the running day, never presented as Garmin's.
+
+    Garmin's running total only covers the resting calories elapsed so far. The
+    projection adds today's active calories to the resting calories of the most
+    recent complete day within a week, which is nearly constant per profile.
+    """
+    projection: dict[str, Any] = {
+        "projected_total_kcal": None,
+        "projection_resting_kcal": None,
+        "projection_reference_date": None,
+    }
+    active = values["active_kcal"]
+    if day != current_date or active is None:
+        return projection
+    reference: tuple[date, float | int] | None = None
+    for record_date, record in performance_recovery.dated_garmin_recovery_records(
+        snapshot.get("daily_stats")
+    ):
+        try:
+            record_day = date.fromisoformat(record_date)
+        except ValueError:
+            continue
+        if not 0 < (current_date - record_day).days <= 7:
+            continue
+        resting = _as_number(
+            _first_present(record, GARMIN_DAILY_EXPENDITURE_FIELDS["resting_kcal"])
+        )
+        if resting is None or resting <= 0:
+            continue
+        if reference is None or record_day > reference[0]:
+            reference = (record_day, resting)
+    if reference is None:
+        return projection
+    projected = reference[1] + active
+    # A reference below what is already measured today is stale or partial.
+    if any(
+        values[field] is not None and projected < values[field]
+        for field in ("resting_kcal", "total_kcal")
+    ):
+        return projection
+    return {
+        "projected_total_kcal": projected,
+        "projection_resting_kcal": reference[1],
+        "projection_reference_date": reference[0].isoformat(),
+    }
 
 
 def _expenditure_values(
