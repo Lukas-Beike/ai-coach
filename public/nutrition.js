@@ -370,6 +370,7 @@ function showCachedNutritionView(path, renderView) {
 
 async function loadNutritionWeek(sequence, generation) {
   const path = "/api/nutrition/week";
+  const cacheEpoch = viewCacheEpoch;
   const status = document.querySelector("#nutritionWeekStatus");
   const cached = showCachedNutritionView(path, renderNutritionWeek);
   if (!cached) {
@@ -383,9 +384,9 @@ async function loadNutritionWeek(sequence, generation) {
   }
   try {
     const week = await api(path);
-    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;
+    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration || cacheEpoch !== viewCacheEpoch) return;
     renderNutritionWeek(week);
-    rememberViewCache(path, week);
+    rememberViewCache(path, week, cacheEpoch);
   } catch (error) {
     if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) status.textContent = cached ? `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}` : `Wochenübersicht konnte nicht geladen werden: ${error.message}`;
   }
@@ -410,6 +411,7 @@ async function loadNutrition() {
   const status = document.querySelector("#nutritionStatus");
   const path = `/api/nutrition/day${dateInput.value ? `?date=${encodeURIComponent(dateInput.value)}` : ""}`;
   // A start without a date asks for today, so its cached view is keyed by today.
+  const cacheEpoch = viewCacheEpoch;
   const cacheKey = `/api/nutrition/day?date=${encodeURIComponent(dateInput.value || todayIso())}`;
   const cached = showCachedNutritionView(cacheKey, renderNutritionDay);
   if (!cached) {
@@ -420,9 +422,9 @@ async function loadNutrition() {
   }
   try {
     const day = await api(path);
-    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;
+    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration || cacheEpoch !== viewCacheEpoch) return;
     renderNutritionDay(day);
-    rememberViewCache(`/api/nutrition/day?date=${encodeURIComponent(day.date)}`, day);
+    rememberViewCache(`/api/nutrition/day?date=${encodeURIComponent(day.date)}`, day, cacheEpoch);
   } catch (error) {
     if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) {
       if (cached) {

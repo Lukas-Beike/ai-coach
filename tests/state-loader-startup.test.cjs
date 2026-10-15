@@ -130,20 +130,25 @@ test("a completed load schedules one coalesced snapshot save", async () => {
 
 test("the view cache keeps recent reads for the same assets and is cleared with the snapshot", () => {
   const first = loader();
-  first.context.rememberViewCache("/api/nutrition/week", { days: [1] });
+  first.context.rememberViewCache("/api/nutrition/week", { days: [1] }, 0);
   assert.equal(first.storage.size, 0);
   first.state.data = {};
-  first.context.rememberViewCache("/api/nutrition/week", { days: [1] });
-  first.context.rememberViewCache("/api/nutrition/week", { days: [2] });
+  first.context.rememberViewCache("/api/nutrition/week", { days: [1] }, 0);
+  first.context.rememberViewCache("/api/nutrition/week", { days: [2] }, 0);
   assert.deepEqual(plain(first.context.readViewCache("/api/nutrition/week")), { days: [2] });
   assert.equal(first.context.readViewCache("/api/analysis/season"), null);
   assert.equal(loader({ storage: first.storage, asset: "/state-loader.js?v=2" }).context.readViewCache("/api/nutrition/week"), null);
   const limit = vm.runInContext("VIEW_CACHE_LIMIT", first.context);
-  for (let index = 0; index <= limit; index += 1) first.context.rememberViewCache(`/view/${index}`, index);
+  for (let index = 0; index <= limit; index += 1) first.context.rememberViewCache(`/view/${index}`, index, 0);
   assert.equal(first.context.readViewCache("/view/0"), null);
   assert.equal(first.context.readViewCache(`/view/${limit}`), limit);
   first.context.clearStateSnapshot();
   assert.equal(first.storage.size, 0);
+  // A read that started before the clear does not store its response.
+  first.context.rememberViewCache("/api/nutrition/week", { days: [3] }, 0);
+  assert.equal(first.context.readViewCache("/api/nutrition/week"), null);
+  first.context.rememberViewCache("/api/nutrition/week", { days: [3] }, vm.runInContext("viewCacheEpoch", first.context));
+  assert.deepEqual(plain(first.context.readViewCache("/api/nutrition/week")), { days: [3] });
 });
 
 test("snapshot data never overrides the startup bootstrap or claims its versions", async () => {
@@ -206,7 +211,7 @@ test("a full storage drops the view cache before the state snapshot", () => {
   }
   const { context, state, storage } = loader({ storage: new FullStorage() });
   state.data = { messages: [{ id: 1 }] };
-  context.rememberViewCache("/api/nutrition/week", { days: [1] });
+  context.rememberViewCache("/api/nutrition/week", { days: [1] }, 0);
   state.initialStateLoaded = true;
   context.saveStateSnapshot();
   assert.equal(storage.has("coach-view-cache"), false);

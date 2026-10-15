@@ -205,6 +205,8 @@ async function loadInitialState() {
   // The calendar and library load with the start, so opening them shows data at once.
   await load("/api/bootstrap?local=1", ["chat", "performance", "feedback", "profile", "plan", "library"]);
   if (sessionGeneration !== state.sessionGeneration) return;
+  // An update start whose fresh data failed shows the stored data and retries.
+  if (!state.data && showStateSnapshot(readStateSnapshot())) { retryBootstrapAuth(); return; }
   state.initialStateLoaded = true;
   scheduleStateSnapshotSave();
   if (state.chatInitialScrollPending && AppRouter.baseRoute() === "coach") scrollChatToLatest();

@@ -1002,6 +1002,7 @@ async function renderTrainingRecords() { // NOSONAR
 
 async function renderSeasonPreparation() {
   const path = "/api/analysis/season";
+  const cacheEpoch = viewCacheEpoch;
   const generation = ++seasonGeneration;
   const session = state.sessionGeneration;
   const cached = readViewCache(path);
@@ -1010,9 +1011,9 @@ async function renderSeasonPreparation() {
   } catch { renderSeasonEvents(null, generation); }
   try {
     const season = await api(path);
-    if (generation !== seasonGeneration || session !== state.sessionGeneration) return;
+    if (generation !== seasonGeneration || session !== state.sessionGeneration || cacheEpoch !== viewCacheEpoch) return;
     renderSeasonEvents(season, generation);
-    rememberViewCache(path, season);
+    rememberViewCache(path, season, cacheEpoch);
   } catch (error) {
     if (generation === seasonGeneration && session === state.sessionGeneration) document.getElementById("seasonPreparation").append(reportNode("p", cached ? `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}` : error.message));
   }

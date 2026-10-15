@@ -43,3 +43,13 @@ test("a start after an update without a reachable server shows the stored data @
   await expect(page.locator("#loginDialog")).not.toBeVisible();
   await expect(page.locator("#authLoading")).toBeHidden();
 });
+
+test("a start after an update whose fresh data fails shows the stored data @responsive", async ({ page }) => {
+  await ready(page);
+  await simulateUpdate(page);
+  await page.route("**/api/bootstrap?local=1", (route) => route.abort());
+  await page.reload();
+  await expect(page.locator("#appShell")).toBeVisible();
+  await expect(page.locator("#authLoading")).toBeHidden();
+  await expect.poll(() => page.evaluate(() => Boolean(state.data && state.replaceDataOnLoad))).toBe(true);
+});

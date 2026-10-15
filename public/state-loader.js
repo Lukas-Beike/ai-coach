@@ -38,6 +38,9 @@ const VIEW_CACHE_LIMIT = 24;
 const STATE_SNAPSHOT_SAVE_DELAY_MS = 1000;
 const STATE_SNAPSHOT_ASSET = Array.from(document.scripts || [], (script) => script.src).join(" ") || document.currentScript?.src || "";
 let stateSnapshotSaveTimer = null;
+// Changes when the device data is cleared, so a view read that started before
+// a logout or privacy deletion neither renders nor caches its response.
+let viewCacheEpoch = 0;
 // A load with failed areas keeps the previous snapshot instead of storing partial state.
 let stateSnapshotIncomplete = false;
 
@@ -72,6 +75,7 @@ function readStateSnapshot() {
 }
 
 function clearStateSnapshot() {
+  viewCacheEpoch += 1;
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
   try {
@@ -92,8 +96,8 @@ function readViewCache(path) {
   return readViewCacheEntries().find(([key]) => key === path)?.[1] ?? null;
 }
 
-function rememberViewCache(path, value) {
-  if (!state.data) return;
+function rememberViewCache(path, value, epoch) {
+  if (!state.data || epoch !== viewCacheEpoch) return;
   const entries = [[path, value], ...readViewCacheEntries().filter(([key]) => key !== path)].slice(0, VIEW_CACHE_LIMIT);
   try {
     localStorage.setItem(VIEW_CACHE_KEY, JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, entries }));

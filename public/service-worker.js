@@ -39,7 +39,7 @@ globalThis.addEventListener("fetch", (event) => {
     const timer = setTimeout(() => cached().then(settle).catch(() => {}), NAVIGATION_TIMEOUT_MS);
     network.then((response) => { clearTimeout(timer); settle(response); }).catch(async () => {
       clearTimeout(timer);
-      const response = await cached();
+      const response = await cached().catch(() => null);
       if (response) settle(response);
       else if (!settled) reject(new TypeError("Offline"));
     });
