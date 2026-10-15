@@ -18,6 +18,14 @@ CHECKIN_TEXT_LIMITS = {
 CHECKIN_SCORE_FIELDS = ("soreness", "stress", "motivation", "session_rpe")
 CHECKIN_TAGS = ("travel", "late_meal", "high_stress")
 CHECKIN_DAY_STATUSES = ("unknown", "rest", "pause")
+COACH_PRESERVED_FIELDS = CHECKIN_SCORE_FIELDS + (
+    "available_minutes",
+    "day_form",
+    "illness",
+    "pain",
+    "availability_notes",
+    "notes",
+)
 
 
 def bounded_score(value: Any) -> int | None:
@@ -46,6 +54,22 @@ def bounded_minutes(value: Any) -> int | None:
             400, "Die verfügbare Trainingszeit muss zwischen 0 und 1440 Minuten liegen."
         )
     return number
+
+
+def coach_clear_fields(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if (
+        not isinstance(value, list)
+        or any(not isinstance(item, str) for item in value)
+        or len(set(value)) != len(value)
+        or set(value) - set(COACH_PRESERVED_FIELDS)
+    ):
+        raise AppError(
+            400,
+            "clear_fields muss eine eindeutige Liste erlaubter Check-in-Felder sein.",
+        )
+    return tuple(value)
 
 
 def normalize_checkin(value: Any, *, today: date) -> dict[str, Any]:
@@ -153,26 +177,30 @@ class CheckinService:
         return self._save_normalized(checkin)
 
     def save_coach(self, arguments: Any) -> dict[str, Any]:
-        """Save a coach-supplied check-in while preserving omitted edit fields."""
+        """Save a coach-supplied check-in while preserving omitted edit fields.
+
+        Fields listed in ``clear_fields`` are removed instead of restored; they
+        must not also carry a value.
+        """
         if not isinstance(arguments, dict):
             raise AppError(400, "Der Tages-Check-in muss als Objekt gesendet werden.")
         value = dict(arguments)
+        clear_fields = coach_clear_fields(value.pop("clear_fields", None))
         for field in CHECKIN_SCORE_FIELDS + ("available_minutes",):
             if value.get(field) == -1:
                 value[field] = None
+        for field in clear_fields:
+            if value.get(field) not in (None, ""):
+                raise AppError(
+                    400,
+                    "Ein Check-in-Feld kann nicht zugleich einen Wert erhalten und gelöscht werden.",
+                )
         normalized = normalize_checkin(value, today=self._today())
         with self._manager.unit_of_work() as db:
             existing = self._repository.get(db, normalized["checkin_date"])
         if existing:
-            for field in CHECKIN_SCORE_FIELDS + (
-                "available_minutes",
-                "day_form",
-                "illness",
-                "pain",
-                "availability_notes",
-                "notes",
-            ):
-                if normalized[field] in (None, ""):
+            for field in COACH_PRESERVED_FIELDS:
+                if field not in clear_fields and normalized[field] in (None, ""):
                     normalized[field] = existing[field]
         return {"stored_locally": True, **self._save_normalized(normalized)}
 

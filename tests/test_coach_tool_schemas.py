@@ -76,6 +76,33 @@ class CoachToolSchemaTests(unittest.TestCase):
                 with self.subTest(tool=name, key=key, bound=bound):
                     self.assertEqual(prop.get(bound), value)
 
+    def test_save_checkin_clear_fields_enumerates_coach_preserved_fields(self):
+        from backend.athlete.checkins import (
+            CHECKIN_SCORE_FIELDS,
+            CHECKIN_TEXT_LIMITS,
+            COACH_PRESERVED_FIELDS,
+        )
+
+        tool = {
+            tool["name"]: tool
+            for tool in build_structured_tool_schemas(
+                default_profile={},
+                checkin_text_limits=CHECKIN_TEXT_LIMITS,
+                checkin_score_fields=CHECKIN_SCORE_FIELDS,
+                training_change_limit=366,
+                library_bulk_max_entries=100,
+                training_plan_statuses=(),
+            )
+        }["save_checkin"]
+        payload = tool["parameters"]["properties"]["payload"]
+        clear_fields = payload["properties"]["clear_fields"]
+        self.assertEqual(clear_fields["type"], "array")
+        self.assertIs(clear_fields["uniqueItems"], True)
+        self.assertEqual(clear_fields["items"]["enum"], list(COACH_PRESERVED_FIELDS))
+        self.assertNotIn("clear_fields", payload.get("required", []))
+        self.assertIn("clear_fields", tool["description"])
+        self.assertIn("Omitted and empty fields preserve", tool["description"])
+
     def test_refresh_days_allow_all_days_or_bounded_window(self):
         days = _tools()["start_provider_refresh"]["parameters"]["properties"]["days"]
         self.assertEqual(
