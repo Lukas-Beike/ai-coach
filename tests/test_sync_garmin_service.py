@@ -359,6 +359,27 @@ class GarminSyncServiceTests(unittest.TestCase):
         self.assertEqual(self.key_values.values["garmin_sync_status"], "")
         self.assertFalse(self.lock.locked())
 
+    def test_status_cleanup_failure_still_releases_the_shared_lock(self):
+        service = self.make_service()
+        set_status = self.lifecycle_state.set_sync_status
+
+        def fail_cleanup(message):
+            if message == "":
+                raise RuntimeError("synthetic status cleanup failure")
+            set_status(message)
+
+        with (
+            patch.object(
+                self.lifecycle_state, "set_sync_status", side_effect=fail_cleanup
+            ),
+            self.assertRaisesRegex(RuntimeError, "status cleanup"),
+        ):
+            service.sync(reason="test")
+
+        self.assertFalse(self.lock.locked())
+        self.assertEqual(service.sync(reason="test")["status"], "ok")
+        self.assertFalse(self.lock.locked())
+
 
 class GarminRemoteReaderTests(unittest.TestCase):
     def make_reader(self, client_factory, state=None):
