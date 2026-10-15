@@ -214,7 +214,7 @@ def garmin_body_fat_daily_records(
 
 
 def garmin_weight_metric(snapshot: dict[str, Any]) -> dict[str, Any]:
-    records = garmin_weight_records(snapshot)
+    records = garmin_weight_daily_records(snapshot) or garmin_weight_records(snapshot)
     if not records:
         return _metric(None, "kg", None)
     dated = sorted(records, key=lambda item: item[0] or "")
@@ -231,7 +231,7 @@ def garmin_weight_average(
 ) -> float | None:
     cutoff = end_date - timedelta(days=days - 1)
     values: list[float] = []
-    for record_date, weight in garmin_weight_records(snapshot):
+    for record_date, weight in garmin_weight_daily_records(snapshot):
         try:
             record_day = (
                 date.fromisoformat(iso_date_prefix(str(record_date)))

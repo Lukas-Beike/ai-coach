@@ -96,6 +96,10 @@ class ChatStreamRegistry:
 
     def set_background_event(self, operation_id: str, event: threading.Event) -> None:
         with self._lock:
+            # A reset may cancel a queued turn before its event is registered.
+            existing = self._background_events.get(operation_id)
+            if existing is not None and existing.is_set():
+                event.set()
             self._background_events[operation_id] = event
 
     def get_background_event(self, operation_id: str) -> threading.Event | None:

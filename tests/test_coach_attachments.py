@@ -9,6 +9,7 @@ from test_coach_dialogue import DialogueHarness, server
 from backend.coach import attachments as coach_attachments
 from backend.coach.attachments import (
     _FIT_SPORTS,
+    AttachmentRequestTooLarge,
     _fit_crc16,
     _fit_data_record,
     _fit_session_summary,
@@ -281,6 +282,43 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 attachments=[{"name": "chart.png", "data": PNG}],
             )
         self.assertEqual(error.exception.reason, "attachment_storage_quota")
+        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
+
+    def test_outgoing_provider_payload_is_limited_to_request_budget(self):
+        fit_upload = self.upload(FIT, "ride.fit")
+        outgoing = len(
+            coach_attachments.openai_attachment_data(
+                validate_attachments([fit_upload])[0]
+            )[0]
+        )
+        self.assertGreater(outgoing, len(fit_upload["data"]))
+        with (
+            patch.object(coach_attachments, "MAX_REQUEST_BYTES", outgoing - 1),
+            self.assertRaises(AttachmentRequestTooLarge),
+        ):
+            validate_attachments([fit_upload])
+        with patch.object(coach_attachments, "MAX_REQUEST_BYTES", outgoing):
+            self.assertEqual(len(validate_attachments([fit_upload])), 1)
+
+    def test_oversized_outgoing_request_is_rejected_before_storage(self):
+        fit_upload = self.upload(FIT, "ride.fit")
+        outgoing = len(
+            coach_attachments.openai_attachment_data(
+                validate_attachments([fit_upload])[0]
+            )[0]
+        )
+        with (
+            patch.object(coach_attachments, "MAX_REQUEST_BYTES", outgoing - 1),
+            self.assertRaises(server.AppError) as error,
+        ):
+            server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
+                "Analyze",
+                "oversized-request-turn",
+                "synthetic-csrf",
+                attachments=[fit_upload],
+            )
+        self.assertEqual(error.exception.status, 413)
+        self.assertEqual(error.exception.reason, "attachment_request_too_large")
         self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
 
     def test_openai_model_input_includes_image_gpx_and_fit_evidence(self):

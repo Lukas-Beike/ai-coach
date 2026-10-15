@@ -91,6 +91,60 @@ def response_id(value: Any) -> str:
 _validate_response_id = response_id
 
 
+# Poll failures the Coach resumes against the same background response.
+RESUMABLE_POLL_REASONS = frozenset(
+    {"provider_unavailable", "provider_timeout", "invalid_response"}
+)
+
+
+def _cancel_best_effort(cancel: Callable[[str], Any], active_response_id: str) -> None:
+    try:
+        cancel(active_response_id)
+    except Exception:  # noqa: BLE001, S110 - remote cancellation is best effort
+        pass
+
+
+def _retrieve_or_cancel(
+    retrieve: Callable[[str], dict[str, Any]],
+    cancel: Callable[[str], Any],
+    active_response_id: str,
+) -> dict[str, Any]:
+    try:
+        return retrieve(active_response_id)
+    except AppError as exc:
+        # Transient failures keep the response running so the caller can resume it.
+        if exc.reason not in RESUMABLE_POLL_REASONS:
+            _cancel_best_effort(cancel, active_response_id)
+        raise
+    except Exception:
+        _cancel_best_effort(cancel, active_response_id)
+        raise
+
+
+# Short first polls catch fast responses (e.g. a tool-round follow-up); the
+# configured interval stays the upper bound for long-running responses.
+_POLL_BACKOFF_SECONDS = (0.25, 0.5, 1.0)
+
+
+def _poll_delay(attempt: int, poll_seconds: float) -> float:
+    """Delay before poll ``attempt`` (0-based), never above ``poll_seconds``."""
+    if attempt < len(_POLL_BACKOFF_SECONDS):
+        return min(_POLL_BACKOFF_SECONDS[attempt], poll_seconds)
+    return poll_seconds
+
+
+def _poll_wait_cancelled(
+    cancel_event: Any, wait: Callable[[float], Any], poll_seconds: float
+) -> bool:
+    if cancel_event is None:
+        wait(poll_seconds)
+        return False
+    return bool(
+        cancel_event.wait(poll_seconds)
+        or getattr(cancel_event, "is_set", lambda: False)()
+    )
+
+
 def poll_background_response(
     initial_response: dict[str, Any],
     *,
@@ -107,32 +161,21 @@ def poll_background_response(
     wait = time.sleep if wait is None else wait
     active_response_id = response_id(initial_response.get("id"))
     current = initial_response
-
-    def abort(error: AppError) -> None:
-        try:
-            cancel(active_response_id)
-        except Exception:  # noqa: BLE001, S110 - remote cancellation is best effort
-            pass
-        raise error
-
+    attempt = 0
     while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
-        if cancel_event is not None:
-            if (
-                cancel_event.wait(poll_seconds)
-                or getattr(cancel_event, "is_set", lambda: False)()
-            ):
-                abort(AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled"))
-        else:
-            wait(poll_seconds)
+        delay = _poll_delay(attempt, poll_seconds)
+        attempt += 1
+        if _poll_wait_cancelled(cancel_event, wait, delay):
+            _cancel_best_effort(cancel, active_response_id)
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
         if monotonic() - started >= max_seconds:
-            abort(
-                AppError(
-                    504,
-                    "Die Hintergrundplanung hat das Zeitlimit überschritten.",
-                    reason="provider_timeout",
-                )
+            _cancel_best_effort(cancel, active_response_id)
+            raise AppError(
+                504,
+                "Die Hintergrundplanung hat das Zeitlimit überschritten.",
+                reason="provider_timeout",
             )
-        current = retrieve(active_response_id)
+        current = _retrieve_or_cancel(retrieve, cancel, active_response_id)
     return current
 
 

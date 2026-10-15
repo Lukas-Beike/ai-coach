@@ -96,7 +96,7 @@ class CompetitionService:
         bounded = max(1, min(int(limit), 500)) if limit is not None else None
         if db is not None:
             return self._repository.list(db, bounded)
-        with self._database_manager.unit_of_work() as connection:
+        with self._database_manager.reader() as connection:
             return self._repository.list(connection, bounded)
 
     def restore_in_transaction(

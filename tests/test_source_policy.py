@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import unittest
 from collections.abc import Mapping
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -198,6 +198,127 @@ class WahooLowestPriorityTests(unittest.TestCase):
                     latest_wellness_day=LATEST_DAY,
                 )
             ),
+        )
+
+
+class WahooAgeLimitTests(unittest.TestCase):
+    """A Wahoo FTP or weight older than 90 days is history, not the current value."""
+
+    AS_OF = LATEST_DAY
+
+    def _ftp_days_old(self, days: int, value: float = 250) -> Observation:
+        return _wahoo_ftp(value, self.AS_OF - timedelta(days=days))
+
+    def _weight_days_old(self, days: int, value: float = 78.5) -> Observation:
+        return _obs(
+            MetricKind.WEIGHT,
+            value,
+            self.AS_OF - timedelta(days=days),
+            ProviderId.WAHOO,
+        )
+
+    def test_wahoo_ftp_at_89_and_90_days_is_current_but_91_days_is_not(self) -> None:
+        for days, expected in ((89, 250), (90, 250), (91, None)):
+            with self.subTest(days=days):
+                self.assertEqual(
+                    expected,
+                    _values(
+                        select_current(
+                            [self._ftp_days_old(days)],
+                            MetricKind.FTP,
+                            sport=Sport.RIDE,
+                            latest_wellness_day=LATEST_DAY,
+                            as_of=self.AS_OF,
+                        )
+                    ),
+                )
+
+    def test_wahoo_weight_at_89_days_is_current_but_91_days_is_not(self) -> None:
+        self.assertEqual(
+            78.5,
+            _values(
+                select_current(
+                    [self._weight_days_old(89)],
+                    MetricKind.WEIGHT,
+                    latest_wellness_day=LATEST_DAY,
+                    as_of=self.AS_OF,
+                )
+            ),
+        )
+        self.assertIsNone(
+            select_current(
+                [self._weight_days_old(91)],
+                MetricKind.WEIGHT,
+                latest_wellness_day=LATEST_DAY,
+                as_of=self.AS_OF,
+            )
+        )
+
+    def test_stale_wahoo_value_stays_in_history_and_fresh_intervals_still_win(
+        self,
+    ) -> None:
+        stale = self._ftp_days_old(120, value=300)
+        observations = [
+            stale,
+            _obs(MetricKind.FTP, 240, LATEST_DAY, INTERVALS, sport=Sport.RIDE),
+        ]
+        self.assertEqual(
+            240,
+            _values(
+                select_current(
+                    observations,
+                    MetricKind.FTP,
+                    sport=Sport.RIDE,
+                    latest_wellness_day=LATEST_DAY,
+                    as_of=self.AS_OF,
+                )
+            ),
+        )
+        self.assertIn(stale, observations)
+        self.assertIsNone(
+            select_current(
+                [stale],
+                MetricKind.FTP,
+                sport=Sport.RIDE,
+                latest_wellness_day=LATEST_DAY,
+                as_of=self.AS_OF,
+            )
+        )
+
+    def test_without_as_of_no_age_limit_applies(self) -> None:
+        self.assertEqual(
+            250,
+            _values(
+                select_current(
+                    [self._ftp_days_old(400)],
+                    MetricKind.FTP,
+                    sport=Sport.RIDE,
+                    latest_wellness_day=LATEST_DAY,
+                )
+            ),
+        )
+
+    def test_garmin_and_intervals_values_are_not_age_limited(self) -> None:
+        old_garmin_weight = _obs(
+            MetricKind.WEIGHT, 80.0, self.AS_OF - timedelta(days=400), GARMIN
+        )
+        self.assertIs(
+            old_garmin_weight,
+            select_current([old_garmin_weight], MetricKind.WEIGHT, as_of=self.AS_OF),
+        )
+
+    def test_only_the_wahoo_rules_carry_an_age_limit(self) -> None:
+        limited = {
+            kind: [(limit.provider, limit.days) for limit in rule.max_age]
+            for kind, rule in CURRENT_RULES.items()
+            if rule.max_age
+        }
+        self.assertEqual(
+            limited,
+            {
+                MetricKind.FTP: [(ProviderId.WAHOO, 90)],
+                MetricKind.WEIGHT: [(ProviderId.WAHOO, 90)],
+            },
         )
 
 

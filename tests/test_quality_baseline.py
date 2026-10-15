@@ -2,6 +2,8 @@
 
 import contextlib
 import io
+import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -36,12 +38,54 @@ class QualityBaselineTests(unittest.TestCase):
     def test_existing_diagnostic_is_accepted(self):
         self.assertEqual(self.check([self.existing])[0], 0)
 
+    def test_line_and_column_shifts_do_not_change_debt(self):
+        moved = {**self.existing, "line": 9, "column": 1}
+        result, output = self.check([moved])
+        self.assertEqual(result, 0)
+        self.assertIn("0 new, 0 obsolete", output)
+
     def test_new_violation_cannot_replace_one_fixed_violation(self):
-        changed = {**self.existing, "line": 9}
+        changed = {**self.existing, "code": "F811"}
         result, output = self.check([changed])
         self.assertEqual(result, 1)
-        self.assertIn("NEW ruff backend/example.py:9", output)
-        self.assertIn("OBSOLETE ruff backend/example.py:4", output)
+        self.assertIn("NEW ruff backend/example.py:4 F811", output)
+        self.assertIn("OBSOLETE ruff backend/example.py F401", output)
+
+    def test_committed_baseline_stores_line_independent_entries(self):
+        root = Path(__file__).resolve().parents[1]
+        baseline = json.loads(
+            (root / "tests/fixtures/quality_baseline.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            {tuple(sorted(item)) for item in baseline["diagnostics"]},
+            {("code", "message_sha256", "path", "tool")},
+        )
+
+    def test_snapshot_writes_line_independent_entries(self):
+        output = io.StringIO()
+        with (
+            patch(
+                "tools.quality_baseline.collect",
+                return_value=(self.versions, [self.existing]),
+            ),
+            patch.object(
+                sys, "argv", ["quality_baseline.py", "--snapshot", "--base", "a" * 40]
+            ),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertEqual(quality_baseline.main(), 0)
+        snapshot = json.loads(output.getvalue())
+        self.assertEqual(
+            snapshot["diagnostics"],
+            [
+                {
+                    "tool": "ruff",
+                    "path": "backend/example.py",
+                    "code": "F401",
+                    "message_sha256": "a" * 64,
+                }
+            ],
+        )
 
     def test_obsolete_diagnostic_requires_baseline_cleanup(self):
         result, output = self.check([])

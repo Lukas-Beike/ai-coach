@@ -29,7 +29,8 @@ class PrivacyRestorePostRoutes:
         auth = self._session_auth_service()
         session = auth.require_auth(handler)
         auth.require_csrf(handler, session)
-        payload = handler.read_body(self._max_backup_bytes)
+        # The upload is streamed; the restore service stages it to a file in chunks.
+        payload = handler.read_body_stream(self._max_backup_bytes)
         result = self._database_restore_service().restore(payload)
         clear_headers = auth.session_cookie_headers(clear=True)
         handler.send_json(

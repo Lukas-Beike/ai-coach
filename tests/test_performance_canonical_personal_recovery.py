@@ -252,7 +252,7 @@ class PopulatedPersonalRecoveryTests(CanonicalReadFixture):
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
-            inputs = read_performance_inputs(selector, db, self.intervals)
+            inputs = read_performance_inputs(selector, db, self.intervals, as_of=TODAY)
         self.assertIsNotNone(inputs)
         assert inputs is not None
         assert inputs.personal_recovery is not None

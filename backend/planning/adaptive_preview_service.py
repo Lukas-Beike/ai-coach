@@ -9,9 +9,12 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.errors import AppError
 from backend.planning import adaptive, calendar
 from backend.planning.context import external_calendar_event_dates
 from backend.weather.adaptive import weather_adaptive_reason
+
+MAX_PREVIEW_PLANNED_UNITS = 500
 
 
 def _as_number(value: Any) -> float | int | None:
@@ -468,9 +471,19 @@ class AdaptiveReplanPreviewService:
             window_days=self._external_calendar_window_days,
         )
         signals.extend(calendar_signals)
+        drafts = self._planned_unit_service.list(
+            MAX_PREVIEW_PLANNED_UNITS + 1, future_only=True
+        )
+        if len(drafts) > MAX_PREVIEW_PLANNED_UNITS:
+            raise AppError(
+                409,
+                f"Es gibt mehr als {MAX_PREVIEW_PLANNED_UNITS} zukünftige lokale "
+                "Einheiten; die adaptive Vorschau kann nicht vollständig erstellt werden. "
+                "Bitte zuerst nicht mehr benötigte Einheiten archivieren.",
+            )
         changes = [
             change
-            for draft in self._planned_unit_service.list(500, future_only=True)
+            for draft in drafts
             if (
                 change := _change(
                     draft,

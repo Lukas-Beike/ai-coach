@@ -47,6 +47,9 @@ class FakeManager:
 
         return UnitOfWork()
 
+    def read_snapshot(self):
+        return self.unit_of_work()
+
     def close(self):
         self.connection.close()
 

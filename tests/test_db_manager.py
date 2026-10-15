@@ -121,6 +121,25 @@ class DatabaseManagerTests(unittest.TestCase):
                 self.assertEqual(id(second), first_id)
             manager.close()
 
+    def test_unit_of_work_rolls_back_on_base_exceptions_before_reuse(self):
+        class Interrupted(BaseException):
+            """Stands in for KeyboardInterrupt or a cancelled task."""
+
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        manager = self.make_manager(temporary.name)
+        self.addCleanup(manager.close)
+        with manager.unit_of_work() as db:
+            db.execute("CREATE TABLE records (value TEXT NOT NULL)")
+        with self.assertRaises(Interrupted), manager.unit_of_work() as db:
+            db.execute("INSERT INTO records(value) VALUES (?)", ("discarded",))
+            raise Interrupted
+        with manager.unit_of_work() as db:
+            self.assertFalse(db.in_transaction)
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 0
+            )
+
     def test_writer_is_serialized(self):
         with tempfile.TemporaryDirectory() as root:
             manager = self.make_manager(root)
@@ -229,6 +248,133 @@ class DatabaseManagerTests(unittest.TestCase):
                 self.assertEqual(failures, ["database reader limit reached"])
             manager.close()
 
+    def make_wal_manager(self, **options) -> DatabaseManager:
+        root = self.enterContext(tempfile.TemporaryDirectory())
+        manager = DatabaseManager(
+            Path(root) / "snapshot.db",
+            sqlite3,
+            row_factory=sqlite3.Row,
+            **options,
+        )
+        self.addCleanup(manager.close)
+        with manager.unit_of_work() as db:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("CREATE TABLE records (value INTEGER NOT NULL)")
+            db.execute("INSERT INTO records(value) VALUES (1)")
+        return manager
+
+    @staticmethod
+    def count(db) -> int:
+        return db.execute("SELECT COUNT(*) FROM records").fetchone()[0]
+
+    def test_read_snapshot_is_consistent_across_concurrent_commits(self):
+        manager = self.make_wal_manager()
+        with manager.read_snapshot() as snapshot:
+            self.assertEqual(self.count(snapshot), 1)
+            committed = threading.Event()
+
+            def write() -> None:
+                with manager.unit_of_work() as db:
+                    db.execute("INSERT INTO records(value) VALUES (2)")
+                committed.set()
+
+            writer = threading.Thread(target=write)
+            writer.start()
+            self.assertTrue(committed.wait(5))
+            writer.join(5)
+            # The commit landed, but the pinned snapshot must not see it.
+            self.assertEqual(self.count(snapshot), 1)
+        with manager.read_snapshot() as fresh:
+            self.assertEqual(self.count(fresh), 2)
+
+    def test_read_snapshot_is_not_blocked_by_a_long_held_writer(self):
+        manager = self.make_wal_manager()
+        holding = threading.Event()
+        release = threading.Event()
+
+        def hold_writer() -> None:
+            with manager.unit_of_work() as db:
+                db.execute("INSERT INTO records(value) VALUES (2)")
+                holding.set()
+                release.wait(10)
+
+        writer = threading.Thread(target=hold_writer)
+        writer.start()
+        try:
+            self.assertTrue(holding.wait(5))
+            results = []
+
+            def read() -> None:
+                with manager.read_snapshot() as db:
+                    results.append(self.count(db))
+
+            reader = threading.Thread(target=read)
+            reader.start()
+            reader.join(5)
+            self.assertFalse(reader.is_alive())
+            # Only committed data is visible while the writer is open.
+            self.assertEqual(results, [1])
+        finally:
+            release.set()
+            writer.join(5)
+
+    def test_read_snapshot_is_read_only_and_restores_the_pooled_connection(self):
+        manager = self.make_wal_manager()
+        with manager.read_snapshot() as snapshot:
+            with manager.unit_of_work() as nested, manager.reader() as again:
+                self.assertIs(nested, snapshot)
+                self.assertIs(again, snapshot)
+                with self.assertRaises(sqlite3.OperationalError):
+                    nested.execute("INSERT INTO records(value) VALUES (9)")
+            snapshot_id = id(snapshot)
+        with manager.reader() as reused:
+            self.assertEqual(id(reused), snapshot_id)
+            self.assertFalse(reused.in_transaction)
+            self.assertEqual(reused.execute("PRAGMA query_only").fetchone()[0], 0)
+        with manager.unit_of_work() as db:
+            db.execute("INSERT INTO records(value) VALUES (3)")
+        with manager.read_snapshot() as db:
+            self.assertEqual(self.count(db), 2)
+
+    def test_read_snapshot_releases_its_lease_after_an_error(self):
+        manager = self.make_wal_manager(reader_count=1, timeout=0.2)
+        with self.assertRaises(RuntimeError), manager.read_snapshot():
+            raise RuntimeError("handler failed")
+        with manager.read_snapshot() as db:
+            self.assertEqual(self.count(db), 1)
+        manager.close()
+
+    def test_read_snapshot_nested_in_unit_of_work_reuses_the_writer(self):
+        manager = self.make_wal_manager()
+        with manager.unit_of_work() as writer:
+            writer.execute("INSERT INTO records(value) VALUES (2)")
+            with manager.read_snapshot() as nested:
+                self.assertIs(nested, writer)
+                self.assertEqual(self.count(nested), 2)
+
+    def test_unit_of_work_accepts_a_shorter_writer_wait(self):
+        manager = self.make_wal_manager(timeout=30)
+        self.assertTrue(manager._writer_lock.acquire())
+        try:
+            failure = []
+
+            def contender() -> None:
+                started = time.monotonic()
+                try:
+                    with manager.unit_of_work(timeout=0.05):
+                        pass
+                except TimeoutError as exc:
+                    failure.append((str(exc), time.monotonic() - started))
+
+            thread = threading.Thread(target=contender)
+            thread.start()
+            thread.join(5)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(failure[0][0], "database writer limit reached")
+            self.assertLess(failure[0][1], 5)
+        finally:
+            manager._writer_lock.release()
+
     def test_restore_drain_closes_connections_and_resumes_current_database(self):
         with tempfile.TemporaryDirectory() as root:
             manager = self.make_manager(root)
@@ -249,6 +395,30 @@ class DatabaseManagerTests(unittest.TestCase):
                 initialize_schema(db)
                 self.assertTrue(database_schema_is_current(db))
             manager.close()
+
+    def test_failed_fresh_schema_creation_leaves_no_partial_tables(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        db = sqlite3.connect(Path(temporary.name) / "fresh.db")
+        self.addCleanup(db.close)
+        # The script creates kv first; a conflicting snapshots table fails it midway.
+        db.execute("CREATE TABLE snapshots (blocked INTEGER)")
+        db.commit()
+
+        with self.assertRaises(sqlite3.OperationalError):
+            initialize_schema(db)
+
+        self.assertFalse(db.in_transaction)
+        self.assertEqual(
+            {
+                row[0]
+                for row in db.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                )
+            },
+            {"snapshots"},
+        )
 
 
 if __name__ == "__main__":

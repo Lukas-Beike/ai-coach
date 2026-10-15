@@ -131,6 +131,39 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
             )
             self.assertEqual(staged.read_bytes(), b"safe")
 
+    def test_stage_streams_chunks_and_enforces_the_limit_while_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            validator = service(root, maximum_bytes=8)
+            staged = validator.stage(iter([b"safe", b"-db"]))
+            self.assertEqual(staged.read_bytes(), b"safe-db")
+
+            consumed: list[int] = []
+
+            def oversized_chunks():
+                for chunk in (b"1234", b"56789", b"never-read"):
+                    consumed.append(len(chunk))
+                    yield chunk
+
+            with self.assertRaises(AppError) as oversized:
+                validator.stage(oversized_chunks())
+            self.assertEqual(oversized.exception.status, 413)
+            self.assertEqual(consumed, [4, 5])
+
+            with self.assertRaises(AppError) as empty:
+                validator.stage(iter([]))
+            self.assertEqual(empty.exception.status, 413)
+
+            def broken_chunks():
+                yield b"partial"
+                raise TimeoutError("socket deadline")
+
+            with self.assertRaises(TimeoutError):
+                validator.stage(broken_chunks())
+
+            # Only the earlier successful stage remains; every failed stage cleaned up.
+            self.assertEqual([path.name for path in root.iterdir()], [staged.name])
+
     def test_validate_commits_session_scrubbing_after_schema_integrity_and_fk_checks(
         self,
     ) -> None:

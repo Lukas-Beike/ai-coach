@@ -10,6 +10,7 @@ from typing import Any
 
 from backend.coach.attachments import (
     MAX_ATTACHMENT_STORAGE_BYTES,
+    AttachmentRequestTooLarge,
     validate_attachments,
 )
 from backend.coach.authorization import coach_execution_scope, coach_session_key
@@ -55,10 +56,10 @@ class CoachJobSubmissionService:
         self, session_csrf_hash: str, operation_id: str | None = None
     ) -> dict[str, Any] | None:
         session_key = coach_session_key(session_csrf_hash)
-        with self._database_lock:
-            database_manager = self._database_manager()
-            with database_manager.unit_of_work() as db:
-                rows = self._active_rows(db)
+        # Pure read of one table: no writer or shared lock. Enqueue re-checks
+        # the same rows inside its own transaction before inserting.
+        with self._database_manager().reader() as db:
+            rows = self._active_rows(db)
         return self._find_active(rows, session_key, operation_id)
 
     def stream_status(self, session_csrf_hash: str) -> dict[str, Any]:
@@ -180,6 +181,12 @@ class CoachJobSubmissionService:
             )
         try:
             attachments = validate_attachments(attachments)
+        except AttachmentRequestTooLarge:
+            raise AppError(
+                413,
+                "Die Anhänge sind zusammen zu groß für eine Coach-Anfrage. Bitte sende weniger oder kleinere Dateien.",
+                reason="attachment_request_too_large",
+            ) from None
         except ValueError:
             raise AppError(
                 400,
@@ -308,10 +315,13 @@ class CoachJobSubmissionService:
                 }
                 db.execute(
                     "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) "
-                    "VALUES (?, ?, NULL, '{}', 'local', 'queued', ?, ?, ?)",
+                    "VALUES (?, ?, NULL, ?, 'local', 'queued', ?, ?, ?)",
                     (
                         uuid.uuid4().hex,
                         client_turn_id,
+                        # The stored athlete message started this turn, so it may
+                        # write locally; a resume reads this instead of assuming it.
+                        json.dumps({"allow_mutations": True}),
                         json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
                         now,
                         now,

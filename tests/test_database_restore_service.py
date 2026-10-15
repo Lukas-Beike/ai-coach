@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -40,11 +41,14 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.coach_wake = Mock()
         self.calls: list[str] = []
 
-        def stage(payload: bytes) -> Path:
-            self.assertTrue(self.gate.state()["active"])
+        def stage(payload: bytes | Iterable[bytes]) -> Path:
+            # Staging runs before the maintenance gate is taken.
+            self.assertFalse(self.gate.state()["active"])
             self.calls.append("stage")
             staged = self.data_dir / "staged.db"
-            staged.write_bytes(payload)
+            staged.write_bytes(
+                payload if isinstance(payload, bytes) else b"".join(payload)
+            )
             return staged
 
         def validate(path: Path) -> None:
@@ -125,6 +129,28 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         )
         self.coach_jobs.resume_interrupted.assert_called_once_with(self.coach_failures)
         self.assertFalse(self.gate.state()["active"])
+
+    def test_chunked_upload_restores_like_whole_bytes(self) -> None:
+        chunks = iter([b"replacement ", b"database"])
+
+        result = self.service.restore(chunks)
+
+        self.assertEqual(self.database_path.read_bytes(), b"replacement database")
+        self.assertTrue(result["restored"])
+        self.assertFalse((self.data_dir / "staged.db").exists())
+        self.assertEqual(self.calls[:2], ["stage", "validate"])
+
+    def test_staged_upload_is_removed_when_the_maintenance_gate_refuses(self) -> None:
+        with (
+            patch.object(self.gate, "restore", side_effect=AppError(409, "busy")),
+            self.assertRaises(AppError) as raised,
+        ):
+            self.service.restore(b"replacement database")
+
+        self.assertEqual(raised.exception.status, 409)
+        self.assertFalse((self.data_dir / "staged.db").exists())
+        self.assertEqual(self.database_path.read_bytes(), b"previous database")
+        self.validation.validate.assert_not_called()
 
     def test_invalid_backup_never_changes_live_database_and_cleans_stage(self) -> None:
         self.validation.validate.side_effect = AppError(400, "invalid backup")
@@ -211,6 +237,44 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.assertEqual(self.database_path.read_bytes(), b"previous database")
         self.assertFalse((self.data_dir / "staged.db").exists())
         self.sync_jobs.resume_interrupted.assert_not_called()
+        self.assertFalse(self.gate.state()["active"])
+
+    def test_resume_failure_after_replace_reports_restored_and_still_wakes_workers(
+        self,
+    ) -> None:
+        self.sync_jobs.resume_interrupted.side_effect = RuntimeError(
+            "sensitive resume detail"
+        )
+
+        with self.assertRaises(AppError) as raised:
+            self.service.restore(b"replacement database")
+
+        self.assertEqual(raised.exception.status, 500)
+        self.assertEqual(raised.exception.reason, "restored_resume_failed")
+        self.assertIn("wiederhergestellt", raised.exception.message)
+        self.assertIn("App neu", raised.exception.message)
+        self.assertNotIn("konnte nicht validiert", raised.exception.message)
+        self.assertNotIn("sensitive resume detail", raised.exception.message)
+        self.assertEqual(self.database_path.read_bytes(), b"replacement database")
+        self.assertFalse((self.data_dir / "staged.db").exists())
+        self.coach_jobs.resume_interrupted.assert_not_called()
+        self.sync_wake.set.assert_called_once_with()
+        self.coach_wake.set.assert_called_once_with()
+        self.assertFalse(self.gate.state()["active"])
+
+    def test_coach_resume_failure_after_replace_still_wakes_both_workers(self) -> None:
+        self.coach_jobs.resume_interrupted.side_effect = RuntimeError(
+            "synthetic coach resume failure"
+        )
+
+        with self.assertRaises(AppError) as raised:
+            self.service.restore(b"replacement database")
+
+        self.assertEqual(raised.exception.status, 500)
+        self.assertEqual(raised.exception.reason, "restored_resume_failed")
+        self.assertEqual(self.database_path.read_bytes(), b"replacement database")
+        self.sync_wake.set.assert_called_once_with()
+        self.coach_wake.set.assert_called_once_with()
         self.assertFalse(self.gate.state()["active"])
 
 

@@ -55,7 +55,7 @@ class ActivityDetailStore:
             )
 
     def calendar_profiles(self) -> dict[str, dict[str, Any]]:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             rows = db.execute(
                 "SELECT json_extract(value, '$.activity_id') AS id, "
                 "json_extract(value, '$.summary_sha256') AS fingerprint, "

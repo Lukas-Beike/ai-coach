@@ -277,7 +277,7 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
-            inputs = read_performance_inputs(selector, db, self.intervals)
+            inputs = read_performance_inputs(selector, db, self.intervals, as_of=TODAY)
         self.assertIsNotNone(inputs)
         assert inputs is not None
         assert inputs.recovery is not None
@@ -305,6 +305,6 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
             patch.object(selector, "reader_for", wraps=selector.reader_for) as resolved,
             self.manager.reader() as db,
         ):
-            inputs = read_performance_inputs(selector, db, self.intervals)
+            inputs = read_performance_inputs(selector, db, self.intervals, as_of=TODAY)
         resolved.assert_called_once()
         self.assertIsNotNone(inputs)

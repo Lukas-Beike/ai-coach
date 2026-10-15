@@ -44,6 +44,9 @@ class _Manager:
     def reader(self) -> Any:
         return self._case.manager.reader()
 
+    def read_snapshot(self) -> Any:
+        return self._case.manager.read_snapshot()
+
     def unit_of_work(self) -> Any:
         return self._case.manager.unit_of_work()
 

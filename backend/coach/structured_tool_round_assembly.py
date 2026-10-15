@@ -15,6 +15,8 @@ from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
+from backend.coach.turn_write_gate import CoachWriteGateService
+from backend.coach.write_gate import ImpactClassifier, build_openai_impact_classifier
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ class StructuredToolRoundState:
 class StructuredToolRoundConversation:
     training_context_service: Callable[[], Any]
     response_service: Callable[[], Any]
+    response_transport: Callable[[], Any]
 
 
 class CoachStructuredToolRoundAssembly:
@@ -92,6 +95,7 @@ class CoachStructuredToolRoundAssembly:
         self._job_store = state.job_store
         self._training_context_service = conversation.training_context_service
         self._response_service = conversation.response_service
+        self._response_transport = conversation.response_transport
 
     def execution_service(self) -> CoachStructuredToolExecutionService:
         return CoachStructuredToolExecutionService(
@@ -127,6 +131,19 @@ class CoachStructuredToolRoundAssembly:
             frozenset(self._read_only_tools()),
         )
 
+    def write_gate_service(self) -> CoachWriteGateService:
+        def classifier(model: str) -> ImpactClassifier:
+            # Same Responses transport (and OPENAI_BASE_URL) as the Coach turn.
+            return build_openai_impact_classifier(
+                self._response_transport().request,
+                model=model,
+                reasoning_effort="low",
+            )
+
+        return CoachWriteGateService(
+            frozenset(self._read_only_tools()), classifier, self._logger
+        )
+
     def service(self) -> CoachStructuredToolRoundService:
         return CoachStructuredToolRoundService(
             self._database_manager,
@@ -139,5 +156,6 @@ class CoachStructuredToolRoundAssembly:
             self._job_store(),
             self._training_context_service(),
             self._response_service(),
+            self.write_gate_service(),
             self._tool_round_limits(),
         )

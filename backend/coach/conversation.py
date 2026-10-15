@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -19,6 +20,11 @@ from backend.runtime.events import StateEventBuffer
 MESSAGE_ATTACHMENTS_QUERY = "SELECT attachments FROM messages WHERE id=?"
 
 
+# Bounded below the browser's 25 s request timeout so the athlete gets the
+# retry hint instead of a client-side timeout.
+RESET_LOCK_TIMEOUT_SECONDS = 15
+
+
 class CoachConversationResetService:
     """Clear local dialogue and best-effort delete the remote conversation."""
 
@@ -33,6 +39,8 @@ class CoachConversationResetService:
         utc_now: Callable[[], str],
         uuid_factory: Callable[[], uuid.UUID],
         logger: Any,
+        *,
+        lock_timeout_seconds: float = RESET_LOCK_TIMEOUT_SECONDS,
     ) -> None:
         self._database_manager = database_manager
         self._key_values = key_values
@@ -43,19 +51,52 @@ class CoachConversationResetService:
         self._utc_now = utc_now
         self._uuid_factory = uuid_factory
         self._logger = logger
+        self._lock_timeout_seconds = lock_timeout_seconds
+        self.remote_delete_thread: threading.Thread | None = None
 
-    def _delete_remote(self, conversation_id: str) -> bool:
-        if not conversation_id:
-            return False
+    def _delete_remote(self, conversation_id: str) -> None:
         try:
-            return self._openai_client.delete_conversation(conversation_id)
+            self._openai_client.delete_conversation(conversation_id)
         except Exception:
             self._logger.warning(
                 "Remote OpenAI conversation could not be deleted during reset",
                 extra={"event": "openai_reset_remote_delete_failed"},
                 exc_info=True,
             )
+
+    def _start_remote_delete(self, conversation_id: str) -> bool:
+        """Delete the old remote conversation off the HTTP request, best effort."""
+        if not conversation_id:
             return False
+        self.remote_delete_thread = threading.Thread(
+            target=self._delete_remote,
+            args=(conversation_id,),
+            name="coach-reset-remote-delete",
+            daemon=True,
+        )
+        self.remote_delete_thread.start()
+        return True
+
+    def _active_operation_ids(self) -> list[str]:
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            rows = db.execute(
+                "SELECT receipt FROM coach_commands WHERE status IN ('queued', 'running')"
+            ).fetchall()
+        operation_ids = (
+            str(command_receipt(row["receipt"]).get("operation_id") or "")
+            for row in rows
+        )
+        return [operation_id for operation_id in operation_ids if operation_id]
+
+    def _cancel_turns(self, operation_ids: list[str]) -> None:
+        """Ask turns to stop and abort their in-flight provider stream."""
+        for operation_id in operation_ids:
+            _, response = self._streams.cancel_background_event(operation_id)
+            if response is not None:
+                try:
+                    response.close()
+                except OSError, ValueError:
+                    pass
 
     def _reset_local(self) -> tuple[list[str], str, str]:
         with self._db_lock, self._database_manager.unit_of_work() as db:
@@ -100,14 +141,28 @@ class CoachConversationResetService:
         return operation_ids, conversation_id, generation
 
     def reset(self) -> dict[str, Any]:
-        with self._conversation_lock:
+        # A running turn holds the conversation lock until it ends, so ask it to
+        # stop first; otherwise the reset would wait for the turn's natural end.
+        signalled = self._active_operation_ids()
+        self._cancel_turns(signalled)
+        if not self._conversation_lock.acquire(timeout=self._lock_timeout_seconds):
+            raise AppError(
+                409,
+                "Die laufende Coach-Anfrage wird noch beendet. Bitte den Chat gleich erneut zurücksetzen.",
+                reason="chat_reset_timeout",
+            )
+        try:
             operation_ids, conversation_id, generation = self._reset_local()
-            for operation_id in operation_ids:
-                self._streams.cancel_background_event(operation_id)
+            self._cancel_turns([op for op in operation_ids if op not in signalled])
+        finally:
+            self._conversation_lock.release()
         return {
             "status": "ok",
             "generation": generation,
-            "remote_conversation_deleted": self._delete_remote(conversation_id),
+            # None: remote deletion runs in the background; False: nothing to delete.
+            "remote_conversation_deleted": None
+            if self._start_remote_delete(conversation_id)
+            else False,
             "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt.",
         }
 

@@ -27,6 +27,7 @@ from backend.sync import queue as sync_queue
 from backend.sync.intervals import IntervalsSyncService
 
 server = fixtures.server
+WRITE_IMPACT = "write_impact"  # name of the write gate's classifier schema
 
 
 class DialogueHarness:
@@ -58,6 +59,9 @@ class DialogueHarness:
         dialogue_clock.start()
         self.addCleanup(dialogue_clock.stop)
         self.counter = 0
+        # What the write gate's delete/bulk classifier confirms; nothing by
+        # default, so destructive calls must be confirmed explicitly.
+        self.gate_verdict = {"requests": []}
         # Most legacy behavior tests exercise effects after explicitly simulating
         # the athlete clicking the new remote-approval card. Security tests turn
         # this off and assert the proposal remains inert.
@@ -121,11 +125,22 @@ class DialogueHarness:
             ]
         }
 
+    def confirm_impact(self, domain, *, delete=False, bulk=False, accepts=False):
+        """Let the gate's classifier confirm an explicitly requested delete/bulk."""
+        self.gate_verdict = {
+            "requests": [{"domain": domain, "delete": delete, "bulk": bulk}],
+            "accepts_proposal": accepts,
+        }
+
     def turn(self, message, steps, turn=None, **kwargs):
         steps = iter(steps)
         self.counter += 1
 
         def response(payload, *args, **extra):
+            if payload.get("text", {}).get("format", {}).get("name") == WRITE_IMPACT:
+                # The write gate's impact classifier is a separate model call;
+                # it must not consume a scripted Coach response.
+                return {"output_text": json.dumps(self.gate_verdict)}
             step = next(steps)
             return step(payload) if callable(step) else step
 
@@ -590,7 +605,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             )
 
         result, _ = self.turn(
-            "Bitte dauerhaft merken",
+            "Bitte dauerhaft im Profil merken",
             [
                 lambda _: self.call(
                     "update_profile", {"changes": changes}, ["local_profile"]
@@ -672,7 +687,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         before = server.ATHLETE_DATA.profile().get()
         for changes, scope in cases:
             result, _ = self.turn(
-                "Bitte speichern",
+                "Bitte im Profil speichern",
                 [
                     lambda _, c=changes, s=scope: self.call(
                         "update_profile", {"changes": c}, s
@@ -871,7 +886,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                     "UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],)
                 )
             result, _ = self.turn(
-                "Bitte nochmal versuchen",
+                "Bitte den Sync nochmal versuchen",
                 [
                     lambda _, j=job: self.call(
                         "resolve_training_sync_conflict",
@@ -886,7 +901,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "failed"
             )
             result, _ = self.turn(
-                "Ja, bei dem Anbieter nochmal versuchen",
+                "Ja, bei dem Anbieter den Sync nochmal versuchen",
                 [
                     lambda _, j=job: self.call("get_sync_job", {"job_id": j["id"]}),
                     lambda _, j=job, p=provider, r=remote, s=scope: self.call(
@@ -1246,6 +1261,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             response["output"][0]["arguments"] = json.dumps(args)
             return response
 
+        self.confirm_impact("planning", bulk=True)
         result, _ = self.turn(
             "Bitte bis zum Giro durchplanen, zweimal Oberkörper pro Woche.",
             [rebuild, {"output_text": "Der Zeitraum ist geplant."}],
@@ -1528,6 +1544,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 period,
             )
 
+        self.confirm_impact("planning", bulk=True)
         result, _ = self.turn(
             "Samstag planen",
             [invalid_patch, replace_plan, {"output_text": "Plan gespeichert."}],
@@ -1784,6 +1801,40 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             server.PLANNING_DATA.competition().list()[0]["event_date"], "2026-10-04"
         )
 
+    def test_unconfirmed_delete_is_not_performed_and_keeps_the_record(self):
+        server.PLANNING_DATA.competition().save(
+            {
+                "name": "Synthetic Giro",
+                "event_date": "2026-10-03",
+                "sport": "Ride",
+                "priority": "A",
+            }
+        )
+        (competition,) = server.PLANNING_DATA.competition().list()
+        seen = []
+
+        def answer(payload):
+            seen.append(json.loads(payload["input"][0]["output"]))
+            return {"output_text": "Soll ich den Giro wirklich löschen?"}
+
+        result, _ = self.turn(
+            "Der Giro passt nicht mehr",
+            [
+                lambda _: self.call(
+                    "delete_competition",
+                    {"competition_id": competition["id"]},
+                    [f"competition:{competition['id']}"],
+                ),
+                answer,
+            ],
+        )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(seen[0]["status"], "not_performed")
+        self.assertEqual(seen[0]["gate_reason"], "impact_not_confirmed")
+        self.assertEqual(result["command_receipts"], [])
+        self.assertEqual(server.PLANNING_DATA.competition().list(), [competition])
+
     def test_different_target_id_cannot_escape_action_scope(self):
         for name in ("First", "Second"):
             server.PLANNING_DATA.competition().save(
@@ -1795,8 +1846,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 }
             )
         one, two = server.PLANNING_DATA.competition().list()
+        self.confirm_impact("competition", delete=True)
         result, _ = self.turn(
-            "Den ersten entfernen",
+            "Den ersten Wettkampf entfernen",
             [
                 lambda _: self.call(
                     "delete_competition",
@@ -1965,7 +2017,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             [self.workout("2026-09-08"), self.workout("2026-09-09")]
         )
         result, _ = self.turn(
-            "Alle offenen Einheiten übertragen",
+            "Alle offenen Einheiten zu Intervals übertragen",
             [
                 lambda _: self.call(
                     "start_intervals_plan_sync",
@@ -1987,7 +2039,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         )[0]
         entry = server.SYNC_COMMANDS.authority().pending_plan_push_entries()[0]
         result, _ = self.turn(
-            "Nur diese Einheit übertragen",
+            "Nur diese Einheit zu Intervals übertragen",
             [
                 lambda _: self.call(
                     "start_intervals_plan_sync",
@@ -2342,8 +2394,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             call["output"][0]["arguments"] = json.dumps(args)
             return call
 
+        self.confirm_impact("planning", bulk=True)
         result, _ = self.turn(
-            "Ja, so ?bernehmen", [commit, {"output_text": "Gespeichert."}]
+            "Ja, so übernehmen", [commit, {"output_text": "Gespeichert."}]
         )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(len(self.state()["planned_units"]), 1)

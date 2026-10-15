@@ -191,7 +191,7 @@ async function pollChatStatus() {
     if (running) showRunningChatStatus(status);
     else await finishRecoveredChatStatus();
   } catch (error) {
-    authFailed = /Authentication/.test(error.message);
+    authFailed = error?.status === 401 || /Authentication/.test(error.message);
   } finally {
     settleChatStatusPoll(pollRequest, authFailed, running);
   }
@@ -205,12 +205,20 @@ async function loadInitialState() {
   const areas = ["chat", "performance", "feedback", "profile"];
   areas.push("weather");
   if (AppRouter.baseRoute(route) === "plan") areas.push("plan", "library");
-  await load("/api/bootstrap?local=1", areas);
+  const loading = load("/api/bootstrap?local=1", areas);
+  const snapshot = state.data ? null : readStateSnapshot();
+  if (snapshot) {
+    render(snapshot);
+    state.replaceDataOnLoad = true;
+    finishAppShellLoading();
+  }
+  await loading;
   if (sessionGeneration !== state.sessionGeneration) return;
   state.initialStateLoaded = true;
   if (state.chatInitialScrollPending && AppRouter.baseRoute() === "coach") scrollChatToLatest();
+  // Refresh stale weather in the background; the local bootstrap is already current.
   if (state.data?.profile?.weather_location) {
-    await load("/api/bootstrap", state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
+    void load(LIVE_AREA_REFRESH, state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
   }
   connectStateEvents();
   scheduleChatStatusPoll(0);
@@ -621,6 +629,11 @@ function steerCurrentChat(event) {
 
 async function resetCoachChat() {
   const button = $("#openaiChatResetButton");
+  // Reset clears the local queue; wait for queued messages instead of silently dropping them.
+  if (state.chatQueue?.length) {
+    toast("Bitte warte, bis die wartenden Nachrichten gesendet sind. Danach kannst du den Chat zurücksetzen.", true);
+    return;
+  }
   if (!button || !await requestConfirmation("Coach-Chat wirklich zurücksetzen und eine neue Unterhaltung beginnen?", { title: "Coach-Chat zurücksetzen?" })) return;
   button.disabled = true;
   button.textContent = "Wird zurückgesetzt…";
@@ -1290,6 +1303,23 @@ function coachActionCard(proposal) {
   const description = document.createElement("p");
   description.textContent = coachActionDescription(proposal);
   card.append(description);
+  if (state.coachActionUnknownIds?.has(proposal.id)) {
+    const status = document.createElement("p");
+    status.textContent = "Ausführung unklar. Die Freigabe bleibt gesperrt, bis der Status geprüft ist.";
+    const check = document.createElement("button");
+    check.type = "button";
+    check.className = "secondary-button";
+    check.textContent = "Status prüfen";
+    check.addEventListener("click", () => {
+      check.disabled = true;
+      void reconcileCoachActionProposal(proposal.id);
+    });
+    const actions = document.createElement("div");
+    actions.className = "coach-action-card-actions";
+    actions.append(check);
+    card.append(status, actions);
+    return card;
+  }
   if (!["preview", "ready"].includes(proposal.status)) {
     const status = document.createElement("p");
     status.textContent = coachActionStatus(proposal);
@@ -1345,43 +1375,91 @@ function coachActionReceipt(proposal, result) {
   return { title, message, details, duplicateDelete, undo, remoteWrite, localWrite, nutritionProductWrite };
 }
 
+// A 4xx answer proves the server did not run the action; anything else after execute was sent may have run it.
+function isHttpClientRejection(error) {
+  return Number.isInteger(error?.status) && error.status >= 400 && error.status < 500;
+}
+
+// Re-reads the server's proposal list and lifts the unknown-outcome lock only when the server still reports the proposal as confirmable.
+async function reconcileCoachActionProposal(proposalId) {
+  try {
+    const history = await api("/api/chat/history?limit=1");
+    const proposals = Array.isArray(history?.proposed_actions) ? history.proposed_actions : [];
+    const current = proposals.find((item) => item.id === proposalId);
+    state.coachActionUnknownIds.delete(proposalId);
+    state.coachActionProposals = proposals;
+    if (current && ["preview", "ready"].includes(current.status)) {
+      addCoachReceipt({ title: "Nicht ausgeführt", message: "Die Aktion wurde nicht ausgeführt und kann erneut geprüft und freigegeben werden." });
+    } else {
+      addCoachReceipt({ title: "Ausführung prüfen", message: "Die Freigabe wurde bereits verbraucht. Bitte den Ausführungsbeleg prüfen.", status: "error" });
+      // A consumed approval may have run the action, so reload the areas it can change.
+      void load("/api/bootstrap?local=1", ["plan", "library", "profile", "feedback", "performance"]);
+    }
+    renderCoachActionReview();
+  } catch (error) {
+    toast(error.message, true);
+    renderCoachActionReview();
+  }
+}
+
 async function executeCoachActionProposal(proposal, button) {
-  if (!proposal?.id || button.disabled || !["preview", "ready"].includes(proposal.status)) return;
+  if (!proposal?.id || button.disabled || state.coachActionUnknownIds?.has(proposal.id) || !["preview", "ready"].includes(proposal.status)) return;
   const originalRoute = state.route;
+  let executeSent = false;
+  let executeResponded = false;
   button.disabled = true;
   try {
     const confirmed = await api("/api/coach/actions/confirm", {
       method: "POST",
       body: JSON.stringify({ proposal_id: proposal.id }),
     });
+    const payloadHash = confirmed?.proposed_action?.payload_hash;
+    if (!confirmed?.action_token || !payloadHash) throw new Error("Die Freigabe konnte nicht bestätigt werden; bitte den Vorschlag erneut prüfen.");
+    executeSent = true;
     const result = await api("/api/coach/actions/execute", {
       method: "POST",
-      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
+      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: payloadHash }),
     });
+    executeResponded = true;
     if (proposal.action_type === "undo_change" && result.status !== "undone") throw new Error("Die Undo-Bestätigung fehlt; bitte den aktuellen Stand prüfen.");
     state.coachActionProposals = (state.coachActionProposals || []).filter((item) => item.id !== proposal.id);
     renderCoachActionReview();
     const receipt = coachActionReceipt(proposal, result);
     addCoachReceipt(receipt);
     toast(receipt.message);
-    if (state.route === originalRoute) {
-      if (receipt.nutritionProductWrite) await AppRouter.navigate("nutrition/products", { historyMode: "push" });
-      else if (receipt.localWrite) await AppRouter.navigate("nutrition/diary", { historyMode: "push" });
-      else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
-    }
+    if (state.route === originalRoute) await showCoachReceiptArea(receipt);
     await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);
   } catch (error) {
-    addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
-    if (error.reason === "proposal_expired") {
-      proposal.status = "expired";
-      renderCoachActionReview();
-    } else if (["proposal_invalid", "proposal_used", "proposal_unavailable"].includes(error.reason)) {
-      proposal.status = "used";
-      renderCoachActionReview();
-    }
-    toast(error.message, true);
-    button.disabled = false;
+    if (executeSent && !executeResponded && !isHttpClientRejection(error)) lockUnknownCoachActionOutcome(proposal, error);
+    else rejectCoachActionProposal(proposal, button, error);
   }
+}
+
+async function showCoachReceiptArea(receipt) {
+  if (receipt.nutritionProductWrite) await AppRouter.navigate("nutrition/products", { historyMode: "push" });
+  else if (receipt.localWrite) await AppRouter.navigate("nutrition/diary", { historyMode: "push" });
+  else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
+}
+
+// The action may have run; keep the button locked until the server state is known.
+function lockUnknownCoachActionOutcome(proposal, error) {
+  state.coachActionUnknownIds.add(proposal.id);
+  addCoachReceipt({ title: "Ausführung unklar", message: "Die Antwort zur Freigabe ist nicht angekommen. Die Freigabe bleibt gesperrt, bis der Status geprüft ist.", status: "error" });
+  renderCoachActionReview();
+  toast(error.message, true);
+}
+
+function rejectCoachActionProposal(proposal, button, error) {
+  addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
+  if (error.reason === "proposal_expired") {
+    proposal.status = "expired";
+    renderCoachActionReview();
+  } else if (["proposal_invalid", "proposal_used", "proposal_unavailable"].includes(error.reason)) {
+    proposal.status = "used";
+    renderCoachActionReview();
+  }
+  toast(error.message, true);
+  button.disabled = false;
 }
 
 function createPendingMessage(entry, index = 0) {
@@ -1615,6 +1693,7 @@ function renderMessageNode(message) {
     }
   }
   appendMessageRetry(node, message);
+  appendMessageChanges(node, message);
   const actions = document.createElement("div");
   actions.className = "message-actions";
   const copy = messageActionButton("copy", "Nachricht kopieren");
@@ -1641,6 +1720,51 @@ function renderMessageNode(message) {
   return node;
 }
 
+// What the Coach turn changed locally, with one undo for the whole turn.
+function appendMessageChanges(node, message) {
+  const changes = message.role === "assistant" ? message.coach_changes : null;
+  if (!Array.isArray(changes?.labels) || !changes.labels.length) return;
+  const line = document.createElement("div");
+  line.className = "message-changes";
+  const text = document.createElement("span");
+  text.textContent = `${changes.undone_at ? "Zurückgenommen" : "Geändert"}: ${changes.labels.join(" · ")}`;
+  line.append(text);
+  if (changes.undoable && !changes.undone_at && message.client_turn_id) {
+    const undo = document.createElement("button");
+    undo.type = "button";
+    undo.className = "message-undo";
+    undo.textContent = "Rückgängig";
+    undo.addEventListener("click", () => undoCoachTurn(message.client_turn_id, undo));
+    line.append(undo);
+  }
+  node.append(line);
+}
+
+async function undoCoachTurn(clientTurnId, button) {
+  if (button.disabled) return;
+  button.disabled = true;
+  const confirmed = await requestConfirmation("Alle lokalen Änderungen dieser Coach-Antwort zurücknehmen? Intervals.icu bleibt unverändert.", { title: "Änderungen zurücknehmen?", confirmLabel: "Zurücknehmen" });
+  if (!confirmed) {
+    button.disabled = false;
+    return;
+  }
+  try {
+    const result = await api("/api/change-history/undo-turn", {
+      method: "POST",
+      body: JSON.stringify({ client_turn_id: clientTurnId }),
+    });
+    (state.data?.messages || []).forEach((item) => {
+      if (item.role === "assistant" && item.client_turn_id === clientTurnId) item.coach_changes = result.coach_changes;
+    });
+    renderMessages(state.data?.messages || [], false, true);
+    toast("Änderungen zurückgenommen");
+    await load("/api/bootstrap?local=1", ["plan", "library", "profile"]);
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message, true);
+  }
+}
+
 function appendChatStream(root, streamVisible) {
   const phase = state.chatRequest?.phase;
   if (!streamVisible) return false;
@@ -1656,7 +1780,7 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));
   const visibleMessages = messages || [];
   const signature = JSON.stringify([
-    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.attachment_names, message.error]),
+    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.attachment_names, message.error, message.coach_changes || null]),
     appShellLoading, state.data?.messages_next_cursor, state.chatStreamText, state.chatServerOperationId,
     state.chatResponseStarted, state.chatRequest?.phase || null, state.chatRequest?.responseMessageId || null,
     state.chatRequest?.responseMessageReceived || false,

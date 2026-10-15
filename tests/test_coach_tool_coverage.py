@@ -13,6 +13,7 @@ from unittest.mock import patch
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.training_patch import CoachTrainingPatchService
+from backend.coach.write_gate import CLASSIFIER_DOMAINS, TOOL_DOMAIN
 from backend.planning import library as planning_library
 from backend.providers import http as provider_http
 from backend.providers import intervals_client as intervals_client_module
@@ -36,6 +37,13 @@ def covers(*cases):
         return checked
 
     return decorate
+
+
+# Remote writes need athlete wording that names the sync.
+def message_for(tool):
+    if TOOL_DOMAIN.get(tool) == "remote_intervals":
+        return "Bitte mit Intervals synchronisieren."
+    return "Bitte so ausführen."
 
 
 REQUIRED_VARIANTS = {
@@ -128,6 +136,15 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     def setUp(self):
         super().setUp()
+        # Every covered call stands for an explicit athlete request, so the write
+        # gate's classifier confirms deletes and bulk changes.
+        self.gate_verdict = {
+            "requests": [
+                {"domain": domain, "delete": True, "bulk": True}
+                for domain in sorted(CLASSIFIER_DOMAINS)
+            ],
+            "accepts_proposal": True,
+        }
         self.observed = set()
         self.issued = {}
         for owner, name in (
@@ -161,11 +178,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                     self.observed.add(step["tool"] + ":" + variant)
         return receipt, model
 
-    def run_tool(
-        self, name, arguments=None, scope=None, message="Bitte so ausführen.", **kwargs
-    ):
+    def run_tool(self, name, arguments=None, scope=None, message=None, **kwargs):
         receipt, _ = self.turn(
-            message,
+            message or message_for(name),
             [
                 lambda _: self.call(name, arguments, scope, **kwargs),
                 {"output_text": "Synthetischer Ergebnistext."},
@@ -508,7 +523,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             },
             ["local_plan"],
             period=period,
-            message="Erstelle zunächst nur einen Entwurf.",
+            message="Erstelle zunächst nur einen Plan als Entwurf.",
         )
         self.assertEqual(self.state()["planned_units"], [])
         source = [
@@ -609,7 +624,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 }
             },
             ["activity_feedback"],
-            message="Notiere zum gestrigen Lauf: entspanntes Ende.",
+            message="Notiere als Feedback zum gestrigen Lauf: entspanntes Ende.",
         )
         self.assertEqual(
             server.ATHLETE_DATA.activity_feedback().list()[0]["notes"],
@@ -619,7 +634,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "delete_activity_feedback",
             {"activity_id": "synthetic-run"},
             ["activity_feedback"],
-            message="Entferne diese Notiz wieder.",
+            message="Entferne dieses Feedback wieder.",
         )
         self.assertEqual(server.ATHLETE_DATA.activity_feedback().list(), [])
         self.assertEqual(server.ATHLETE_DATA.checkin().list()[0]["soreness"], 6)
@@ -649,7 +664,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "save_competition",
             {"payload": {"competition_id": competition_id, "event_date": "2026-10-04"}},
             ["competition:" + competition_id],
-            message="Den bitte einen Tag später.",
+            message="Den Wettkampf bitte einen Tag später.",
         )
         self.assertEqual(
             server.PLANNING_DATA.competition().list()[0]["event_date"], "2026-10-04"
@@ -756,7 +771,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     def test_new_plan_sync_and_later_selected_sync_use_real_ids(self):
         period = {"start": "2026-09-09", "end": "2026-09-09"}
         result, _ = self.turn(
-            "Mittwoch locker trainieren und anschließend übertragen.",
+            "Mittwoch locker trainieren und anschließend zu Intervals übertragen.",
             [
                 lambda _: self.call(
                     "apply_training_patch",
@@ -795,7 +810,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             target="intervals",
             remote_write=True,
             sync_scope="selected",
-            message="Nur diese Einheit erneut übertragen.",
+            message="Nur diese Einheit erneut zu Intervals übertragen.",
         )
         self.assertEqual(selected["entries"], 1)
         with server.database_manager().unit_of_work() as db:
@@ -814,7 +829,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             target="intervals",
             remote_write=True,
             sync_scope="all_pending",
-            message="Jetzt alle offenen Einheiten übertragen.",
+            message="Jetzt alle offenen Einheiten zu Intervals übertragen.",
         )
         self.assertEqual(all_pending["entries"], 2)
 
@@ -900,6 +915,63 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
+    def apply_after_preview(self, message, preview):
+        """Run one turn in which the Coach tries to apply the given preview."""
+        seen = []
+
+        def apply(_):
+            return self.call(
+                "apply_adaptive_replan",
+                {"adjustment_id": preview["id"]},
+                ["adaptive_replan:" + preview["id"]],
+            )
+
+        def answer(payload):
+            seen.append(json.loads(payload["input"][0]["output"]))
+            return {"output_text": "Soll ich die Anpassung übernehmen?"}
+
+        self.turn(message, [apply, answer])
+        return seen[0]
+
+    def test_acknowledgement_after_a_preview_does_not_apply_it(self):
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [{**self.workout(), "duration_minutes": 90}]
+        )
+        server.ATHLETE_DATA.checkin().save({"available_minutes": 30})
+        preview = self.run_tool("preview_adaptive_replan", {}, ["adaptive_replan"])
+        before = self.state()["planned_units"]
+        self.gate_verdict = {"requests": []}
+
+        output = self.apply_after_preview("danke", preview)
+
+        self.assertEqual(output["status"], "not_performed")
+        self.assertEqual(output["gate_reason"], "approval_not_confirmed")
+        self.assertEqual(self.state()["planned_units"], before)
+        latest = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service()
+        self.assertEqual(latest.latest_preview()["status"], "preview")
+
+    def test_confirming_message_after_another_message_cannot_apply_an_old_preview(
+        self,
+    ):
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [{**self.workout(), "duration_minutes": 90}]
+        )
+        server.ATHLETE_DATA.checkin().save({"available_minutes": 30})
+        preview = self.run_tool("preview_adaptive_replan", {}, ["adaptive_replan"])
+        before = self.state()["planned_units"]
+        self.gate_verdict = {"requests": []}
+        self.turn("Wie war mein Schlaf?", [{"output_text": "Gut."}])
+        self.gate_verdict = {
+            "requests": [{"domain": "planning", "delete": False, "bulk": False}],
+            "accepts_proposal": True,
+        }
+
+        output = self.apply_after_preview("Ja, übernimm die Anpassung.", preview)
+
+        self.assertFalse(output["ok"])
+        self.assertEqual(output["reason"], "adaptive_approval_required")
+        self.assertEqual(self.state()["planned_units"], before)
+
     @covers("apply_adaptive_replan:intervals")
     def test_illness_sync_requires_explicit_remote_acceptance_after_preview(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
@@ -910,20 +982,36 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         with patch.object(
             IllnessPauseSyncService, "sync", return_value={"status": "ok", "synced": 3}
         ) as remote:
-            denied, _ = self.turn(
+            seen = []
+
+            def preview_again(payload):
+                seen.append(json.loads(payload["input"][0]["output"]))
+                return self.call("preview_adaptive_replan", {}, ["adaptive_replan"])
+
+            self.turn(
                 "Nur lokal übernehmen.",
                 [
                     lambda _: self.call(
                         "apply_adaptive_replan",
                         arguments,
-                        ["adaptive_replan:" + preview["id"]],
+                        ["adaptive_replan:" + preview["id"], "intervals_sync"],
+                        target="intervals",
+                        remote_write=True,
                     ),
+                    preview_again,
                     {"output_text": "Nicht übertragen."},
                 ],
             )
-            self.assertEqual(denied["status"], "failed")
+            self.assertEqual(seen[0]["gate_reason"], "remote_not_requested")
             self.assertEqual(self.state()["planned_units"], before)
             remote.assert_not_called()
+            # A refused approval cannot be redeemed by a later message, so the
+            # Coach previews again and the athlete approves that preview.
+            preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().latest_preview()
+            arguments = {
+                "adjustment_id": preview["id"],
+                "sync_illness_to_intervals": True,
+            }
             result = self.run_tool(
                 "apply_adaptive_replan",
                 arguments,
@@ -978,11 +1066,8 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )
         self.assertIsNotNone(result["duplicate"])
         self.assertEqual(result["duplicate"]["canonical_id"], "synthetic-wahoo")
-        self.assertEqual(
-            result["proposed_action"]["action_type"],
-            "delete_duplicate_intervals_activity",
-        )
-        self.assertEqual(result["proposed_action"]["status"], "preview")
+        self.assertNotIn("proposed_action", result)
+        self.assertNotIn("proposal", result)
         self.assertEqual(
             server.SYNC_PERSISTENCE.state_repository().latest_snapshot()[
                 "recent_activities"
@@ -1655,7 +1740,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             self.assertEqual(result["command_receipts"], [])
             self.assertEqual(self.athlete_state(), before)
 
-    def test_model_misreading_negated_sync_cannot_queue_before_athlete_approval(self):
+    def test_model_misreading_negated_sync_cannot_queue_or_propose(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
         before_jobs = server.SYNC_JOB_QUEUE.service().list()
         self.auto_approve_remote_proposals = False
@@ -1677,12 +1762,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             ],
         )
 
-        result = receipt["command_receipts"][0]["result"]
-        self.assertEqual(result["status"], "approval_required")
+        # The write gate refuses the sync before it can even become a proposal.
+        self.assertEqual(receipt["command_receipts"], [])
+        self.assertEqual(receipt["proposed_actions"], [])
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), before_jobs)
         proposals = server.COACH_PROPOSALS.read_service().current("synthetic-session")
-        self.assertEqual(len(proposals), 1)
-        self.assertEqual(proposals[0]["action_type"], "remote_coach_write")
+        self.assertEqual(proposals, [])
 
     def test_all_pending_approval_does_not_expand_to_units_added_after_preview(self):
         first = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
@@ -2104,7 +2189,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 if kwargs.get("remote_write"):
                     self.auto_approve_remote_proposals = False
                 result, _ = self.turn(
-                    "Synthetischer Auftrag mit ungültigem Argument.",
+                    message_for(name),
                     [
                         lambda _, n=name, a=args, s=scope, k=kwargs: self.call(
                             n, a, s, **k
@@ -2142,7 +2227,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             )
 
         result, _ = self.turn(
-            "Zeig mir eine mögliche Entlastung.",
+            "Zeig mir eine mögliche Entlastung im Plan.",
             [
                 lambda _: self.call("preview_adaptive_replan", {}, ["adaptive_replan"]),
                 premature,
@@ -2230,25 +2315,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )[0]
         server.ATHLETE_DATA.checkin().save({"available_minutes": 30})
         preview = self.run_tool("preview_adaptive_replan", {}, ["adaptive_replan"])
-        current = self.state()
-        self.run_tool(
-            "apply_training_patch",
-            {
-                "changes": [
-                    {
-                        "local_id": unit["id"],
-                        "action": "update",
-                        "duration_minutes": 45,
-                        "expected_payload_hash": current["planned_units"][0][
-                            "expected_payload_hash"
-                        ],
-                    }
-                ],
-                "expected_revision": current["planning_revision"],
-            },
-            ["planned_unit:" + unit["id"]],
-            period={"start": "2026-09-09", "end": "2026-09-09"},
-        )
+        # The edit happens outside the Coach so the apply turn stays the first
+        # athlete message after the preview.
+        server.PLANNING_DATA.planned_unit().update(unit["id"], {"duration_minutes": 45})
         result = self.run_tool(
             "apply_adaptive_replan",
             {"adjustment_id": preview["id"]},

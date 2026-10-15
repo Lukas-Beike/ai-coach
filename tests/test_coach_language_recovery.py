@@ -79,7 +79,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
             ) as enqueue,
         ):
             result, model = self.turn(
-                "Bitte den Plan nochmal übertragen",
+                "Bitte den Plan nochmal zu Intervals übertragen",
                 [
                     sync,
                     limited,

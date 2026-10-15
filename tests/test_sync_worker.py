@@ -6,11 +6,12 @@ import sqlite3
 import threading
 import unittest
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.jobs import SyncJobStore
 from backend.sync.worker import SyncJobWorker
 
 
@@ -147,31 +148,50 @@ class SyncJobWorkerTests(unittest.TestCase):
         _join_worker(worker)
         self.assertFalse(worker._worker_thread.is_alive())
 
-    def test_non_maintenance_app_error_remains_visible(self) -> None:
-        class FailingStore:
-            def claim(self) -> None:
-                raise AppError(500, "claim failed", reason="store_failure")
+    def test_non_maintenance_app_error_is_logged_and_worker_continues(self) -> None:
+        class FlakyStore:
+            claims = 0
 
-        worker = SyncJobWorker(
-            FailingStore(), _RecordingRunner(), MaintenanceGate(), poll_seconds=1
-        )
+            def claim(self) -> dict[str, str] | None:
+                self.claims += 1
+                if self.claims == 1:
+                    raise AppError(500, "claim failed secret", reason="store_failure")
+                if self.claims == 2:
+                    return {"id": "job-1"}
+                return None
 
-        with self.assertRaisesRegex(AppError, "claim failed"):
-            worker.run_loop()
-
-        class FailingRunner:
+        class FailingThenStoppingRunner:
             def run(self, job: dict[str, Any]) -> None:
-                raise AppError(500, "runner failed", reason="runner_failure")
+                raise AppError(500, "runner failed secret", reason="runner_failure")
 
-        class OneJobStore:
-            def claim(self) -> dict[str, str]:
-                return {"id": "job-1"}
-
+        store = FlakyStore()
         worker = SyncJobWorker(
-            OneJobStore(), FailingRunner(), MaintenanceGate(), poll_seconds=1
+            cast(SyncJobStore, store),
+            FailingThenStoppingRunner(),
+            MaintenanceGate(),
+            poll_seconds=0,
         )
-        with self.assertRaisesRegex(AppError, "runner failed"):
+
+        def stop_on_third_claim() -> None:
+            if store.claims >= 3:
+                worker.stop()
+
+        original_claim = store.claim
+
+        def claim() -> dict[str, str] | None:
+            result = original_claim()
+            stop_on_third_claim()
+            return result
+
+        store.claim = claim  # type: ignore[method-assign]
+
+        with patch("backend.sync.worker._LOGGER.error") as log_error:
             worker.run_loop()
+
+        self.assertGreaterEqual(store.claims, 3)
+        reasons = [call.kwargs["extra"]["reason"] for call in log_error.call_args_list]
+        self.assertEqual(reasons, ["store_failure", "runner_failure"])
+        self.assertNotIn("secret", repr(log_error.call_args_list))
 
     def test_transient_claim_error_keeps_worker_alive_without_replaying_job(
         self,

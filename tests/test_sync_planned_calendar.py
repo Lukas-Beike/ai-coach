@@ -794,6 +794,42 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.assertEqual(self.client.deleted, ["event-2"])
         self.assertEqual([event["id"] for event in self.client.events], ["event-1"])
 
+    def test_repair_rejects_corrupt_stored_payload_as_conflict(self):
+        service = self.make_repair_service()
+        for raw_payload in ("not json", "[]", json.dumps({"date": "not-a-date"})):
+            with self.subTest(raw_payload=raw_payload):
+                self.add_unit(raw_payload=raw_payload)
+                with self.assertRaises(AppError) as caught:
+                    service.repair_entry(LOCAL_ID, self.payload_hash())
+                self.assertEqual(caught.exception.status, 409)
+                self.assertEqual(caught.exception.reason, "planning_revision_conflict")
+                self.assertEqual(self.client.deleted, [])
+                with self.manager.unit_of_work() as db:
+                    db.execute(
+                        "DELETE FROM planned_units WHERE local_id=?", (LOCAL_ID,)
+                    )
+
+    def test_delete_duplicates_never_deletes_an_empty_identity(self):
+        service = self.make_repair_service()
+        deleted = []
+
+        class Export:
+            @staticmethod
+            def event_identity(event):
+                return str(event.get("id") or "")
+
+            @staticmethod
+            def delete(remote_id):
+                deleted.append(remote_id)
+
+        context = type(
+            "Context",
+            (),
+            {"export": Export, "removing": True, "remote_id": "", "batch": None},
+        )
+        service._delete_duplicates(context, [{"id": ""}, {}, {"id": None}])
+        self.assertEqual(deleted, [])
+
     def test_repair_readback_failure_keeps_remote_identity(self):
         self.add_unit()
         self.client.responses = [[self.remote_event("event-1", type="Ride")]]

@@ -19,6 +19,15 @@ from backend.planning.sport import planned_activity_type
 
 DEFAULT_ILLNESS_PAUSE_DAYS = 3
 WEATHER_ADAPTIVE_MAX_MINUTES = 90
+# The only planned-unit fields an adaptive replacement may change on apply.
+ADAPTIVE_REPLACEMENT_KEYS = (
+    "duration_minutes",
+    "description",
+    "target",
+    "rationale",
+    "archived",
+    "private_calendar_adjustment",
+)
 
 
 def workout_is_hard(workout: dict[str, Any]) -> bool:
@@ -262,6 +271,13 @@ class AdaptiveReplanApplyService:
             status = str(row["status"])
             if status in {"applied", "stale", "partial"}:
                 return {"status": f"already_{status}", "id": normalized_id}
+            latest = self._adjustment_repository.latest(db)
+            if not latest or str(latest["id"]) != normalized_id:
+                raise AppError(
+                    409,
+                    "Diese Plananpassung wurde durch eine neuere Vorschau ersetzt. "
+                    "Bitte die aktuelle Vorschau verwenden.",
+                )
 
             payload = json.loads(row["payload"])
             illness_pause = (
@@ -464,12 +480,19 @@ class AdaptiveReplanApplyService:
             return 0, {"library_workout_id": draft_id, "reason": "invalid_date"}
         if current_date < today.isoformat():
             return 0, {"library_workout_id": draft_id, "reason": "past"}
+        # Overlay only the fields a preview replaces on the current row, so athlete
+        # edits to start time, plan membership or remote identity survive.
         replacement = {
-            **replacement,
+            **current,
+            **{
+                key: replacement[key]
+                for key in ADAPTIVE_REPLACEMENT_KEYS
+                if key in replacement
+            },
             "id": draft_id,
-            "moving_time": int(replacement.get("duration_minutes") or 0) * 60,
             "sync_status": "local",
         }
+        replacement["moving_time"] = int(replacement.get("duration_minutes") or 0) * 60
         if not replacement.get("archived") and not replacement.get("local_deleted"):
             planning_workouts.validate_workout_description(replacement)
             for key in planning_workouts.DERIVED_WORKOUT_KEYS:

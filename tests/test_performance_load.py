@@ -119,6 +119,23 @@ class PerformanceLoadTests(unittest.TestCase):
             },
         )
 
+    def test_actual_atl_applies_load_from_days_without_wellness_rows(self):
+        end_date = date(2026, 9, 12)
+        wellness = [
+            {"id": "2026-09-01", "atl": 10},
+            {"id": "2026-09-04", "atl": 10},
+        ]
+        activities = [{"start_date_local": "2026-09-02", "icu_training_load": 100}]
+        retention = math.exp(-1 / 7)
+        decay = 1 - retention
+        expected = (10 * retention + 100 * decay) * retention**2
+        series = actual_atl_series(wellness, activities, end_date)
+        self.assertEqual(series[date(2026, 9, 4)], round(expected, 2))
+        self.assertNotEqual(
+            series[date(2026, 9, 4)],
+            actual_atl_series(wellness, [], end_date)[date(2026, 9, 4)],
+        )
+
     def test_actual_atl_decays_across_missing_days_and_is_sorted(self):
         end_date = date(2026, 9, 12)
         wellness = [

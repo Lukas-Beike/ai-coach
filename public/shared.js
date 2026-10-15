@@ -115,8 +115,8 @@ function ensureRouteData(route = state.route) {
   if (!state.data) return;
   const requested = [];
   const panelRoute = AppRouter.baseRoute(route);
-  if (panelRoute === "plan" && !state.loadedAreas.has("plan")) requested.push("plan");
-  if (panelRoute === "plan" && !state.loadedAreas.has("library")) requested.push("library");
+  // Skip areas an earlier request is already loading, such as the startup load.
+  if (panelRoute === "plan") requested.push(...["plan", "library"].filter((area) => !state.loadedAreas.has(area) && !areaLoading(area)));
   if (requested.length) load("/api/bootstrap?local=1", requested);
   if (route === "more/equipment") void renderTrainingRecords();
   if (route === "analysis/performance") void renderCyclingPowerProfile();

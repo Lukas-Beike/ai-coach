@@ -373,11 +373,17 @@ class StructuredTrainingChangeValidatorTests(unittest.TestCase):
             reason="planning_revision_conflict",
         )
 
-    def test_expected_revision_conversion_errors_are_preserved(self) -> None:
-        for value, error_type in (("not-an-int", ValueError), ([], TypeError)):
-            with self.subTest(value=value), self.assertRaises(error_type):
-                self.validator.validate(
-                    [], {"expected_revision": value}, self.db, False
+    def test_malformed_expected_revision_is_a_client_error(self) -> None:
+        malformed: tuple[object, ...] = ("not-an-int", [], {})
+        for value in malformed:
+            with self.subTest(value=value):
+                self._assert_app_error(
+                    lambda value=value: self.validator.validate(
+                        [], {"expected_revision": value}, self.db, False
+                    ),
+                    status=400,
+                    message="Eine vollständige Planänderung benötigt die gelesene Planrevision.",
+                    reason="planning_revision_required",
                 )
 
     def test_required_payload_hash_rejects_missing_or_malformed_hash(self) -> None:

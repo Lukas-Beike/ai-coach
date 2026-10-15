@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from backend.coach.change_receipts import change_summary
 from backend.coach.constants import AI_PROVIDER
 from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
@@ -65,6 +66,7 @@ class CoachFinalReceiptService:
                 for entry in command_receipts
                 if entry.get("result", {}).get("proposed_action")
             ],
+            "change_summary": change_summary(command_receipts),
         }
         for key in (
             "openai_response_id",
@@ -97,6 +99,10 @@ class CoachFinalReceiptService:
                 final_receipt["text"],
                 client_turn_id=client_turn_id,
             )
+            if final_receipt.get("change_summary"):
+                final_receipt["message"]["coach_changes"] = final_receipt[
+                    "change_summary"
+                ]
             for step in command_receipts:
                 if step["tool"] == "preview_adaptive_replan" and step.get(
                     "result", {}

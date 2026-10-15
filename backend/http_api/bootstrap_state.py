@@ -11,6 +11,7 @@ from backend.canonical.public_metrics import neutral_calendar_entries
 from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
+from backend.sync.intervals_state import latest_library_timestamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.wahoo_connection import WAHOO_TOKENS_KEY, connection_status
 
@@ -69,9 +70,11 @@ class PublicBootstrapService:
     def read(self) -> dict[str, Any]:
         deps = self._dependencies
         registry = getattr(deps, "provider_registry", DEFAULT_PROVIDER_REGISTRY)
-        # Resolve the manager only after taking the shared lock; all reads below
-        # then reuse this single unit of work, including nested service reads.
-        with deps.database_lock, deps.database_manager().unit_of_work() as db:
+        # One read-only WAL snapshot serves every read below, including nested
+        # service reads, so the projection is consistent without the writer or
+        # the shared database lock. A hidden write fails on the query-only
+        # connection instead of racing.
+        with deps.database_manager().read_snapshot() as db:
             snapshot = deps.sync_state_repository().latest_snapshot()
             local_planned = deps.planned_unit_service().list(250)
             competitions = deps.competition_service().list(limit=100)
@@ -85,6 +88,7 @@ class PublicBootstrapService:
                     deps.garmin_sync_state_service().core_error_entries()
                 ),
                 garmin_tokenstore_exists=Path(deps.config.garmin_tokenstore).exists(),
+                read_only=True,
             )
             jobs = deps.sync_job_queue_service().list()
             state_version_values = deps.state_version_service().versions(
@@ -165,9 +169,7 @@ class PublicBootstrapService:
                         db, "last_sync_error"
                     )
                     or None,
-                    last_library_sync_at=deps.key_values.get_in_transaction(
-                        db, "last_library_sync_at"
-                    ),
+                    last_library_sync_at=_library_activity_at(deps, db),
                     last_library_sync_error=deps.key_values.get_in_transaction(
                         db, "last_library_sync_error"
                     )
@@ -212,9 +214,7 @@ class PublicBootstrapService:
                     job for job in jobs if job.get("status") in {"queued", "running"}
                 ],
                 "library_sync": {
-                    "last_sync_at": deps.key_values.get_in_transaction(
-                        db, "last_library_sync_at"
-                    ),
+                    "last_sync_at": _library_activity_at(deps, db),
                     "last_error": deps.key_values.get_in_transaction(
                         db, "last_library_sync_error"
                     )
@@ -282,6 +282,13 @@ class PublicBootstrapService:
                 ),
                 "usage": deps.provider_state_service().summary("openai"),
             }
+
+
+def _library_activity_at(deps: Any, db: Any) -> str | None:
+    return latest_library_timestamp(
+        deps.key_values.get_in_transaction(db, "last_library_sync_at"),
+        deps.key_values.get_in_transaction(db, "last_library_push_at"),
+    )
 
 
 def bootstrap_provider_states(

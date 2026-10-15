@@ -13,7 +13,6 @@ from typing import Any, Self
 from unittest.mock import Mock
 
 from backend.activities.duplicate_inspection import DuplicateInspector
-from backend.activities.duplicates import duplicate_delete_action
 from backend.coach.clarification import CoachClarificationService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.tool_dispatch import CoachToolDispatchService
@@ -49,13 +48,13 @@ class LockCheckingDatabaseManager(DatabaseManager):
         self.uow_count = 0
 
     @contextmanager
-    def unit_of_work(self) -> Iterator[Any]:
+    def unit_of_work(self, *, timeout: float | None = None) -> Iterator[Any]:
         if not self._tracking_lock.held:
             raise AssertionError(
                 "database unit of work must run under the injected lock"
             )
         self.uow_count += 1
-        with super().unit_of_work() as db:
+        with super().unit_of_work(timeout=timeout) as db:
             yield db
 
 
@@ -164,9 +163,7 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.assertEqual(self.database_manager.uow_count, 2)
         self.training_patch.apply.assert_called_once_with(arguments, action)
 
-    def test_duplicate_inspection_only_creates_session_bound_delete_proposal(
-        self,
-    ) -> None:
+    def test_duplicate_inspection_never_creates_delete_proposal(self) -> None:
         duplicate = {
             "canonical_id": "900",
             "canonical_name": "Run A",
@@ -184,17 +181,13 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.proposal_creation.create.assert_not_called()
         self.inspector.latest.assert_called_once_with()
 
-        self.proposal_creation.create.return_value = {"proposal": {"id": "proposal-1"}}
         result = self.execute(
             "inspect_activity_duplicates", session_csrf_hash="bound-csrf"
         )
-        self.assertEqual(
-            result,
-            {"ok": True, "duplicate": duplicate, "proposal": {"id": "proposal-1"}},
-        )
-        self.proposal_creation.create.assert_called_once_with(
-            duplicate_delete_action(duplicate), "bound-csrf"
-        )
+        self.assertEqual(result, {"ok": True, "duplicate": duplicate})
+        self.assertNotIn("proposal", result)
+        self.proposal_creation.create.assert_not_called()
+        self.proposal_creation.create_remote_write.assert_not_called()
 
     def test_direct_duplicate_delete_requires_remote_write_approval(self) -> None:
         action = {

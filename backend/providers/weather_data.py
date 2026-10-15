@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 _HOURLY_FIELDS = (
@@ -17,6 +18,24 @@ _DAILY_FIELDS = (
 )
 
 
+def _usable_weather_value(value: Any) -> bool:
+    return value is not None and not (
+        isinstance(value, float) and not math.isfinite(value)
+    )
+
+
+def _overlay_weather_series(
+    base_values: list[Any],
+    short_values: list[Any],
+    short_times: list[Any],
+    positions: dict[str, int],
+) -> None:
+    for timestamp, value in zip(short_times, short_values, strict=False):
+        base_index = positions.get(str(timestamp))
+        if base_index is not None and _usable_weather_value(value):
+            base_values[base_index] = value
+
+
 def _overlay_weather_values(base: dict[str, Any], short: dict[str, Any]) -> None:
     raw_base_times = base.get("time")
     raw_short_times = short.get("time")
@@ -27,12 +46,8 @@ def _overlay_weather_values(base: dict[str, Any], short: dict[str, Any]) -> None
         if key == "time" or not isinstance(short_values, list):
             continue
         base_values = base.get(key)
-        if not isinstance(base_values, list) or len(base_values) != len(base_times):
-            continue
-        for short_index, timestamp in enumerate(short_times):
-            base_index = positions.get(str(timestamp))
-            if base_index is not None and short_index < len(short_values):
-                base_values[base_index] = short_values[short_index]
+        if isinstance(base_values, list) and len(base_values) == len(base_times):
+            _overlay_weather_series(base_values, short_values, short_times, positions)
 
 
 def merge_weather_forecasts(

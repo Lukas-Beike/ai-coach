@@ -6,6 +6,8 @@ import threading
 import unittest
 from unittest.mock import MagicMock, Mock, patch
 
+from backend.coach.dialogue import INSTRUCTIONS
+from backend.coach.request_payload import compose_model_instructions
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
@@ -33,6 +35,8 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.jobs = Mock()
         self.response = Mock()
         self.response.respond.return_value = {"output": []}
+        self.write_gate = Mock()
+        self.write_gate.open_turn.return_value.denial.return_value = None
         self.service = CoachStructuredToolRoundService(
             lambda: self.manager,
             self.lock,
@@ -44,6 +48,7 @@ class StructuredToolRoundTests(unittest.TestCase):
             self.jobs,
             Mock(),
             self.response,
+            self.write_gate,
             CoachStructuredToolRoundLimits(
                 max_rounds=1,
                 background_horizon_days=7,
@@ -106,6 +111,35 @@ class StructuredToolRoundTests(unittest.TestCase):
             "synthetic-turn",
             {"command_receipts": state.command_receipts, "sync_job_ids": []},
         )
+
+    def test_released_turn_cannot_execute_tools_or_record_receipts(self) -> None:
+        state = self.state()
+        self.jobs.turn_open.return_value = False
+
+        name, call_id, result, action = self.service._execute_tool_call(
+            self.call(), state=state, question="", cancelled=False
+        )
+
+        self.assertEqual((name, call_id), ("read_profile", "call-one"))
+        self.assertEqual(
+            (result["ok"], result["status"], result["reason"]),
+            (False, "not_performed", "turn_released"),
+        )
+        self.assertEqual(action, {"operation": "read_profile"})
+        self.jobs.turn_open.assert_called_once_with("synthetic-turn")
+        self.execution.execute.assert_not_called()
+        self.assertEqual(state.command_receipts, [])
+        self.jobs.merge_receipt.assert_not_called()
+
+    def test_open_turn_still_executes_its_tool(self) -> None:
+        self.jobs.turn_open.return_value = True
+
+        _name, _call_id, result, _action = self.service._execute_tool_call(
+            self.call(), state=self.state(), question="", cancelled=False
+        )
+
+        self.assertTrue(result["ok"])
+        self.execution.execute.assert_called_once()
 
     def test_food_lookup_runs_outside_outer_transaction_and_persists_receipt(
         self,
@@ -254,6 +288,38 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.assertIn(
             "Do not change data or pending requests.", state.model_instructions
         )
+        # Static rules first, per-turn context last (provider prompt caching).
+        self.assertTrue(state.model_instructions.startswith(INSTRUCTIONS))
+        self.assertLess(
+            state.model_instructions.index("fresh synthetic context"),
+            state.model_instructions.index("Do not change data or pending requests."),
+        )
+
+    def test_refresh_rebuild_keeps_turn_attachment_notices(self) -> None:
+        state = self.state()
+        state.allow_mutations = True
+        state.model_instructions = compose_model_instructions(
+            "stale synthetic context", allow_mutations=True, attachment_summary=True
+        )
+        self.execution.execute.return_value = {
+            "ok": True,
+            "synchronous_refresh": True,
+        }
+        with patch.object(
+            self.service._training_context,
+            "build",
+            return_value="fresh synthetic context",
+        ):
+            self.service._execute_tool_call(
+                self.call(), state=state, question="", cancelled=False
+            )
+        self.assertEqual(
+            state.model_instructions,
+            compose_model_instructions(
+                "fresh synthetic context", allow_mutations=True, attachment_summary=True
+            ),
+        )
+        self.assertIn("untrusted evidence", state.model_instructions)
 
     def test_refresh_rebuild_preserves_attachment_context(self) -> None:
         state = self.state()

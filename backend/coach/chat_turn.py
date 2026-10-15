@@ -140,6 +140,33 @@ class CoachChatTurnService:
             thinking_level = self._settings.selected_thinking_level()
         return model, thinking_level
 
+    def _background_may_write(
+        self,
+        client_turn_id: str,
+        existing_command: dict[str, Any],
+        background_receipt: dict[str, Any],
+    ) -> bool:
+        """A resumed background job writes only for the stored athlete message that
+        started it, and never when its persisted intent already withheld writes."""
+        try:
+            stored_intent = json.loads(existing_command.get("intent") or "{}")
+        except TypeError, ValueError:
+            stored_intent = {}
+        if (
+            isinstance(stored_intent, dict)
+            and stored_intent.get("allow_mutations") is False
+        ):
+            return False
+        origin_id = background_receipt.get("user_message_id")
+        if type(origin_id) is not int:
+            return False
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            origin = db.execute(
+                "SELECT 1 FROM messages WHERE id=? AND role='user' AND client_turn_id=?",
+                (origin_id, client_turn_id),
+            ).fetchone()
+        return origin is not None
+
     def _resume_background_command(
         self,
         background_owned: bool,
@@ -164,7 +191,7 @@ class CoachChatTurnService:
         self,
         message: str,
         *,
-        allow_mutations: bool = True,
+        allow_mutations: bool | None = None,
         on_text_delta: Callable[[str], None] | None = None,
         cancel_event: threading.Event | None = None,
         session_csrf_hash: str = "",
@@ -187,7 +214,7 @@ class CoachChatTurnService:
         self,
         message: str,
         *,
-        allow_mutations: bool,
+        allow_mutations: bool | None,
         on_text_delta: Callable[[str], None] | None,
         cancel_event: threading.Event | None,
         session_csrf_hash: str,
@@ -220,6 +247,10 @@ class CoachChatTurnService:
             (existing_command or {}).get("conversation_id") or ""
         )
         conversation_id = existing_conversation_id or self._conversations().ensure()
+        if allow_mutations is None:
+            allow_mutations = not background_owned or self._background_may_write(
+                client_turn_id, existing_command or {}, background_receipt
+            )
         structured_intent = {"allow_mutations": allow_mutations}
         self._resume_background_command(
             background_owned, conversation_id, structured_intent, client_turn_id

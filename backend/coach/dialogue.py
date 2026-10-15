@@ -90,7 +90,8 @@ local_plan (creation or a bounded planning period), planned_unit:<id>,
 training_plan:<id>, library_workout:<id>, local_template (template creation),
 competition:<id>, local_competitions (competition creation/sync), local_profile, local_checkin,
 activity_feedback, local_nutrition (diary/meals/templates), local_nutrition_product (new product),
-nutrition_product:<id> (editing that product), local_equipment, artifact:<id>, adaptive_replan:<id>, change:<id>,
+nutrition_product:<id> (editing that product), nutrition_template:<id> (editing that saved meal),
+local_equipment, artifact:<id>, adaptive_replan:<id>, change:<id>,
 sync_job:<id>, intervals_refresh, garmin_refresh, calendar_refresh,
 weather_refresh, intervals_sync. Use exact existing object tokens for edits.
 An external write requires the athlete's corresponding synchronization request

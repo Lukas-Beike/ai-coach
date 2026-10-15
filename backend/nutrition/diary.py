@@ -421,7 +421,7 @@ class NutritionDiaryService:
         valid_end = validate_iso_date(end_date)
         if valid_start > valid_end:
             raise AppError(400, "Startdatum muss vor oder am Enddatum liegen.")
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             entries = self._nutrition_repository.list_by_range(
                 db, valid_start, valid_end
             )

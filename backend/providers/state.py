@@ -114,7 +114,9 @@ class ProviderStateService:
 
     def summary(self, provider: str) -> dict[str, Any]:
         provider = _provider(provider)
-        with self._lock, self._manager.unit_of_work() as db:
+        # Pure read: three key/value lookups need neither the writer nor the
+        # shared lock, and join an active transaction or read snapshot.
+        with self._manager.reader() as db:
             return self._summary_unlocked(db, provider)
 
     def record_status(

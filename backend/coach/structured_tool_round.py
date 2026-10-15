@@ -8,12 +8,16 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
+from backend import change_history
 from backend.coach.authorization import coach_execution_scope
 from backend.coach.context import CoachTrainingContextService
 from backend.coach.context_selection import select_coach_context
-from backend.coach.dialogue import INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS
 from backend.coach.job_store import CoachJobStore
 from backend.coach.proposal_models import coach_action_hash
+from backend.coach.request_payload import (
+    LOCAL_ATTACHMENT_SUMMARY_NOTICE,
+    compose_model_instructions,
+)
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.tool_call_metadata import structured_tool_call_metadata
@@ -25,10 +29,20 @@ from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
+from backend.coach.turn_write_gate import CoachTurnWriteGate, CoachWriteGateService
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
 COACH_TOOL_MAX_ROUNDS = 12
+_TURN_RELEASED = {
+    "ok": False,
+    "status": "not_performed",
+    "reason": "turn_released",
+    "message": (
+        "Nothing was saved or sent. This turn was already ended and released. "
+        "Do not repeat this call and do not claim it happened."
+    ),
+}
 
 
 @dataclass
@@ -49,6 +63,8 @@ class StructuredCoachRoundState:
     background_owned: bool
     on_text_delta: Callable[[str], None] | None
     recovery_state: dict[str, bool]
+    # Opened once per turn by CoachStructuredToolRoundService.
+    write_gate: CoachTurnWriteGate | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +90,7 @@ class CoachStructuredToolRoundService:
         jobs: CoachJobStore,
         training_context: CoachTrainingContextService,
         response: CoachStructuredResponseService,
+        write_gate: CoachWriteGateService,
         limits: CoachStructuredToolRoundLimits,
     ) -> None:
         self._database_manager = database_manager
@@ -86,7 +103,19 @@ class CoachStructuredToolRoundService:
         self._jobs = jobs
         self._training_context = training_context
         self._response = response
+        self._write_gate = write_gate
         self._limits = limits
+
+    def _turn_write_gate(self, state: StructuredCoachRoundState) -> CoachTurnWriteGate:
+        """Open the turn's single write gate, seeded from its existing receipts."""
+        if state.write_gate is None:
+            state.write_gate = self._write_gate.open_turn(
+                message=state.message,
+                context=state.context,
+                model=state.request_payload.get("model"),
+                command_receipts=state.command_receipts,
+            )
+        return state.write_gate
 
     def _execute_tool_call(
         self,
@@ -130,50 +159,18 @@ class CoachStructuredToolRoundService:
                     allow_mutations=state.allow_mutations,
                     paused=paused,
                 )
+                # The one write choke point: a denied call is not executed, leaves
+                # no receipt (so it never becomes a failure or pending request)
+                # and only tells the model that nothing was done.
+                denial = self._turn_write_gate(state).denial(
+                    name, {**metadata["arguments"], "_request": action.get("request")}
+                )
+                if denial is not None:
+                    return name, call_id, denial, {"operation": name}
 
-                local_transaction = name not in {
-                    "start_provider_refresh",
-                    "apply_adaptive_replan",
-                    "delete_duplicate_intervals_activity",
-                    *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
-                }
-                with (
-                    self._database_lock if local_transaction else nullcontext(),
-                    self._database_manager().unit_of_work()
-                    if local_transaction
-                    else nullcontext(),
-                ):
-                    result = self._execution.execute(
-                        metadata,
-                        action=action,
-                        context=state.context,
-                        conversation_id=state.conversation_id,
-                        client_turn_id=state.client_turn_id,
-                        session_csrf_hash=state.session_csrf_hash,
-                        sync_job_ids=state.sync_job_ids,
-                        cancel_event=state.cancel_event,
-                    )
-                    state.command_receipts.append(
-                        {
-                            "call_id": call_id,
-                            "tool": name,
-                            "effect_key": effect_key,
-                            "step_key": step_key,
-                            "repair_key": repair_key,
-                            "scope_repair_key": scope_repair_key,
-                            "request_binding_key": request_binding_key,
-                            "plan_effect_key": plan_effect_key,
-                            "request": action.get("request"),
-                            "result": result,
-                        }
-                    )
-                    self._jobs.merge_receipt(
-                        state.client_turn_id,
-                        {
-                            "command_receipts": state.command_receipts,
-                            "sync_job_ids": state.sync_job_ids,
-                        },
-                    )
+                result = self._execute_and_record(metadata, action, state)
+                if result is None:
+                    return name, call_id, dict(_TURN_RELEASED), {"operation": name}
             if result.get("synchronous_refresh") or (
                 name == "get_sync_job" and result.get("ok")
             ):
@@ -197,8 +194,68 @@ class CoachStructuredToolRoundService:
         state.model_instructions = model_instructions
         return name, call_id, result, action
 
+    def _execute_and_record(
+        self,
+        metadata: dict[str, Any],
+        action: dict[str, Any],
+        state: StructuredCoachRoundState,
+    ) -> dict[str, Any] | None:
+        """Execute one prepared call and append its receipt; None if the turn is released."""
+        name = metadata["name"]
+        local_transaction = name not in {
+            "start_provider_refresh",
+            "apply_adaptive_replan",
+            "delete_duplicate_intervals_activity",
+            *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
+        }
+        with (
+            self._database_lock if local_transaction else nullcontext(),
+            self._database_manager().unit_of_work()
+            if local_transaction
+            else nullcontext(),
+            # Kept on the receipt so the athlete can undo the turn's changes.
+            change_history.collect_changes() as changes,
+        ):
+            # Checked under the same lock as stale-turn release, so a turn
+            # released while this worker was busy cannot finish its writes.
+            if not self._jobs.turn_open(state.client_turn_id):
+                return None
+            result = self._execution.execute(
+                metadata,
+                action=action,
+                context=state.context,
+                conversation_id=state.conversation_id,
+                client_turn_id=state.client_turn_id,
+                session_csrf_hash=state.session_csrf_hash,
+                sync_job_ids=state.sync_job_ids,
+                cancel_event=state.cancel_event,
+            )
+            state.command_receipts.append(
+                {
+                    "call_id": metadata["call_id"],
+                    "tool": name,
+                    "effect_key": metadata["effect_key"],
+                    "step_key": metadata["step_key"],
+                    "repair_key": metadata["repair_key"],
+                    "scope_repair_key": metadata["scope_repair_key"],
+                    "request_binding_key": metadata["request_binding_key"],
+                    "plan_effect_key": metadata["plan_effect_key"],
+                    "request": action.get("request"),
+                    "result": result,
+                    "changes": changes,
+                }
+            )
+            self._jobs.merge_receipt(
+                state.client_turn_id,
+                {
+                    "command_receipts": state.command_receipts,
+                    "sync_job_ids": state.sync_job_ids,
+                },
+            )
+        return result
+
     def _refreshed_instructions(self, state: StructuredCoachRoundState) -> str:
-        instructions = (
+        return compose_model_instructions(
             self._training_context.build(
                 selection=select_coach_context(
                     state.message,
@@ -209,13 +266,11 @@ class CoachStructuredToolRoundService:
                     has_receipts=True,
                 ),
                 local_date=state.context.get("local_date", ""),
-            )
-            + "\n\n"
-            + COACH_DIALOGUE_INSTRUCTIONS
+            ),
+            allow_mutations=state.allow_mutations,
+            attachment_summary=LOCAL_ATTACHMENT_SUMMARY_NOTICE
+            in state.model_instructions,
         )
-        if not state.allow_mutations:
-            instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
-        return instructions
 
     def _update_plan_scope(
         self, state: StructuredCoachRoundState, action: dict[str, Any]
@@ -280,6 +335,7 @@ class CoachStructuredToolRoundService:
         state: StructuredCoachRoundState,
     ) -> tuple[dict[str, Any], int, str, bool, str]:
         """Run bounded tool rounds while preserving durable replay checkpoints."""
+        self._turn_write_gate(state)
         while rounds < self._limits.max_rounds:
             calls = self._journal.function_calls(response)
             if not calls:

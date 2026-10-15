@@ -448,7 +448,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.1"
+APP_VERSION = "1.13.2"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -1685,6 +1685,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
         conversation=StructuredToolRoundConversation(
             training_context_service=lambda: COACH_CONTEXT.training_context_service(),
             response_service=lambda: COACH_TURNS.structured_response_service(),
+            response_transport=lambda: COACH_CONVERSATION.response_transport(),
         ),
     )
 )

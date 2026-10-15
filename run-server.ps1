@@ -18,13 +18,11 @@ Get-Content -LiteralPath (Join-Path $appDirectory ".env") | ForEach-Object {
     }
 }
 
-$pythonCandidates = @(
-    (Join-Path $appDirectory ".runtime\python\python.exe"),
-    (Join-Path $appDirectory "..\..\Game\.runtime\python\python.exe")
-)
-$pythonExecutable = $pythonCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-if (-not $pythonExecutable) {
-    throw "No usable Python runtime was found."
+# Only the app's own runtime is used: .env values are loaded into this process,
+# so a Python from another project must never receive them.
+$pythonExecutable = Join-Path $appDirectory ".runtime\python\python.exe"
+if (-not (Test-Path -LiteralPath $pythonExecutable -PathType Leaf)) {
+    throw "The app's Python runtime was not found at $pythonExecutable. Install it there and start again."
 }
 
 $dataDirectory = Join-Path $appDirectory "data"

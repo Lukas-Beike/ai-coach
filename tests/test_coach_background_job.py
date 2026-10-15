@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import Mock
 
 from backend.coach.background_job import CoachBackgroundJobRunner
+from backend.coach.job_store import MAX_FAILED_ATTEMPTS
 from backend.coach.streams import ChatStreamRegistry
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
@@ -118,6 +119,72 @@ class CoachBackgroundJobRunnerTests(unittest.TestCase):
             self.assertIsNone(self.streams.get_background_event(operation_id))
         finally:
             self.streams.unregister("synthetic-session", operation_id)
+
+    def test_handled_failure_does_not_count_as_an_escaped_attempt(self) -> None:
+        self.chat.run.side_effect = RuntimeError("synthetic")
+        self.failures.persist.return_value = {"status": "failed"}
+
+        self.runner.run(self.job("synthetic-operation"))
+
+        self.jobs.record_failed_attempt.assert_not_called()
+        self.failures.persist.assert_called_once()
+
+    def test_escaped_failure_below_the_bound_is_counted_and_retried(self) -> None:
+        self.chat.run.side_effect = RuntimeError("synthetic")
+        self.failures.persist.side_effect = RuntimeError("synthetic persist failure")
+        self.jobs.record_failed_attempt.return_value = MAX_FAILED_ATTEMPTS - 1
+
+        with self.assertRaises(RuntimeError):
+            self.runner.run(self.job("synthetic-operation"))
+
+        self.jobs.record_failed_attempt.assert_called_once_with("synthetic-turn")
+        self.failures.persist.assert_called_once()
+
+    def test_job_that_keeps_failing_is_ended_with_a_terminal_failure(self) -> None:
+        self.chat.run.side_effect = RuntimeError("synthetic")
+        self.failures.persist.side_effect = [
+            RuntimeError("synthetic persist failure"),
+            {"status": "failed", "error": "ended"},
+        ]
+        self.jobs.record_failed_attempt.return_value = MAX_FAILED_ATTEMPTS
+        operation_id, _ = self.streams.register("synthetic-session")
+        try:
+            with self.assertRaises(RuntimeError):
+                self.runner.run(self.job(operation_id))
+
+            ended = self.failures.persist.call_args_list[1]
+            self.assertEqual(ended.args[:2], ("synthetic-turn", {}))
+            self.assertEqual(ended.args[2].reason, "background_job_exhausted")
+            events = self.streams.events("synthetic-session", operation_id)
+            assert events is not None
+            self.assertEqual(
+                events.get_nowait(),
+                ("completed", {"status": "failed", "error": "ended"}),
+            )
+        finally:
+            self.streams.unregister("synthetic-session", operation_id)
+
+    def test_failure_while_ending_a_job_keeps_the_original_error(self) -> None:
+        self.sessions.restore_coach_session_csrf_hash.side_effect = RuntimeError(
+            "original"
+        )
+        self.jobs.record_failed_attempt.side_effect = OSError("database gone")
+
+        with self.assertRaises(RuntimeError) as raised:
+            self.runner.run(self.job("synthetic-operation"))
+
+        self.assertEqual(str(raised.exception), "original")
+
+    def test_invalidated_or_requeued_jobs_never_count_as_failed_attempts(self) -> None:
+        self.chat.run.side_effect = AppError(429, "busy", reason="chat_queue_full")
+        self.runner.run(self.job("synthetic-operation"))
+        stale = self.job("synthetic-operation")
+        with self.gate.restore():
+            pass
+        self.runner.run(stale)
+
+        self.jobs.requeue.assert_called_once()
+        self.jobs.record_failed_attempt.assert_not_called()
 
     def test_morning_completion_requires_final_message_without_clarification(
         self,

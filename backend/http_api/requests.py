@@ -8,30 +8,40 @@ shape validation independent of ``server.py``.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
-from typing import Any
+from collections.abc import Callable, Iterator, Mapping
+from typing import Any, Protocol
 
+
+class HeaderLookup(Protocol):
+    """The read-only header access used by body helpers (``Mapping`` or ``Message``)."""
+
+    def get(self, name: str, default: Any = None, /) -> Any: ...
+
+
+HeaderSource = Mapping[str, Any] | HeaderLookup
 ReadBytes = Callable[[int], bytes]
 ErrorFactory = Callable[[int, str], Exception]
 AudioTypeNormalizer = Callable[[str], str]
 
+# Large bodies (database restore uploads) are read in pieces of this size, so a
+# whole upload never has to be held in memory at once.
+STREAM_CHUNK_BYTES = 1024 * 1024
 
-def _content_length(headers: Mapping[str, Any], error: ErrorFactory) -> int:
+
+def _content_length(headers: HeaderSource, error: ErrorFactory) -> int:
     try:
         return int(headers.get("Content-Length", "0"))
     except ValueError as exc:
         raise error(400, "Ungültige Content-Length.") from exc
 
 
-def read_body(
-    headers: Mapping[str, Any],
-    read_bytes: ReadBytes,
+def _validated_size(
+    headers: HeaderSource,
     max_bytes: int,
     *,
     error: ErrorFactory,
-    too_large_status_threshold: int | None = None,
-) -> bytes:
-    """Read one bounded body while preserving the API's size errors."""
+    too_large_status_threshold: int | None,
+) -> int:
     size = _content_length(headers, error)
     if size <= 0 or size > max_bytes:
         threshold = (
@@ -42,7 +52,62 @@ def read_body(
         raise error(
             413 if size > threshold else 400, "Ungültige Größe des Anfrageinhalts."
         )
+    return size
+
+
+def read_body(
+    headers: HeaderSource,
+    read_bytes: ReadBytes,
+    max_bytes: int,
+    *,
+    error: ErrorFactory,
+    too_large_status_threshold: int | None = None,
+) -> bytes:
+    """Read one bounded body while preserving the API's size errors."""
+    size = _validated_size(
+        headers,
+        max_bytes,
+        error=error,
+        too_large_status_threshold=too_large_status_threshold,
+    )
     return read_bytes(size)
+
+
+def read_body_stream(
+    headers: HeaderSource,
+    read_bytes: ReadBytes,
+    max_bytes: int,
+    *,
+    error: ErrorFactory,
+    too_large_status_threshold: int | None = None,
+    chunk_size: int = STREAM_CHUNK_BYTES,
+) -> Iterator[bytes]:
+    """Validate one bounded body up front, then yield it in chunks.
+
+    The size checks run here, before any byte is read, with the same errors as
+    ``read_body``. The returned iterator reads at most ``chunk_size`` bytes per
+    step and raises the API's 400 error if the connection ends before the
+    declared length.
+    """
+    size = _validated_size(
+        headers,
+        max_bytes,
+        error=error,
+        too_large_status_threshold=too_large_status_threshold,
+    )
+    return _body_chunks(size, read_bytes, chunk_size, error)
+
+
+def _body_chunks(
+    size: int, read_bytes: ReadBytes, chunk_size: int, error: ErrorFactory
+) -> Iterator[bytes]:
+    remaining = size
+    while remaining:
+        chunk = read_bytes(min(chunk_size, remaining))
+        if not chunk:
+            raise error(400, "Der Anfrageinhalt wurde unvollständig übertragen.")
+        remaining -= len(chunk)
+        yield chunk
 
 
 def read_audio_body(

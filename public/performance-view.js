@@ -215,9 +215,10 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
 }
 
 async function saveInlineMetric(key, value, button) {
-  const profile = { ...state.data?.profile, [key]: String(value || "").trim() };
   button.disabled = true;
   try {
+    // PUT /api/profile replaces the whole profile; change only this metric on the server's current values.
+    const profile = { ...(await fetchCurrentProfile()), [key]: String(value || "").trim() };
     const saved = await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
     if (!Object.keys(profile).every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string")) {
       throw new Error("Die Profilbestätigung ist unvollständig. Der Entwurf bleibt erhalten.");

@@ -59,8 +59,11 @@ def initialize_application_database(
         messages_deleted = db.execute(
             "DELETE FROM messages WHERE created_at < ?", (cutoff,)
         ).rowcount
+        # The newest snapshot is the latest provider state, even when it is old.
         snapshots_deleted = db.execute(
-            "DELETE FROM snapshots WHERE created_at < ?", (cutoff,)
+            "DELETE FROM snapshots WHERE created_at < ? "
+            "AND id <> (SELECT MAX(id) FROM snapshots)",
+            (cutoff,),
         ).rowcount
         LOGGER.info(
             "Data retention purge completed",

@@ -133,8 +133,8 @@ def _atl_series_from_rows(
     cursor = first_date
     for row_date, _row in dated_wellness[1:]:
         while cursor + timedelta(days=1) < row_date:
-            previous *= retention
             cursor += timedelta(days=1)
+            previous = previous * retention + load_by_date.get(cursor, 0.0) * decay
         previous = previous * retention + load_by_date.get(row_date, 0.0) * decay
         series[row_date] = round(previous, 2)
         cursor = row_date

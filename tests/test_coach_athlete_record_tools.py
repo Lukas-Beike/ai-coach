@@ -190,6 +190,74 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
         self.nutrition.log_template.assert_not_called()
         self.nutrition.delete_template.assert_not_called()
 
+    def test_existing_template_save_requires_its_template_scope(self):
+        self.nutrition.save_template.return_value = {"id": "template-1"}
+        with self.assertRaises(AppError) as raised:
+            self.service.execute(
+                "save_nutrition_template",
+                {"payload": {"id": "template-1", "name": "Meal"}},
+                {
+                    "operation": "save_nutrition_template",
+                    "authorization_scope": ["local_nutrition"],
+                },
+            )
+        self.assertEqual(raised.exception.reason, "intent_scope_denied")
+        self.nutrition.save_template.assert_not_called()
+
+        result = self.service.execute(
+            "save_nutrition_template",
+            {"payload": {"id": "template-1", "name": "Meal"}},
+            {
+                "operation": "save_nutrition_template",
+                "authorization_scope": [
+                    "local_nutrition",
+                    "nutrition_template:template-1",
+                ],
+            },
+        )
+        self.assertEqual(result, {"ok": True, "template": {"id": "template-1"}})
+        self.nutrition.save_template.assert_called_once_with(
+            {"id": "template-1", "name": "Meal"}
+        )
+
+    def test_new_template_save_stays_within_local_nutrition_scope(self):
+        self.nutrition.save_template.return_value = {"id": "template-2"}
+        self.service.execute(
+            "save_nutrition_template",
+            {"payload": {"name": "Meal"}},
+            {
+                "operation": "save_nutrition_template",
+                "authorization_scope": ["local_nutrition"],
+            },
+        )
+        self.nutrition.save_template.assert_called_once_with(
+            {"name": "Meal", "source": "coach"}
+        )
+
+    def test_dialogue_template_save_with_id_requires_template_token(self):
+        with self.assertRaises(AppError) as raised:
+            CoachDialogueActionService._apply_nutrition_object_scope(
+                "save_nutrition_template",
+                {"payload": {"id": "template-1"}},
+                {"authorization_scope": ["local_nutrition"]},
+            )
+        self.assertEqual(raised.exception.reason, "intent_scope_denied")
+        CoachDialogueActionService._apply_nutrition_object_scope(
+            "save_nutrition_template",
+            {"payload": {"id": "template-1"}},
+            {
+                "authorization_scope": [
+                    "local_nutrition",
+                    "nutrition_template:template-1",
+                ]
+            },
+        )
+        CoachDialogueActionService._apply_nutrition_object_scope(
+            "save_nutrition_template",
+            {"payload": {"name": "Meal"}},
+            {"authorization_scope": ["local_nutrition"]},
+        )
+
     def test_product_scope_only_authorizes_product_save(self):
         self.nutrition.save_product.return_value = {"id": "product-1"}
         result = self.service.execute(

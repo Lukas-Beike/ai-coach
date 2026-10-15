@@ -20,15 +20,16 @@ class _Lock:
 
 
 class _UnitOfWork:
-    def __init__(self, events):
+    def __init__(self, events, name="uow"):
         self.events = events
+        self.name = name
 
     def __enter__(self):
-        self.events.append("uow-enter")
+        self.events.append(f"{self.name}-enter")
         return object()
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.events.append("uow-exit")
+        self.events.append(f"{self.name}-exit")
         return False
 
 
@@ -38,6 +39,9 @@ class _Manager:
 
     def unit_of_work(self):
         return _UnitOfWork(self.events)
+
+    def reader(self):
+        return _UnitOfWork(self.events, "reader")
 
 
 class _Repository:
@@ -285,11 +289,20 @@ class ProviderStateServiceTests(unittest.TestCase):
             },
         )
 
-    def test_every_operation_acquires_lock_before_transaction(self):
+    def test_summary_reads_on_a_reader_without_lock_or_writer(self):
         self.service.summary("openai")
+        self.assertNotIn("lock-enter", self.events)
+        self.assertNotIn("uow-enter", self.events)
+        self.assertLess(
+            self.events.index("reader-enter"), self.events.index("get:openai_usage")
+        )
+        self.assertEqual(self.events[-1], "reader-exit")
+
+    def test_every_write_acquires_lock_before_transaction(self):
+        self.service.record_success("openai")
         self.assertLess(self.events.index("lock-enter"), self.events.index("uow-enter"))
         self.assertLess(
-            self.events.index("uow-enter"), self.events.index("get:openai_usage")
+            self.events.index("uow-enter"), self.events.index("set:openai_status")
         )
         self.assertEqual(self.events[-2:], ["uow-exit", "lock-exit"])
 

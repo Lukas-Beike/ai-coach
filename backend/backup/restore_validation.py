@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,17 +32,30 @@ class DatabaseRestoreValidationService:
     def __init__(self, config: DatabaseRestoreValidationConfig) -> None:
         self._config = config
 
-    def stage(self, payload: bytes) -> Path:
-        if not payload or len(payload) > self._config.maximum_bytes:
-            raise AppError(413, "Das Datenbank-Backup ist leer oder zu groß.")
+    def stage(self, payload: bytes | Iterable[bytes]) -> Path:
+        """Write a whole payload, or its chunks in order, to a new staging file.
+
+        Chunks are written as they arrive and the size limit is enforced while
+        writing. Any failure removes the staging file.
+        """
+        chunks = (payload,) if isinstance(payload, bytes) else payload
         self._config.data_dir.mkdir(parents=True, exist_ok=True)
         path = self._config.data_dir / f".intervals-coach-restore-{uuid.uuid4().hex}.db"
         created = False
+        size = 0
         try:
             with path.open("xb") as temporary:
                 created = True
-                temporary.write(payload)
-        except Exception:
+                for chunk in chunks:
+                    size += len(chunk)
+                    if size > self._config.maximum_bytes:
+                        raise AppError(
+                            413, "Das Datenbank-Backup ist leer oder zu groß."
+                        )
+                    temporary.write(chunk)
+            if size == 0:
+                raise AppError(413, "Das Datenbank-Backup ist leer oder zu groß.")
+        except BaseException:
             if created:
                 path.unlink(missing_ok=True)
             raise

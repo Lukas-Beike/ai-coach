@@ -1,10 +1,11 @@
 import hashlib
+import re
 import unittest
 
 from backend.coach.dialogue import INSTRUCTIONS
 from backend.coach.prompt import COACH_PROMPT
 
-EXPECTED_SHA256 = "c9073705fad3f7425155590b75a55ee5ebe4d7528271a8ec45380cb13053651e"
+EXPECTED_SHA256 = "5446c57ca5e45e3d6689bd9ed3869c94fa38dae4ad896c5b639ecbb3e1c19d18"
 
 
 class CoachPromptTests(unittest.TestCase):
@@ -30,6 +31,21 @@ class CoachPromptTests(unittest.TestCase):
         for marker in required_markers:
             with self.subTest(marker=marker):
                 self.assertIn(marker, COACH_PROMPT)
+
+    def test_rule_identifiers_are_unique(self):
+        identifiers = re.findall(r"^(\d+[a-z]?)\. ", COACH_PROMPT, re.MULTILINE)
+        self.assertGreater(len(identifiers), 20)
+        self.assertEqual(len(identifiers), len(set(identifiers)))
+
+    def test_plan_calendar_repair_requires_explicit_named_sync(self):
+        self.assertNotIn(
+            "start_intervals_plan_sync with repair=true for plan calendar repair",
+            COACH_PROMPT,
+        )
+        self.assertIn(
+            "running start_intervals_plan_sync with repair=true only when the athlete explicitly asks for that named sync",
+            COACH_PROMPT,
+        )
 
     def test_clarification_is_conversational_and_negation_is_not_authority(self):
         for marker in (

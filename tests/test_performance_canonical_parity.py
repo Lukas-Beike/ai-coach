@@ -140,6 +140,12 @@ class RecordingManager:
             self.events.append("exit")
 
     @contextmanager
+    def read_snapshot(self) -> Iterator[str]:
+        """A read-only snapshot is recorded as the same lease."""
+        with self.unit_of_work() as db:
+            yield db
+
+    @contextmanager
     def reader(self) -> Iterator[str]:
         self.events.append("reader")
         try:
@@ -206,7 +212,10 @@ def _load_pair(
     snapshot = _snapshot(rows)
     legacy = performance_load_context([], rows, _latest(rows), PARITY_TODAY)["load"]
     canonical = read_performance_inputs(
-        StubObservationReader(_observations(snapshot)), None, snapshot
+        StubObservationReader(_observations(snapshot)),
+        None,
+        snapshot,
+        as_of=PARITY_TODAY,
     )
     canonical_load = performance_load_context(
         [], rows, _latest(rows), PARITY_TODAY, canonical=canonical
@@ -278,6 +287,7 @@ class CanonicalLoadParityTests(unittest.TestCase):
             StubObservationReader(_observations(_snapshot(canonical_rows))),
             None,
             _snapshot(canonical_rows),
+            as_of=PARITY_TODAY,
         )
         self.assertEqual(legacy["ctl"], "58,2")
         self.assertIsNotNone(canonical)
@@ -317,7 +327,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         ]
         snapshot = _snapshot(rows)
         reader = StubObservationReader(_observations(snapshot))
-        inputs = read_performance_inputs(reader, "db", snapshot)
+        inputs = read_performance_inputs(reader, "db", snapshot, as_of=PARITY_TODAY)
         kinds = [kind for kind, _start, _end in reader.calls]
         # Wellness fields and the current-metric kinds, each read once and unbounded.
         self.assertEqual(len(kinds), len(set(kinds)))
@@ -334,7 +344,9 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         for snapshot in (_snapshot([]), None):
             with self.subTest(snapshot=snapshot is None):
                 self.assertIsNone(
-                    read_performance_inputs(StubObservationReader(), "db", snapshot)
+                    read_performance_inputs(
+                        StubObservationReader(), "db", snapshot, as_of=PARITY_TODAY
+                    )
                 )
 
     def test_a_snapshot_without_wellness_rows_is_rebuilt_from_observations(
@@ -345,7 +357,10 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
             key: value for key, value in source.items() if key != "recent_wellness"
         }
         inputs = read_performance_inputs(
-            StubObservationReader(_observations(source)), "db", stripped
+            StubObservationReader(_observations(source)),
+            "db",
+            stripped,
+            as_of=PARITY_TODAY,
         )
         self.assertEqual(_present(inputs).wellness_day, PARITY_TODAY)
         self.assertEqual((_present(inputs).ctl, _present(inputs).atl), (50.0, 60.0))
@@ -365,7 +380,10 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
             with self.subTest(rows=rows):
                 inputs = _present(
                     read_performance_inputs(
-                        StubObservationReader(), "db", _snapshot(rows)
+                        StubObservationReader(),
+                        "db",
+                        _snapshot(rows),
+                        as_of=PARITY_TODAY,
                     )
                 )
                 self.assertEqual(
@@ -389,7 +407,9 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         ]
         snapshot = _snapshot(rows)
         reader = StubObservationReader(_observations(snapshot))
-        _assert_load_inputs(self, read_performance_inputs(reader, "db", snapshot))
+        _assert_load_inputs(
+            self, read_performance_inputs(reader, "db", snapshot, as_of=PARITY_TODAY)
+        )
 
     def test_non_mapping_wellness_entries_and_non_list_fields_are_ignored(
         self,
@@ -400,12 +420,16 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
             StubObservationReader(_observations(_snapshot([rows[1]]))),
             "db",
             snapshot,
+            as_of=PARITY_TODAY,
         )
         self.assertIsNotNone(inputs)
         self.assertEqual(_present(inputs).ctl, 50.0)
         self.assertIsNone(
             read_performance_inputs(
-                StubObservationReader(), "db", {"recent_wellness": "text"}
+                StubObservationReader(),
+                "db",
+                {"recent_wellness": "text"},
+                as_of=PARITY_TODAY,
             )
         )
 
@@ -441,6 +465,19 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
 
     def test_canonical_inputs_replace_only_ctl_and_atl_in_the_load_block(self) -> None:
         rows = [{"id": PARITY_DAY, "ctl": "55", "atl": 65, "tsb": 3, "rampRate": "1.5"}]
+        inputs = CanonicalPerformanceInputs(wellness_day=PARITY_TODAY, ctl=1.0, atl=2.0)
+        load = performance_load_context(
+            [], rows, _latest(rows), PARITY_TODAY, canonical=inputs
+        )["load"]
+        self.assertEqual(
+            load,
+            {"id": PARITY_DAY, "ctl": 1.0, "atl": 2.0, "tsb": 3, "rampRate": "1.5"},
+        )
+
+    def test_missing_canonical_value_keeps_the_valid_latest_row_value(self) -> None:
+        # A newer source overrides only what it provides: the latest row's ATL
+        # survives a missing observation, as a number like the canonical values.
+        rows = [{"id": PARITY_DAY, "ctl": "55", "atl": 65, "tsb": 3, "rampRate": "1.5"}]
         inputs = CanonicalPerformanceInputs(
             wellness_day=PARITY_TODAY, ctl=1.0, atl=None
         )
@@ -449,8 +486,54 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         )["load"]
         self.assertEqual(
             load,
-            {"id": PARITY_DAY, "ctl": 1.0, "atl": None, "tsb": 3, "rampRate": "1.5"},
+            {"id": PARITY_DAY, "ctl": 1.0, "atl": 65, "tsb": 3, "rampRate": "1.5"},
         )
+        inputs = CanonicalPerformanceInputs(
+            wellness_day=PARITY_TODAY, ctl=None, atl=2.0
+        )
+        load = performance_load_context(
+            [], rows, _latest(rows), PARITY_TODAY, canonical=inputs
+        )["load"]
+        self.assertEqual((load["ctl"], load["atl"]), (55, 2.0))
+
+    def test_missing_canonical_value_never_falls_back_to_unusable_or_absent(
+        self,
+    ) -> None:
+        inputs = CanonicalPerformanceInputs(
+            wellness_day=PARITY_TODAY, ctl=None, atl=None
+        )
+        cases: dict[str, list[dict[str, Any]]] = {
+            "unusable_text": [{"id": PARITY_DAY, "ctl": "invalid", "atl": "n/a"}],
+            "absent_in_latest_row": [
+                {"id": EARLIER_DAY, "ctl": 40, "atl": 45},
+                {"id": PARITY_DAY},
+            ],
+        }
+        for name, rows in cases.items():
+            with self.subTest(name):
+                load = performance_load_context(
+                    [], rows, _latest(rows), PARITY_TODAY, canonical=inputs
+                )["load"]
+                self.assertEqual((load["ctl"], load["atl"]), (None, None))
+
+    def test_partial_observations_keep_the_other_value_from_the_snapshot_row(
+        self,
+    ) -> None:
+        rows = [{"id": PARITY_DAY, "ctl": 50, "atl": 60}]
+        snapshot = _snapshot(rows)
+        reader = StubObservationReader(
+            tuple(
+                observation
+                for observation in _observations(snapshot)
+                if observation.kind is MetricKind.ATL
+            )
+        )
+        canonical = read_performance_inputs(reader, "db", snapshot, as_of=PARITY_TODAY)
+        load = performance_load_context(
+            [], rows, _latest(rows), PARITY_TODAY, canonical=canonical
+        )["load"]
+        self.assertIsNone(_present(canonical).ctl)
+        self.assertEqual((load["ctl"], load["atl"]), (50, 60.0))
 
     def test_missing_canonical_observation_yields_none_for_that_value(self) -> None:
         snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
@@ -461,7 +544,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                 if observation.kind is MetricKind.ATL
             )
         )
-        inputs = read_performance_inputs(reader, "db", snapshot)
+        inputs = read_performance_inputs(reader, "db", snapshot, as_of=PARITY_TODAY)
         self.assertIsNotNone(inputs)
         self.assertIsNone(_present(inputs).ctl)
         self.assertEqual(_present(inputs).atl, 60.0)
@@ -531,7 +614,7 @@ class CanonicalWiringTests(unittest.TestCase):
                 observation_reader=lambda: reader,
             ),
         )
-        read_snapshot, canonical = service._performance_inputs()
+        read_snapshot, canonical = service._performance_inputs(PARITY_TODAY)
         self.assertIs(read_snapshot, snapshot)
         self.assertEqual(reader.db_seen, ["db"] * 13)
         self.assertEqual(_present(canonical).ctl, 50.0)
@@ -544,7 +627,7 @@ class CanonicalWiringTests(unittest.TestCase):
         snapshot_reader = Mock()
         snapshot_reader.latest_snapshot.return_value = snapshot
         service = ActivityAnalysisReadService(manager, snapshot_reader, Mock(), Mock())
-        read_snapshot, canonical = service._performance_inputs()
+        read_snapshot, canonical = service._performance_inputs(PARITY_TODAY)
         self.assertIs(read_snapshot, snapshot)
         self.assertIsNone(canonical)
         # Only the legacy snapshot read's own unit of work runs.

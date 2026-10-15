@@ -151,13 +151,29 @@ def job_dto(
     }
 
 
+# Item ids are f"{job_id}-{index}" and every item of a job shares one timestamp, so
+# the text id sorts "-10" before "-2". Order by the numeric index; ids that do not
+# follow that format keep a stable id order.
+ITEM_ORDER = (
+    "created_at, CASE WHEN substr(id, 1, length(job_id) + 1) = job_id || '-' "
+    "THEN CAST(substr(id, length(job_id) + 2) AS INTEGER) ELSE 0 END, id"
+)
+# Items that finished successfully are never rewritten by a later failure or retry.
+_SETTLED_ITEMS = "status NOT IN ('completed', 'skipped')"
+# Only automatic requesters coalesce; an explicit user or coach request always
+# queues. A "backfill" continuation carries the next chunk's end_date cursor, so it
+# is never folded into another job: that would drop the cursor and stop the chain.
+_COALESCED_REQUESTERS = frozenset({"scheduler", "startup"})
+_COALESCED_TYPES = frozenset({"refresh", "historical_backfill"})
+
+
 def read_job(db: Any, job_id: str) -> tuple[Any | None, builtins.list[Any]]:
     """Read one job and its ordered items through a caller-owned connection."""
     job = db.execute("SELECT * FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
     if job is None:
         return None, []
     items = db.execute(
-        "SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job_id,)
+        f"SELECT * FROM sync_job_items WHERE job_id=? ORDER BY {ITEM_ORDER}", (job_id,)
     ).fetchall()
     return job, items
 
@@ -595,6 +611,19 @@ class SyncJobStore:
         with self._database_manager.unit_of_work() as db:
             return has_active_job(db, provider, job_type)
 
+    def has_backfill_continuation(
+        self, provider: str, end_date: str, created_since: str
+    ) -> bool:
+        """Report whether a backfill chain already continued to ``end_date``."""
+        with self._database_manager.unit_of_work() as db:
+            row = db.execute(
+                "SELECT 1 FROM sync_jobs WHERE provider=? AND type='historical_backfill' "
+                "AND requested_by='backfill' AND json_extract(payload, '$.end_date')=? "
+                "AND created_at>=? LIMIT 1",
+                (provider, end_date, created_since),
+            ).fetchone()
+            return row is not None
+
     def pending_performance_job_id(self, provider: str) -> str | None:
         with self._database_manager.unit_of_work() as db:
             row = db.execute(
@@ -638,11 +667,14 @@ class SyncJobStore:
         job_id = str(self._uuid_factory())
 
         with self._database_manager.unit_of_work() as db:
-            if normalized["type"] == "performance_refresh":
+            if normalized["type"] == "performance_refresh" or (
+                normalized["type"] in _COALESCED_TYPES
+                and requested in _COALESCED_REQUESTERS
+            ):
                 existing = db.execute(
-                    "SELECT * FROM sync_jobs WHERE provider=? AND type='performance_refresh' "
+                    "SELECT * FROM sync_jobs WHERE provider=? AND type=? "
                     "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1",
-                    (normalized["provider"],),
+                    (normalized["provider"], normalized["type"]),
                 ).fetchone()
                 if existing:
                     current, items = read_job(db, existing["id"])
@@ -705,6 +737,13 @@ class SyncJobStore:
                     "error_detail=NULL, updated_at=? WHERE job_id=? AND status='running'",
                     (now, job["id"]),
                 )
+            # No performance refresh survives a restart or restore, so a persisted
+            # running marker left by a crash is stale and must not stay "1".
+            db.execute(
+                "UPDATE kv SET value='0', updated_at=? "
+                "WHERE key='performance_refresh_running' AND value='1'",
+                (now,),
+            )
             return len(jobs)
 
     def claim(self) -> dict[str, Any] | None:
@@ -748,7 +787,10 @@ class SyncJobStore:
         error_class: str | None = None,
         error_detail: str | None = None,
     ) -> dict[str, Any] | None:
-        """Update every item; detail must already be redacted and is clipped here."""
+        """Update every unfinished item; completed items are kept as they are.
+
+        Detail must already be redacted and is clipped here.
+        """
         if item_status not in ITEM_STATUSES:
             raise SyncJobInvalidOperationError("Invalid sync item status.")
         now = self._now()
@@ -759,13 +801,13 @@ class SyncJobStore:
                 return None
             db.execute(
                 "UPDATE sync_job_items SET status=?, error_class=?, error_detail=?, updated_at=? "
-                "WHERE job_id=?",
+                f"WHERE job_id=? AND {_SETTLED_ITEMS}",
                 (item_status, error_class, detail, now, job_id),
             )
             items = [
                 dict(item)
                 for item in db.execute(
-                    "SELECT status FROM sync_job_items WHERE job_id=? ORDER BY created_at, id",
+                    f"SELECT status FROM sync_job_items WHERE job_id=? ORDER BY {ITEM_ORDER}",
                     (job_id,),
                 ).fetchall()
             ]
@@ -812,21 +854,40 @@ class SyncJobStore:
             stored_items = [
                 dict(item)
                 for item in db.execute(
-                    "SELECT id, item_key FROM sync_job_items WHERE job_id=? ORDER BY created_at, id",
+                    f"SELECT id, item_key FROM sync_job_items WHERE job_id=? ORDER BY {ITEM_ORDER}",
                     (job_id,),
                 ).fetchall()
             ]
             stored_by_key = {
                 str(item.get("item_key") or ""): item for item in stored_items
             }
+            # Unkeyed results map by position only when none is keyed and counts agree.
+            positional = len(item_results) == len(stored_items) and not any(
+                self._result_key(item) for item in item_results
+            )
             for index, item in enumerate(item_results):
                 self._update_result_item(
-                    db, item, index, stored_items, stored_by_key, redact, now
+                    db,
+                    item,
+                    index,
+                    stored_items,
+                    stored_by_key,
+                    positional,
+                    redact,
+                    now,
                 )
+            # An item the result did not report has an unknown outcome; fail it so
+            # it stays retryable instead of leaving the job running forever.
+            db.execute(
+                "UPDATE sync_job_items SET status='failed', error_class='plan_push_error', "
+                "error_detail='No result was reported for this item.', updated_at=? "
+                "WHERE job_id=? AND status IN ('queued', 'running')",
+                (now, job_id),
+            )
             items = [
                 dict(item)
                 for item in db.execute(
-                    "SELECT status FROM sync_job_items WHERE job_id=? ORDER BY created_at, id",
+                    f"SELECT status FROM sync_job_items WHERE job_id=? ORDER BY {ITEM_ORDER}",
                     (job_id,),
                 ).fetchall()
             ]
@@ -851,22 +912,25 @@ class SyncJobStore:
             return self._event_snapshot(updated, updated_items)
 
     @staticmethod
+    def _result_key(item: Mapping[str, Any]) -> str:
+        return str(item.get("library_workout_id") or item.get("item_key") or "").strip()
+
+    @staticmethod
     def _update_result_item(
         db: Any,
         item: dict[str, Any],
         index: int,
         stored_items: builtins.list[dict[str, Any]],
         stored_by_key: dict[str, dict[str, Any]],
+        positional: bool,
         redact: Callable[[str], str],
         now: str,
     ) -> None:
-        item_key = str(
-            item.get("library_workout_id") or item.get("item_key") or ""
-        ).strip()
+        item_key = SyncJobStore._result_key(item)
         target = stored_by_key.get(item_key)
         if target is None and len(stored_items) == 1:
             target = stored_items[0]
-        if target is None and index < len(stored_items):
+        if target is None and positional:
             target = stored_items[index]
         if target is None:
             return
@@ -921,7 +985,7 @@ class SyncJobStore:
             )
             db.execute(
                 "UPDATE sync_job_items SET status='queued', error_class=?, error_detail=?, updated_at=? "
-                "WHERE job_id=?",
+                f"WHERE job_id=? AND {_SETTLED_ITEMS}",
                 (error_class, clipped_detail, now, job_id),
             )
             return True

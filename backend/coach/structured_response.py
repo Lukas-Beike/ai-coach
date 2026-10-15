@@ -16,6 +16,7 @@ from backend.coach.response_transport import (
     raise_if_chat_cancelled,
 )
 from backend.errors import AppError
+from backend.providers.openai_requests import RESUMABLE_POLL_REASONS
 
 
 @dataclass
@@ -175,8 +176,7 @@ class CoachStructuredResponseService:
         resumable = (
             background_owned
             and resume_id
-            and exc.reason
-            in {"provider_unavailable", "provider_timeout", "invalid_response"}
+            and exc.reason in RESUMABLE_POLL_REASONS
             and (cancel_event is None or not cancel_event.is_set())
         )
         if not resumable:

@@ -14,6 +14,9 @@ from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 
 SELECT_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
+# A job whose failure escapes its own error handling is retried this many times in
+# total, then ended; contention requeues are counted separately and never end a job.
+MAX_FAILED_ATTEMPTS = 3
 
 
 class CoachJobStore:
@@ -116,6 +119,45 @@ class CoachJobStore:
                 reason="background_message_missing",
             )
         return str(row["content"])
+
+    def turn_open(self, client_turn_id: str) -> bool:
+        """Report whether the turn may still act: its command is queued or running.
+
+        A turn released as stale (or finished by recovery) is `completed`; a worker
+        that is still running it must stop executing tools.
+        """
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            row = db.execute(
+                "SELECT status FROM coach_commands WHERE client_turn_id=?",
+                (client_turn_id,),
+            ).fetchone()
+        return bool(row and row["status"] in {"queued", "running"})
+
+    def record_failed_attempt(self, client_turn_id: str) -> int:
+        """Count a failure that escaped the job's own error handling."""
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            row = db.execute(
+                SELECT_RECEIPT_SQL,
+                (client_turn_id,),
+            ).fetchone()
+            if not row:
+                return 0
+            receipt = command_receipt(row.get("receipt"))
+            try:
+                attempts = max(0, int(receipt.get("failed_attempts") or 0)) + 1
+            except TypeError, ValueError:
+                attempts = 1
+            receipt["failed_attempts"] = attempts
+            db.execute(
+                "UPDATE coach_commands SET receipt=?, updated_at=? "
+                "WHERE client_turn_id=? AND status IN ('queued', 'running')",
+                (
+                    json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
+                    self._utc_now(),
+                    client_turn_id,
+                ),
+            )
+        return attempts
 
     def cancel_requested(self, client_turn_id: str) -> bool:
         """Read a persisted cancel flag before a claimed worker resumes."""

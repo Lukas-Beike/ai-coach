@@ -15,6 +15,22 @@ FIXTURE_TRAINING_FEATURES_SEED_VERSION = "1"
 FIXTURE_OPENAI_MODES = ("canned", "offline")
 
 # This file is mounted only in disposable test containers, never normal startup.
+# The published fixture password is only acceptable in a container that explicitly
+# declares itself disposable; the guard runs before any environment or server state.
+DISPOSABLE_FIXTURE_MARKER = "AI_COACH_DISPOSABLE_FIXTURE"
+
+
+def require_disposable_fixture_marker() -> None:
+    """Refuse to start the fixture unless the disposable-container marker is exactly 1."""
+    if os.environ.get(DISPOSABLE_FIXTURE_MARKER) != "1":
+        raise SystemExit(
+            f"Refusing to start the browser fixture: {DISPOSABLE_FIXTURE_MARKER}=1 "
+            "is required and is set only by disposable fixture containers."
+        )
+
+
+if __name__ == "__main__":
+    require_disposable_fixture_marker()
 os.environ.update(
     {
         "DATA_DIR": "/data/coach-fixture-data",
@@ -163,6 +179,7 @@ def fixture_coach_response(payload, **kwargs):
     }:
         nutrition = server.NUTRITION_ASSEMBLY.meal_library_service()
         templates = nutrition.list_templates()
+        scope = ["local_nutrition"]
         if current_message == "E2E nutrition: mixed meal":
             product = nutrition.save_product(
                 {
@@ -254,6 +271,8 @@ def fixture_coach_response(payload, **kwargs):
             arguments = {"payload": {**templates[0], "kcal": 600}}
             arguments["payload"].pop("updated_at", None)
             arguments["payload"].pop("nutrition_basis", None)
+            # Editing a saved meal needs its exact template scope.
+            scope.append(f"nutrition_template:{templates[0]['id']}")
         else:
             name = "delete_nutrition_template"
             arguments = {"id": templates[0]["id"]}
@@ -261,7 +280,7 @@ def fixture_coach_response(payload, **kwargs):
             "summary": "Synthetic nutrition request",
             "source_message_ids": [current_id],
             "target": "local",
-            "scope": ["local_nutrition"],
+            "scope": scope,
             "period": None,
             "constraints": [],
             "remote_write": False,

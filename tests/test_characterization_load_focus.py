@@ -211,9 +211,9 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
             {date(2026, 5, 1): 10.0, date(2026, 5, 2): round(10 * RETENTION, 2)},
         )
 
-    def test_activity_load_on_a_day_without_wellness_row_is_dropped(self) -> None:
-        # Quirk: loads on days without a wellness row only decay the anchor. They are
-        # never added, so the series is identical with or without the activity.
+    def test_activity_load_on_a_day_without_wellness_row_is_applied(self) -> None:
+        # Loads on days without a wellness row decay the running ATL and add their
+        # load, so the next wellness day reflects the completed activity.
         wellness = [_wellness("2026-05-01", 10), _wellness("2026-05-04", 10)]
         with_gap_load = actual_atl_series(
             wellness, [_activity("2026-05-02", icu_training_load=100)], TODAY
@@ -222,10 +222,12 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
             with_gap_load,
             {
                 date(2026, 5, 1): 10.0,
-                date(2026, 5, 4): round(10 * RETENTION**3, 2),
+                date(2026, 5, 4): round(
+                    (10 * RETENTION + 100 * DECAY) * RETENTION**2, 2
+                ),
             },
         )
-        self.assertEqual(with_gap_load, actual_atl_series(wellness, [], TODAY))
+        self.assertNotEqual(with_gap_load, actual_atl_series(wellness, [], TODAY))
 
     def test_activity_load_before_first_wellness_row_is_ignored(self) -> None:
         series = actual_atl_series(

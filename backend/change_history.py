@@ -6,6 +6,9 @@ import hashlib
 import json
 import re
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -21,6 +24,27 @@ ENTITY_TYPES = {
     "training_plan",
 }
 ACTIONS = {"create", "update", "delete", "undo"}
+# Fields a caller needs to undo a recorded change later.
+UNDO_REFERENCE_FIELDS = ("id", "entity_type", "action", "after_hash")
+
+_collected_changes: ContextVar[list[dict[str, str]] | None] = ContextVar(
+    "collected_changes", default=None
+)
+
+
+@contextmanager
+def collect_changes() -> Iterator[list[dict[str, str]]]:
+    """Collect undo references for the changes recorded inside the block.
+
+    Undo rows are not collected because they cannot be undone again.
+    """
+    collected: list[dict[str, str]] = []
+    token = _collected_changes.set(collected)
+    try:
+        yield collected
+    finally:
+        _collected_changes.reset(token)
+
 
 PROFILE_FIELDS = {
     "name",
@@ -271,6 +295,9 @@ def record_change(
             )
         ),
     )
+    collected = _collected_changes.get()
+    if collected is not None and action != "undo":
+        collected.append({key: record[key] for key in UNDO_REFERENCE_FIELDS})
     return record
 
 

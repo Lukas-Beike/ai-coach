@@ -103,7 +103,8 @@ class ServerRuntimeTests(ServerTestCase):
             "function moreSegmentFromRoute(route = AppState.state.route)", navigation
         )
         self.assertIn("function renderMoreSegments(segment)", views)
-        self.assertIn('formData.getAll("sports")', app)
+        self.assertIn("function profileFormValues(form)", app)
+        self.assertIn('new FormData(form).getAll("sports")', app)
         self.assertNotIn("function collectCompetitions()", forms)
         plan_views = (
             Path(__file__).resolve().parents[1] / "public" / "plan-views.js"

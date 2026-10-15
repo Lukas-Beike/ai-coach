@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.coach.proposal_creation import CoachProposalCreationService
+from backend.coach.turn_undo import CoachTurnUndoService
 from backend.history.undo_service import HistoryUndoService
 
 
@@ -16,9 +17,11 @@ class HistoryUndoPostRoutes:
         self,
         history_undo_service: Callable[[], HistoryUndoService],
         coach_proposal_creation_service: Callable[[], CoachProposalCreationService],
+        coach_turn_undo_service: CoachTurnUndoService,
     ) -> None:
         self._history_undo_service = history_undo_service
         self._coach_proposal_creation_service = coach_proposal_creation_service
+        self._coach_turn_undo_service = coach_turn_undo_service
 
     def handle(self, handler: Any, path: str, session: dict[str, Any]) -> bool:
         if path == "/api/change-history/undo/preview":
@@ -35,6 +38,9 @@ class HistoryUndoPostRoutes:
         elif path == "/api/change-history/undo":
             payload = handler.read_json()
             handler.send_json(200, self._history_undo_service().apply(payload))
+        elif path == "/api/change-history/undo-turn":
+            client_turn_id = handler.read_json().get("client_turn_id")
+            handler.send_json(200, self._coach_turn_undo_service.undo(client_turn_id))
         else:
             return False
         return True

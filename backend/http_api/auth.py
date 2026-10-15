@@ -7,6 +7,7 @@ import hmac
 import secrets
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from http.cookies import CookieError, SimpleCookie
 from typing import Any
@@ -26,6 +27,9 @@ SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 SESSION_TOUCH_INTERVAL_SECONDS = 5 * 60
 SESSION_CLEANUP_INTERVAL_SECONDS = 15 * 60
 SESSION_CLEANUP_BATCH_SIZE = 100
+# Session upkeep (touch, cleanup, expired delete) never decides authentication,
+# so it waits only briefly for the writer and retries on a later request.
+SESSION_MAINTENANCE_WAIT_SECONDS = 1.0
 
 
 class SessionAuthServiceCache:
@@ -37,6 +41,7 @@ class SessionAuthServiceCache:
             tuple[DatabaseManager, Config, bool, AthleteSessionService] | None
         ) = None
         self._sessions = AthleteSessionService()
+        self._lock = threading.Lock()
 
     def get(
         self,
@@ -47,7 +52,9 @@ class SessionAuthServiceCache:
         rate_limiter: RateLimiter,
         sessions: AthleteSessionService | None = None,
     ) -> SessionAuthService:
-        with database_lock:
+        # The cache only guards its own composition state; it must not queue
+        # every authenticated request behind a database writer.
+        with self._lock:
             sessions = sessions or self._sessions
             signature = (database_manager, config, sqlcipher_available, sessions)
             if self._service is None or self._signature != signature:
@@ -74,15 +81,14 @@ def get_session_auth_service(
     sessions: AthleteSessionService | None = None,
 ) -> SessionAuthService:
     """Return the auth service owned by the current persistence config."""
-    with database_lock:
-        return SESSION_AUTH_SERVICE_CACHE.get(
-            database_manager,
-            database_lock,
-            config,
-            sqlcipher_available,
-            RATE_LIMITER,
-            sessions,
-        )
+    return SESSION_AUTH_SERVICE_CACHE.get(
+        database_manager,
+        database_lock,
+        config,
+        sqlcipher_available,
+        RATE_LIMITER,
+        sessions,
+    )
 
 
 class SessionAuthService:
@@ -104,7 +110,9 @@ class SessionAuthService:
         self._rate_limiter = rate_limiter
         self._sessions = sessions or AthleteSessionService()
         self._session_lock = threading.RLock()
-        self._last_cleanup_monotonic = 0.0
+        # None means no cleanup has run yet, so the first check is always due
+        # regardless of how long the monotonic clock has been running.
+        self._last_cleanup_monotonic: float | None = None
 
     @property
     def session_lock(self) -> threading.RLock:
@@ -144,16 +152,49 @@ class SessionAuthService:
     def cleanup_expired_sessions(
         self, db: Any, now: float, *, force: bool = False
     ) -> int:
-        current_monotonic = time.monotonic()
-        if (
-            not force
-            and current_monotonic - self._last_cleanup_monotonic
-            < SESSION_CLEANUP_INTERVAL_SECONDS
-        ):
+        if not force and not self._cleanup_due():
             return 0
         deleted = self._sessions.cleanup_expired(db, now, SESSION_CLEANUP_BATCH_SIZE)
-        self._last_cleanup_monotonic = current_monotonic
+        self._last_cleanup_monotonic = time.monotonic()
         return deleted
+
+    def _cleanup_due(self) -> bool:
+        last = self._last_cleanup_monotonic
+        return (
+            last is None or time.monotonic() - last >= SESSION_CLEANUP_INTERVAL_SECONDS
+        )
+
+    def _write_if_idle(self, write: Callable[[Any], object]) -> bool:
+        """Run a non-essential session write unless the writer is busy.
+
+        Authentication is decided from the read snapshot alone, so a busy
+        writer must never stall or fail a request; the write is retried by a
+        later request.
+        """
+        held: list[threading.RLock] = []
+        try:
+            for lock in (self._session_lock, self._database_lock):
+                if not lock.acquire(timeout=SESSION_MAINTENANCE_WAIT_SECONDS):
+                    return False
+                held.append(lock)
+            with self._database_manager.unit_of_work(
+                timeout=SESSION_MAINTENANCE_WAIT_SECONDS
+            ) as db:
+                write(db)
+            return True
+        except TimeoutError:
+            return False
+        finally:
+            for lock in reversed(held):
+                lock.release()
+
+    def _touch_if_still_stale(self, db: Any, token_hash: str, now: float) -> None:
+        row = self._sessions.get(db, token_hash)
+        if not row:
+            return
+        last_seen = self.session_timestamp(row["last_seen"])
+        if last_seen is None or now - last_seen >= SESSION_TOUCH_INTERVAL_SECONDS:
+            self._sessions.touch(db, token_hash, datetime.now(UTC).isoformat())
 
     def authenticated_session(self, handler: Any) -> dict[str, Any] | None:
         token = self.cookie_value(handler, SESSION_COOKIE)
@@ -161,25 +202,28 @@ class SessionAuthService:
             return None
         now = time.time()
         token_hash = self.session_token_hash(token)
-        with (
-            self._session_lock,
-            self._database_lock,
-            self._database_manager.unit_of_work() as db,
-        ):
-            self.cleanup_expired_sessions(db, now)
+        # The lookup is a pure read on a WAL snapshot: it neither waits for the
+        # writer nor holds a lock, and it sees every committed login/logout.
+        with self._database_manager.read_snapshot() as db:
             row = self._sessions.get(db, token_hash)
-            if not row:
-                return None
-            if float(row["expires_at"]) <= now:
-                self._sessions.delete(db, token_hash)
-                return None
-            last_seen = self.session_timestamp(row["last_seen"])
-            if last_seen is None or now - last_seen >= SESSION_TOUCH_INTERVAL_SECONDS:
-                self._sessions.touch(db, token_hash, datetime.now(UTC).isoformat())
-            return {
-                "csrf_hash": row["csrf_hash"],
-                "expires_at": float(row["expires_at"]),
-            }
+        expires_at = float(row["expires_at"]) if row else 0.0
+        if self._cleanup_due() and not self._write_if_idle(
+            lambda db: self.cleanup_expired_sessions(db, now)
+        ):
+            # Back off until the next interval so a long busy writer does not
+            # make every request wait for the cleanup attempt.
+            self._last_cleanup_monotonic = time.monotonic()
+        if not row:
+            return None
+        if expires_at <= now:
+            self._write_if_idle(lambda db: self._sessions.delete(db, token_hash))
+            return None
+        last_seen = self.session_timestamp(row["last_seen"])
+        if last_seen is None or now - last_seen >= SESSION_TOUCH_INTERVAL_SECONDS:
+            self._write_if_idle(
+                lambda db: self._touch_if_still_stale(db, token_hash, now)
+            )
+        return {"csrf_hash": row["csrf_hash"], "expires_at": expires_at}
 
     def login_user(self, handler: Any, password: str | None = None) -> dict[str, Any]:
         if app_config.security_configuration_error(
@@ -284,11 +328,7 @@ class SessionAuthService:
         if not normalized_key:
             return ""
         now = time.time()
-        with (
-            self._session_lock,
-            self._database_lock,
-            self._database_manager.unit_of_work() as db,
-        ):
+        with self._database_manager.read_snapshot() as db:
             rows = self._sessions.list_csrf(db)
         for row in rows:
             csrf_hash = str(row.get("csrf_hash") or "")

@@ -9,6 +9,7 @@ import math
 import re
 import socket
 import ssl
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -24,6 +25,7 @@ from backend.runtime.socket_deadline import SocketDeadline
 
 MAX_EXTERNAL_CALENDAR_BYTES = 5_000_000
 CALENDAR_FETCH_TIMEOUT_SECONDS = 30
+CALENDAR_TIMEOUT_MESSAGE = "Der Kalender-Feed hat nicht rechtzeitig geantwortet."
 CALENDAR_CONNECTION_TIMEOUT_SECONDS = 10
 EXTERNAL_HTTP_STARTED_EVENT = "External HTTP request started"
 EXTERNAL_HTTP_COMPLETED_EVENT = "External HTTP request completed"
@@ -35,17 +37,52 @@ ICAL_MAX_RAW_EVENTS = 10000
 ICAL_DAY_NUMBERS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
 
 
+class _CalendarResolveTimeout(TimeoutError):
+    """Address resolution did not finish within the caller's deadline."""
+
+
+def _getaddrinfo_bounded(hostname: str, timeout: float) -> list[Any]:
+    """Run the blocking resolver on a worker thread and stop waiting at ``timeout``.
+
+    The resolver call itself cannot be interrupted; on timeout the worker is left
+    to finish in the background as a daemon thread and its result is discarded.
+    """
+    outcome: dict[str, Any] = {}
+    finished = threading.Event()
+
+    def resolve() -> None:
+        try:
+            outcome["items"] = socket.getaddrinfo(
+                hostname, 443, type=socket.SOCK_STREAM
+            )
+        except Exception as exc:  # noqa: BLE001 - re-raised in the calling thread
+            outcome["error"] = exc
+        finally:
+            finished.set()
+
+    threading.Thread(target=resolve, name="calendar-dns-resolve", daemon=True).start()
+    if not finished.wait(timeout):
+        raise _CalendarResolveTimeout("calendar address resolution timed out")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["items"]
+
+
 def _resolve_calendar_addresses(
-    hostname: str, *, status: int
+    hostname: str, *, status: int, timeout: float | None = None
 ) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     try:
         addresses = [ipaddress.ip_address(hostname)]
     except ValueError:
         try:
-            addresses = [
-                ipaddress.ip_address(item[4][0])
-                for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
-            ]
+            items = (
+                socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
+                if timeout is None
+                else _getaddrinfo_bounded(hostname, timeout)
+            )
+            addresses = [ipaddress.ip_address(item[4][0]) for item in items]
+        except _CalendarResolveTimeout:
+            raise
         except (OSError, ValueError, IndexError, TypeError) as exc:
             raise AppError(
                 status, "Die Kalenderadresse konnte nicht aufgelöst werden."
@@ -206,15 +243,15 @@ def fetch_calendar_feed(url: str, *, app_version: str) -> bytes:
     )
     timed_out = False
     try:
-        addresses = _resolve_calendar_addresses(hostname, status=502)
-        request_context["address_count"] = len(addresses)
         try:
+            addresses = _resolve_calendar_addresses(
+                hostname, status=502, timeout=_calendar_fetch_remaining(deadline)
+            )
+            request_context["address_count"] = len(addresses)
             _calendar_fetch_remaining(deadline)
         except TimeoutError as exc:
             timed_out = True
-            raise AppError(
-                504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet."
-            ) from exc
+            raise AppError(504, CALENDAR_TIMEOUT_MESSAGE) from exc
         last_network_error: OSError | None = None
         for address in addresses:
             try:
@@ -246,7 +283,7 @@ def fetch_calendar_feed(url: str, *, app_version: str) -> bytes:
                 last_network_error = exc
                 continue
         if timed_out:
-            raise AppError(504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet.")
+            raise AppError(504, CALENDAR_TIMEOUT_MESSAGE)
         raise AppError(
             502, "Der Kalender-Feed konnte nicht geladen werden."
         ) from last_network_error
@@ -257,7 +294,14 @@ def fetch_calendar_feed(url: str, *, app_version: str) -> bytes:
 
 def external_calendar_url(value: Any) -> str:
     raw, _, hostname, _ = _calendar_url_parts(value)
-    _resolve_calendar_addresses(hostname, status=400)
+    try:
+        _resolve_calendar_addresses(
+            hostname, status=400, timeout=CALENDAR_FETCH_TIMEOUT_SECONDS
+        )
+    except TimeoutError as exc:
+        raise AppError(
+            504, "Die Kalenderadresse konnte nicht rechtzeitig aufgelöst werden."
+        ) from exc
     return raw
 
 

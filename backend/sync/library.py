@@ -506,7 +506,8 @@ class WorkoutLibrarySyncStateService:
             _REMOTE_LINKS.refresh_from_slots(
                 db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
             )
-            self._key_value_repository.set(db, "last_library_sync_at", now)
+            # A push must not move the remote-import gate (last_library_sync_at).
+            self._key_value_repository.set(db, "last_library_push_at", now)
             self._key_value_repository.set(db, "last_library_sync_error", "")
         return synced
 

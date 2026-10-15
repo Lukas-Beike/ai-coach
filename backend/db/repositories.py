@@ -537,13 +537,14 @@ class PlanAdjustmentRepository:
 
     def latest(self, db: Any) -> dict[str, Any] | None:
         row = db.execute(
-            "SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at DESC LIMIT 1"
+            # rowid breaks created_at ties so the last inserted preview is the latest.
+            "SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at DESC, rowid DESC LIMIT 1"
         ).fetchone()
         return dict(row) if row else None
 
     def list_recent(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT payload, status FROM plan_adjustments ORDER BY created_at DESC LIMIT ?",
+            "SELECT payload, status FROM plan_adjustments ORDER BY created_at DESC, rowid DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -562,6 +563,31 @@ class PlanAdjustmentRepository:
             "UPDATE plan_adjustments SET payload=?, status=?, applied_at=? WHERE id=?",
             (payload, status, applied_at, adjustment_id),
         )
+
+
+# An assistant message shows the change summary of the Coach turn it finished.
+_MESSAGE_COLUMNS = (
+    "id, role, content, client_turn_id, created_at, "
+    "(SELECT json_group_array(json_extract(value, '$.name')) "
+    "FROM json_each(messages.attachments)) AS attachment_names, "
+    "(SELECT json_extract(receipt, '$.change_summary') FROM coach_commands "
+    "WHERE messages.role='assistant' "
+    "AND coach_commands.client_turn_id=messages.client_turn_id "
+    "AND json_valid(receipt)) AS coach_changes"
+)
+
+
+def _message_view(row: Any) -> dict[str, Any]:
+    message = {
+        key: value
+        for key, value in row.items()
+        if (key != "client_turn_id" or value is not None)
+        and (key != "attachment_names" or value != "[]")
+        and (key != "coach_changes" or value is not None)
+    }
+    if "coach_changes" in message:
+        message["coach_changes"] = json.loads(message["coach_changes"])
+    return message
 
 
 class ChatRepository:
@@ -591,18 +617,10 @@ class ChatRepository:
 
     def list(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT id, role, content, client_turn_id, created_at, (SELECT json_group_array(json_extract(value, '$.name')) FROM json_each(messages.attachments)) AS attachment_names FROM messages ORDER BY id DESC LIMIT ?",
+            f"SELECT {_MESSAGE_COLUMNS} FROM messages ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
-        return [
-            {
-                key: value
-                for key, value in row.items()
-                if (key != "client_turn_id" or value is not None)
-                and (key != "attachment_names" or value != "[]")
-            }
-            for row in reversed(rows)
-        ]
+        return [_message_view(row) for row in reversed(rows)]
 
     def list_page(
         self,
@@ -625,21 +643,10 @@ class ChatRepository:
             params.append(before_message_id)
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = db.execute(
-            "SELECT id, role, content, client_turn_id, created_at, "
-            "(SELECT json_group_array(json_extract(value, '$.name')) "
-            "FROM json_each(messages.attachments)) AS attachment_names "
-            f"FROM messages{where} ORDER BY id DESC LIMIT ?",
+            f"SELECT {_MESSAGE_COLUMNS} FROM messages{where} ORDER BY id DESC LIMIT ?",
             (*params, limit),
         ).fetchall()
-        return [
-            {
-                key: value
-                for key, value in row.items()
-                if (key != "client_turn_id" or value is not None)
-                and (key != "attachment_names" or value != "[]")
-            }
-            for row in rows
-        ]
+        return [_message_view(row) for row in rows]
 
 
 class CheckinRepository:

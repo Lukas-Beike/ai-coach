@@ -2,6 +2,7 @@ import copy
 import unittest
 from datetime import date, timedelta
 
+from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.load_context import performance_load_context
 
 
@@ -82,6 +83,14 @@ class PerformanceLoadContextTests(unittest.TestCase):
         self.assertEqual(
             performance_load_context([], [], latest, today)["load"]["tsb"], -10.0
         )
+
+    def test_canonical_ctl_and_atl_override_legacy_when_observed(self):
+        today = date(2026, 9, 30)
+        latest = {"id": today.isoformat(), "ctl": 55, "atl": 65}
+        canonical = CanonicalPerformanceInputs(wellness_day=today, ctl=60.5, atl=70.25)
+        result = performance_load_context([], [], latest, today, canonical=canonical)
+        self.assertEqual(result["load"]["ctl"], 60.5)
+        self.assertEqual(result["load"]["atl"], 70.25)
 
     def test_input_data_is_not_mutated(self):
         today = date(2026, 9, 30)

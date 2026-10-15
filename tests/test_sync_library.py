@@ -289,7 +289,7 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
             }
         self.assertEqual(
             values,
-            {"last_library_sync_at": NOW, "last_library_sync_error": ""},
+            {"last_library_push_at": NOW, "last_library_sync_error": ""},
         )
         self.assertEqual(local_workout, local_before)
         self.assertEqual(remote_workout, remote_before)
@@ -736,6 +736,30 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         self.client.create_library_workouts.assert_called_once_with(
             [planning_workouts.library_workout_payload(self.workout())]
         )
+        self.assertEqual(synced["external_id"], "remote-created")
+        self.assertEqual(self.library_row()["sync_state"], "synced")
+
+    def test_retry_after_lost_identity_adopts_the_created_remote_workout(self):
+        self.add_entry()
+        created = {**self.workout(), "id": "remote-created"}
+        self.client.get_workout_library.return_value = []
+        self.client.create_library_workouts.return_value = [created]
+        with (
+            patch.object(
+                WorkoutLibrarySyncStateService,
+                "store_remote_identity",
+                side_effect=RuntimeError("database busy"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "database busy"),
+        ):
+            self.service.sync_entry(LIBRARY_ID)
+        self.assertEqual(self.library_row()["sync_state"], "sync_error")
+        self.assertIsNone(self.library_row()["external_id"])
+
+        self.client.get_workout_library.return_value = [created]
+        synced = self.service.sync_entry(LIBRARY_ID)
+
+        self.assertEqual(self.client.create_library_workouts.call_count, 1)
         self.assertEqual(synced["external_id"], "remote-created")
         self.assertEqual(self.library_row()["sync_state"], "synced")
 
@@ -1388,6 +1412,15 @@ class WorkoutLibraryRefreshServiceTests(unittest.TestCase):
         self.workout_library.list.assert_called_once_with(include_archived=True)
         self.event_buffer.publish.assert_not_called()
         self.assertEqual(self.get_marker("last_library_sync_at"), "previous-sync")
+
+    def test_push_marker_does_not_gate_the_remote_import(self):
+        self.set_marker("last_library_push_at", "previous-push")
+
+        result = self.service.refresh(reason="startup")
+
+        self.assertEqual(result["status"], "ok")
+        self.provider_client.get_workout_library.assert_called_once_with()
+        self.assertEqual(self.get_marker("last_library_sync_at"), NOW)
 
     def test_success_reconciles_once_sets_markers_publishes_and_returns_result(self):
         result = self.service.refresh(reason="startup")

@@ -133,6 +133,8 @@ class SyncReconcileTests(unittest.TestCase):
         self.assertTrue(self.db.in_transaction)
 
     def test_synced_keeps_missing_moving_time_and_pops_other_missing_fields(self):
+        # The event answers the push of the local unit, so the pushed duration is
+        # kept; remote clears arrive through RemotePlannedUnitReconciler.
         self.add_unit(
             "unit-1",
             {
