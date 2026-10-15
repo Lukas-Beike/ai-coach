@@ -10,6 +10,7 @@ from typing import Any
 
 from backend import observability
 from backend.coach.authorization import authorized_operations
+from backend.coach.change_receipts import change_summary
 from backend.coach.context_selection import infer_coach_domain
 from backend.coach.outcomes import (
     COACH_ACTION_LABELS,
@@ -123,6 +124,10 @@ class CoachTurnFailureService:
                     ],
                 }
             )
+            # Keep applied local writes undoable, as a successful turn does.
+            summary = change_summary(commands)
+            if summary:
+                receipt["change_summary"] = summary
             # A terminal failure is not resumable and must not retain inline image data.
             for key in (
                 "openai_response_id",
@@ -135,6 +140,8 @@ class CoachTurnFailureService:
             receipt["message"] = deps.chat_repository.add(
                 db, "assistant", text, client_turn_id=client_turn_id
             )
+            if summary:
+                receipt["message"]["coach_changes"] = summary
             db.execute(
                 "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? "
                 "WHERE client_turn_id=?",
