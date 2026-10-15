@@ -777,7 +777,7 @@ class StandardFixtureDataTests(unittest.TestCase):
             ],
         )
         self.assertEqual(len(scenarios["swim_unit"]), 1)
-        self.assertEqual(scenarios["swim_unit"][0]["sport"], "Swim")
+        self.assertEqual(scenarios["swim_unit"][0]["sport"], "swim")
         self.assertEqual(scenarios["swim_unit"][0]["date"], scenarios["swim_day"])
         self.assertEqual(scenarios["swim_unit"][0]["icu_training_load"], 40)
         self.assertEqual(len(scenarios["camp_units"]), 1)
