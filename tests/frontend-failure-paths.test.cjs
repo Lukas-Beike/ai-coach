@@ -183,6 +183,7 @@ function cancelHarness() {
   });
   // updateChatControls is reduced to the cancel button, which is the part under test.
   vm.runInContext([
+    "let chatCancelInFlight = false;",
     extractFunction(coachSource, "cancelChat"),
     extractFunction(coachSource, "updateChatCancelButton"),
     "function updateChatControls() { controlCalls.push(1); updateChatCancelButton($('#cancelChatButton'), { reconciling: false }); }",
@@ -227,6 +228,37 @@ test("a failed cancel keeps a phase that the stream reached while the request wa
   await pending;
   assert.equal(harness.state.chatRequest.phase, "reconciling");
   assert.equal(harness.state.chatRequest.cancelRequested, false);
+});
+
+test("a second stop click while the cancel is pending sends nothing and the retry stays possible", async () => {
+  const harness = cancelHarness();
+  const pending = harness.context.cancelChat();
+  assert.equal(harness.button.disabled, true);
+  await harness.context.cancelChat();
+  assert.equal(harness.apiCalls.length, 1);
+  harness.settle().reject(httpError(500, "Serverfehler"));
+  await pending;
+  assert.equal(harness.state.chatStream.cancelRequested, false);
+  assert.equal(harness.state.chatRequest.cancelRequested, false);
+  assert.equal(harness.button.disabled, false);
+  const retry = harness.context.cancelChat();
+  assert.equal(harness.apiCalls.length, 2);
+  harness.settle().resolve({});
+  await retry;
+  assert.equal(harness.controller.signal.aborted, true);
+});
+
+test("a deferred cancel that fails once the operation id arrived becomes retryable", async () => {
+  const harness = cancelHarness();
+  // The stop click came before the operation id; the stream then retries the cancel.
+  harness.state.chatStream.cancelRequested = true;
+  harness.state.chatRequest.cancelRequested = true;
+  const pending = harness.context.cancelChat();
+  harness.settle().reject(httpError(500, "Serverfehler"));
+  await pending;
+  assert.equal(harness.state.chatStream.cancelRequested, false);
+  assert.equal(harness.state.chatRequest.cancelRequested, false);
+  assert.equal(harness.button.disabled, false);
 });
 
 test("a cancel that fails after the session ended restores the flags without a stale error toast", async () => {

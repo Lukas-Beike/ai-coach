@@ -555,19 +555,21 @@ async function drainChatQueue(firstMessage, requestKind = null, attachments = []
   return "completed";
 }
 
+// One cancel request at a time: an overlapping call would race the first one's failure handling.
+let chatCancelInFlight = false;
+
 async function cancelChat() {
+  if (chatCancelInFlight) return;
   const stream = state.chatStream;
   const request = state.chatRequest;
   const operationId = stream?.operationId || state.chatServerOperationId;
-  const previous = {
-    streamCancel: stream?.cancelRequested ?? false,
-    requestCancel: request?.cancelRequested ?? false,
-    phase: request?.phase,
-  };
+  const previousPhase = request?.phase;
   if (stream) stream.cancelRequested = true;
   if (request) request.cancelRequested = true;
   if (!operationId) { updateChatControls(); return; }
   if (request) request.phase = "recovering";
+  chatCancelInFlight = true;
+  updateChatControls();
   try {
     await api("/api/chat/cancel", {
       method: "POST",
@@ -575,15 +577,18 @@ async function cancelChat() {
     });
   } catch (error) {
     // The server job may still be running, so keep the stream alive and let the athlete retry.
-    if (stream) stream.cancelRequested = previous.streamCancel;
+    // A deferred cancel (requested before the operation id arrived) must also become retryable.
+    if (stream) stream.cancelRequested = false;
     if (request) {
-      request.cancelRequested = previous.requestCancel;
+      request.cancelRequested = false;
       // Keep a phase that completion or a background handover set while the request was pending.
-      if (request.phase === "recovering" && !request.background && state.chatStream === stream) request.phase = previous.phase;
+      if (request.phase === "recovering" && !request.background && state.chatStream === stream) request.phase = previousPhase;
     }
     updateChatControls();
     if (error?.name !== "AbortError") toast("Stoppen fehlgeschlagen. Bitte erneut versuchen.", true);
     return;
+  } finally {
+    chatCancelInFlight = false;
   }
   stream?.controller.abort();
   scheduleChatStatusPoll(0);
