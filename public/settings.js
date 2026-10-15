@@ -11,12 +11,6 @@ function profileFieldText(value) {
   return typeof value === "string" ? value : "";
 }
 
-// PUT /api/profile replaces the whole profile on the server, so every write starts from the server's current values.
-async function fetchCurrentProfile() {
-  const current = await api("/api/profile");
-  return current.profile && typeof current.profile === "object" ? current.profile : {};
-}
-
 async function saveProfile(event) {
   event.preventDefault();
   const button = event.submitter || event.currentTarget.querySelector("button[type=submit]");
@@ -36,9 +30,9 @@ async function saveProfile(event) {
     // Without the server-rendered baseline, the form cannot tell edited fields from untouched ones.
     if (!baseline) throw new Error("Das Profil wird noch geladen. Bitte kurz warten und erneut speichern.");
     changed = Object.fromEntries(Object.entries(formValues).filter(([key, value]) => profileFieldText(value) !== profileFieldText(baseline[key])));
-    const profile = { ...(await fetchCurrentProfile()), ...changed };
-    const saved = await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
-    if (!Object.keys(profile).every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string")) {
+    // PUT /api/profile applies only the sent fields to the server's current profile.
+    const saved = await api("/api/profile", { method: "PUT", body: JSON.stringify(changed) });
+    if (!Object.keys(changed).every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string")) {
       throw new Error("Die Profilbestätigung ist unvollständig. Der Entwurf bleibt erhalten.");
     }
     state.profileBaseline = { ...baseline, ...changed };

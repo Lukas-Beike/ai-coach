@@ -75,7 +75,8 @@ provider-keyed.
 | Method | Path | Purpose | Requirement |
 | --- | --- | --- | --- |
 | PUT | `/api/settings/model`, `/api/settings/thinking-level`, `/api/settings/calendar-display` | Update settings | CSRF |
-| PUT | `/api/profile`, `/api/athlete-context` | Update profile and competitions | CSRF |
+| PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile | CSRF |
+| PUT | `/api/athlete-context` | Replace profile and competitions | CSRF |
 | PUT | `/api/nutrition/entry` | Update a nutrition entry | CSRF |
 
 The former `/api/logs/clear` and `/api/diagnostics/clear` aliases are not

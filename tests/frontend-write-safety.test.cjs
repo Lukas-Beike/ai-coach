@@ -74,7 +74,7 @@ function profileContext({ server, baseline, stateProfile }) {
   return { context, state, calls, toasts };
 }
 
-test("profile save keeps the server's current values for fields the athlete did not edit", async () => {
+test("profile save sends only the fields the athlete edited", async () => {
   const { context, calls, toasts } = profileContext({
     server: { name: "Anna", sports: "Cycling", typical_weekly_volume: "10 h", coaching_style: "Unterstützend", weight: "60" },
     baseline: { name: "Anna", sports: "Cycling", typical_weekly_volume: "8 h", coaching_style: "Unterstützend" },
@@ -89,10 +89,9 @@ test("profile save keeps the server's current values for fields the athlete did 
   await context.saveProfile(event);
   const put = calls.find((call) => call.method === "PUT");
   assert.ok(put, "expected a PUT to /api/profile");
-  const body = plain(put.body);
-  assert.equal(body.name, "Anna M.");
-  assert.equal(body.typical_weekly_volume, "10 h");
-  assert.equal(body.weight, "60");
+  assert.equal(calls.filter((call) => call.method === "GET").length, 0, "saving must not pre-read the profile");
+  assert.deepEqual(Object.keys(plain(put.body)), ["name"]);
+  assert.equal(plain(put.body).name, "Anna M.");
   assert.equal(toasts.at(-1).isError, false);
 });
 
@@ -108,18 +107,17 @@ test("profile save refuses to write before the rendered baseline is known", asyn
   assert.equal(toasts.at(-1).isError, true);
 });
 
-test("inline metric save changes only its key on the server's current profile", async () => {
+test("inline metric save sends only its key", async () => {
   const { context, calls } = profileContext({
-    server: { name: "Anna", typical_weekly_volume: "10 h", weight: "60" },
+    server: { name: "Anna", typical_weekly_volume: "10 h", weight_kg: "60" },
     baseline: { name: "Anna" },
-    stateProfile: { name: "Anna", typical_weekly_volume: "8 h", weight: "55" },
+    stateProfile: { name: "Anna", typical_weekly_volume: "8 h", weight_kg: "55" },
   });
-  await context.saveInlineMetric("weight", " 62 ", { disabled: false });
+  await context.saveInlineMetric("weight_kg", " 62 ", { disabled: false });
   const put = calls.find((call) => call.method === "PUT");
   assert.ok(put);
-  const body = plain(put.body);
-  assert.equal(body.weight, "62");
-  assert.equal(body.typical_weekly_volume, "10 h");
+  assert.equal(calls.filter((call) => call.method === "GET").length, 0, "saving must not pre-read the profile");
+  assert.deepEqual(plain(put.body), { weight_kg: "62" });
 });
 
 function coachContext(apiImpl) {

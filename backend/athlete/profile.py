@@ -128,10 +128,26 @@ class ProfileService:
         restored = dict(current or DEFAULT_PROFILE)
         restored.update(target or DEFAULT_PROFILE)
         normalized = normalize_profile(restored)
+        previous = self.get_from_db(db)
         self._profile_repository.set(db, json.dumps(normalized, ensure_ascii=False))
+        self._on_location_changed(
+            previous,
+            normalized,
+            repository=self._key_value_repository,
+            db=db,
+        )
         return normalized
 
     def save(self, profile: dict[str, Any]) -> dict[str, str]:
+        """Replace the whole profile; callers must send every field they keep."""
         normalized = normalize_profile(profile, validate_timezone=True)
         with self._manager.unit_of_work() as db:
             return self.save_in_transaction(normalized, db, already_normalized=True)
+
+    def patch(self, changes: dict[str, Any]) -> dict[str, str]:
+        """Apply only the submitted fields onto the profile stored in this transaction."""
+        if not isinstance(changes, dict):
+            raise AppError(400, "Die Profiländerung muss ein Objekt sein.")
+        with self._manager.unit_of_work() as db:
+            current = self.get_from_db(db)
+            return self.save_in_transaction({**current, **changes}, db)
