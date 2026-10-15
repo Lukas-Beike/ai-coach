@@ -179,17 +179,35 @@ def garmin_daily_health_metrics(
     return result
 
 
+def _complete_read_window(snapshot: dict[str, Any]) -> tuple[date, date] | None:
+    """Return the latest run's read window if its daily-stats read was complete."""
+    freshness = snapshot.get("source_freshness")
+    daily_stats = freshness.get("daily_stats") if isinstance(freshness, dict) else None
+    if not isinstance(daily_stats, dict) or daily_stats.get("freshness") != "current":
+        return None
+    provider_sync = snapshot.get("provider_sync")
+    window = (
+        provider_sync.get("read_window") if isinstance(provider_sync, dict) else None
+    )
+    if not isinstance(window, dict):
+        return None
+    try:
+        return date.fromisoformat(window["start"]), date.fromisoformat(window["end"])
+    except KeyError, TypeError, ValueError:
+        return None
+
+
 def _projection_reference(
     snapshot: dict[str, Any], current_date: date
 ) -> tuple[date, float | int] | None:
     """Return the resting calories of the latest complete day within a week.
 
-    Retained records from a partial or failed refresh may still hold a day's
-    running value, so a reference needs a fully current daily-stats read.
+    Records retained from an earlier sync may still hold a day's running value
+    (a partial or failed refresh, or a shorter manual window), so a reference
+    must lie inside the window of a fully current daily-stats read.
     """
-    freshness = snapshot.get("source_freshness")
-    daily_stats = freshness.get("daily_stats") if isinstance(freshness, dict) else None
-    if not isinstance(daily_stats, dict) or daily_stats.get("freshness") != "current":
+    read_window = _complete_read_window(snapshot)
+    if read_window is None:
         return None
     reference: tuple[date, float | int] | None = None
     for record_date, record in performance_recovery.dated_garmin_recovery_records(
@@ -204,6 +222,7 @@ def _projection_reference(
         )
         if (
             0 < (current_date - record_day).days <= 7
+            and read_window[0] <= record_day <= read_window[1]
             and resting is not None
             and resting > 0
             and (reference is None or record_day > reference[0])

@@ -148,6 +148,9 @@ class GarminDailyHealthTests(unittest.TestCase):
                 {"date": "2026-10-01", "bmrKilocalories": 3000},
             ],
             "source_freshness": {"daily_stats": {"freshness": "current"}},
+            "provider_sync": {
+                "read_window": {"start": "2026-10-13", "end": "2026-10-15"}
+            },
         }
 
         result = garmin_daily_expenditure(snapshot, "2026-10-15", date(2026, 10, 15))
@@ -191,6 +194,9 @@ class GarminDailyHealthTests(unittest.TestCase):
                     {
                         "daily_stats": daily_stats,
                         "source_freshness": {"daily_stats": {"freshness": "current"}},
+                        "provider_sync": {
+                            "read_window": {"start": "2026-10-01", "end": "2026-10-15"}
+                        },
                     },
                     "2026-10-15",
                     date(2026, 10, 15),
@@ -198,6 +204,55 @@ class GarminDailyHealthTests(unittest.TestCase):
                 self.assertIsNone(result["projected_total_kcal"])
                 self.assertIsNone(result["projection_resting_kcal"])
                 self.assertIsNone(result["projection_reference_date"])
+
+    def test_running_day_projection_needs_reference_inside_latest_read_window(self):
+        daily_stats = [
+            {
+                "date": "2026-10-15",
+                "activeKilocalories": 23,
+                "bmrKilocalories": 1180,
+                "totalKilocalories": 1203,
+            },
+            # Yesterday's evening value from an earlier sync; plausible but not final.
+            {"date": "2026-10-14", "bmrKilocalories": 2000},
+        ]
+        provider_sync_cases = {
+            "one-day read of today": {
+                "read_window": {"start": "2026-10-15", "end": "2026-10-15"}
+            },
+            "window ended before the reference": {
+                "read_window": {"start": "2026-10-10", "end": "2026-10-13"}
+            },
+            "no window": {},
+            "malformed window": {"read_window": {"start": "today", "end": None}},
+            "malformed provider sync": [],
+        }
+        for name, provider_sync in provider_sync_cases.items():
+            with self.subTest(name):
+                result = garmin_daily_expenditure(
+                    {
+                        "daily_stats": daily_stats,
+                        "source_freshness": {"daily_stats": {"freshness": "current"}},
+                        "provider_sync": provider_sync,
+                    },
+                    "2026-10-15",
+                    date(2026, 10, 15),
+                )
+                self.assertIsNone(result["projected_total_kcal"])
+                self.assertEqual(result["total_kcal"], 1203)
+
+        covered = garmin_daily_expenditure(
+            {
+                "daily_stats": daily_stats,
+                "source_freshness": {"daily_stats": {"freshness": "current"}},
+                "provider_sync": {
+                    "read_window": {"start": "2026-10-14", "end": "2026-10-15"}
+                },
+            },
+            "2026-10-15",
+            date(2026, 10, 15),
+        )
+        self.assertEqual(covered["projected_total_kcal"], 2023)
 
     def test_running_day_projection_ignores_records_retained_by_a_partial_read(self):
         daily_stats = [
