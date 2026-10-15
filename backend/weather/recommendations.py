@@ -67,19 +67,35 @@ def _weather_training_windows(target_date: date) -> list[tuple[int, int, str]]:
     return [(6, 21, "Wochenende")]
 
 
+def _known_average(values: list[float | None]) -> float | None:
+    known = [value for value in values if value is not None]
+    return sum(known) / len(known) if known else None
+
+
+def _weather_rain_amount(item: dict[str, float | int | str]) -> float | None:
+    rain = weather_projection.weather_number(item.get("rain"))
+    showers = weather_projection.weather_number(item.get("showers"))
+    if rain is None and showers is None:
+        return None
+    return (rain or 0) + (showers or 0)
+
+
+def _round_optional(value: float | None) -> int | None:
+    return round(value) if value is not None else None
+
+
 def _weather_interval_summary(
     interval: list[dict[str, float | int | str]],
 ) -> dict[str, Any]:
-    """Calculate forecast values used for one possible training window."""
+    """Calculate forecast values used for one possible training window.
+
+    Unknown measurements stay None; they are never reported as zero.
+    """
     precipitation = [
         weather_projection.weather_number(item.get("precipitation_probability"))
         for item in interval
     ]
-    rain = [
-        (weather_projection.weather_number(item.get("rain")) or 0)
-        + (weather_projection.weather_number(item.get("showers")) or 0)
-        for item in interval
-    ]
+    rain = [_weather_rain_amount(item) for item in interval]
     temperatures = [
         weather_projection.weather_number(item.get("apparent_temperature"))
         for item in interval
@@ -96,23 +112,16 @@ def _weather_interval_summary(
         weather_projection.weather_number(item.get("wind_direction_10m"))
         for item in interval
     ]
+    known_rain = [value for value in rain if value is not None]
     return {
-        "precipitation_average": sum(
-            value for value in precipitation if value is not None
-        )
-        / max(1, len([value for value in precipitation if value is not None])),
-        "rain_total": sum(rain),
-        "temperature_average": sum(value for value in temperatures if value is not None)
-        / max(1, len([value for value in temperatures if value is not None])),
-        "gust_maximum": max((value for value in gusts if value is not None), default=0),
-        "wind_speed_average": sum(value for value in wind_speeds if value is not None)
-        / max(1, len([value for value in wind_speeds if value is not None])),
-        "wind_direction_average": (
-            sum(value for value in directions if value is not None)
-            / max(1, len([value for value in directions if value is not None]))
-            if any(value is not None for value in directions)
-            else None
+        "precipitation_average": _known_average(precipitation),
+        "rain_total": sum(known_rain) if known_rain else None,
+        "temperature_average": _known_average(temperatures),
+        "gust_maximum": max(
+            (value for value in gusts if value is not None), default=None
         ),
+        "wind_speed_average": _known_average(wind_speeds),
+        "wind_direction_average": _known_average(directions),
         "weather_codes": [
             int(item["weather_code"])
             for item in interval
@@ -122,16 +131,23 @@ def _weather_interval_summary(
 
 
 def _weather_window_score(event: dict[str, Any], summary: dict[str, Any]) -> float:
-    """Score one valid window; lower scores are more suitable."""
+    """Score one valid window; lower scores are more suitable.
+
+    Precipitation probability and apparent temperature are required by the
+    candidate filter. Optional wind and rain terms add no penalty when unknown.
+    """
     severe_weather = sum(25 for code in summary["weather_codes"] if code >= 95) + sum(
         8 for code in summary["weather_codes"] if 61 <= code <= 86
     )
     running = "run" in str(event.get("type") or "").casefold()
+    wind_speed = summary["wind_speed_average"] or 0
+    gust_maximum = summary["gust_maximum"] or 0
+    rain_total = summary["rain_total"] or 0
     return (
         summary["precipitation_average"] * 0.8
-        + summary["rain_total"] * 8
-        + max(0, summary["wind_speed_average"] - 20) * (0.5 if running else 1.4)
-        + max(0, summary["gust_maximum"] - 30)
+        + rain_total * 8
+        + max(0, wind_speed - 20) * (0.5 if running else 1.4)
+        + max(0, gust_maximum - 30)
         * (1.0 if is_outdoor_activity(event) and not running else 0.5)
         + max(0, 4 - summary["temperature_average"]) * 1.5
         + max(0, summary["temperature_average"] - 27) * 1.2
@@ -172,6 +188,11 @@ def _weather_candidate_windows(
             ):
                 continue
             summary = _weather_interval_summary(interval)
+            if (
+                summary["precipitation_average"] is None
+                or summary["temperature_average"] is None
+            ):
+                continue
             convenience_penalty = 2 if availability == WORKDAY_TIME_LABEL else 0
             candidates.append(
                 (
@@ -219,13 +240,9 @@ def weather_recommendation(
     summary = _weather_interval_summary(best)
     precipitation_avg = round(summary["precipitation_average"])
     temperature_avg = round(summary["temperature_average"])
-    gust_max = round(summary["gust_maximum"])
-    wind_speed_avg = round(summary["wind_speed_average"])
-    wind_direction = (
-        round(summary["wind_direction_average"])
-        if summary["wind_direction_average"] is not None
-        else None
-    )
+    gust_max = _round_optional(summary["gust_maximum"])
+    wind_speed_avg = _round_optional(summary["wind_speed_average"])
+    wind_direction = _round_optional(summary["wind_direction_average"])
     end_hour = start_hour + duration_hours
     best_code = summary["weather_codes"][0] if summary["weather_codes"] else None
     recommendation = {
@@ -243,10 +260,10 @@ def weather_recommendation(
         "wind_direction": wind_direction,
         "wind_gusts": gust_max,
     }
-    reason = (
-        f"ca. {temperature_avg} °C gefühlte Temperatur, {wind_speed_avg} km/h Wind "
-        f"und {precipitation_avg} % Regenwahrscheinlichkeit"
-    )
+    reason = f"ca. {temperature_avg} °C gefühlte Temperatur"
+    if wind_speed_avg is not None:
+        reason += f", {wind_speed_avg} km/h Wind"
+    reason += f" und {precipitation_avg} % Regenwahrscheinlichkeit"
     if gust_max is not None:
         reason += f", Böen bis {gust_max} km/h"
     recommendation["reason"] = reason + "."
