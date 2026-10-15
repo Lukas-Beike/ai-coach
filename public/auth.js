@@ -267,6 +267,13 @@ async function logout() {
   if (!await confirmDiscardChanges()) return;
   const confirmed = await requestConfirmation("Du wirst auf diesem Gerät abgemeldet. Deine Daten bleiben verschlüsselt gespeichert.", { title: "Abmelden?" });
   if (!confirmed) return;
-  try { await api("/api/logout", { method: "POST", body: "{}" }); } catch { }
+  try {
+    await api("/api/logout", { method: "POST", body: "{}" });
+  } catch (error) {
+    // api() has already shown the login for a 401 or an ended session; any other failure
+    // leaves the server session valid, so the app stays open and the athlete can retry.
+    if (error?.name !== "AbortError" && error?.status !== 401) toast("Abmelden fehlgeschlagen. Bitte erneut versuchen.", true);
+    return;
+  }
   showLogin();
 }

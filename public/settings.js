@@ -81,14 +81,16 @@ async function saveCheckin(event) {
   const errorNode = $("#checkinError");
   if (errorNode) errorNode.textContent = "";
   if (button) { button.disabled = true; button.textContent = "Check-in wird gespeichert…"; }
+  // The form stays editable while the request is pending; edits made after this snapshot remain a draft.
+  const submittedForm = JSON.stringify([...new FormData(form)]);
   try {
     const result = await api("/api/feedback", { method: "POST", body: JSON.stringify(values) });
     if (result.checkin?.checkin_date !== values.checkin_date) throw new Error("Die Check-in-Bestätigung fehlt. Der Entwurf bleibt erhalten.");
-    state.checkinDirty = false;
-    setDirtyIndicator("checkinDirtyIndicator", false);
+    state.checkinDirty = JSON.stringify([...new FormData(form)]) !== submittedForm;
+    setDirtyIndicator("checkinDirtyIndicator", state.checkinDirty);
     state.checkinSelectedDate = result.checkin?.checkin_date || values.checkin_date;
     toast("Tages-Check-in gespeichert");
-    $("#checkinDialog")?.close();
+    if (!state.checkinDirty) $("#checkinDialog")?.close();
     await load();
   } catch (error) {
     if (errorNode) errorNode.textContent = error.message;
