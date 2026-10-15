@@ -20,7 +20,14 @@
   `index.html`, `app.js`, `styles.css`, or service-worker assets change, bump
   the asset query version in `index.html` and the cache name/asset URLs in
   `service-worker.js` so a fresh installation receives a consistent current asset set. Do not add
-  application update dialogs, cache conversion or earlier-client support.
+  interactive application update dialogs, cache conversion or earlier-client support.
+- The last loaded state and recent view reads are stored on the device, so a
+  start or view shows them at once while fresh data loads. After an update the
+  start shows a non-interactive "Update wird verarbeitet…" loading screen until
+  the fresh bootstrap arrives; the previous snapshot is shown only when the
+  server cannot be reached. Logout, a 401, an
+  unauthenticated start and a privacy deletion clear this device data. Never
+  store credentials, session data or CSRF tokens in it.
 - Keep microphone and notification features opt-in, bounded, and functional in
   browsers that do not support them. Audio must not be persisted by the client.
 - Keep UI text and feature documentation in `README.md` accurate when adding

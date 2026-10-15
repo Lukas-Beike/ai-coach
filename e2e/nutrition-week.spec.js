@@ -36,6 +36,13 @@ test("@responsive nutrition week shows coverage, signed balance and missing days
   await expect(page.getByRole("heading", { name: "Trainingsverpflegung" })).toHaveCount(0);
   fail = true;
   await page.locator('[data-nutrition-segment="week"]').click();
+  // A failed refresh keeps the last loaded week on this device and says so.
+  await expect(week).toContainText("Gespeicherter Stand. Aktualisierung fehlgeschlagen");
+  await expect(week).toContainText("+500 kcal");
+  await expect(week.locator(".nutrition-week-chart-day")).toHaveCount(7);
+  await page.evaluate(() => localStorage.removeItem("coach-view-cache"));
+  await page.locator('[data-nutrition-segment="diary"]').click();
+  await page.locator('[data-nutrition-segment="week"]').click();
   await expect(week).toContainText("Wochenübersicht konnte nicht geladen werden");
   await expect(week.locator("#nutritionWeekTotals")).toBeEmpty();
   await expect(week.locator("#nutritionWeekChart")).toBeEmpty();

@@ -1,6 +1,7 @@
 const CACHE = "intervals-coach-v433";
-const ASSETS = ["/", "/styles.css?v=316", "/format.js?v=1", "/api.js?v=224", "/navigation.js?v=233", "/appearance.js?v=218", "/state.js?v=223", "/views.js?v=227", "/plan-views.js?v=9", "/forms.js?v=217", "/components.js?v=217", "/coach.js?v=27", "/shared.js?v=12", "/auth.js?v=6", "/sync-status.js?v=10", "/notifications.js?v=4", "/nutrition.js?v=30", "/analysis.js?v=116", "/activity-details.js?v=13", "/performance-view.js?v=11", "/diagnostics.js?v=4", "/state-loader.js?v=8", "/sync-actions.js?v=5", "/wahoo-connection.js?v=3", "/settings.js?v=7", "/app.js?v=287", "/icon.svg?v=217", "/apple-touch-icon.png?v=1", "/manifest.webmanifest"];
+const ASSETS = ["/", "/styles.css?v=316", "/format.js?v=1", "/api.js?v=224", "/navigation.js?v=233", "/appearance.js?v=218", "/state.js?v=223", "/views.js?v=227", "/plan-views.js?v=9", "/forms.js?v=217", "/components.js?v=217", "/coach.js?v=28", "/shared.js?v=12", "/auth.js?v=7", "/sync-status.js?v=10", "/notifications.js?v=4", "/nutrition.js?v=30", "/analysis.js?v=117", "/activity-details.js?v=13", "/performance-view.js?v=11", "/diagnostics.js?v=4", "/state-loader.js?v=9", "/sync-actions.js?v=5", "/wahoo-connection.js?v=3", "/settings.js?v=7", "/app.js?v=287", "/icon.svg?v=217", "/apple-touch-icon.png?v=1", "/manifest.webmanifest"];
 const VERSIONED_ASSETS = new Set(["/format.js", "/activity-details.js", "/analysis.js", "/nutrition.js", "/api.js", "/navigation.js", "/appearance.js", "/state.js", "/views.js", "/plan-views.js", "/forms.js", "/components.js", "/coach.js", "/shared.js", "/auth.js", "/sync-status.js", "/notifications.js", "/performance-view.js", "/diagnostics.js", "/state-loader.js", "/sync-actions.js", "/wahoo-connection.js", "/settings.js", "/app.js", "/styles.css", "/icon.svg", "/apple-touch-icon.png"]);
+const NAVIGATION_TIMEOUT_MS = 2500;
 globalThis.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS))));
 globalThis.addEventListener("activate", (event) => event.waitUntil((async () => {
   const keys = await caches.keys();
@@ -18,10 +19,31 @@ globalThis.addEventListener("fetch", (event) => {
     })));
     return;
   }
-  event.respondWith(fetch(event.request).then((response) => {
-    if (response.ok) void caches.open(CACHE).then((cache) => cache.put(event.request, response.clone()));
-    return response;
-  }).catch(() => caches.open(CACHE).then((cache) => cache.match(event.request))));
+  const fetched = fetch(event.request).then((response) => {
+    const copy = response.ok ? response.clone() : null;
+    return { response, stored: copy && caches.open(CACHE).then((cache) => cache.put(event.request, copy)) };
+  });
+  // The cache update outlives a response that was already served from the cache.
+  event.waitUntil(fetched.then(({ stored }) => stored).catch(() => {}));
+  const network = fetched.then(({ response }) => response);
+  const cached = () => caches.open(CACHE).then((cache) => cache.match(event.request));
+  if (event.request.mode !== "navigate") {
+    event.respondWith(network.catch(cached));
+    return;
+  }
+  // A slow network must not hold the app start: after a short wait the cached
+  // page starts the app while the network response still refreshes the cache.
+  event.respondWith(new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (response) => { if (response && !settled) { settled = true; resolve(response); } };
+    const timer = setTimeout(() => cached().then(settle), NAVIGATION_TIMEOUT_MS);
+    network.then((response) => { clearTimeout(timer); settle(response); }).catch(async () => {
+      clearTimeout(timer);
+      const response = await cached();
+      if (response) settle(response);
+      else if (!settled) reject(new TypeError("Offline"));
+    });
+  }));
 });
 globalThis.addEventListener("notificationclick", (event) => {
   event.notification.close();

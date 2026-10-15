@@ -358,49 +358,72 @@ function renderNutritionWeek(week) {
   document.querySelector("#nutritionWeekDetails").hidden = false;
 }
 
-async function loadNutritionWeek(sequence, generation) {
-  const status = document.querySelector("#nutritionWeekStatus");
-  status.textContent = "Wochenübersicht wird geladen…";
-  document.querySelector("#nutritionWeekTotals").replaceChildren();
-  document.querySelector("#nutritionWeekDays").replaceChildren();
-  document.querySelector("#nutritionWeekChart").replaceChildren();
-  document.querySelector("#nutritionWeekChartSection").hidden = true;
-  document.querySelector("#nutritionWeekPeriod").textContent = "";
-  document.querySelector("#nutritionWeekDetails").hidden = true;
+// Renders the last loaded response at once; the fresh response replaces it.
+function showCachedNutritionView(path, renderView) {
+  const cached = readViewCache(path);
+  if (!cached) return false;
   try {
-    const week = await api("/api/nutrition/week");
-    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) renderNutritionWeek(week);
+    renderView(cached);
+    return true;
+  } catch { return false; }
+}
+
+async function loadNutritionWeek(sequence, generation) {
+  const path = "/api/nutrition/week";
+  const status = document.querySelector("#nutritionWeekStatus");
+  const cached = showCachedNutritionView(path, renderNutritionWeek);
+  if (!cached) {
+    status.textContent = "Wochenübersicht wird geladen…";
+    document.querySelector("#nutritionWeekTotals").replaceChildren();
+    document.querySelector("#nutritionWeekDays").replaceChildren();
+    document.querySelector("#nutritionWeekChart").replaceChildren();
+    document.querySelector("#nutritionWeekChartSection").hidden = true;
+    document.querySelector("#nutritionWeekPeriod").textContent = "";
+    document.querySelector("#nutritionWeekDetails").hidden = true;
+  }
+  try {
+    const week = await api(path);
+    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;
+    renderNutritionWeek(week);
+    rememberViewCache(path, week);
   } catch (error) {
-    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) status.textContent = `Wochenübersicht konnte nicht geladen werden: ${error.message}`;
+    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) status.textContent = cached ? `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}` : `Wochenübersicht konnte nicht geladen werden: ${error.message}`;
   }
 }
 
-async function loadNutrition() {
-  const sequence = ++nutritionLoadSequence;
-  const generation = state.sessionGeneration;
+function renderNutritionDay(day) {
+  document.querySelector("#nutritionDate").value = day.date;
+  renderNutritionExpenditure(day.energy_expenditure, day.date);
+  document.querySelector("#nutritionStatus").textContent = day.entry_count ? "" : "Noch keine Mahlzeiten erfasst. Das bedeutet nicht, dass du nichts gegessen hast.";
+  const totals = document.querySelector("#nutritionTotals");
+  totals.replaceChildren();
+  appendNutritionTotals(totals, day);
+  appendNutritionMacroNote(totals, Number(day.entries_without_macros) || 0);
+  document.querySelector("#nutritionEntries").replaceChildren(...day.entries.map((item) => nutritionCard(item, false)));
+}
 
+async function loadNutrition() {  const sequence = ++nutritionLoadSequence;  const generation = state.sessionGeneration;
   if (state.route === "nutrition/week") { void loadNutritionWeek(sequence, generation); return; }
-  const dateInput = document.querySelector("#nutritionDate");
-  const status = document.querySelector("#nutritionStatus");
-  status.textContent = "Ernährung wird geladen…";
-  clearNutritionExpenditure();
-  document.querySelector("#nutritionEntries").replaceChildren();
-  document.querySelector("#nutritionTotals").replaceChildren();
-  try {
-    const dateQuery = dateInput.value ? `?date=${encodeURIComponent(dateInput.value)}` : "";
-    const day = await api(`/api/nutrition/day${dateQuery}`);
-    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;
-    dateInput.value = day.date;
-    renderNutritionExpenditure(day.energy_expenditure, day.date);
-    status.textContent = day.entry_count ? "" : "Noch keine Mahlzeiten erfasst. Das bedeutet nicht, dass du nichts gegessen hast.";
-    const totals = document.querySelector("#nutritionTotals");
-    appendNutritionTotals(totals, day);
-    appendNutritionMacroNote(totals, Number(day.entries_without_macros) || 0);
-    document.querySelector("#nutritionEntries").replaceChildren(...day.entries.map((item) => nutritionCard(item, false)));
+  const dateInput = document.querySelector("#nutritionDate");  const status = document.querySelector("#nutritionStatus");  const path = `/api/nutrition/day${dateInput.value ? `?date=${encodeURIComponent(dateInput.value)}` : ""}`;
+  const cached = showCachedNutritionView(path, renderNutritionDay);
+  if (!cached) {
+    status.textContent = "Ernährung wird geladen…";
+    clearNutritionExpenditure();
+    document.querySelector("#nutritionEntries").replaceChildren();
+    document.querySelector("#nutritionTotals").replaceChildren();
+  }
+  try {    const day = await api(path);
+    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration) return;    renderNutritionDay(day);
+    rememberViewCache(path, day);
   } catch (error) {
     if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) {
-      status.textContent = `Ernährung konnte nicht geladen werden: ${error.message}`;
-      clearNutritionExpenditure(`Tagesverbrauch konnte nicht geladen werden: ${error.message}`);
+      if (cached) {
+        status.textContent = `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}`;
+        nutritionExpenditureSection().querySelector("#nutritionExpenditureStatus").textContent = `Gespeicherter Stand. Tagesverbrauch konnte nicht aktualisiert werden: ${error.message}`;
+      } else {
+        status.textContent = `Ernährung konnte nicht geladen werden: ${error.message}`;
+        clearNutritionExpenditure(`Tagesverbrauch konnte nicht geladen werden: ${error.message}`);
+      }
     }
   }
 }

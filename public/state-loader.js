@@ -27,28 +27,69 @@ function render(data) {
 // Path key for an area-only refresh: it reads live provider-backed areas such as
 // weather without recomputing the whole bootstrap a second time.
 const LIVE_AREA_REFRESH = "live-areas";
-// The last rendered state for this tab, so a reload shows data at once while the
-// fresh state loads. Session-scoped, keyed to the asset version, and cleared by
-// showLogin on logout, 401 and an unauthenticated start.
+// The last rendered state on this device, so every app start shows data at once
+// while the fresh state loads. It survives app restarts and updates and is
+// cleared by showLogin on logout, 401 and an unauthenticated start, and by a
+// privacy deletion. A snapshot from other assets marks a pending update.
 const STATE_SNAPSHOT_KEY = "coach-state-snapshot";
-const STATE_SNAPSHOT_ASSET = document.currentScript?.src || "";
+const VIEW_CACHE_KEY = "coach-view-cache";
+const VIEW_CACHE_LIMIT = 24;
+const STATE_SNAPSHOT_SAVE_DELAY_MS = 1000;
+const STATE_SNAPSHOT_ASSET = Array.from(document.scripts || [], (script) => script.src).join(" ") || document.currentScript?.src || "";
+let stateSnapshotSaveTimer = null;
 
 function saveStateSnapshot() {
+  clearTimeout(stateSnapshotSaveTimer);
+  stateSnapshotSaveTimer = null;
   if (!state.initialStateLoaded || !state.data || state.replaceDataOnLoad) return;
   try {
-    sessionStorage.setItem(STATE_SNAPSHOT_KEY, JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: state.data }));
+    localStorage.setItem(STATE_SNAPSHOT_KEY, JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: state.data }));
   } catch { clearStateSnapshot(); }
+}
+
+// Coalesces the saves after loaded state, so an app closed by the system still
+// starts with recent data.
+function scheduleStateSnapshotSave() {
+  if (stateSnapshotSaveTimer === null) stateSnapshotSaveTimer = setTimeout(saveStateSnapshot, STATE_SNAPSHOT_SAVE_DELAY_MS);
 }
 
 function readStateSnapshot() {
   try {
-    const snapshot = JSON.parse(sessionStorage.getItem(STATE_SNAPSHOT_KEY) || "null");
-    return snapshot?.asset === STATE_SNAPSHOT_ASSET && snapshot.data && typeof snapshot.data === "object" ? snapshot.data : null;
+    const snapshot = JSON.parse(localStorage.getItem(STATE_SNAPSHOT_KEY) || "null");
+    if (!snapshot?.data || typeof snapshot.data !== "object") return null;
+    return { data: snapshot.data, updated: snapshot.asset !== STATE_SNAPSHOT_ASSET };
   } catch { return null; }
 }
 
 function clearStateSnapshot() {
-  try { sessionStorage.removeItem(STATE_SNAPSHOT_KEY); } catch { }
+  clearTimeout(stateSnapshotSaveTimer);
+  stateSnapshotSaveTimer = null;
+  try {
+    localStorage.removeItem(STATE_SNAPSHOT_KEY);
+    localStorage.removeItem(VIEW_CACHE_KEY);
+  } catch { }
+}
+
+function readViewCacheEntries() {
+  try {
+    const cache = JSON.parse(localStorage.getItem(VIEW_CACHE_KEY) || "null");
+    return cache?.asset === STATE_SNAPSHOT_ASSET && Array.isArray(cache.entries) ? cache.entries : [];
+  } catch { return []; }
+}
+
+// The last response of a view read, shown while the view loads it again.
+function readViewCache(path) {
+  return readViewCacheEntries().find(([key]) => key === path)?.[1] ?? null;
+}
+
+function rememberViewCache(path, value) {
+  if (!state.data) return;
+  const entries = [[path, value], ...readViewCacheEntries().filter(([key]) => key !== path)].slice(0, VIEW_CACHE_LIMIT);
+  try {
+    localStorage.setItem(VIEW_CACHE_KEY, JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, entries }));
+  } catch {
+    try { localStorage.removeItem(VIEW_CACHE_KEY); } catch { }
+  }
 }
 
 function loadStateRequests(areas, query) {
@@ -146,7 +187,10 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     payload.messages = state.data?.messages || [];
     const { failures, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
     applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration);
-    if (requestSequence === state.loadSequence) renderLoadedState(payload, liveAreasOnly);
+    if (requestSequence === state.loadSequence) {
+      renderLoadedState(payload, liveAreasOnly);
+      scheduleStateSnapshotSave();
+    }
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
     if (sessionGeneration !== state.sessionGeneration || error?.status === 401 || /Authentication/.test(error.message)) return;

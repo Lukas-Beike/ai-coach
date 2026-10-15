@@ -98,6 +98,10 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
 
   responseMode = "error";
   await page.evaluate(() => loadNutrition());
+  // A failed refresh keeps the stored day on this device and says so.
+  await expect(page.locator("#nutritionExpenditureStatus")).toContainText("Gespeicherter Stand. Tagesverbrauch konnte nicht aktualisiert werden");
+  await expect(expenditure).toContainText("05.10.2026");
+  await page.evaluate(() => { localStorage.removeItem("coach-view-cache"); return loadNutrition(); });
   await expect(page.locator("#nutritionExpenditureStatus")).toContainText("Tagesverbrauch konnte nicht geladen werden");
   await expect(expenditure.locator("#nutritionExpenditureTotals")).not.toContainText("2.100 kcal");
   await expect(page.locator("#nutritionExpenditureDate")).toBeEmpty();
