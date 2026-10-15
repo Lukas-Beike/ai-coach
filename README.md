@@ -151,7 +151,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 - **Accessible Keyboard Shortcuts**: Desktop navigation supporting Enter-to-send, Shift+Enter for line breaks, Esc for modal dismissal, and ARIA live announcements. On touch devices, Enter inserts a line break; the send button or Ctrl/Cmd+Enter sends.
 
 ### Privacy, Security & Data Management
-- **SQLCipher AES-256 Encryption**: Complete encryption of all athlete data, metrics, tokens, chat history, and attachments at rest using `APP_PASSWORD`.
+- **SQLCipher AES-256 Encryption**: Complete encryption of all athlete data, metrics, database-stored provider tokens (Wahoo), chat history, and attachments at rest using `APP_PASSWORD`. The Garmin token store is a separate plaintext file and is not covered; see Garmin setup.
 - **Strict Session Security**: High-security session cookies hardened with `HttpOnly`, `SameSite=Strict`, and optional `Secure` flags.
 - **Bounded HTTP Input**: At most 32 active handlers, with separate 20-second absolute limits for request headers and bodies. Login admission is checked before reading its body; these input limits do not shorten Coach responses or SSE streams.
 - **Zero Third-Party Trackers**: Self-hosted architecture containing zero tracking scripts, third-party analytics, external CDNs, or telemetry reporting.
@@ -269,7 +269,7 @@ All configuration is loaded from container environment variables or a local `.en
 | `DATA_RETENTION_DAYS` | `-1` | No | `-1` (or any value ≤ 0) retains data indefinitely; positive values are clamped to 30–3650 days and remove older chat messages and snapshots at startup. |
 | `SYNC_HISTORY_EARLIEST_DATE` | `2000-01-01` | No | ISO date (`YYYY-MM-DD`) that bounds the historical Intervals.icu/Garmin backfill. The backfill walks back in 90-day chunks, never beyond this date, and stops after 180 consecutive days without records. An invalid value is ignored with a logged warning. |
 | `PORT` | `8090` | No | Internal HTTP port the application listens on. |
-| `DATA_DIR` | `/data` | No | Path to the directory where the encrypted database and tokens are stored. |
+| `DATA_DIR` | `/data` | No | Path to the directory where the encrypted database and the plaintext Garmin token store are stored. |
 | `TZ` | `Europe/Berlin` | No | IANA timezone (e.g., `Europe/Berlin`) used as the default athlete timezone when none is saved and as the container's local timezone. Crucial for accurate daily scheduling and sleep windows. |
 
 ---
@@ -296,7 +296,7 @@ docker run -d \
   ghcr.io/lukas-beike/ai-coach:latest
 ```
 
-*Note: Never run `docker rm -v`, as the `/data` volume contains your encrypted database and token stores.*
+*Note: Never run `docker rm -v`, as the `/data` volume contains your encrypted database and the plaintext Garmin token store.*
 
 The image runs as the non-root `app` user. Application code under `/app` is owned by root and is not writable by that user; only `/data` is writable.
 
@@ -405,7 +405,7 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). Complete the initial 
      python /app/garmin-login.py
    ```
 3. Enter the MFA code sent to your email or mobile device when prompted.
-4. The helper generates an encrypted OAuth token store saved to `/data/garmin_tokens`.
+4. The helper saves the OAuth token store to `/data/garmin_tokens`. It is a plaintext JSON file containing OAuth access and refresh tokens, protected only by owner-only file permissions; it is **not** encrypted. Keep `/data` and every backup of it on encrypted host storage, and treat the token store like a password.
 5. Once complete, you may safely remove `GARMIN_PASSWORD` from your `.env`. Restart the `ai-coach` container, and it will authenticate automatically using the persisted tokens.
 
 ### Wahoo connection
