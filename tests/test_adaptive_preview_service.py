@@ -50,11 +50,12 @@ class _Calendar:
 class _Weather:
     def __init__(self, days: list[dict]):
         self.days = days
+        self.meta: dict = {}
         self.calls = []
 
     def state(self, **kwargs):
         self.calls.append(kwargs)
-        return {"days": self.days}
+        return {**self.meta, "days": self.days}
 
 
 class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
@@ -373,6 +374,99 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
         self.assertEqual(
             (self.feedback, self.drafts, self.events, self.weather_days), before
         )
+
+    def _weather_driven_preview(self, meta: dict) -> dict:
+        target = "2026-09-21"
+        self.drafts.append(
+            {
+                "id": "weather-ride",
+                "date": target,
+                "name": "Long ride",
+                "type": "Ride",
+                "duration_minutes": 200,
+                "description": "Endurance outdoors",
+            }
+        )
+        self.weather_days.append(
+            {
+                "date": target,
+                "weather_code": 63,
+                "precipitation_probability_max": 70,
+                "rain_sum": 3,
+            }
+        )
+        self.weather.meta = meta
+        return self.service.preview()
+
+    def test_fresh_forecast_freshness_is_saved_with_weather_preview(self):
+        fetched_at = "2026-09-20T09:00:00+00:00"
+
+        result = self._weather_driven_preview(
+            {
+                "state": "ready",
+                "provider": "Open-Meteo",
+                "fetched_at": fetched_at,
+                "stale": False,
+            }
+        )
+
+        self.assertEqual(result["changes"][0]["blocking_triggers"], ["weather"])
+        expected = {
+            "state": "ready",
+            "provider": "Open-Meteo",
+            "fetched_at": fetched_at,
+            "stale": False,
+        }
+        self.assertEqual(result["weather_forecast"], expected)
+        self.assertEqual(self.service.latest_preview()["weather_forecast"], expected)
+
+    def test_stale_cache_freshness_is_saved_and_still_drives_weather_change(self):
+        fetched_at = "2026-09-19T01:00:00+00:00"
+
+        result = self._weather_driven_preview(
+            {
+                "state": "stale",
+                "provider": "Open-Meteo",
+                "fetched_at": fetched_at,
+                "stale": True,
+                "error": "Wetterdaten sind veraltet.",
+            }
+        )
+
+        self.assertEqual(result["changes"][0]["blocking_triggers"], ["weather"])
+        self.assertEqual(result["weather_forecast"]["fetched_at"], fetched_at)
+        self.assertIs(result["weather_forecast"]["stale"], True)
+        self.assertEqual(result["weather_forecast"]["state"], "stale")
+        self.assertEqual(
+            self.service.latest_preview()["weather_forecast"],
+            result["weather_forecast"],
+        )
+
+    def test_failed_refresh_keeps_last_good_forecast_age_in_saved_preview(self):
+        # A failed refresh serves the last-good forecast with its original fetched_at.
+        fetched_at = "2026-09-18T06:00:00+00:00"
+
+        result = self._weather_driven_preview(
+            {
+                "state": "stale",
+                "provider": "Open-Meteo",
+                "fetched_at": fetched_at,
+                "stale": True,
+                "error": "Wetterdaten konnten derzeit nicht aktualisiert werden.",
+            }
+        )
+
+        self.assertEqual(result["changes"][0]["blocking_triggers"], ["weather"])
+        self.assertEqual(
+            result["weather_forecast"],
+            {
+                "state": "stale",
+                "provider": "Open-Meteo",
+                "fetched_at": fetched_at,
+                "stale": True,
+            },
+        )
+        self.assertNotIn("days", result["weather_forecast"])
 
     def test_existing_applied_matching_illness_pause_is_approved(self):
         self.feedback.update(

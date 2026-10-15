@@ -27,6 +27,16 @@ def _as_number(value: Any) -> float | int | None:
     return int(number) if number.is_integer() else round(number, 2)
 
 
+def _forecast_freshness(weather: dict[str, Any]) -> dict[str, Any]:
+    """Describe the forecast age the preview used, without the forecast days."""
+    return {
+        "state": weather.get("state"),
+        "provider": weather.get("provider"),
+        "fetched_at": weather.get("fetched_at"),
+        "stale": bool(weather.get("stale")),
+    }
+
+
 def _feedback_signals(feedback: dict[str, Any]) -> list[str]:
     signals = []
     if feedback.get("illness"):
@@ -516,6 +526,7 @@ class AdaptiveReplanPreviewService:
             "signals": signals,
             "changes": changes,
             "illness_pause": illness_pause,
+            "weather_forecast": _forecast_freshness(weather),
             "message": message,
             "scope": (
                 "Nur nach Bestätigung werden lokale zukünftige Einheiten angepasst "

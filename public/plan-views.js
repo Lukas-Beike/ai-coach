@@ -292,6 +292,11 @@ function nextCompetitionSummary(next, dateLabel, todayKey) {
   return `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${phase} · ${when}`;
 }
 
+function adaptiveForecastNote(forecast, formatTime) {
+  if (!forecast?.fetched_at) return "";
+  return `Wetterprognose Stand ${formatTime(forecast.fetched_at)}${forecast.stale ? " (veraltet)" : ""}`;
+}
+
 function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
@@ -310,11 +315,13 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (illnessNeedsForecast || pendingIllnessPause) caption = "Krankheit gemeldet: Sportpause prognostizieren und bestätigen.";
     else if (count === 1) caption = "Ein zukünftiger Entwurf braucht eine Anpassung.";
     else caption = `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
+    const weatherChanged = changes.some((change) => Array.isArray(change?.blocking_triggers) && change.blocking_triggers.includes("weather"));
+    const forecastNote = weatherChanged ? adaptiveForecastNote(preview?.weather_forecast, formatTime) : "";
     const coachNotice = $("#coachAdaptivePlanningNotice");
     if (coachNotice) {
       coachNotice.hidden = !required;
       const detail = coachNotice.querySelector("small");
-      if (detail) detail.textContent = required ? `${caption} Bitte den Coach um die Anpassung.` : "";
+      if (detail) detail.textContent = required ? [caption, forecastNote ? `${forecastNote}.` : "", "Bitte den Coach um die Anpassung."].filter(Boolean).join(" ") : "";
     }
   }
 
