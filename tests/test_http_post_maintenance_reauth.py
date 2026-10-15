@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 from backend.errors import AppError
@@ -25,11 +26,12 @@ class PostReauthenticatesInsideMaintenanceGateTests(unittest.TestCase):
         self.dispatcher.handle_before_maintenance.return_value = False
         self.dispatcher.handle_authenticated.return_value = None
 
-        self.handler = RequestHandler.__new__(RequestHandler)
-        self.handler.command = "POST"
-        self.handler.path = "/api/synthetic"
-        self.handler.headers = {"X-CSRF-Token": "synthetic-token"}
-        self.handler.dependencies = SimpleNamespace(
+        # A bare handler stub: only the attributes do_POST reads are set.
+        handler: Any = RequestHandler.__new__(RequestHandler)
+        handler.command = "POST"
+        handler.path = "/api/synthetic"
+        handler.headers = {"X-CSRF-Token": "synthetic-token"}
+        handler.dependencies = SimpleNamespace(
             session_auth_service=lambda: self.auth_service,
             route_dispatcher=Mock(),
             post_dispatcher=self.dispatcher,
@@ -37,8 +39,9 @@ class PostReauthenticatesInsideMaintenanceGateTests(unittest.TestCase):
             logger=Mock(),
             internal_server_error="internal",
         )
-        self.handler._send_app_error = Mock()
-        self.handler.send_json = Mock()
+        handler._send_app_error = Mock()
+        handler.send_json = Mock()
+        self.handler = handler
 
     def test_valid_session_is_checked_again_and_dispatched_once_authenticated(
         self,
