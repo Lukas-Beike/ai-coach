@@ -136,6 +136,9 @@ _RECORD_LISTS: dict[str, tuple[str, ...]] = {
     "apply_workout_library_plan": ("entries",),
 }
 _REMOVING_ACTIONS = frozenset({"archive", "delete"})
+# Plan status spellings that archive: "archived" and the German alias that
+# backend/planning/training_plans.py maps to it (TRAINING_PLAN_STATUS_ALIASES).
+_ARCHIVED_STATUSES = frozenset({"archived", "archiviert"})
 # Applying a preview needs the classifier to confirm the athlete asked for it.
 _APPROVAL_TOOLS = frozenset({"apply_adaptive_replan"})
 
@@ -431,6 +434,11 @@ def record_count(tool_name: str, arguments: Mapping[str, Any] | None) -> int:
     return max(1, sum(len(_items(arguments, key)) for key in keys))
 
 
+def _canonical(value: Any) -> str:
+    """Spell action and status values as the record handlers read them."""
+    return str(value or "").strip().casefold()
+
+
 def _removes_records(tool_name: str, arguments: Mapping[str, Any] | None) -> bool:
     if tool_name in _DELETE_TOOLS:
         return True
@@ -439,10 +447,12 @@ def _removes_records(tool_name: str, arguments: Mapping[str, Any] | None) -> boo
     if tool_name in {"save_equipment", "update_training_plan"}:
         payload = arguments.get("payload")
         return isinstance(payload, Mapping) and (
-            payload.get("action") == "delete" or payload.get("status") == "archived"
+            _canonical(payload.get("action")) == DELETE
+            or _canonical(payload.get("status")) in _ARCHIVED_STATUSES
         )
     return any(
-        isinstance(item, Mapping) and item.get("action") in _REMOVING_ACTIONS
+        isinstance(item, Mapping)
+        and _canonical(item.get("action")) in _REMOVING_ACTIONS
         for key in _RECORD_LISTS.get(tool_name, ())
         for item in _items(arguments, key)
     )
