@@ -567,6 +567,65 @@ class RemoteTierTests(unittest.TestCase):
         origin = gate.PendingOrigin(3, "Sync den Plan zu Intervals")
         self.assertTrue(_authority("nochmal", pending_origin=origin).remote_requested)
 
+    def test_contextual_affirmation_accepts_a_detailed_yes_to_a_sync_offer(self):
+        previous = "Soll ich die drei Einheiten zu Intervals.icu übertragen?"
+        for reply in (
+            "Ja, bitte übertrage die drei Einheiten dorthin.",
+            "Ja, mach das bitte für diese drei Einheiten.",
+            "Ja, bitte.",
+            "Ja, lade 3 Einheiten hoch.",
+            "Yes, please upload the three sessions.",
+        ):
+            with self.subTest(reply=reply):
+                self.assertTrue(_authority(reply, previous).remote_requested)
+                decision = _check(
+                    "start_intervals_plan_sync",
+                    reply,
+                    previous,
+                    classifier=_Classifier(_verdict(["planning"], accepts=True)),
+                )
+                self.assertTrue(decision.allowed, decision)
+        self.assertFalse(
+            _authority(
+                "Ja, bitte übertrage die drei Einheiten dorthin.",
+                "Soll ich die drei Einheiten lokal speichern?",
+            ).remote_requested
+        )
+
+    def test_contextual_affirmation_denies_qualified_or_negated_replies(self):
+        previous = "Soll ich die drei Einheiten zu Intervals.icu übertragen?"
+        for reply in (
+            "Ja, aber nur lokal speichern.",
+            "Ja, aber nicht hochladen.",
+            "Ja? Was passiert dann?",
+            "Ja, aber erst morgen.",
+            "Ja, wenn es passt.",
+            "Nein, lass das.",
+            "Ja, ich glaube schon dass das gut ist.",
+            "Ok, speichere es erstmal in der Bibliothek.",
+            "Ja, zunächst nur in die Bibliothek.",
+            "Mach lieber eine Pause-Woche daraus.",
+            "Ja, stattdessen die Kraftwoche planen.",
+            # Unrelated instructions after a yes or a verb anchor, without any
+            # qualifier word, must not count as naming the sync.
+            "Ja, in der Bibliothek lassen.",
+            "Mach eine Pause-Woche daraus.",
+            "Klingt nach zu viel, kürze die Woche.",
+            "Ja, kürze auf 45 Minuten.",
+            "Genau, plane die Kraftwoche.",
+        ):
+            with self.subTest(reply=reply):
+                self.assertFalse(gate.is_contextual_affirmation(reply))
+                self.assertFalse(_authority(reply, previous).remote_requested)
+                decision = _check(
+                    "start_intervals_plan_sync",
+                    reply,
+                    previous,
+                    classifier=_Classifier(_verdict(sorted(gate.DOMAINS), True, True)),
+                )
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.reason, "remote_not_requested")
+
     def test_bare_affirmation_table(self):
         for text, expected in (
             ("ja", True), ("Jo.", True), ("OK", True), ("okay", True),
