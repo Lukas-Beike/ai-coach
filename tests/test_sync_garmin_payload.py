@@ -451,6 +451,41 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertEqual(failed["gear"][0]["activity_ids"], ["11"])
         self.assertEqual(failed["source_freshness"]["gear"]["freshness"], "stale")
 
+    def test_failed_gear_activity_read_keeps_the_last_known_list(self):
+        stored = [
+            {"gearUUID": "one", "activity_ids": ["11"], "stats": {}},
+            {
+                "gearUUID": "two",
+                "activity_ids": ["21"],
+                "activity_ids_truncated": True,
+                "stats": {},
+            },
+            {"gearUUID": "three", "activity_ids": ["31"], "stats": {}},
+        ]
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                {"synced_at": "2026-09-20T10:00:00", "gear": stored, "errors": []}
+            )
+        )
+        merged = self.service.prepare_remote(
+            {
+                "synced_at": "2026-09-20T11:00:00",
+                "gear": [
+                    {"gearUUID": "one", "stats": {}},
+                    {"gearUUID": "two", "stats": {}},
+                    {"gearUUID": "three", "activity_ids": [], "stats": {}},
+                    {"gearUUID": "four", "stats": {}},
+                ],
+                "errors": [],
+            }
+        )
+        rows = {row["gearUUID"]: row for row in merged["gear"]}
+        self.assertEqual(rows["one"]["activity_ids"], ["11"])
+        self.assertTrue(rows["two"]["activity_ids_truncated"])
+        self.assertEqual(rows["three"]["activity_ids"], [])
+        self.assertNotIn("activity_ids", rows["four"])
+        self.assertEqual(merged["source_freshness"]["gear"]["freshness"], "current")
+
     def test_top_level_gear_profile_failure_is_reported(self):
         payload = {"errors": []}
 

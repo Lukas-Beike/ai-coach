@@ -23,6 +23,7 @@ from backend.performance.history import append_garmin_performance_history
 from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_hr
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
+from backend.providers.garmin_gear_fields import garmin_gear_id
 from backend.providers.garmin_morning import merge_garmin_records
 from backend.runtime.ports import ActivityRowReader
 from backend.sync.daily import DailySyncMarkerService
@@ -314,6 +315,7 @@ def _merge_garmin_source(
     previous_freshness = freshness.get(source, {})
     complete = source not in failed and pagination.get(source, {}).get("complete", True)
     if _merge_gear_freshness(source, incoming, complete, payload, freshness):
+        _keep_gear_activity_ids(incoming, previous.get("gear"))
         return
     _merge_source_freshness(
         source, incoming, previous, previous_freshness, complete, payload, freshness
@@ -339,6 +341,25 @@ def _merge_gear_freshness(
         "observed_at": payload["synced_at"],
     }
     return True
+
+
+def _keep_gear_activity_ids(incoming: Any, previous: Any) -> None:
+    """Keep an item's last known Garmin activity list when this sync could not read it."""
+    known = {
+        garmin_gear_id(row): row
+        for row in (previous if isinstance(previous, list) else [])
+        if isinstance(row, dict)
+        and garmin_gear_id(row)
+        and isinstance(row.get("activity_ids"), list)
+    }
+    for row in incoming:
+        if not isinstance(row, dict) or "activity_ids" in row:
+            continue
+        stored = known.get(garmin_gear_id(row))
+        if stored is not None:
+            row["activity_ids"] = stored["activity_ids"]
+            if stored.get("activity_ids_truncated"):
+                row["activity_ids_truncated"] = True
 
 
 def _merge_source_freshness(

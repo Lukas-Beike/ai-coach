@@ -136,7 +136,11 @@ class EquipmentService:
         # initial import succeeded. Leave initialization open for recovery.
         if not rows:
             return
-        activity_rows, _ = self._deduplicate(self._read_activity_rows())
+        # Garmin lists no gear activities: skip reading every activity row.
+        listed = any(isinstance(row.get("activity_ids"), list) for row in rows)
+        activity_rows = (
+            self._deduplicate(self._read_activity_rows())[0] if listed else []
+        )
         with self._manager.unit_of_work() as db:
             initialized = db.execute(
                 SELECT_VALUE, ("garmin_equipment_initialized",)
@@ -947,8 +951,8 @@ def _derived_sports(
     """Return the sport an open item's linked activities agree on.
 
     Only items with an open sport, no components and no children derive one. A
-    single sport pair must cover at least three quarters of the linked activities
-    that name a sport, and at least three of them must.
+    single sport pair must cover at least three quarters of all linked activities,
+    unknown and other types included, and at least three of them.
     """
     parents = {item.get("parent_id") for item in items}
     open_ids = {
@@ -959,26 +963,28 @@ def _derived_sports(
         and item.get("kind") != "component"
         and item["id"] not in parents
     }
-    counts: dict[str, Counter[tuple[str, str]]] = {}
+    counts: dict[str, Counter[tuple[str, str] | None]] = {}
     stored: dict[tuple[str, str], StoredSport] = {}
     for row in rows:
         equipment_id = links.get(str(row.get("id")))
+        if equipment_id not in open_ids:
+            continue
         sport = resolve_equipment_sport(row.get("type"))
-        pair = _stored_pair(sport)
-        if (
-            equipment_id in open_ids
-            and sport
-            and pair
-            and sport.sport is not Sport.OTHER
-        ):
-            counts.setdefault(equipment_id, Counter())[pair] += 1
+        pair = _stored_pair(sport) if sport and sport.sport is not Sport.OTHER else None
+        counts.setdefault(equipment_id, Counter())[pair] += 1
+        if sport and pair:
             stored.setdefault(pair, sport)
     derived = {}
     for equipment_id, counter in counts.items():
-        pair, top = counter.most_common(1)[0]
-        total = counter.total()
-        if total >= SPORT_DERIVATION_MIN_ROWS and top / total >= SPORT_DERIVATION_SHARE:
-            derived[equipment_id] = stored[pair]
+        top = max(
+            (pair for pair in counter if pair is not None),
+            key=lambda pair: counter[pair],
+            default=None,
+        )
+        if top is None or counter[top] < SPORT_DERIVATION_MIN_ROWS:
+            continue
+        if counter[top] / counter.total() >= SPORT_DERIVATION_SHARE:
+            derived[equipment_id] = stored[top]
     return derived
 
 

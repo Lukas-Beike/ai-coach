@@ -624,6 +624,19 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         service.sync_garmin_snapshot(self._snapshot(gear, matches))
         self.assertTrue(service.read()["items"][0]["sport_pending"])
 
+    def test_garmin_sync_without_gear_activity_lists_reads_no_activities(self):
+        def unexpected_read():
+            raise AssertionError("activity rows read without gear activity lists")
+
+        service = self._gear_service([])
+        service._read_activity_rows = unexpected_read
+        service.sync_garmin_snapshot(self._snapshot([self._gear_row("g1")]))
+        service.sync_garmin_snapshot(self._snapshot([self._gear_row("g1")]))
+        imported = self.manager.connection.execute(
+            "SELECT COUNT(*) FROM kv WHERE key LIKE 'equipment:%'"
+        ).fetchone()[0]
+        self.assertEqual(imported, 1)
+
     def _derived_item(self, rows):
         service = self._gear_service(rows)
         gear = [
@@ -647,7 +660,10 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         mixed += [self._ride(f"u{n}", type="Run") for n in range(2)]
         few = [self._ride("r0"), self._ride("r1")]
         unknown = [self._ride(f"x{n}", type="Gadget") for n in range(4)]
-        for rows in (mixed, few, unknown):
+        # Unknown types count toward the share: 3 of 5 linked activities is 60 %.
+        diluted = [self._ride(f"r{n}") for n in range(3)]
+        diluted += [self._ride(f"x{n}", type="Gadget") for n in range(2)]
+        for rows in (mixed, few, unknown, diluted):
             with self.subTest(count=len(rows)):
                 self.assertTrue(self._derived_item(rows)[1]["sport_pending"])
                 self.manager.connection.execute("DELETE FROM kv")
