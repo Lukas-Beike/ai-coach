@@ -35,6 +35,8 @@ globalThis.AppState = (() => {
     chatStatusTimer: null,
     chatStatusPollInFlight: null,
     chatStatusRecheck: false,
+    // The last Coach event ended a turn, so a "running" status may still be closing.
+    chatStatusTurnEnded: false,
     chatResponseStarted: false,
     chatResponseScrollPending: false,
     chatResponseMessageId: null,

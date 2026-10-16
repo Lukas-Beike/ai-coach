@@ -170,11 +170,15 @@ function settleChatStatusPoll(pollRequest, authFailed, running) {
   state.chatStatusPollInFlight = null;
   const recheck = state.chatStatusRecheck;
   state.chatStatusRecheck = false;
+  if (!running) state.chatStatusTurnEnded = false;
   if (authFailed) return;
   // A check asked for while this one ran may have missed the change it announced.
   if (recheck) scheduleChatStatusPoll(0);
-  // The event stream announces Coach turns; a slow check only guards against a missed event.
-  else if (stateEventStreamHealthy()) rescheduleChatStatusPoll(CHAT_STATUS_SAFETY_POLL_MS);
+  // A finished turn reads as running until its stream closes, so look again shortly.
+  else if (running && state.chatStatusTurnEnded) rescheduleChatStatusPoll(1_500);
+  // The event stream announces Coach turns; a slow check only guards against a missed
+  // event, and runs early enough to notice a stream that went silent.
+  else if (stateEventStreamHealthy()) rescheduleChatStatusPoll(Math.min(CHAT_STATUS_SAFETY_POLL_MS, stateEventStaleInMs()));
   else rescheduleChatStatusPoll(running ? 1_500 : 5_000);
 }
 

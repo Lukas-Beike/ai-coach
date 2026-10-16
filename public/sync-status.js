@@ -8,6 +8,11 @@ function stateEventStreamHealthy() {
     && Date.now() - state.stateEventActivityAt < STATE_EVENT_STALE_MS);
 }
 
+// Milliseconds until a silent stream counts as stale.
+function stateEventStaleInMs() {
+  return Math.max(0, state.stateEventActivityAt + STATE_EVENT_STALE_MS - Date.now());
+}
+
 function scheduleStateEventRefresh(areas) {
   (areas || []).forEach((area) => state.stateEventRefreshAreas.add(area));
   if (state.stateEventRefreshTimer) clearTimeout(state.stateEventRefreshTimer);
@@ -40,7 +45,10 @@ function handleStateEvent(event) {
     return;
   }
   // A submitted or finished Coach turn (possibly from another device) checks the status once.
-  if (event.type === "coach" && (payload.role === "user" || payload.role === "assistant")) scheduleChatStatusPoll(0);
+  if (event.type === "coach" && (payload.role === "user" || payload.role === "assistant")) {
+    state.chatStatusTurnEnded = payload.role === "assistant";
+    scheduleChatStatusPoll(0);
+  }
   const areas = {
     coach: ["chat", "profile"],
     planning: ["plan", "library"],

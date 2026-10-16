@@ -355,3 +355,49 @@ test("a live transcript load during a Coach turn records the version it was requ
   }
   assert.equal(app.count("/api/chat/history?limit=100"), 1, "the same chat version is read once");
 });
+
+test("a status check that still reads a finished turn as running looks again shortly", async () => {
+  const app = frontend({ eventSource: true });
+  Object.assign(app.context, { loadChatHistoryFresh: async () => {}, resumeQueuedChat() {}, scrollChatToResponseStart() {} });
+  app.auto.set("/api/chat/status", { status: "running", operation_id: "op-1" });
+  app.context.connectStateEvents();
+  app.sources[0].listeners.ready(event("ready", { latest_event_id: 1 }));
+  // Another device's turn ends; its stream has not closed yet, so the server still reports it.
+  app.sources[0].listeners.coach(event("coach", { role: "assistant", message_id: 3 }, "2"));
+  await app.clock.advance(0);
+  assert.equal(app.count("/api/chat/status"), 1);
+  assert.equal(app.state.busy, true);
+  app.auto.set("/api/chat/status", { status: "idle" });
+  await app.clock.advance(1_500);
+  assert.equal(app.count("/api/chat/status"), 2, "the stale running state is not kept for the slow interval");
+  await app.clock.advance(60_000);
+  assert.equal(app.count("/api/chat/status"), 2, "an idle chat stops checking");
+});
+
+test("a started turn keeps the slow check while the event stream is healthy", async () => {
+  const app = frontend({ eventSource: true });
+  app.auto.set("/api/chat/status", { status: "running", operation_id: "op-1" });
+  app.context.connectStateEvents();
+  app.sources[0].listeners.ready(event("ready", { latest_event_id: 1 }));
+  app.sources[0].listeners.coach(event("coach", { role: "user", message_id: 2 }, "2"));
+  await app.clock.advance(0);
+  await app.clock.advance(14_000);
+  assert.equal(app.count("/api/chat/status"), 1);
+});
+
+test("a silently stalled event stream switches to the fast check once it counts as stale", async () => {
+  const app = frontend({ eventSource: true });
+  app.auto.set("/api/chat/status", { status: "running", operation_id: "op-1" });
+  app.state.busy = true;
+  app.context.connectStateEvents();
+  app.sources[0].listeners.ready(event("ready", { latest_event_id: 1 }));
+  await app.clock.advance(10_000);
+  app.context.scheduleChatStatusPoll(0);
+  await app.clock.advance(0);
+  // No heartbeat and no error: checks at 25 s, 40 s and the stale point at 45 s.
+  await app.clock.advance(35_000);
+  assert.equal(app.count("/api/chat/status"), 4);
+  assert.equal(app.context.stateEventStreamHealthy(), false);
+  await app.clock.advance(1_500);
+  assert.equal(app.count("/api/chat/status"), 5, "the fast check starts at the stale point");
+});

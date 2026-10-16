@@ -22,6 +22,7 @@ function showLogin() {
   state.initialStateLoaded = false;
   state.chatStatusPollInFlight = null;
   state.chatStatusRecheck = false;
+  state.chatStatusTurnEnded = false;
   state.chatStream?.controller.abort();
   state.chatStream = null;
   state.chatQueue = [];
