@@ -33,8 +33,10 @@ class _KeyValueRepository:
 class _PayloadService:
     def __init__(self, snapshot):
         self.value = snapshot
+        self.reads = 0
 
     def snapshot(self):
+        self.reads += 1
         return self.value
 
 
@@ -131,13 +133,14 @@ class GarminProjectionServiceTests(unittest.TestCase):
         last_sync_at="2026-09-20T07:30:00Z",
         available=True,
         client_available=False,
+        payload=None,
     ):
         config = config or _config()
         redactor = Redactor(lambda: config)
         battery = _MorningBodyBatteryService(body_battery)
         service = GarminProjectionService(
             config=config,
-            garmin_payload_service=_PayloadService(snapshot or {}),
+            garmin_payload_service=payload or _PayloadService(snapshot or {}),
             garmin_sync_service=_SyncService(available),
             garmin_sync_state_service=_SyncStateService(core_errors or []),
             sync_state_repository=_SyncStateRepository(canonical),
@@ -271,6 +274,26 @@ class GarminProjectionServiceTests(unittest.TestCase):
         self.assertFalse(result["has_max_hr"])
         self.assertFalse(result["has_vo2max"])
         self.assertFalse(result["has_estimated_run_times"])
+
+    def test_public_state_reuses_a_snapshot_the_caller_already_read(self):
+        snapshot = {
+            "source": "fixture",
+            "sleep": [{"date": "2026-09-19"}],
+            "activities": [{"activityId": "garmin-1"}],
+        }
+        payload = _PayloadService(snapshot)
+        service, battery = self._service(snapshot=snapshot, payload=payload)
+        with patch.object(
+            performance_garmin_metrics,
+            "garmin_performance_metrics",
+            return_value=_metrics(),
+        ):
+            expected = service.public_state()
+            result = service.public_state(snapshot)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(payload.reads, 1)
+        self.assertIs(battery.snapshots[-1], snapshot)
 
     def test_coach_context_keeps_recovery_scope_error_bounds_and_performance_fallback(
         self,

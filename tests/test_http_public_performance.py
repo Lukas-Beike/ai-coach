@@ -62,7 +62,7 @@ class PublicPerformanceStateTests(unittest.TestCase):
         sync_state_repository.latest_snapshot.assert_called_once_with()
         garmin_payload_service.snapshot.assert_called_once_with()
         profile_service.get.assert_called_once_with()
-        garmin_projection_service.public_state.assert_called_once_with()
+        garmin_projection_service.public_state.assert_called_once_with(garmin)
 
     def test_feedback_state_keeps_the_30_checkin_limit_and_existing_contexts(self):
         checkins = [{"checkin_date": "2026-09-23"}]
