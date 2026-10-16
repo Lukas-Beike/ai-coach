@@ -391,7 +391,7 @@ class AdaptiveReplanPreviewService:
 
     def latest_preview(self, *, db: Any | None = None) -> dict[str, Any] | None:
         if db is None:
-            with self._database_manager.unit_of_work() as connection:
+            with self._database_manager.reader() as connection:
                 row = self._adjustment_repository.latest(connection)
         else:
             row = self._adjustment_repository.latest(db)
@@ -432,7 +432,7 @@ class AdaptiveReplanPreviewService:
         }
 
     def latest_illness_pause(self) -> tuple[str, dict[str, Any]] | None:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             rows = self._adjustment_repository.list_recent(db)
         for row in rows:
             try:

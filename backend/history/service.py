@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from backend import change_history
@@ -16,13 +17,16 @@ class ChangeHistoryService:
         self._profile_repository = profile_repository
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
-        with self._database_manager.unit_of_work() as db:
-            change_history.cleanup(db)
+        # Retention is enforced on read in SQL; recording a change prunes rows.
+        cutoff = (
+            datetime.now(UTC) - timedelta(days=change_history.RETENTION_DAYS)
+        ).isoformat()
+        with self._database_manager.read_snapshot() as db:
             rows = db.execute(
                 "SELECT id, entity_type, entity_id, action, source, created_at, "
                 "before_hash, after_hash, diff FROM change_history "
-                "ORDER BY created_at DESC LIMIT ?",
-                (max(1, min(int(limit), change_history.MAX_ROWS)),),
+                "WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?",
+                (cutoff, max(1, min(int(limit), change_history.MAX_ROWS))),
             ).fetchall()
         return [change_history.public_view(dict(row)) for row in rows]
 

@@ -149,7 +149,7 @@ class GarminPayloadService:
         self._activity_rows = activity_rows
 
     def snapshot(self) -> dict[str, Any]:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             return self.snapshot_in(db)
 
     def snapshot_in(self, db: Any) -> dict[str, Any]:
@@ -458,7 +458,7 @@ class GarminSyncStateService:
         self._sync_equipment = sync_equipment
 
     def _get(self, key: str) -> str | None:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             return self._key_value_repository.get(db, key)
 
     def _set(self, key: str, value: str) -> None:

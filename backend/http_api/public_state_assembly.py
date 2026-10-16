@@ -322,7 +322,6 @@ class PublicStateAssembly:
                 weather=self._weather().service(),
                 adaptive_followup=self._adaptive_preview_followup_service(),
                 database_manager_factory=self._database_manager,
-                db_lock=self._database_lock(),
                 key_values=self._key_values(),
                 training_plans=planning.training_plan(),
                 external_calendar=calendar.reader(),
@@ -347,7 +346,6 @@ class PublicStateAssembly:
             self._planning_data().planned_unit(),
             self._weather().service(),
             self._database_manager(),
-            self._database_lock(),
             self._local_date,
             CalendarWindowRange(
                 self._calendar_history_days(), self._calendar_future_days()
@@ -393,7 +391,6 @@ class PublicStateAssembly:
                     weather_prelude=self.weather_prelude_service(),
                     calendar_projection=self.calendar_projection_service(),
                     database_manager=self._database_manager,
-                    database_lock=database_lock,
                     key_values=self._key_value_service(),
                     app_name=self._app_name,
                     app_version=self._app_version,

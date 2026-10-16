@@ -9,7 +9,7 @@ sections once the backfill is complete. All storage is temporary.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from datetime import date
 from typing import Any, TypeVar
 from unittest.mock import Mock
@@ -61,6 +61,15 @@ class _RecordingManager(_Manager):
     @contextmanager
     def unit_of_work(self) -> Iterator[Any]:
         with super().unit_of_work() as db:
+            self.open = True
+            try:
+                yield db
+            finally:
+                self.open = False
+
+    @contextmanager
+    def read_snapshot(self) -> Iterator[Any]:
+        with super().read_snapshot() as db:
             self.open = True
             try:
                 yield db
@@ -220,7 +229,6 @@ class HttpStateReadTests(CanonicalContextReadCase):
             planned,
             weather,
             _Manager(self),  # type: ignore[arg-type]
-            nullcontext(),
             lambda: TODAY,
             CalendarWindowRange(35, 35),
             None,
@@ -280,7 +288,6 @@ class HttpStateReadTests(CanonicalContextReadCase):
                 weather=weather,
                 adaptive_followup=Mock(),
                 database_manager_factory=lambda: _Manager(self),  # type: ignore[arg-type,return-value]
-                db_lock=nullcontext(),
                 key_values=key_values,
                 training_plans=plans,
                 external_calendar=calendar,

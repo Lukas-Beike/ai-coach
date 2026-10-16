@@ -84,7 +84,7 @@ class PrivacyAssemblyTests(unittest.TestCase):
         self.assertIs(first._competitions, competition)
         self.assertIs(first._adaptive_preview, preview)
         self.assertIs(exported._dependencies.database_manager, manager)
-        self.assertIs(exported._dependencies.database_lock, replacement_lock)
+        self.assertFalse(hasattr(exported._dependencies, "database_lock"))
         deletion = assembly.delete_service()
         self.assertIs(deletion._dependencies.database_lock, replacement_lock)
         self.assertIs(deletion._dependencies.maintenance_gate, replacement_gate)

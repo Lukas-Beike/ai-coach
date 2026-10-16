@@ -99,6 +99,9 @@ class _FakeDatabaseManager:
         self.units += 1
         yield "db"
 
+    def reader(self):
+        return self.unit_of_work()
+
 
 class _FakeKeyValues:
     def __init__(self, values: dict[str, Any]) -> None:

@@ -53,6 +53,8 @@ class FakeManager:
     def unit_of_work(self):
         yield object()
 
+    reader = unit_of_work
+
 
 def make_config(**overrides):
     with tempfile.TemporaryDirectory() as directory:

@@ -40,6 +40,8 @@ class _FakeDatabaseManager:
     def unit_of_work(self):
         return _FakeUnitOfWork()
 
+    read_snapshot = unit_of_work
+
 
 def _empty_season_source():
     return SeasonSource(

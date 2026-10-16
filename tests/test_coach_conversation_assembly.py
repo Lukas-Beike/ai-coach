@@ -97,7 +97,7 @@ class CoachConversationAssemblyTests(unittest.TestCase):
         self.assertIs(message_factory.call_args.args[2], dependencies["events"])
         self.assertIs(history_factory.call_args.args[1], dependencies["chats"])
         self.assertIs(history_factory.call_args.args[2], dependencies["keys"])
-        self.assertIs(history_factory.call_args.args[3], dependencies["lock"])
+        self.assertEqual(len(history_factory.call_args.args), 3)
         self.assertEqual(dependencies["manager_provider"].call_count, 2)
 
     def test_provision_and_reset_retain_gate_and_stream_owners(self):

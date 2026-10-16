@@ -140,6 +140,9 @@ class Harness:
 
         return transaction()
 
+    def reader(self):
+        return self.unit_of_work()
+
     def path(self) -> object | None:
         return object() if self.fixture_is_available else None
 

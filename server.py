@@ -1866,7 +1866,6 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
     dependencies=DiagnosticsAssembly.Inputs(
         runtime=DiagnosticRuntimeDependencies(
             database_manager=database_manager,
-            database_lock=DB_LOCK,
             key_values=KEY_VALUE_REPOSITORY,
             config=lambda: CONFIG,
             settings=SETTINGS,

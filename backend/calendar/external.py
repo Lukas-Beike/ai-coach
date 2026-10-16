@@ -110,7 +110,7 @@ class ExternalCalendarReader:
     def list_events(
         self, limit: Any = 300, training_relevant_only: bool = False
     ) -> list[dict[str, Any]]:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             return list_events(
                 db,
                 today=self._today(),
@@ -121,7 +121,7 @@ class ExternalCalendarReader:
     def list_events_in_window(
         self, window_days: int, training_relevant_only: bool = False
     ) -> list[dict[str, Any]]:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             return list_events_in_window(
                 db,
                 today=self._today(),
@@ -132,7 +132,7 @@ class ExternalCalendarReader:
     def state(
         self, *, configured: bool, running: bool, window_days: int
     ) -> dict[str, Any]:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             return state(
                 db,
                 configured=configured,

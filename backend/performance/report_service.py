@@ -316,7 +316,7 @@ class TrainingReportReadService:
         if not isinstance(values, dict):
             raise AppError(400, "Das Szenario muss ein Objekt sein.")
         today = self._today()
-        with self._season_source.database_manager().unit_of_work() as db:
+        with self._season_source.database_manager().read_snapshot() as db:
             snapshot = self._read_snapshot()
             inputs = read_season_load_inputs(
                 self._season_source, db, today=today, timezone=timezone
@@ -421,7 +421,7 @@ class TrainingSeasonReadService:
         self._season_source = season_source
 
     def season(self, timezone: str = "UTC") -> dict[str, Any]:
-        with self._season_source.database_manager().unit_of_work() as db:
+        with self._season_source.database_manager().read_snapshot() as db:
             return self._season_preparation(
                 self._read_snapshot() or {},
                 self._read_competitions(),

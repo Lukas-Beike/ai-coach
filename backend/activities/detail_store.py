@@ -31,7 +31,7 @@ class ActivityDetailStore:
         return f"activity_detail:{digest}"
 
     def get(self, activity_id: str) -> dict[str, Any] | None:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             row = db.execute(
                 "SELECT value FROM kv WHERE key=?", (self._key(activity_id),)
             ).fetchone()
@@ -74,7 +74,7 @@ class ActivityDetailStore:
 
     def analysis_summaries(self) -> list[dict[str, Any]]:
         """Read bounded scalar analyses without transferring full sensor arrays."""
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             rows = db.execute(
                 "SELECT json_extract(value, '$.activity_id') AS id, "
                 "json_extract(value, '$.summary_sha256') AS fingerprint, "

@@ -115,7 +115,6 @@ class CoachConversationAssembly:
             self._database_manager(),
             self._chat_repository,
             self._key_values,
-            self._database_lock,
         )
 
     def dialogue_read_service(self) -> CoachDialogueReadService:

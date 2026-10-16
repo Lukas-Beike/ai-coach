@@ -7,6 +7,7 @@ import threading
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from backend.db.manager import background_writer
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.jobs import SyncJobStore
@@ -95,7 +96,8 @@ class SyncJobWorker:
         """Run claims until stopped; failures are logged and retried after a poll."""
         while not self._stop_event.is_set():
             try:
-                with self._maintenance_gate.operation():
+                # Background sync never outranks a waiting Coach or athlete write.
+                with self._maintenance_gate.operation(), background_writer():
                     job = self._store.claim()
                     if job is not None:
                         job["_maintenance_generation"] = (

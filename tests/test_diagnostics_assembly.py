@@ -19,8 +19,9 @@ from backend.diagnostics.assembly import (
 class DiagnosticsAssemblyTests(unittest.TestCase):
     def setUp(self):
         self.deps = {
-            "database_manager": Mock(return_value=Mock(unit_of_work=Mock())),
-            "database_lock": Mock(),
+            "database_manager": Mock(
+                return_value=Mock(unit_of_work=Mock(), read_snapshot=Mock())
+            ),
             "key_values": Mock(),
             "config": Mock(return_value=Mock()),
             "settings": Mock(),
@@ -50,7 +51,6 @@ class DiagnosticsAssemblyTests(unittest.TestCase):
             dependencies=DiagnosticsAssembly.Inputs(
                 runtime=DiagnosticRuntimeDependencies(
                     database_manager=self.deps["database_manager"],
-                    database_lock=self.deps["database_lock"],
                     key_values=self.deps["key_values"],
                     config=self.deps["config"],
                     settings=self.deps["settings"],
@@ -116,7 +116,7 @@ class DiagnosticsAssemblyTests(unittest.TestCase):
         first_history = self.assembly.coach_history_service()
         second_history = self.assembly.coach_history_service()
         self.assertIsNot(first_history, second_history)
-        self.assertIs(first_history._db_lock, self.deps["database_lock"])
+        self.assertFalse(hasattr(first_history, "_db_lock"))
 
 
 if __name__ == "__main__":

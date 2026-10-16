@@ -50,7 +50,6 @@ class DiagnosticReportDependencies:
     """Concrete application owners required to compose a diagnostic report."""
 
     database_manager: DatabaseManager
-    db_lock: Any
     key_values: KeyValueRepository
     config: Config
     settings: SettingsService
@@ -111,7 +110,8 @@ class DiagnosticReportService:
         deps = self._deps
         diagnostic_capture_entries = deps.diagnostic_capture.entries()
         diagnostic_capture_status = deps.diagnostic_capture.status()
-        with deps.db_lock, deps.database_manager.unit_of_work() as db:
+        # The report only reads, so it takes one WAL snapshot instead of the writer.
+        with deps.database_manager.read_snapshot() as db:
             snapshot = deps.sync_state.latest_snapshot()
             garmin_status = deps.garmin_projection.public_state()
             database_counts = self._database_counts(db)
@@ -175,6 +175,7 @@ class DiagnosticReportService:
                     garmin_tokenstore_exists=Path(
                         deps.config.garmin_tokenstore
                     ).exists(),
+                    read_only=True,
                 ),
                 "external_calendar": {
                     "configured": bool(deps.config.calendar_ical_url),

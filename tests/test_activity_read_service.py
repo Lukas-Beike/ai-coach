@@ -16,6 +16,11 @@ class _Manager:
     def unit_of_work(self):
         yield object()
 
+    def reader(self):
+        return self.unit_of_work()
+
+    read_snapshot = reader
+
 
 class _Snapshots:
     def __init__(self, snapshot):

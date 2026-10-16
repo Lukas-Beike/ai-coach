@@ -165,6 +165,25 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.assertNotIn("private", repr(result))
         self.sync_state_repository.latest_snapshot.assert_not_called()
 
+    def test_creation_prunes_expired_proposals_on_the_write_path(self) -> None:
+        with self.database_manager.unit_of_work() as db:
+            for proposal_id, expires_at in (("expired", 100), ("live", 101)):
+                db.execute(
+                    "INSERT INTO coach_action_proposals "
+                    "(id, session_csrf_hash, action_type, target_system, object_ids, "
+                    "diff, payload, payload_hash, status, expires_at, created_at) "
+                    "VALUES (?, 's', 'undo_change', 'local', '[]', '[]', '{}', 'h', "
+                    "'preview', ?, '2026-09-23T00:00:00Z')",
+                    (proposal_id, expires_at),
+                )
+
+        self._service().create(self._undo(), "session-csrf-hash")
+
+        self.assertEqual(
+            sorted(row["id"] for row in self._rows()),
+            ["abc12345-6789-4abc-8def-0123456789ab", "live"],
+        )
+
     def test_local_nutrition_write_requires_bound_request_and_shows_safe_values(
         self,
     ) -> None:

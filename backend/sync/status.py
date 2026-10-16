@@ -187,6 +187,8 @@ class SyncPublicStateService:
                     self._garmin_sync_state_service.core_error_entries()
                 ),
                 garmin_tokenstore_exists=Path(self._config.garmin_tokenstore).exists(),
+                # A status GET must not prune history; the refresh path does.
+                read_only=True,
             )
         result = project_sync_status(
             running=running,

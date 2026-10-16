@@ -296,17 +296,17 @@ class CoachConversationHistoryService:
         database_manager: DatabaseManager,
         chat_repository: ChatRepository,
         key_values: KeyValueRepository,
-        database_lock: Any,
     ) -> None:
         self._database_manager = database_manager
         self._chat_repository = chat_repository
         self._key_values = key_values
-        self._database_lock = database_lock
 
     def page(
         self, *, before_message_id: int | None, search: str, limit: int
     ) -> tuple[str, list[dict[str, Any]]]:
-        with self._database_lock, self._database_manager.unit_of_work() as db:
+        # One WAL snapshot keeps the page and its generation consistent without
+        # waiting for the writer.
+        with self._database_manager.read_snapshot() as db:
             messages = self._chat_repository.list_page(
                 db, before_message_id=before_message_id, search=search, limit=limit
             )

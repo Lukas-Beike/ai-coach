@@ -58,6 +58,8 @@ class _Manager:
     def reader(self):
         yield self.db
 
+    read_snapshot = reader
+
     @contextmanager
     def unit_of_work(self):
         yield self.db

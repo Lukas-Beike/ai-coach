@@ -493,14 +493,15 @@ class CoachPerformanceContextReader:
     def read_sources(
         self, read_snapshot: Callable[[], Any]
     ) -> tuple[Any, CanonicalPerformanceInputs | None, list[dict[str, Any]] | None]:
-        """Read the snapshot, its load inputs and compact activities in one unit of work.
+        """Read the snapshot, its load inputs and compact activities in one read snapshot.
 
         A sync that commits in between can then not pair newer activities with the
         older snapshot's sync time. Without an activity source the rows stay None.
+        The reads never wait for the writer.
         """
         if self._activity_rows is None:
             return (*self.read_snapshot(read_snapshot), None)
-        with self._activity_rows.database_manager().unit_of_work() as db:
+        with self._activity_rows.database_manager().read_snapshot() as db:
             snapshot, inputs = self.read_snapshot(read_snapshot)
             return snapshot, inputs, self._activity_rows.compact(db)
 

@@ -19,13 +19,11 @@ class ReadinessService:
     def __init__(
         self,
         manager_factory: Callable[[], DatabaseManager],
-        db_lock: Any,
         data_dir: Path,
         maintenance_gate: MaintenanceGate,
         probe: ReadinessProbeService | None = None,
     ) -> None:
         self._manager_factory = manager_factory
-        self._db_lock = db_lock
         self._data_dir = data_dir
         self._maintenance_gate = maintenance_gate
         self._probe = probe or ReadinessProbeService()
@@ -38,7 +36,8 @@ class ReadinessService:
             "maintenance": False,
         }
         try:
-            with self._db_lock, self._manager_factory().unit_of_work() as db:
+            # Both checks only read, so a long writer must not make the probe fail.
+            with self._manager_factory().read_snapshot() as db:
                 checks["database"] = self._probe.database_available(db)
                 checks["schema"] = database_schema_is_current(db)
         except Exception:  # noqa: BLE001, S110 - an infrastructure probe must fail closed.

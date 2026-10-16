@@ -35,8 +35,8 @@ class _FailingReadManager:
         self._manager = manager
 
     @contextmanager
-    def unit_of_work(self):
-        with self._manager.unit_of_work() as db:
+    def read_snapshot(self):
+        with self._manager.read_snapshot() as db:
             yield _FailHistoryRead(db)
 
 
@@ -101,7 +101,7 @@ class ChangeHistoryServiceTests(unittest.TestCase):
         self.assertEqual(full[1]["diff"]["fields"], {"name": {"changed": True}})
         self.assertEqual(full[1]["remote_sync"], "local_only")
 
-    def test_list_cleanup_removes_expired_and_caps_retained_rows(self):
+    def test_list_hides_expired_and_caps_rows_without_deleting(self):
         base = datetime(2026, 9, 20, tzinfo=timezone.utc)
         with self.database_manager.unit_of_work() as db:
             rows = [
@@ -141,17 +141,14 @@ class ChangeHistoryServiceTests(unittest.TestCase):
         self.assertEqual(len(listed), change_history.MAX_ROWS)
         self.assertEqual(listed[0]["id"], f"row-{change_history.MAX_ROWS:04d}")
         self.assertNotIn("row-0000", {row["id"] for row in listed})
+        self.assertNotIn("expired", {row["id"] for row in listed})
+        # A GET never prunes; recording a change owns the cleanup.
         with self.database_manager.reader() as db:
             self.assertEqual(
                 db.execute("SELECT COUNT(*) AS count FROM change_history").fetchone()[
                     "count"
                 ],
-                change_history.MAX_ROWS,
-            )
-            self.assertIsNone(
-                db.execute(
-                    "SELECT id FROM change_history WHERE id='expired'"
-                ).fetchone()
+                change_history.MAX_ROWS + 2,
             )
 
     def test_list_clamps_large_requested_limit_to_max_rows(self):
@@ -184,7 +181,7 @@ class ChangeHistoryServiceTests(unittest.TestCase):
         self.assertEqual(listed[0]["id"], f"row-{change_history.MAX_ROWS:04d}")
         self.assertNotIn("row-0000", {row["id"] for row in listed})
 
-    def test_list_rolls_back_cleanup_if_read_fails(self):
+    def test_list_leaves_expired_rows_when_the_read_fails(self):
         expired_at = (datetime.now(timezone.utc) - timedelta(days=181)).isoformat()
         self._insert_history("expired", expired_at)
         service = ChangeHistoryService(

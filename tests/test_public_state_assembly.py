@@ -180,12 +180,12 @@ class PublicStateAssemblyTests(unittest.TestCase):
         )
         self.assertIs(service._profile_service, profile_service)
 
-    def test_public_state_assembly_retains_the_reentrant_lock_and_settings(self):
+    def test_public_state_assembly_retains_the_settings_without_a_read_lock(self):
         assembly, _deps, owners = self.make_assembly()
 
         service = assembly.state_service()
 
-        self.assertIs(service._deps.database_lock, owners["lock"])
+        self.assertFalse(hasattr(service._deps, "database_lock"))
         self.assertIs(service._deps.config, owners["config"])
         self.assertIs(service._deps.settings, owners["settings"])
         self.assertIs(service._deps.database_manager, _deps["database_manager"])
