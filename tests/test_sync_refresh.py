@@ -3,8 +3,9 @@ import unittest
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
-from backend.errors import AppError
+from backend.errors import AppError, DatabaseBusyError
 from backend.runtime.events import StateEventBuffer
+from backend.sync.jobs import is_retryable_error
 from backend.sync.refresh import (
     ProviderRefreshTracker,
     create_refresh_record,
@@ -58,12 +59,18 @@ class SyncRefreshTests(unittest.TestCase):
             (ProviderError(reason="invalid_job_request"), "invalid_job_request"),
             (ProviderError(reason="invalid_job_resolution"), "invalid_job_resolution"),
             (TimeoutError("synthetic timeout"), "network_error"),
+            (DatabaseBusyError("writer"), "database_busy"),
             (ProviderError(status=429), "rate_limited"),
             (RuntimeError("synthetic provider failure"), "temporary_error"),
         )
         for error, expected in cases:
             with self.subTest(expected=expected):
                 self.assertEqual(sync_job_error_class(error), expected)
+
+    def test_a_busy_local_database_is_a_retryable_job_failure(self):
+        self.assertTrue(
+            is_retryable_error(sync_job_error_class(DatabaseBusyError("writer")))
+        )
 
     def make_tracker(self, now, *, retention_days=30, max_rows=200):
         manager = SQLiteDatabaseManager()
@@ -346,6 +353,7 @@ class SyncRefreshTests(unittest.TestCase):
                 "network_error",
             ),
             (TimeoutError("timed out"), "network_error"),
+            (DatabaseBusyError("reader"), "database_busy"),
             (AppError(502, "provider failed"), "provider_error"),
         )
         for error, expected in cases:

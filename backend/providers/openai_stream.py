@@ -21,6 +21,7 @@ from backend.errors import (
     OPENAI_API_KEY_ERROR,
     AppError,
     ClientDisconnected,
+    DatabaseBusyError,
     ProviderErrorClassifier,
 )
 from backend.providers import http as provider_http
@@ -705,6 +706,9 @@ class OpenAIStreamClient:
             )
         except HTTPError as exc:
             self._http_error(exc, context, started, stream_state.response_bytes)
+        except DatabaseBusyError:
+            # A local write after the response, such as usage, is no OpenAI timeout.
+            raise
         except TimeoutError as exc:
             self._timeout(
                 exc, cancel_event, context, started, stream_state.response_bytes

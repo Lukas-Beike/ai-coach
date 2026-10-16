@@ -16,9 +16,10 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
+from backend.errors import DatabaseBusyError
+
 DATABASE_MANAGER_CLOSED_MESSAGE = "database manager is closed"
 DATABASE_MANAGER_UNINITIALIZED_MESSAGE = "database manager is not initialized"
-
 # The application lock coordinates larger transactions and restore work that
 # span multiple repositories. DatabaseManager keeps its own connection locks.
 DATABASE_LOCK = threading.RLock()
@@ -233,7 +234,7 @@ class DatabaseManager:
         with self._lease():
             wait = self.timeout if timeout is None else timeout
             if not self._writer_lock.acquire(timeout=wait):
-                raise TimeoutError("database writer limit reached")
+                raise DatabaseBusyError("writer")
             try:
                 connection = (
                     self._writer if self.persist_connections else self._connect()
@@ -273,7 +274,7 @@ class DatabaseManager:
             return
         with self._lease():
             if not self._reader_slots.acquire(timeout=self.timeout):
-                raise TimeoutError("database reader limit reached")
+                raise DatabaseBusyError("reader")
             try:
                 try:
                     connection = self._readers.get_nowait()
@@ -325,7 +326,7 @@ class DatabaseManager:
             return
         with self._lease():
             if not self._reader_slots.acquire(timeout=self.timeout):
-                raise TimeoutError("database reader limit reached")
+                raise DatabaseBusyError("reader")
             try:
                 try:
                     connection = self._readers.get_nowait()

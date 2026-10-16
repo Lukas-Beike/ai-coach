@@ -6,7 +6,7 @@ from types import MappingProxyType, SimpleNamespace
 from unittest import mock
 from urllib.error import HTTPError
 
-from backend.errors import AppError, ClientDisconnected
+from backend.errors import AppError, ClientDisconnected, DatabaseBusyError
 from backend.observability import DiagnosticCapture, Redactor
 from backend.providers import openai as openai_provider
 from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
@@ -2406,6 +2406,22 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             (502, "invalid_response"),
         )
         self.assertEqual(state.usage, [])
+
+    def test_stream_client_passes_a_busy_local_database_through_unchanged(self):
+        state = _StreamStateService()
+
+        def busy_usage(*_args):
+            raise DatabaseBusyError("writer")
+
+        state.record_usage = busy_usage
+        response = _StreamResponse(self._stream_lines())
+        client = self._stream_client(lambda *_args, **_kwargs: response, state=state)
+
+        with self.assertRaises(DatabaseBusyError):
+            client.stream({"input": "hello"}, lambda _delta: None)
+        self.assertNotIn(
+            "timeout", [kwargs.get("state") for _args, kwargs in state.status]
+        )
 
     def test_stream_client_timeout_network_and_client_disconnect_contracts(self):
         for failure, status, reason in (
