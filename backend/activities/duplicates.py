@@ -235,6 +235,16 @@ def garmin_activity_duplicates_intervals(
     )
 
 
+def _window_bound(start: datetime, offset: timedelta) -> datetime:
+    """Shift a start by the window, clamped at the datetime range limits."""
+    try:
+        return start + offset
+    except OverflowError:
+        if offset > timedelta(0):
+            return datetime.max.replace(tzinfo=start.tzinfo)
+        return datetime.min.replace(tzinfo=start.tzinfo)
+
+
 def filter_garmin_activities(
     activities: Any, intervals_activities: Any
 ) -> tuple[list[dict[str, Any]], int]:
@@ -261,8 +271,12 @@ def filter_garmin_activities(
         garmin_start = activity_datetime(activity_start_local(item))
         if garmin_start is None:
             return False
-        low = bisect_left(starts, garmin_start - _GARMIN_DUPLICATE_START_WINDOW)
-        high = bisect_right(starts, garmin_start + _GARMIN_DUPLICATE_START_WINDOW)
+        low = bisect_left(
+            starts, _window_bound(garmin_start, -_GARMIN_DUPLICATE_START_WINDOW)
+        )
+        high = bisect_right(
+            starts, _window_bound(garmin_start, _GARMIN_DUPLICATE_START_WINDOW)
+        )
         return any(
             _garmin_activity_matches(item, intervals_list[index])
             for _, index in indexed[low:high]

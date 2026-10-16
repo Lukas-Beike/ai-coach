@@ -237,6 +237,22 @@ class GarminDuplicateTests(unittest.TestCase):
         )
         self.assertEqual(removed, 5)
 
+    def test_filter_clamps_the_window_at_the_datetime_limits(self):
+        intervals = [
+            _intervals(id="first", start_date_local="0001-01-01T00:10:00"),
+            _intervals(id="last", start_date_local="9999-12-31T23:40:00"),
+        ]
+        activities = [
+            _garmin(activityId="g-first", startTimeLocal="0001-01-01T00:00:00"),
+            _garmin(activityId="g-last", startTimeLocal="9999-12-31T23:59:59"),
+            _garmin(activityId="g-kept", startTimeLocal="2026-08-29T07:00:00"),
+        ]
+
+        kept, removed = filter_garmin_activities(activities, intervals)
+
+        self.assertEqual([item["activityId"] for item in kept], ["g-kept"])
+        self.assertEqual(removed, 2)
+
 
 class IntervalsCyclingMatchTests(unittest.TestCase):
     def test_alias_dates_and_duration_fields_match(self):
