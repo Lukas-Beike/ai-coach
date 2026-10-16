@@ -520,7 +520,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         }
         self.assertEqual(sources, {"i1": None, "i2": None})
 
-    def test_activity_listed_for_two_main_items_links_nothing(self):
+    def test_activity_listed_for_several_main_items_links_to_each(self):
         rows = [self._ride("i1"), self._ride("i2")]
         service = self._gear_service(rows)
         items = self._garmin_gear(
@@ -528,14 +528,53 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             [
                 self._gear_row("g1", activity_ids=["ai1", "ai2"]),
                 self._gear_row("g2", activity_ids=["ai1"]),
+                self._gear_row("g3", "Shoes", activity_ids=["ai1", "ai2"]),
             ],
             self._matches(rows),
         )
-        self.assertEqual(items["g1"]["usage"]["assigned_sessions"], 1)
-        self.assertEqual(items["g2"]["usage"]["assigned_sessions"], 0)
+        # Garmin counts one activity in the totals of every gear item it lists.
+        self.assertEqual(items["g1"]["usage"]["assigned_sessions"], 2)
+        self.assertEqual(items["g2"]["usage"]["assigned_sessions"], 1)
+        self.assertEqual(items["g2"]["usage"]["hours"], 0.5)
+        self.assertEqual(items["g3"]["usage"]["assigned_sessions"], 2)
+        pairs = {
+            (row["activity_id"], row["equipment_id"])
+            for row in service.read()["assignments"]
+        }
+        ids = {uuid: item["id"] for uuid, item in items.items()}
         self.assertEqual(
-            {row["activity_id"] for row in service.read()["assignments"]}, {"i2"}
+            pairs,
+            {
+                ("i1", ids["g1"]),
+                ("i1", ids["g2"]),
+                ("i1", ids["g3"]),
+                ("i2", ids["g1"]),
+                ("i2", ids["g3"]),
+            },
         )
+
+    def test_explicit_assignment_replaces_every_garmin_link_of_the_activity(self):
+        # An explicit assignment counts from the item's start, the import day.
+        rows = [self._ride("i1", day="2026-09-01"), self._ride("i2")]
+        service = self._gear_service(rows)
+        items = self._garmin_gear(
+            service,
+            [
+                self._gear_row("g1", activity_ids=["ai1", "ai2"]),
+                self._gear_row("g2", activity_ids=["ai1", "ai2"]),
+            ],
+            self._matches(rows),
+        )
+        service.assign({"activity_id": "i1", "equipment_id": items["g2"]["id"]})
+        usage = {item["garmin_uuid"]: item["usage"] for item in service.read()["items"]}
+        self.assertEqual(usage["g1"]["assigned_sessions"], 1)
+        self.assertEqual(usage["g2"]["assigned_sessions"], 2)
+        by_activity = {}
+        for row in service.read()["assignments"]:
+            by_activity.setdefault(row["activity_id"], []).append(row)
+        self.assertEqual(len(by_activity["i1"]), 1)
+        self.assertIsNone(by_activity["i1"][0].get("source"))
+        self.assertEqual(len(by_activity["i2"]), 2)
 
     def test_missing_activity_ids_mean_unknown_and_link_nothing(self):
         service = self._gear_service([self._ride("i1", external_id="a1")])
@@ -764,6 +803,26 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         _, item = self._derived_item(rows)
         self.assertFalse(item["sport_pending"])
         self.assertEqual(item["sport"], "ride")
+
+    def test_open_sport_is_derived_from_each_item_of_overlapping_lists(self):
+        rides = [self._ride(f"r{n}") for n in range(3)]
+        runs = [self._ride(f"u{n}", type="Run") for n in range(3)]
+        service = self._gear_service(rides + runs)
+        gear = [
+            self._gear_row("g1", "Gadget", activity_ids=["a" + r["id"] for r in rides]),
+            self._gear_row(
+                "g2", "Gadget", activity_ids=["a" + r["id"] for r in rides + runs]
+            ),
+            self._gear_row("g3", "Gadget", activity_ids=["a" + r["id"] for r in runs]),
+        ]
+        matches = self._matches(rides + runs)
+        self._garmin_gear(service, gear, matches)
+        service.sync_garmin_snapshot(self._snapshot(gear, matches))
+        items = {item["garmin_uuid"]: item for item in service.read()["items"]}
+        self.assertEqual(items["g1"]["sport"], "ride")
+        self.assertEqual(items["g3"]["sport"], "run")
+        # Half rides and half runs stays open.
+        self.assertTrue(items["g2"]["sport_pending"])
 
     def test_open_sport_stays_open_below_threshold_minimum_or_unknown(self):
         mixed = [self._ride(f"r{n}") for n in range(2)]

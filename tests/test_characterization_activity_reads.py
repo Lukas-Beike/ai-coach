@@ -25,7 +25,10 @@ from backend.activities.read_service import PAGE_DEFAULT, PAGE_MAX, ActivityRead
 from backend.db.manager import DatabaseManager
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
-from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.activity_read_service import (
+    ActivityAnalysisReadService,
+    _activity_equipment,
+)
 from backend.performance.report_service import TrainingRecordsService
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
@@ -530,6 +533,29 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         self.assertIsNone(result["detail_data"]["content_sha256"])
         self.assertEqual([], result["detail_data"]["available_streams"])
         self.assertEqual({}, result["session_analysis"])
+
+
+class ActivityEquipmentTests(unittest.TestCase):
+    def test_every_linked_main_item_and_its_components_are_listed(self) -> None:
+        equipment = {
+            "items": [
+                {"id": "bike"},
+                {"id": "chain", "parent_id": "bike"},
+                {"id": "meter"},
+                {"id": "shoes"},
+            ],
+            "assignments": [
+                {"activity_id": "a1", "equipment_id": "bike"},
+                {"activity_id": "a1", "equipment_id": "meter"},
+                {"activity_id": "a2", "equipment_id": "shoes"},
+                {"activity_id": "a3", "equipment_id": None},
+            ],
+        }
+        self.assertEqual(
+            ["bike", "chain", "meter"],
+            [row["id"] for row in _activity_equipment(equipment, "a1")],
+        )
+        self.assertEqual([], _activity_equipment(equipment, "a3"))
 
 
 class TrainingRecordObservationCharacterizationTests(_StorageCase):

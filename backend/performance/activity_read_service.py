@@ -200,15 +200,12 @@ def _detail_metadata(
 
 
 def _activity_equipment(equipment: dict, activity_id: str) -> list[dict]:
-    assignment = next(
-        (
-            row
-            for row in equipment.get("assignments", [])
-            if row["activity_id"] == activity_id
-        ),
-        None,
-    )
-    equipment_ids = {assignment["equipment_id"]} if assignment else set()
+    # Garmin can link one activity to several main items.
+    equipment_ids = {
+        row["equipment_id"]
+        for row in equipment.get("assignments", [])
+        if row["activity_id"] == activity_id and row["equipment_id"]
+    }
     return [
         row
         for row in equipment.get("items", [])
