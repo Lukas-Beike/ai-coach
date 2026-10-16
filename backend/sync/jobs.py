@@ -60,6 +60,7 @@ RETRYABLE_ERROR_CLASSES = frozenset(
 SYNC_JOB_LIST_LIMIT = 50
 SYNC_JOB_MAX_ATTEMPTS = 3
 MAX_JOB_REFRESH_DAYS = 3660
+MAX_EMPTY_BACKFILL_CHUNKS = 100
 INVALID_NUTRITION_MANIFEST_ERROR = "Invalid nutrition approval manifest."
 NUTRITION_MANIFEST_FIELDS = frozenset(
     {
@@ -278,7 +279,12 @@ def normalize_sync_job_request(
         normalized_payload = _normalize_plan_push_job(provider_value, values, registry)
     else:
         normalized_payload = _normalize_refresh_job(
-            provider_value, values, all_sync_days, registry, enforce_period_limit
+            provider_value,
+            values,
+            all_sync_days,
+            registry,
+            enforce_period_limit,
+            historical=type_value == "historical_backfill",
         )
     return {
         "provider": provider_value,
@@ -495,11 +501,21 @@ def _normalize_refresh_job(
     all_sync_days: int,
     registry: ProviderRegistry,
     enforce_period_limit: bool,
+    *,
+    historical: bool = False,
 ) -> dict[str, Any]:
-    if set(values) - registry.refresh_fields(provider_value):
+    # A backfill chain carries its count of consecutive empty chunks in the job.
+    allowed = registry.refresh_fields(provider_value)
+    if historical:
+        allowed = allowed | {"empty_chunks"}
+    if set(values) - allowed:
         raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
 
     normalized_payload: dict[str, Any] = {}
+    if historical and "empty_chunks" in values:
+        normalized_payload["empty_chunks"] = _normalize_empty_chunks(
+            values["empty_chunks"]
+        )
     if "days" in values:
         max_days = MAX_JOB_REFRESH_DAYS
         if enforce_period_limit:
@@ -524,6 +540,16 @@ def _normalize_refresh_days(value: Any, all_sync_days: int, max_days: int) -> in
     if days != all_sync_days and (days < 1 or days > max_days):
         raise JobValidationError("Der Synchronisationszeitraum ist zu groß.")
     return days
+
+
+def _normalize_empty_chunks(value: Any) -> int:
+    try:
+        count = int(value)
+    except (TypeError, ValueError) as exc:
+        raise JobValidationError("Der Backfill-Leerzähler ist ungültig.") from exc
+    if count < 0 or count > MAX_EMPTY_BACKFILL_CHUNKS:
+        raise JobValidationError("Der Backfill-Leerzähler ist ungültig.")
+    return count
 
 
 def _normalize_refresh_force(value: Any) -> bool:
@@ -591,11 +617,13 @@ class SyncJobStore:
         uuid_factory: Callable[[], str],
         *,
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
+        foreground_busy: Callable[[], bool] | None = None,
     ):
         self._database_manager = database_manager
         self._now = now
         self._uuid_factory = uuid_factory
         self._registry = registry
+        self._foreground_busy = foreground_busy
 
     def state(self, job_id: str) -> dict[str, Any] | None:
         with self._database_manager.unit_of_work() as db:
@@ -747,11 +775,19 @@ class SyncJobStore:
             return len(jobs)
 
     def claim(self) -> dict[str, Any] | None:
+        """Claim the oldest due job; backfill jobs yield to all other work.
+
+        While the Coach has queued or running work, backfill jobs stay queued so
+        the single database writer remains free for the athlete's request.
+        """
         now = self._now()
+        hold_backfill = self._foreground_busy is not None and self._foreground_busy()
         with self._database_manager.unit_of_work() as db:
             candidate = db.execute(
                 "SELECT id FROM sync_jobs WHERE status='queued' "
-                "AND (available_at IS NULL OR available_at<=?) ORDER BY created_at, id LIMIT 1",
+                "AND (available_at IS NULL OR available_at<=?) "
+                + ("AND requested_by<>'backfill' " if hold_backfill else "")
+                + "ORDER BY requested_by='backfill', created_at, id LIMIT 1",
                 (now,),
             ).fetchone()
             if not candidate:

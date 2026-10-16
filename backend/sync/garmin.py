@@ -579,12 +579,18 @@ class GarminSyncStateService:
                 self._sync_state_repository.update_cursor(
                     GARMIN_ID, "historical", historical_cursor, synced_at
                 )
+        pagination = payload["provider_sync"]["pagination"]
         result = {
             "status": "ok" if complete else "partial",
             "synced_at": synced_at,
             "errors": len(payload.get("errors") or []),
             "activities": len(payload.get("activities") or []),
-            "pagination": payload["provider_sync"]["pagination"],
+            # Records fetched by this run's collections (historic metrics excluded).
+            "window_records": sum(
+                int((pagination.get(source) or {}).get("records") or 0)
+                for source in GARMIN_COLLECTION_SOURCES
+            ),
+            "pagination": pagination,
         }
         if source is not None:
             result["source"] = source

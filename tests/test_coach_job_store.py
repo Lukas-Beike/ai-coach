@@ -231,6 +231,16 @@ class CoachJobStoreTests(unittest.TestCase):
         self.assertFalse(self.store.turn_open("released"))
         self.assertFalse(self.store.turn_open("missing"))
 
+    def test_busy_is_true_only_while_a_turn_is_queued_or_running(self):
+        self.assertFalse(self.store.busy())
+        self._insert("released", {"mode": "background"}, status="completed")
+        self.assertFalse(self.store.busy())
+        self._insert("queued", {"mode": "background"}, status="queued")
+        self.assertTrue(self.store.busy())
+        with self.manager.unit_of_work() as db:
+            db.execute("UPDATE coach_commands SET status = 'running'")
+        self.assertTrue(self.store.busy())
+
     def test_record_failed_attempt_counts_only_open_commands(self):
         self._insert("job", {"mode": "background", "phase": "preparing"})
         self._insert("done", {"mode": "background"}, status="completed")

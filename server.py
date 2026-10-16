@@ -7,7 +7,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from functools import partial
 from http.server import (
     BaseHTTPRequestHandler,  # noqa: F401 - compatibility export for tests
@@ -868,7 +868,7 @@ def key_value_service() -> KeyValueService:
 SYNC_PERIOD_DEFAULTS = DEFAULT_PROVIDER_REGISTRY.sync_period_defaults()
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
-SYNC_EARLIEST_DATE = date(2000, 1, 1)
+SYNC_EARLIEST_DATE = CONFIG.sync_history_earliest_date
 # Keep enough calendar history to show whether recently planned workouts were
 # completed, while retaining the existing five-week forward planning horizon.
 PLANNED_CALENDAR_HISTORY_DAYS = 35
@@ -964,6 +964,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
             retry_base_seconds=SYNC_JOB_RETRY_BASE_SECONDS,
             retry_max_seconds=SYNC_JOB_RETRY_MAX_SECONDS,
             registry=DEFAULT_PROVIDER_REGISTRY,
+            foreground_busy=lambda: COACH_BACKGROUND_JOBS.job_store().busy(),
         ),
     )
 )

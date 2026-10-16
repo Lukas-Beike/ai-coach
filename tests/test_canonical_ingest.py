@@ -7,6 +7,7 @@ are synthetic and mocked; no account, network or real data directory is used.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -26,6 +27,7 @@ from backend.db.canonical_store import WriteOutcome
 from backend.db.schema import initialize_schema
 from backend.providers.canonical_plans import IngestPlan, ObservationItem
 from backend.sync import canonical_ingest as ingest
+from backend.sync.snapshots import historical_chunk_snapshot, merge_historical_snapshot
 
 ZONE = ZoneInfo("Europe/Berlin")
 NOW = "2026-09-20T08:00:00+00:00"
@@ -207,6 +209,91 @@ class IntervalsIngestTests(IngestFixture):
             intervals_snapshot([intervals_row("i-1"), {"type": "Ride"}]), None
         )
         self.assertEqual((counters.written, counters.skipped_invalid), (1, 1))
+
+    def test_chunked_historical_ingest_matches_one_full_ingest(self) -> None:
+        def snapshot(activities: list[str], wellness: list[str]) -> dict[str, Any]:
+            return {
+                "synced_at": NOW,
+                "raw_provider_data": {
+                    "athlete": {"id": "athlete-1"},
+                    "activities": [
+                        intervals_row(name, day=f"2026-09-{index + 2:02d}")
+                        for index, name in enumerate(activities)
+                    ],
+                    "wellness": [
+                        {"id": f"2026-09-{index + 2:02d}", "weight": 70.0 + index}
+                        for index, _ in enumerate(wellness)
+                    ],
+                },
+            }
+
+        base = snapshot(["i-1", "i-2"], ["w-1", "w-2"])
+        older = snapshot(["i-0", "i-2"], ["w-0"])
+        older["raw_provider_data"]["wellness"][0]["id"] = "2026-09-01"
+        oldest = snapshot(["i-3"], [])
+        merged = base
+        chunks = []
+        for incoming in (older, oldest):
+            current = merged
+            merged = merge_historical_snapshot(current, incoming)
+            chunks.append(historical_chunk_snapshot(current, merged))
+        self.assertEqual(
+            [len(chunk["raw_provider_data"]["activities"]) for chunk in chunks],
+            [1, 1],
+        )
+
+        def dump(db: sqlite3.Connection) -> dict[str, list[str]]:
+            tables = [
+                row[0]
+                for row in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' "
+                    "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                )
+            ]
+            # Generated ids (uuid text, autoincrement integers) depend on the
+            # insertion order; compare everything else.
+            generated = re.compile(r"[a-z]+_[0-9a-f]{32}")
+
+            def stable_rows(table: str) -> list[str]:
+                info = db.execute(f"PRAGMA table_info({table})").fetchall()
+                keep = [
+                    index
+                    for index, column in enumerate(info)
+                    if not (column[5] and column[2].upper() == "INTEGER")
+                ]
+                return sorted(
+                    generated.sub("<id>", repr(tuple(row[i] for i in keep)))
+                    for row in db.execute(f"SELECT * FROM {table}")
+                )
+
+            return {table: stable_rows(table) for table in tables}
+
+        def ingest_all(db: sqlite3.Connection, snapshots: list[dict[str, Any]]):
+            for item in snapshots:
+                ingest.ingest_intervals_snapshot(
+                    db,
+                    item,
+                    zone=ZONE,
+                    activity_days=None,
+                    all_sync_days=3,
+                    earliest_date=EARLIEST,
+                )
+
+        ingest_all(self.db, [base, *chunks])
+        with tempfile.TemporaryDirectory() as directory:
+            full = sqlite3.connect(Path(directory) / "full.db")
+            try:
+                initialize_schema(full)
+                ingest_all(full, [merged])
+                expected = dump(full)
+            finally:
+                full.close()
+
+        actual = dump(self.db)
+        self.assertGreater(len(actual["activity_records"]), 0)
+        self.assertEqual(actual.keys(), expected.keys())
+        for table in expected:
+            self.assertEqual(actual[table], expected[table], table)
 
     def test_historical_fetch_never_deletes(self) -> None:
         self.ingest(intervals_snapshot([intervals_row("i-1"), intervals_row("i-2")]), 3)

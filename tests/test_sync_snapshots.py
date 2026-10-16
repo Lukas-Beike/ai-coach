@@ -5,6 +5,7 @@ import json
 import unittest
 
 from backend.sync.snapshots import (
+    historical_chunk_snapshot,
     latest_snapshot,
     merge_historical_snapshot,
     merge_performance_snapshot,
@@ -234,6 +235,59 @@ class SnapshotMergeTests(unittest.TestCase):
         self.assertEqual(
             result["historical_sync"], {"synced_at": "historical", "window": {}}
         )
+
+
+class HistoricalChunkSnapshotTests(unittest.TestCase):
+    def test_returns_merged_snapshot_when_there_is_no_stored_history(self):
+        merged = {"raw_provider_data": {"activities": [{"id": "a"}]}}
+        for current in (None, {}, {"raw_provider_data": None}, "snapshot"):
+            with self.subTest(current=current):
+                self.assertIs(historical_chunk_snapshot(current, merged), merged)
+
+    def test_keeps_only_rows_the_merge_added_and_drops_a_stored_athlete(self):
+        current = {
+            "synced_at": "current",
+            "raw_provider_data": {
+                "athlete": {"id": "current"},
+                "activities": [{"id": "same"}, {"id": "same"}, {"id": "a"}],
+                "wellness": [{"id": "w"}],
+            },
+        }
+        incoming = {
+            "synced_at": "chunk",
+            "raw_provider_data": {
+                "athlete": {"id": "incoming"},
+                "activities": [{"id": "same"}, {"id": "older"}],
+                "wellness": [{"id": "w"}, {"id": "older-w"}],
+            },
+        }
+        merged = merge_historical_snapshot(current, incoming)
+        original_merged = copy.deepcopy(merged)
+
+        chunk = historical_chunk_snapshot(current, merged)
+
+        self.assertEqual(
+            chunk["raw_provider_data"],
+            {
+                "activities": [{"id": "older"}],
+                "wellness": [{"id": "older-w"}],
+                "upcoming_calendar": [],
+            },
+        )
+        self.assertEqual(chunk["synced_at"], "current")
+        self.assertEqual(chunk["historical_sync"], merged["historical_sync"])
+        self.assertEqual(merged, original_merged)
+
+    def test_keeps_the_athlete_when_the_stored_snapshot_has_none(self):
+        current = {"raw_provider_data": {"activities": [{"id": "a"}]}}
+        incoming = {"raw_provider_data": {"athlete": {"id": "incoming"}}}
+
+        chunk = historical_chunk_snapshot(
+            current, merge_historical_snapshot(current, incoming)
+        )
+
+        self.assertEqual(chunk["raw_provider_data"]["athlete"], {"id": "incoming"})
+        self.assertEqual(chunk["raw_provider_data"]["activities"], [])
 
 
 if __name__ == "__main__":

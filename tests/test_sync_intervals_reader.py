@@ -184,6 +184,53 @@ class IntervalsSnapshotReaderTests(unittest.TestCase):
             snapshot["provider_sync"]["pagination"]["activities"]["records"], 2
         )
 
+    def test_historical_chunk_on_stored_history_skips_refresh_only_reads(self):
+        stored = {
+            "recent_activities": [{"id": "older", "name": "Older"}],
+            "cycling_power_profile": {"points": [{"watts": 300}]},
+            "raw_provider_data": {
+                "athlete": {"id": "athlete", "name": "Stored"},
+                "activities": [{"id": "older"}],
+                "wellness": [],
+            },
+        }
+        api = FakeIntervalsApi(
+            rows={
+                "activities": [{"id": "a1"}, {"id": "older"}],
+                "wellness": [{"id": "w1"}],
+            }
+        )
+        reader = make_reader(api, stored)
+
+        snapshot = reader.fetch_snapshot(activity_days=2, end_date=date(2024, 1, 10))
+
+        self.assertEqual([call for call in api.calls if call[0] == "get"], [])
+        self.assertEqual(
+            snapshot["cycling_power_profile"], {"points": [{"watts": 300}]}
+        )
+        # The count covers this window's fetch, not the merged history.
+        self.assertEqual(snapshot["provider_sync"]["window_records"], 3)
+        self.assertGreater(len(snapshot["raw_provider_data"]["activities"]), 0)
+
+    def test_refresh_and_first_historical_chunk_still_read_athlete_data(self):
+        stored = {"recent_activities": [{"id": "older"}]}
+        for existing, end_date in ((stored, None), (None, date(2024, 1, 10))):
+            with self.subTest(end_date=end_date):
+                api = FakeIntervalsApi()
+                reader = make_reader(api, existing)
+
+                snapshot = reader.fetch_snapshot(activity_days=2, end_date=end_date)
+
+                paths = [call[1] for call in api.calls if call[0] == "get"]
+                self.assertEqual(
+                    paths,
+                    [
+                        "/athlete/athlete%2F1",
+                        "/athlete/athlete%2F1/activity-power-curves",
+                    ],
+                )
+                self.assertEqual(snapshot["provider_sync"]["window_records"], 0)
+
     def test_cancellation_before_io_and_between_provider_steps(self):
         cancelled = threading.Event()
         cancelled.set()
