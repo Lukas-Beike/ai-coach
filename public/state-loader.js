@@ -146,14 +146,14 @@ function mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatCon
   return { failures, appliedAreas };
 }
 
-function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveAreasOnly) {
+function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveVersions) {
   payload.state_versions = { ...state.data?.state_versions };
   for (const area of appliedAreas) {
     if (area === "chat" && chatGeneration !== state.chatGeneration) continue;
     const versionKeys = { feedback: ["checkins", "activity_feedback"], performance: ["performance", providerIds().garmin, "activities"].filter(Boolean) }[area] || [area];
     for (const key of versionKeys) {
-      // A live load has no bootstrap; it read at least the version it was requested for.
-      const version = bootstrap.state_versions?.[key] ?? (liveAreasOnly ? state.requestedStateVersions?.[key] : undefined);
+      // A live load has no bootstrap; it read at least the versions requested before it started.
+      const version = bootstrap.state_versions?.[key] ?? liveVersions?.[key];
       if (version !== undefined) payload.state_versions[key] = version;
     }
   }
@@ -191,6 +191,8 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const initialLoad = $("#appShell").classList.contains("is-loading");
   try {
     const liveAreasOnly = path === LIVE_AREA_REFRESH;
+    // A version requested after this point is read by the follow-up load, not this one.
+    const liveVersions = liveAreasOnly ? { ...state.requestedStateVersions } : null;
     const query = path.includes("local=1") ? "?local=1" : "";
     const areas = new Set(requestedAreas || ["chat", "plan", "library", "performance", "feedback", "profile"]);
     // The area reads do not depend on the bootstrap, so they run alongside it.
@@ -209,7 +211,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     // Incorporate changes that arrived while these requests were in flight.
     payload.messages = state.data?.messages || [];
     const { failures, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
-    applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveAreasOnly);
+    applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveVersions);
     if (requestSequence === state.loadSequence) renderCompletedState(payload, liveAreasOnly, failures.length > 0);
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {

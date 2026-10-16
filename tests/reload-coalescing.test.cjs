@@ -56,6 +56,7 @@ function frontend({ eventSource = false } = {}) {
   const sources = [];
   const bootstrap = { state_versions: {} };
   const shell = { classList: { contains: () => false, add() {}, remove() {} } };
+  const statusElements = Object.fromEntries(["#statusCard", "#statusTitle", "#statusDetail"].map((selector) => [selector, { hidden: true, textContent: "", classList: { add() {}, remove() {} } }]));
   const bodies = {
     [BOOTSTRAP]: () => ({ ...bootstrap }),
     "/api/plan?local=1": () => ({}),
@@ -88,7 +89,7 @@ function frontend({ eventSource = false } = {}) {
     clearTimeout: clock.clear,
     setInterval: clock.setInterval,
     clearInterval: clock.clear,
-    $: (selector) => (selector === "#appShell" ? shell : null),
+    $: (selector) => (selector === "#appShell" ? shell : statusElements[selector] || null),
     currentPlanLoadAreas: () => ["chat"],
     applyChatResult() {},
     finishAppShellLoading() {},
@@ -101,7 +102,7 @@ function frontend({ eventSource = false } = {}) {
     api(requestPath) {
       calls.push(requestPath);
       if (auto.has(requestPath)) return Promise.resolve(auto.get(requestPath));
-      return new Promise((resolve) => pending.push({ path: requestPath, resolve }));
+      return new Promise((resolve, reject) => pending.push({ path: requestPath, resolve, reject }));
     },
     ...(eventSource ? { EventSource: FakeEventSource } : {}),
   });
@@ -122,7 +123,7 @@ function frontend({ eventSource = false } = {}) {
     }
   };
   const count = (requestPath) => calls.filter((call) => call === requestPath).length;
-  return { context, state, clock, calls, auto, sources, bootstrap, respondOnce, settle, count };
+  return { context, state, clock, calls, pending, auto, sources, bootstrap, statusElements, respondOnce, settle, count };
 }
 
 const event = (type, payload = {}, lastEventId = "") => ({ type, data: JSON.stringify(payload), lastEventId });
@@ -162,6 +163,34 @@ test("a server version that is already requested is not requested again", async 
   app.context.handleSyncStatus(status());
   await app.settle();
   assert.equal(app.count(BOOTSTRAP), 1);
+});
+
+test("a live load records the version it was started for, not one that arrived while it ran", async () => {
+  const app = frontend();
+  const CHAT = "/api/chat/history?limit=100";
+  app.state.busy = true;
+  app.state.data.state_versions = { chat: 1 };
+  app.context.handleSyncStatus({ running: false, state_versions: { chat: 2 } });
+  await tick();
+  assert.equal(app.count(CHAT), 1);
+  app.context.handleSyncStatus({ running: false, state_versions: { chat: 3 } });
+  await tick();
+  app.pending.shift().resolve({});
+  await tick();
+  await tick();
+  assert.equal(app.state.data.state_versions.chat, 2, "the first read only covers version 2");
+  assert.equal(app.count(CHAT), 2);
+  // The follow-up for version 3 fails, so version 3 stays unread.
+  app.pending.shift().reject(new Error("timeout"));
+  await app.state.loadPromise?.catch(() => {});
+  await tick();
+  assert.equal(app.state.data.state_versions.chat, 2);
+  assert.equal(app.statusElements["#statusDetail"].textContent, "chat: timeout");
+  app.context.handleSyncStatus({ running: false, state_versions: { chat: 3 } });
+  await tick();
+  assert.equal(app.count(CHAT), 3, "the next poll retries the unread version");
+  await app.settle();
+  assert.equal(app.state.data.state_versions.chat, 3);
 });
 
 test("state events replayed before the first ready do not reload the loaded app", async () => {
