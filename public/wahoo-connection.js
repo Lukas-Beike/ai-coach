@@ -34,6 +34,9 @@ function takeWahooReturnOutcome() {
 // re-enabling the button or resetting its label.
 let wahooRedirecting = false;
 
+// Plans reach Wahoo only through the explicit library export (README, Wahoo step 8).
+const WAHOO_SCOPE_DETAIL = "Importiert Einheiten · schreibt nur bei ausdrücklichem Plan-Export";
+
 function wahooProviderLabel(data) {
   return data?.provider_labels?.[data?.provider_ids?.wahoo] || "";
 }
@@ -60,7 +63,7 @@ function wahooConnectionView(data) {
     reconnect,
     status,
     ok: connected,
-    detail: since ? `Verbunden seit ${since}` : "",
+    detail: since ? `Verbunden seit ${since} · ${WAHOO_SCOPE_DETAIL}` : WAHOO_SCOPE_DETAIL,
     connectLabel: reconnect ? "Wahoo erneut verbinden" : "Wahoo verbinden",
     canConnect: configured && !connected,
     canDisconnect: connected,
