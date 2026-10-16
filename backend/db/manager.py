@@ -16,14 +16,10 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
+from backend.errors import DatabaseBusyError
+
 DATABASE_MANAGER_CLOSED_MESSAGE = "database manager is closed"
 DATABASE_MANAGER_UNINITIALIZED_MESSAGE = "database manager is not initialized"
-# Stored and shown as a sync or request error, so it is the athlete's language.
-DATABASE_BUSY_MESSAGE = (
-    "Die lokale Datenbank war vorübergehend ausgelastet. "
-    "Ein späterer Versuch sollte gelingen."
-)
-
 # The application lock coordinates larger transactions and restore work that
 # span multiple repositories. DatabaseManager keeps its own connection locks.
 DATABASE_LOCK = threading.RLock()
@@ -36,16 +32,6 @@ BACKGROUND_WRITER_BYPASS_LIMIT = 8
 _BACKGROUND_WRITER: ContextVar[bool] = ContextVar(
     "database_background_writer", default=False
 )
-
-
-class DatabaseBusyError(TimeoutError):
-    """No database connection became free in time; a later attempt can succeed."""
-
-    reason = "database_busy"
-
-    def __init__(self, resource: str) -> None:
-        super().__init__(DATABASE_BUSY_MESSAGE)
-        self.resource = resource
 
 
 @contextmanager

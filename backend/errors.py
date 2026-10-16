@@ -111,6 +111,23 @@ class ClientDisconnected(Exception):
     pass
 
 
+# Stored and shown as a sync or request error, so it is the athlete's language.
+DATABASE_BUSY_MESSAGE = (
+    "Die lokale Datenbank war vorübergehend ausgelastet. "
+    "Ein späterer Versuch sollte gelingen."
+)
+
+
+class DatabaseBusyError(TimeoutError):
+    """No database connection became free in time; a later attempt can succeed."""
+
+    reason = "database_busy"
+
+    def __init__(self, resource: str) -> None:
+        super().__init__(DATABASE_BUSY_MESSAGE)
+        self.resource = resource
+
+
 def provider_error(
     service: str | None, category: str, *, status: int | None = None
 ) -> AppError:

@@ -16,9 +16,9 @@ from backend.coach.turn_failures import (
 )
 from backend.coach.turn_undo import CoachTurnUndoService
 from backend.db import row_factory as production_row_factory
-from backend.db.manager import DatabaseBusyError, DatabaseManager
+from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
-from backend.errors import AppError
+from backend.errors import AppError, DatabaseBusyError
 from backend.runtime.events import StateEventBuffer
 
 

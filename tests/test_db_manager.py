@@ -6,14 +6,13 @@ import unittest
 from pathlib import Path
 
 from backend.db.manager import (
-    DATABASE_BUSY_MESSAGE,
-    DatabaseBusyError,
     DatabaseManager,
     DatabaseManagerCache,
     WriterGate,
     background_writer,
 )
 from backend.db.schema import database_schema_is_current, initialize_schema
+from backend.errors import DATABASE_BUSY_MESSAGE, DatabaseBusyError
 
 
 class DatabaseManagerTests(unittest.TestCase):

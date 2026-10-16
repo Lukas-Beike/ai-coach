@@ -3,8 +3,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
-from backend.db.manager import DatabaseBusyError
-from backend.errors import AppError
+from backend.errors import AppError, DatabaseBusyError
 from backend.runtime.events import StateEventBuffer
 from backend.sync.jobs import is_retryable_error
 from backend.sync.refresh import (
