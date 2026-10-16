@@ -2,6 +2,7 @@
 
 import json
 import math
+import re
 import uuid
 from collections.abc import Callable, Sequence
 from datetime import date
@@ -24,6 +25,8 @@ from backend.providers.garmin_gear_fields import (
 
 EQUIPMENT_PREFIX = "equipment:"
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
+PROVIDER_GEAR_SOURCE = "intervals_gear"
+GEAR_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 class EquipmentService:
@@ -81,6 +84,7 @@ class EquipmentService:
                 if isinstance(row, dict) and garmin_gear_id(row)
             }
             items = self._records(db, "equipment", 100)
+            gear_links = _gear_links(items)
             if item_id:
                 selected = db.execute(
                     SELECT_VALUE, (EQUIPMENT_PREFIX + item_id,)
@@ -88,10 +92,14 @@ class EquipmentService:
                 if not selected:
                     raise AppError(404, "Ausrüstung nicht gefunden.")
                 items = [json.loads(selected["value"])]
-            assignments = {
-                row["activity_id"]: row
-                for row in self._records(db, "equipment_assignment", 2000)
-            }
+            assignments = _effective_assignments(
+                rows,
+                {
+                    row["activity_id"]: row
+                    for row in self._records(db, "equipment_assignment", 2000)
+                },
+                gear_links,
+            )
             maintenance = self._records(db, "equipment_maintenance", 1000)
         for item in items:
             _update_usage(
@@ -112,7 +120,7 @@ class EquipmentService:
             .get("freshness"),
             "assignments": list(assignments.values()),
             "excluded_duplicates": duplicates,
-            "scope": "Known canonical activities with explicit assignments only, plus confirmed initial usage. Missing provider history or measurements makes counters incomplete; no inferred favorite gear. Maintenance includes only later calendar days, same-day order is unknown. Limits: 100 items, 2000 assignments, 1000 maintenance events.",
+            "scope": "Known canonical activities with explicit assignments, or whose Intervals.icu gear id equals the id stored on a matching item (an explicit assignment, including unassigned, always wins), plus confirmed initial usage. Missing provider history or measurements makes counters incomplete; no inferred favorite gear. Maintenance includes only later calendar days, same-day order is unknown. Limits: 100 items, 2000 assignments, 1000 maintenance events.",
         }
 
     def sync_garmin_snapshot(self, snapshot: dict[str, Any]) -> None:
@@ -184,6 +192,7 @@ class EquipmentService:
             "maintenance_km",
             "maintenance_hours",
             "lifetime_target_km",
+            "intervals_gear_id",
         }
         if not isinstance(payload, dict) or set(payload) - allowed:
             raise AppError(400, "Ungültige Ausrüstung.")
@@ -214,6 +223,7 @@ class EquipmentService:
                 "parent_pending": payload["kind"] == "component" and not parent_id,
             }
             _preserve_equipment_metadata(saved, previous, payload)
+            _store_intervals_gear_id(db, saved, previous, payload)
             db.execute(
                 "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
                 (
@@ -399,6 +409,7 @@ def _refresh_garmin_distances(
         if linked is None:
             continue
         changed = _update_garmin_gear(linked, row)
+        changed = _rederive_pending_sport(db, linked, row) or changed
         if not changed:
             continue
         linked["updated_at"] = now
@@ -408,16 +419,20 @@ def _refresh_garmin_distances(
         )
 
 
-def _validate_equipment_children(
-    db: Any, item_id: str, parent_id: str | None, payload: dict[str, Any]
-) -> None:
-    children = [
+def _equipment_children(db: Any, item_id: str) -> list[dict[str, Any]]:
+    return [
         json.loads(row["value"])
         for row in db.execute(
             "SELECT value FROM kv WHERE key LIKE 'equipment:%' AND json_extract(value, '$.parent_id')=?",
             (item_id,),
         ).fetchall()
     ]
+
+
+def _validate_equipment_children(
+    db: Any, item_id: str, parent_id: str | None, payload: dict[str, Any]
+) -> None:
+    children = _equipment_children(db, item_id)
     invalid_parent = parent_id or payload["kind"] == "component"
     mismatched_sport = any(
         _item_pair(item) != _stored_pair(_payload_sport(payload)) for item in children
@@ -425,7 +440,7 @@ def _validate_equipment_children(
     if children and (invalid_parent or mismatched_sport):
         raise AppError(
             409,
-            "Vorhandene Komponenten ben?tigen diesen Hauptgegenstand und dessen Sportart.",
+            "Vorhandene Komponenten benötigen diesen Hauptgegenstand und dessen Sportart.",
         )
 
 
@@ -801,6 +816,126 @@ def _preserve_equipment_metadata(
         for field in ("garmin_maximum_meters", "garmin_status"):
             if previous.get(field) is not None:
                 saved[field] = previous[field]
+
+
+def _rederive_pending_sport(
+    db: Any, linked: dict[str, Any], row: dict[str, Any]
+) -> bool:
+    """Give an item whose sport is still open the sport its Garmin gear type names.
+
+    Only open items change, and only to a known sport, so an athlete's choice and
+    an unidentified gear type are never overwritten. Items with components stay
+    open, because their components must keep the sport of their main item.
+    """
+    if not linked.get("sport_pending"):
+        return False
+    stored = resolve_equipment_sport(_garmin_sport(row))
+    if (
+        stored is None
+        or stored.sport is Sport.OTHER
+        or _equipment_children(db, str(linked["id"]))
+    ):
+        return False
+    linked.update(_equipment_sport_fields(stored))
+    return True
+
+
+def _gear_links(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Map each Intervals.icu gear id to the one main item that stores it.
+
+    An id stored on several items is ambiguous and links nothing. Components and
+    items with an open sport never link; their sessions come from explicit
+    assignments or from their main item.
+    """
+    owners: dict[str, dict[str, Any]] = {}
+    ambiguous: set[str] = set()
+    for item in items:
+        gear_id = item.get("intervals_gear_id")
+        if (
+            not gear_id
+            or item.get("parent_id")
+            or item.get("kind") == "component"
+            or item.get("sport_pending")
+        ):
+            continue
+        if gear_id in owners:
+            ambiguous.add(gear_id)
+        owners[gear_id] = item
+    return {
+        gear_id: item for gear_id, item in owners.items() if gear_id not in ambiguous
+    }
+
+
+def _row_gear_id(row: dict[str, Any]) -> str | None:
+    gear = row.get("gear")
+    gear_id = gear.get("id") if isinstance(gear, dict) else None
+    if isinstance(gear_id, bool) or not isinstance(gear_id, (str, int)):
+        return None
+    return str(gear_id).strip() or None
+
+
+def _effective_assignments(
+    rows: list[dict[str, Any]],
+    explicit: dict[str, dict[str, Any]],
+    gear_links: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Return explicit assignments plus provider-gear links for the other activities.
+
+    An explicit record, including one that unassigns, always wins. A row links
+    only when its provider gear id belongs to an item of the same sport pair.
+    """
+    effective = dict(explicit)
+    if not gear_links:
+        return effective
+    for row in rows:
+        activity_id = str(row.get("id"))
+        item = gear_links.get(_row_gear_id(row) or "")
+        pair = _stored_pair(resolve_equipment_sport(row.get("type")))
+        if activity_id in effective or item is None or pair is None:
+            continue
+        if _item_pair(item) == pair:
+            effective[activity_id] = {
+                "activity_id": activity_id,
+                "equipment_id": item["id"],
+                "source": PROVIDER_GEAR_SOURCE,
+            }
+    return effective
+
+
+def _store_intervals_gear_id(
+    db: Any,
+    saved: dict[str, Any],
+    previous: dict[str, Any] | None,
+    payload: dict[str, Any],
+) -> None:
+    """Keep, set or clear the Intervals.icu gear id an item links activities by."""
+    if "intervals_gear_id" not in payload:
+        if previous and previous.get("intervals_gear_id"):
+            saved["intervals_gear_id"] = previous["intervals_gear_id"]
+        return
+    gear_id = payload["intervals_gear_id"]
+    if gear_id is None or gear_id == "":
+        return
+    if (
+        not isinstance(gear_id, str)
+        or not GEAR_ID_PATTERN.fullmatch(gear_id)
+        or saved["kind"] == "component"
+        or _gear_id_taken(db, saved["id"], gear_id)
+    ):
+        raise AppError(
+            400, "Intervals.icu-Ausrüstungs-ID ungültig oder bereits vergeben."
+        )
+    saved["intervals_gear_id"] = gear_id
+
+
+def _gear_id_taken(db: Any, item_id: str, gear_id: str) -> bool:
+    return (
+        db.execute(
+            "SELECT 1 FROM kv WHERE key LIKE 'equipment:%' AND key != ? AND json_extract(value, '$.intervals_gear_id')=?",
+            (EQUIPMENT_PREFIX + item_id, gear_id),
+        ).fetchone()
+        is not None
+    )
 
 
 def _update_garmin_gear(linked: dict[str, Any], row: dict[str, Any]) -> bool:
