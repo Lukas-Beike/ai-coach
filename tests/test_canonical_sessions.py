@@ -232,6 +232,27 @@ class GarminIntervalsPairTests(unittest.TestCase):
         self.assert_pair(garmin_ride(), intervals_ride(distance=0), True)
         self.assert_pair(garmin_ride(duration=None), intervals_ride(), True)
 
+    def test_garmin_moving_duration_is_a_second_duration_candidate(self) -> None:
+        # Garmin duration is elapsed time (4500 s); Intervals reports moving time.
+        walk = {"activityType": {"typeKey": "walking"}, "distance": 5000.0}
+        intervals = intervals_ride(type="Walk", moving_time=3620, distance=5000.0)
+        self.assert_pair(
+            garmin_ride(duration=4500.0, movingDuration=3600.0, **walk), intervals, True
+        )
+        self.assert_pair(
+            garmin_ride(duration=4500.0, movingDuration=3000.0, **walk),
+            intervals,
+            False,
+        )
+        self.assert_pair(garmin_ride(duration=4500.0, **walk), intervals, False)
+
+    def test_a_matching_moving_duration_does_not_override_distance(self) -> None:
+        self.assert_pair(
+            garmin_ride(duration=4500.0, movingDuration=3600.0, distance=40000.0),
+            intervals_ride(moving_time=3620),
+            False,
+        )
+
     def test_missing_intervals_duration_leaves_distance_to_decide(self) -> None:
         self.assert_pair(garmin_ride(), intervals_ride(moving_time=None), True)
 

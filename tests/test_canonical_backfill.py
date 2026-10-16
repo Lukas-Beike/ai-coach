@@ -950,8 +950,8 @@ class ReprojectionTests(BackfillFixture):
         )
         deleted = self.rows(
             "SELECT mapped_version FROM provider_records WHERE source_record_id = '1' "
-            "AND record_kind = ?",
-            (ACTIVITY_KIND,),
+            "AND provider = ? AND record_kind = ?",
+            (INTERVALS, ACTIVITY_KIND),
         )
         self.assertEqual(
             deleted[0]["mapped_version"],

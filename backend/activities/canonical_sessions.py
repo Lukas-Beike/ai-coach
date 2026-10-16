@@ -295,13 +295,18 @@ def _garmin_measurements_agree(
 ) -> bool:
     compared = 0
     agreed = 0
-    if garmin.duration_s is not None and intervals.duration_s is not None:
+    # Garmin ``duration`` is elapsed time and Intervals.icu ``moving_time`` is
+    # moving time, so the Garmin moving duration is a second candidate.
+    garmin_durations = [
+        value
+        for value in (garmin.duration_s, garmin.moving_duration_s)
+        if value is not None
+    ]
+    if garmin_durations and intervals.duration_s is not None:
         compared += 1
-        if _close(
-            garmin.duration_s,
-            intervals.duration_s,
-            DURATION_FLOOR_S,
-            intervals.duration_s,
+        if any(
+            _close(value, intervals.duration_s, DURATION_FLOOR_S, intervals.duration_s)
+            for value in garmin_durations
         ):
             agreed += 1
     # Only the distance pair skips non-positive values, as the legacy rule does.

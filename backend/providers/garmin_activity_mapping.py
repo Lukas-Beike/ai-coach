@@ -21,6 +21,10 @@ the same moment.
   form, the key as plain text.
 * ``duration``, then ``movingTime`` (seconds). ``movingTime`` is the fallback that
   ``backend.activities.duplicates`` uses for ``duration``.
+* ``movingDuration`` (seconds) -> ``moving_duration_s``, with no ``movingTime``
+  fallback because ``movingTime`` already feeds ``duration_s``. Garmin
+  ``duration`` is elapsed time, so duplicate detection also compares this moving
+  time against the Intervals.icu moving time.
 * ``distance`` (metres), ``activityTrainingLoad`` (Garmin training load),
   ``averageHR`` (bpm), ``avgPower``, then ``averagePower`` (watts).
 * ``activityName`` (text, stripped and truncated to 200 characters).
@@ -65,13 +69,14 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-MAPPER_VERSION: Final = 1
+MAPPER_VERSION: Final = 2
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
 _ACTIVITY_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _ROW_FIELD: Final = "activity"
 _DURATION_KEYS: Final = ("duration", "movingTime")
+_MOVING_DURATION_KEYS: Final = ("movingDuration",)
 _POWER_KEYS: Final = ("avgPower", "averagePower")
 
 # Exact Garmin activityType.typeKey values. The environment is set only where the
@@ -151,6 +156,9 @@ def _map_row(
     duration = _optional_number(
         row, _DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
     )
+    moving_duration = _optional_number(
+        row, _MOVING_DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
+    )
     distance = _optional_number(
         row, ("distance",), (0.0, MAX_ACTIVITY_DISTANCE_M), ref, issues
     )
@@ -170,6 +178,7 @@ def _map_row(
         environment=environment,
         started_at=started_at,
         duration_s=duration,
+        moving_duration_s=moving_duration,
         distance_m=distance,
         load=load,
         load_model=(

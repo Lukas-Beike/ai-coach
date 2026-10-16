@@ -97,6 +97,55 @@ class GarminDuplicateTests(unittest.TestCase):
             )
         )
 
+    def test_garmin_walk_merges_when_only_the_moving_duration_agrees(self):
+        # Garmin duration is elapsed time (4500 s); Intervals reports moving time.
+        walk = _garmin(
+            activityType="walking",
+            duration=4_500,
+            movingDuration=3_600,
+            distance=5_000,
+        )
+        copy = _intervals(type="Walk", moving_time=3_620, distance=5_000)
+        self.assertTrue(garmin_activity_duplicates_intervals(walk, [copy]))
+        self.assertFalse(
+            garmin_activity_duplicates_intervals(
+                {**walk, "movingDuration": 3_000}, [copy]
+            )
+        )
+        self.assertFalse(
+            garmin_activity_duplicates_intervals(
+                {key: value for key, value in walk.items() if key != "movingDuration"},
+                [copy],
+            )
+        )
+
+    def test_matching_moving_duration_does_not_override_distance_or_start(self):
+        walk = _garmin(duration=4_500, movingDuration=3_600)
+        copy = _intervals(moving_time=3_620)
+        self.assertTrue(garmin_activity_duplicates_intervals(walk, [copy]))
+        self.assertFalse(
+            garmin_activity_duplicates_intervals({**walk, "distance": 40_000}, [copy])
+        )
+        self.assertFalse(
+            garmin_activity_duplicates_intervals(
+                {**walk, "startTimeLocal": "2026-08-29T07:31:00"}, [copy]
+            )
+        )
+
+    def test_present_zero_durations_are_still_compared(self):
+        # A zero Garmin duration falls back to movingTime, as before.
+        self.assertTrue(
+            garmin_activity_duplicates_intervals(
+                _garmin(duration=0, movingTime=3_600), [_intervals()]
+            )
+        )
+        # A zero Intervals moving_time is compared as zero and rejects the pair.
+        self.assertFalse(
+            garmin_activity_duplicates_intervals(
+                _garmin(), [_intervals(moving_time=0, elapsed_time=3_600)]
+            )
+        )
+
     def test_missing_invalid_and_nonpositive_measurements(self):
         self.assertFalse(
             garmin_activity_duplicates_intervals(
