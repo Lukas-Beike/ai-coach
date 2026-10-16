@@ -363,14 +363,6 @@ def resolve_competition_sport(
     return StoredSport(sport, token_environment)
 
 
-def legacy_competition_sport(value: Any) -> StoredSport:
-    """Translate stored legacy competition text; unsupported text is kept in detail."""
-    resolved = resolve_competition_sport(value)
-    if resolved is not None:
-        return resolved
-    return StoredSport(Sport.OTHER, Environment.UNKNOWN, _kept_detail(value))
-
-
 def resolve_equipment_sport(value: Any, environment: Any = None) -> StoredSport | None:
     """Return the canonical equipment sport of a canonical value or legacy token."""
     canonical = _canonical_sport(value)

@@ -5,20 +5,15 @@ from __future__ import annotations
 import json
 import sqlite3
 import unittest
-from collections.abc import Callable
-from contextlib import closing
-from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
-from backend.db.migrations import migrate_schema
 from backend.db.remote_links import RemoteLinkRepository
 from backend.db.repositories import CompetitionRepository
 from backend.db.schema import initialize_schema
 from backend.planning.planned_unit_service import PlannedUnitService
 
-SCHEMA_V7 = Path(__file__).with_name("fixtures") / "schema_v7.sql.txt"
 NOW = "2026-10-12T08:00:00+00:00"
 INTERVALS = ProviderId.INTERVALS.value
 REPOSITORY = RemoteLinkRepository()
@@ -201,86 +196,6 @@ class PlannedUnitWriterTests(unittest.TestCase):
             )
             REPOSITORY.refresh_from_slots(self.db, self.kind, "u1")
             self.assertEqual(link(self.db, self.kind, "u1"), expected)
-
-
-class MigrationParityTests(unittest.TestCase):
-    """The runtime derivation matches the schema-version-8 backfill."""
-
-    def snapshot(self, db: Any) -> list[tuple[Any, ...]]:
-        return [
-            tuple(row)
-            for row in db.execute(
-                "SELECT entity_kind, local_id, provider, remote_id, "
-                "remote_external_id, baseline_hash, sync_state, last_synced_at "
-                "FROM remote_links ORDER BY entity_kind, local_id"
-            )
-        ]
-
-    def seed(self, db: Any) -> None:
-        for suffix, event_id, external in (
-            ("a", " 601 ", "ext-a"),
-            ("b", "601", None),
-            ("c", None, "ext-c"),
-            ("d", None, None),
-            ("e", "602", "   "),
-        ):
-            insert_competition(
-                db, f"c-{suffix}", intervals_event_id=event_id, external_id=external
-            )
-        for suffix, remote_event_id, external in (
-            ("a", 701, "ext-pa"),
-            ("b", "701", None),
-            ("c", None, "ext-pc"),
-            ("d", None, None),
-            ("e", True, None),
-        ):
-            payload: dict[str, Any] = {"id": suffix, "date": "2026-11-01"}
-            if remote_event_id is not None:
-                payload["remote_event_id"] = remote_event_id
-            for table in ("planned_units", "workout_library"):
-                columns = (
-                    "baseline_hash, " if table == "planned_units" else ""
-                ) + "sync_dirty"
-                db.execute(
-                    f"INSERT INTO {table}(id, local_id, external_id, payload, "
-                    f"{columns}, updated_at"
-                    + (", created_at" if table == "planned_units" else "")
-                    + ") VALUES (?, ?, ?, ?, "
-                    + ("'hash', " if table == "planned_units" else "")
-                    + "1, ?"
-                    + (", ?" if table == "planned_units" else "")
-                    + ")",
-                    (
-                        f"id-{suffix}",
-                        f"u-{suffix}",
-                        external,
-                        json.dumps(payload),
-                        NOW,
-                        *((NOW,) if table == "planned_units" else ()),
-                    ),
-                )
-
-    def test_runtime_refresh_reproduces_the_upgrade_backfill(self) -> None:
-        with closing(memory_database(SCHEMA_V7.read_text(encoding="utf-8"))) as db:
-            self.seed(db)
-            migrate_schema(db)
-            backfilled = self.snapshot(db)
-            self.assertTrue(backfilled)
-            db.execute("DELETE FROM remote_links")
-            targets: list[tuple[RemoteEntityKind, str, str]] = [
-                (RemoteEntityKind.COMPETITION, "competitions", "id"),
-                (RemoteEntityKind.PLANNED_UNIT, "planned_units", "local_id"),
-                (RemoteEntityKind.LIBRARY_WORKOUT, "workout_library", "local_id"),
-            ]
-            refresh: Callable[[RemoteEntityKind, str], None] = lambda kind, local_id: (
-                REPOSITORY.refresh_from_slots(db, kind, local_id)
-            )
-            for kind, table, column in targets:
-                for (local_id,) in db.execute(
-                    f"SELECT {column} FROM {table} ORDER BY rowid"
-                ).fetchall():
-                    refresh(kind, local_id)
-            self.assertEqual(self.snapshot(db), backfilled)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,6 @@ from backend.canonical.stored_sports import (
     LEGACY_COMPETITION_TOKENS,
     LEGACY_EQUIPMENT_TOKENS,
     StoredSport,
-    legacy_competition_sport,
     legacy_workout_sport,
     resolve_competition_sport,
     resolve_equipment_sport,
@@ -154,13 +153,6 @@ class StoredCompetitionSportTests(unittest.TestCase):
         self.assertEqual(
             competition_stored_sport({"sport": "Obstacle course"}),
             StoredSport(Sport.OTHER, UNKNOWN, "Obstacle course"),
-        )
-        self.assertEqual(
-            legacy_competition_sport("Obstacle course"),
-            StoredSport(Sport.OTHER, UNKNOWN, "Obstacle course"),
-        )
-        self.assertEqual(
-            legacy_competition_sport(""), StoredSport(Sport.OTHER, UNKNOWN, None)
         )
 
 

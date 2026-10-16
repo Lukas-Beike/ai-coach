@@ -5,7 +5,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -13,9 +12,7 @@ import backend
 from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import (
-    CURRENT_SCHEMA_VERSION,
     database_schema_is_current,
-    initialize_schema,
 )
 
 
@@ -29,91 +26,6 @@ class DatabaseBootstrapTests(unittest.TestCase):
         connection = sqlite3.connect(":memory:")
         connection.row_factory = sqlite3.Row
         return connection
-
-    def drop_provider_tables(self, db):
-        # Released schemas predate the schema v6 provider tables and the schema
-        # v7 activity_feedback.provider column; children first. The column is
-        # removed by rebuilding the table with its released DDL, because
-        # DROP COLUMN leaves different stored SQL text than a released schema.
-        db.execute("ALTER TABLE activity_feedback RENAME TO activity_feedback_v7")
-        db.execute(
-            """
-            CREATE TABLE activity_feedback (
-                activity_id TEXT PRIMARY KEY,
-                activity_name TEXT NOT NULL DEFAULT '',
-                activity_date TEXT NOT NULL DEFAULT '',
-                notes TEXT NOT NULL DEFAULT '',
-                session_rpe REAL CHECK (session_rpe IS NULL OR (session_rpe >= 0 AND session_rpe <= 10)),
-                deviation_reason TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            """
-        )
-        db.execute(
-            "INSERT INTO activity_feedback SELECT activity_id, activity_name, "
-            "activity_date, notes, session_rpe, deviation_reason, created_at, "
-            "updated_at FROM activity_feedback_v7"
-        )
-        db.execute("DROP TABLE activity_feedback_v7")
-        # Schema v8 added remote_links and the tombstone provider column; the
-        # tombstone table is rebuilt with its released DDL for the same reason.
-        db.execute("DROP TABLE remote_links")
-        db.execute(
-            "ALTER TABLE competition_sync_tombstones "
-            "RENAME TO competition_sync_tombstones_v8"
-        )
-        db.execute(
-            """
-            CREATE TABLE competition_sync_tombstones (
-                id TEXT PRIMARY KEY,
-                intervals_event_id TEXT,
-                external_id TEXT,
-                created_at TEXT NOT NULL
-            );
-            """
-        )
-        db.execute(
-            "INSERT INTO competition_sync_tombstones SELECT id, intervals_event_id, "
-            "external_id, created_at FROM competition_sync_tombstones_v8"
-        )
-        db.execute("DROP TABLE competition_sync_tombstones_v8")
-        # Schema v9 added competitions.environment and sport_detail.
-        db.execute("DROP TABLE competitions")
-        db.execute(
-            """
-            CREATE TABLE competitions (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                event_date TEXT NOT NULL,
-                sport TEXT NOT NULL,
-                priority TEXT NOT NULL,
-                distance TEXT NOT NULL,
-                target TEXT NOT NULL,
-                course_profile TEXT NOT NULL,
-                notes TEXT NOT NULL,
-                category TEXT NOT NULL DEFAULT 'RACE_B',
-                start_date_local TEXT,
-                description TEXT NOT NULL DEFAULT '',
-                moving_time INTEGER,
-                intervals_event_id TEXT,
-                external_id TEXT,
-                sync_dirty INTEGER NOT NULL DEFAULT 1,
-                sync_state TEXT NOT NULL DEFAULT 'local',
-                sync_conflict TEXT NOT NULL DEFAULT '',
-                last_synced_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            """
-        )
-        for table in (
-            "observations",
-            "activity_records",
-            "activity_sessions",
-            "provider_records",
-        ):
-            db.execute(f"DROP TABLE {table}")
 
     def bootstrap(self, db, *, retention_days=-1):
         initialize_application_database(
@@ -222,153 +134,6 @@ class DatabaseBootstrapTests(unittest.TestCase):
                 self.assertEqual(
                     db.execute("PRAGMA user_version").fetchone()[0], version
                 )
-
-    def test_1_12_19_schema_is_migrated_without_losing_existing_rows(self):
-        db = self.make_connection()
-        self.addCleanup(db.close)
-        initialize_schema(db)
-        db.execute(
-            "INSERT INTO nutrition_logs(id, meal_date, logged_at, meal_type, description, kcal, created_at, updated_at) VALUES ('meal-1', '2026-09-15', ?, 'lunch', 'Synthetic meal', 500, ?, ?)",
-            (self.now, self.now, self.now),
-        )
-        db.execute("DROP TABLE nutrition_products")
-        db.execute("ALTER TABLE external_calendar_events DROP COLUMN no_training")
-        db.execute("ALTER TABLE nutrition_logs DROP COLUMN logged_time_known")
-        self.drop_provider_tables(db)
-        db.execute("PRAGMA user_version = 1")
-        db.commit()
-
-        self.bootstrap(db)
-
-        self.assertTrue(database_schema_is_current(db))
-        self.assertEqual(
-            db.execute(
-                "SELECT description FROM nutrition_logs WHERE id='meal-1'"
-            ).fetchone()[0],
-            "Synthetic meal",
-        )
-        self.assertEqual(
-            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
-        )
-        db.execute(
-            "INSERT INTO nutrition_products(id, name, basis_amount, basis_unit, source, created_at, updated_at) VALUES ('product-1', 'Synthetic oats', 100, 'g', 'manual', ?, ?)",
-            (self.now, self.now),
-        )
-        self.assertEqual(
-            db.execute("SELECT name FROM nutrition_products").fetchone()[0],
-            "Synthetic oats",
-        )
-
-    def test_schema_v5_database_bootstraps_without_losing_records(self):
-        schema_v5 = Path(__file__).with_name("fixtures") / "schema_v5.sql.txt"
-        db = self.make_connection()
-        self.addCleanup(db.close)
-        db.executescript(schema_v5.read_text(encoding="utf-8"))
-        db.execute(
-            "INSERT INTO messages(role, content, created_at) VALUES ('user', 'Synthetic question', ?)",
-            (self.now,),
-        )
-        db.execute(
-            "INSERT INTO snapshots(payload, created_at) VALUES ('{}', ?)", (self.now,)
-        )
-        db.execute(
-            "INSERT INTO nutrition_logs(id, meal_date, logged_at, meal_type, description, kcal, created_at, updated_at, logged_time_known) VALUES ('meal-1', '2026-09-15', ?, 'lunch', 'Synthetic meal', 500, ?, ?, 0)",
-            (self.now, self.now, self.now),
-        )
-        db.commit()
-
-        self.bootstrap(db)
-
-        self.assertTrue(database_schema_is_current(db))
-        self.assertEqual(
-            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
-        )
-        self.assertEqual(
-            db.execute("SELECT content FROM messages").fetchone()[0],
-            "Synthetic question",
-        )
-        self.assertEqual(db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0], 1)
-        self.assertEqual(
-            tuple(
-                db.execute(
-                    "SELECT description, logged_time_known FROM nutrition_logs WHERE id='meal-1'"
-                ).fetchone()
-            ),
-            ("Synthetic meal", 0),
-        )
-
-    def test_bounded_retention_keeps_removed_gemini_state_absent(self):
-        db = self.make_connection()
-        self.addCleanup(db.close)
-        self.bootstrap(db, retention_days=1)
-        old = (self.current_time - timedelta(days=31)).isoformat()
-        recent = (self.current_time - timedelta(days=29)).isoformat()
-        db.executemany(
-            "INSERT INTO messages(role, content, created_at) VALUES ('user', ?, ?)",
-            [("old", old), ("recent", recent)],
-        )
-        db.executemany(
-            "INSERT INTO snapshots(payload, created_at) VALUES (?, ?)",
-            [("old", old), ("recent", recent)],
-        )
-        # Version 3 predates logged_time_known, so the legacy shape must match.
-        db.execute("ALTER TABLE nutrition_logs DROP COLUMN logged_time_known")
-        self.drop_provider_tables(db)
-        db.execute("PRAGMA user_version = 3")
-
-        self.bootstrap(db, retention_days=1)
-
-        self.assertEqual(
-            [
-                row["content"]
-                for row in db.execute("SELECT content FROM messages ORDER BY id")
-            ],
-            ["recent"],
-        )
-        self.assertEqual(
-            [
-                row["payload"]
-                for row in db.execute("SELECT payload FROM snapshots ORDER BY id")
-            ],
-            ["recent"],
-        )
-        self.assertIsNone(self.key_values.get(db, "gemini_conversation_history"))
-        self.assertIsNone(self.key_values.get(db, "gemini_call_names"))
-
-    def test_release_1_12_26_reopen_does_not_recreate_retired_provider_state(self):
-        fixture = Path(__file__).with_name("fixtures") / "schema_1_12_26.sql.txt"
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "synthetic.db"
-            with closing(sqlite3.connect(path)) as db:
-                db.row_factory = sqlite3.Row
-                db.executescript(fixture.read_text(encoding="utf-8"))
-                db.executemany(
-                    "INSERT INTO kv VALUES (?, ?, 'before')",
-                    [
-                        ("selected_ai_provider", "gemini"),
-                        ("selected_model_gemini", "gemini-test"),
-                        ("gemini_conversation_history", "[]"),
-                        ("gemini_call_names", "{}"),
-                        ("gemini_usage", "{}"),
-                        ("gemini_status", "{}"),
-                        ("openai_conversation_id", "conv_openai"),
-                    ],
-                )
-                self.bootstrap(db)
-                db.commit()
-                after_upgrade = list(db.iterdump())
-
-            with closing(sqlite3.connect(path)) as db:
-                db.row_factory = sqlite3.Row
-                self.bootstrap(db)
-                db.commit()
-                self.assertTrue(database_schema_is_current(db))
-                self.assertEqual(list(db.iterdump()), after_upgrade)
-                values = dict(db.execute("SELECT key, value FROM kv"))
-                self.assertEqual(values["selected_ai_provider"], "openai")
-                self.assertEqual(values["openai_conversation_id"], "conv_openai")
-                self.assertFalse(any(key.startswith("gemini_") for key in values))
-                self.assertNotIn("selected_model_gemini", values)
 
     def test_bounded_retention_clamps_to_three_thousand_six_hundred_fifty_days(self):
         db = self.make_connection()

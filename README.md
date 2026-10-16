@@ -29,20 +29,18 @@ order and the package-cycle fixture is empty.
 
 ## Release and Database Compatibility
 
-Releases preserve the athlete's existing encrypted database. Schema changes use
-explicit, versioned and transactional migrations with upgrade regression tests;
-supported previous releases can be upgraded directly, including when an
-intermediate release was skipped. A fresh database is only required when the
-athlete explicitly chooses to start over. Unknown or newer schemas are rejected
-without deleting or partially changing the data.
+Releases preserve the athlete's existing encrypted database. The oldest
+supported schema is version 9, written by release 1.13.x; startup and restore
+accept it in place, retaining existing records and SQLCipher encryption. Older,
+unknown or newer schemas are rejected without deleting or partially changing
+the data: upgrade an older database or backup with release 1.13.6 first. Keep
+the existing `/data` bind mount and `APP_PASSWORD` when recreating the
+container, and do not replace or reset the data directory to resolve a
+rejected schema. A fresh database is only required when the athlete explicitly
+chooses to start over. Future schema changes add explicit, versioned and
+transactional migrations from version 9 with upgrade regression tests.
 
-Version 1.12.21 supports direct updates from 1.12.19 and 1.12.20. Keep the existing
-`/data` bind mount and `APP_PASSWORD` when recreating the container. Startup
-automatically adds the missing nutrition-product table and indexes before
-workers start, retaining existing records and SQLCipher encryption. A failed
-migration rolls back; do not replace or reset the data directory to resolve it.
-
-Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. Startup rewrites the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`) in one transaction; the step is idempotent and older backups are migrated before a restore. The HTTP API and coach tools keep accepting the old tokens, and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types.
+Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. The HTTP API and coach tools keep accepting the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`), and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types.
 
 ---
 
@@ -534,7 +532,7 @@ When a database restore is initiated:
 2. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 3. Active background sync jobs and Coach turns are allowed to finish gracefully.
 4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`.
-5. Supported older schemas are migrated on the staged backup copy. The replacement database must then match the current schema and pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
+5. The replacement database must match the current schema (version 9); older backups are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss.
 
 ### Privacy Export & Data Purge
@@ -854,7 +852,7 @@ Der Coach bevorzugt **BLS 4.0** für Grundnahrungsmittel und **Open Food Facts**
 
 **Datenquellen:** Max Rubner-Institut (2025): *Bundeslebensmittelschlüssel (BLS), Version 4.0 — Deutsche Nährstoffdatenbank*, Karlsruhe, [DOI 10.25826/Data20251217-134202-0](https://doi.org/10.25826/Data20251217-134202-0), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de). Die eingebundene Ableitung enthält Lebensmittelbezeichnung, Energie, Kohlenhydrate, Protein, Fett und Datenherkunft pro 100 g essbarem Anteil; fehlende Werte, Spuren und Angaben unter der Nachweisgrenze bleiben unbekannt. Reproduzierbare Extraktion: `python tools/extract_bls.py <BLS_4_0_2025_DE.zip>` mit dem [offiziellen Download](https://www.blsdb.de/download). Open Food Facts: [Datenbank unter ODbL 1.0, Inhalte unter Database Contents License](https://openfoodfacts.github.io/openfoodfacts-server/api/); gemeinschaftlich gepflegte Produktwerte sind auf Produkt, Einheit und Vollständigkeit zu prüfen. BLS-Daten und OFF-Cache bleiben getrennt. Es werden keine Produktdaten oder Bilder zu Open Food Facts hochgeladen.
 
-Ernährungseinträge bleiben lokal; eine Übertragung der Tagessummen zu Intervals.icu erfolgt nur nach explizitem Auftrag und Freigabe. Vorlagen und Quellenangaben gehören zu Datenschutzexport, verschlüsseltem Backup und der Löschkategorie Ernährung. Release 1.12.21 migriert das vorhandene SQLCipher-Schema von 1.12.19 und 1.12.20 automatisch beim Start; ein leeres Datenverzeichnis ist für dieses Update nicht erforderlich.
+Ernährungseinträge bleiben lokal; eine Übertragung der Tagessummen zu Intervals.icu erfolgt nur nach explizitem Auftrag und Freigabe. Vorlagen und Quellenangaben gehören zu Datenschutzexport, verschlüsseltem Backup und der Löschkategorie Ernährung.
 
 Garmins Tagesverbrauch (für heute vorläufig) mit Aktivkalorien und Grundumsatz wird für das ausgewählte Tagebuchdatum getrennt von der erfassten Nahrungsaufnahme angezeigt. Datum, Quelle und Aktualität bleiben sichtbar; Werte für heute sind vorläufig, solange Garmins Tagesdatensatz noch ergänzt wird. Fehlende Komponenten bleiben unbekannt und werden nicht zu einem erfundenen Gesamtwert addiert. Garmins eigener Tagesverbrauchs-Prognosewert ist über die API nicht abrufbar; für heute zeigt die App deshalb zusätzlich eine klar als „Prognose Tagesverbrauch (abgeleitet)“ gekennzeichnete eigene Schätzung: Grundumsatz des letzten abgeschlossenen Tages (höchstens sieben Tage zurück) plus die bisherigen Aktivkalorien, mit sichtbarer Rechnung. Sie weicht typischerweise um wenige kcal von Garmin Connect ab und entfällt, wenn Aktivkalorien oder ein plausibler Referenztag fehlen.
 
