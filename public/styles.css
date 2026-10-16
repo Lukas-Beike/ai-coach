@@ -1230,7 +1230,6 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   #settingsPanel > .more-segment-nav { position: sticky; top: 24px; grid-column: 1; grid-row: 2 / span 8; display: grid; align-content: start; gap: 4px; margin: 0; }
   #settingsPanel > .more-segment-nav a { flex: none; min-height: 46px; justify-content: start; padding: 10px 12px; text-align: left; }
   #settingsPanel > .settings-section { grid-column: 2; width: 100%; min-width: 0; }
-  #settingsPanel > .session-settings { order: 1; }
 }
 
 @media (max-width: 767px) {
