@@ -67,9 +67,11 @@ class _DatedRows:
     def __init__(self, rows):
         self.rows = rows
         self.starts = []
+        self.units = []
 
-    def activity_rows(self, _db, *, start=None, end=None, limit=None):
+    def activity_rows(self, db, *, start=None, end=None, limit=None):
         self.starts.append(start)
+        self.units.append(db)
         return tuple(
             row
             for row in self.rows
@@ -169,6 +171,12 @@ class ActivityReadServiceTests(unittest.TestCase):
         old = service.detail("old", garmin_snapshot={}, profile={}, today=today)
         self.assertEqual("Winter run", old["activity"]["name"])
         self.assertEqual([date(2025, 9, 21), date(2025, 9, 21), None], rows.starts)
+        # The full-history lookup shares the read snapshot of the windowed read.
+        self.assertIs(rows.units[1], rows.units[2])
+        with self.assertRaises(AppError) as missing:
+            service.detail("missing", garmin_snapshot={}, profile={}, today=today)
+        self.assertEqual("activity_details_not_found", missing.exception.reason)
+        self.assertEqual([date(2025, 9, 21), None], rows.starts[3:])
 
     def test_detail_rejects_invalid_or_missing_activity(self):
         service = self.service()

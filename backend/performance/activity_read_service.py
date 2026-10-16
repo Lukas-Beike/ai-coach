@@ -14,7 +14,6 @@ from backend.performance.activity_validation import activity_performance_validat
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
-    activity_rows_for,
     performance_options,
     read_performance_inputs,
 )
@@ -48,35 +47,35 @@ class ActivityAnalysisReadService(ActivityReadService):
         self._canonical = canonical
 
     def _performance_inputs(
-        self, as_of: date
-    ) -> tuple[dict[str, Any], CanonicalPerformanceInputs | None]:
-        """Read the snapshot, and CTL and ATL in the same read snapshot when configured."""
+        self, as_of: date, activity_id: str | None = None
+    ) -> tuple[dict[str, Any], CanonicalPerformanceInputs | None, Sequence[Any] | None]:
+        """Read the snapshot, CTL and ATL, and the activity's rows in one read snapshot.
+
+        The performance inputs cover only the recent year, so an older activity
+        is looked up in the full history of the same read snapshot.
+        """
         source = self._canonical
         if source is None:
-            return self._snapshot(), None
+            return self._snapshot(), None, None
         with source.database_manager().read_snapshot() as db:
             snapshot = self._snapshot()
+            reader = source.activity_row_reader()
             canonical = read_performance_inputs(
                 source.observation_reader(),
                 db,
                 snapshot,
-                activity_reader=source.activity_row_reader(),
+                activity_reader=reader,
                 as_of=as_of,
             )
-        return snapshot, canonical
-
-    def _detail_rows(
-        self, canonical: CanonicalPerformanceInputs | None, normalized_id: str
-    ) -> Sequence[Any] | None:
-        """Return the canonical rows that hold the activity, if they were read.
-
-        The performance inputs cover only the recent year, so an older activity
-        is looked up in the full history.
-        """
-        rows = None if canonical is None else canonical.activity_rows
-        if rows is None or _find_activity(rows, normalized_id) is not None:
-            return rows
-        return activity_rows_for(self._canonical)
+            rows = None if canonical is None else canonical.activity_rows
+            if (
+                rows is not None
+                and reader is not None
+                and activity_id is not None
+                and _find_activity(rows, activity_id) is None
+            ):
+                rows = tuple(reader.activity_rows(db))
+        return snapshot, canonical, rows
 
     def detail(
         self,
@@ -94,10 +93,8 @@ class ActivityAnalysisReadService(ActivityReadService):
                 reason="invalid_activity_request",
             )
         normalized_id = str(self._references.resolve(normalized_id))
-        snapshot, canonical = self._performance_inputs(today)
-        activity = _raw_activity(
-            snapshot, normalized_id, self._detail_rows(canonical, normalized_id)
-        )
+        snapshot, canonical, rows = self._performance_inputs(today, normalized_id)
+        activity = _raw_activity(snapshot, normalized_id, rows)
         cached = self._detail_store.get(normalized_id) if self._detail_store else None
         stale = bool(
             cached
