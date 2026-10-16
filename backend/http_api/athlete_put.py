@@ -34,7 +34,7 @@ class AthletePutRoutes:
                     payload.get("profile"), payload.get("competitions")
                 )
             else:
-                result = self._profile_service().save(payload)
+                result = self._profile_service().patch(payload)
 
         handler.send_json(200, result)
         return True

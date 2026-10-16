@@ -161,6 +161,63 @@ class ProfileServiceTests(unittest.TestCase):
             self.db.execute("SELECT COUNT(*) FROM change_history").fetchone()[0], 0
         )
 
+    def test_patch_applies_partial_writes_to_the_current_stored_profile(self):
+        self.service.save({"name": "Ada", "weight_kg": "60", "goals": "Base"})
+
+        # A second caller that read an older snapshot must not erase fields it did not send.
+        self.service.patch({"weight_kg": "62"})
+        saved = self.service.patch({"goals": "Threshold"})
+
+        self.assertEqual(saved["name"], "Ada")
+        self.assertEqual(saved["weight_kg"], "62")
+        self.assertEqual(saved["goals"], "Threshold")
+        self.assertEqual(self.service.get(), saved)
+
+    def test_patch_with_only_weight_keeps_name_and_normalizes_changed_field(self):
+        self.service.save({"name": "Ada", "timezone": "UTC"})
+
+        saved = self.service.patch({"weight_kg": "  61.5 "})
+
+        self.assertEqual(saved["name"], "Ada")
+        self.assertEqual(saved["timezone"], "UTC")
+        self.assertEqual(saved["weight_kg"], "61.5")
+
+    def test_patch_rejects_non_object_payload(self):
+        with self.assertRaises(AppError):
+            self.service.patch(["name"])
+
+    def test_patch_invalid_timezone_rolls_back_without_changes(self):
+        self.service.save({"name": "Ada", "timezone": "UTC"})
+        with self.assertRaises(AppError):
+            self.service.patch({"timezone": "Mars/Invalid"})
+        self.assertEqual(self.service.get()["timezone"], "UTC")
+
+    def test_restore_of_location_change_invokes_location_hook_and_clears_weather(self):
+        calls = []
+
+        def spy(previous, current, *, repository, db):
+            calls.append((previous["weather_location"], current["weather_location"]))
+            return weather_cache.invalidate_for_location_change(
+                previous, current, repository=repository, db=db
+            )
+
+        self.service._on_location_changed = spy
+        self.service.save({"weather_location": "Berlin", "timezone": "UTC"})
+        before = self.service.get()
+        self.service.save({"weather_location": "Hamburg", "timezone": "UTC"})
+        self.key_values.set(self.db, weather_cache.CACHE_KEY, "cached")
+        self.key_values.set(self.db, weather_cache.FAILURE_KEY, "failed")
+        calls.clear()
+
+        restored = self.service.restore_in_transaction(
+            self.db, self.service.get(), before
+        )
+
+        self.assertEqual(calls, [("Hamburg", "Berlin")])
+        self.assertEqual(restored["weather_location"], "Berlin")
+        self.assertEqual(self.key_values.get(self.db, weather_cache.CACHE_KEY), "")
+        self.assertEqual(self.key_values.get(self.db, weather_cache.FAILURE_KEY), "")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -968,7 +968,8 @@ class ProviderHTTPTests(unittest.TestCase):
             failure["error"],
             {"type": "AppError", "status": 409, "reason": "already_exists"},
         )
-        self.assertEqual(failure["exception_message"], "synthetic message")
+        self.assertNotIn("exception_message", failure)
+        self.assertNotIn("synthetic message", repr(capture.entries))
 
     def test_external_call_translates_unexpected_exception_with_cause_and_no_leak(self):
         logger = _CallLogger()
@@ -996,9 +997,8 @@ class ProviderHTTPTests(unittest.TestCase):
             "provider payload must not leak", repr(logger.records[1][2]["extra"])
         )
         self.assertEqual(capture.entries[1][1]["error"], {"type": "RuntimeError"})
-        self.assertEqual(
-            capture.entries[1][1]["exception_message"], "provider payload must not leak"
-        )
+        self.assertNotIn("exception_message", capture.entries[1][1])
+        self.assertNotIn("provider payload must not leak", repr(capture.entries))
 
     def test_external_call_classifies_timeout_without_exposing_error_text(self):
         logger = _CallLogger()

@@ -247,6 +247,7 @@ class PrivacyDeleteDependencies:
     planning_revision_service: PlanningRevisionService
     openai_client: OpenAIResponsesClient
     logger: logging.Logger
+    diagnostics_suspended: Callable[[], AbstractContextManager[None]]
 
 
 class PrivacyDeleteService:
@@ -319,7 +320,10 @@ class PrivacyDeleteService:
                         extra={"event": "privacy_remote_delete_failed"},
                         exc_info=True,
                     )
+            # Flushes stay blocked from before the delete until the cache is dropped,
+            # so deleted diagnostics are neither served nor written back.
             with (
+                dependencies.diagnostics_suspended(),
                 dependencies.database_lock,
                 dependencies.database_manager.unit_of_work() as db,
             ):
@@ -381,6 +385,7 @@ class PrivacyStateDependencies:
     planning_revision_service: PlanningRevisionService
     openai_client: Callable[[], OpenAIResponsesClient]
     logger: logging.Logger
+    diagnostics_suspended: Callable[[], AbstractContextManager[None]]
 
 
 @dataclass(frozen=True)
@@ -428,6 +433,7 @@ class PrivacyAssembly:
         self._planning_revision_service = state.planning_revision_service
         self._openai_client = state.openai_client
         self._logger = state.logger
+        self._diagnostics_suspended = state.diagnostics_suspended
         self._data_dir = archive.data_dir
         self._database_path = archive.database_path
         self._maximum_export_bytes = archive.maximum_export_bytes
@@ -462,6 +468,7 @@ class PrivacyAssembly:
                 planning_revision_service=self._planning_revision_service,
                 openai_client=self._openai_client(),
                 logger=self._logger,
+                diagnostics_suspended=self._diagnostics_suspended,
             )
         )
 

@@ -15,6 +15,7 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_PLANNING_ERROR, AppError
 from backend.planning import calendar as planning_calendar
 from backend.planning import planned_units, workouts
+from backend.planning.conflicts import calendar_item_window
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 
 _REMOTE_LINKS = RemoteLinkRepository()
@@ -22,6 +23,11 @@ UPDATE_SQL = (
     "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', "
     "sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?"
 )
+
+
+def _start_time_suffix(start: str) -> str | None:
+    """Return the time part of a local start such as 2026-09-21T07:15:00."""
+    return start[10:] if len(start) > 10 and start[10] == "T" else None
 
 
 class PlannedUnitService:
@@ -139,14 +145,19 @@ class PlannedUnitService:
         )
         restored_target = dict(target)
         if restore_date:
-            previous_start = str(current_payload.get("start_date_local") or "")
             suffix = (
-                previous_start[10:]
-                if len(previous_start) > 10 and previous_start[10] == "T"
-                else "T00:00:00"
+                _start_time_suffix(str(target.get("start_date_local") or ""))
+                or _start_time_suffix(
+                    str(current_payload.get("start_date_local") or "")
+                )
+                or "T00:00:00"
             )
             restored_target["start_date_local"] = restore_date + suffix
-        if restore_date != current_date or restored_from_hidden:
+        window_changed = any(
+            key in restored_target and restored_target[key] != current_payload.get(key)
+            for key in ("start_date_local", "duration_minutes", "moving_time")
+        )
+        if restore_date != current_date or window_changed or restored_from_hidden:
             self._reject_restore_conflict(
                 entity_id, {**current_payload, **restored_target}
             )
@@ -503,6 +514,9 @@ class PlannedUnitService:
             current, action, values
         )
         date_changed = planned_units.prepare_planned_workout_date(candidate, current)
+        window_changed = calendar_item_window(candidate) != calendar_item_window(
+            current
+        )
         is_active = not candidate.get("archived") and not candidate.get("local_deleted")
         marker_conflicts = (
             self._calendar_conflict_service.constraints(candidate)
@@ -517,7 +531,11 @@ class PlannedUnitService:
                 ),
                 reason="plan_date_conflict",
             )
-        if is_active and not skip_calendar_conflict and date_changed:
+        if (
+            is_active
+            and not skip_calendar_conflict
+            and (date_changed or window_changed)
+        ):
             conflicts = self._calendar_conflict_service.conflicts(
                 candidate, {normalized_id}
             )

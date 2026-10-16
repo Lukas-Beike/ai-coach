@@ -135,6 +135,26 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
         normalize.assert_not_called()
         self.assertEqual(self.lock.acquire_calls, [])
 
+    def test_pending_entry_edited_during_upload_is_not_calendar_synced(self) -> None:
+        pending = self._add("library", {"date": "2026-10-01"})
+        self.library_sync.sync_entry.return_value = {
+            "date": "2026-10-05",
+            "external_id": "remote-workout",
+            "sync_status": "local",
+        }
+
+        result = self._service().sync({"entries": [pending]})
+
+        self.library_sync.sync_calendar_entry.assert_not_called()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["results"][0]["status"], "conflict")
+        self.assertEqual(result["results"][0]["error"], "Seit der Vorschau geändert")
+        self.assertEqual(result["failed_object_ids"], [pending["library_workout_id"]])
+        self.assertEqual(
+            result["retry_scope"], "Nur fehlgeschlagene Objekte erneut auswählen."
+        )
+
     def test_pending_and_existing_library_entries(self) -> None:
         pending = self._add("library", {"date": "2026-10-01"})
         calendar_candidate = self._add(

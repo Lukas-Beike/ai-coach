@@ -292,6 +292,25 @@ function nextCompetitionSummary(next, dateLabel, todayKey) {
   return `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${phase} · ${when}`;
 }
 
+function adaptiveForecastNote(forecast, formatTime) {
+  if (!forecast?.fetched_at) return "";
+  return `Wetterprognose Stand ${formatTime(forecast.fetched_at)}${forecast.stale ? " (veraltet)" : ""}`;
+}
+
+function adaptiveIllnessPending(data, preview) {
+  const illness = String(data.local_feedback?.today?.illness || "").trim();
+  const previewIllness = String(preview?.illness_pause?.illness || "").trim();
+  const needsForecast = Boolean(illness && (!preview?.illness_pause || previewIllness !== illness || !preview.illness_pause?.approved));
+  const pendingPause = Boolean(preview?.status === "preview" && preview?.illness_pause && !preview.illness_pause.approved);
+  return needsForecast || pendingPause;
+}
+
+function adaptiveCaption(illnessPending, count) {
+  if (illnessPending) return "Krankheit gemeldet: Sportpause prognostizieren und bestätigen.";
+  if (count === 1) return "Ein zukünftiger Entwurf braucht eine Anpassung.";
+  return `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
+}
+
 function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
@@ -300,21 +319,16 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (summary) summary.textContent = nextCompetitionSummary(next, dateLabel, todayIso());
     const preview = planning.latest_replan;
     const changes = Array.isArray(preview?.changes) ? preview.changes : [];
-    const illness = String(data.local_feedback?.today?.illness || "").trim();
-    const previewIllness = String(preview?.illness_pause?.illness || "").trim();
-    const illnessNeedsForecast = Boolean(illness && (!preview?.illness_pause || previewIllness !== illness || !preview.illness_pause?.approved));
-    const pendingIllnessPause = Boolean(preview?.status === "preview" && preview?.illness_pause && !preview.illness_pause.approved);
-    const required = Boolean(planning.needs_replan || illnessNeedsForecast || pendingIllnessPause);
-    const count = Number(planning.replan_changes || changes.length);
-    let caption;
-    if (illnessNeedsForecast || pendingIllnessPause) caption = "Krankheit gemeldet: Sportpause prognostizieren und bestätigen.";
-    else if (count === 1) caption = "Ein zukünftiger Entwurf braucht eine Anpassung.";
-    else caption = `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
+    const illnessPending = adaptiveIllnessPending(data, preview);
+    const required = Boolean(planning.needs_replan || illnessPending);
+    const caption = adaptiveCaption(illnessPending, Number(planning.replan_changes || changes.length));
+    const weatherChanged = changes.some((change) => Array.isArray(change?.blocking_triggers) && change.blocking_triggers.includes("weather"));
+    const forecastNote = weatherChanged ? adaptiveForecastNote(preview?.weather_forecast, formatTime) : "";
     const coachNotice = $("#coachAdaptivePlanningNotice");
     if (coachNotice) {
       coachNotice.hidden = !required;
       const detail = coachNotice.querySelector("small");
-      if (detail) detail.textContent = required ? `${caption} Bitte den Coach um die Anpassung.` : "";
+      if (detail) detail.textContent = required ? [caption, forecastNote ? `${forecastNote}.` : "", "Bitte den Coach um die Anpassung."].filter(Boolean).join(" ") : "";
     }
   }
 

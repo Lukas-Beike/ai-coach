@@ -6,7 +6,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -39,6 +39,8 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.coach_failures = Mock()
         self.sync_wake = Mock()
         self.coach_wake = Mock()
+        self.diagnostics_suspended = Mock()
+        self.canonical_backfill_start = Mock()
         self.calls: list[str] = []
 
         def stage(payload: bytes | Iterable[bytes]) -> Path:
@@ -79,6 +81,18 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         )
         self.sync_wake.set.side_effect = lambda: self.calls.append("sync-wake")
         self.coach_wake.set.side_effect = lambda: self.calls.append("coach-wake")
+
+        @contextmanager
+        def suspended() -> Iterator[None]:
+            # Like the real capture: the cache is dropped on a normal exit only.
+            self.calls.append("diagnostics-suspend")
+            yield
+            self.calls.append("diagnostics-discard")
+
+        self.diagnostics_suspended.side_effect = suspended
+        self.canonical_backfill_start.side_effect = lambda: self.calls.append(
+            "backfill-start"
+        )
         self.service = DatabaseRestoreService(
             RestoreDependencies(
                 validation=self.validation,
@@ -93,6 +107,8 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
                 coach_wake=self.coach_wake,
                 config=DatabaseRestoreConfig(self.data_dir, self.database_path),
                 redact=lambda _message: "redacted",
+                diagnostics_suspended=self.diagnostics_suspended,
+                canonical_backfill_start=self.canonical_backfill_start,
             )
         )
 
@@ -118,17 +134,41 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
             self.calls,
             [
                 "stage",
+                "diagnostics-suspend",
                 "validate",
                 "checkpoint",
                 "drain",
+                "diagnostics-discard",
                 "sync-resume",
                 "coach-resume",
+                "backfill-start",
                 "sync-wake",
                 "coach-wake",
             ],
         )
         self.coach_jobs.resume_interrupted.assert_called_once_with(self.coach_failures)
         self.assertFalse(self.gate.state()["active"])
+
+    def test_restore_restarts_the_canonical_backfill_worker_once_after_the_swap(
+        self,
+    ) -> None:
+        # The worker may already have exited (done or failed) before the restore.
+        self.service.restore(b"replacement database")
+
+        self.canonical_backfill_start.assert_called_once_with()
+        self.diagnostics_suspended.assert_called_once_with()
+        self.assertEqual(self.calls.count("diagnostics-discard"), 1)
+
+    def test_invalid_backup_neither_restarts_backfill_nor_discards_diagnostics(
+        self,
+    ) -> None:
+        self.validation.validate.side_effect = AppError(400, "invalid backup")
+
+        with self.assertRaises(AppError):
+            self.service.restore(b"replacement database")
+
+        self.canonical_backfill_start.assert_not_called()
+        self.assertNotIn("diagnostics-discard", self.calls)
 
     def test_chunked_upload_restores_like_whole_bytes(self) -> None:
         chunks = iter([b"replacement ", b"database"])
@@ -138,7 +178,7 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.assertEqual(self.database_path.read_bytes(), b"replacement database")
         self.assertTrue(result["restored"])
         self.assertFalse((self.data_dir / "staged.db").exists())
-        self.assertEqual(self.calls[:2], ["stage", "validate"])
+        self.assertEqual(self.calls[:2], ["stage", "diagnostics-suspend"])
 
     def test_staged_upload_is_removed_when_the_maintenance_gate_refuses(self) -> None:
         with (

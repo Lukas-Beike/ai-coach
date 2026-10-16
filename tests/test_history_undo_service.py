@@ -493,6 +493,78 @@ class HistoryUndoServiceTests(unittest.TestCase):
         self.assertEqual(self.revision.calls, 1)
         self.assertEqual(self._counts(), (1, 0, []))
 
+    def _insert_legacy_profile_row(self):
+        """Insert a row hashed before sleep_target_hours joined the projection."""
+        legacy_before = {"name": "before"}
+        legacy_after = {"name": "after"}
+        diff = change_history.audit_diff(legacy_before, legacy_after)
+        with self.raw_manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO change_history "
+                "(id, entity_type, entity_id, action, source, created_at, "
+                "before_hash, after_hash, diff) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    _CHANGE_ID,
+                    "profile",
+                    _ENTITY_ID,
+                    "update",
+                    "local",
+                    "2026-09-20T00:00:00+00:00",
+                    change_history.audit_hash(legacy_before),
+                    change_history.audit_hash(legacy_after),
+                    json.dumps(diff),
+                ),
+            )
+        return legacy_after
+
+    def test_legacy_profile_row_stays_undoable_and_later_edits_still_conflict(self):
+        self._insert_legacy_profile_row()
+        self.history.current_value = {"name": "after", "sleep_target_hours": "7.5"}
+        current_hash = change_history.audit_hash(
+            change_history.audit_projection("profile", self.history.current_value)
+        )
+
+        preview = self.service.preview(_CHANGE_ID)
+        self.assertEqual(
+            preview["proposal"]["payload"]["expected_current_hash"], current_hash
+        )
+        result = self.service.apply(preview["proposal"]["payload"])
+        self.assertEqual(result["status"], "undone")
+        self.assertEqual(len(self.services["profile"].calls), 1)
+
+        self.history.current_value = {"name": "later", "sleep_target_hours": "7.5"}
+        with self.assertRaises(AppError) as raised:
+            self.service.preview(_CHANGE_ID)
+        self.assertEqual(
+            (raised.exception.status, raised.exception.message),
+            (409, _STALE_ERROR),
+        )
+        self.assertEqual(len(self.services["profile"].calls), 1)
+
+    def test_legacy_row_accepts_batch_after_hash_and_rejects_wrong_expected_hash(self):
+        legacy_after = self._insert_legacy_profile_row()
+        self.history.current_value = {"name": "after", "sleep_target_hours": "7.5"}
+
+        with self.assertRaises(AppError) as raised:
+            self.service.apply(
+                {"change_id": _CHANGE_ID, "expected_current_hash": "0" * 64}
+            )
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(self.services["profile"].calls, [])
+
+        with self.raw_manager.unit_of_work() as db:
+            undone = self.service.apply_many(
+                db,
+                [
+                    {
+                        "id": _CHANGE_ID,
+                        "after_hash": change_history.audit_hash(legacy_after),
+                    }
+                ],
+            )
+        self.assertEqual(undone[0]["status"], "undone")
+        self.assertEqual(len(self.services["profile"].calls), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

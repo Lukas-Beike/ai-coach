@@ -252,6 +252,83 @@ class AthleteCheckinTests(unittest.TestCase):
         self.assertEqual(saved["notes"], "keep")
         self.assertEqual(saved["day_form"], "good")
 
+    def test_save_coach_clear_fields_removes_listed_values_and_keeps_omitted(self):
+        self.service.save(
+            {
+                "soreness": 8,
+                "available_minutes": 45,
+                "day_form": "good",
+                "illness": "Synthetic cold",
+                "pain": "Synthetic knee",
+                "notes": "keep",
+            }
+        )
+        result = self.service.save_coach(
+            {"clear_fields": ["illness", "pain", "available_minutes"]}
+        )
+        saved = result["checkin"]
+        self.assertIsNone(saved["available_minutes"])
+        self.assertEqual(saved["illness"], "")
+        self.assertEqual(saved["pain"], "")
+        self.assertEqual(saved["soreness"], 8)
+        self.assertEqual(saved["day_form"], "good")
+        self.assertEqual(saved["notes"], "keep")
+
+    def test_save_coach_clear_fields_can_clear_scores_and_texts(self):
+        self.service.save({"soreness": 8, "stress": 4, "notes": "old"})
+        result = self.service.save_coach(
+            {"clear_fields": ["soreness", "notes"], "stress": 5}
+        )
+        saved = result["checkin"]
+        self.assertIsNone(saved["soreness"])
+        self.assertEqual(saved["notes"], "")
+        self.assertEqual(saved["stress"], 5)
+
+    def test_save_coach_clear_field_with_null_or_empty_value_is_allowed(self):
+        self.service.save({"illness": "Synthetic cold", "pain": "Synthetic knee"})
+        result = self.service.save_coach(
+            {"illness": None, "pain": "", "clear_fields": ["illness", "pain"]}
+        )
+        self.assertEqual(result["checkin"]["illness"], "")
+        self.assertEqual(result["checkin"]["pain"], "")
+
+    def test_save_coach_rejects_clear_field_that_also_has_value(self):
+        self.service.save({"illness": "Synthetic cold", "available_minutes": 45})
+        for payload in (
+            {"illness": "Still ill", "clear_fields": ["illness"]},
+            {"available_minutes": 30, "clear_fields": ["available_minutes"]},
+        ):
+            with (
+                self.subTest(payload=payload),
+                self.assertRaisesRegex(
+                    AppError, "kann nicht zugleich einen Wert erhalten und gelöscht"
+                ),
+            ):
+                self.service.save_coach(payload)
+        with self.manager.unit_of_work() as db:
+            saved = self.repository.get(db, TODAY.isoformat())
+        self.assertEqual(saved["illness"], "Synthetic cold")
+        self.assertEqual(saved["available_minutes"], 45)
+
+    def test_save_coach_rejects_invalid_clear_fields(self):
+        invalid = (
+            "illness",
+            ["checkin_date"],
+            ["illness", "illness"],
+            ["illness", 3],
+            ["unknown_field"],
+        )
+        for clear_fields in invalid:
+            with (
+                self.subTest(clear_fields=clear_fields),
+                self.assertRaisesRegex(
+                    AppError, "clear_fields muss eine eindeutige Liste"
+                ),
+            ):
+                self.service.save_coach({"clear_fields": clear_fields})
+        with self.manager.unit_of_work() as db:
+            self.assertEqual(self.repository.list(db, 365), [])
+
     def test_context_limits_recent_and_uses_today(self):
         for offset in range(16):
             day = date(2026, 8, 31 - offset)

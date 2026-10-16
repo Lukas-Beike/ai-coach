@@ -56,6 +56,16 @@ class DemoContainerScriptTests(unittest.TestCase):
         self.assertNotIn("docker rm -v", script)
         self.assertIn(f"{FIXTURE_MARKER}=1", script)
 
+    def test_native_docker_failures_stop_the_script(self):
+        script = _read("scripts/demo-container.ps1")
+        # Each docker call (build, ps, stop, rm, run) must be followed by an exit-code check.
+        self.assertGreaterEqual(script.count("$LASTEXITCODE -ne 0"), 5)
+        self.assertIn("Demo container did not become healthy on port $Port", script)
+        self.assertLess(
+            script.index("did not become healthy"), script.index("Demo ready")
+        )
+        self.assertNotIn("docker rm -v", script)
+
     def test_script_refuses_production_and_non_demo_names(self):
         shell = shutil.which("pwsh") or shutil.which("powershell")
         if shell is None:

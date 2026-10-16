@@ -23,7 +23,7 @@ class AthletePutRoutesTests(unittest.TestCase):
     def test_profile_write_holds_shared_database_lock(self) -> None:
         payload = {"name": "Example", "timezone": "Europe/Berlin"}
         self.handler.read_json.return_value = payload
-        self.profile.save.side_effect = lambda _value: (
+        self.profile.patch.side_effect = lambda _value: (
             {"name": "Example"}
             if self.database_lock._is_owned()
             else self.fail("profile writes must hold the shared database lock")
@@ -53,16 +53,16 @@ class AthletePutRoutesTests(unittest.TestCase):
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_called_once_with(200, result)
 
-    def test_profile_route_passes_whole_payload(self) -> None:
+    def test_profile_route_passes_submitted_fields_as_patch(self) -> None:
         payload = {"name": "Example", "timezone": "Europe/Berlin"}
         result = {"name": "Example", "timezone": "Europe/Berlin"}
         self.handler.read_json.return_value = payload
-        self.profile.save.return_value = result
+        self.profile.patch.return_value = result
 
         self.assertTrue(self.routes.handle(self.handler, "/api/profile"))
 
         self.profile_factory.assert_called_once_with()
-        self.profile.save.assert_called_once_with(payload)
+        self.profile.patch.assert_called_once_with(payload)
         self.context_factory.assert_not_called()
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_called_once_with(200, result)
@@ -104,7 +104,7 @@ class AthletePutRoutesTests(unittest.TestCase):
 
     def test_service_app_error_propagates_without_response(self) -> None:
         self.handler.read_json.return_value = {"name": "invalid"}
-        self.profile.save.side_effect = AppError(400, "invalid profile")
+        self.profile.patch.side_effect = AppError(400, "invalid profile")
 
         with self.assertRaisesRegex(AppError, "invalid profile"):
             self.routes.handle(self.handler, "/api/profile")

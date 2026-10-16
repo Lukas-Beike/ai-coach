@@ -6,6 +6,7 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable, Iterable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,6 +42,8 @@ class RestoreDependencies:
     coach_wake: Any
     config: DatabaseRestoreConfig
     redact: Callable[[str], str]
+    diagnostics_suspended: Callable[[], AbstractContextManager[None]]
+    canonical_backfill_start: Callable[[], None]
 
 
 class DatabaseRestoreService:
@@ -79,6 +82,9 @@ class DatabaseRestoreService:
         try:
             dependencies.sync_jobs.resume_interrupted()
             dependencies.coach_jobs.resume_interrupted(dependencies.coach_failures)
+            # Restored canonical backfill state may be unfinished; the worker exits
+            # once done or failed, so restart it (idempotent while alive).
+            dependencies.canonical_backfill_start()
         finally:
             dependencies.sync_wake.set()
             dependencies.coach_wake.set()
@@ -118,7 +124,10 @@ class DatabaseRestoreService:
         temporary_path = self._stage(payload)
         try:
             with self._dependencies.maintenance_gate.restore():
-                previous_backup_name = self._promote(temporary_path)
+                # Flushes stay blocked from before the swap until the cache is dropped,
+                # so the pre-restore diagnostics cannot overwrite the restored ones.
+                with self._dependencies.diagnostics_suspended():
+                    previous_backup_name = self._promote(temporary_path)
                 # The live database is already replaced here; failures must not be
                 # reported as validation errors.
                 try:

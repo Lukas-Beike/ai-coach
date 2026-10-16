@@ -173,6 +173,14 @@ class SelectedWorkoutSyncService:
         try:
             with self._provider_resync_gate.operation():
                 synced = self._workout_library_sync_service.sync_entry(local_id)
+            if str(synced.get("sync_status") or "synced") != "synced":
+                # A local edit landed during the remote call; the remote copy is
+                # stale, so do not write the calendar from the newer local payload.
+                return {
+                    "library_workout_id": local_id,
+                    "status": "conflict",
+                    "error": "Seit der Vorschau geändert",
+                }
             with self._provider_resync_gate.operation():
                 calendar_event = self._workout_library_sync_service.sync_calendar_entry(
                     local_id, synced

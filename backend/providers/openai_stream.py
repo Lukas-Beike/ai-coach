@@ -41,6 +41,7 @@ from backend.providers.openai_requests import (
 from backend.providers.openai_responses import (
     response_diagnostic_content,
     response_diagnostic_details,
+    without_free_text,
 )
 
 if TYPE_CHECKING:
@@ -273,10 +274,12 @@ class OpenAIStreamTelemetry:
                 "diagnostic_id": context.get("diagnostic_id"),
                 "attempt": context.get("attempt"),
                 **response_diagnostic_content(final_response),
-                "provider_error": final_response.get("error")
-                if isinstance(final_response, dict)
-                else None,
-                "provider_response": final_response,
+                "provider_error": without_free_text(
+                    final_response.get("error")
+                    if isinstance(final_response, dict)
+                    else None
+                ),
+                "provider_response": without_free_text(final_response),
             },
         )
 
