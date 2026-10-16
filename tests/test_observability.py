@@ -955,6 +955,39 @@ class DiagnosticCaptureDiscardTests(unittest.TestCase):
         self.assertNotIn("diagnostic_capture_entries", store.values)
         self.assertEqual(capture.entries(), [])
 
+    def test_delayed_write_cannot_write_cleared_entries_back_after_suspension(self):
+        store = _KeyValueStore()
+        timer_fired = threading.Event()
+
+        @contextmanager
+        def timer_context():
+            timer_fired.set()
+            yield
+
+        capture = DiagnosticCapture(
+            store.get,
+            store.set,
+            Redactor(_config),
+            flush_delay_seconds=0.1,
+            timer_context=timer_context,
+        )
+        capture.capture("before_delete_marker", {"text": "synthetic before"})
+        timer = capture._flush_timer
+        self.assertIsNotNone(timer)
+
+        with capture.suspended():
+            with store.lock:
+                store.values.clear()
+            # The delayed write starts during the suspension and waits for it.
+            self.assertTrue(timer_fired.wait(5))
+            timer.join(timeout=0.2)
+            self.assertTrue(timer.is_alive(), "the write must wait for the suspension")
+        timer.join(timeout=5)
+
+        self.assertFalse(timer.is_alive())
+        self.assertNotIn("diagnostic_capture_entries", store.values)
+        self.assertEqual(capture.entries(), [])
+
     def test_suspension_keeps_the_cache_when_the_mutation_fails(self):
         store = _KeyValueStore()
         capture = DiagnosticCapture(
