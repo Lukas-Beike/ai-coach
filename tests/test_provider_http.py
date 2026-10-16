@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from urllib.error import HTTPError
 
 import backend.providers.http as http_module
-from backend.errors import AppError
+from backend.errors import AppError, DatabaseBusyError
 from backend.observability import Redactor
 from backend.providers.http import (
     JsonHttpClient,
@@ -119,6 +119,25 @@ class ProviderHTTPTests(unittest.TestCase):
     def setUp(self):
         self.logger = _CallLogger()
         self.capture = _DiagnosticCapture()
+
+    def test_json_http_client_passes_a_busy_local_database_through_unchanged(self):
+        class BusyState(_ProviderState):
+            def record_success(self, provider, status):
+                raise DatabaseBusyError("writer")
+
+        state = BusyState()
+        response = _JSONResponse(b'{"ok": true}', status=200)
+        client = self._client(lambda _request, *, timeout: response, state=state)
+
+        with self.assertRaises(DatabaseBusyError):
+            client.request(
+                "GET", "https://example.test/api/v1/resource", service="openai"
+            )
+        self.assertNotIn("status", [call[0] for call in state.calls])
+        self.assertNotIn(
+            "upstream_network_error",
+            [call[2].get("extra", {}).get("event") for call in self.logger.records],
+        )
 
     def test_json_http_client_success_empty_body_and_observation(self):
         state = _ProviderState()
