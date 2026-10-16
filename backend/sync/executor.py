@@ -150,8 +150,8 @@ class HistoricalSyncJobOwner:
         ):
             return
         next_end = result["historical_next_end"]
-        # A retried partial chunk already continued its chain on the first run;
-        # queuing again would start a second chain over the remaining history.
+        # A chunk that ran again (a retry or a restart) may already have queued
+        # its continuation; queuing again would start a second chain.
         if self._queue_service.backfill_continued(
             job["provider"], next_end, str(job.get("created_at") or "")
         ):
