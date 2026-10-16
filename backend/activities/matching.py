@@ -9,9 +9,10 @@ from datetime import datetime
 from typing import Any
 
 from backend.activities.identity import activity_datetime as _activity_datetime
-from backend.activities.identity import activity_kind as _activity_kind
+from backend.activities.identity import activity_sport as _activity_sport
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
+from backend.canonical.vocabulary import Sport
 from backend.providers.intervals_activity_keys import TRAINING_LOAD_LOOKUP
 
 # Units without a planned time are stored as a bare date or at local midnight.
@@ -109,9 +110,9 @@ def _is_unpaired(activity: dict[str, Any]) -> bool:
 def _same_day_candidates(
     event: dict[str, Any], activity_rows: list[dict[str, Any]], unused: set[int]
 ) -> list[int]:
-    """Return unused, unpaired activities on the unit's day and sport family."""
-    event_kind = _activity_kind(event)
-    if event_kind == "other":
+    """Return unused, unpaired activities on the unit's day and canonical sport."""
+    event_sport = _activity_sport(event)
+    if event_sport == Sport.OTHER:
         return []
     event_date = record_date(_first_present(event, _UNIT_START_FIELDS))
     return [
@@ -122,7 +123,7 @@ def _same_day_candidates(
             _first_present(activity_rows[activity_index], _ACTIVITY_START_FIELDS)
         )
         == event_date
-        and _activity_kind(activity_rows[activity_index]) == event_kind
+        and _activity_sport(activity_rows[activity_index]) == event_sport
     ]
 
 
@@ -167,7 +168,7 @@ def _best_fit_rank(
 ) -> tuple[Any, ...]:
     """Rank a same-day candidate; smaller ranks are better fits.
 
-    Sport family is a gate applied by `_same_day_candidates`, so only same-family
+    Sport is a gate applied by `_same_day_candidates`, so only same-sport
     candidates are ranked. Then: duration gap, load gap, activity start time, and
     stable identity ordering.
     """

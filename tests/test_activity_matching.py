@@ -121,6 +121,59 @@ class ActivityMatchingTests(unittest.TestCase):
         ]
         self.assertEqual(_unpaired_activity_match(event, activities, {0, 1}), 0)
 
+    def test_canonical_sports_beyond_legacy_families_match_the_same_sport(self):
+        for planned_start in ("2026-09-20T10:00:00", "2026-09-20"):
+            for sport in ("Walk", "Hike", "Row", "Yoga", "NordicSki"):
+                with self.subTest(start=planned_start, sport=sport):
+                    event = {
+                        "category": "WORKOUT",
+                        "type": sport,
+                        "date": planned_start,
+                    }
+                    activity = {
+                        "id": "done",
+                        "type": sport,
+                        "start_date_local": "2026-09-20T10:30:00",
+                    }
+                    self.assertEqual(
+                        match_planned_workouts([event], [activity]), {0: activity}
+                    )
+
+    def test_unclassified_sport_never_matches_through_the_fallbacks(self):
+        for planned_start in ("2026-09-20T10:00:00", "2026-09-20"):
+            with self.subTest(start=planned_start):
+                event = {
+                    "category": "WORKOUT",
+                    "type": "Workout",
+                    "date": planned_start,
+                }
+                activity = {
+                    "id": "done",
+                    "type": "Workout",
+                    "start_date_local": "2026-09-20T10:30:00",
+                }
+                self.assertEqual(match_planned_workouts([event], [activity]), {})
+
+    def test_different_canonical_sports_do_not_match(self):
+        for planned_start in ("2026-09-20T10:00:00", "2026-09-20"):
+            for planned, actual in (
+                ("Walk", "Hike"),
+                ("Walk", "Run"),
+                ("Hike", "Walk"),
+            ):
+                with self.subTest(start=planned_start, planned=planned, actual=actual):
+                    event = {
+                        "category": "WORKOUT",
+                        "type": planned,
+                        "date": planned_start,
+                    }
+                    activity = {
+                        "id": "done",
+                        "type": actual,
+                        "start_date_local": "2026-09-20T10:30:00",
+                    }
+                    self.assertEqual(match_planned_workouts([event], [activity]), {})
+
     def test_paired_candidates_use_earliest_provider_start(self):
         event = {"id": "event"}
         activities = [
