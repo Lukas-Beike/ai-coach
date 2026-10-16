@@ -62,3 +62,27 @@ test("race prediction rows exclude body weight and empty states give a reason", 
   );
   assert.match(racePredictionEmptyReason({ run_threshold_pace_seconds_per_km: { value: 290 } }), /^Noch keine Prognosen – Laufwerte sind vorhanden/);
 });
+
+test("current W/kg uses the preferred provider's newest point and falls back to the newest of all", () => {
+  const { isPreferredSource } = loadFunctions("shared.js", ["isPreferredSource"]);
+  const { analysisValidPoint } = loadFunctions("analysis.js", ["analysisValidPoint"]);
+  const { currentPerformanceValues } = loadFunctions("performance-view.js", ["currentPerformanceValues"], { isPreferredSource, analysisValidPoint });
+  const garmin = (points) => ({ source: "Garmin Connect", source_provider: "garmin", points });
+  const intervals = (points) => ({ source: "Intervals.icu eFTP", source_provider: "intervals", points });
+  const history = (series, preferred) => ({ body: { preferred_providers: preferred, windows: { "12w": { metrics: { cycling_w_per_kg: series } } } } });
+  const wPerKg = (series, preferred) => currentPerformanceValues({}, history(series, preferred)).cycling_w_per_kg;
+
+  const older = wPerKg([garmin([{ date: "2026-10-10", value: 3.1 }]), intervals([{ date: "2026-10-14", value: 3.3 }, { date: "2026-10-15", value: 3.4 }])], { cycling_w_per_kg: "garmin" });
+  assert.equal(older.value, 3.1, "an older preferred Garmin point wins over newer Intervals points");
+  assert.equal(older.source, "Garmin Connect", "the value keeps the Garmin source label");
+  assert.equal(older.unit, "W/kg");
+
+  const invalid = wPerKg([garmin([{ date: "2026-10-12", value: null }]), intervals([{ date: "2026-10-14", value: 3.3 }, { date: "2026-10-15", value: 3.4 }])], { cycling_w_per_kg: "garmin" });
+  assert.equal(invalid.value, 3.4, "without a valid Garmin point the newest Intervals point is used");
+  assert.equal(invalid.source, "Intervals.icu eFTP");
+  assert.equal(wPerKg([garmin([]), intervals([{ date: "2026-10-14", value: 3.3 }])], { cycling_w_per_kg: "garmin" }).value, 3.3, "a Garmin series without points falls back too");
+
+  const none = wPerKg([garmin([{ date: "2026-10-10", value: 3.1 }]), intervals([{ date: "2026-10-15", value: 3.4 }])], {});
+  assert.equal(none.value, 3.4, "a metric without a preference keeps the newest point");
+  assert.equal(wPerKg([], { cycling_w_per_kg: "garmin" }), undefined, "no points at all stay empty");
+});
