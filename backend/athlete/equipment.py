@@ -54,12 +54,13 @@ class EquipmentService:
             else resolve_activity
         )
 
-    def _records(self, db: Any, prefix: str, limit: int) -> list[dict[str, Any]]:
+    def _records(self, db: Any, prefix: str, limit: int | None) -> list[dict[str, Any]]:
+        """Return the newest records of a kind; a limit of None reads them all."""
         return [
             json.loads(row["value"])
             for row in db.execute(
                 "SELECT value FROM kv WHERE key LIKE ? ORDER BY updated_at DESC LIMIT ?",
-                (prefix + ":%", limit),
+                (prefix + ":%", -1 if limit is None else limit),
             ).fetchall()
         ]
 
@@ -89,10 +90,12 @@ class EquipmentService:
             links = _garmin_links(
                 items, garmin.get("gear"), garmin.get("activity_matches"), rows
             )
-            explicit_ids = _explicit_assignment_ids(db)
-            links = {
-                key: value for key, value in links.items() if key not in explicit_ids
+            # Every explicit assignment, including an unassignment, overrides the link.
+            explicit = {
+                row["activity_id"]: row
+                for row in self._records(db, "equipment_assignment", None)
             }
+            links = {key: value for key, value in links.items() if key not in explicit}
             if item_id:
                 selected = db.execute(
                     SELECT_VALUE, (EQUIPMENT_PREFIX + item_id,)
@@ -100,14 +103,7 @@ class EquipmentService:
                 if not selected:
                     raise AppError(404, "Ausrüstung nicht gefunden.")
                 items = [json.loads(selected["value"])]
-            assignments = _effective_assignments(
-                rows,
-                {
-                    row["activity_id"]: row
-                    for row in self._records(db, "equipment_assignment", 2000)
-                },
-                links,
-            )
+            assignments = _effective_assignments(rows, explicit, links)
             maintenance = self._records(db, "equipment_maintenance", 1000)
         for item in items:
             _update_usage(
@@ -175,7 +171,10 @@ class EquipmentService:
                             db, row, gear_id, self._today(), now
                         )
             # An explicit assignment, including an unassignment, overrides the link.
-            explicit = _explicit_assignment_ids(db)
+            explicit = {
+                row["activity_id"]
+                for row in self._records(db, "equipment_assignment", None)
+            }
             links = _garmin_links(
                 local_rows, rows, snapshot.get("activity_matches"), activity_rows
             )
@@ -923,18 +922,6 @@ def _rows_by_garmin_id(matches: Any, rows: list[dict[str, Any]]) -> dict[str, se
         if row.get("external_id") not in (None, ""):
             by_garmin.setdefault(str(row["external_id"]), set()).add(str(row.get("id")))
     return by_garmin
-
-
-def _explicit_assignment_ids(db: Any) -> set[str]:
-    """Return every explicitly assigned or unassigned activity, without a limit."""
-    return {
-        str(row[0])
-        for row in db.execute(
-            "SELECT json_extract(value, '$.activity_id') FROM kv "
-            "WHERE key LIKE 'equipment_assignment:%'"
-        ).fetchall()
-        if row[0] is not None
-    }
 
 
 def _effective_assignments(

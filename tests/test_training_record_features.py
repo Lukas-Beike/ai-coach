@@ -637,7 +637,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             ],
         )
 
-    def test_old_unassignment_still_beats_the_garmin_link(self):
+    def test_old_explicit_assignments_still_beat_the_garmin_link(self):
         rows = [self._ride(f"r{n}") for n in range(4)]
         service = self._gear_service(rows)
         gear = [
@@ -645,11 +645,13 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         ]
         matches = self._matches(rows)
         self._garmin_gear(service, gear, matches)
+        other = service.save(self._bike(name="Other"))["equipment"]
         service.assign({"activity_id": "r0", "equipment_id": None})
-        service.assign({"activity_id": "r1", "equipment_id": None})
+        service.assign({"activity_id": "r1", "equipment_id": other["id"]})
         self._newer_assignments(2001)
-        usage = service.read()["items"][0]["usage"]
-        self.assertEqual(usage["assigned_sessions"], 2)
+        usage = {item["name"]: item["usage"] for item in service.read()["items"]}
+        self.assertEqual(usage["Gear g1"]["assigned_sessions"], 2)
+        self.assertEqual(usage["Other"]["assigned_sessions"], 1)
         service.sync_garmin_snapshot(self._snapshot(gear, matches))
         self.assertTrue(service.read()["items"][0]["sport_pending"])
 
