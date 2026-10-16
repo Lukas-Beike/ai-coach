@@ -39,7 +39,7 @@ from backend.sync.observation import SyncOperationObserver
 from backend.sync.performance import PerformanceRefreshFollowupService
 from backend.sync.planned_units import RemotePlannedUnitReconciler
 from backend.sync.snapshot_storage import SnapshotStorage
-from backend.sync.snapshots import merge_historical_snapshot
+from backend.sync.snapshots import historical_chunk_snapshot, merge_historical_snapshot
 from backend.sync.state import SyncStateRepository
 from backend.sync.status import SyncOperationStateWriter
 from backend.sync.windows import split_date_windows
@@ -140,6 +140,9 @@ class IntervalsSnapshotReader:
         activities = deduplicate_api_records(activities)
         wellness = deduplicate_api_records(wellness)
         self._raise_if_cancelled(cancel_event)
+        # A historical chunk on top of a stored snapshot keeps that snapshot's
+        # athlete data and power profile, so it skips those refresh-only reads.
+        chunk_only = end_date is not None and bool(existing)
         events = self._api_client.get_paged_collection(
             f"/athlete/{athlete}/events",
             {
@@ -150,7 +153,11 @@ class IntervalsSnapshotReader:
             **cancel_kwargs,
         )
         self._raise_if_cancelled(cancel_event)
-        athlete_data = self._api_client.get(f"/athlete/{athlete}", **cancel_kwargs)
+        athlete_data = (
+            {}
+            if chunk_only
+            else self._api_client.get(f"/athlete/{athlete}", **cancel_kwargs)
+        )
         incoming = compact_snapshot(
             athlete_data,
             activities,
@@ -174,9 +181,13 @@ class IntervalsSnapshotReader:
                 "start": calendar_start.isoformat(),
                 "end": calendar_end.isoformat(),
             },
+            # Records fetched for this window alone, before any merge.
+            "window_records": len(activities) + len(wellness),
         }
-        incoming["cycling_power_profile"] = self._cycling_power_profile(
-            athlete, today, existing, cancel_event
+        incoming["cycling_power_profile"] = (
+            existing.get("cycling_power_profile") or {}
+            if chunk_only
+            else self._cycling_power_profile(athlete, today, existing, cancel_event)
         )
         if not incremental:
             return incoming
@@ -317,10 +328,13 @@ class IntervalsSnapshotService:
     def store_snapshot(
         self, snapshot: dict[str, Any], activity_days: int, end_date: date | None
     ) -> tuple[dict[str, Any], dict[str, Any]]:
+        ingested = snapshot
         if end_date is not None:
-            snapshot = merge_historical_snapshot(
-                self._snapshot_storage.merge_base(), snapshot
-            )
+            base = self._snapshot_storage.merge_base()
+            snapshot = merge_historical_snapshot(base, snapshot)
+            # The merged history is already stored; ingest only the new rows so
+            # the writer transaction does not grow with the stored history.
+            ingested = historical_chunk_snapshot(base, snapshot)
         zone = self._local_now().tzinfo or UTC
         provider_sync = snapshot.get("provider_sync", {})
         calendar_window = (
@@ -336,7 +350,7 @@ class IntervalsSnapshotService:
             # stored afterwards, without the sections the tables serve.
             ingest_intervals_snapshot(
                 db,
-                snapshot,
+                ingested,
                 zone=zone,
                 # Only a full, non-incremental window may delete; historical fetches never do.
                 activity_days=activity_days if end_date is None else None,
@@ -494,14 +508,18 @@ class IntervalsSyncWorkflow:
         if cancel_event is not None:
             fetch_kwargs["cancel_event"] = cancel_event
         snapshot = self._reader.fetch_snapshot(**fetch_kwargs)
+        window_records = (snapshot.get("provider_sync") or {}).get("window_records")
         journal.storing(operation_id)
         snapshot, planned_import = self._snapshots.store_snapshot(
             snapshot, activity_days, end_date
         )
         if end_date is None:
             self._daily_sync_marker_service.mark(INTERVALS_ID)
+        # Only a refresh seeds the library; a backfill chunk just adds history.
         library_imported, library_error, library_count = (
             self._snapshots.seed_workout_library(reason, cancel_event)
+            if end_date is None
+            else (0, None, 0)
         )
         sync_window, pagination = self._snapshots.record_window(
             activity_days, end_date, snapshot
@@ -511,6 +529,7 @@ class IntervalsSyncWorkflow:
             "synced_at": snapshot["synced_at"],
             "activities": len(snapshot["recent_activities"]),
             "wellness": len(snapshot["recent_wellness"]),
+            "window_records": window_records,
             "events": len(snapshot["upcoming_calendar"]),
             "planned_import": planned_import,
             "activity_days": activity_days,

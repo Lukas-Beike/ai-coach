@@ -41,6 +41,7 @@ class SyncQueuePolicy:
     retry_base_seconds: int
     retry_max_seconds: int
     registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
+    foreground_busy: Callable[[], bool] | None = None
 
 
 class SyncJobQueueAssembly:
@@ -74,6 +75,7 @@ class SyncJobQueueAssembly:
         self._retry_base_seconds = policy.retry_base_seconds
         self._retry_max_seconds = policy.retry_max_seconds
         self._registry = policy.registry
+        self._foreground_busy = policy.foreground_busy
 
     def store(self) -> jobs.SyncJobStore:
         """Create a store bound to the active database manager."""
@@ -82,6 +84,7 @@ class SyncJobQueueAssembly:
             self._now,
             self._uuid_factory,
             registry=self._registry,
+            foreground_busy=self._foreground_busy,
         )
 
     def service(self) -> queue.SyncJobQueueService:

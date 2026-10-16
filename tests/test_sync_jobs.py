@@ -363,6 +363,24 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
             {},
         )
 
+    def test_empty_chunk_counter_is_accepted_only_for_historical_jobs(self):
+        payload = {"days": 90, "end_date": "2026-06-03", "empty_chunks": "1"}
+        for provider in ("intervals", "garmin"):
+            with self.subTest(provider=provider):
+                self.assertEqual(
+                    self.normalize(provider, "historical_backfill", payload)["payload"],
+                    {"days": 90, "end_date": "2026-06-03", "empty_chunks": 1},
+                )
+                self.assert_invalid(provider, "refresh", {"empty_chunks": 1}, "Felder")
+        for invalid in (-1, 101, "x", None):
+            with self.subTest(value=invalid):
+                self.assert_invalid(
+                    "intervals",
+                    "historical_backfill",
+                    {"empty_chunks": invalid},
+                    "Backfill-Leerzähler",
+                )
+
     def test_boolean_fields_require_actual_booleans(self):
         for value in (True, False):
             with self.subTest(value=value):
@@ -812,6 +830,73 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertIsInstance(winners[0]["payload"], str)
         self.assertEqual(self.store.state(job["id"])["items"][0]["attempts"], 1)
         self.assertIsNone(self.store.claim())
+
+    def _enqueue_backfill(
+        self, end_date="2026-06-03", available_at=None, requested_by="backfill"
+    ):
+        return self.store.enqueue(
+            {
+                "provider": "intervals",
+                "type": "historical_backfill",
+                "payload": {"days": 90, "end_date": end_date},
+            },
+            requested_by,
+            None,
+            available_at,
+        )[0]
+
+    def test_claim_orders_backfill_jobs_after_other_queued_jobs(self):
+        backfill = self._enqueue_backfill()
+        self.current_now = "2026-09-20T12:00:05+00:00"
+        refresh, _ = self.enqueue("weather", "refresh", {"force": True})
+        self.current_now = "2026-09-20T12:00:10+00:00"
+
+        self.assertEqual(self.store.claim()["id"], refresh["id"])
+        self.assertEqual(self.store.claim()["id"], backfill["id"])
+        self.assertIsNone(self.store.claim())
+
+    def test_claim_holds_backfill_while_foreground_work_runs(self):
+        busy = [True]
+        store = SyncJobStore(
+            self.manager,
+            lambda: self.current_now,
+            lambda: next(self.identifiers),
+            foreground_busy=lambda: busy[0],
+        )
+        backfill = self._enqueue_backfill()
+        refresh, _ = self.enqueue("weather", "refresh", {"force": True})
+
+        self.assertEqual(store.claim()["id"], refresh["id"])
+        self.assertIsNone(store.claim())
+        self.assertEqual(store.state(backfill["id"])["status"], "queued")
+
+        busy[0] = False
+        self.assertEqual(store.claim()["id"], backfill["id"])
+
+    def test_claim_treats_a_startup_backfill_as_background_work(self):
+        busy = [True]
+        store = SyncJobStore(
+            self.manager,
+            lambda: self.current_now,
+            lambda: next(self.identifiers),
+            foreground_busy=lambda: busy[0],
+        )
+        # The first chunk is queued at startup, not by a continuation.
+        backfill = self._enqueue_backfill(requested_by="startup")
+        self.current_now = "2026-09-20T12:00:05+00:00"
+        refresh, _ = self.enqueue("weather", "refresh", {"force": True})
+
+        self.assertEqual(store.claim()["id"], refresh["id"])
+        self.assertIsNone(store.claim())
+        busy[0] = False
+        self.assertEqual(store.claim()["id"], backfill["id"])
+
+    def test_claim_waits_for_the_backfill_continuation_delay(self):
+        backfill = self._enqueue_backfill(available_at="2026-09-20T12:00:15+00:00")
+
+        self.assertIsNone(self.store.claim())
+        self.current_now = "2026-09-20T12:00:15+00:00"
+        self.assertEqual(self.store.claim()["id"], backfill["id"])
 
     def test_resume_interrupted_resets_running_records_and_claims_again(self):
         job, _ = self.enqueue(

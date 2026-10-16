@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from backend.config import Config
@@ -24,7 +25,7 @@ NOW = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
 
 
 def _config(**values: str) -> Config:
-    defaults = {
+    defaults: dict[str, Any] = {
         "port": 8090,
         "openai_api_key": "",
         "openai_base_url": "https://api.openai.com/v1",

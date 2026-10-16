@@ -36,6 +36,17 @@ class CoachJobStore:
         self._maintenance_gate = maintenance_gate
         self._utc_now = utc_now
 
+    def busy(self) -> bool:
+        """Report whether a Coach turn is queued or running."""
+        with self._database_manager().reader() as db:
+            return (
+                db.execute(
+                    "SELECT 1 FROM coach_commands "
+                    "WHERE status IN ('queued', 'running') LIMIT 1"
+                ).fetchone()
+                is not None
+            )
+
     def claim(self) -> dict[str, Any] | None:
         with (
             self._maintenance_gate.operation(),

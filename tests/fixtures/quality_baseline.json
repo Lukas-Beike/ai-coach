@@ -536,27 +536,9 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_sync_garmin_service.py",
-      "code": "arg-type",
-      "message_sha256": "16610b5b216207d4df9d943b0e296f26131cb9a54dc4eb090ffac13fd040c0a0"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_intervals.py",
       "code": "arg-type",
       "message_sha256": "1700ef4aeab756114a9196c6105dd44a9d20a852e87555ba00bd366a1df6f8ef"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_observability.py",
-      "code": "arg-type",
-      "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_freshness.py",
-      "code": "arg-type",
-      "message_sha256": "171381938c7ceda9ebaeb7e9e5e770d72d0084f4da19fb0f04ba541ac755f3ed"
     },
     {
       "tool": "mypy",
@@ -653,12 +635,6 @@
       "path": "tests/test_coach_request_payload.py",
       "code": "arg-type",
       "message_sha256": "248119b31631b4bbce11bca5f2fa6b4eb6d5d6b51cfae662bd814f551f4c3896"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_garmin_service.py",
-      "code": "arg-type",
-      "message_sha256": "2627ee3026f6c40e9cf4de748f04da9e6b168767ed0657719d341b513d0a077d"
     },
     {
       "tool": "mypy",
@@ -1274,33 +1250,9 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_observability.py",
-      "code": "arg-type",
-      "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_freshness.py",
-      "code": "arg-type",
-      "message_sha256": "c3391e7a07b0cfce4330178e5b1c31b725ab91eb22ac3bf21ac9e623293c7168"
-    },
-    {
-      "tool": "mypy",
       "path": "backend/http_api/state_prelude.py",
       "code": "arg-type",
       "message_sha256": "c5b10da3c1a67ec6fec8ae1b72aedf49046619ec7640adc1f88c80d760648235"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_observability.py",
-      "code": "arg-type",
-      "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_freshness.py",
-      "code": "arg-type",
-      "message_sha256": "c5e35d88008cfc49a2f2bbe1893c6d513e79c030d8911d24615e1974f0c64718"
     },
     {
       "tool": "mypy",

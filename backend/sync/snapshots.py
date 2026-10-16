@@ -81,6 +81,32 @@ def merge_historical_snapshot(
     return merged
 
 
+def historical_chunk_snapshot(
+    current: dict[str, Any] | None, merged: dict[str, Any]
+) -> dict[str, Any]:
+    """Return ``merged`` reduced to the rows a historical merge added to ``current``.
+
+    ``merged`` comes from ``merge_historical_snapshot``: ``current`` rows come
+    first and the first occurrence of an id wins, so the added rows are the tail
+    after the deduplicated ``current`` rows. Ingesting only that tail writes the
+    same canonical rows as ingesting the whole merged history, because rows are
+    mapped independently. The synced time is kept so the rows carry the same
+    fetch time. The athlete block is dropped when ``current`` already stored it.
+    """
+    if not isinstance(current, dict) or not isinstance(
+        current.get("raw_provider_data"), dict
+    ):
+        return merged
+    current_raw = current["raw_provider_data"]
+    raw = dict(merged.get("raw_provider_data") or {})
+    for key in ("activities", "wellness"):
+        known = len(deduplicate_api_records(current_raw.get(key) or []))
+        raw[key] = list(raw.get(key) or [])[known:]
+    if current_raw.get("athlete"):
+        raw.pop("athlete", None)
+    return {**merged, "raw_provider_data": raw}
+
+
 def latest_snapshot(db: Any, repository: Any) -> dict[str, Any] | None:
     payload = repository.latest_payload(db)
     return json.loads(payload) if payload else None

@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 
 from backend.config import Config
@@ -151,7 +152,7 @@ def _config(**changes) -> Config:
         secure_cookies=False,
         data_retention_days=30,
     )
-    overrides = {
+    overrides: dict[str, Any] = {
         "garmin_email": "athlete@example.invalid",
         "garmin_password": "secret",
         "garmin_tokenstore": "missing-tokenstore",
@@ -496,6 +497,7 @@ class GarminSyncJobOwnerTests(unittest.TestCase):
     def test_refresh_catchup_includes_recovery_but_historical_backfill_does_not(self):
         historical_sync = Mock()
         historical_sync.window.return_value = (90, date(2026, 6, 30))
+        historical_sync.below_floor.return_value = None
         garmin_service = Mock(sync=Mock(return_value={"status": "partial"}))
         morning_service = Mock()
         fixture_loader = Mock(path=Mock(return_value=None))
