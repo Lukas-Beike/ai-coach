@@ -8,6 +8,7 @@ from activity_row_support import SnapshotActivityRows
 from backend.errors import AppError
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.sync.snapshot_reader import SnapshotRepositoryReader
 
 
@@ -53,6 +54,29 @@ class _Feedback:
             }
             for item in activities
         ]
+
+
+class _NoObservations:
+    def observations(self, _db, _kind, *, start=None, end=None, sport=None):
+        return ()
+
+
+class _DatedRows:
+    """Raw activity rows that honour the start bound and record each read."""
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.starts = []
+        self.units = []
+
+    def activity_rows(self, db, *, start=None, end=None, limit=None):
+        self.starts.append(start)
+        self.units.append(db)
+        return tuple(
+            row
+            for row in self.rows
+            if start is None or row["start_date_local"][:10] >= start.isoformat()
+        )
 
 
 class ActivityReadServiceTests(unittest.TestCase):
@@ -115,6 +139,44 @@ class ActivityReadServiceTests(unittest.TestCase):
             "bounded sanitized detail projection of exactly one Intervals.icu activity",
             result["data_scope"],
         )
+
+    def test_detail_reads_an_activity_older_than_the_performance_window(self):
+        snapshot = {"synced_at": "2026-09-20T08:00:00+00:00", "athlete": {}}
+        rows = _DatedRows(
+            [
+                {"id": "new", "type": "Run", "start_date_local": "2026-09-20T08:00:00"},
+                {
+                    "id": "old",
+                    "name": "Winter run",
+                    "type": "Run",
+                    "start_date_local": "2024-01-10T08:00:00",
+                },
+            ]
+        )
+        service = ActivityAnalysisReadService(
+            _Manager(),
+            _Snapshots(snapshot),
+            CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
+            _Feedback(),
+            canonical=CanonicalPerformanceSource(
+                database_manager=_Manager,
+                observation_reader=_NoObservations,
+                activity_rows=lambda: rows,
+            ),
+        )
+        today = date(2026, 9, 20)
+        recent = service.detail("new", garmin_snapshot={}, profile={}, today=today)
+        self.assertEqual("new", recent["activity_id"])
+        self.assertEqual([date(2025, 9, 21)], rows.starts)
+        old = service.detail("old", garmin_snapshot={}, profile={}, today=today)
+        self.assertEqual("Winter run", old["activity"]["name"])
+        self.assertEqual([date(2025, 9, 21), date(2025, 9, 21), None], rows.starts)
+        # The full-history lookup shares the read snapshot of the windowed read.
+        self.assertIs(rows.units[1], rows.units[2])
+        with self.assertRaises(AppError) as missing:
+            service.detail("missing", garmin_snapshot={}, profile={}, today=today)
+        self.assertEqual("activity_details_not_found", missing.exception.reason)
+        self.assertEqual([date(2025, 9, 21), None], rows.starts[3:])
 
     def test_detail_rejects_invalid_or_missing_activity(self):
         service = self.service()

@@ -614,7 +614,7 @@ class CanonicalWiringTests(unittest.TestCase):
                 observation_reader=lambda: reader,
             ),
         )
-        read_snapshot, canonical = service._performance_inputs(PARITY_TODAY)
+        read_snapshot, canonical, _ = service._performance_inputs(PARITY_TODAY)
         self.assertIs(read_snapshot, snapshot)
         self.assertEqual(reader.db_seen, ["db"] * 13)
         self.assertEqual(_present(canonical).ctl, 50.0)
@@ -627,7 +627,7 @@ class CanonicalWiringTests(unittest.TestCase):
         snapshot_reader = Mock()
         snapshot_reader.latest_snapshot.return_value = snapshot
         service = ActivityAnalysisReadService(manager, snapshot_reader, Mock(), Mock())
-        read_snapshot, canonical = service._performance_inputs(PARITY_TODAY)
+        read_snapshot, canonical, _ = service._performance_inputs(PARITY_TODAY)
         self.assertIs(read_snapshot, snapshot)
         self.assertIsNone(canonical)
         # Only the legacy snapshot read's own reader lease runs.
