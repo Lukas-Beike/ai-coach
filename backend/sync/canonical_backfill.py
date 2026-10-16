@@ -44,7 +44,10 @@ projection no longer emits becomes ``invalid`` in the same transaction that adva
 ``mapped_version``; its session keeps its state. A later version that emits it again
 makes it ``active`` with the same ``activity_id``. An unusable stored payload emits
 nothing, so the activity it owns is marked ``invalid`` as well, and a later mapper fix
-restores it. Observations have no state column and no exact ownership for athlete and
+restores it. In the same transaction, the sessions near the re-projected activities
+are linked to duplicates from other providers (``link_activity_sessions``), so a
+mapper fix that lets two copies match merges stored history without a new provider
+refresh. Observations have no state column and no exact ownership for athlete and
 health records, so observations that an upgraded mapper no longer emits are not retired;
 they keep their old ``mapper_version``. The table reader that follows this phase serves
 only observations whose ``mapper_version`` equals the current version of their mapper,
@@ -88,6 +91,7 @@ from enum import StrEnum
 from functools import partial
 from typing import Any, Final
 
+from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store
 from backend.db.repositories import KeyValueRepository
@@ -453,7 +457,7 @@ class CanonicalBackfill:
             if not finished:
                 return written, False
             _complete_reprojection(
-                db, state, current, row, work, version=version, now=now
+                db, state, current, row, work, version=version, zone=zone, now=now
             )
 
     def _work_for(
@@ -604,6 +608,7 @@ def _complete_reprojection(
     work: _Work,
     *,
     version: int,
+    zone: tzinfo,
     now: str,
 ) -> None:
     # Wahoo rows are ingested live, not backfilled, so its bucket appears on demand.
@@ -611,6 +616,17 @@ def _complete_reprojection(
         row["provider"], dict.fromkeys(COUNTER_NAMES, 0)
     )
     bucket["retired"] += _retire_unemitted(db, row, work, now=now)
+    # After the retirement, so an activity the new projection drops is never bundled.
+    link_activity_sessions(
+        db,
+        touched_dates={
+            item.value.local_date
+            for item in work.items
+            if isinstance(item.value, ActivityItem)
+        },
+        zone=zone,
+        now=now,
+    )
     canonical_store.set_mapped_version(
         db, record_id=current["id"], mapper_version=version, now=now
     )
