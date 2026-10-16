@@ -14,7 +14,7 @@ import re
 import sys
 import threading
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -781,11 +781,14 @@ class DiagnosticCapture:
         max_bytes: int = DIAGNOSTIC_CAPTURE_MAX_BYTES,
         max_entry_bytes: int = DIAGNOSTIC_CAPTURE_MAX_ENTRY_BYTES,
         flush_delay_seconds: float | None = None,
+        timer_context: Callable[[], AbstractContextManager[Any]] = nullcontext,
     ) -> None:
         """Flush on the capturing thread, or after ``flush_delay_seconds`` on a timer.
 
         Each flush rewrites the whole entry list, so a delay merges the flushes
-        of a burst of captures and keeps the write off the request thread.
+        of a burst of captures and keeps the write off the request thread. With a
+        delay every capture is written within the delay; ``timer_context`` wraps
+        the timer's write.
         """
         self._get_kv = get_kv
         self._set_kv = set_kv
@@ -806,6 +809,7 @@ class DiagnosticCapture:
         self._flush_lock = threading.Lock()
         self._flush_delay = flush_delay_seconds
         self._flush_timer: threading.Timer | None = None
+        self._timer_context = timer_context
 
     def _load_entries(self) -> list[dict[str, Any]]:
         while True:
@@ -1019,22 +1023,33 @@ class DiagnosticCapture:
                 should_flush = self._dirty_count >= min(
                     self._batch_size, self._max_entries
                 )
+                delayed = self._flush_delay is not None
             break
-        if should_flush or event.endswith("_failed"):
+        if delayed or should_flush or event.endswith("_failed"):
             self._request_flush()
 
-    def _request_flush(self) -> None:
-        if self._flush_delay is None:
-            self.flush()
-            return
+    def close(self) -> None:
+        """Write pending entries now; later captures flush on the capturing thread."""
         with self._lock:
-            if self._flush_timer is not None:
-                return
-            self._flush_timer = threading.Timer(self._flush_delay, self._timed_flush)
-            self._flush_timer.daemon = True
-            self._flush_timer.start()
+            timer = self._flush_timer
+            self._flush_timer = None
+            self._flush_delay = None
+        if timer is not None:
+            timer.cancel()
+        self.flush()
+
+    def _request_flush(self) -> None:
+        with self._lock:
+            delay = self._flush_delay
+            if delay is not None and self._flush_timer is None:
+                self._flush_timer = threading.Timer(delay, self._timed_flush)
+                self._flush_timer.daemon = True
+                self._flush_timer.start()
+        if delay is None:
+            self.flush()
 
     def _timed_flush(self) -> None:
         with self._lock:
             self._flush_timer = None
-        self.flush()
+        with self._timer_context():
+            self.flush()

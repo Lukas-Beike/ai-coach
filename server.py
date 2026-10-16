@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
 import sqlite3
 import threading
 import time
@@ -895,18 +896,12 @@ SETTINGS = SettingsService(
 # Each flush rewrites the whole capture, so captures are merged on a timer and
 # written as background work that yields to Coach and athlete writes.
 DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS = 30.0
-
-
-def _write_diagnostic_capture(key: str, value: str) -> None:
-    with background_writer():
-        key_value_service().set(key, value)
-
-
 DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     lambda key: key_value_service().get(key),
-    _write_diagnostic_capture,
+    lambda key, value: key_value_service().set(key, value),
     REDACTOR,
     flush_delay_seconds=DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS,
+    timer_context=background_writer,
 )
 
 SYNC_PERSISTENCE = SyncPersistenceAssembly(
@@ -2093,6 +2088,8 @@ def main() -> None:
     sync_worker: sync_worker_runtime.SyncJobWorker | None = None
     daily_loop: sync_scheduler_runtime.DailySyncLoop | None = None
     daily_thread: threading.Thread | None = None
+    # `docker stop` sends SIGTERM; shut down like Ctrl+C so pending work is written.
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     try:
         SYNC_JOB_QUEUE.service().resume_interrupted()
         COACH_BACKGROUND_JOBS.job_store().resume_interrupted(
@@ -2128,6 +2125,7 @@ def main() -> None:
         COACH_JOB_WORKER.stop()
         CANONICAL_BACKFILL.worker.stop()
         server.server_close()
+        DIAGNOSTIC_CAPTURE.close()
         if daily_thread is not None:
             daily_thread.join(timeout=5)
         if sync_worker is not None:

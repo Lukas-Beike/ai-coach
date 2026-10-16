@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -573,6 +574,56 @@ class ObservabilityTests(unittest.TestCase):
         timer = capture._flush_timer
         self.assertIsNotNone(timer)
         timer.cancel()
+
+    def test_diagnostic_capture_delay_writes_a_single_ordinary_entry(self):
+        store = _KeyValueStore()
+        written = threading.Event()
+        contexts: list[str] = []
+
+        @contextmanager
+        def timer_context():
+            contexts.append("enter")
+            yield
+
+        def recording_set(key: str, value: str) -> None:
+            store.set(key, value)
+            written.set()
+
+        capture = DiagnosticCapture(
+            store.get,
+            recording_set,
+            Redactor(_config),
+            flush_delay_seconds=0.3,
+            timer_context=timer_context,
+        )
+        capture.capture("synthetic_event", {"index": 0})
+        self.assertTrue(written.wait(5))
+        self.assertIn("synthetic_event", store.get("diagnostic_capture_entries"))
+        self.assertEqual(contexts, ["enter"])
+
+    def test_diagnostic_capture_close_writes_now_and_stops_delaying(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get,
+            store.set,
+            Redactor(_config),
+            flush_delay_seconds=60,
+            timer_context=lambda: self.fail("close must not use the timer context"),
+        )
+        capture.capture("synthetic_event", {"index": 0})
+        timer = capture._flush_timer
+        self.assertIsNotNone(timer)
+
+        capture.close()
+
+        self.assertIn("synthetic_event", store.get("diagnostic_capture_entries"))
+        self.assertIsNone(capture._flush_timer)
+        self.assertFalse(timer.is_alive() and not timer.finished.is_set())
+        capture.capture("event_after_close_failed", {"index": 1})
+        self.assertIn(
+            "event_after_close_failed", store.get("diagnostic_capture_entries")
+        )
+        self.assertIsNone(capture._flush_timer)
 
     def test_diagnostic_capture_default_retains_more_than_1500_entries(self):
         store = _KeyValueStore()
