@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "base": "e23d4c0bf2a91f002f84b243f3154e8d1b7b6574",
+  "base": "83c7eb3c088ad508f6243cbc5d20cdd89b2c17b6",
   "versions": {
-    "ruff": "0.16.10",
+    "ruff": "0.17.0",
     "mypy": "2.4.0"
   },
   "diagnostics": [
