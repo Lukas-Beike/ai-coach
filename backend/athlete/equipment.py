@@ -956,16 +956,7 @@ def _derived_sports(
     single sport pair must cover at least three quarters of all linked activities,
     unknown and other types included, and at least three of them.
     """
-    parents = {item.get("parent_id") for item in items}
-    open_ids = {
-        str(item["id"])
-        for item in items
-        if item.get("sport_pending")
-        and item.get("source") == GARMIN_INITIAL_SOURCE
-        and not item.get("parent_id")
-        and item.get("kind") != "component"
-        and item["id"] not in parents
-    }
+    open_ids = _sport_derivable_ids(items)
     counts: dict[str, Counter[tuple[str, str] | None]] = {}
     stored: dict[tuple[str, str], StoredSport] = {}
     for row in rows:
@@ -979,16 +970,36 @@ def _derived_sports(
             stored.setdefault(pair, sport)
     derived = {}
     for equipment_id, counter in counts.items():
-        top = max(
-            (pair for pair in counter if pair is not None),
-            key=lambda pair: counter[pair],
-            default=None,
-        )
-        if top is None or counter[top] < SPORT_DERIVATION_MIN_ROWS:
-            continue
-        if counter[top] / counter.total() >= SPORT_DERIVATION_SHARE:
+        top = _dominant_pair(counter)
+        if top is not None:
             derived[equipment_id] = stored[top]
     return derived
+
+
+def _sport_derivable_ids(items: list[dict[str, Any]]) -> set[str]:
+    """Return main items still as imported from Garmin with an open sport."""
+    parents = {item.get("parent_id") for item in items}
+    return {
+        str(item["id"])
+        for item in items
+        if item.get("sport_pending")
+        and item.get("source") == GARMIN_INITIAL_SOURCE
+        and not item.get("parent_id")
+        and item.get("kind") != "component"
+        and item["id"] not in parents
+    }
+
+
+def _dominant_pair(counter: Counter[tuple[str, str] | None]) -> tuple[str, str] | None:
+    """Return the sport pair that meets the derivation count and share."""
+    top = max(
+        (pair for pair in counter if pair is not None),
+        key=counter.__getitem__,
+        default=None,
+    )
+    if top is None or counter[top] < SPORT_DERIVATION_MIN_ROWS:
+        return None
+    return top if counter[top] / counter.total() >= SPORT_DERIVATION_SHARE else None
 
 
 def _update_garmin_gear(linked: dict[str, Any], row: dict[str, Any]) -> bool:
