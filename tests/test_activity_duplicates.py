@@ -139,8 +139,14 @@ class GarminDuplicateTests(unittest.TestCase):
                 _garmin(duration=0, movingTime=3_600), [_intervals()]
             )
         )
-        # A zero Intervals moving_time is compared as zero and rejects the pair.
+        # A zero Intervals moving_time is compared as zero; only an agreeing
+        # elapsed_time keeps the pair.
         self.assertFalse(
+            garmin_activity_duplicates_intervals(
+                _garmin(), [_intervals(moving_time=0, elapsed_time=5_000)]
+            )
+        )
+        self.assertTrue(
             garmin_activity_duplicates_intervals(
                 _garmin(), [_intervals(moving_time=0, elapsed_time=3_600)]
             )

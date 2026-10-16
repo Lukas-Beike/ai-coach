@@ -142,6 +142,7 @@ def _ride(
     duration_s: float | None = 3600.0,
     distance_m: float | None = 30000.0,
     sport: Sport = Sport.RIDE,
+    elapsed_duration_s: float | None = None,
 ) -> ActivityRecord:
     """Build a canonical ride directly, for values the mappers never produce."""
     return ActivityRecord(
@@ -166,6 +167,7 @@ def _ride(
         avg_hr=None,
         avg_power=None,
         name=None,
+        elapsed_duration_s=elapsed_duration_s,
     )
 
 
@@ -246,6 +248,28 @@ class GarminIntervalsPairTests(unittest.TestCase):
         )
         self.assert_pair(garmin_ride(duration=4500.0, **walk), intervals, False)
 
+    def test_garmin_elapsed_duration_may_match_the_intervals_elapsed_time(
+        self,
+    ) -> None:
+        # Garmin sends no moving time for this walk; Intervals.icu moving time is
+        # much shorter than the elapsed time of both recordings.
+        walk = garmin_ride(
+            activityType={"typeKey": "walking"}, duration=4500.0, distance=5000.0
+        )
+        intervals = intervals_ride(type="Walk", moving_time=2400, distance=5000.0)
+        self.assert_pair(walk, {**intervals, "elapsed_time": 4520}, True)
+        self.assert_pair(walk, {**intervals, "elapsed_time": 5200}, False)
+        self.assert_pair(walk, intervals, False)
+        # An agreeing elapsed time does not override the distance or the start.
+        self.assert_pair(
+            {**walk, "distance": 9000.0}, {**intervals, "elapsed_time": 4520}, False
+        )
+        self.assert_pair(
+            {**walk, "startTimeLocal": "2026-06-01 07:31:00"},
+            {**intervals, "elapsed_time": 4520},
+            False,
+        )
+
     def test_a_matching_moving_duration_does_not_override_distance(self) -> None:
         self.assert_pair(
             garmin_ride(duration=4500.0, movingDuration=3600.0, distance=40000.0),
@@ -322,11 +346,14 @@ class DocumentedDeviationTests(unittest.TestCase):
         self.assertFalse(_canonical_garmin_duplicate(garmin_ride(), row))
 
     def test_zero_intervals_moving_time_falls_back_to_elapsed_time(self) -> None:
-        # Legacy compares a zero moving_time as zero and rejects the pair. The
-        # canonical duration ignores the zero and uses elapsed_time (3600 s).
+        # Legacy compares a zero moving_time as zero and only the Garmin elapsed
+        # duration (4500 s) with elapsed_time, so it rejects the pair. The
+        # canonical duration ignores the zero and uses elapsed_time (3600 s),
+        # which the Garmin moving duration matches.
+        garmin = garmin_ride(duration=4500.0, movingDuration=3600.0)
         row = intervals_ride(moving_time=0, elapsed_time=3600)
-        self.assertFalse(garmin_activity_duplicates_intervals(garmin_ride(), [row]))
-        self.assertTrue(_canonical_garmin_duplicate(garmin_ride(), row))
+        self.assertFalse(garmin_activity_duplicates_intervals(garmin, [row]))
+        self.assertTrue(_canonical_garmin_duplicate(garmin, row))
 
     def test_zero_garmin_duration_falls_back_to_moving_time_only_in_legacy(
         self,
@@ -517,6 +544,90 @@ class SessionStructureTests(unittest.TestCase):
         self.assertEqual(
             bundle_sessions(records, zone=BERLIN),
             bundle_sessions(iter(records), zone=BERLIN),
+        )
+
+    def test_an_elapsed_match_joins_only_a_session_without_a_garmin_record(
+        self,
+    ) -> None:
+        # Two short walks 20 minutes apart. The first Garmin walk matches the early
+        # copy by moving time; the second has no moving time, and its elapsed time
+        # agrees with both copies.
+        early, late = _map_intervals(
+            [
+                intervals_ride(
+                    id="early",
+                    type="Walk",
+                    start_date_local="2026-06-01T07:00:00",
+                    moving_time=1500,
+                    elapsed_time=1800,
+                    distance=2000.0,
+                ),
+                intervals_ride(
+                    id="late",
+                    type="Walk",
+                    start_date_local="2026-06-01T07:20:00",
+                    moving_time=1400,
+                    elapsed_time=1800,
+                    distance=2000.0,
+                ),
+            ]
+        )
+        walk = {"activityType": {"typeKey": "walking"}, "distance": 2000.0}
+        first, second = _map_garmin(
+            [
+                garmin_ride(
+                    **walk, activityId=1, duration=1800.0, movingDuration=1500.0
+                ),
+                garmin_ride(
+                    **walk,
+                    activityId=2,
+                    startTimeLocal="2026-06-01 07:20:00",
+                    duration=1800.0,
+                ),
+            ]
+        )
+
+        def members(
+            sessions: tuple[ActivitySession, ...],
+        ) -> set[frozenset[str | None]]:
+            return {
+                frozenset(
+                    record.provenance.source_record_id
+                    for record in (session.primary, *session.duplicates)
+                )
+                for session in sessions
+            }
+
+        self.assertEqual(
+            {frozenset({"early", "1"}), frozenset({"late", "2"})},
+            members(_bundle([early, late], [first, second])),
+        )
+        # Without its own copy the second walk joins no session.
+        self.assertEqual(
+            {frozenset({"early", "1"}), frozenset({"2"})},
+            members(_bundle([early], [first, second])),
+        )
+        # Alone, the second walk joins the earlier copy by its elapsed time.
+        self.assertEqual(
+            {frozenset({"early", "2"}), frozenset({"late"})},
+            members(_bundle([early, late], [second])),
+        )
+
+    def test_a_wahoo_record_is_not_matched_by_the_intervals_elapsed_time(
+        self,
+    ) -> None:
+        copy = _ride("copy", elapsed_duration_s=4500.0)
+        wahoo = _ride("wahoo", provider=ProviderId.WAHOO, duration_s=4500.0)
+        garmin = _ride(
+            "garmin",
+            provider=ProviderId.GARMIN,
+            recorded_by=RecordingOrigin.GARMIN,
+            duration_s=4500.0,
+        )
+
+        self.assertFalse(_duplicate_ids(_bundle([copy, wahoo]), ProviderId.WAHOO))
+        self.assertEqual(
+            {"garmin"}, _duplicate_ids(_bundle([copy, garmin]), ProviderId.GARMIN)
         )
 
     def test_every_record_appears_in_exactly_one_session(self) -> None:
@@ -728,12 +839,29 @@ def _quadratic_bundle_sessions(
             if _wahoo_and_garmin_copy_match(entries[wahoo_index], entries[copy_index]):
                 duplicate_of[copy_index] = wahoo_index
                 break
+    unmatched = []
     for index, entry in enumerate(entries):
         if entry.record.provenance.provider is not ProviderId.GARMIN:
             continue
         for target_index, target in enumerate(entries):
             if _is_intervals(target.record) and _garmin_matches_intervals(
                 entry, target
+            ):
+                duplicate_of[index] = duplicate_of.get(target_index, target_index)
+                break
+        else:
+            unmatched.append(index)
+    for index in unmatched:
+        joined = {
+            primary
+            for duplicate, primary in duplicate_of.items()
+            if entries[duplicate].record.provenance.provider is ProviderId.GARMIN
+        }
+        for target_index, target in enumerate(entries):
+            if (
+                _is_intervals(target.record)
+                and duplicate_of.get(target_index, target_index) not in joined
+                and _garmin_matches_intervals(entries[index], target, elapsed=True)
             ):
                 duplicate_of[index] = duplicate_of.get(target_index, target_index)
                 break
@@ -780,6 +908,7 @@ def _generated_records(seed: int, count: int = 300) -> list[ActivityRecord]:
                 started_at=rng.choice(events) + timedelta(minutes=offset),
                 duration_s=rng.choice(SAMPLE_DURATIONS_S),
                 distance_m=rng.choice(SAMPLE_DISTANCES_M),
+                elapsed_duration_s=rng.choice(SAMPLE_DURATIONS_S),
             )
         )
     return records

@@ -164,7 +164,9 @@ def _garmin_duplicate_measurements(
     compared = 0
     matches = 0
     # Garmin ``duration`` is elapsed time and Intervals.icu ``moving_time`` is
-    # moving time, so Garmin ``movingDuration`` is a second candidate.
+    # moving time, so Garmin ``movingDuration`` is a second candidate. Without a
+    # Garmin moving time (walks), Garmin ``duration`` may also agree with the
+    # Intervals.icu ``elapsed_time``.
     garmin_durations = [
         number
         for number in (
@@ -181,7 +183,7 @@ def _garmin_duplicate_measurements(
         if any(
             abs(duration - moving_time) <= max(120, moving_time * 0.10)
             for duration in garmin_durations
-        ):
+        ) or _elapsed_times_agree(garmin_activity, intervals_activity):
             matches += 1
     left = _number(garmin_activity.get("distance"))
     right = _number(intervals_activity.get("distance"))
@@ -190,6 +192,18 @@ def _garmin_duplicate_measurements(
         if abs(left - right) <= max(500, right * 0.10):
             matches += 1
     return compared, matches
+
+
+def _elapsed_times_agree(
+    garmin_activity: dict[str, Any], intervals_activity: dict[str, Any]
+) -> bool:
+    elapsed = _number(garmin_activity.get("duration"))
+    other = _number(intervals_activity.get("elapsed_time"))
+    return (
+        elapsed is not None
+        and other is not None
+        and abs(elapsed - other) <= max(120, other * 0.10)
+    )
 
 
 def _intervals_start(intervals_activity: dict[str, Any]) -> datetime | None:

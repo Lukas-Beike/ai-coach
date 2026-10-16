@@ -75,8 +75,9 @@ def load_fixture_rows() -> list[dict[str, Any]]:
 
 
 class ModuleContractTests(unittest.TestCase):
-    def test_mapper_version_is_one(self) -> None:
-        self.assertEqual(1, MAPPER_VERSION)
+    def test_mapper_version_is_two(self) -> None:
+        # Version 2 keeps elapsed_time as elapsed_duration_s.
+        self.assertEqual(2, MAPPER_VERSION)
 
     def test_retrieved_at_must_be_timezone_aware(self) -> None:
         with self.assertRaises(ValueError):
@@ -376,6 +377,33 @@ class AliasTests(unittest.TestCase):
             (MappingIssue("i-test", "moving_time", IssueReason.INVALID_NUMBER),),
             result.issues,
         )
+
+    def test_elapsed_time_is_kept_next_to_the_moving_time(self) -> None:
+        record = map_one(moving_time=3000, elapsed_time=3600)
+
+        self.assertEqual(3000.0, record.duration_s)
+        self.assertEqual(3600.0, record.elapsed_duration_s)
+        self.assertEqual(3600.0, map_one(elapsed_time=3600).elapsed_duration_s)
+        self.assertIsNone(map_one(moving_time=3000).elapsed_duration_s)
+
+    def test_invalid_elapsed_time_is_reported_once(self) -> None:
+        for moving_time in (3000, None):
+            with self.subTest(moving_time=moving_time):
+                result = map_rows([row(moving_time=moving_time, elapsed_time="abc")])
+
+                record = result.records[0]
+                self.assertEqual(
+                    None if moving_time is None else 3000.0, record.duration_s
+                )
+                self.assertIsNone(record.elapsed_duration_s)
+                self.assertEqual(
+                    (
+                        MappingIssue(
+                            "i-test", "elapsed_time", IssueReason.INVALID_NUMBER
+                        ),
+                    ),
+                    result.issues,
+                )
 
     def test_average_watts_precedes_average_power(self) -> None:
         self.assertEqual(

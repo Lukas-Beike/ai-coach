@@ -16,6 +16,14 @@ Starts are compared on the athlete's wall clock, as the legacy rules compare
 naive local times. A zone is therefore required: records carry only instants.
 Records must be representable in ``zone``, as mapper output is.
 
+Garmin often sends no moving time (walks), so its elapsed duration cannot agree
+with the Intervals.icu moving time. A Garmin-provider record that matched no
+Intervals.icu record under the rule above may then duplicate one whose elapsed
+time agrees with the Garmin duration, with the same start, family and distance
+rules. That second pass only joins an Intervals.icu session that no Garmin
+record joined yet: two short walks of similar length within 30 minutes would
+otherwise each claim the earlier copy.
+
 Assignment is first match wins in deterministic order (start instant, then
 provider, then activity id). A record is a duplicate of at most one primary, and
 every input record appears in exactly one session. A Garmin-provider duplicate
@@ -194,6 +202,8 @@ def _assign_duplicates(entries: tuple[_Entry, ...]) -> dict[int, int]:
         index for index, entry in enumerate(entries) if _is_intervals(entry.record)
     ]
     intervals_window = _WallWindow(entries, intervals)
+    joined: set[int] = set()
+    unmatched: list[int] = []
     for index, entry in enumerate(entries):
         if entry.record.provenance.provider is not ProviderId.GARMIN:
             continue
@@ -205,6 +215,21 @@ def _assign_duplicates(entries: tuple[_Entry, ...]) -> dict[int, int]:
         if matches:
             target_index = min(matches)
             duplicate_of[index] = duplicate_of.get(target_index, target_index)
+            joined.add(duplicate_of[index])
+        else:
+            unmatched.append(index)
+    for index in unmatched:
+        entry = entries[index]
+        matches = [
+            target_index
+            for target_index in intervals_window.near(entry.wall)
+            if duplicate_of.get(target_index, target_index) not in joined
+            and _garmin_matches_intervals(entry, entries[target_index], elapsed=True)
+        ]
+        if matches:
+            target_index = min(matches)
+            duplicate_of[index] = duplicate_of.get(target_index, target_index)
+            joined.add(duplicate_of[index])
     _assign_wahoo_provider_duplicates(entries, duplicate_of, intervals_window)
     return duplicate_of
 
@@ -270,7 +295,9 @@ def _sessions(
     )
 
 
-def _garmin_matches_intervals(garmin: _Entry, intervals: _Entry) -> bool:
+def _garmin_matches_intervals(
+    garmin: _Entry, intervals: _Entry, *, elapsed: bool = False
+) -> bool:
     if abs(garmin.wall - intervals.wall) > START_WINDOW:
         return False
     if garmin.family != intervals.family and _OTHER_FAMILY not in (
@@ -278,7 +305,7 @@ def _garmin_matches_intervals(garmin: _Entry, intervals: _Entry) -> bool:
         intervals.family,
     ):
         return False
-    return _garmin_measurements_agree(garmin.record, intervals.record)
+    return _garmin_measurements_agree(garmin.record, intervals.record, elapsed=elapsed)
 
 
 def _wahoo_matches_intervals(wahoo: _Entry, intervals: _Entry) -> bool:
@@ -291,13 +318,14 @@ def _wahoo_matches_intervals(wahoo: _Entry, intervals: _Entry) -> bool:
 
 
 def _garmin_measurements_agree(
-    garmin: ActivityRecord, intervals: ActivityRecord
+    garmin: ActivityRecord, intervals: ActivityRecord, *, elapsed: bool = False
 ) -> bool:
     compared = 0
     agreed = 0
     # Garmin ``duration`` is elapsed time, while the Intervals.icu duration is
     # usually moving time (elapsed only when moving time is missing), so the
-    # Garmin moving duration is a second candidate.
+    # Garmin moving duration is a second candidate. The elapsed pass also accepts
+    # the Garmin duration against the Intervals.icu elapsed time.
     garmin_durations = [
         value
         for value in (garmin.duration_s, garmin.moving_duration_s)
@@ -308,7 +336,7 @@ def _garmin_measurements_agree(
         if any(
             _close(value, intervals.duration_s, DURATION_FLOOR_S, intervals.duration_s)
             for value in garmin_durations
-        ):
+        ) or (elapsed and _elapsed_times_agree(garmin, intervals)):
             agreed += 1
     # Only the distance pair skips non-positive values, as the legacy rule does.
     if garmin.distance_m and intervals.distance_m:
@@ -321,6 +349,15 @@ def _garmin_measurements_agree(
         ):
             agreed += 1
     return compared > 0 and agreed == compared
+
+
+def _elapsed_times_agree(garmin: ActivityRecord, intervals: ActivityRecord) -> bool:
+    elapsed = intervals.elapsed_duration_s
+    return (
+        garmin.duration_s is not None
+        and elapsed is not None
+        and _close(garmin.duration_s, elapsed, DURATION_FLOOR_S, elapsed)
+    )
 
 
 def _wahoo_and_garmin_copy_match(wahoo: _Entry, copy: _Entry) -> bool:

@@ -126,6 +126,8 @@ class ActivityRecord:
     normalized_power: float | None = None
     avg_cadence: float | None = None
     energy_kj: float | None = None
+    # Elapsed time when ``duration_s`` is moving time (Intervals.icu); otherwise None.
+    elapsed_duration_s: float | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
@@ -201,6 +203,16 @@ class ActivityRecord:
             "energy_kj",
             optional_bounded_number(
                 self.energy_kj, "energy_kj", 0.0, MAX_ACTIVITY_ENERGY_KJ
+            ),
+        )
+        object.__setattr__(
+            self,
+            "elapsed_duration_s",
+            optional_bounded_number(
+                self.elapsed_duration_s,
+                "elapsed_duration_s",
+                0.0,
+                MAX_ACTIVITY_DURATION_S,
             ),
         )
         optional_text(self.name, "name", max_length=200)
