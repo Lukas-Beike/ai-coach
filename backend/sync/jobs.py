@@ -786,8 +786,8 @@ class SyncJobStore:
             candidate = db.execute(
                 "SELECT id FROM sync_jobs WHERE status='queued' "
                 "AND (available_at IS NULL OR available_at<=?) "
-                + ("AND requested_by<>'backfill' " if hold_backfill else "")
-                + "ORDER BY requested_by='backfill', created_at, id LIMIT 1",
+                + ("AND type<>'historical_backfill' " if hold_backfill else "")
+                + "ORDER BY type='historical_backfill', created_at, id LIMIT 1",
                 (now,),
             ).fetchone()
             if not candidate:

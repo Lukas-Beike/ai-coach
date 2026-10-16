@@ -9,6 +9,7 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import urlparse
 
 import backend
@@ -32,7 +33,7 @@ from backend.observability import (
 
 
 def _config(**updates: str) -> Config:
-    values = {
+    values: dict[str, Any] = {
         "port": 8090,
         "openai_api_key": "synthetic-openai-value",
         "openai_base_url": "https://api.openai.com/v1",

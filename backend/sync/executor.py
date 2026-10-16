@@ -110,6 +110,22 @@ class HistoricalSyncJobOwner:
         days = max(1, min(days, (end_date - self._sync_earliest_date).days + 1))
         return days, end_date
 
+    def below_floor(
+        self, provider: str, job_type: str, historical_end: date | None
+    ) -> dict[str, Any] | None:
+        """End a backfill whose window lies wholly below the floor without a fetch."""
+        if (
+            job_type != "historical_backfill"
+            or historical_end is None
+            or historical_end >= self._sync_earliest_date
+        ):
+            return None
+        # The cursor at the floor keeps a restart from resuming the walk.
+        self._sync_state_repository.update_cursor(
+            provider, "historical", self._sync_earliest_date.isoformat()
+        )
+        return {"status": "ok", "window_records": 0, "historical_next_end": None}
+
     def add_next_end(
         self,
         provider: str,
@@ -232,6 +248,11 @@ class IntervalsSyncJobOwner:
             str(job.get("type") or ""),
             lambda: self._historical_sync.sync_period(INTERVALS_ID),
         )
+        floor_result = self._historical_sync.below_floor(
+            INTERVALS_ID, str(job.get("type") or ""), historical_end
+        )
+        if floor_result is not None:
+            return floor_result
         sync_kwargs: dict[str, Any] = {
             "reason": reason,
             "activity_days": days,
@@ -307,6 +328,11 @@ class GarminSyncJobOwner:
         days, historical_end = self._historical_sync.window(
             payload, job_type, lambda: self._sync_days(job_type)
         )
+        floor_result = self._historical_sync.below_floor(
+            GARMIN_ID, job_type, historical_end
+        )
+        if floor_result is not None:
+            return floor_result
         sync_kwargs: dict[str, Any] = {
             "days": days,
             "operation_id": job["id"],

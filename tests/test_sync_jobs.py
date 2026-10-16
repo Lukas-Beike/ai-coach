@@ -831,14 +831,16 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual(self.store.state(job["id"])["items"][0]["attempts"], 1)
         self.assertIsNone(self.store.claim())
 
-    def _enqueue_backfill(self, end_date="2026-06-03", available_at=None):
+    def _enqueue_backfill(
+        self, end_date="2026-06-03", available_at=None, requested_by="backfill"
+    ):
         return self.store.enqueue(
             {
                 "provider": "intervals",
                 "type": "historical_backfill",
                 "payload": {"days": 90, "end_date": end_date},
             },
-            "backfill",
+            requested_by,
             None,
             available_at,
         )[0]
@@ -868,6 +870,24 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertIsNone(store.claim())
         self.assertEqual(store.state(backfill["id"])["status"], "queued")
 
+        busy[0] = False
+        self.assertEqual(store.claim()["id"], backfill["id"])
+
+    def test_claim_treats_a_startup_backfill_as_background_work(self):
+        busy = [True]
+        store = SyncJobStore(
+            self.manager,
+            lambda: self.current_now,
+            lambda: next(self.identifiers),
+            foreground_busy=lambda: busy[0],
+        )
+        # The first chunk is queued at startup, not by a continuation.
+        backfill = self._enqueue_backfill(requested_by="startup")
+        self.current_now = "2026-09-20T12:00:05+00:00"
+        refresh, _ = self.enqueue("weather", "refresh", {"force": True})
+
+        self.assertEqual(store.claim()["id"], refresh["id"])
+        self.assertIsNone(store.claim())
         busy[0] = False
         self.assertEqual(store.claim()["id"], backfill["id"])
 

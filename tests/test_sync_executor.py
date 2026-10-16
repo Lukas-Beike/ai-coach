@@ -510,6 +510,27 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertEqual(self.intervals.calls[-1][1]["activity_days"], 10)
         self.assertEqual(self.intervals.calls[-1][1]["end_date"], date(2000, 1, 10))
 
+    def test_backfill_below_the_floor_ends_without_a_fetch(self) -> None:
+        for provider, service in (("intervals", self.intervals), ("garmin", self.garmin)):
+            with self.subTest(provider=provider):
+                service.calls.clear()
+                self.queue.calls.clear()
+                self.state.cursor_updates.clear()
+
+                self.executor.run(
+                    self.job(
+                        provider,
+                        "historical_backfill",
+                        {"days": 90, "end_date": "1999-12-01"},
+                    )
+                )
+
+                self.assertEqual(service.calls, [])
+                self.assertEqual(self.queue.calls, [])
+                self.assertEqual(
+                    self.state.cursor_updates, [(provider, "historical", "2000-01-01")]
+                )
+
     def test_historical_window_uses_a_configured_floor(self) -> None:
         historical = build_historical_sync(self.state, self.queue, date(2020, 1, 1))
 

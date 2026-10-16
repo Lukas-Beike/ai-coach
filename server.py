@@ -943,6 +943,11 @@ GARMIN_ASSEMBLY = GarminAssembly(
     )
 )
 
+
+def _coach_foreground_busy() -> bool:
+    return COACH_BACKGROUND_JOBS.job_store().busy()
+
+
 SYNC_JOB_QUEUE = SyncJobQueueAssembly(
     dependencies=SyncJobQueueAssembly.Inputs(
         persistence=SyncQueuePersistence(
@@ -964,7 +969,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
             retry_base_seconds=SYNC_JOB_RETRY_BASE_SECONDS,
             retry_max_seconds=SYNC_JOB_RETRY_MAX_SECONDS,
             registry=DEFAULT_PROVIDER_REGISTRY,
-            foreground_busy=lambda: COACH_BACKGROUND_JOBS.job_store().busy(),
+            foreground_busy=_coach_foreground_busy,
         ),
     )
 )
