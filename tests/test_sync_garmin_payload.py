@@ -363,6 +363,132 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertEqual([row["gearUUID"] for row in result], ["one", "two"])
         self.assertEqual([row["stats"] for row in result], [{}, {}])
 
+    @staticmethod
+    def _gear_client(**extra):
+        return SimpleNamespace(
+            get_user_profile=lambda: {"id": 123},
+            get_gear=lambda profile: [
+                {"gearUUID": "one", "gearName": "Bike"},
+                {"gearUUID": "two", "gearName": "Shoes"},
+            ],
+            get_gear_stats=lambda identity: {"totalDistance": 2000},
+            **extra,
+        )
+
+    def test_gear_collection_stores_unique_activity_ids_read_only(self):
+        calls = []
+
+        def activities(identity, limit):
+            calls.append((identity, limit))
+            return [
+                {"activityId": 11, "activityType": {"typeKey": "running"}},
+                {"activityId": "12"},
+                {"activityId": 11},
+                {"noId": True},
+                "malformed",
+            ]
+
+        writers = {
+            name: Mock()
+            for name in ("add_gear_to_activity", "remove_gear_from_activity")
+        }
+        client = self._gear_client(get_gear_activities=activities, **writers)
+        client.set_gear_default = Mock()
+        call = lambda service, operation, fetch, details: fetch()
+        result = _gear_inventory(client, call)
+        self.assertEqual([row["activity_ids"] for row in result], [["11", "12"]] * 2)
+        self.assertNotIn("activity_ids_truncated", result[0])
+        self.assertEqual(calls, [("one", 1000), ("two", 1000)])
+        for writer in (*writers.values(), client.set_gear_default):
+            writer.assert_not_called()
+
+    def test_gear_collection_omits_activity_ids_when_unknown(self):
+        call = lambda service, operation, fetch, details: fetch()
+        result = _gear_inventory(self._gear_client(), call)
+        self.assertTrue(all("activity_ids" not in row for row in result))
+
+        def fail(identity, limit):
+            raise RuntimeError("Synthetic gear activities unavailable")
+
+        result = _gear_inventory(self._gear_client(get_gear_activities=fail), call)
+        self.assertEqual([row["gearUUID"] for row in result], ["one", "two"])
+        self.assertTrue(all("activity_ids" not in row for row in result))
+        self.assertEqual([row["stats"]["totalDistance"] for row in result], [2000] * 2)
+        invalid = self._gear_client(get_gear_activities=lambda identity, limit: {})
+        self.assertTrue(
+            all("activity_ids" not in row for row in _gear_inventory(invalid, call))
+        )
+        # An empty list is a real answer, unlike a missing one.
+        empty = self._gear_client(get_gear_activities=lambda identity, limit: [])
+        self.assertEqual(
+            [row["activity_ids"] for row in _gear_inventory(empty, call)], [[], []]
+        )
+
+    def test_gear_collection_flags_truncated_activity_lists(self):
+        call = lambda service, operation, fetch, details: fetch()
+        full = self._gear_client(
+            get_gear_activities=lambda identity, limit: [
+                {"activityId": number} for number in range(limit)
+            ]
+        )
+        result = _gear_inventory(full, call)
+        self.assertTrue(all(row["activity_ids_truncated"] for row in result))
+        self.assertEqual(len(result[0]["activity_ids"]), 1000)
+
+    def test_stored_gear_snapshot_keeps_activity_ids_through_merge(self):
+        gear = [{"gearUUID": "one", "activity_ids": ["11"], "stats": {}}]
+        merged = self.service.prepare_remote(
+            {"synced_at": "2026-09-20T10:00:00", "gear": gear, "errors": []}
+        )
+        self.assertEqual(merged["gear"][0]["activity_ids"], ["11"])
+        self.store_garmin_snapshot(merged)
+        failed = self.service.prepare_remote(
+            {
+                "synced_at": "2026-09-20T11:00:00",
+                "errors": [{"source": "gear", "message": "Synthetic failure"}],
+            }
+        )
+        self.assertEqual(failed["gear"][0]["activity_ids"], ["11"])
+        self.assertEqual(failed["source_freshness"]["gear"]["freshness"], "stale")
+
+    def test_failed_gear_activity_read_keeps_the_last_known_list(self):
+        stored = [
+            {"gearUUID": "one", "activity_ids": ["11"], "stats": {}},
+            {
+                "gearUUID": "two",
+                "activity_ids": ["21"],
+                "activity_ids_truncated": True,
+                "stats": {},
+            },
+            {"gearUUID": "three", "activity_ids": ["31"], "stats": {}},
+        ]
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                {"synced_at": "2026-09-20T10:00:00", "gear": stored, "errors": []}
+            )
+        )
+        merged = self.service.prepare_remote(
+            {
+                "synced_at": "2026-09-20T11:00:00",
+                "gear": [
+                    {"gearUUID": "one", "stats": {}},
+                    {"gearUUID": "two", "stats": {}},
+                    {"gearUUID": "three", "activity_ids": [], "stats": {}},
+                    {"gearUUID": "four", "stats": {}},
+                ],
+                "errors": [],
+            }
+        )
+        rows = {row["gearUUID"]: row for row in merged["gear"]}
+        self.assertEqual(rows["one"]["activity_ids"], ["11"])
+        self.assertTrue(rows["two"]["activity_ids_truncated"])
+        self.assertTrue(rows["one"]["activity_ids_stale"])
+        self.assertTrue(rows["two"]["activity_ids_stale"])
+        self.assertEqual(rows["three"]["activity_ids"], [])
+        self.assertNotIn("activity_ids_stale", rows["three"])
+        self.assertNotIn("activity_ids", rows["four"])
+        self.assertEqual(merged["source_freshness"]["gear"]["freshness"], "current")
+
     def test_top_level_gear_profile_failure_is_reported(self):
         payload = {"errors": []}
 
