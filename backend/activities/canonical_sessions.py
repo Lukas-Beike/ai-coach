@@ -295,8 +295,9 @@ def _garmin_measurements_agree(
 ) -> bool:
     compared = 0
     agreed = 0
-    # Garmin ``duration`` is elapsed time and Intervals.icu ``moving_time`` is
-    # moving time, so the Garmin moving duration is a second candidate.
+    # Garmin ``duration`` is elapsed time, while the Intervals.icu duration is
+    # usually moving time (elapsed only when moving time is missing), so the
+    # Garmin moving duration is a second candidate.
     garmin_durations = [
         value
         for value in (garmin.duration_s, garmin.moving_duration_s)
