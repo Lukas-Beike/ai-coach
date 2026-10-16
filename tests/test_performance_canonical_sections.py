@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import copy
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
@@ -95,6 +95,40 @@ class SectionHelperTests(unittest.TestCase):
             {"id": "later"},
         ]
         self.assertEqual(wellness_rows(carrier, {}), carrier)
+
+
+class _NoObservations:
+    def observations(self, _db, _kind, *, start=None, end=None, sport=None):
+        return ()
+
+
+class _StartRecorder:
+    def __init__(self) -> None:
+        self.starts: list[date | None] = []
+
+    def activity_rows(
+        self, _db: Any, *, start: date | None = None, end=None, limit=None
+    ) -> tuple[dict[str, Any], ...]:
+        self.starts.append(start)
+        return ()
+
+
+class ActivityWindowTests(unittest.TestCase):
+    def _start(self, wellness_days: list[str]) -> date | None:
+        rows = _StartRecorder()
+        snapshot = {"recent_wellness": [{"id": day} for day in wellness_days]}
+        read_performance_inputs(
+            _NoObservations(), object(), snapshot, activity_reader=rows, as_of=TODAY
+        )
+        (start,) = rows.starts
+        return start
+
+    def test_activities_cover_the_year_before_as_of(self) -> None:
+        self.assertEqual(self._start(["2026-09-01"]), TODAY - timedelta(days=364))
+        self.assertEqual(self._start([]), TODAY - timedelta(days=364))
+
+    def test_activities_reach_back_to_the_oldest_wellness_row(self) -> None:
+        self.assertEqual(self._start(["2025-06-01", "2026-10-12"]), date(2025, 6, 1))
 
 
 class SectionReadTests(CanonicalReadFixture):

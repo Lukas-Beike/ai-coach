@@ -14,6 +14,7 @@ from backend.performance.activity_validation import activity_performance_validat
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
+    activity_rows_for,
     performance_options,
     read_performance_inputs,
 )
@@ -64,6 +65,19 @@ class ActivityAnalysisReadService(ActivityReadService):
             )
         return snapshot, canonical
 
+    def _detail_rows(
+        self, canonical: CanonicalPerformanceInputs | None, normalized_id: str
+    ) -> Sequence[Any] | None:
+        """Return the canonical rows that hold the activity, if they were read.
+
+        The performance inputs cover only the recent year, so an older activity
+        is looked up in the full history.
+        """
+        rows = None if canonical is None else canonical.activity_rows
+        if rows is None or _find_activity(rows, normalized_id) is not None:
+            return rows
+        return activity_rows_for(self._canonical)
+
     def detail(
         self,
         activity_id: Any,
@@ -82,9 +96,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         normalized_id = str(self._references.resolve(normalized_id))
         snapshot, canonical = self._performance_inputs(today)
         activity = _raw_activity(
-            snapshot,
-            normalized_id,
-            None if canonical is None else canonical.activity_rows,
+            snapshot, normalized_id, self._detail_rows(canonical, normalized_id)
         )
         cached = self._detail_store.get(normalized_id) if self._detail_store else None
         stale = bool(
@@ -132,6 +144,21 @@ class ActivityAnalysisReadService(ActivityReadService):
         }
 
 
+def _find_activity(raw_activities: Any, normalized_id: str) -> dict | None:
+    if not isinstance(raw_activities, list | tuple):
+        return None
+    return next(
+        (
+            item
+            for item in raw_activities
+            if isinstance(item, dict)
+            and str(_first_present(item, ("id", "activityId", "external_id")) or "")
+            == normalized_id
+        ),
+        None,
+    )
+
+
 def _raw_activity(
     snapshot: dict,
     normalized_id: str,
@@ -143,20 +170,7 @@ def _raw_activity(
         raw_provider_data = snapshot.get("raw_provider_data")
         if isinstance(raw_provider_data, dict):
             raw_activities = raw_provider_data.get("activities")
-    activity = (
-        next(
-            (
-                item
-                for item in raw_activities
-                if isinstance(item, dict)
-                and str(_first_present(item, ("id", "activityId", "external_id")) or "")
-                == normalized_id
-            ),
-            None,
-        )
-        if isinstance(raw_activities, list | tuple)
-        else None
-    )
+    activity = _find_activity(raw_activities, normalized_id)
     if activity is None:
         raise AppError(
             404,

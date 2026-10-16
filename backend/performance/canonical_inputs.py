@@ -23,6 +23,10 @@ wellness rows, and no load, Intervals threshold or recovery value; a stored Waho
 cycling FTP or weight fallback still applies. Without a canonical
 activity reader and without wellness rows there are no inputs, and the caller keeps
 the legacy values.
+
+The activities cover the year before ``as_of``, extended back to the oldest wellness
+row, which seeds the reconstructed ATL. Every activity window the performance
+projection uses is shorter, so a long synced history is not decoded on each read.
 """
 
 from __future__ import annotations
@@ -30,7 +34,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, Sport
@@ -109,6 +113,10 @@ class CanonicalPerformanceSource:
     def activity_row_reader(self) -> ActivityRowReader | None:
         """Return the configured raw activity row reader, if any."""
         return None if self.activity_rows is None else self.activity_rows()
+
+
+# Activities older than this are not read for the performance inputs.
+ACTIVITY_HISTORY_DAYS: Final = 365
 
 
 def snapshot_with_inputs(
@@ -330,7 +338,11 @@ def read_performance_inputs(
         [*_raw_wellness_rows(snapshot), *compact], observed
     )
     activity_rows = (
-        None if activity_reader is None else tuple(activity_reader.activity_rows(db))
+        None
+        if activity_reader is None
+        else tuple(
+            activity_reader.activity_rows(db, start=_activity_start(rows, as_of))
+        )
     )
     if activity_rows is None and not rows:
         return None
@@ -374,6 +386,12 @@ def read_performance_inputs(
         ),
         recovery_averages=read_recovery_average_inputs(reader, db, start=start),
     )
+
+
+def _activity_start(rows: list[dict[str, Any]], as_of: date) -> date:
+    """Return the first day of activities the performance inputs read."""
+    days = [day for day in map(canonical_sections.row_day, rows) if day is not None]
+    return min([as_of - timedelta(days=ACTIVITY_HISTORY_DAYS - 1), *days])
 
 
 def _current_value(
