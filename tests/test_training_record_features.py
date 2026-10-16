@@ -590,6 +590,40 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertEqual(usage["maintenance_hours"], 1)
         self.assertTrue(usage["maintenance_due"])
 
+    def test_component_counts_garmin_linked_sessions_from_its_own_start(self):
+        rows = [self._ride("i1"), self._ride("i2", day="2026-08-31")]
+        service = self._gear_service(rows)
+        item = self._garmin_gear(
+            service,
+            [self._gear_row("g1", activity_ids=["ai1", "ai2"])],
+            self._matches(rows),
+        )["g1"]
+        service.save(
+            self._bike(
+                name="Chain",
+                kind="component",
+                parent_id=item["id"],
+                sport=item["sport"],
+                start_date="2026-08-31",
+            )
+        )
+        usage = {i["name"]: i["usage"] for i in service.read()["items"]}
+        self.assertEqual(usage["Gear g1"]["assigned_sessions"], 2)
+        self.assertEqual(usage["Chain"]["assigned_sessions"], 1)
+
+    def test_explicit_unassignment_is_left_out_of_the_derived_sport(self):
+        rows = [self._ride(f"r{n}") for n in range(4)]
+        service = self._gear_service(rows)
+        gear = [
+            self._gear_row("g1", "Gadget", activity_ids=["a" + r["id"] for r in rows])
+        ]
+        matches = self._matches(rows)
+        self._garmin_gear(service, gear, matches)
+        service.assign({"activity_id": "r0", "equipment_id": None})
+        service.assign({"activity_id": "r1", "equipment_id": None})
+        service.sync_garmin_snapshot(self._snapshot(gear, matches))
+        self.assertTrue(service.read()["items"][0]["sport_pending"])
+
     def _derived_item(self, rows):
         service = self._gear_service(rows)
         gear = [

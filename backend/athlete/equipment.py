@@ -165,12 +165,18 @@ class EquipmentService:
                         _insert_initial_garmin_item(
                             db, row, gear_id, self._today(), now
                         )
+            # An explicit assignment, including an unassignment, overrides the link.
+            explicit = {
+                row["activity_id"]
+                for row in self._records(db, "equipment_assignment", 2000)
+            }
+            links = _garmin_links(
+                local_rows, rows, snapshot.get("activity_matches"), activity_rows
+            )
             derived = _derived_sports(
                 local_rows,
                 activity_rows,
-                _garmin_links(
-                    local_rows, rows, snapshot.get("activity_matches"), activity_rows
-                ),
+                {key: value for key, value in links.items() if key not in explicit},
             )
             _refresh_garmin_distances(db, rows, by_garmin, now, derived)
             if not initialized:
@@ -723,7 +729,8 @@ def _counts_for(item: dict, row: dict, assignments: dict, today: date) -> bool:
     """Return whether the row's effective assignment counts toward the item today.
 
     An item counts rows from its start date on. Garmin lists a gear item's whole
-    history, so rows it links are not cut off at the date the item was imported.
+    history, so rows it links are not cut off at the date the main item was
+    imported. A component still counts only from its own start date.
     """
     assignment = assignments.get(str(row.get("id"))) or {}
     day = iso_date_prefix(str(row.get("start_date_local") or ""))
@@ -732,9 +739,10 @@ def _counts_for(item: dict, row: dict, assignments: dict, today: date) -> bool:
         or not day
     ):
         return False
-    started = (
-        assignment.get("source") == GARMIN_GEAR_SOURCE or item["start_date"] <= day
+    garmin_history = assignment.get("source") == GARMIN_GEAR_SOURCE and not item.get(
+        "parent_id"
     )
+    started = garmin_history or item["start_date"] <= day
     return started and day <= today.isoformat()
 
 
