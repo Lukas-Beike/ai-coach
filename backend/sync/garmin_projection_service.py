@@ -111,8 +111,10 @@ class GarminProjectionService:
             rows = list(sources.activity_rows().activity_rows(db))
         return state, rows
 
-    def public_state(self) -> dict[str, Any]:
-        snapshot = self._garmin_payload_service.snapshot()
+    def public_state(self, snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Project the Garmin status; ``snapshot`` reuses the caller's own read."""
+        if snapshot is None:
+            snapshot = self._garmin_payload_service.snapshot()
         state, intervals_rows = self._canonical_read()
         performance_metrics = performance_garmin_metrics.garmin_performance_metrics(
             snapshot,

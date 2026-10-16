@@ -124,7 +124,9 @@ class PublicPerformanceStateService:
         }
         return {
             "performance": performance,
-            ProviderId.GARMIN.value: self._garmin_projection_service.public_state(),
+            ProviderId.GARMIN.value: self._garmin_projection_service.public_state(
+                garmin
+            ),
         }
 
 
