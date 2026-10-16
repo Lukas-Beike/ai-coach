@@ -31,7 +31,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
         *,
-        read_equipment: Callable[[], dict[str, Any]] = dict,
+        read_equipment: Callable[[str], dict[str, Any]] = lambda _: {},
         references: ActivityReferenceResolver | None = None,
         canonical: CanonicalPerformanceSource | None = None,
     ) -> None:
@@ -118,7 +118,9 @@ class ActivityAnalysisReadService(ActivityReadService):
             today,
             **performance_options(canonical),
         )
-        equipment = _activity_equipment(self._read_equipment(), normalized_id)
+        equipment = _activity_equipment(
+            self._read_equipment(normalized_id), normalized_id
+        )
         local_ids = self._references.local_ids([normalized_id])
         return {
             "ok": True,
@@ -200,15 +202,12 @@ def _detail_metadata(
 
 
 def _activity_equipment(equipment: dict, activity_id: str) -> list[dict]:
-    assignment = next(
-        (
-            row
-            for row in equipment.get("assignments", [])
-            if row["activity_id"] == activity_id
-        ),
-        None,
-    )
-    equipment_ids = {assignment["equipment_id"]} if assignment else set()
+    # Garmin can link one activity to several main items.
+    equipment_ids = {
+        row["equipment_id"]
+        for row in equipment.get("assignments", [])
+        if row["activity_id"] == activity_id and row["equipment_id"]
+    }
     return [
         row
         for row in equipment.get("items", [])

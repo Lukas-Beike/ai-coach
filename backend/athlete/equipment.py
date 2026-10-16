@@ -26,7 +26,8 @@ from backend.providers.garmin_gear_fields import (
 EQUIPMENT_PREFIX = "equipment:"
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
 GARMIN_GEAR_SOURCE = "garmin_gear"
-# The read lists at most this many assignments; usage counts all of them.
+# The read lists at most this many assignments, whole activities only; usage
+# counts all of them.
 ASSIGNMENT_LIST_LIMIT = 2000
 GARMIN_INITIAL_SOURCE = "garmin-initial-sync"
 SPORT_DERIVATION_SHARE = 0.75
@@ -66,7 +67,10 @@ class EquipmentService:
             ).fetchall()
         ]
 
-    def read(self, item_id: str | None = None) -> dict[str, Any]:
+    def read(
+        self, item_id: str | None = None, *, activity_id: str | None = None
+    ) -> dict[str, Any]:
+        """Read items with usage; ``activity_id`` lists only its full assignments."""
         rows, duplicates = self._deduplicate(self._read_activity_rows())
         with self._manager.unit_of_work() as db:
             garmin_row = db.execute(
@@ -131,9 +135,11 @@ class EquipmentService:
             "garmin_freshness": (garmin.get("source_freshness") or {})
             .get("gear", {})
             .get("freshness"),
-            "assignments": list(assignments.values())[:ASSIGNMENT_LIST_LIMIT],
+            "assignments": list(assignments.get(activity_id, ()))
+            if activity_id
+            else _assignment_list(assignments),
             "excluded_duplicates": duplicates,
-            "scope": "Known canonical activities with explicit assignments, or that Garmin lists for the gear of a Garmin-linked main item (an explicit assignment, including unassigned, always wins; an activity Garmin lists for several items, or an item without a Garmin activity list, links nothing), plus confirmed initial usage. Missing provider history or measurements makes counters incomplete; no inferred favorite gear. A truncated or outdated Garmin activity list makes the maintenance of intervals counted from sessions partial. Maintenance includes only later calendar days, same-day order is unknown. Limits: 100 items, 1000 maintenance events; usage counts every assignment, but the list shows only the first 2000, explicit ones newest first, then Garmin links.",
+            "scope": "Known canonical activities with explicit assignments, or that Garmin lists for the gear of a Garmin-linked main item (an explicit assignment, including unassigned, always wins; an activity Garmin lists for several main items links to each of them, like Garmin's own totals; an item without a Garmin activity list links nothing), plus confirmed initial usage. Missing provider history or measurements makes counters incomplete; no inferred favorite gear. A truncated or outdated Garmin activity list makes the maintenance of intervals counted from sessions partial. Maintenance includes only later calendar days, same-day order is unknown. Limits: 100 items, 1000 maintenance events; usage counts every assignment, but the list shows only the first 2000 without splitting an activity's gear, explicit ones newest first, then Garmin links; an activity's own read lists all of its assignments.",
         }
 
     def sync_garmin_snapshot(self, snapshot: dict[str, Any]) -> None:
@@ -747,12 +753,17 @@ def _counts_for(item: dict, row: dict, assignments: dict, today: date) -> bool:
     history, so rows it links are not cut off at the date the main item was
     imported. A component still counts only from its own start date.
     """
-    assignment = assignments.get(str(row.get("id"))) or {}
+    owner = item.get("parent_id") or item["id"]
+    assignment = next(
+        (
+            assignment
+            for assignment in assignments.get(str(row.get("id")), ())
+            if assignment.get("equipment_id") == owner
+        ),
+        None,
+    )
     day = iso_date_prefix(str(row.get("start_date_local") or ""))
-    if (
-        assignment.get("equipment_id") != (item.get("parent_id") or item["id"])
-        or not day
-    ):
+    if assignment is None or not day:
         return False
     garmin_history = assignment.get("source") == GARMIN_GEAR_SOURCE and not item.get(
         "parent_id"
@@ -902,16 +913,17 @@ def _garmin_links(
     gear_rows: Any,
     matches: Any,
     rows: list[dict[str, Any]],
-) -> dict[str, str]:
-    """Map activity ids to the one main item whose Garmin gear lists the activity.
+) -> dict[str, list[str]]:
+    """Map activity ids to every main item whose Garmin gear lists the activity.
 
     Garmin's own gear-to-activity list is the link. Garmin activity ids reach the
     stored Intervals.icu rows through ``activity_matches`` and through an
     ``external_id`` equal to the Garmin id. Only the given (deduplicated) rows
     can link, so a duplicate recording counts once. Components and items without
     a Garmin gear row that lists activities never link; a gear row without
-    ``activity_ids`` is unknown, not empty. An activity linked to several main
-    items links to none.
+    ``activity_ids`` is unknown, not empty. Garmin records several gear items
+    per activity and counts the activity in each item's totals, so an activity
+    listed for several main items links to each of them.
     """
     activity_ids = {
         garmin_gear_id(row): row["activity_ids"]
@@ -932,9 +944,8 @@ def _garmin_links(
         ):
             owners.setdefault(activity_id, set()).add(item["id"])
     return {
-        activity_id: next(iter(equipment_ids))
+        activity_id: sorted(equipment_ids)
         for activity_id, equipment_ids in owners.items()
-        if len(equipment_ids) == 1
     }
 
 
@@ -966,27 +977,45 @@ def _rows_by_garmin_id(matches: Any, rows: list[dict[str, Any]]) -> dict[str, se
 def _effective_assignments(
     rows: list[dict[str, Any]],
     explicit: dict[str, dict[str, Any]],
-    links: dict[str, str],
-) -> dict[str, dict[str, Any]]:
-    """Return explicit assignments plus Garmin gear links for the other activities.
+    links: dict[str, list[str]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Return each activity's explicit assignment or its Garmin gear links.
 
-    An explicit record, including one that unassigns, always wins. Garmin links
-    carry no sport check: shoes used for walks and runs count both.
+    An explicit record, including one that unassigns, replaces every Garmin link
+    of its activity. Garmin links carry no sport check: shoes used for walks and
+    runs count both.
     """
-    effective = dict(explicit)
+    effective = {activity_id: [row] for activity_id, row in explicit.items()}
     for row in rows:
         activity_id = str(row.get("id"))
         if activity_id not in effective and activity_id in links:
-            effective[activity_id] = {
-                "activity_id": activity_id,
-                "equipment_id": links[activity_id],
-                "source": GARMIN_GEAR_SOURCE,
-            }
+            effective[activity_id] = [
+                {
+                    "activity_id": activity_id,
+                    "equipment_id": equipment_id,
+                    "source": GARMIN_GEAR_SOURCE,
+                }
+                for equipment_id in links[activity_id]
+            ]
     return effective
 
 
+def _assignment_list(
+    assignments: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Flatten the assignments up to the list limit, keeping each activity whole."""
+    listed: list[dict[str, Any]] = []
+    for activity_assignments in assignments.values():
+        if len(listed) + len(activity_assignments) > ASSIGNMENT_LIST_LIMIT:
+            break
+        listed.extend(activity_assignments)
+    return listed
+
+
 def _derived_sports(
-    items: list[dict[str, Any]], rows: list[dict[str, Any]], links: dict[str, str]
+    items: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    links: dict[str, list[str]],
 ) -> dict[str, StoredSport]:
     """Return the sport an open item's linked activities agree on.
 
@@ -999,12 +1028,17 @@ def _derived_sports(
     counts: dict[str, Counter[tuple[str, str] | None]] = {}
     stored: dict[tuple[str, str], StoredSport] = {}
     for row in rows:
-        equipment_id = links.get(str(row.get("id")))
-        if equipment_id not in open_ids:
+        equipment_ids = [
+            equipment_id
+            for equipment_id in links.get(str(row.get("id")), ())
+            if equipment_id in open_ids
+        ]
+        if not equipment_ids:
             continue
         sport = resolve_equipment_sport(row.get("type"))
         pair = _stored_pair(sport) if sport and sport.sport is not Sport.OTHER else None
-        counts.setdefault(equipment_id, Counter())[pair] += 1
+        for equipment_id in equipment_ids:
+            counts.setdefault(equipment_id, Counter())[pair] += 1
         if sport and pair:
             stored.setdefault(pair, sport)
     derived = {}
