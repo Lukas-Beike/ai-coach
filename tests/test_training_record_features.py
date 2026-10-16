@@ -2,6 +2,7 @@ import json
 import sqlite3
 import unittest
 from datetime import date
+from unittest.mock import patch
 
 from backend.athlete.checkins import CheckinService
 from backend.athlete.equipment import EquipmentService, _garmin_kind, _garmin_sport
@@ -589,6 +590,63 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         usage = service.read()["items"][0]["usage"]
         self.assertEqual(usage["maintenance_hours"], 1)
         self.assertTrue(usage["maintenance_due"])
+
+    def test_truncated_or_stale_garmin_list_makes_session_maintenance_partial(self):
+        rows = [self._ride("i1"), self._ride("i2"), self._ride("i3")]
+        service = self._gear_service(rows)
+        items = self._garmin_gear(
+            service,
+            [
+                self._gear_row("g1", activity_ids=["ai1"], activity_ids_truncated=True),
+                self._gear_row("g2", activity_ids=["ai2"], activity_ids_stale=True),
+                self._gear_row("g3", activity_ids=["ai3"]),
+            ],
+            self._matches(rows),
+        )
+        for uuid, interval in (
+            ("g1", {"maintenance_hours": 5}),
+            ("g2", {"maintenance_km": 100}),
+            ("g3", {"maintenance_hours": 5}),
+        ):
+            item = items[uuid]
+            service.save(
+                self._bike(
+                    id=item["id"],
+                    expected_revision=item["revision"],
+                    name=item["name"],
+                    **interval,
+                )
+            )
+        service.save(
+            self._bike(
+                name="Chain",
+                kind="component",
+                parent_id=items["g2"]["id"],
+                maintenance_km=100,
+            )
+        )
+        usage = {i["name"]: i["usage"] for i in service.read()["items"]}
+        # Hours come from the incomplete list; g2's distance is Garmin's own total.
+        self.assertEqual(usage["Gear g1"]["maintenance_coverage"], "partial")
+        self.assertIsNone(usage["Gear g1"]["maintenance_due"])
+        self.assertEqual(usage["Gear g2"]["maintenance_coverage"], "known_assignments")
+        self.assertFalse(usage["Gear g2"]["maintenance_due"])
+        self.assertEqual(usage["Chain"]["maintenance_coverage"], "partial")
+        self.assertEqual(usage["Gear g3"]["maintenance_coverage"], "known_assignments")
+        self.assertFalse(usage["Gear g3"]["maintenance_due"])
+
+    def test_assignment_list_is_bounded_but_usage_counts_every_link(self):
+        rows = [self._ride(f"i{n}") for n in range(3)]
+        service = self._gear_service(rows)
+        with patch("backend.athlete.equipment.ASSIGNMENT_LIST_LIMIT", 2):
+            items = self._garmin_gear(
+                service,
+                [self._gear_row("g1", activity_ids=["a" + r["id"] for r in rows])],
+                self._matches(rows),
+            )
+            read = service.read()
+        self.assertEqual(items["g1"]["usage"]["assigned_sessions"], 3)
+        self.assertEqual(len(read["assignments"]), 2)
 
     def test_component_counts_garmin_linked_sessions_from_its_own_start(self):
         rows = [self._ride("i1"), self._ride("i2", day="2026-08-31")]

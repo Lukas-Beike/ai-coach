@@ -344,7 +344,10 @@ def _merge_gear_freshness(
 
 
 def _keep_gear_activity_ids(incoming: Any, previous: Any) -> None:
-    """Keep an item's last known Garmin activity list when this sync could not read it."""
+    """Keep an item's last known Garmin activity list when this sync could not read it.
+
+    The kept list is marked stale, so maintenance counted from it reads as partial.
+    """
     known = {
         garmin_gear_id(row): row
         for row in (previous if isinstance(previous, list) else [])
@@ -358,6 +361,7 @@ def _keep_gear_activity_ids(incoming: Any, previous: Any) -> None:
         stored = known.get(garmin_gear_id(row))
         if stored is not None:
             row["activity_ids"] = stored["activity_ids"]
+            row["activity_ids_stale"] = True
             if stored.get("activity_ids_truncated"):
                 row["activity_ids_truncated"] = True
 

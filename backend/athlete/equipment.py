@@ -26,6 +26,8 @@ from backend.providers.garmin_gear_fields import (
 EQUIPMENT_PREFIX = "equipment:"
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
 GARMIN_GEAR_SOURCE = "garmin_gear"
+# The read lists at most this many assignments; usage counts all of them.
+ASSIGNMENT_LIST_LIMIT = 2000
 GARMIN_INITIAL_SOURCE = "garmin-initial-sync"
 SPORT_DERIVATION_SHARE = 0.75
 SPORT_DERIVATION_MIN_ROWS = 3
@@ -90,6 +92,7 @@ class EquipmentService:
             links = _garmin_links(
                 items, garmin.get("gear"), garmin.get("activity_matches"), rows
             )
+            partial = _partial_garmin_history(items, garmin.get("gear"))
             # Every explicit assignment, including an unassignment, overrides the link.
             explicit = {
                 row["activity_id"]: row
@@ -107,7 +110,13 @@ class EquipmentService:
             maintenance = self._records(db, "equipment_maintenance", 1000)
         for item in items:
             _update_usage(
-                item, rows, assignments, maintenance, self._today(), garmin_usage
+                item,
+                rows,
+                assignments,
+                maintenance,
+                self._today(),
+                garmin_usage,
+                (item.get("parent_id") or item["id"]) in partial,
             )
         return {
             "items": items,
@@ -122,9 +131,9 @@ class EquipmentService:
             "garmin_freshness": (garmin.get("source_freshness") or {})
             .get("gear", {})
             .get("freshness"),
-            "assignments": list(assignments.values()),
+            "assignments": list(assignments.values())[:ASSIGNMENT_LIST_LIMIT],
             "excluded_duplicates": duplicates,
-            "scope": "Known canonical activities with explicit assignments, or that Garmin lists for the gear of a Garmin-linked main item (an explicit assignment, including unassigned, always wins; an activity Garmin lists for several items, or an item without a Garmin activity list, links nothing), plus confirmed initial usage. Missing provider history or measurements makes counters incomplete; no inferred favorite gear. Maintenance includes only later calendar days, same-day order is unknown. Limits: 100 items, 2000 assignments, 1000 maintenance events.",
+            "scope": "Known canonical activities with explicit assignments, or that Garmin lists for the gear of a Garmin-linked main item (an explicit assignment, including unassigned, always wins; an activity Garmin lists for several items, or an item without a Garmin activity list, links nothing), plus confirmed initial usage. Missing provider history or measurements makes counters incomplete; no inferred favorite gear. A truncated or outdated Garmin activity list makes the maintenance of intervals counted from sessions partial. Maintenance includes only later calendar days, same-day order is unknown. Limits: 100 items, 1000 maintenance events; usage counts every assignment, but the list shows only the first 2000, explicit ones newest first, then Garmin links.",
         }
 
     def sync_garmin_snapshot(self, snapshot: dict[str, Any]) -> None:
@@ -691,6 +700,7 @@ def _update_usage(
     maintenance: list[dict],
     today: date,
     garmin_usage: dict[str, float | None],
+    partial_history: bool = False,
 ) -> None:
     eligible = [row for row in rows if _counts_for(item, row, assignments, today)]
     events = sorted(
@@ -721,7 +731,7 @@ def _update_usage(
         "time_known_sessions": sum(
             number(row.get("moving_time")) is not None for row in eligible
         ),
-        **_maintenance_usage(item, eligible, events, garmin_distance),
+        **_maintenance_usage(item, eligible, events, garmin_distance, partial_history),
     }
     target_km = item.get("lifetime_target_km")
     if target_km is None and _valid_positive_number(item.get("garmin_maximum_meters")):
@@ -756,14 +766,17 @@ def _maintenance_usage(
     eligible: list[dict],
     events: list[dict],
     garmin_distance: float | None = None,
+    partial_history: bool = False,
 ) -> dict[str, Any]:
     latest = events[-1] if events else None
     ambiguous, since = _maintenance_sessions(eligible, latest)
     distance = _maintenance_distance(item, since, latest, garmin_distance)
     hours = _maintenance_hours(item, since, latest)
     reached = _maintenance_reached(item, distance, hours)
-    uncertain = _maintenance_uncertain(item, since, ambiguous) or (
-        bool(item.get("maintenance_km")) and distance is None
+    uncertain = (
+        _maintenance_uncertain(item, since, ambiguous)
+        or (bool(item.get("maintenance_km")) and distance is None)
+        or (partial_history and _session_counted_interval(item))
     )
     if reached:
         due = True
@@ -828,6 +841,17 @@ def _maintenance_reached(item: dict, distance: float | None, hours: float) -> bo
     return distance_due or hours_due
 
 
+def _session_counted_interval(item: dict) -> bool:
+    """Return whether a maintenance interval depends on the linked sessions.
+
+    Hours always come from sessions. A Garmin item's distance is Garmin's own total.
+    """
+    return bool(
+        item.get("maintenance_hours")
+        or (item.get("maintenance_km") and not item.get("garmin_uuid"))
+    )
+
+
 def _maintenance_uncertain(
     item: dict, since: list[dict], ambiguous: list[dict]
 ) -> bool:
@@ -856,6 +880,21 @@ def _preserve_equipment_metadata(
         for field in ("garmin_maximum_meters", "garmin_status"):
             if previous.get(field) is not None:
                 saved[field] = previous[field]
+
+
+def _partial_garmin_history(items: list[dict[str, Any]], gear_rows: Any) -> set[str]:
+    """Return main item ids whose Garmin activity list is truncated or outdated."""
+    partial = {
+        garmin_gear_id(row)
+        for row in gear_rows or []
+        if isinstance(row, dict)
+        and (row.get("activity_ids_truncated") or row.get("activity_ids_stale"))
+    }
+    return {
+        item["id"]
+        for item in items
+        if item.get("garmin_uuid") and str(item["garmin_uuid"]) in partial
+    }
 
 
 def _garmin_links(

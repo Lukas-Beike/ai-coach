@@ -482,7 +482,10 @@ class GarminPayloadServiceTests(unittest.TestCase):
         rows = {row["gearUUID"]: row for row in merged["gear"]}
         self.assertEqual(rows["one"]["activity_ids"], ["11"])
         self.assertTrue(rows["two"]["activity_ids_truncated"])
+        self.assertTrue(rows["one"]["activity_ids_stale"])
+        self.assertTrue(rows["two"]["activity_ids_stale"])
         self.assertEqual(rows["three"]["activity_ids"], [])
+        self.assertNotIn("activity_ids_stale", rows["three"])
         self.assertNotIn("activity_ids", rows["four"])
         self.assertEqual(merged["source_freshness"]["gear"]["freshness"], "current")
 
