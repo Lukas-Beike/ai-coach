@@ -375,6 +375,41 @@ test("progress and cancel remain reachable while the composer is hidden", { tag:
   await expect(page.locator("#cancelChatButton")).toBeEnabled();
 });
 
+test("voice input records a follow-up while the Coach is working", async ({ page }) => {
+  await ready(page);
+  await controlled(page);
+  await page.evaluate(() => {
+    const original = fetch;
+    window.fetch = (path, options) => path === "/api/transcribe"
+      ? Promise.resolve(new Response('{"transcript":"Gesprochene Folgefrage"}', { status: 200, headers: { "Content-Type": "application/json" } }))
+      : original(path, options);
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } });
+    window.MediaRecorder = class extends EventTarget {
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const chunk = new Event("dataavailable");
+        chunk.data = new Blob(["synthetic audio"]);
+        this.dispatchEvent(chunk);
+        this.dispatchEvent(new Event("stop"));
+      }
+    };
+  });
+  await page.locator("#messageInput").fill("Long fixture task");
+  await page.locator("#sendButton").click();
+  await expect(page.locator("#cancelChatButton")).toBeVisible();
+  const voice = page.locator("#voiceButton");
+  await expect(voice).toBeEnabled();
+  await voice.click();
+  await expect(voice).toHaveAttribute("aria-pressed", "true");
+  await voice.click();
+  await expect(page.locator("#messageInput")).toHaveValue("Gesprochene Folgefrage");
+  await expect(page.locator("#sendButton")).toHaveAttribute("aria-label", "Einreihen");
+  await expect(page.locator("#sendButton")).toBeEnabled();
+});
+
 test("delayed receipt and transcription cannot alter a new session", async ({ page }) => {
   await ready(page);
   await page.evaluate(() => {

@@ -54,7 +54,7 @@ class SyncOperationStateWriter:
             progress,
             message,
             error,
-            set_value=self._set_value,
+            set_values=self._set_values,
             redact=self._redactor,
         )
         self._event_buffer.publish(
@@ -67,9 +67,12 @@ class SyncOperationStateWriter:
             },
         )
 
-    def _set_value(self, key: str, value: str) -> None:
+    def _set_values(self, values: Mapping[str, str]) -> None:
+        # One transaction per state change: the writer lock is taken once, not
+        # once per key, and readers never see a half-written state.
         with self._database_manager.unit_of_work() as db:
-            self._key_value_repository.set(db, key, value)
+            for key, value in values.items():
+                self._key_value_repository.set(db, key, value)
 
 
 def persist_sync_operation_state(
@@ -80,17 +83,20 @@ def persist_sync_operation_state(
     message: str,
     error: str | None = None,
     *,
-    set_value: Callable[[str, str], None],
+    set_values: Callable[[Mapping[str, str]], None],
     redact: Callable[[str], str],
 ) -> None:
     """Persist bounded, non-athlete-facing state through an injected store."""
-    set_value("sync_operation_id", operation_id)
-    set_value("sync_operation_status", status)
-    set_value("sync_operation_phase", phase)
-    set_value("sync_operation_progress", str(max(0, min(progress, 100))))
-    set_value("sync_operation_message", message)
+    values = {
+        "sync_operation_id": operation_id,
+        "sync_operation_status": status,
+        "sync_operation_phase": phase,
+        "sync_operation_progress": str(max(0, min(progress, 100))),
+        "sync_operation_message": message,
+    }
     if error is not None:
-        set_value("last_sync_error", redact(error)[:1000])
+        values["last_sync_error"] = redact(error)[:1000]
+    set_values(values)
 
 
 def project_sync_status(

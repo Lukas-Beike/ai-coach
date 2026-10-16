@@ -70,6 +70,25 @@ class SyncOperationStateWriterTests(unittest.TestCase):
             },
         )
 
+    def test_write_stores_all_keys_in_one_unit_of_work(self) -> None:
+        with patch.object(
+            self.manager, "unit_of_work", wraps=self.manager.unit_of_work
+        ) as unit_of_work:
+            self.writer.write(
+                "operation-1", "error", "error", 50, "Failed", "SECRET detail"
+            )
+
+        unit_of_work.assert_called_once_with()
+        for key, expected in (
+            ("sync_operation_id", "operation-1"),
+            ("sync_operation_status", "error"),
+            ("sync_operation_phase", "error"),
+            ("sync_operation_progress", "50"),
+            ("sync_operation_message", "Failed"),
+            ("last_sync_error", "[redacted] detail"),
+        ):
+            self.assertEqual(self.get_value(key), expected, key)
+
     def test_error_is_redacted_and_truncated_without_entering_event(self) -> None:
         self.writer.write(
             "operation-2",

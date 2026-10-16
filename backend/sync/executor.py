@@ -43,6 +43,11 @@ from backend.sync.weather import WeatherSyncService
 
 _LOGGER = logging.getLogger(__name__)
 
+# Consecutive chunks without any fetched record (2 x 90 days) end a backfill.
+EMPTY_BACKFILL_CHUNK_LIMIT = 2
+# Pause between backfill chunks so queued foreground work claims the writer first.
+BACKFILL_CONTINUATION_DELAY = timedelta(seconds=15)
+
 
 class HistoricalSyncJobOwner:
     """Own sync windows and the continuation of historical backfills."""
@@ -101,50 +106,85 @@ class HistoricalSyncJobOwner:
         end_date = date.fromisoformat(
             iso_date_prefix(str(payload.get("end_date") or default_end.isoformat()))
         )
+        # Never fetch below the configured floor.
+        days = max(1, min(days, (end_date - self._sync_earliest_date).days + 1))
         return days, end_date
 
+    def below_floor(
+        self, provider: str, job_type: str, historical_end: date | None
+    ) -> dict[str, Any] | None:
+        """End a backfill whose window lies wholly below the floor without a fetch."""
+        if (
+            job_type != "historical_backfill"
+            or historical_end is None
+            or historical_end >= self._sync_earliest_date
+        ):
+            return None
+        # The cursor at the floor keeps a restart from resuming the walk.
+        self._sync_state_repository.update_cursor(
+            provider, "historical", self._sync_earliest_date.isoformat()
+        )
+        return {"status": "ok", "window_records": 0, "historical_next_end": None}
+
     def add_next_end(
-        self, result: dict[str, Any], historical_end: date | None, days: int
+        self,
+        provider: str,
+        payload: Mapping[str, Any],
+        result: dict[str, Any],
+        historical_end: date | None,
+        days: int,
     ) -> None:
+        """Declare the next chunk, or end the chain at the floor or after empty history."""
         if historical_end is None:
             return
         next_end = historical_end - timedelta(days=days)
         result["historical_next_end"] = (
             next_end.isoformat() if next_end >= self._sync_earliest_date else None
         )
+        # Only a complete chunk that fetched nothing counts as empty; a result
+        # without a count is treated as non-empty.
+        empty = result.get("status") == "ok" and result.get("window_records") == 0
+        empty_chunks = int(payload.get("empty_chunks") or 0) + 1 if empty else 0
+        if empty_chunks >= EMPTY_BACKFILL_CHUNK_LIMIT:
+            # The cursor at the floor keeps a restart from resuming the walk.
+            result["historical_next_end"] = None
+            self._sync_state_repository.update_cursor(
+                provider, "historical", self._sync_earliest_date.isoformat()
+            )
+        result["historical_empty_chunks"] = empty_chunks
 
     def queue_next(
         self, job: dict[str, Any], result: Any, fallback_status: str
     ) -> None:
         # A partial chunk stops the chain: providers advance their historical
-        # cursor only for complete windows, so continuing would skip the gap. Only
-        # a failed section outside the window (competitions) may still continue.
+        # cursor only for complete windows, so continuing would skip the gap.
         if not (
             job.get("type") == "historical_backfill"
             and isinstance(result, dict)
             and result.get("historical_next_end")
-            and (
-                fallback_status == "completed"
-                or (fallback_status == "partial" and result.get("window_complete"))
-            )
+            and fallback_status == "completed"
         ):
             return
         next_end = result["historical_next_end"]
-        # A retried partial chunk already continued its chain on the first run;
-        # queuing again would start a second chain over the remaining history.
+        # A chunk that ran again (a retry or a restart) may already have queued
+        # its continuation; queuing again would start a second chain.
         if self._queue_service.backfill_continued(
             job["provider"], next_end, str(job.get("created_at") or "")
         ):
             return
+        payload: dict[str, Any] = {
+            "days": self._sync_chunk_days,
+            "end_date": next_end,
+            "reason": "fortgesetzter historischer Backfill",
+        }
+        if result.get("historical_empty_chunks"):
+            payload["empty_chunks"] = result["historical_empty_chunks"]
         self._queue_service.enqueue(
             job["provider"],
             "historical_backfill",
-            {
-                "days": self._sync_chunk_days,
-                "end_date": next_end,
-                "reason": "fortgesetzter historischer Backfill",
-            },
+            payload,
             requested_by="backfill",
+            available_at=(self._local_now() + BACKFILL_CONTINUATION_DELAY).isoformat(),
         )
 
 
@@ -208,6 +248,11 @@ class IntervalsSyncJobOwner:
             str(job.get("type") or ""),
             lambda: self._historical_sync.sync_period(INTERVALS_ID),
         )
+        floor_result = self._historical_sync.below_floor(
+            INTERVALS_ID, str(job.get("type") or ""), historical_end
+        )
+        if floor_result is not None:
+            return floor_result
         sync_kwargs: dict[str, Any] = {
             "reason": reason,
             "activity_days": days,
@@ -217,7 +262,11 @@ class IntervalsSyncJobOwner:
             sync_kwargs["end_date"] = historical_end
         result = self._intervals_sync_service.sync(**sync_kwargs)
         if str(job.get("type") or "") == "historical_backfill":
-            self._historical_sync.add_next_end(result, historical_end, days)
+            self._historical_sync.add_next_end(
+                INTERVALS_ID, payload, result, historical_end, days
+            )
+            # Backfill chunks only add history; refreshes own competitions.
+            return result
         if result.get("status") == "already_running":
             return result
         try:
@@ -279,6 +328,11 @@ class GarminSyncJobOwner:
         days, historical_end = self._historical_sync.window(
             payload, job_type, lambda: self._sync_days(job_type)
         )
+        floor_result = self._historical_sync.below_floor(
+            GARMIN_ID, job_type, historical_end
+        )
+        if floor_result is not None:
+            return floor_result
         sync_kwargs: dict[str, Any] = {
             "days": days,
             "operation_id": job["id"],
@@ -295,7 +349,9 @@ class GarminSyncJobOwner:
                 result, self._morning_body_battery_service
             )
         if job_type == "historical_backfill":
-            self._historical_sync.add_next_end(result, historical_end, days)
+            self._historical_sync.add_next_end(
+                GARMIN_ID, payload, result, historical_end, days
+            )
         return result
 
     def _sync_days(self, job_type: str) -> int:

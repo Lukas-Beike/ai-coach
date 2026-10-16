@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 from unittest import mock
 
@@ -75,6 +76,27 @@ class ConfigTests(unittest.TestCase):
             config = load_config(root, root, {"OPENAI_BASE_URL": "  "})
 
         self.assertEqual(config.openai_base_url, "https://api.openai.com/v1")
+
+    def test_sync_history_floor_defaults_parses_and_rejects_invalid_values(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            default = load_config(root, root, {})
+            valid = load_config(
+                root, root, {"SYNC_HISTORY_EARLIEST_DATE": " 2015-06-01 "}
+            )
+            blank = load_config(root, root, {"SYNC_HISTORY_EARLIEST_DATE": "  "})
+            with self.assertLogs("backend.config", level="WARNING") as logs:
+                invalid = load_config(
+                    root, root, {"SYNC_HISTORY_EARLIEST_DATE": "not-a-date"}
+                )
+
+        self.assertEqual(default.sync_history_earliest_date, date(2000, 1, 1))
+        self.assertEqual(valid.sync_history_earliest_date, date(2015, 6, 1))
+        self.assertEqual(blank.sync_history_earliest_date, date(2000, 1, 1))
+        self.assertEqual(invalid.sync_history_earliest_date, date(2000, 1, 1))
+        self.assertEqual(len(logs.records), 1)
+        self.assertNotIn("not-a-date", logs.output[0])
 
     def test_security_error_order_and_success(self):
         config = Config(

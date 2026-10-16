@@ -726,7 +726,8 @@ function updateVoiceButton() {
   const recording = voiceIsRecording();
   const transcribing = state.voiceTranscribing;
   const chatReady = Boolean(state.data && Array.isArray(state.data.messages));
-  button.disabled = !chatReady || state.busy || transcribing;
+  // Recording stays available while the Coach works; the transcript is queued like a typed follow-up.
+  button.disabled = !chatReady || transcribing;
   button.classList.toggle("recording", recording);
   button.classList.toggle("transcribing", transcribing);
   button.setAttribute("aria-pressed", recording ? "true" : "false");
@@ -890,7 +891,7 @@ async function transcribeVoice(blob) {
 }
 
 async function toggleVoiceInput() {
-  if (state.busy || state.voiceTranscribing || state.voiceAcquiring) return;
+  if (state.voiceTranscribing || state.voiceAcquiring) return;
   if (voiceIsRecording()) {
     stopVoiceRecording();
     return;

@@ -166,6 +166,7 @@ class IntervalsSyncServiceTests(unittest.TestCase):
             self.snapshot, 7, None
         )
         self.daily_markers.mark.assert_called_once_with("intervals")
+        self.snapshot_service.seed_workout_library.assert_called_once()
         self.followup.enqueue_after_sync.assert_called_once_with("manual refresh")
         self.followup.wait.assert_called_once_with("performance-job", cancel_event=None)
         self.assertEqual(
@@ -183,6 +184,7 @@ class IntervalsSyncServiceTests(unittest.TestCase):
     def test_historical_sync_forwards_end_and_cancel_without_followup(self):
         cancel_event = threading.Event()
         end_date = date(2026, 8, 31)
+        self.snapshot["provider_sync"] = {"window_records": 4}
 
         result = self.service.sync(
             "backfill",
@@ -197,6 +199,11 @@ class IntervalsSyncServiceTests(unittest.TestCase):
         )
         self.daily_markers.mark.assert_not_called()
         self.followup.enqueue_after_sync.assert_not_called()
+        # A backfill chunk only adds history: no library seeding, and the result
+        # reports the records fetched for this window.
+        self.snapshot_service.seed_workout_library.assert_not_called()
+        self.assertEqual(result["window_records"], 4)
+        self.assertEqual(result["library_imported"], 0)
 
     def test_already_running_returns_without_mutating_owner_lock(self):
         self.lock.acquire()

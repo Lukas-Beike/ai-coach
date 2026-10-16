@@ -6,10 +6,12 @@ This module has no application imports and performs no work at import time.
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 import re
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -17,6 +19,8 @@ from urllib.parse import urlsplit, urlunsplit
 from backend.errors import AppError
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_SYNC_HISTORY_EARLIEST_DATE = date(2000, 1, 1)
+_LOGGER = logging.getLogger(__name__)
 SETTINGS_SECRET_KEYS = (
     "OPENAI_API_KEY",
     "INTERVALS_API_KEY",
@@ -107,6 +111,20 @@ def _env_bool(environ: Mapping[str, str], name: str, default: bool = False) -> b
     return default if not value else value in {"1", "true", "yes", "on"}
 
 
+def _env_date(environ: Mapping[str, str], name: str, default: date) -> date:
+    raw = str(environ.get(name, "")).strip()
+    if not raw:
+        return default
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        _LOGGER.warning(
+            "Ignoring invalid ISO date setting",
+            extra={"event": "config_invalid_date", "setting": name},
+        )
+        return default
+
+
 @dataclass(frozen=True)
 class Config:
     port: int
@@ -126,6 +144,7 @@ class Config:
     wahoo_client_id: str = ""
     wahoo_client_secret: str = ""
     wahoo_redirect_uri: str = ""
+    sync_history_earliest_date: date = DEFAULT_SYNC_HISTORY_EARLIEST_DATE
 
     @property
     def wahoo_configured(self) -> bool:
@@ -247,4 +266,7 @@ def load_config(
         wahoo_client_id=value("WAHOO_CLIENT_ID", "").strip(),
         wahoo_client_secret=value("WAHOO_CLIENT_SECRET", "").strip(),
         wahoo_redirect_uri=value("WAHOO_REDIRECT_URI", "").strip(),
+        sync_history_earliest_date=_env_date(
+            target, "SYNC_HISTORY_EARLIEST_DATE", DEFAULT_SYNC_HISTORY_EARLIEST_DATE
+        ),
     )

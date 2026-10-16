@@ -669,7 +669,7 @@ class ServerSyncTests(ServerTestCase):
             140,
             "Daten werden gelesen",
             "secret provider detail",
-            set_value=values.__setitem__,
+            set_values=values.update,
             redact=lambda value: f"redacted:{value}",
         )
         self.assertEqual(values["sync_operation_progress"], "100")

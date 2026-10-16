@@ -489,6 +489,27 @@ class GarminSyncStateServiceTests(unittest.TestCase):
         self._set("last_garmin_error", "{}")
         self.assertEqual(self.service.error_entries(), [])
 
+    def test_payload_result_counts_records_fetched_by_this_run(self):
+        pagination = {
+            "activities": {"windows": 1, "records": 2, "complete": True},
+            "sleep": {"windows": 1, "records": 1, "complete": True},
+            "unrelated": {"records": 50},
+        }
+        payload = {
+            "synced_at": UTC_NOW,
+            "end": "2026-09-19T22:00:00Z",
+            "errors": [],
+            "activities": [{"name": "a"}, {"name": "b"}, {"name": "c"}],
+            "provider_sync": {"pagination": pagination},
+        }
+
+        result = self.service.persist_payload(
+            payload, date(2026, 8, 1), date(2026, 9, 20), source="fixture"
+        )
+
+        # Stored history (three activities) does not count, only this run's fetch.
+        self.assertEqual(result["window_records"], 3)
+
     def test_complete_payload_updates_snapshot_markers_errors_and_cursors(self):
         payload = {
             "synced_at": UTC_NOW,
@@ -513,6 +534,7 @@ class GarminSyncStateServiceTests(unittest.TestCase):
                 "synced_at": UTC_NOW,
                 "errors": 0,
                 "activities": 1,
+                "window_records": 0,
                 "pagination": payload["provider_sync"]["pagination"],
                 "source": "fixture",
             },

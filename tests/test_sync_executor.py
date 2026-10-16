@@ -58,10 +58,14 @@ class RecordingStateRepository:
     def __init__(self, period: int = 30) -> None:
         self.period = period
         self.calls: list[tuple[Any, ...]] = []
+        self.cursor_updates: list[tuple[str, str, str]] = []
 
     def sync_period(self, *args: Any) -> int:
         self.calls.append(args)
         return self.period
+
+    def update_cursor(self, provider: str, stream: str, cursor: str) -> None:
+        self.cursor_updates.append((provider, stream, cursor))
 
 
 class RecordingFixtureLoader:
@@ -162,7 +166,9 @@ class RecordingQueue:
         )
 
 
-def build_historical_sync(state: Any, queue: Any) -> HistoricalSyncJobOwner:
+def build_historical_sync(
+    state: Any, queue: Any, earliest: date = date(2000, 1, 1)
+) -> HistoricalSyncJobOwner:
     return HistoricalSyncJobOwner(
         sync_state_repository=state,
         queue_service=queue,
@@ -170,7 +176,7 @@ def build_historical_sync(state: Any, queue: Any) -> HistoricalSyncJobOwner:
         sync_period_defaults={"intervals": 90, "garmin": 30},
         all_sync_days=-1,
         sync_chunk_days=90,
-        sync_earliest_date=date(2000, 1, 1),
+        sync_earliest_date=earliest,
     )
 
 
@@ -493,6 +499,47 @@ class SyncJobExecutorTests(unittest.TestCase):
         )
         self.assertIsNone(below_boundary["historical_next_end"])
 
+        # The fetched window never reaches below the floor.
+        self.executor.execute(
+            self.job(
+                "intervals",
+                "historical_backfill",
+                {"days": 90, "end_date": "2000-01-10"},
+            )
+        )
+        self.assertEqual(self.intervals.calls[-1][1]["activity_days"], 10)
+        self.assertEqual(self.intervals.calls[-1][1]["end_date"], date(2000, 1, 10))
+
+    def test_backfill_below_the_floor_ends_without_a_fetch(self) -> None:
+        for provider, service in (("intervals", self.intervals), ("garmin", self.garmin)):
+            with self.subTest(provider=provider):
+                service.calls.clear()
+                self.queue.calls.clear()
+                self.state.cursor_updates.clear()
+
+                self.executor.run(
+                    self.job(
+                        provider,
+                        "historical_backfill",
+                        {"days": 90, "end_date": "1999-12-01"},
+                    )
+                )
+
+                self.assertEqual(service.calls, [])
+                self.assertEqual(self.queue.calls, [])
+                self.assertEqual(
+                    self.state.cursor_updates, [(provider, "historical", "2000-01-01")]
+                )
+
+    def test_historical_window_uses_a_configured_floor(self) -> None:
+        historical = build_historical_sync(self.state, self.queue, date(2020, 1, 1))
+
+        days, end = historical.window(
+            {"days": 90, "end_date": "2020-02-01"}, "historical_backfill", lambda: 30
+        )
+
+        self.assertEqual((days, end), (32, date(2020, 2, 1)))
+
     def test_run_completes_and_queues_next_historical_chunk(self) -> None:
         self.intervals.result = {"status": "ok"}
         job = self.job(
@@ -517,11 +564,81 @@ class SyncJobExecutorTests(unittest.TestCase):
                             "reason": "fortgesetzter historischer Backfill",
                         },
                     ),
-                    {"requested_by": "backfill"},
+                    {
+                        "requested_by": "backfill",
+                        "available_at": "2026-09-20T12:00:15+00:00",
+                    },
                 )
             ],
         )
         self.assertEqual(self.outcomes.failure_calls, [])
+
+    def test_historical_chain_stops_after_two_empty_chunks_and_parks_cursor(
+        self,
+    ) -> None:
+        self.intervals.result = {"status": "ok", "window_records": 0}
+        job = self.job(
+            "intervals",
+            "historical_backfill",
+            {"days": 90, "end_date": "2026-09-01"},
+        )
+
+        self.executor.run(job)
+
+        first = self.queue.calls[0][0][2]
+        self.assertEqual(first["empty_chunks"], 1)
+        self.assertEqual(self.state.cursor_updates, [])
+
+        self.queue.calls.clear()
+        self.executor.run(
+            self.job("intervals", "historical_backfill", {**first, "days": 90})
+        )
+
+        self.assertEqual(self.queue.calls, [])
+        self.assertEqual(
+            self.state.cursor_updates, [("intervals", "historical", "2000-01-01")]
+        )
+
+    def test_non_empty_chunk_resets_the_empty_chunk_counter(self) -> None:
+        self.intervals.result = {"status": "ok", "window_records": 3}
+        self.executor.run(
+            self.job(
+                "intervals",
+                "historical_backfill",
+                {"days": 90, "end_date": "2026-09-01", "empty_chunks": 1},
+            )
+        )
+
+        self.assertNotIn("empty_chunks", self.queue.calls[0][0][2])
+        self.assertEqual(self.state.cursor_updates, [])
+
+    def test_chunk_without_a_record_count_is_not_empty(self) -> None:
+        self.intervals.result = {"status": "ok"}
+        self.executor.run(
+            self.job(
+                "intervals",
+                "historical_backfill",
+                {"days": 90, "end_date": "2026-09-01", "empty_chunks": 1},
+            )
+        )
+
+        self.assertEqual(len(self.queue.calls), 1)
+        self.assertNotIn("empty_chunks", self.queue.calls[0][0][2])
+
+    def test_garmin_chain_stops_after_two_empty_chunks(self) -> None:
+        self.garmin.result = {"status": "ok", "window_records": 0}
+        self.executor.run(
+            self.job(
+                "garmin",
+                "historical_backfill",
+                {"days": 90, "end_date": "2026-09-01", "empty_chunks": 1},
+            )
+        )
+
+        self.assertEqual(self.queue.calls, [])
+        self.assertEqual(
+            self.state.cursor_updates, [("garmin", "historical", "2000-01-01")]
+        )
 
     def test_run_stops_historical_chain_after_partial_window(self) -> None:
         self.outcomes.fallback_status = "partial"
@@ -536,8 +653,7 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         self.assertEqual(self.queue.calls, [])
 
-    def test_run_continues_historical_chain_after_competition_failure(self) -> None:
-        self.outcomes.fallback_status = "partial"
+    def test_historical_chunk_skips_competition_sync_and_still_continues(self) -> None:
         self.competitions.error = RuntimeError("fake competition failure")
         job = self.job(
             "intervals",
@@ -547,18 +663,19 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         self.executor.run(job)
 
+        self.assertEqual(self.competitions.calls, [])
         self.assertEqual(len(self.queue.calls), 1)
         self.assertEqual(self.queue.calls[0][0][2]["end_date"], "2026-06-03")
-
-        self.outcomes.fallback_status = "completed"
-        self.competitions.error = None
-        self.executor.run(job)
-        self.assertEqual(len(self.queue.calls), 1)
 
         self.queue.calls.clear()
         self.outcomes.fallback_status = "failed"
         self.executor.run(job)
         self.assertEqual(self.queue.calls, [])
+
+    def test_refresh_job_still_syncs_competitions(self) -> None:
+        self.executor.run(self.job("intervals"))
+
+        self.assertEqual(len(self.competitions.calls), 1)
 
     def test_run_survives_failure_while_recording_failure(self) -> None:
         self.intervals.error = RuntimeError("provider failure")
