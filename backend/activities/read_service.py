@@ -92,7 +92,7 @@ class ActivityReadService:
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
         *,
-        read_equipment: Callable[[], dict[str, Any]] = dict,
+        read_equipment: Callable[[str], dict[str, Any]] = lambda _: {},
         references: ActivityReferenceResolver | None = None,
     ):
         self._database_manager = database_manager

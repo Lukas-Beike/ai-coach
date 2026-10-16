@@ -31,7 +31,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
         *,
-        read_equipment: Callable[[], dict[str, Any]] = dict,
+        read_equipment: Callable[[str], dict[str, Any]] = lambda _: {},
         references: ActivityReferenceResolver | None = None,
         canonical: CanonicalPerformanceSource | None = None,
     ) -> None:
@@ -118,7 +118,9 @@ class ActivityAnalysisReadService(ActivityReadService):
             today,
             **performance_options(canonical),
         )
-        equipment = _activity_equipment(self._read_equipment(), normalized_id)
+        equipment = _activity_equipment(
+            self._read_equipment(normalized_id), normalized_id
+        )
         local_ids = self._references.local_ids([normalized_id])
         return {
             "ok": True,

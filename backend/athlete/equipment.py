@@ -26,7 +26,8 @@ from backend.providers.garmin_gear_fields import (
 EQUIPMENT_PREFIX = "equipment:"
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
 GARMIN_GEAR_SOURCE = "garmin_gear"
-# The read lists at most this many assignments; usage counts all of them.
+# The read lists at most this many assignments, whole activities only; usage
+# counts all of them.
 ASSIGNMENT_LIST_LIMIT = 2000
 GARMIN_INITIAL_SOURCE = "garmin-initial-sync"
 SPORT_DERIVATION_SHARE = 0.75
@@ -66,7 +67,10 @@ class EquipmentService:
             ).fetchall()
         ]
 
-    def read(self, item_id: str | None = None) -> dict[str, Any]:
+    def read(
+        self, item_id: str | None = None, *, activity_id: str | None = None
+    ) -> dict[str, Any]:
+        """Read items with usage; ``activity_id`` lists only its full assignments."""
         rows, duplicates = self._deduplicate(self._read_activity_rows())
         with self._manager.unit_of_work() as db:
             garmin_row = db.execute(
@@ -131,13 +135,11 @@ class EquipmentService:
             "garmin_freshness": (garmin.get("source_freshness") or {})
             .get("gear", {})
             .get("freshness"),
-            "assignments": [
-                assignment
-                for activity_assignments in assignments.values()
-                for assignment in activity_assignments
-            ][:ASSIGNMENT_LIST_LIMIT],
+            "assignments": list(assignments.get(activity_id, ()))
+            if activity_id
+            else _assignment_list(assignments),
             "excluded_duplicates": duplicates,
-            "scope": "Known canonical activities with explicit assignments, or that Garmin lists for the gear of a Garmin-linked main item (an explicit assignment, including unassigned, always wins; an activity Garmin lists for several main items links to each of them, like Garmin's own totals; an item without a Garmin activity list links nothing), plus confirmed initial usage. Missing provider history or measurements makes counters incomplete; no inferred favorite gear. A truncated or outdated Garmin activity list makes the maintenance of intervals counted from sessions partial. Maintenance includes only later calendar days, same-day order is unknown. Limits: 100 items, 1000 maintenance events; usage counts every assignment, but the list shows only the first 2000, explicit ones newest first, then Garmin links.",
+            "scope": "Known canonical activities with explicit assignments, or that Garmin lists for the gear of a Garmin-linked main item (an explicit assignment, including unassigned, always wins; an activity Garmin lists for several main items links to each of them, like Garmin's own totals; an item without a Garmin activity list links nothing), plus confirmed initial usage. Missing provider history or measurements makes counters incomplete; no inferred favorite gear. A truncated or outdated Garmin activity list makes the maintenance of intervals counted from sessions partial. Maintenance includes only later calendar days, same-day order is unknown. Limits: 100 items, 1000 maintenance events; usage counts every assignment, but the list shows only the first 2000 without splitting an activity's gear, explicit ones newest first, then Garmin links; an activity's own read lists all of its assignments.",
         }
 
     def sync_garmin_snapshot(self, snapshot: dict[str, Any]) -> None:
@@ -996,6 +998,18 @@ def _effective_assignments(
                 for equipment_id in links[activity_id]
             ]
     return effective
+
+
+def _assignment_list(
+    assignments: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Flatten the assignments up to the list limit, keeping each activity whole."""
+    listed: list[dict[str, Any]] = []
+    for activity_assignments in assignments.values():
+        if len(listed) + len(activity_assignments) > ASSIGNMENT_LIST_LIMIT:
+            break
+        listed.extend(activity_assignments)
+    return listed
 
 
 def _derived_sports(

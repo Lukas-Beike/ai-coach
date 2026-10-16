@@ -678,7 +678,7 @@ ACTIVITY_READS = ActivityReadAssembly(
         observation_reader=lambda: CANONICAL_READ,
     ),
     ATHLETE_DATA.activity_feedback,
-    lambda: ATHLETE_DATA.equipment().read(),
+    lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 

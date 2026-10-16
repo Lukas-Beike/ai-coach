@@ -31,7 +31,7 @@ class ActivityReadAssembly:
         database_manager: Callable[[], Any],
         sources: ActivityReadSources,
         feedback_service: Callable[[], Any],
-        read_equipment: Callable[[], dict[str, Any]],
+        read_equipment: Callable[[str], dict[str, Any]],
     ) -> None:
         self._database_manager = database_manager
         self._snapshot_reader = sources.snapshot_reader

@@ -466,7 +466,9 @@ class ActivitySummaryFingerprintTests(unittest.TestCase):
 class ActivityDetailStalenessCharacterizationTests(_StorageCase):
     RAW = _activity("ride-1", DAY, name="Threshold", moving_time=3600)
 
-    def _detail(self, raw: list[dict[str, Any]]) -> dict[str, Any]:
+    def _detail(
+        self, raw: list[dict[str, Any]], read_equipment: Any = None
+    ) -> dict[str, Any]:
         snapshots = _Snapshots(_snapshot([], raw))
         service = ActivityAnalysisReadService(
             self.database,
@@ -474,8 +476,26 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
             CompactActivityRows(SnapshotActivityRows(snapshots)),
             _Feedback(),
             ActivityDetailStore(self.database),
+            **({} if read_equipment is None else {"read_equipment": read_equipment}),
         )
         return service.detail("ride-1", garmin_snapshot={}, profile={}, today=TODAY)
+
+    def test_detail_reads_the_equipment_of_its_own_activity(self) -> None:
+        requested: list[str] = []
+
+        def read_equipment(activity_id: str) -> dict[str, Any]:
+            requested.append(activity_id)
+            return {
+                "items": [{"id": "bike"}, {"id": "meter"}],
+                "assignments": [
+                    {"activity_id": activity_id, "equipment_id": "bike"},
+                    {"activity_id": activity_id, "equipment_id": "meter"},
+                ],
+            }
+
+        result = self._detail([self.RAW], read_equipment)
+        self.assertEqual(["ride-1"], requested)
+        self.assertEqual(["bike", "meter"], [row["id"] for row in result["equipment"]])
 
     def _save_analysis(self, **overrides: Any) -> None:
         record: dict[str, Any] = {

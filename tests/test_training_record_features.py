@@ -576,6 +576,31 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertIsNone(by_activity["i1"][0].get("source"))
         self.assertEqual(len(by_activity["i2"]), 2)
 
+    def test_assignment_list_limit_keeps_activities_whole(self):
+        rows = [self._ride("i1"), self._ride("i2")]
+        service = self._gear_service(rows)
+        items = self._garmin_gear(
+            service,
+            [
+                self._gear_row("g1", activity_ids=["ai1", "ai2"]),
+                self._gear_row("g2", activity_ids=["ai1", "ai2"]),
+            ],
+            self._matches(rows),
+        )
+        with patch("backend.athlete.equipment.ASSIGNMENT_LIST_LIMIT", 3):
+            listed = service.read()["assignments"]
+            targeted = service.read(activity_id="i2")["assignments"]
+            usage = {
+                item["garmin_uuid"]: item["usage"]["assigned_sessions"]
+                for item in service.read()["items"]
+            }
+        # The third row would split i2's gear, so the list stops after i1.
+        self.assertEqual([row["activity_id"] for row in listed], ["i1", "i1"])
+        ids = {items["g1"]["id"], items["g2"]["id"]}
+        self.assertEqual({row["activity_id"] for row in targeted}, {"i2"})
+        self.assertEqual({row["equipment_id"] for row in targeted}, ids)
+        self.assertEqual(usage, {"g1": 2, "g2": 2})
+
     def test_missing_activity_ids_mean_unknown_and_link_nothing(self):
         service = self._gear_service([self._ride("i1", external_id="a1")])
         items = self._garmin_gear(
