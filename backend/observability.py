@@ -13,7 +13,8 @@ import logging
 import re
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -956,18 +957,34 @@ class DiagnosticCapture:
                 self._dirty_count = 0
         return {"ok": True, "entries": 0}
 
+    def _drop_cache(self) -> None:
+        with self._lock:
+            self._generation += 1
+            self._entries_cache = None
+            self._entry_sizes = []
+            self._total_bytes = 2
+            self._dirty_count = 0
+
     def discard_cache(self) -> None:
         """Forget the in-memory entries after the stored state was cleared or replaced.
 
         Unflushed entries are dropped, and the next read reloads the stored entries.
         Nothing is written to the store.
         """
-        with self._flush_lock, self._lock:
-            self._generation += 1
-            self._entries_cache = None
-            self._entry_sizes = []
-            self._total_bytes = 2
-            self._dirty_count = 0
+        with self._flush_lock:
+            self._drop_cache()
+
+    @contextmanager
+    def suspended(self) -> Iterator[None]:
+        """Hold off flushes while the stored entries are cleared or replaced.
+
+        A flush cannot write the old entries back between the store mutation and the
+        cache discard. The cache is dropped on a normal exit; a failed mutation leaves
+        the cache untouched. Callers take this before the database lock.
+        """
+        with self._flush_lock:
+            yield
+            self._drop_cache()
 
     def capture(self, event: str, details: dict[str, Any]) -> None:
         """Redact content before it reaches the in-memory cache or database."""

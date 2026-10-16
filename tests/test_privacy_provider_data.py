@@ -6,7 +6,7 @@ import sqlite3
 import tempfile
 import unittest
 import zipfile
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -385,7 +385,7 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
                 planning_revision_service=_PlanningRevision(),
                 openai_client=_OpenAI(),
                 logger=logging.getLogger("test.privacy.provider"),
-                discard_diagnostic_cache=lambda: None,
+                diagnostics_suspended=nullcontext,
             )
         )
 

@@ -31,7 +31,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
             planning_revision_service=Mock(),
             openai_client=Mock(),
             logger=Mock(),
-            discard_diagnostic_cache=Mock(),
+            diagnostics_suspended=MagicMock(),
         )
         return PrivacyDeleteService(PrivacyDeleteDependencies(**vars(mocks))), mocks
 
@@ -79,7 +79,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
         self.assertEqual(dependencies.database_manager.reader.call_count, 1)
         self.assertEqual(dependencies.database_manager.unit_of_work.call_count, 1)
         dependencies.planning_revision_service.mark_reset_pending.assert_called_once_with()
-        dependencies.discard_diagnostic_cache.assert_called_once_with()
+        dependencies.diagnostics_suspended.assert_called_once_with()
 
     def test_deleted_diagnostic_entries_do_not_return_or_resurrect_after_delete(
         self,
@@ -115,7 +115,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
                 planning_revision_service=Mock(),
                 openai_client=Mock(),
                 logger=Mock(),
-                discard_diagnostic_cache=capture.discard_cache,
+                diagnostics_suspended=capture.suspended,
             )
         )
 

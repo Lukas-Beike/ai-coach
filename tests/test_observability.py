@@ -832,6 +832,42 @@ class DiagnosticCaptureDiscardTests(unittest.TestCase):
             "before_restore_marker", store.get("diagnostic_capture_entries")
         )
 
+    def test_flush_during_suspension_cannot_write_cleared_entries_back(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), batch_size=50
+        )
+        capture.capture("before_delete_marker", {"text": "synthetic before"})
+
+        flusher = threading.Thread(target=capture.flush)
+        with capture.suspended():
+            with store.lock:
+                store.values.clear()
+            flusher.start()
+            flusher.join(timeout=0.2)
+            self.assertTrue(flusher.is_alive(), "flush must wait for the suspension")
+        flusher.join(timeout=5)
+
+        self.assertFalse(flusher.is_alive())
+        self.assertNotIn("diagnostic_capture_entries", store.values)
+        self.assertEqual(capture.entries(), [])
+
+    def test_suspension_keeps_the_cache_when_the_mutation_fails(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), batch_size=50
+        )
+        capture.capture("kept_marker", {"text": "synthetic"})
+
+        with self.assertRaises(RuntimeError), capture.suspended():
+            raise RuntimeError("synthetic failure")
+
+        self.assertEqual(
+            [entry["event"] for entry in capture.entries()], ["kept_marker"]
+        )
+        capture.flush()
+        self.assertIn("kept_marker", store.get("diagnostic_capture_entries"))
+
 
 if __name__ == "__main__":
     unittest.main()

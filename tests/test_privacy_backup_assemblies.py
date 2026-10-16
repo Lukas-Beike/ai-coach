@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 from backend.backup.assembly import (
     BackupAssembly,
@@ -58,7 +58,7 @@ class PrivacyAssemblyTests(unittest.TestCase):
                     planning_revision_service=Mock(),
                     openai_client=Mock(return_value=Mock()),
                     logger=Mock(),
-                    discard_diagnostic_cache=Mock(),
+                    diagnostics_suspended=MagicMock(),
                 ),
                 archive=PrivacyArchiveSettings(
                     data_dir=Mock(return_value=Path("temporary-data")),
@@ -133,7 +133,7 @@ class BackupAssemblyTests(unittest.TestCase):
                         sync_wake_event=lambda: sync_wake,
                         coach_wake_event=coach_wake,
                         redact=Mock(),
-                        discard_diagnostic_cache=Mock(),
+                        diagnostics_suspended=MagicMock(),
                         canonical_backfill_start=Mock(),
                     ),
                 )

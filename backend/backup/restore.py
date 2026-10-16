@@ -6,6 +6,7 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable, Iterable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,7 +42,7 @@ class RestoreDependencies:
     coach_wake: Any
     config: DatabaseRestoreConfig
     redact: Callable[[str], str]
-    discard_diagnostic_cache: Callable[[], None]
+    diagnostics_suspended: Callable[[], AbstractContextManager[None]]
     canonical_backfill_start: Callable[[], None]
 
 
@@ -123,11 +124,13 @@ class DatabaseRestoreService:
         temporary_path = self._stage(payload)
         try:
             with self._dependencies.maintenance_gate.restore():
-                previous_backup_name = self._promote(temporary_path)
+                # Flushes stay blocked from before the swap until the cache is dropped,
+                # so the pre-restore diagnostics cannot overwrite the restored ones.
+                with self._dependencies.diagnostics_suspended():
+                    previous_backup_name = self._promote(temporary_path)
                 # The live database is already replaced here; failures must not be
                 # reported as validation errors.
                 try:
-                    self._dependencies.discard_diagnostic_cache()
                     self._resume()
                 except Exception as exc:
                     raise AppError(
