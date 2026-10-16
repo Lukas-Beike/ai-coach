@@ -428,179 +428,234 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             **extra,
         }
 
-    def test_provider_gear_id_links_activities_and_explicit_assignment_wins(self):
+    @staticmethod
+    def _ride(activity_id, day="2026-08-30", **extra):
+        return {
+            "id": activity_id,
+            "type": "Ride",
+            "start_date_local": day,
+            "distance": 10000,
+            "moving_time": 1800,
+            **extra,
+        }
+
+    @staticmethod
+    def _gear_row(uuid, type_name="Bike", **extra):
+        return {
+            "gearUUID": uuid,
+            "gearName": "Gear " + uuid,
+            "gearTypeName": type_name,
+            "stats": {"totalDistance": 50000},
+            **extra,
+        }
+
+    @staticmethod
+    def _matches(rows):
+        return [
+            {"garmin_activity_id": "a" + row["id"], "intervals_activity_id": row["id"]}
+            for row in rows
+        ]
+
+    @staticmethod
+    def _snapshot(gear, matches=()):
+        return {
+            "source_freshness": {"gear": {"freshness": "current"}},
+            "gear": gear,
+            "activity_matches": list(matches),
+        }
+
+    def _garmin_gear(self, service, gear, matches=()):
+        """Import Garmin gear as local items and store the snapshot read() uses."""
+        snapshot = self._snapshot(gear, matches)
+        service.sync_garmin_snapshot(snapshot)
+        self.manager.connection.execute(
+            "INSERT OR REPLACE INTO kv VALUES ('garmin_snapshot', ?, 'now')",
+            (json.dumps(snapshot),),
+        )
+        return {item["garmin_uuid"]: item for item in service.read()["items"]}
+
+    def test_garmin_gear_activities_link_through_matches_and_external_id(self):
         rows = [
-            {
-                "id": "ride-1",
-                "type": "Ride",
-                "start_date_local": "2026-08-30",
-                "distance": 20000,
-                "moving_time": 3600,
-                "gear": {"id": "b123"},
-            },
-            {
-                "id": "ride-2",
-                "type": "Ride",
-                "start_date_local": "2026-08-31",
-                "distance": 10000,
-                "moving_time": 1800,
-                "gear": {"id": "b123"},
-            },
-            {
-                "id": "ride-3",
-                "type": "Ride",
-                "start_date_local": "2026-08-31",
-                "distance": 5000,
-                "gear": {"id": "other-bike"},
-            },
-            {
-                "id": "run-1",
-                "type": "Run",
-                "start_date_local": "2026-08-31",
-                "distance": 7000,
-                "gear": {"id": "b123"},
-            },
+            self._ride("i1"),
+            self._ride("i2", external_id="222"),
+            self._ride("i3", external_id="999"),
+            self._ride("i4", day="2026-08-31", type="Walk", external_id="333"),
+            self._ride("i5", external_id=""),
         ]
         service = self._gear_service(rows)
-        bike = service.save(self._bike(intervals_gear_id="b123"))["equipment"]
-        usage = service.read()["items"][0]["usage"]
-        # The run has the same gear id but another sport pair; ride-3 has no link.
-        self.assertEqual(usage["distance_km"], 30)
-        self.assertEqual(usage["assigned_sessions"], 2)
-        links = {row["activity_id"]: row for row in service.read()["assignments"]}
-        self.assertEqual(links["ride-1"]["source"], "intervals_gear")
-        self.assertNotIn("ride-3", links)
-        # An explicit unassignment overrides the provider link.
-        service.assign({"activity_id": "ride-1", "equipment_id": None})
-        usage = service.read()["items"][0]["usage"]
-        self.assertEqual(usage["distance_km"], 10)
-        self.assertIsNone(
-            {row["activity_id"]: row for row in service.read()["assignments"]}[
-                "ride-1"
-            ]["equipment_id"]
+        items = self._garmin_gear(
+            service,
+            [self._gear_row("g1", activity_ids=["111", "222", "333"])],
+            [{"garmin_activity_id": "111", "intervals_activity_id": "i1"}],
         )
-        # Re-assigning explicitly counts it again, once.
-        service.assign({"activity_id": "ride-1", "equipment_id": bike["id"]})
-        self.assertEqual(service.read()["items"][0]["usage"]["distance_km"], 30)
+        item = items["g1"]
+        # i1 via the match, i2 and i4 via external_id (no sport check), not i3/i5,
+        # even though the import date (2026-09-01) is after every linked session.
+        self.assertEqual(item["usage"]["assigned_sessions"], 3)
+        self.assertEqual(item["usage"]["hours"], 1.5)
+        self.assertEqual(item["usage"]["distance_km"], 50)
+        links = {row["activity_id"]: row for row in service.read()["assignments"]}
+        self.assertEqual(set(links), {"i1", "i2", "i4"})
+        self.assertEqual({row["source"] for row in links.values()}, {"garmin_gear"})
 
-    def test_provider_gear_link_counts_each_session_once_and_needs_a_stored_id(self):
+    def test_explicit_assignment_and_unassignment_beat_the_garmin_link(self):
+        rows = [self._ride("i1"), self._ride("i2")]
+        service = self._gear_service(rows)
+        items = self._garmin_gear(
+            service,
+            [self._gear_row("g1", activity_ids=["ai1", "ai2"])],
+            self._matches(rows),
+        )
+        other = service.save(self._bike(name="Other"))["equipment"]
+        self.assertEqual(items["g1"]["usage"]["assigned_sessions"], 2)
+        service.assign({"activity_id": "i1", "equipment_id": None})
+        service.assign({"activity_id": "i2", "equipment_id": other["id"]})
+        read = {item["name"]: item for item in service.read()["items"]}
+        self.assertEqual(read["Gear g1"]["usage"]["assigned_sessions"], 0)
+        self.assertEqual(read["Other"]["usage"]["assigned_sessions"], 1)
+        sources = {
+            row["activity_id"]: row.get("source")
+            for row in service.read()["assignments"]
+        }
+        self.assertEqual(sources, {"i1": None, "i2": None})
+
+    def test_activity_listed_for_two_main_items_links_nothing(self):
+        rows = [self._ride("i1"), self._ride("i2")]
+        service = self._gear_service(rows)
+        items = self._garmin_gear(
+            service,
+            [
+                self._gear_row("g1", activity_ids=["ai1", "ai2"]),
+                self._gear_row("g2", activity_ids=["ai1"]),
+            ],
+            self._matches(rows),
+        )
+        self.assertEqual(items["g1"]["usage"]["assigned_sessions"], 1)
+        self.assertEqual(items["g2"]["usage"]["assigned_sessions"], 0)
+        self.assertEqual(
+            {row["activity_id"] for row in service.read()["assignments"]}, {"i2"}
+        )
+
+    def test_missing_activity_ids_mean_unknown_and_link_nothing(self):
+        service = self._gear_service([self._ride("i1", external_id="a1")])
+        items = self._garmin_gear(
+            service,
+            [self._gear_row("g1"), self._gear_row("g2", activity_ids=[])],
+            [{"garmin_activity_id": "a1", "intervals_activity_id": "i1"}],
+        )
+        self.assertEqual(items["g1"]["usage"]["assigned_sessions"], 0)
+        self.assertEqual(items["g2"]["usage"]["assigned_sessions"], 0)
+        self.assertEqual(service.read()["assignments"], [])
+
+    def test_duplicate_recordings_of_one_session_count_once(self):
         base = {
             "type": "Ride",
             "start_date_local": "2026-08-30T08:00:00",
             "distance": 20000,
             "moving_time": 3600,
-            "gear": {"id": "b123"},
         }
-        # The Garmin recording of a Wahoo ride is a duplicate of the same session.
         rows = [
-            {**base, "id": "i1", "device_name": "Wahoo ELEMNT"},
-            {**base, "id": "i2", "device_name": "Garmin Edge 840"},
+            {**base, "id": "i1", "device_name": "Wahoo ELEMNT", "external_id": "w1"},
+            {**base, "id": "i2", "device_name": "Garmin Edge 840", "external_id": "a1"},
         ]
         service = self._gear_service(rows)
-        service.save(self._bike())
-        self.assertEqual(service.read()["items"][0]["usage"]["assigned_sessions"], 0)
-        item = service.read()["items"][0]
+        items = self._garmin_gear(
+            service,
+            [self._gear_row("g1", activity_ids=["a1"])],
+            [
+                {"garmin_activity_id": "a1", "intervals_activity_id": "i1"},
+                {"garmin_activity_id": "a1", "intervals_activity_id": "i2"},
+            ],
+        )
+        self.assertEqual(items["g1"]["usage"]["assigned_sessions"], 1)
+        self.assertEqual(items["g1"]["usage"]["hours"], 1)
+
+    def test_garmin_linked_sessions_feed_maintenance_usage(self):
+        rows = [self._ride("i1"), self._ride("i2", day="2026-08-31")]
+        service = self._gear_service(rows)
+        item = self._garmin_gear(
+            service,
+            [self._gear_row("g1", activity_ids=["ai1", "ai2"])],
+            self._matches(rows),
+        )["g1"]
         service.save(
             self._bike(
                 id=item["id"],
                 expected_revision=item["revision"],
-                intervals_gear_id="b123",
+                name=item["name"],
+                maintenance_hours=0.5,
             )
         )
         usage = service.read()["items"][0]["usage"]
-        self.assertEqual(usage["assigned_sessions"], 1)
-        self.assertEqual(usage["distance_km"], 20)
+        self.assertEqual(usage["maintenance_hours"], 1)
+        self.assertTrue(usage["maintenance_due"])
 
-    def test_intervals_gear_id_is_validated_unique_and_preserved(self):
-        service = self._gear_service([])
-        bike = service.save(self._bike(intervals_gear_id="b123"))["equipment"]
-        with self.assertRaises(AppError):
-            service.save(self._bike(name="Other", intervals_gear_id="b123"))
-        for invalid in ("bad id", {"id": 1}, 5, "x" * 65):
-            with self.assertRaises(AppError):
-                service.save(self._bike(name="Third", intervals_gear_id=invalid))
-        with self.assertRaises(AppError):
-            service.save(
-                {
-                    **self._bike(name="Chain", intervals_gear_id="c1"),
-                    "kind": "component",
-                }
-            )
-        edited = service.save(
-            self._bike(
-                id=bike["id"], expected_revision=bike["revision"], name="Renamed"
-            )
-        )["equipment"]
-        self.assertEqual(edited["intervals_gear_id"], "b123")
-        cleared = service.save(
-            self._bike(
-                id=bike["id"],
-                expected_revision=edited["revision"],
-                intervals_gear_id=None,
-            )
-        )["equipment"]
-        self.assertNotIn("intervals_gear_id", cleared)
-
-    def test_ambiguous_or_pending_gear_ids_link_nothing(self):
-        rows = [
-            {
-                "id": "ride-1",
-                "type": "Ride",
-                "start_date_local": "2026-08-30",
-                "distance": 20000,
-                "gear": {"id": "b123"},
-            }
-        ]
+    def _derived_item(self, rows):
         service = self._gear_service(rows)
-        first = service.save(self._bike(intervals_gear_id="b123"))["equipment"]
-        # Two items storing one id (for example from an older record) are ambiguous.
-        duplicate = dict(first, id="00000000-0000-4000-8000-000000000001", name="B")
-        self.manager.connection.execute(
-            "INSERT INTO kv VALUES (?, ?, 'now')",
-            ("equipment:" + duplicate["id"], json.dumps(duplicate)),
-        )
-        self.assertEqual(
-            {item["usage"]["assigned_sessions"] for item in service.read()["items"]},
-            {0},
-        )
-        self.manager.connection.execute(
-            "DELETE FROM kv WHERE key=?", ("equipment:" + duplicate["id"],)
-        )
-        stored = dict(first, sport_pending=True)
-        self.manager.connection.execute(
-            "UPDATE kv SET value=? WHERE key=?",
-            (json.dumps(stored), "equipment:" + first["id"]),
-        )
-        self.assertEqual(service.read()["items"][0]["usage"]["assigned_sessions"], 0)
+        gear = [
+            self._gear_row("g1", "Gadget", activity_ids=["a" + r["id"] for r in rows])
+        ]
+        matches = self._matches(rows)
+        # The import step opens the sport; a second sync derives it from activities.
+        self._garmin_gear(service, gear, matches)
+        service.sync_garmin_snapshot(self._snapshot(gear, matches))
+        return service, service.read()["items"][0]
 
-    def test_garmin_gear_type_gives_open_sport_a_real_sport_and_keeps_unknown_open(
-        self,
-    ):
-        service = self._gear_service([])
-
-        def snapshot(type_name, name):
-            return {
-                "source_freshness": {"gear": {"freshness": "current"}},
-                "gear": [
-                    {
-                        "gearUUID": "gear-1",
-                        "gearName": name,
-                        "gearTypeName": type_name,
-                        "stats": {"totalDistance": 1000},
-                    }
-                ],
-            }
-
-        service.sync_garmin_snapshot(snapshot("Gadget", "Mystery"))
-        self.assertTrue(service.read()["items"][0]["sport_pending"])
-        service.sync_garmin_snapshot(snapshot("Gadget", "Mystery"))
-        self.assertTrue(service.read()["items"][0]["sport_pending"])
-        service.sync_garmin_snapshot(snapshot("Bike", "Mystery"))
-        item = service.read()["items"][0]
+    def test_open_sport_is_derived_at_three_quarters_with_three_activities(self):
+        rows = [self._ride(f"r{n}") for n in range(3)]
+        rows.append(self._ride("w1", type="Walk"))
+        _, item = self._derived_item(rows)
         self.assertFalse(item["sport_pending"])
         self.assertEqual(item["sport"], "ride")
-        # A chosen sport is never replaced by a later gear type.
-        service.sync_garmin_snapshot(snapshot("Shoes", "Mystery"))
+
+    def test_open_sport_stays_open_below_threshold_minimum_or_unknown(self):
+        mixed = [self._ride(f"r{n}") for n in range(2)]
+        mixed += [self._ride(f"u{n}", type="Run") for n in range(2)]
+        few = [self._ride("r0"), self._ride("r1")]
+        unknown = [self._ride(f"x{n}", type="Gadget") for n in range(4)]
+        for rows in (mixed, few, unknown):
+            with self.subTest(count=len(rows)):
+                self.assertTrue(self._derived_item(rows)[1]["sport_pending"])
+                self.manager.connection.execute("DELETE FROM kv")
+
+    def test_open_sport_with_components_stays_open_and_set_sport_is_kept(self):
+        rows = [self._ride(f"r{n}") for n in range(4)]
+        service = self._gear_service(rows)
+        gear = [
+            self._gear_row("g1", "Gadget", activity_ids=["a" + r["id"] for r in rows])
+        ]
+        snapshot = self._snapshot(gear, self._matches(rows))
+        item = self._garmin_gear(service, gear, snapshot["activity_matches"])["g1"]
+        child_id = "00000000-0000-4000-8000-000000000002"
+        self.manager.connection.execute(
+            "INSERT INTO kv VALUES (?, ?, 'now')",
+            (
+                "equipment:" + child_id,
+                json.dumps(
+                    {
+                        **item,
+                        "id": child_id,
+                        "kind": "component",
+                        "garmin_uuid": None,
+                        "parent_id": item["id"],
+                    }
+                ),
+            ),
+        )
+        service.sync_garmin_snapshot(snapshot)
+        self.assertTrue(service.read(item["id"])["items"][0]["sport_pending"])
+        self.manager.connection.execute(
+            "DELETE FROM kv WHERE key=?", ("equipment:" + child_id,)
+        )
+        service.sync_garmin_snapshot(snapshot)
+        self.assertEqual(service.read()["items"][0]["sport"], "ride")
+        # A sport that is already set is never replaced, even by a clear majority.
+        runs = [self._ride(f"n{n}", type="Run") for n in range(4)]
+        service._read_activity_rows = lambda: runs
+        run_gear = [
+            self._gear_row("g1", "Gadget", activity_ids=["a" + r["id"] for r in runs])
+        ]
+        service.sync_garmin_snapshot(self._snapshot(run_gear, self._matches(runs)))
         self.assertEqual(service.read()["items"][0]["sport"], "ride")
 
     def test_equipment_environment_matches_what_activity_types_express(self):

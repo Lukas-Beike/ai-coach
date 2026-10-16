@@ -519,7 +519,8 @@ def _gear_inventory(client: Any, external_call: ExternalCall) -> list[dict[str, 
         if normalized is None:
             continue
         stats = _gear_usage_stats(client, normalized["gearUUID"], external_call)
-        result.append({**normalized, "stats": stats or {}})
+        linked = _gear_activity_ids(client, normalized["gearUUID"], external_call)
+        result.append({**normalized, "stats": stats or {}, **(linked or {})})
     return result
 
 
@@ -559,6 +560,44 @@ def _gear_usage_stats(
     except Exception:  # noqa: BLE001 - omit only this unavailable optional row.
         return None
     return result if isinstance(result, dict) else None
+
+
+GEAR_ACTIVITIES_LIMIT = 1000
+
+
+def _gear_activity_ids(
+    client: Any, gear_uuid: str, external_call: ExternalCall
+) -> dict[str, Any] | None:
+    """Read the Garmin activities linked to one gear item (read-only).
+
+    ``None`` means the link list is unknown (method missing or call failed), which
+    is not the same as an empty list of activities.
+    """
+    fetch = getattr(client, "get_gear_activities", None)
+    if not callable(fetch):
+        return None
+    try:
+        result = external_call(
+            "garmin",
+            "gear_activities",
+            partial(fetch, gear_uuid, GEAR_ACTIVITIES_LIMIT),
+            None,
+        )
+    except Exception:  # noqa: BLE001 - omit only this unavailable optional row.
+        return None
+    if not isinstance(result, list):
+        return None
+    ids = list(
+        dict.fromkeys(
+            str(item["activityId"])
+            for item in result
+            if isinstance(item, dict) and item.get("activityId") not in (None, "")
+        )
+    )
+    linked: dict[str, Any] = {"activity_ids": ids}
+    if len(result) >= GEAR_ACTIVITIES_LIMIT:
+        linked["activity_ids_truncated"] = True
+    return linked
 
 
 def _collect_optional_metric(
