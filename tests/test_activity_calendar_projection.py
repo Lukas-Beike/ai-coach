@@ -210,6 +210,35 @@ class PlanningComplianceTests(unittest.TestCase):
 
         self.assertEqual([row["id"] for row in calendar], ["event", "extra"])
 
+    def test_completed_walk_is_one_row_with_its_planned_walk(self):
+        today = date(2026, 9, 12)
+        events = [
+            {
+                "id": "planned-walk",
+                "category": "WORKOUT",
+                "type": "Walk",
+                "start_date_local": today.isoformat(),
+                "moving_time": 3600,
+            }
+        ]
+        activities = [
+            {
+                "id": "walk",
+                "type": "Walk",
+                "start_date_local": f"{today.isoformat()}T07:00:00",
+                "moving_time": 3300,
+            }
+        ]
+
+        enriched, _weekly = planning_compliance_state(events, activities, today)
+        calendar = training_calendar_items(enriched, activities)
+
+        self.assertEqual([row["id"] for row in calendar], ["planned-walk"])
+        self.assertEqual(
+            calendar[0]["compliance"]["actual_activity"]["id"],
+            "walk",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

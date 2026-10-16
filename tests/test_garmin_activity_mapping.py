@@ -80,8 +80,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_one(self) -> None:
-        self.assertEqual(1, MAPPER_VERSION)
+    def test_mapper_version_is_two(self) -> None:
+        self.assertEqual(2, MAPPER_VERSION)
 
     def test_fixture_maps_every_record_without_issues(self) -> None:
         result = _map(*_fixture_rows())
@@ -497,6 +497,39 @@ class DurationAndDistanceTests(unittest.TestCase):
 
                 assert record is not None
                 self.assertEqual(expected, record.duration_s)
+
+    def test_moving_duration_comes_from_moving_duration_only(self) -> None:
+        cases = (
+            ({"duration": 4500.0, "movingDuration": 3600.0}, 4500.0, 3600.0),
+            (
+                {"duration": 4500.0, "movingDuration": 3600.0, "movingTime": 3000.0},
+                4500.0,
+                3600.0,
+            ),
+            # movingTime feeds duration_s, never moving_duration_s.
+            ({"duration": 4500.0, "movingTime": 3000.0}, 4500.0, None),
+            ({"duration": None, "movingTime": 3200}, 3200.0, None),
+            ({"duration": 4500.0}, 4500.0, None),
+        )
+        for overrides, duration, moving in cases:
+            with self.subTest(overrides=overrides):
+                record, issues = _one(**overrides)
+
+                assert record is not None
+                self.assertEqual(duration, record.duration_s)
+                self.assertEqual(moving, record.moving_duration_s)
+                self.assertEqual((), issues)
+
+    def test_invalid_moving_duration_is_one_issue_and_keeps_duration(self) -> None:
+        record, issues = _one(duration=4500.0, movingDuration="abc", movingTime=3000.0)
+
+        assert record is not None
+        self.assertEqual(4500.0, record.duration_s)
+        self.assertIsNone(record.moving_duration_s)
+        self.assertEqual(
+            (MappingIssue("910009", "movingDuration", IssueReason.INVALID_NUMBER),),
+            issues,
+        )
 
     def test_present_invalid_duration_does_not_fall_back_to_an_alias(self) -> None:
         record, issues = _one(duration="abc", movingTime=3000.0)

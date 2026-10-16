@@ -161,25 +161,31 @@ def _garmin_duplicate_measurements(
 ) -> tuple[int, int]:
     compared = 0
     matches = 0
-    pairs = (
-        (
+    # Garmin ``duration`` is elapsed time and Intervals.icu ``moving_time`` is
+    # moving time, so Garmin ``movingDuration`` is a second candidate.
+    garmin_durations = [
+        number
+        for number in (
             _number(
                 garmin_activity.get("duration") or garmin_activity.get("movingTime")
             ),
-            _number(intervals_activity.get("moving_time")),
-            120,
-        ),
-        (
-            _number(garmin_activity.get("distance")),
-            _number(intervals_activity.get("distance")),
-            500,
-        ),
-    )
-    for index, (left, right, minimum) in enumerate(pairs):
-        if left is None or right is None or index == 1 and (left <= 0 or right <= 0):
-            continue
+            _number(garmin_activity.get("movingDuration")),
+        )
+        if number is not None
+    ]
+    moving_time = _number(intervals_activity.get("moving_time"))
+    if garmin_durations and moving_time is not None:
         compared += 1
-        if abs(left - right) <= max(minimum, right * 0.10):
+        if any(
+            abs(duration - moving_time) <= max(120, moving_time * 0.10)
+            for duration in garmin_durations
+        ):
+            matches += 1
+    left = _number(garmin_activity.get("distance"))
+    right = _number(intervals_activity.get("distance"))
+    if left is not None and right is not None and left > 0 and right > 0:
+        compared += 1
+        if abs(left - right) <= max(500, right * 0.10):
             matches += 1
     return compared, matches
 
