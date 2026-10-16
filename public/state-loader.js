@@ -183,6 +183,16 @@ function renderCompletedState(payload, liveAreasOnly, failed) {
   scheduleStateSnapshotSave();
 }
 
+// A failed sign-in is handled by the login flow, not the status card.
+function showStateLoadFailure(error) {
+  if (error?.status === 401 || /Authentication/.test(error.message)) return;
+  const statusCard = $("#statusCard");
+  statusCard.hidden = false;
+  statusCard.classList.add("warning");
+  $("#statusTitle").textContent = "Trainingsdaten konnten nicht geladen werden";
+  $("#statusDetail").textContent = error.message;
+}
+
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
   const sessionGeneration = state.sessionGeneration;
@@ -215,12 +225,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     if (requestSequence === state.loadSequence) renderCompletedState(payload, liveAreasOnly, failures.length > 0);
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
-    if (sessionGeneration !== state.sessionGeneration || error?.status === 401 || /Authentication/.test(error.message)) return;
-    const statusCard = $("#statusCard");
-    statusCard.hidden = false;
-    statusCard.classList.add("warning");
-    $("#statusTitle").textContent = "Trainingsdaten konnten nicht geladen werden";
-    $("#statusDetail").textContent = error.message;
+    if (sessionGeneration === state.sessionGeneration) showStateLoadFailure(error);
   } finally {
     if (sessionGeneration === state.sessionGeneration && $("#appShell").classList.contains("is-loading")) finishAppShellLoading();
   }
