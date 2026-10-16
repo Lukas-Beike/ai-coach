@@ -94,26 +94,30 @@ class WriterGate:
             else:
                 self._foreground_waiting += 1
             try:
-                while True:
-                    remaining = (
-                        None if deadline is None else deadline - time.monotonic()
-                    )
-                    if remaining is not None and remaining <= 0:
-                        return False
-                    self._condition.wait(remaining)
-                    if self._may_take(background):
-                        self._grant(background)
-                        return True
+                return self._wait_for_turn(background, deadline)
             finally:
-                if background:
-                    self._background_waiting -= 1
-                    if not self._background_waiting:
-                        # Grants only count against a waiting background writer.
-                        self._bypassed = 0
-                else:
-                    self._foreground_waiting -= 1
-                # A waiter that gave up (or was served) may unblock the others.
-                self._condition.notify_all()
+                self._stop_waiting(background)
+
+    def _wait_for_turn(self, background: bool, deadline: float | None) -> bool:
+        while True:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                return False
+            self._condition.wait(remaining)
+            if self._may_take(background):
+                self._grant(background)
+                return True
+
+    def _stop_waiting(self, background: bool) -> None:
+        if background:
+            self._background_waiting -= 1
+            if not self._background_waiting:
+                # Grants only count against a waiting background writer.
+                self._bypassed = 0
+        else:
+            self._foreground_waiting -= 1
+        # A waiter that gave up (or was served) may unblock the others.
+        self._condition.notify_all()
 
     def release(self) -> None:
         with self._condition:
