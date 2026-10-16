@@ -16,6 +16,7 @@ import threading
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, datetime
+from functools import lru_cache
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, TextIO
@@ -151,6 +152,15 @@ def _secret_variants(value: Any) -> set[str]:
             variants.add(unquote(item))
             variants.add(quote(item, safe=""))
     return {item for item in variants if len(item) >= 4}
+
+
+@lru_cache(maxsize=32)
+def _secret_patterns(value: str) -> tuple[re.Pattern[str], ...]:
+    """Compile one secret's case-insensitive variant patterns, longest first."""
+    return tuple(
+        re.compile(re.escape(variant), re.IGNORECASE)
+        for variant in sorted(_secret_variants(value), key=len, reverse=True)
+    )
 
 
 def safe_url_netloc(parsed: Any) -> str:
@@ -395,10 +405,8 @@ class Redactor:
         redacted = str(value or "")
         calendar_url = str(getattr(config, "calendar_ical_url", "") or "")
         calendar_safe_url = self._safe_calendar_url_for_config(config)
-        for variant in sorted(_secret_variants(calendar_url), key=len, reverse=True):
-            redacted = re.sub(
-                re.escape(variant), calendar_safe_url, redacted, flags=re.IGNORECASE
-            )
+        for pattern in _secret_patterns(calendar_url):
+            redacted = pattern.sub(calendar_safe_url, redacted)
         redacted = URL_VALUE_RE.sub(_redact_url, redacted)
         secret_values = (
             getattr(config, "openai_api_key", ""),
@@ -411,12 +419,8 @@ class Redactor:
             getattr(config, "wahoo_client_secret", ""),
         )
         for secret_value in secret_values:
-            for variant in sorted(
-                _secret_variants(secret_value), key=len, reverse=True
-            ):
-                redacted = re.sub(
-                    re.escape(variant), _REDACTED, redacted, flags=re.IGNORECASE
-                )
+            for pattern in _secret_patterns(str(secret_value or "")):
+                redacted = pattern.sub(_REDACTED, redacted)
         redacted = re.sub(
             r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted
         )

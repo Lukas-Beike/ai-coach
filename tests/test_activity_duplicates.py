@@ -195,6 +195,48 @@ class GarminDuplicateTests(unittest.TestCase):
         self.assertEqual(removed, 1)
         self.assertEqual(activities, original)
 
+    def test_filter_compares_only_starts_in_the_window_with_the_pairwise_result(self):
+        intervals = [
+            _intervals(id="late", start_date_local="2026-08-29T08:10:00"),
+            _intervals(
+                id="alias", start_date_local=None, start_date="2026-08-29T10:00:00Z"
+            ),
+            _intervals(id="no-start", start_date_local="not-a-date"),
+            _intervals(id="edge", start_date_local="2026-08-29T12:00:00"),
+            _intervals(id="run", type="Run", start_date_local="2026-08-29T14:00:00"),
+        ]
+        activities = [
+            _garmin(activityId=f"g-{minute}", startTimeLocal=start)
+            for minute, start in enumerate(
+                (
+                    "2026-08-29T07:39:59",
+                    "2026-08-29T07:40:00",
+                    "2026-08-29T08:40:00",
+                    "2026-08-29T08:40:01",
+                    "2026-08-29T10:20:00",
+                    "2026-08-29T11:30:00",
+                    "2026-08-29T12:30:00",
+                    "2026-08-29T12:30:00.000001",
+                    "2026-08-29T14:00:00",
+                    "not-a-date",
+                )
+            )
+        ]
+        expected = [
+            item
+            for item in activities
+            if not garmin_activity_duplicates_intervals(item, intervals)
+        ]
+
+        kept, removed = filter_garmin_activities(activities, intervals)
+
+        self.assertEqual(kept, expected)
+        self.assertEqual(
+            [item["activityId"] for item in kept],
+            ["g-0", "g-3", "g-7", "g-8", "g-9"],
+        )
+        self.assertEqual(removed, 5)
+
 
 class IntervalsCyclingMatchTests(unittest.TestCase):
     def test_alias_dates_and_duration_fields_match(self):
