@@ -624,6 +624,56 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         service.sync_garmin_snapshot(self._snapshot(gear, matches))
         self.assertTrue(service.read()["items"][0]["sport_pending"])
 
+    def _newer_assignments(self, count):
+        """Store many newer explicit assignments of other activities."""
+        self.manager.connection.executemany(
+            "INSERT INTO kv VALUES (?, ?, '2026-09-02T00:00:00Z')",
+            [
+                (
+                    f"equipment_assignment:n{n}",
+                    json.dumps({"activity_id": f"n{n}", "equipment_id": None}),
+                )
+                for n in range(count)
+            ],
+        )
+
+    def test_old_unassignment_still_beats_the_garmin_link(self):
+        rows = [self._ride(f"r{n}") for n in range(4)]
+        service = self._gear_service(rows)
+        gear = [
+            self._gear_row("g1", "Gadget", activity_ids=["a" + r["id"] for r in rows])
+        ]
+        matches = self._matches(rows)
+        self._garmin_gear(service, gear, matches)
+        service.assign({"activity_id": "r0", "equipment_id": None})
+        service.assign({"activity_id": "r1", "equipment_id": None})
+        self._newer_assignments(2001)
+        usage = service.read()["items"][0]["usage"]
+        self.assertEqual(usage["assigned_sessions"], 2)
+        service.sync_garmin_snapshot(self._snapshot(gear, matches))
+        self.assertTrue(service.read()["items"][0]["sport_pending"])
+
+    def test_sport_other_saved_by_the_athlete_is_not_derived(self):
+        rows = [self._ride(f"r{n}") for n in range(4)]
+        service = self._gear_service(rows)
+        gear = [
+            self._gear_row("g1", "Gadget", activity_ids=["a" + r["id"] for r in rows])
+        ]
+        matches = self._matches(rows)
+        item = self._garmin_gear(service, gear, matches)["g1"]
+        service.save(
+            self._bike(
+                id=item["id"],
+                expected_revision=item["revision"],
+                name=item["name"],
+                sport="other",
+            )
+        )
+        service.sync_garmin_snapshot(self._snapshot(gear, matches))
+        saved = service.read()["items"][0]
+        self.assertEqual(saved["sport"], "other")
+        self.assertTrue(saved["sport_pending"])
+
     def test_garmin_sync_without_gear_activity_lists_reads_no_activities(self):
         def unexpected_read():
             raise AssertionError("activity rows read without gear activity lists")

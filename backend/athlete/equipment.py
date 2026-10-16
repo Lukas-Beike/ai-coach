@@ -26,6 +26,7 @@ from backend.providers.garmin_gear_fields import (
 EQUIPMENT_PREFIX = "equipment:"
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
 GARMIN_GEAR_SOURCE = "garmin_gear"
+GARMIN_INITIAL_SOURCE = "garmin-initial-sync"
 SPORT_DERIVATION_SHARE = 0.75
 SPORT_DERIVATION_MIN_ROWS = 3
 
@@ -88,6 +89,10 @@ class EquipmentService:
             links = _garmin_links(
                 items, garmin.get("gear"), garmin.get("activity_matches"), rows
             )
+            explicit_ids = _explicit_assignment_ids(db)
+            links = {
+                key: value for key, value in links.items() if key not in explicit_ids
+            }
             if item_id:
                 selected = db.execute(
                     SELECT_VALUE, (EQUIPMENT_PREFIX + item_id,)
@@ -170,10 +175,7 @@ class EquipmentService:
                             db, row, gear_id, self._today(), now
                         )
             # An explicit assignment, including an unassignment, overrides the link.
-            explicit = {
-                row["activity_id"]
-                for row in self._records(db, "equipment_assignment", 2000)
-            }
+            explicit = _explicit_assignment_ids(db)
             links = _garmin_links(
                 local_rows, rows, snapshot.get("activity_matches"), activity_rows
             )
@@ -412,7 +414,7 @@ def _insert_initial_garmin_item(
         "lifetime_target_source": ProviderId.GARMIN.value,
         "revision": 1,
         "updated_at": now,
-        "source": "garmin-initial-sync",
+        "source": GARMIN_INITIAL_SOURCE,
     }
     db.execute(
         "INSERT OR IGNORE INTO kv(key,value,updated_at) VALUES(?,?,?)",
@@ -923,6 +925,18 @@ def _rows_by_garmin_id(matches: Any, rows: list[dict[str, Any]]) -> dict[str, se
     return by_garmin
 
 
+def _explicit_assignment_ids(db: Any) -> set[str]:
+    """Return every explicitly assigned or unassigned activity, without a limit."""
+    return {
+        str(row[0])
+        for row in db.execute(
+            "SELECT json_extract(value, '$.activity_id') FROM kv "
+            "WHERE key LIKE 'equipment_assignment:%'"
+        ).fetchall()
+        if row[0] is not None
+    }
+
+
 def _effective_assignments(
     rows: list[dict[str, Any]],
     explicit: dict[str, dict[str, Any]],
@@ -950,7 +964,8 @@ def _derived_sports(
 ) -> dict[str, StoredSport]:
     """Return the sport an open item's linked activities agree on.
 
-    Only items with an open sport, no components and no children derive one. A
+    Only items still as imported from Garmin, with an open sport, no components
+    and no children derive one; an athlete-saved item keeps its sport. A
     single sport pair must cover at least three quarters of all linked activities,
     unknown and other types included, and at least three of them.
     """
@@ -959,6 +974,7 @@ def _derived_sports(
         str(item["id"])
         for item in items
         if item.get("sport_pending")
+        and item.get("source") == GARMIN_INITIAL_SOURCE
         and not item.get("parent_id")
         and item.get("kind") != "component"
         and item["id"] not in parents
