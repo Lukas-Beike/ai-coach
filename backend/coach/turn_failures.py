@@ -216,6 +216,7 @@ class CoachTurnFailureService:
             "organization_spend_limit_exceeded": OPENAI_USAGE_LIMIT_MESSAGE,
             "project_spend_limit_exceeded": OPENAI_USAGE_LIMIT_MESSAGE,
             "organization_usage_limit_exceeded": OPENAI_USAGE_LIMIT_MESSAGE,
+            "database_busy": "Die lokale Datenbank war kurz ausgelastet. Bitte versuche es erneut.",
             "provider_timeout": "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut.",
             "not_found": "Das konfigurierte KI-Modell oder der angeforderte Dienst wurde nicht gefunden. Bitte die Modellkonfiguration prüfen.",
             "provider_unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",

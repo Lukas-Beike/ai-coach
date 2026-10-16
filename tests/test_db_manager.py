@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 
 from backend.db.manager import (
+    DATABASE_BUSY_MESSAGE,
+    DatabaseBusyError,
     DatabaseManager,
     DatabaseManagerCache,
     WriterGate,
@@ -198,14 +200,14 @@ class DatabaseManagerTests(unittest.TestCase):
                     try:
                         with manager.unit_of_work():
                             pass
-                    except TimeoutError as exc:
-                        failure.append(str(exc))
+                    except DatabaseBusyError as exc:
+                        failure.append(exc.resource)
 
                 contender = threading.Thread(target=competing_writer)
                 contender.start()
                 contender.join(1)
                 self.assertFalse(contender.is_alive())
-                self.assertEqual(failure, ["database writer limit reached"])
+                self.assertEqual(failure, ["writer"])
             finally:
                 manager._writer_lock.release()
                 manager.close()
@@ -243,14 +245,14 @@ class DatabaseManagerTests(unittest.TestCase):
                     try:
                         with manager.reader():
                             pass
-                    except TimeoutError as exc:
-                        failures.append(str(exc))
+                    except DatabaseBusyError as exc:
+                        failures.append(exc.resource)
 
                 contender = threading.Thread(target=competing_reader)
                 contender.start()
                 contender.join(1)
                 self.assertFalse(contender.is_alive())
-                self.assertEqual(failures, ["database reader limit reached"])
+                self.assertEqual(failures, ["reader"])
             manager.close()
 
     def make_wal_manager(self, **options) -> DatabaseManager:
@@ -368,14 +370,14 @@ class DatabaseManagerTests(unittest.TestCase):
                 try:
                     with manager.unit_of_work(timeout=0.05):
                         pass
-                except TimeoutError as exc:
-                    failure.append((str(exc), time.monotonic() - started))
+                except DatabaseBusyError as exc:
+                    failure.append((exc.resource, time.monotonic() - started))
 
             thread = threading.Thread(target=contender)
             thread.start()
             thread.join(5)
             self.assertFalse(thread.is_alive())
-            self.assertEqual(failure[0][0], "database writer limit reached")
+            self.assertEqual(failure[0][0], "writer")
             self.assertLess(failure[0][1], 5)
         finally:
             manager._writer_lock.release()
@@ -750,14 +752,14 @@ class WriterGateTests(unittest.TestCase):
                 try:
                     with cache.unit_of_work(timeout=0):
                         pass
-                except TimeoutError as exc:
-                    failure.append(str(exc))
+                except DatabaseBusyError as exc:
+                    failure.append(exc.resource)
 
             thread = threading.Thread(target=contender)
             thread.start()
             thread.join(5)
             self.assertFalse(thread.is_alive())
-            self.assertEqual(failure, ["database writer limit reached"])
+            self.assertEqual(failure, ["writer"])
         finally:
             release.set()
             holder.join(5)
@@ -772,6 +774,16 @@ class WriterGateTests(unittest.TestCase):
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("CREATE TABLE records (value INTEGER NOT NULL)")
         return manager
+
+
+class DatabaseBusyErrorTests(unittest.TestCase):
+    def test_busy_error_is_a_timeout_with_a_displayable_message(self):
+        error = DatabaseBusyError("writer")
+
+        self.assertIsInstance(error, TimeoutError)
+        self.assertEqual(str(error), DATABASE_BUSY_MESSAGE)
+        self.assertEqual(error.reason, "database_busy")
+        self.assertEqual(error.resource, "writer")
 
 
 if __name__ == "__main__":

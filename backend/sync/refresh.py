@@ -207,6 +207,8 @@ class ProviderRefreshTracker:
     @staticmethod
     def error_code(error: BaseException) -> str:
         reason = str(getattr(error, "reason", "") or "").casefold()
+        if reason == "database_busy":
+            return "database_busy"
         status = getattr(error, "status", None)
         message = str(getattr(error, "message", "") or "").casefold()
         if status == 429 or "rate" in reason or "rate limit" in message:

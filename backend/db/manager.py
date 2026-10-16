@@ -18,6 +18,11 @@ from typing import Any
 
 DATABASE_MANAGER_CLOSED_MESSAGE = "database manager is closed"
 DATABASE_MANAGER_UNINITIALIZED_MESSAGE = "database manager is not initialized"
+# Stored and shown as a sync or request error, so it is the athlete's language.
+DATABASE_BUSY_MESSAGE = (
+    "Die lokale Datenbank war vorübergehend ausgelastet. "
+    "Ein späterer Versuch sollte gelingen."
+)
 
 # The application lock coordinates larger transactions and restore work that
 # span multiple repositories. DatabaseManager keeps its own connection locks.
@@ -31,6 +36,16 @@ BACKGROUND_WRITER_BYPASS_LIMIT = 8
 _BACKGROUND_WRITER: ContextVar[bool] = ContextVar(
     "database_background_writer", default=False
 )
+
+
+class DatabaseBusyError(TimeoutError):
+    """No database connection became free in time; a later attempt can succeed."""
+
+    reason = "database_busy"
+
+    def __init__(self, resource: str) -> None:
+        super().__init__(DATABASE_BUSY_MESSAGE)
+        self.resource = resource
 
 
 @contextmanager
@@ -233,7 +248,7 @@ class DatabaseManager:
         with self._lease():
             wait = self.timeout if timeout is None else timeout
             if not self._writer_lock.acquire(timeout=wait):
-                raise TimeoutError("database writer limit reached")
+                raise DatabaseBusyError("writer")
             try:
                 connection = (
                     self._writer if self.persist_connections else self._connect()
@@ -273,7 +288,7 @@ class DatabaseManager:
             return
         with self._lease():
             if not self._reader_slots.acquire(timeout=self.timeout):
-                raise TimeoutError("database reader limit reached")
+                raise DatabaseBusyError("reader")
             try:
                 try:
                     connection = self._readers.get_nowait()
@@ -325,7 +340,7 @@ class DatabaseManager:
             return
         with self._lease():
             if not self._reader_slots.acquire(timeout=self.timeout):
-                raise TimeoutError("database reader limit reached")
+                raise DatabaseBusyError("reader")
             try:
                 try:
                     connection = self._readers.get_nowait()

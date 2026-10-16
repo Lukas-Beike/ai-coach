@@ -16,7 +16,7 @@ from backend.coach.turn_failures import (
 )
 from backend.coach.turn_undo import CoachTurnUndoService
 from backend.db import row_factory as production_row_factory
-from backend.db.manager import DatabaseManager
+from backend.db.manager import DatabaseBusyError, DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
@@ -256,6 +256,16 @@ class CoachTurnFailureTests(unittest.TestCase):
                 self.assertEqual(status, "failed")
                 self.assertIn(expected, text)
                 self.assertNotIn("private provider text", text)
+
+    def test_busy_local_database_is_explained_as_a_short_retry(self) -> None:
+        status, text, _, _ = self.service._base_response(
+            DatabaseBusyError("writer"), []
+        )
+
+        self.assertEqual(status, "failed")
+        self.assertEqual(
+            text, "Die lokale Datenbank war kurz ausgelastet. Bitte versuche es erneut."
+        )
 
     def test_provider_timeout_is_a_persisted_actionable_chat_message(self) -> None:
         self._assert_persisted_failure(

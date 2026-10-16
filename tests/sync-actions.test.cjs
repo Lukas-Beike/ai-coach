@@ -50,3 +50,25 @@ test("without any detail the configuration fallback is still shown", async () =>
     id: "job-1", status: "failed", error_class: "invalid_configuration", items: [{ status: "failed", error_class: "invalid_configuration", error_detail: null }],
   }), { message: FALLBACK });
 });
+
+// Runs the real providerRequiresManualAttention against one freshness entry.
+function requiresManualAttention(entry) {
+  const start = statusSource.indexOf("const NON_RETRYABLE_PROVIDER_ERRORS");
+  const end = statusSource.indexOf("function renderProviderAttention");
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({});
+  vm.runInContext(statusSource.slice(start, end), context);
+  context.entry = entry;
+  return vm.runInContext("providerRequiresManualAttention(entry)", context);
+}
+
+test("a busy local database never asks for manual attention", () => {
+  for (const state of ["error", "stale", "partial"]) {
+    assert.equal(requiresManualAttention({ configured: true, state, error_code: "database_busy", next_retry_at: null }), false);
+  }
+});
+
+test("a provider failure without a scheduled retry still asks for manual attention", () => {
+  assert.equal(requiresManualAttention({ configured: true, state: "error", error_code: "network_error", next_retry_at: null }), true);
+  assert.equal(requiresManualAttention({ configured: true, state: "stale", error_code: "auth_required", next_retry_at: null }), true);
+});

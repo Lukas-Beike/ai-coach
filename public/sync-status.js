@@ -288,6 +288,7 @@ const PROVIDER_FRESHNESS_ERRORS = {
   auth_required: "Erneute Anmeldung erforderlich",
   rate_limited: "Rate Limit erreicht",
   network_error: "Netzwerkfehler",
+  database_busy: "Lokale Datenbank kurz ausgelastet",
   invalid_configuration: "Ungültige Konfiguration",
   provider_error: "Providerfehler",
   upstream_auth: globalThis.AppApi.messageForReason("upstream_auth"),
@@ -319,6 +320,10 @@ function providerShortLabel(provider) {
 const NON_RETRYABLE_PROVIDER_ERRORS = Object.freeze(["auth_required", "invalid_configuration"]);
 
 
+// A busy local database is not a provider problem; the next refresh repeats the read.
+const TRANSIENT_LOCAL_PROVIDER_ERRORS = Object.freeze(["database_busy"]);
+
+
 function providerErrorIsNonRetryable(errorCode) {
   return NON_RETRYABLE_PROVIDER_ERRORS.includes(errorCode);
 }
@@ -327,6 +332,7 @@ function providerErrorIsNonRetryable(errorCode) {
 function providerRequiresManualAttention(entry) {
   if (!entry?.configured) return false;
   if (providerErrorIsNonRetryable(entry.error_code)) return true;
+  if (TRANSIENT_LOCAL_PROVIDER_ERRORS.includes(entry.error_code)) return false;
   const hasFutureRetry = entry.next_retry_at && Date.parse(entry.next_retry_at) > Date.now();
   return ["error", "stale", "partial"].includes(entry.state) && !hasFutureRetry;
 }

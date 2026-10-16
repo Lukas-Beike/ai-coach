@@ -50,6 +50,7 @@ TERMINAL_ITEM_STATUSES = frozenset({"completed", "partial", "failed", "skipped"}
 RETRYABLE_ERROR_CLASSES = frozenset(
     {
         "network_error",
+        "database_busy",
         "timeout",
         "provider_unavailable",
         "rate_limited",
