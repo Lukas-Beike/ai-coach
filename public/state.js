@@ -18,6 +18,10 @@ globalThis.AppState = (() => {
     loadPromise: null,
     pendingLoads: new Map(),
     loadingAreas: new Set(),
+    // Server versions a background reload was requested for, until that load settles.
+    requestedStateVersions: {},
+    // Background reloads waiting for a running Coach turn to finish.
+    deferredLoad: null,
     replaceDataOnLoad: false,
     sessionGeneration: 0,
     chatGeneration: 0,
@@ -47,6 +51,11 @@ globalThis.AppState = (() => {
     stateEventRefreshAreas: new Set(),
     stateEventLastId: 0,
     stateEventBackoff: 1000,
+    // The stream announced itself ("ready") and was heard from recently.
+    stateEventReady: false,
+    stateEventActivityAt: 0,
+    // True once a stream has caught up with the server, so a later reconnect replays real changes.
+    stateEventBaselined: false,
     coachActionProposals: [],
     coachActionUnknownIds: new Set(),
     coachReceipts: [],

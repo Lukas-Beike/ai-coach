@@ -242,8 +242,59 @@ function load(path = "/api/bootstrap", requestedAreas = null) {
     }
   })();
   const tracked = promise.finally(() => {
-    if (state.loadPromise === tracked) state.loadPromise = null;
+    if (state.loadPromise !== tracked) return;
+    state.loadPromise = null;
+    // Versions are only "already requested" while their load chain is open.
+    if (!state.pendingLoads.size && !state.deferredLoad) state.requestedStateVersions = {};
   });
   state.loadPromise = tracked;
   return tracked;
+}
+
+// Background reloads (sync status, state events) wait while a Coach turn works,
+// so the turn is not slowed by bootstrap, plan and performance reads. A turn that
+// runs long cannot hold them back for more than this.
+const BACKGROUND_LOAD_DEFER_MAX_MS = 60_000;
+const BACKGROUND_LOAD_CHECK_MS = 1_000;
+// The transcript and profile follow the Coach turn live, so they never wait.
+const LIVE_WHILE_BUSY_AREAS = new Set(["chat", "profile"]);
+
+function cancelDeferredLoads() {
+  const deferred = state.deferredLoad;
+  state.deferredLoad = null;
+  if (!deferred) return null;
+  clearInterval(deferred.checkTimer);
+  clearTimeout(deferred.capTimer);
+  return deferred;
+}
+
+// Runs the waiting reloads once, merged into one load per path.
+function flushDeferredLoads() {
+  const deferred = cancelDeferredLoads();
+  let promise = Promise.resolve();
+  deferred?.loads.forEach((areas, path) => { promise = load(path, [...areas]); });
+  return promise;
+}
+
+function deferBackgroundLoad(path, areas) {
+  const deferred = state.deferredLoad || (state.deferredLoad = { loads: new Map(), checkTimer: null, capTimer: null });
+  const waiting = deferred.loads.get(path) || new Set();
+  areas.forEach((area) => waiting.add(area));
+  deferred.loads.set(path, waiting);
+  if (!deferred.checkTimer) {
+    deferred.checkTimer = setInterval(() => { if (!state.busy) void flushDeferredLoads().catch(() => {}); }, BACKGROUND_LOAD_CHECK_MS);
+    deferred.capTimer = setTimeout(() => { void flushDeferredLoads().catch(() => {}); }, BACKGROUND_LOAD_DEFER_MAX_MS);
+  }
+}
+
+// Entry point for reloads the athlete did not ask for. Athlete actions and the
+// receipts of their own Coach turn call load() directly and are never deferred.
+function requestBackgroundLoad(path, areas) {
+  const requested = [...new Set(areas || [])];
+  if (!requested.length) return Promise.resolve();
+  if (!state.busy) return load(path, requested);
+  const later = requested.filter((area) => !LIVE_WHILE_BUSY_AREAS.has(area));
+  const live = requested.filter((area) => LIVE_WHILE_BUSY_AREAS.has(area));
+  if (later.length) deferBackgroundLoad(path, later);
+  return live.length ? load(LIVE_AREA_REFRESH, live) : Promise.resolve();
 }

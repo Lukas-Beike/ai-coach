@@ -17,6 +17,8 @@ function showLogin() {
   state.loadSequence += 1;
   state.pendingLoads.clear();
   state.loadPromise = null;
+  state.requestedStateVersions = {};
+  cancelDeferredLoads();
   state.initialStateLoaded = false;
   state.chatStatusPollInFlight = null;
   state.chatStream?.controller.abort();
@@ -36,6 +38,9 @@ function showLogin() {
   state.stateEventRefreshAreas.clear();
   state.stateEventLastId = 0;
   state.stateEventBackoff = 1000;
+  state.stateEventReady = false;
+  state.stateEventBaselined = false;
+  state.stateEventActivityAt = 0;
   state.data = null;
   globalThis.ActivityDetails?.close();
   resetNutritionView();
