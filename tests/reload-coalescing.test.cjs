@@ -321,3 +321,37 @@ test("leaving the session drops the waiting background reloads", async () => {
   await app.clock.advance(120_000);
   assert.equal(app.calls.length, 0);
 });
+
+test("a Coach event during a status check checks again as soon as that check ends", async () => {
+  const app = frontend({ eventSource: true });
+  app.state.busy = true;
+  app.context.connectStateEvents();
+  app.sources[0].listeners.ready(event("ready", { latest_event_id: 1 }));
+  app.context.scheduleChatStatusPoll(0);
+  await app.clock.advance(0);
+  assert.equal(app.count("/api/chat/status"), 1);
+  // The answer is committed while the first check is still waiting for its "running" reply.
+  app.sources[0].listeners.coach(event("coach", { role: "assistant", message_id: 3 }, "2"));
+  await app.clock.advance(400);
+  assert.equal(app.count("/api/chat/status"), 1, "only one check runs at a time");
+  app.auto.set("/api/chat/status", { status: "running", operation_id: "op-1" });
+  await app.respondOnce();
+  await app.clock.advance(0);
+  assert.equal(app.count("/api/chat/status"), 2, "the event is not left to the slow safety check");
+});
+
+test("a live transcript load during a Coach turn records the version it was requested for", async () => {
+  const app = frontend();
+  app.state.busy = true;
+  app.state.data.state_versions = { chat: 1 };
+  const status = () => ({ running: false, state_versions: { chat: 2 } });
+  app.context.handleSyncStatus(status());
+  await app.settle();
+  assert.equal(app.count("/api/chat/history?limit=100"), 1);
+  assert.equal(app.state.data.state_versions.chat, 2);
+  for (let index = 0; index < 3; index += 1) {
+    app.context.handleSyncStatus(status());
+    await app.settle();
+  }
+  assert.equal(app.count("/api/chat/history?limit=100"), 1, "the same chat version is read once");
+});

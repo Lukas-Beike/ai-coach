@@ -168,9 +168,13 @@ function rescheduleChatStatusPoll(delay) {
 function settleChatStatusPoll(pollRequest, authFailed, running) {
   if (state.chatStatusPollInFlight !== pollRequest) return;
   state.chatStatusPollInFlight = null;
+  const recheck = state.chatStatusRecheck;
+  state.chatStatusRecheck = false;
   if (authFailed) return;
+  // A check asked for while this one ran may have missed the change it announced.
+  if (recheck) scheduleChatStatusPoll(0);
   // The event stream announces Coach turns; a slow check only guards against a missed event.
-  if (stateEventStreamHealthy()) rescheduleChatStatusPoll(CHAT_STATUS_SAFETY_POLL_MS);
+  else if (stateEventStreamHealthy()) rescheduleChatStatusPoll(CHAT_STATUS_SAFETY_POLL_MS);
   else rescheduleChatStatusPoll(running ? 1_500 : 5_000);
 }
 
@@ -180,7 +184,10 @@ async function pollChatStatus() {
     rescheduleChatStatusPoll(5_000);
     return;
   }
-  if (state.chatStatusPollInFlight) return;
+  if (state.chatStatusPollInFlight) {
+    state.chatStatusRecheck = true;
+    return;
+  }
   const pollRequest = {};
   state.chatStatusPollInFlight = pollRequest;
   let running = false;

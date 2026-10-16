@@ -34,6 +34,7 @@ globalThis.AppState = (() => {
     chatServerOperationId: null,
     chatStatusTimer: null,
     chatStatusPollInFlight: null,
+    chatStatusRecheck: false,
     chatResponseStarted: false,
     chatResponseScrollPending: false,
     chatResponseMessageId: null,

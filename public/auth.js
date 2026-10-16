@@ -21,6 +21,7 @@ function showLogin() {
   cancelDeferredLoads();
   state.initialStateLoaded = false;
   state.chatStatusPollInFlight = null;
+  state.chatStatusRecheck = false;
   state.chatStream?.controller.abort();
   state.chatStream = null;
   state.chatQueue = [];

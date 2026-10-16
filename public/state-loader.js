@@ -146,13 +146,15 @@ function mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatCon
   return { failures, appliedAreas };
 }
 
-function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration) {
+function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveAreasOnly) {
   payload.state_versions = { ...state.data?.state_versions };
   for (const area of appliedAreas) {
     if (area === "chat" && chatGeneration !== state.chatGeneration) continue;
     const versionKeys = { feedback: ["checkins", "activity_feedback"], performance: ["performance", providerIds().garmin, "activities"].filter(Boolean) }[area] || [area];
     for (const key of versionKeys) {
-      if (bootstrap.state_versions?.[key] !== undefined) payload.state_versions[key] = bootstrap.state_versions[key];
+      // A live load has no bootstrap; it read at least the version it was requested for.
+      const version = bootstrap.state_versions?.[key] ?? (liveAreasOnly ? state.requestedStateVersions?.[key] : undefined);
+      if (version !== undefined) payload.state_versions[key] = version;
     }
   }
 }
@@ -207,7 +209,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     // Incorporate changes that arrived while these requests were in flight.
     payload.messages = state.data?.messages || [];
     const { failures, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
-    applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration);
+    applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveAreasOnly);
     if (requestSequence === state.loadSequence) renderCompletedState(payload, liveAreasOnly, failures.length > 0);
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
