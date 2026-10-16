@@ -659,6 +659,52 @@ class ActivityMetricStoreTests(StoreFixture):
             with self.subTest(column=column):
                 self.assertIsNone(rows[0][column])
 
+    def test_elapsed_duration_is_kept_in_the_details_and_round_trips(self) -> None:
+        def write(record: ActivityRecord) -> WriteOutcome:
+            return canonical_store.upsert_activity_record(
+                self.db,
+                record,
+                local_date=date(2026, 6, 1),
+                mapper_version=2,
+                fetched_at=STAMP,
+                now=STAMP,
+            )
+
+        record = replace(activity("walk-1"), elapsed_duration_s=4520.0)
+        self.assertIs(WriteOutcome.WRITTEN, write(record))
+        self.assertIs(WriteOutcome.UNCHANGED, write(record))
+        details = self.one("SELECT details FROM activity_records")[0]
+        self.assertEqual('{"elapsed_duration_s":4520.0}', details)
+        row = canonical_store.active_activity_rows(self.db)[0]
+        self.assertEqual(
+            4520.0, canonical_store.activity_elapsed_duration(row["details"])
+        )
+
+        self.assertIs(
+            WriteOutcome.UPDATED, write(replace(record, elapsed_duration_s=None))
+        )
+        self.assertEqual(
+            canonical_store.ACTIVITY_DETAILS,
+            self.one("SELECT details FROM activity_records")[0],
+        )
+
+    def test_unreadable_details_have_no_elapsed_duration(self) -> None:
+        for details in (
+            None,
+            "",
+            "{",
+            "[]",
+            "{}",
+            '{"elapsed_duration_s":"4520"}',
+            '{"elapsed_duration_s":true}',
+            "[" * 100_000,
+        ):
+            with self.subTest(details=details[:20] if details else details):
+                self.assertIsNone(canonical_store.activity_elapsed_duration(details))
+        self.assertEqual(
+            61.0, canonical_store.activity_elapsed_duration('{"elapsed_duration_s":61}')
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

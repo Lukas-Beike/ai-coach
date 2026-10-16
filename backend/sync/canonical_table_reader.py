@@ -183,6 +183,7 @@ def _activity(row: Mapping[str, Any]) -> ActivityRecord:
         normalized_power=row["normalized_power"],
         avg_cadence=row["avg_cadence"],
         energy_kj=row["energy_kj"],
+        elapsed_duration_s=canonical_store.activity_elapsed_duration(row["details"]),
     )
 
 

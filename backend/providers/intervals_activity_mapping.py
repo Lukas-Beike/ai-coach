@@ -17,7 +17,10 @@ produces an issue, and the next alias is tried:
   mapper prefers the exact instant when one is sent.
 * duration: ``moving_time`` before ``elapsed_time``, as activity_validation does.
   A zero duration is out of range (the legacy minimum is one second), so
-  ``elapsed_time`` is then consulted.
+  ``elapsed_time`` is then consulted. ``elapsed_time`` is also kept on its own as
+  ``elapsed_duration_s``, so session bundling can compare it with a Garmin
+  elapsed time when Garmin sends no moving time. A malformed ``elapsed_time`` is
+  reported once.
 * average heart rate: ``average_heartrate`` before ``averageHR``.
 * average power: ``average_watts`` before ``average_power``, as
   activity_validation does. ``icu_average_watts`` is not read because no reader
@@ -72,13 +75,14 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-MAPPER_VERSION: Final = 1
+MAPPER_VERSION: Final = 2
 INTERVALS_LABEL: Final = "Intervals.icu"
 MAX_ACTIVITY_ID_LENGTH: Final = 200
 MAX_NAME_LENGTH: Final = 200
 
 _START_KEYS: Final = ("start_date", "start_date_local")
-_DURATION_KEYS: Final = ("moving_time", "elapsed_time")
+_MOVING_TIME_KEYS: Final = ("moving_time",)
+_ELAPSED_TIME_KEYS: Final = ("elapsed_time",)
 _DISTANCE_KEYS: Final = ("distance",)
 _LOAD_KEYS: Final = ("icu_training_load",)
 _AVERAGE_HR_KEYS: Final = ("average_heartrate", "averageHR")
@@ -342,6 +346,12 @@ def _map_row(
         if value is not None
     )
     load = reader.number(_LOAD_KEYS, 0.0, MAX_ACTIVITY_LOAD)
+    moving_time = reader.number(
+        _MOVING_TIME_KEYS, _MIN_DURATION_S, MAX_ACTIVITY_DURATION_S
+    )
+    elapsed_time = reader.number(
+        _ELAPSED_TIME_KEYS, _MIN_DURATION_S, MAX_ACTIVITY_DURATION_S
+    )
     return ActivityRecord(
         activity_id=activity_id,
         provenance=Provenance(
@@ -355,9 +365,7 @@ def _map_row(
         sport=sport,
         environment=environment,
         started_at=started_at,
-        duration_s=reader.number(
-            _DURATION_KEYS, _MIN_DURATION_S, MAX_ACTIVITY_DURATION_S
-        ),
+        duration_s=moving_time if moving_time is not None else elapsed_time,
         distance_m=reader.number(_DISTANCE_KEYS, 0.0, MAX_ACTIVITY_DISTANCE_M),
         load=load,
         load_model=(
@@ -366,6 +374,7 @@ def _map_row(
         avg_hr=reader.number(_AVERAGE_HR_KEYS, *HEART_RATE_BOUNDS),
         avg_power=reader.number(_AVERAGE_POWER_KEYS, 0.0, MAX_ACTIVITY_POWER_W),
         name=reader.name(),
+        elapsed_duration_s=elapsed_time,
     )
 
 
