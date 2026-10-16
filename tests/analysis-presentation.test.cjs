@@ -84,6 +84,9 @@ test("current W/kg uses the preferred provider's newest point and falls back to 
 
   const tie = wPerKg([intervals([{ date: "2026-10-15", value: 3.4 }]), garmin([{ date: "2026-10-15", value: 3.2 }])], { cycling_w_per_kg: "garmin" });
   assert.equal(tie.value, 3.2, "the preferred Garmin point wins a same-date tie");
+  const unlabelled = (series) => series.map(({ source_provider, ...item }) => item);
+  const legacyTie = wPerKg(unlabelled([intervals([{ date: "2026-10-15", value: 3.4 }]), garmin([{ date: "2026-10-15", value: 3.2 }])]), {});
+  assert.equal(legacyTie.value, 3.2, "without a recorded preference the Garmin label wins a same-date tie");
 
   const none = wPerKg([garmin([{ date: "2026-10-10", value: 3.1 }]), intervals([{ date: "2026-10-15", value: 3.4 }])], {});
   assert.equal(none.value, 3.4, "a metric without a preference keeps the newest point");
