@@ -522,6 +522,58 @@ class ObservabilityTests(unittest.TestCase):
         self.assertFalse(lock_held_during_set)
         self.assertIn("event-1", store.get("diagnostic_capture_entries"))
 
+    def test_diagnostic_capture_delay_merges_a_burst_into_one_write_off_thread(self):
+        store = _KeyValueStore()
+        written = threading.Event()
+        writes: list[tuple[str, int]] = []
+
+        def recording_set(key: str, value: str) -> None:
+            writes.append((value, threading.get_ident()))
+            store.set(key, value)
+            written.set()
+
+        capture = DiagnosticCapture(
+            store.get,
+            recording_set,
+            Redactor(_config),
+            batch_size=1,
+            flush_delay_seconds=0.3,
+        )
+        capture.capture("provider_request_failed", {"index": 0})
+        capture.capture("provider_request_failed", {"index": 1})
+        capture.capture("synthetic_event", {"index": 2})
+        # Failed events no longer write on the capturing thread; entries stay readable.
+        self.assertEqual(writes, [])
+        self.assertEqual(len(capture.entries()), 3)
+        self.assertTrue(written.wait(5))
+        self.assertEqual(len(writes), 1)
+        payload, thread_id = writes[0]
+        self.assertNotEqual(thread_id, threading.get_ident())
+        self.assertEqual(
+            [entry["details"]["index"] for entry in json.loads(payload)], [0, 1, 2]
+        )
+        written.clear()
+        capture.capture("synthetic_event", {"index": 3})
+        self.assertTrue(written.wait(5))
+        self.assertEqual(len(writes), 2)
+
+    def test_diagnostic_capture_explicit_flush_writes_pending_delayed_entries(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get,
+            store.set,
+            Redactor(_config),
+            batch_size=1,
+            flush_delay_seconds=60,
+        )
+        capture.capture("synthetic_event", {"index": 0})
+        self.assertIsNone(store.get("diagnostic_capture_entries"))
+        capture.flush()
+        self.assertIn("synthetic_event", store.get("diagnostic_capture_entries"))
+        timer = capture._flush_timer
+        self.assertIsNotNone(timer)
+        timer.cancel()
+
     def test_diagnostic_capture_default_retains_more_than_1500_entries(self):
         store = _KeyValueStore()
         capture = DiagnosticCapture(store.get, store.set, Redactor(_config))

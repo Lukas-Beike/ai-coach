@@ -136,6 +136,7 @@ from backend.db.manager import (
 )
 from backend.db.manager import (
     DatabaseManager,
+    background_writer,
 )
 from backend.db.repositories import (
     ActivityFeedbackRepository,
@@ -891,10 +892,21 @@ SETTINGS = SettingsService(
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
 )
+# Each flush rewrites the whole capture, so captures are merged on a timer and
+# written as background work that yields to Coach and athlete writes.
+DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS = 30.0
+
+
+def _write_diagnostic_capture(key: str, value: str) -> None:
+    with background_writer():
+        key_value_service().set(key, value)
+
+
 DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     lambda key: key_value_service().get(key),
-    lambda key, value: key_value_service().set(key, value),
+    _write_diagnostic_capture,
     REDACTOR,
+    flush_delay_seconds=DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS,
 )
 
 SYNC_PERSISTENCE = SyncPersistenceAssembly(
@@ -2122,6 +2134,7 @@ def main() -> None:
             sync_worker.join(timeout=5)
         COACH_JOB_WORKER.join(timeout=5)
         CANONICAL_BACKFILL.worker.join(timeout=5)
+        DIAGNOSTIC_CAPTURE.flush()
 
 
 if __name__ == "__main__":

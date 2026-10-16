@@ -780,7 +780,13 @@ class DiagnosticCapture:
         batch_size: int = 10,
         max_bytes: int = DIAGNOSTIC_CAPTURE_MAX_BYTES,
         max_entry_bytes: int = DIAGNOSTIC_CAPTURE_MAX_ENTRY_BYTES,
+        flush_delay_seconds: float | None = None,
     ) -> None:
+        """Flush on the capturing thread, or after ``flush_delay_seconds`` on a timer.
+
+        Each flush rewrites the whole entry list, so a delay merges the flushes
+        of a burst of captures and keeps the write off the request thread.
+        """
         self._get_kv = get_kv
         self._set_kv = set_kv
         self._redactor = redactor
@@ -798,6 +804,8 @@ class DiagnosticCapture:
         self._generation = 0
         self._lock = threading.RLock()
         self._flush_lock = threading.Lock()
+        self._flush_delay = flush_delay_seconds
+        self._flush_timer: threading.Timer | None = None
 
     def _load_entries(self) -> list[dict[str, Any]]:
         while True:
@@ -1013,4 +1021,20 @@ class DiagnosticCapture:
                 )
             break
         if should_flush or event.endswith("_failed"):
+            self._request_flush()
+
+    def _request_flush(self) -> None:
+        if self._flush_delay is None:
             self.flush()
+            return
+        with self._lock:
+            if self._flush_timer is not None:
+                return
+            self._flush_timer = threading.Timer(self._flush_delay, self._timed_flush)
+            self._flush_timer.daemon = True
+            self._flush_timer.start()
+
+    def _timed_flush(self) -> None:
+        with self._lock:
+            self._flush_timer = None
+        self.flush()
