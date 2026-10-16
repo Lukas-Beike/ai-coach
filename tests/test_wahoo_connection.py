@@ -53,6 +53,8 @@ class FakeManager:
     def unit_of_work(self):
         yield object()
 
+    reader = unit_of_work
+
 
 def make_config(**overrides):
     with tempfile.TemporaryDirectory() as directory:
@@ -431,13 +433,11 @@ class WahooRedactionTests(unittest.TestCase):
     def test_code_and_state_are_masked_in_request_targets(self):
         for key in ("code", "state", "client_secret"):
             self.assertIn(key, REDACTED_URL_QUERY_KEYS)
-        text = (
-            '"GET /api/wahoo/callback?code=SECRETCODE&state=SECRETSTATE&x=ok HTTP/1.1"'
-        )
+        text = '"GET /api/wahoo/callback?code=SECRETCODE&state=SECRETSTATE&limit=5 HTTP/1.1"'
         redacted = redact_request_query(text)
         self.assertNotIn("SECRETCODE", redacted)
         self.assertNotIn("SECRETSTATE", redacted)
-        self.assertIn("x=ok", redacted)
+        self.assertIn("limit=5", redacted)
         self.assertEqual(redact_request_query(""), "")
         encoded = redact_request_query("GET /cb?%63ode=SECRETCODE HTTP/1.1")
         self.assertNotIn("SECRETCODE", encoded)

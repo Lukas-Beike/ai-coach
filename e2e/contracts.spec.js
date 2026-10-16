@@ -345,7 +345,9 @@ test("profile invalid JSON and incomplete success preserve the dirty draft", asy
 
 test("reload recovers a partial write receipt and executable undo proposal", async ({ page }) => {
   await ready(page);
-  await page.evaluate(() => sessionStorage.setItem("coachPendingTurn", "fixture-persisted-turn"));
+  // Store the turn only for the reloaded page: the unloading page would otherwise
+  // recover the receipt itself and clear the turn before the reload starts.
+  await page.addInitScript(() => sessionStorage.setItem("coachPendingTurn", "fixture-persisted-turn"));
   await page.route("**/api/chat/receipt?*", (route) => route.fulfill({ json: {
     client_turn_id: "fixture-persisted-turn", status: "partial",
     message: { id: 501, client_turn_id: "fixture-persisted-turn", content: "Check-in saved; summary unavailable." },

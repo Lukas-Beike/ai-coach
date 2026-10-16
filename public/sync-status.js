@@ -1,3 +1,18 @@
+// The server sends a heartbeat every 15 seconds; three missed ones make the stream stale.
+const STATE_EVENT_STALE_MS = 45_000;
+
+// True while the event stream is connected and has been heard from recently, so
+// Coach status changes arrive as events and need no frequent status polling.
+function stateEventStreamHealthy() {
+  return Boolean(state.stateEventSource && state.stateEventReady
+    && Date.now() - state.stateEventActivityAt < STATE_EVENT_STALE_MS);
+}
+
+// Milliseconds until a silent stream counts as stale.
+function stateEventStaleInMs() {
+  return Math.max(0, state.stateEventActivityAt + STATE_EVENT_STALE_MS - Date.now());
+}
+
 function scheduleStateEventRefresh(areas) {
   (areas || []).forEach((area) => state.stateEventRefreshAreas.add(area));
   if (state.stateEventRefreshTimer) clearTimeout(state.stateEventRefreshTimer);
@@ -5,15 +20,8 @@ function scheduleStateEventRefresh(areas) {
     state.stateEventRefreshTimer = null;
     const requested = [...state.stateEventRefreshAreas];
     state.stateEventRefreshAreas.clear();
-    // A state event can arrive while a domain refresh is in flight. Keep the
-    // requested areas queued instead of silently coalescing them into that
-    // older request.
-    if (state.loadPromise) {
-      requested.forEach((area) => state.stateEventRefreshAreas.add(area));
-      scheduleStateEventRefresh([]);
-      return;
-    }
-    load("/api/bootstrap?local=1", requested).catch(() => {});
+    // A load already in flight takes these areas as one follow-up load.
+    requestBackgroundLoad("/api/bootstrap?local=1", requested).catch(() => {});
   }, 400);
 }
 
@@ -22,13 +30,25 @@ function handleStateEvent(event) {
   let payload = {};
   try { payload = JSON.parse(event.data || "{}"); } catch (_) { return; }
   if (payload.latest_event_id !== undefined) state.stateEventLastId = Number(payload.latest_event_id) || state.stateEventLastId;
+  state.stateEventActivityAt = Date.now();
+  if (event.type === "ready") {
+    state.stateEventReady = true;
+    state.stateEventBaselined = true;
+    return;
+  }
+  if (event.type === "heartbeat") return;
+  // The first stream after the state load replays what that load already shows.
+  if (!state.stateEventBaselined) return;
   if (event.type === "reset") {
     scheduleStateEventRefresh(["chat", "plan", "library", "performance", "feedback", "profile"]);
     scheduleChatStatusPoll(0);
     return;
   }
-  // A submitted Coach turn (possibly from another device) starts status polling once.
-  if (event.type === "coach" && payload.role === "user") scheduleChatStatusPoll(0);
+  // A submitted or finished Coach turn (possibly from another device) checks the status once.
+  if (event.type === "coach" && (payload.role === "user" || payload.role === "assistant")) {
+    state.chatStatusTurnEnded = payload.role === "assistant";
+    scheduleChatStatusPoll(0);
+  }
   const areas = {
     coach: ["chat", "profile"],
     planning: ["plan", "library"],
@@ -56,6 +76,7 @@ function scheduleStateEventReconnect() {
 function disconnectStateEvents() {
   const source = state.stateEventSource;
   state.stateEventSource = null;
+  state.stateEventReady = false;
   source?.close();
   if (state.stateEventReconnectTimer) clearTimeout(state.stateEventReconnectTimer);
   state.stateEventReconnectTimer = null;
@@ -68,7 +89,7 @@ function connectStateEvents() {
   state.stateEventSource = source;
   let openedAt = null;
   source.onopen = () => { if (state.stateEventSource === source) openedAt = performance.now(); };
-  ["provider", "job", "planning", "coach", "sync", "reset"].forEach((name) => source.addEventListener(name, handleStateEvent));
+  ["provider", "job", "planning", "coach", "sync", "reset", "ready", "heartbeat"].forEach((name) => source.addEventListener(name, handleStateEvent));
   source.onerror = () => {
     if (state.stateEventSource !== source) return;
     // Receiving headers does not prove a stable stream: a proxy or browser
@@ -77,6 +98,8 @@ function connectStateEvents() {
     if (openedAt !== null && performance.now() - openedAt >= 30_000) state.stateEventBackoff = 1000;
     disconnectStateEvents();
     scheduleStateEventReconnect();
+    // Without the stream, Coach status changes are found by the polling fallback.
+    if (chatStatusPollWanted()) scheduleChatStatusPoll(0);
   };
 }
 
@@ -107,7 +130,8 @@ function broadcastSyncMessage(message) {
 }
 
 function changedSyncAreas(nextVersions) {
-  const previous = state.data?.state_versions || {};
+  // A version that a load was already requested for is not requested again.
+  const previous = { ...state.data?.state_versions, ...state.requestedStateVersions };
   const areaMap = {
     activities: ["plan", "performance"],
     performance: ["performance", "plan"],
@@ -167,9 +191,12 @@ function handleSyncStatus(status, broadcast = false) {
   renderSyncStatus(status);
   const changedAreas = changedSyncAreas(status.state_versions);
   if (changedAreas.length && state.data) {
-    load("/api/bootstrap?local=1", changedAreas).catch(() => {});
+    Object.assign(state.requestedStateVersions, status.state_versions);
+    requestBackgroundLoad("/api/bootstrap?local=1", changedAreas).catch(() => {});
   } else if (state.data && status.state_versions) {
-    state.data.state_versions = { ...state.data.state_versions, ...status.state_versions };
+    // Versions with a load still pending are recorded by that load, not here.
+    const settled = Object.fromEntries(Object.entries(status.state_versions).filter(([key]) => !(key in state.requestedStateVersions)));
+    state.data.state_versions = { ...state.data.state_versions, ...settled };
   }
   if (!status.running && status.operation_id && status.operation_id === state.syncPoll.operationId) {
     state.localSync.intervals = false;
@@ -261,6 +288,7 @@ const PROVIDER_FRESHNESS_ERRORS = {
   auth_required: "Erneute Anmeldung erforderlich",
   rate_limited: "Rate Limit erreicht",
   network_error: "Netzwerkfehler",
+  database_busy: "Lokale Datenbank kurz ausgelastet",
   invalid_configuration: "Ungültige Konfiguration",
   provider_error: "Providerfehler",
   upstream_auth: globalThis.AppApi.messageForReason("upstream_auth"),
@@ -292,6 +320,10 @@ function providerShortLabel(provider) {
 const NON_RETRYABLE_PROVIDER_ERRORS = Object.freeze(["auth_required", "invalid_configuration"]);
 
 
+// A busy local database is not a provider problem; the next refresh repeats the read.
+const TRANSIENT_LOCAL_PROVIDER_ERRORS = Object.freeze(["database_busy"]);
+
+
 function providerErrorIsNonRetryable(errorCode) {
   return NON_RETRYABLE_PROVIDER_ERRORS.includes(errorCode);
 }
@@ -300,6 +332,7 @@ function providerErrorIsNonRetryable(errorCode) {
 function providerRequiresManualAttention(entry) {
   if (!entry?.configured) return false;
   if (providerErrorIsNonRetryable(entry.error_code)) return true;
+  if (TRANSIENT_LOCAL_PROVIDER_ERRORS.includes(entry.error_code)) return false;
   const hasFutureRetry = entry.next_retry_at && Date.parse(entry.next_retry_at) > Date.now();
   return ["error", "stale", "partial"].includes(entry.state) && !hasFutureRetry;
 }

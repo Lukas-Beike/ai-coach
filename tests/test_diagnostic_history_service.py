@@ -2,7 +2,6 @@ import hashlib
 import json
 import sqlite3
 import tempfile
-import threading
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,7 +24,6 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
             )
         finally:
             db.close()
-        self.lock = threading.RLock()
         self.redacted_values = []
 
         @contextmanager
@@ -44,7 +42,6 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
 
         self.service = CoachDiagnosticHistoryService(
             database=database,
-            db_lock=self.lock,
             redact=redact,
             receipt_parser=command_receipt,
             allowed_tools={"save_checkin", "sync_intervals"},

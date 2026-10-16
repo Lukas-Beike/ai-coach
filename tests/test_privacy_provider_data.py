@@ -6,7 +6,7 @@ import sqlite3
 import tempfile
 import unittest
 import zipfile
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -57,6 +57,8 @@ class _Manager:
     @contextmanager
     def reader(self):
         yield self.db
+
+    read_snapshot = reader
 
     @contextmanager
     def unit_of_work(self):
@@ -383,6 +385,7 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
                 planning_revision_service=_PlanningRevision(),
                 openai_client=_OpenAI(),
                 logger=logging.getLogger("test.privacy.provider"),
+                diagnostics_suspended=nullcontext,
             )
         )
 

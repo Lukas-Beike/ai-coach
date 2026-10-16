@@ -21,20 +21,18 @@ class CoachDiagnosticHistoryService:
     def __init__(
         self,
         database: Callable[[], Any],
-        db_lock: Any,
         redact: Callable[[Any], Any],
         receipt_parser: Callable[[Any], dict[str, Any]],
         allowed_tools: Collection[str],
     ) -> None:
         self._database = database
-        self._db_lock = db_lock
         self._redact = redact
         self._receipt_parser = receipt_parser
         self._allowed_tools = frozenset(allowed_tools)
 
     def history(self) -> list[dict[str, Any]]:
         """Return recent command evidence after credential redaction."""
-        with self._db_lock, self._database() as db:
+        with self._database() as db:
             rows = db.execute(
                 "SELECT client_turn_id, receipt, created_at, updated_at "
                 "FROM coach_commands "

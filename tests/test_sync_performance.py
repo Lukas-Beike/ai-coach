@@ -257,6 +257,9 @@ class PerformanceRefreshServiceTests(unittest.TestCase):
 
         self.sync_state.latest_snapshot = tracked_latest
         self.sync_state.save_snapshot = tracked_save
+        # The first snapshot read leases a pooled reader; warm it so the count
+        # covers only connections the refresh itself would open.
+        original_latest()
         connection_count = self.backend.connect_count
 
         result = self.service.refresh()

@@ -28,6 +28,8 @@ from backend.canonical.vocabulary import (
 ACTIVITY_ID_PREFIX: Final = "act_"
 ATHLETE_SERIES: Final = "athlete"
 OBSERVATION_DETAILS: Final = "{}"
+ACTIVITY_DETAILS: Final = "{}"
+_ELAPSED_DURATION_KEY: Final = "elapsed_duration_s"
 _PROVIDER_RECORD_EXISTS: Final = (
     "SELECT 1 AS present FROM provider_records "
     "WHERE provider = ? AND record_kind = ? AND source_record_id = ?"
@@ -57,6 +59,7 @@ _ACTIVITY_COLUMNS: Final = (
     "avg_cadence",
     "energy_kj",
     "name",
+    "details",
     "mapper_version",
 )
 _OBSERVATION_COLUMNS: Final = (
@@ -442,6 +445,7 @@ _ACTIVITY_READ_COLUMNS: Final = (
     "r.avg_cadence",
     "r.energy_kj",
     "r.name",
+    "r.details",
     "r.fetched_at",
 )
 _OBSERVATION_READ_COLUMNS: Final = (
@@ -994,8 +998,32 @@ def _activity_values(
         "avg_cadence": record.avg_cadence,
         "energy_kj": record.energy_kj,
         "name": record.name,
+        "details": _activity_details(record),
         "mapper_version": mapper_version,
     }
+
+
+def _activity_details(record: ActivityRecord) -> str:
+    # The projection owns the whole details object; no other writer adds keys.
+    if record.elapsed_duration_s is None:
+        return ACTIVITY_DETAILS
+    return json.dumps(
+        {_ELAPSED_DURATION_KEY: record.elapsed_duration_s}, separators=(",", ":")
+    )
+
+
+def activity_elapsed_duration(details: object) -> float | None:
+    """Return the elapsed duration stored in an activity's details, if any."""
+    if not isinstance(details, str):
+        return None
+    try:
+        loaded = json.loads(details)
+    except ValueError, RecursionError:
+        return None
+    value = loaded.get(_ELAPSED_DURATION_KEY) if isinstance(loaded, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
 
 
 def _observation_values(

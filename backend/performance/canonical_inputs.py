@@ -23,6 +23,10 @@ wellness rows, and no load, Intervals threshold or recovery value; a stored Waho
 cycling FTP or weight fallback still applies. Without a canonical
 activity reader and without wellness rows there are no inputs, and the caller keeps
 the legacy values.
+
+The activities cover the year before ``as_of``, extended back to the oldest wellness
+row, which seeds the reconstructed ATL. Every activity window the performance
+projection uses is shorter, so a long synced history is not decoded on each read.
 """
 
 from __future__ import annotations
@@ -30,7 +34,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, Sport
@@ -111,19 +115,24 @@ class CanonicalPerformanceSource:
         return None if self.activity_rows is None else self.activity_rows()
 
 
+# Activities older than this are not read for the performance inputs.
+ACTIVITY_HISTORY_DAYS: Final = 365
+
+
 def snapshot_with_inputs(
     source: CanonicalPerformanceSource | None,
     read_snapshot: Callable[[], Any],
     *,
     as_of: date,
 ) -> tuple[Any, CanonicalPerformanceInputs | None]:
-    """Read a snapshot and its canonical load inputs in one unit of work.
+    """Read a snapshot and its canonical load inputs in one read snapshot.
 
-    Without a canonical source the snapshot is read exactly as before.
+    Without a canonical source the snapshot is read exactly as before. The
+    reads never wait for the writer.
     """
     if source is None:
         return read_snapshot(), None
-    with source.database_manager().unit_of_work() as db:
+    with source.database_manager().read_snapshot() as db:
         snapshot = read_snapshot()
         return snapshot, read_performance_inputs(
             source.observation_reader(),
@@ -137,7 +146,7 @@ def snapshot_with_inputs(
 def activity_rows_for(
     source: CanonicalPerformanceSource | None,
 ) -> tuple[dict[str, Any], ...] | None:
-    """Read the raw activity rows in their own unit of work.
+    """Read the raw activity rows in a read of their own, without the writer.
 
     None without a source or an activity row reader, so the caller keeps reading
     the activities from its snapshot.
@@ -145,7 +154,7 @@ def activity_rows_for(
     reader = None if source is None else source.activity_row_reader()
     if source is None or reader is None:
         return None
-    with source.database_manager().unit_of_work() as db:
+    with source.database_manager().reader() as db:
         return tuple(reader.activity_rows(db))
 
 
@@ -329,7 +338,11 @@ def read_performance_inputs(
         [*_raw_wellness_rows(snapshot), *compact], observed
     )
     activity_rows = (
-        None if activity_reader is None else tuple(activity_reader.activity_rows(db))
+        None
+        if activity_reader is None
+        else tuple(
+            activity_reader.activity_rows(db, start=_activity_start(rows, as_of))
+        )
     )
     if activity_rows is None and not rows:
         return None
@@ -373,6 +386,12 @@ def read_performance_inputs(
         ),
         recovery_averages=read_recovery_average_inputs(reader, db, start=start),
     )
+
+
+def _activity_start(rows: list[dict[str, Any]], as_of: date) -> date:
+    """Return the first day of activities the performance inputs read."""
+    days = [day for day in map(canonical_sections.row_day, rows) if day is not None]
+    return min([as_of - timedelta(days=ACTIVITY_HISTORY_DAYS - 1), *days])
 
 
 def _current_value(

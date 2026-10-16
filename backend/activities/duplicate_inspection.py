@@ -28,7 +28,7 @@ class DuplicateInspector:
 
     def latest(self) -> dict[str, Any] | None:
         """Return the newest exact-source ride pair, always keeping Wahoo canonical."""
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.read_snapshot() as db:
             snapshot = self._snapshot_reader.latest_snapshot(db)
             rows = self._row_reader.activity_rows(db)
         synced_at = snapshot.get("synced_at") if isinstance(snapshot, dict) else None

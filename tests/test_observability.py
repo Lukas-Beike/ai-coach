@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -522,6 +523,108 @@ class ObservabilityTests(unittest.TestCase):
         self.assertFalse(lock_held_during_set)
         self.assertIn("event-1", store.get("diagnostic_capture_entries"))
 
+    def test_diagnostic_capture_delay_merges_a_burst_into_one_write_off_thread(self):
+        store = _KeyValueStore()
+        written = threading.Event()
+        writes: list[tuple[str, int]] = []
+
+        def recording_set(key: str, value: str) -> None:
+            writes.append((value, threading.get_ident()))
+            store.set(key, value)
+            written.set()
+
+        capture = DiagnosticCapture(
+            store.get,
+            recording_set,
+            Redactor(_config),
+            batch_size=1,
+            flush_delay_seconds=0.3,
+        )
+        capture.capture("provider_request_failed", {"index": 0})
+        capture.capture("provider_request_failed", {"index": 1})
+        capture.capture("synthetic_event", {"index": 2})
+        # Failed events no longer write on the capturing thread; entries stay readable.
+        self.assertEqual(writes, [])
+        self.assertEqual(len(capture.entries()), 3)
+        self.assertTrue(written.wait(5))
+        self.assertEqual(len(writes), 1)
+        payload, thread_id = writes[0]
+        self.assertNotEqual(thread_id, threading.get_ident())
+        self.assertEqual(
+            [entry["details"]["index"] for entry in json.loads(payload)], [0, 1, 2]
+        )
+        written.clear()
+        capture.capture("synthetic_event", {"index": 3})
+        self.assertTrue(written.wait(5))
+        self.assertEqual(len(writes), 2)
+
+    def test_diagnostic_capture_explicit_flush_writes_pending_delayed_entries(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get,
+            store.set,
+            Redactor(_config),
+            batch_size=1,
+            flush_delay_seconds=60,
+        )
+        capture.capture("synthetic_event", {"index": 0})
+        self.assertIsNone(store.get("diagnostic_capture_entries"))
+        capture.flush()
+        self.assertIn("synthetic_event", store.get("diagnostic_capture_entries"))
+        timer = capture._flush_timer
+        self.assertIsNotNone(timer)
+        timer.cancel()
+
+    def test_diagnostic_capture_delay_writes_a_single_ordinary_entry(self):
+        store = _KeyValueStore()
+        written = threading.Event()
+        contexts: list[str] = []
+
+        @contextmanager
+        def timer_context():
+            contexts.append("enter")
+            yield
+
+        def recording_set(key: str, value: str) -> None:
+            store.set(key, value)
+            written.set()
+
+        capture = DiagnosticCapture(
+            store.get,
+            recording_set,
+            Redactor(_config),
+            flush_delay_seconds=0.3,
+            timer_context=timer_context,
+        )
+        capture.capture("synthetic_event", {"index": 0})
+        self.assertTrue(written.wait(5))
+        self.assertIn("synthetic_event", store.get("diagnostic_capture_entries"))
+        self.assertEqual(contexts, ["enter"])
+
+    def test_diagnostic_capture_close_writes_now_and_stops_delaying(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get,
+            store.set,
+            Redactor(_config),
+            flush_delay_seconds=60,
+            timer_context=lambda: self.fail("close must not use the timer context"),
+        )
+        capture.capture("synthetic_event", {"index": 0})
+        timer = capture._flush_timer
+        self.assertIsNotNone(timer)
+
+        capture.close()
+
+        self.assertIn("synthetic_event", store.get("diagnostic_capture_entries"))
+        self.assertIsNone(capture._flush_timer)
+        self.assertFalse(timer.is_alive() and not timer.finished.is_set())
+        capture.capture("event_after_close_failed", {"index": 1})
+        self.assertIn(
+            "event_after_close_failed", store.get("diagnostic_capture_entries")
+        )
+        self.assertIsNone(capture._flush_timer)
+
     def test_diagnostic_capture_default_retains_more_than_1500_entries(self):
         store = _KeyValueStore()
         capture = DiagnosticCapture(store.get, store.set, Redactor(_config))
@@ -739,6 +842,167 @@ class HttpAccessLogLevelTests(unittest.TestCase):
         self.assertEqual(error_message, "Streaming response failed: synthetic timeout")
         self.assertEqual(error_extra["event"], "http_access")
         self.assertEqual(error_extra["context"]["path"], "/api/state/events")
+
+    def test_access_log_masks_free_text_query_on_success_and_error_paths(self):
+        logger = _RecordingLogger()
+        handler = RequestHandler.__new__(RequestHandler)
+        handler.command = "GET"
+        target = (
+            "/api/chat/history?q=secret-marker&limit=20&cursor=abc123"
+            "&code=SECRETCODE&access_token=SECRETTOKEN"
+        )
+        handler.path = target
+        handler.requestline = f"GET {target} HTTP/1.1"
+        handler.dependencies = SimpleNamespace(logger=logger)
+
+        handler.log_request(200)
+        handler.log_request(404)
+        handler.log_error('"%s" %s', handler.requestline, "404")
+
+        self.assertEqual(len(logger.records), 3)
+        for _level, message, extra in logger.records:
+            with self.subTest(message=message):
+                self.assertNotIn("secret-marker", message)
+                self.assertNotIn("SECRETCODE", message)
+                self.assertNotIn("SECRETTOKEN", message)
+                self.assertIn("limit=20", message)
+                self.assertIn("cursor=abc123", message)
+                self.assertIn("q=[REDACTED]", message)
+                self.assertNotIn("secret-marker", repr(extra))
+                self.assertEqual(extra["context"]["path"], "/api/chat/history")
+
+
+class DiagnosticCaptureDiscardTests(unittest.TestCase):
+    def test_discarded_cache_drops_unflushed_entries_and_never_writes_them_back(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), batch_size=50
+        )
+        capture.capture("before_delete_marker", {"text": "synthetic before"})
+        self.assertEqual(capture.status()["entries"], 1)
+
+        # Privacy deletion clears the store, then the cache is discarded.
+        with store.lock:
+            store.values.clear()
+        capture.discard_cache()
+
+        self.assertEqual(capture.status()["entries"], 0)
+        self.assertEqual(capture.entries(), [])
+        capture.flush()
+        self.assertNotIn("diagnostic_capture_entries", store.values)
+
+        capture.capture("after_delete_marker", {"text": "synthetic after"})
+        capture.flush()
+        stored = json.loads(store.get("diagnostic_capture_entries"))
+        self.assertEqual([entry["event"] for entry in stored], ["after_delete_marker"])
+        self.assertEqual(
+            [entry["event"] for entry in capture.entries()], ["after_delete_marker"]
+        )
+
+    def test_restore_swap_shows_only_restored_entries_after_discard(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), batch_size=1
+        )
+        capture.capture("before_restore_marker", {"text": "synthetic before"})
+        self.assertEqual(
+            [entry["event"] for entry in capture.entries()], ["before_restore_marker"]
+        )
+
+        # The swapped-in database carries its own captured diagnostics.
+        restored = [
+            {
+                "timestamp": "2026-10-01T00:00:00+00:00",
+                "event": "restored_marker",
+                "details": {"text": "synthetic restored"},
+            }
+        ]
+        with store.lock:
+            store.values.clear()
+            store.values["diagnostic_capture_entries"] = json.dumps(restored)
+        capture.discard_cache()
+
+        self.assertEqual(
+            [entry["event"] for entry in capture.entries()], ["restored_marker"]
+        )
+        capture.capture("after_restore_marker", {"text": "synthetic after"})
+        stored = json.loads(store.get("diagnostic_capture_entries"))
+        self.assertEqual(
+            [entry["event"] for entry in stored],
+            ["restored_marker", "after_restore_marker"],
+        )
+        self.assertNotIn(
+            "before_restore_marker", store.get("diagnostic_capture_entries")
+        )
+
+    def test_flush_during_suspension_cannot_write_cleared_entries_back(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), batch_size=50
+        )
+        capture.capture("before_delete_marker", {"text": "synthetic before"})
+
+        flusher = threading.Thread(target=capture.flush)
+        with capture.suspended():
+            with store.lock:
+                store.values.clear()
+            flusher.start()
+            flusher.join(timeout=0.2)
+            self.assertTrue(flusher.is_alive(), "flush must wait for the suspension")
+        flusher.join(timeout=5)
+
+        self.assertFalse(flusher.is_alive())
+        self.assertNotIn("diagnostic_capture_entries", store.values)
+        self.assertEqual(capture.entries(), [])
+
+    def test_delayed_write_cannot_write_cleared_entries_back_after_suspension(self):
+        store = _KeyValueStore()
+        timer_fired = threading.Event()
+
+        @contextmanager
+        def timer_context():
+            timer_fired.set()
+            yield
+
+        capture = DiagnosticCapture(
+            store.get,
+            store.set,
+            Redactor(_config),
+            flush_delay_seconds=0.1,
+            timer_context=timer_context,
+        )
+        capture.capture("before_delete_marker", {"text": "synthetic before"})
+        timer = capture._flush_timer
+        self.assertIsNotNone(timer)
+
+        with capture.suspended():
+            with store.lock:
+                store.values.clear()
+            # The delayed write starts during the suspension and waits for it.
+            self.assertTrue(timer_fired.wait(5))
+            timer.join(timeout=0.2)
+            self.assertTrue(timer.is_alive(), "the write must wait for the suspension")
+        timer.join(timeout=5)
+
+        self.assertFalse(timer.is_alive())
+        self.assertNotIn("diagnostic_capture_entries", store.values)
+        self.assertEqual(capture.entries(), [])
+
+    def test_suspension_keeps_the_cache_when_the_mutation_fails(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), batch_size=50
+        )
+        capture.capture("kept_marker", {"text": "synthetic"})
+
+        with self.assertRaises(RuntimeError), capture.suspended():
+            raise RuntimeError("synthetic failure")
+
+        self.assertEqual(
+            [entry["event"] for entry in capture.entries()], ["kept_marker"]
+        )
+        capture.flush()
+        self.assertIn("kept_marker", store.get("diagnostic_capture_entries"))
 
 
 if __name__ == "__main__":

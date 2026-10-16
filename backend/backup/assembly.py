@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,8 @@ class RestoreLifecycleDependencies:
     sync_wake_event: Callable[[], Any]
     coach_wake_event: Any
     redact: Callable[[str], str]
+    diagnostics_suspended: Callable[[], AbstractContextManager[None]]
+    canonical_backfill_start: Callable[[], None]
 
 
 class BackupAssembly:
@@ -91,6 +94,8 @@ class BackupAssembly:
         self._sync_wake_event = lifecycle.sync_wake_event
         self._coach_wake_event = lifecycle.coach_wake_event
         self._redact = lifecycle.redact
+        self._diagnostics_suspended = lifecycle.diagnostics_suspended
+        self._canonical_backfill_start = lifecycle.canonical_backfill_start
 
     def backup_service(self) -> DatabaseBackupService:
         return DatabaseBackupService(
@@ -134,5 +139,7 @@ class BackupAssembly:
             coach_wake=self._coach_wake_event,
             config=DatabaseRestoreConfig(self._data_dir(), self._database_path()),
             redact=self._redact,
+            diagnostics_suspended=self._diagnostics_suspended,
+            canonical_backfill_start=self._canonical_backfill_start,
         )
         return DatabaseRestoreService(dependencies)

@@ -228,6 +228,7 @@ class SyncPublicStateServiceTests(unittest.TestCase):
             profile={"name": "Athlete"},
             garmin_has_core_error=False,
             garmin_tokenstore_exists=False,
+            read_only=True,
         )
         self.jobs.list.assert_called_once_with()
 

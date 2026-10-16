@@ -16,7 +16,7 @@ from backend.errors import (
     AppError,
 )
 from backend.planning import library as planning_library
-from backend.planning.conflicts import calendar_items_conflict
+from backend.planning.conflicts import calendar_item_window, calendar_items_conflict
 from backend.planning.workouts import normalize_workout
 
 _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
@@ -180,6 +180,7 @@ class StructuredTrainingChangeValidator:
         final_active: dict[str, bool],
         restore_identities: set[str],
         changes_by_identity: dict[str, dict[str, Any]],
+        window_identities: set[str],
     ) -> None:
         action = str(change.get("action") or "update").strip().casefold()
         if action == "restore":
@@ -216,9 +217,10 @@ class StructuredTrainingChangeValidator:
         ).strip()
         if candidate_date:
             final_dates[change_identity] = validated_training_date(candidate_date)
-        changes_by_identity[change_identity] = _project_existing_training_change(
-            current, change, candidate_date
-        )
+        projected = _project_existing_training_change(current, change, candidate_date)
+        if calendar_item_window(projected) != calendar_item_window(current):
+            window_identities.add(change_identity)
+        changes_by_identity[change_identity] = projected
 
     @staticmethod
     def _validate_batch_time_windows(
@@ -263,6 +265,7 @@ class StructuredTrainingChangeValidator:
         restore_identities: set[str],
         batch_ids: set[str],
         changes_by_identity: dict[str, dict[str, Any]] | None = None,
+        window_identities: set[str] | None = None,
     ) -> None:
         if changes_by_identity:
             self._validate_batch_time_windows(
@@ -281,23 +284,28 @@ class StructuredTrainingChangeValidator:
                 or identity in restore_identities
             )
         }
+        moved_windows = window_identities or set()
         for candidate_date in dates_to_check:
-            candidates = [
-                change
+            candidates: list[tuple[str | None, dict[str, Any]]] = [
+                (identity, change)
                 for identity, change in (changes_by_identity or {}).items()
                 if final_dates.get(identity) == candidate_date
                 and final_active.get(identity, True)
-            ] or [{"date": candidate_date}]
-            for candidate in candidates:
+            ] or [(None, {"date": candidate_date})]
+            for identity, candidate in candidates:
                 self._validate_calendar_candidate(
-                    candidate, candidate_date, ordinary_conflict_dates, batch_ids
+                    candidate,
+                    candidate_date,
+                    candidate_date in ordinary_conflict_dates
+                    or identity in moved_windows,
+                    batch_ids,
                 )
 
     def _validate_calendar_candidate(
         self,
         candidate: dict[str, Any],
         candidate_date: str,
-        ordinary_conflict_dates: set[str],
+        check_ordinary: bool,
         batch_ids: set[str],
     ) -> None:
         if hasattr(
@@ -313,7 +321,7 @@ class StructuredTrainingChangeValidator:
             if hasattr(self.calendar_conflict_service, "constraints")
             else {"date": candidate_date}
         )
-        if candidate_date not in ordinary_conflict_dates:
+        if not check_ordinary:
             return
         if self.calendar_conflict_service.conflicts(conflict_candidate, batch_ids):
             raise AppError(
@@ -332,6 +340,7 @@ class StructuredTrainingChangeValidator:
         final_dates: dict[str, str] = {}
         final_active: dict[str, bool] = {}
         restore_identities: set[str] = set()
+        window_identities: set[str] = set()
         changes_by_identity: dict[str, dict[str, Any]] = {}
         for index, change in enumerate(changes):
             local_id = str(change.get("local_id") or "").strip()
@@ -351,6 +360,7 @@ class StructuredTrainingChangeValidator:
                 final_active,
                 restore_identities,
                 changes_by_identity,
+                window_identities,
             )
         self._validate_training_change_dates(
             final_dates,
@@ -359,6 +369,7 @@ class StructuredTrainingChangeValidator:
             restore_identities,
             batch_ids,
             changes_by_identity=changes_by_identity,
+            window_identities=window_identities,
         )
 
     def validate_batch(self, changes: list[dict[str, Any]], db: Any) -> None:

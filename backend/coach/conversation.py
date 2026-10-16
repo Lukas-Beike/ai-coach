@@ -18,6 +18,25 @@ from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.events import StateEventBuffer
 
 MESSAGE_ATTACHMENTS_QUERY = "SELECT attachments FROM messages WHERE id=?"
+# A prior Coach turn sent attachments to OpenAI. Receipts are filtered in SQL so a
+# turn does not decode every stored receipt; the CASE guards skip malformed JSON.
+PRIOR_OPENAI_ATTACHMENTS_QUERY = (
+    "SELECT 1 FROM coach_commands JOIN messages ON messages.id="
+    "json_extract(CASE WHEN json_valid(receipt) THEN receipt END, '$.user_message_id') "
+    "WHERE json_type(CASE WHEN json_valid(receipt) THEN receipt END, "
+    "'$.user_message_id')='integer' "
+    "AND json_extract(CASE WHEN json_valid(receipt) THEN receipt END, "
+    "'$.ai_provider')=? "
+    "AND messages.id<? AND messages.attachments!='[]' LIMIT 1"
+)
+# Attachment items without their encoded file data, which evidence never shows.
+ATTACHMENT_EVIDENCE_QUERY = (
+    "SELECT json_each.type AS kind, CASE WHEN json_each.type='object' "
+    "THEN json_remove(json_each.value, '$.data') ELSE json_each.value END AS item "
+    "FROM messages, json_each(CASE WHEN json_valid(messages.attachments) "
+    "AND json_type(messages.attachments)='array' THEN messages.attachments "
+    "ELSE '[]' END) WHERE messages.id=? ORDER BY json_each.key"
+)
 
 
 # Bounded below the browser's 25 s request timeout so the athlete gets the
@@ -213,21 +232,10 @@ class CoachAttachmentContextService:
             attachment_row = db.execute(
                 MESSAGE_ATTACHMENTS_QUERY, (receipt.get("user_message_id"),)
             ).fetchone()
-            prior_ids = set()
-            for row in db.execute(
-                "SELECT receipt FROM coach_commands WHERE receipt IS NOT NULL"
-            ).fetchall():
-                prior = command_receipt(row["receipt"])
-                message_id = prior.get("user_message_id")
-                if prior.get("ai_provider") == AI_PROVIDER and isinstance(
-                    message_id, int
-                ):
-                    prior_ids.add(message_id)
             has_prior = bool(
-                prior_ids
-                and db.execute(
-                    f"SELECT 1 FROM messages WHERE id<? AND attachments!='[]' AND id IN ({','.join('?' for _ in prior_ids)}) LIMIT 1",
-                    (receipt.get("user_message_id") or 0, *prior_ids),
+                db.execute(
+                    PRIOR_OPENAI_ATTACHMENTS_QUERY,
+                    (AI_PROVIDER, receipt.get("user_message_id") or 0),
                 ).fetchone()
             )
         try:
@@ -242,12 +250,13 @@ class CoachAttachmentContextService:
         with self._database_manager.reader() as db:
             context["attachment_evidence"] = []
             for message in context["messages"]:
-                row = db.execute(MESSAGE_ATTACHMENTS_QUERY, (message["id"],)).fetchone()
-                try:
-                    attachments = json.loads(row["attachments"] or "[]") if row else []
-                except TypeError, json.JSONDecodeError:
-                    attachments = []
-                for item in attachments if isinstance(attachments, list) else []:
+                rows = db.execute(ATTACHMENT_EVIDENCE_QUERY, (message["id"],))
+                for row in rows.fetchall():
+                    item = (
+                        json.loads(row["item"])
+                        if row["kind"] == "object"
+                        else row["item"]
+                    )
                     context["attachment_evidence"].append(
                         {
                             "source_message_id": message["id"],
@@ -296,17 +305,17 @@ class CoachConversationHistoryService:
         database_manager: DatabaseManager,
         chat_repository: ChatRepository,
         key_values: KeyValueRepository,
-        database_lock: Any,
     ) -> None:
         self._database_manager = database_manager
         self._chat_repository = chat_repository
         self._key_values = key_values
-        self._database_lock = database_lock
 
     def page(
         self, *, before_message_id: int | None, search: str, limit: int
     ) -> tuple[str, list[dict[str, Any]]]:
-        with self._database_lock, self._database_manager.unit_of_work() as db:
+        # One WAL snapshot keeps the page and its generation consistent without
+        # waiting for the writer.
+        with self._database_manager.read_snapshot() as db:
             messages = self._chat_repository.list_page(
                 db, before_message_id=before_message_id, search=search, limit=limit
             )

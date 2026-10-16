@@ -17,6 +17,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.vocabulary import ActivityLinkKind, MetricKind, ProviderId
 from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.repositories import KeyValueRepository
@@ -950,8 +951,8 @@ class ReprojectionTests(BackfillFixture):
         )
         deleted = self.rows(
             "SELECT mapped_version FROM provider_records WHERE source_record_id = '1' "
-            "AND record_kind = ?",
-            (ACTIVITY_KIND,),
+            "AND provider = ? AND record_kind = ?",
+            (INTERVALS, ACTIVITY_KIND),
         )
         self.assertEqual(
             deleted[0]["mapped_version"],
@@ -1043,6 +1044,15 @@ class ReprojectionTests(BackfillFixture):
         )
         backfill = self.make_backfill(batch_size=100)
         self.run_to_completion(backfill)
+        with self.manager.unit_of_work() as db:
+            # Backfill ingest does not link; re-projection does, so link up front.
+            dates = db.execute("SELECT DISTINCT local_date FROM activity_sessions")
+            link_activity_sessions(
+                db,
+                touched_dates={date.fromisoformat(row["local_date"]) for row in dates},
+                zone=ZONE,
+                now=NOW,
+            )
         original = self.canonical_snapshot()
 
         bumped = {
@@ -1148,6 +1158,117 @@ class ReprojectionTests(BackfillFixture):
             "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
             "WHERE r.provider = ? ORDER BY r.provider_activity_id",
             (INTERVALS,),
+        )
+
+    def test_reprojection_links_a_garmin_walk_its_moving_time_now_matches(
+        self,
+    ) -> None:
+        # Garmin duration is elapsed time; only the moving time matches Intervals.icu.
+        walk = {
+            "id": "w1",
+            "type": "Walk",
+            "start_date_local": "2026-09-10T07:00:00",
+            "moving_time": 3620,
+            "distance": 5000.0,
+        }
+        garmin_walk = {
+            "activityId": 77,
+            "activityType": {"typeKey": "walking"},
+            "startTimeLocal": "2026-09-10 07:00:00",
+            "duration": 4500.0,
+            "movingDuration": 3600.0,
+            "distance": 5000.0,
+        }
+        self.insert_snapshot(self.manager, intervals_snapshot([walk]))
+        self.set_garmin(self.manager, garmin_payload(activities=[garmin_walk]))
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+        query = (
+            "SELECT r.provider, s.activity_id, s.state, s.merged_into "
+            "FROM activity_records AS r JOIN activity_sessions AS s "
+            "ON s.activity_id = r.activity_id ORDER BY r.provider"
+        )
+        with self.manager.unit_of_work() as db:
+            # The state an older Garmin mapper left: no moving time, separate sessions.
+            db.execute(
+                "UPDATE activity_records SET moving_duration_s = NULL WHERE provider = ?",
+                (GARMIN,),
+            )
+        self.assertEqual({row["state"] for row in self.rows(query)}, {"active"})
+        key = (GARMIN, ACTIVITY_KIND)
+        with patch.dict(
+            canonical_plans._MAPPER_VERSIONS,
+            {key: canonical_plans._MAPPER_VERSIONS[key] + 1},
+        ):
+            self.run_to_completion(backfill)
+
+        garmin, intervals = self.rows(query)
+        self.assertEqual(
+            (garmin["provider"], intervals["provider"]), (GARMIN, INTERVALS)
+        )
+        survivor, alias = (
+            (garmin, intervals) if intervals["merged_into"] else (intervals, garmin)
+        )
+        self.assertEqual((survivor["state"], survivor["merged_into"]), ("active", None))
+        self.assertEqual(
+            (alias["state"], alias["merged_into"]),
+            ("duplicate", survivor["activity_id"]),
+        )
+        self.assertEqual(self.summary(backfill)["providers"][GARMIN]["reprojected"], 1)
+
+    def test_reprojection_links_a_garmin_walk_by_the_intervals_elapsed_time(
+        self,
+    ) -> None:
+        # Garmin sends no moving time; only the Intervals.icu elapsed time matches.
+        walk = {
+            "id": "w1",
+            "type": "Walk",
+            "start_date_local": "2026-09-10T07:00:00",
+            "moving_time": 2400,
+            "elapsed_time": 4520,
+            "distance": 5000.0,
+        }
+        garmin_walk = {
+            "activityId": 77,
+            "activityType": {"typeKey": "walking"},
+            "startTimeLocal": "2026-09-10 07:00:00",
+            "duration": 4500.0,
+            "distance": 5000.0,
+        }
+        self.insert_snapshot(self.manager, intervals_snapshot([walk]))
+        self.set_garmin(self.manager, garmin_payload(activities=[garmin_walk]))
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+        query = (
+            "SELECT r.provider, s.activity_id, s.state, s.merged_into "
+            "FROM activity_records AS r JOIN activity_sessions AS s "
+            "ON s.activity_id = r.activity_id ORDER BY r.provider"
+        )
+        with self.manager.unit_of_work() as db:
+            # The state the first Intervals.icu mapper left: no elapsed time.
+            db.execute(
+                "UPDATE activity_records SET details = '{}' WHERE provider = ?",
+                (INTERVALS,),
+            )
+        self.assertEqual({row["state"] for row in self.rows(query)}, {"active"})
+        key = (INTERVALS, ACTIVITY_KIND)
+        with patch.dict(
+            canonical_plans._MAPPER_VERSIONS,
+            {key: canonical_plans._MAPPER_VERSIONS[key] + 1},
+        ):
+            self.run_to_completion(backfill)
+
+        garmin, intervals = self.rows(query)
+        survivor, alias = (
+            (garmin, intervals) if intervals["merged_into"] else (intervals, garmin)
+        )
+        self.assertEqual((survivor["state"], survivor["merged_into"]), ("active", None))
+        self.assertEqual(
+            (alias["state"], alias["merged_into"]),
+            ("duplicate", survivor["activity_id"]),
+        )
+        self.assertEqual(
+            self.summary(backfill)["providers"][INTERVALS]["reprojected"], 1
         )
 
     def test_reprojection_keeps_a_deleted_activity_and_its_session_deleted(

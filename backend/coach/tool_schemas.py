@@ -564,7 +564,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "save_checkin",
-            "Save explicitly stated daily condition, illness, pain or availability. Omit unknown fields; scores are 0-10. checkin_date defaults to the athlete-local today and cannot be in the future. Empty fields preserve existing feedback.",
+            "Save explicitly stated daily condition, illness, pain or availability. Omit unknown fields; scores are 0-10. checkin_date defaults to the athlete-local today and cannot be in the future. Omitted and empty fields preserve existing feedback. To remove saved values, list those fields in clear_fields only when the athlete explicitly asked to remove them; never list a field that also has a value.",
             {
                 "payload": {
                     "type": "object",
@@ -601,6 +601,19 @@ def build_structured_tool_schemas(
                             "type": ["integer", "null"],
                             "minimum": 0,
                             "maximum": 1440,
+                        },
+                        "clear_fields": {
+                            "type": "array",
+                            "uniqueItems": True,
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    *CHECKIN_SCORE_FIELDS,
+                                    "available_minutes",
+                                    *CHECKIN_TEXT_LIMITS,
+                                ],
+                            },
+                            "description": "Saved values to remove for these fields only. Use only when the athlete explicitly asks to remove them; omitted fields keep their saved values. A listed field must not also have a value in this payload.",
                         },
                     },
                 }

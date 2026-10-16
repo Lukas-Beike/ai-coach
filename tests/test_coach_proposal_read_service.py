@@ -6,9 +6,11 @@ import hashlib
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
 from datetime import date
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 from backend.coach.proposal_models import (
@@ -72,7 +74,7 @@ class CoachProposalReadServiceTests(unittest.TestCase):
         manager = Mock()
 
         self.assertEqual(CoachProposalReadService(manager).current(""), [])
-        manager.unit_of_work.assert_not_called()
+        manager.read_snapshot.assert_not_called()
 
     def test_current_is_session_scoped_and_excludes_expired_and_consumed(self) -> None:
         self._insert("mine", expires_at=101)
@@ -86,28 +88,28 @@ class CoachProposalReadServiceTests(unittest.TestCase):
         ).current("session-a")
 
         self.assertEqual([proposal["id"] for proposal in proposals], ["mine"])
+        # Listing only filters; the expired row stays until the next write prunes it.
         with self.database_manager.reader() as db:
             expired = db.execute(
                 "SELECT id FROM coach_action_proposals WHERE id='expired'"
             ).fetchone()
-        self.assertIsNone(expired)
+        self.assertIsNotNone(expired)
 
-    def test_prune_and_select_use_separate_clock_reads(self) -> None:
-        self._insert("still-stored-but-no-longer-current", expires_at=150)
-        now = Mock(side_effect=[100, 200])
-
-        proposals = CoachProposalReadService(self.database_manager, now=now).current(
-            "session-a"
-        )
-
-        self.assertEqual(proposals, [])
-        self.assertEqual(now.call_count, 2)
-        with self.database_manager.reader() as db:
-            row = db.execute(
-                "SELECT id FROM coach_action_proposals "
-                "WHERE id='still-stored-but-no-longer-current'"
-            ).fetchone()
-        self.assertIsNotNone(row)
+    def test_current_does_not_wait_for_the_writer(self) -> None:
+        self._insert("mine", expires_at=200)
+        results: list[list[dict[str, Any]]] = []
+        with self.database_manager.unit_of_work():
+            worker = threading.Thread(
+                target=lambda: results.append(
+                    CoachProposalReadService(
+                        self.database_manager, now=lambda: 100
+                    ).current("session-a")
+                )
+            )
+            worker.start()
+            worker.join(10)
+            self.assertFalse(worker.is_alive())
+        self.assertEqual([item["id"] for item in results[0]], ["mine"])
 
     def test_returns_newest_30_and_never_exposes_payload_or_action_token(self) -> None:
         for index in range(35):

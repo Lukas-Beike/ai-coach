@@ -30,7 +30,7 @@ class _Database:
 
     def execute(self, query, _params=()):
         if not self.lock.active:
-            raise AssertionError("SQL read escaped DB_LOCK")
+            raise AssertionError("SQL read escaped its read boundary")
         self.queries.append(query)
         if "FROM kv ORDER BY key" in query:
             return _Rows(
@@ -75,15 +75,19 @@ class _Manager:
         self.entries = 0
 
     @contextmanager
-    def unit_of_work(self):
-        if not self.lock.active:
-            raise AssertionError("unit of work entered without DB_LOCK")
+    def read_snapshot(self):
         self.entries += 1
-        yield self.db
+        with self.lock:
+            yield self.db
+
+    reader = read_snapshot
+
+    def unit_of_work(self):
+        raise AssertionError("the export must not take the writer")
 
 
 class PrivacyDataExportServiceTests(unittest.TestCase):
-    def test_local_projection_keeps_shared_uow_and_separate_snapshot_reads(self):
+    def test_local_projection_keeps_one_snapshot_and_separate_reads(self):
         lock = _Lock()
         db = _Database(lock)
         manager = _Manager(lock, db)
@@ -126,7 +130,6 @@ class PrivacyDataExportServiceTests(unittest.TestCase):
         service = PrivacyDataExportService(
             PrivacyDataExportDependencies(
                 database_manager=manager,
-                database_lock=lock,
                 key_value_repository=KeyValues(),
                 profile_service=Profile(),
                 workout_library_service=EmptyService(),

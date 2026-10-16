@@ -55,6 +55,9 @@ def _isolated_read_text(path, *args, **kwargs):
 with patch.object(Path, "read_text", _isolated_read_text):
     import server
 
+# A delayed diagnostics write would outlive the test class and its temporary data.
+server.DIAGNOSTIC_CAPTURE.close()
+
 server.CONFIG = replace(
     server.CONFIG,
     garmin_email="",

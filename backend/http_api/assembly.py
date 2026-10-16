@@ -357,7 +357,6 @@ class HttpApiAssembly:
         meal_library_service = nutrition.meal_library
         audio_transcription_client = nutrition.audio_transcription
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._data_dir = data_dir
         self._readiness_maintenance_gate = readiness_maintenance_gate
         self._workout_library = workout_library
@@ -632,7 +631,6 @@ class HttpApiAssembly:
     def readiness_service(self) -> ReadinessService:
         return ReadinessService(
             self._database_manager,
-            self._database_lock(),
             self._data_dir(),
             self._readiness_maintenance_gate(),
             ReadinessProbeService(),

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import unittest
 from collections.abc import Iterator
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import date
 from typing import Any
@@ -614,7 +614,7 @@ class CanonicalWiringTests(unittest.TestCase):
                 observation_reader=lambda: reader,
             ),
         )
-        read_snapshot, canonical = service._performance_inputs(PARITY_TODAY)
+        read_snapshot, canonical, _ = service._performance_inputs(PARITY_TODAY)
         self.assertIs(read_snapshot, snapshot)
         self.assertEqual(reader.db_seen, ["db"] * 13)
         self.assertEqual(_present(canonical).ctl, 50.0)
@@ -627,11 +627,11 @@ class CanonicalWiringTests(unittest.TestCase):
         snapshot_reader = Mock()
         snapshot_reader.latest_snapshot.return_value = snapshot
         service = ActivityAnalysisReadService(manager, snapshot_reader, Mock(), Mock())
-        read_snapshot, canonical = service._performance_inputs(PARITY_TODAY)
+        read_snapshot, canonical, _ = service._performance_inputs(PARITY_TODAY)
         self.assertIs(read_snapshot, snapshot)
         self.assertIsNone(canonical)
-        # Only the legacy snapshot read's own unit of work runs.
-        self.assertEqual(manager.events, ["enter", "exit"])
+        # Only the legacy snapshot read's own reader lease runs.
+        self.assertEqual(manager.events, ["reader", "reader_exit"])
 
     def test_activity_detail_passes_canonical_inputs_to_the_load_context(self) -> None:
         activity = {
@@ -820,7 +820,6 @@ def _prelude(
         planned,
         weather,
         manager,  # type: ignore[arg-type]
-        nullcontext(),
         lambda: PARITY_TODAY,
         CalendarWindowRange(35, 35),
         inputs,

@@ -29,6 +29,9 @@ class FakeDatabaseManager:
         finally:
             self.active_connection = None
 
+    def reader(self):
+        return self.unit_of_work()
+
 
 class FakeKeyValueRepository:
     def __init__(self, values):

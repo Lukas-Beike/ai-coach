@@ -55,9 +55,7 @@ class CoachTurnOpeningTests(unittest.TestCase):
         import threading
 
         self.lock = threading.RLock()
-        self.receipt_service = CoachCommandReceiptService(
-            lambda: self.manager, self.lock
-        )
+        self.receipt_service = CoachCommandReceiptService(lambda: self.manager)
         self.clock_values = iter(("command-created", "command-updated"))
         self.service = CoachTurnOpeningService(
             self.manager,

@@ -277,7 +277,7 @@ class WorkoutLibraryService:
     ) -> list[dict[str, Any]]:
         if db is not None:
             return self._list_in_db(db, limit, include_archived)
-        with self._database_manager.unit_of_work() as own_db:
+        with self._database_manager.reader() as own_db:
             return self._list_in_db(own_db, limit, include_archived)
 
     @staticmethod

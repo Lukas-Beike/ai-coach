@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 
@@ -42,7 +41,6 @@ class CoachCommandReceiptServiceTests(unittest.TestCase):
         self.session = "session-a"
         self.service = CoachCommandReceiptService(
             lambda: self.manager,
-            threading.RLock(),
             now=lambda: 100,
         )
 

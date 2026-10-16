@@ -45,7 +45,6 @@ class PublicStateLocalPrelude:
         planned_units: PlannedUnitService,
         weather: WeatherService,
         database_manager: DatabaseManager,
-        database_lock: Any,
         today: Callable[[], date],
         window: CalendarWindowRange,
         performance_inputs: Callable[[Any, Any], CanonicalPerformanceInputs | None]
@@ -57,14 +56,14 @@ class PublicStateLocalPrelude:
         self._planned_units = planned_units
         self._weather = weather
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._today = today
         self._window = window
         self._performance_inputs = performance_inputs
         self._activity_rows = activity_rows
 
     def read(self, local_only: bool) -> LocalStatePrelude:
-        with self._database_lock, self._database_manager.unit_of_work() as db:
+        # One WAL snapshot serves every local read; a writer never blocks it.
+        with self._database_manager.read_snapshot() as db:
             snapshot = self._sync_state.latest_snapshot()
             performance_inputs = (
                 self._performance_inputs(db, snapshot)

@@ -22,6 +22,7 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, INVALID_LIBRARY_ID_ERROR, AppError
 from backend.planning import workouts as planning_workouts
+from backend.planning.library_service import UPDATE_LIBRARY_SQL
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.library import (
     WorkoutLibraryRefreshService,
@@ -892,6 +893,73 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         self.assertEqual(json.loads(row["payload"])["external_id"], "remote-created")
         self.assertEqual(row["sync_state"], "sync_error")
         self.assertEqual(row["sync_dirty"], 1)
+
+    def commit_local_edit(self, name):
+        """Commit a template edit the way the library service does."""
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                UPDATE_LIBRARY_SQL,
+                (json.dumps(self.workout(name), ensure_ascii=False), NOW, LIBRARY_ID),
+            )
+
+    def test_create_response_keeps_a_local_edit_made_during_upload(self):
+        self.add_entry()
+        created = {**self.workout(), "id": "remote-created"}
+        self.client.get_workout_library.return_value = []
+
+        def create_then_edit(_payloads):
+            self.commit_local_edit("Edited name")
+            return [created]
+
+        self.client.create_library_workouts.side_effect = create_then_edit
+
+        synced = self.service.sync_entry(LIBRARY_ID)
+
+        row = self.library_row()
+        payload = json.loads(row["payload"])
+        self.assertEqual(payload["name"], "Edited name")
+        self.assertEqual(payload["external_id"], "remote-created")
+        self.assertEqual(row["external_id"], "remote-created")
+        self.assertEqual(row["sync_state"], "local")
+        self.assertEqual(row["sync_dirty"], 1)
+        self.assertEqual(self.remote_link()["remote_external_id"], "remote-created")
+        self.assertEqual(synced["sync_status"], "local")
+        self.assertEqual(synced["name"], "Edited name")
+
+        self.client.update_library_workout.return_value = {
+            **self.workout("Edited name"),
+            "id": "remote-created",
+        }
+        resynced = self.service.sync_entry(LIBRARY_ID)
+
+        self.client.update_library_workout.assert_called_once()
+        external_id, uploaded = self.client.update_library_workout.call_args.args
+        self.assertEqual(external_id, "remote-created")
+        self.assertEqual(uploaded["name"], "Edited name")
+        self.assertEqual(self.library_row()["sync_state"], "synced")
+        self.assertEqual(self.library_row()["sync_dirty"], 0)
+        self.assertEqual(resynced["sync_status"], "synced")
+
+    def test_update_response_keeps_a_local_edit_made_during_upload(self):
+        self.add_entry(state="sync_error", external_id="remote-old")
+
+        def update_then_edit(_external_id, _payload):
+            self.commit_local_edit("Edited name")
+            return self.workout()
+
+        self.client.update_library_workout.side_effect = update_then_edit
+
+        synced = self.service.sync_entry(LIBRARY_ID)
+
+        row = self.library_row()
+        payload = json.loads(row["payload"])
+        self.assertEqual(payload["name"], "Edited name")
+        self.assertEqual(payload["external_id"], "remote-old")
+        self.assertEqual(row["external_id"], "remote-old")
+        self.assertEqual(row["sync_state"], "local")
+        self.assertEqual(row["sync_dirty"], 1)
+        self.assertEqual(synced["name"], "Edited name")
+        self.assertEqual(synced["sync_status"], "local")
 
     def test_sync_error_is_saved_redacted_and_reraised(self):
         self.add_entry()

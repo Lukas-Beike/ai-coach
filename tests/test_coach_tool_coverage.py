@@ -1025,6 +1025,36 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertGreater(result["updated_checkins"], 0)
         self.assertEqual(result["intervals_sync"]["status"], "ok")
 
+    def test_save_checkin_clear_fields_removes_only_listed_values_through_coach(self):
+        self.run_tool(
+            "save_checkin",
+            {
+                "payload": {
+                    "soreness": 6,
+                    "available_minutes": 45,
+                    "day_form": "Synthetic form",
+                    "illness": "Synthetic cold",
+                    "pain": "Synthetic knee",
+                    "notes": "Synthetic keep",
+                }
+            },
+            ["local_checkin"],
+            message="Heute sind die Beine schwer und ich habe Erkältung und Knieschmerzen.",
+        )
+        self.run_tool(
+            "save_checkin",
+            {"payload": {"clear_fields": ["illness", "pain", "available_minutes"]}},
+            ["local_checkin"],
+            message="Die Erkältung und die Knieschmerzen sind weg, und die Zeit ist wieder offen.",
+        )
+        saved = server.ATHLETE_DATA.checkin().list()[0]
+        self.assertIsNone(saved["available_minutes"])
+        self.assertEqual(saved["illness"], "")
+        self.assertEqual(saved["pain"], "")
+        self.assertEqual(saved["soreness"], 6)
+        self.assertEqual(saved["day_form"], "Synthetic form")
+        self.assertEqual(saved["notes"], "Synthetic keep")
+
     @covers("undo_training_change:success")
     def test_undo_is_a_bound_preview_until_explicit_confirmation(self):
         server.PLANNING_DATA.workout_library().create_template(
@@ -2054,6 +2084,17 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 {},
             ),
             ("save_checkin", {"payload": {"soreness": 11}}, ["local_checkin"], {}),
+            (
+                "save_checkin",
+                {
+                    "payload": {
+                        "illness": "Synthetic cold",
+                        "clear_fields": ["illness"],
+                    }
+                },
+                ["local_checkin"],
+                {},
+            ),
             (
                 "save_activity_feedback",
                 {"payload": {"activity_id": "missing", "notes": "Synthetic"}},

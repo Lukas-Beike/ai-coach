@@ -24,6 +24,7 @@ from backend import observability
 from backend.errors import (
     COACH_ABORTED_ERROR,
     AppError,
+    DatabaseBusyError,
     ProviderErrorClassifier,
     provider_error,
 )
@@ -540,6 +541,9 @@ class JsonHttpClient:
             self._http_error(
                 exc, service, request_context, parsed_url, started, cancel_event
             )
+        except DatabaseBusyError:
+            # A local state write after the response is no network failure.
+            raise
         except (OSError, ValueError) as exc:
             self._network_failure(
                 exc, service, request_context, parsed_url, started, cancel_event
@@ -847,7 +851,6 @@ def external_call(
                 "operation": operation,
                 "duration_ms": duration_ms,
                 "error": observability.safe_diagnostic_error(exc),
-                "exception_message": str(exc),
             },
         )
         raise
@@ -872,7 +875,6 @@ def external_call(
                 "operation": operation,
                 "duration_ms": duration_ms,
                 "error": observability.safe_diagnostic_error(exc),
-                "exception_message": str(exc),
             },
         )
         raise provider_error(service, "client") from exc

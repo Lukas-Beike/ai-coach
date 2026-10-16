@@ -113,7 +113,7 @@ class CoachTurnAssembly:
 
     def command_receipt_service(self) -> CoachCommandReceiptService:
         return CoachCommandReceiptService(
-            self._database_manager, self._database_lock, now=self._receipt_clock
+            self._database_manager, now=self._receipt_clock
         )
 
     def planning_command_service(self) -> CoachPlanningCommandService:

@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from backend import change_history
+from backend.athlete.profile import DEFAULT_PROFILE
 from backend.errors import AppError
 
 
@@ -105,6 +106,62 @@ class ChangeHistoryTests(unittest.TestCase):
         self.assertEqual(view["diff"]["fields"], {"name": {"changed": True}})
         self.assertNotIn("Ada", json.dumps(view))
         self.assertEqual(view["remote_sync"], "local_only")
+
+    def test_every_persisted_profile_field_is_audited(self):
+        self.assertLessEqual(set(DEFAULT_PROFILE), change_history.PROFILE_FIELDS)
+
+    def test_each_profile_field_alone_records_a_restorable_change(self):
+        for field in DEFAULT_PROFILE:
+            with self.subTest(field=field):
+                before = dict(DEFAULT_PROFILE)
+                after = {
+                    **before,
+                    field: "7.5" if field == "sleep_target_hours" else "x",
+                }
+                record = change_history.record_change(
+                    self.db, "profile", "profile", "update", before, after
+                )
+                self.assertIsNotNone(record)
+                fields = json.loads(record["diff"])["fields"]
+                self.assertEqual(
+                    fields,
+                    {field: {"before": before[field], "after": after[field]}},
+                )
+
+    def test_planned_unit_time_only_edit_is_recorded(self):
+        before = {
+            "id": "u1",
+            "date": "2026-09-21",
+            "start_date_local": "2026-09-21T10:00:00",
+        }
+        after = {**before, "start_date_local": "2026-09-21T08:30:00"}
+        record = change_history.record_change(
+            self.db, "planned_unit", "u1", "update", before, after
+        )
+        self.assertIsNotNone(record)
+        self.assertEqual(
+            list(json.loads(record["diff"])["fields"]), ["start_date_local"]
+        )
+
+    def test_legacy_hash_matches_projection_without_added_fields(self):
+        value = {"name": "Ada", "sleep_target_hours": "7.5", "fueling_tolerance": "gel"}
+        legacy = {"name": "Ada"}
+        accepted = change_history.accepted_audit_hashes("profile", value)
+        self.assertEqual(
+            accepted,
+            {
+                change_history.audit_hash(value),
+                change_history.audit_hash(legacy),
+            },
+        )
+        self.assertEqual(
+            change_history.accepted_audit_hashes("profile", legacy),
+            {change_history.audit_hash(legacy)},
+        )
+        self.assertEqual(
+            change_history.accepted_audit_hashes("competition", value),
+            {change_history.audit_hash(value)},
+        )
 
 
 if __name__ == "__main__":

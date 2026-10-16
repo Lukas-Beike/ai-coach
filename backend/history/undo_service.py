@@ -46,7 +46,11 @@ class HistoryUndoService:
                 db, history["entity_type"], history["entity_id"]
             )
             current_hash = change_history.audit_hash(current_projection)
-            self._require_current_hash(current_hash, history["after_hash"])
+            self._require_current_hash(
+                history["entity_type"],
+                current_projection,
+                history["after_hash"],
+            )
             _, target_projection = self._history_service.target(history)
             public_change = change_history.public_view(history)
 
@@ -96,8 +100,12 @@ class HistoryUndoService:
         current, current_projection = self._history_service.current(
             db, entity_type, entity_id
         )
-        current_hash = change_history.audit_hash(current_projection)
-        self._require_current_hash(current_hash, history["after_hash"], expected_hash)
+        self._require_current_hash(
+            entity_type,
+            current_projection,
+            history["after_hash"],
+            expected_hash,
+        )
         target, _ = self._history_service.target(history)
         after = self._restore(
             db, entity_type, entity_id, current, target, history["action"]
@@ -138,11 +146,21 @@ class HistoryUndoService:
 
     @staticmethod
     def _require_current_hash(
-        current_hash: str, after_hash: str, expected_hash: str | None = None
+        entity_type: str,
+        current_projection: dict[str, Any] | None,
+        after_hash: str,
+        expected_hash: str | None = None,
     ) -> None:
-        if current_hash != after_hash or (
+        """Reject undo unless the row still describes the current local state.
+
+        Preview hands out the full current hash; batch callers pass the row's
+        own after_hash, which may be a legacy hash of the same state.
+        """
+        current_hash = change_history.audit_hash(current_projection)
+        accepted = change_history.accepted_audit_hashes(entity_type, current_projection)
+        if after_hash not in accepted or (
             expected_hash is not None
-            and (expected_hash != after_hash or current_hash != expected_hash)
+            and expected_hash not in {current_hash, after_hash}
         ):
             raise AppError(409, _STALE_HISTORY)
 

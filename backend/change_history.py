@@ -63,6 +63,8 @@ PROFILE_FIELDS = {
     "body_fat_pct",
     "height_cm",
     "performance_notes",
+    "sleep_target_hours",
+    "fueling_tolerance",
 }
 LIBRARY_FIELDS = {
     "id",
@@ -97,6 +99,7 @@ PLANNED_UNIT_FIELDS = {
     "moving_time",
     "target",
     "date",
+    "start_date_local",
     "source",
     "origin",
     "rationale",
@@ -194,6 +197,24 @@ def audit_hash(value: dict[str, Any] | None) -> str:
         default=str,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+# Projection fields added after released history rows were recorded. Such rows
+# were hashed without these fields, so they stay matchable by stripping them.
+_FIELDS_ADDED_TO_AUDIT = {
+    "profile": ("sleep_target_hours", "fueling_tolerance"),
+    "planned_unit": ("start_date_local",),
+}
+
+
+def accepted_audit_hashes(entity_type: str, value: dict[str, Any] | None) -> set[str]:
+    """Return the hashes a current projection may match for a recorded row."""
+    full_hash = audit_hash(value)
+    added = _FIELDS_ADDED_TO_AUDIT.get(entity_type, ())
+    if not value or not any(field in value for field in added):
+        return {full_hash}
+    legacy = {key: item for key, item in value.items() if key not in added}
+    return {full_hash, audit_hash(legacy)}
 
 
 def audit_diff(

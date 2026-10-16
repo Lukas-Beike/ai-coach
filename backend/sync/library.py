@@ -444,6 +444,50 @@ class WorkoutLibrarySyncStateService:
             raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
         return normalized_id, row, local_workout
 
+    @staticmethod
+    def _uploaded_payload_is_current(
+        current: dict[str, Any] | None, uploaded: dict[str, Any]
+    ) -> bool:
+        """Return whether the stored row still holds the uploaded payload.
+
+        Keys the sync itself writes (external_id, sync_status) are ignored; any
+        other difference means a local edit was committed during the remote call.
+        """
+        if current is None or not isinstance(uploaded, dict):
+            return False
+        sync_owned = {"external_id", "sync_status"}
+        return {k: v for k, v in current.items() if k not in sync_owned} == {
+            k: v for k, v in uploaded.items() if k not in sync_owned
+        }
+
+    @staticmethod
+    def _stored_row(db: Any, local_id: str) -> Any | None:
+        return db.execute(
+            "SELECT payload, sync_state FROM workout_library WHERE local_id=?",
+            (local_id,),
+        ).fetchone()
+
+    @staticmethod
+    def _persist_remote_identity(
+        db: Any,
+        local_id: str,
+        current: dict[str, Any] | None,
+        external_id: str,
+    ) -> None:
+        """Store only the remote identity on top of the current payload."""
+        db.execute(
+            "UPDATE workout_library SET external_id=?, payload=? WHERE local_id=?",
+            (
+                external_id,
+                json.dumps(
+                    {**(current or {}), "external_id": external_id},
+                    ensure_ascii=False,
+                ),
+                local_id,
+            ),
+        )
+        _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.LIBRARY_WORKOUT, local_id)
+
     def store_remote_identity(
         self,
         local_id: str,
@@ -457,20 +501,25 @@ class WorkoutLibrarySyncStateService:
                 "Die Bibliothekseinheit konnte nicht zu Intervals.icu übertragen werden.",
             )
         with self._database_manager.unit_of_work() as db:
-            db.execute(
-                "UPDATE workout_library SET external_id=?, payload=? WHERE local_id=?",
-                (
-                    external_id,
-                    json.dumps(
-                        {**local_workout, "external_id": external_id},
-                        ensure_ascii=False,
+            row = self._stored_row(db, local_id)
+            current = self._object_payload(row["payload"]) if row else None
+            if self._uploaded_payload_is_current(current, local_workout):
+                db.execute(
+                    "UPDATE workout_library SET external_id=?, payload=? WHERE local_id=?",
+                    (
+                        external_id,
+                        json.dumps(
+                            {**local_workout, "external_id": external_id},
+                            ensure_ascii=False,
+                        ),
+                        local_id,
                     ),
-                    local_id,
-                ),
-            )
-            _REMOTE_LINKS.refresh_from_slots(
-                db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
-            )
+                )
+                _REMOTE_LINKS.refresh_from_slots(
+                    db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
+                )
+            else:
+                self._persist_remote_identity(db, local_id, current, external_id)
         return external_id
 
     def finish(
@@ -483,14 +532,28 @@ class WorkoutLibrarySyncStateService:
         verify_readback: Callable[[dict[str, Any], dict[str, Any]], None],
     ) -> dict[str, Any]:
         verify_readback(local_workout, remote_workout)
-        synced = planning_library.normalize_library_workout(
-            {**local_workout, **remote_workout},
-            local_id=local_id,
-            external_id=external_id,
-            sync_status="synced",
-        )
         now = self._now()
         with self._database_manager.unit_of_work() as db:
+            row = self._stored_row(db, local_id)
+            if row is None:
+                raise AppError(404, "Lokale Bibliothekseinheit nicht gefunden.")
+            current = self._object_payload(row["payload"])
+            if not self._uploaded_payload_is_current(current, local_workout):
+                # A local edit was committed during the remote call. Keep the
+                # athlete's newer payload dirty so the next explicit sync uploads it.
+                self._persist_remote_identity(db, local_id, current, external_id)
+                return planning_library.normalize_library_workout(
+                    {**current, "external_id": external_id},
+                    local_id=local_id,
+                    external_id=external_id,
+                    sync_status=str(row["sync_state"] or "local"),
+                )
+            synced = planning_library.normalize_library_workout(
+                {**local_workout, **remote_workout},
+                local_id=local_id,
+                external_id=external_id,
+                sync_status="synced",
+            )
             db.execute(
                 "UPDATE workout_library SET external_id=?, payload=?, sync_dirty=0, "
                 "sync_state='synced', sync_error=NULL, last_synced_at=?, updated_at=? "

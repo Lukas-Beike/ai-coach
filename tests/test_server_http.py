@@ -1733,7 +1733,6 @@ class ServerHttpTests(ServerTestCase):
         with tempfile.TemporaryDirectory() as data_dir:
             readiness = ReadinessService(
                 server.database_manager,
-                server.DB_LOCK,
                 Path(data_dir),
                 runtime_maintenance.MAINTENANCE_GATE,
             ).state()
@@ -1836,7 +1835,6 @@ class ServerHttpTests(ServerTestCase):
         ):
             readiness = ReadinessService(
                 server.database_manager,
-                server.DB_LOCK,
                 Path(data_dir),
                 runtime_maintenance.MAINTENANCE_GATE,
             ).state()
@@ -1873,7 +1871,6 @@ class ServerHttpTests(ServerTestCase):
             ):
                 readiness = ReadinessService(
                     server.database_manager,
-                    server.DB_LOCK,
                     Path(data_dir),
                     runtime_maintenance.MAINTENANCE_GATE,
                 ).state()

@@ -157,6 +157,11 @@ class CoachJobSubmissionService:
         self._stream_registry.set_background_event(
             operation_id, cancel_event or threading.Event()
         )
+        if cancel_event is not None and cancel_event.is_set():
+            # The athlete cancelled before the job existed, so the cancel request
+            # found nothing to persist; record it before the worker or a restart
+            # can pick the turn up.
+            self._persist_early_cancel(client_turn_id)
         self._wake_event.set()
         return {
             "status": "queued",
@@ -164,6 +169,15 @@ class CoachJobSubmissionService:
             "operation_id": operation_id,
             "plan_scope": scope,
         }
+
+    def _persist_early_cancel(self, client_turn_id: str) -> None:
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            db.execute(
+                "UPDATE coach_commands SET receipt=json_set(receipt, "
+                "'$.cancel_requested', json('true'), '$.phase', 'cancelling'), "
+                "updated_at=? WHERE client_turn_id=? AND status IN ('queued', 'running')",
+                (self._utc_now(), client_turn_id),
+            )
 
     def _validate_submission(
         self,

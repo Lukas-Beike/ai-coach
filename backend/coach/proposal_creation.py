@@ -24,6 +24,7 @@ from backend.coach.proposal_models import (
     _utc_now,
     coach_action_hash,
     coach_action_view,
+    prune_expired_coach_proposals,
 )
 from backend.coach.proposal_validation import (
     _validate_local_coach_write,
@@ -86,6 +87,8 @@ class CoachProposalCreationService:
         expires_at = self._now() + self._ttl_seconds
         created_at = self._utc_now()
         with self._database_manager.unit_of_work() as db:
+            # Expired authorization artifacts are deleted on the write path only.
+            prune_expired_coach_proposals(db, self._now())
             db.execute(
                 "INSERT INTO coach_action_proposals "
                 "(id, session_csrf_hash, action_type, target_system, object_ids, "

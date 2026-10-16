@@ -27,6 +27,17 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
             [(a.activity_id, a.provenance.provider) for a in table],
         )
 
+    def test_stored_activities_keep_their_elapsed_duration(self) -> None:
+        populate(self)
+        legacy = self.read(self.projection.activities)
+        table = self.read(self.table.activities)
+
+        self.assertIn(5600.0, [a.elapsed_duration_s for a in table])
+        self.assertEqual(
+            [a.elapsed_duration_s for a in legacy],
+            [a.elapsed_duration_s for a in table],
+        )
+
     def test_populated_tables_serve_observations_with_their_legacy_values(self) -> None:
         populate(self)
         served = 0

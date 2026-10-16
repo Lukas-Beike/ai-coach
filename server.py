@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
 import sqlite3
 import threading
 import time
 import uuid
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from functools import partial
 from http.server import (
@@ -135,6 +137,7 @@ from backend.db.manager import (
 )
 from backend.db.manager import (
     DatabaseManager,
+    background_writer,
 )
 from backend.db.repositories import (
     ActivityFeedbackRepository,
@@ -448,7 +451,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.5"
+APP_VERSION = "1.13.6"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -675,7 +678,7 @@ ACTIVITY_READS = ActivityReadAssembly(
         observation_reader=lambda: CANONICAL_READ,
     ),
     ATHLETE_DATA.activity_feedback,
-    lambda: ATHLETE_DATA.equipment().read(),
+    lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
@@ -767,6 +770,15 @@ HISTORY = HistoryAssembly(
     )
 )
 
+
+def suspend_diagnostic_flushes() -> AbstractContextManager[None]:
+    return DIAGNOSTIC_CAPTURE.suspended()
+
+
+def start_canonical_backfill() -> None:
+    return CANONICAL_BACKFILL.worker.start()
+
+
 PRIVACY_ASSEMBLY = PrivacyAssembly(
     dependencies=PrivacyAssembly.Inputs(
         athlete=PrivacyAthleteSources(
@@ -797,6 +809,7 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
             planning_revision_service=PLANNING_REVISION_SERVICE,
             openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
             logger=LOGGER,
+            diagnostics_suspended=suspend_diagnostic_flushes,
         ),
         archive=PrivacyArchiveSettings(
             data_dir=lambda: DATA_DIR,
@@ -835,6 +848,8 @@ BACKUP_ASSEMBLY = BackupAssembly(
             sync_wake_event=shared_sync_job_wake_event,
             coach_wake_event=COACH_JOB_WORKER.wake_event,
             redact=REDACTOR.redact_text,
+            diagnostics_suspended=suspend_diagnostic_flushes,
+            canonical_backfill_start=start_canonical_backfill,
         ),
     )
 )
@@ -878,10 +893,15 @@ SETTINGS = SettingsService(
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
 )
+# Each flush rewrites the whole capture, so captures are merged on a timer and
+# written as background work that yields to Coach and athlete writes.
+DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS = 30.0
 DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
     REDACTOR,
+    flush_delay_seconds=DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS,
+    timer_context=background_writer,
 )
 
 SYNC_PERSISTENCE = SyncPersistenceAssembly(
@@ -1866,7 +1886,6 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
     dependencies=DiagnosticsAssembly.Inputs(
         runtime=DiagnosticRuntimeDependencies(
             database_manager=database_manager,
-            database_lock=DB_LOCK,
             key_values=KEY_VALUE_REPOSITORY,
             config=lambda: CONFIG,
             settings=SETTINGS,
@@ -2069,6 +2088,8 @@ def main() -> None:
     sync_worker: sync_worker_runtime.SyncJobWorker | None = None
     daily_loop: sync_scheduler_runtime.DailySyncLoop | None = None
     daily_thread: threading.Thread | None = None
+    # `docker stop` sends SIGTERM; shut down like Ctrl+C so pending work is written.
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     try:
         SYNC_JOB_QUEUE.service().resume_interrupted()
         COACH_BACKGROUND_JOBS.job_store().resume_interrupted(
@@ -2104,12 +2125,14 @@ def main() -> None:
         COACH_JOB_WORKER.stop()
         CANONICAL_BACKFILL.worker.stop()
         server.server_close()
+        DIAGNOSTIC_CAPTURE.close()
         if daily_thread is not None:
             daily_thread.join(timeout=5)
         if sync_worker is not None:
             sync_worker.join(timeout=5)
         COACH_JOB_WORKER.join(timeout=5)
         CANONICAL_BACKFILL.worker.join(timeout=5)
+        DIAGNOSTIC_CAPTURE.flush()
 
 
 if __name__ == "__main__":

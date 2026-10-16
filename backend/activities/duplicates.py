@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_left, bisect_right
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from backend.activities.identity import activity_datetime, activity_kind
@@ -23,6 +24,7 @@ from backend.providers.snapshot_projection import (
 )
 from backend.providers.source_labels import SourceView, provider_label
 
+_GARMIN_DUPLICATE_START_WINDOW = timedelta(minutes=30)
 _DUPLICATE_DELETE_STALE_ERROR = (
     "Das Wahoo-/Garmin-Duplikat ist nicht mehr aktuell. "
     "Bitte die letzte Einheit erneut analysieren."
@@ -161,40 +163,64 @@ def _garmin_duplicate_measurements(
 ) -> tuple[int, int]:
     compared = 0
     matches = 0
-    pairs = (
-        (
+    # Garmin ``duration`` is elapsed time and Intervals.icu ``moving_time`` is
+    # moving time, so Garmin ``movingDuration`` is a second candidate. Without a
+    # Garmin moving time (walks), Garmin ``duration`` may also agree with the
+    # Intervals.icu ``elapsed_time``.
+    garmin_durations = [
+        number
+        for number in (
             _number(
                 garmin_activity.get("duration") or garmin_activity.get("movingTime")
             ),
-            _number(intervals_activity.get("moving_time")),
-            120,
-        ),
-        (
-            _number(garmin_activity.get("distance")),
-            _number(intervals_activity.get("distance")),
-            500,
-        ),
-    )
-    for index, (left, right, minimum) in enumerate(pairs):
-        if left is None or right is None or index == 1 and (left <= 0 or right <= 0):
-            continue
+            _number(garmin_activity.get("movingDuration")),
+        )
+        if number is not None
+    ]
+    moving_time = _number(intervals_activity.get("moving_time"))
+    if garmin_durations and moving_time is not None:
         compared += 1
-        if abs(left - right) <= max(minimum, right * 0.10):
+        if any(
+            abs(duration - moving_time) <= max(120, moving_time * 0.10)
+            for duration in garmin_durations
+        ) or _elapsed_times_agree(garmin_activity, intervals_activity):
+            matches += 1
+    left = _number(garmin_activity.get("distance"))
+    right = _number(intervals_activity.get("distance"))
+    if left is not None and right is not None and left > 0 and right > 0:
+        compared += 1
+        if abs(left - right) <= max(500, right * 0.10):
             matches += 1
     return compared, matches
+
+
+def _elapsed_times_agree(
+    garmin_activity: dict[str, Any], intervals_activity: dict[str, Any]
+) -> bool:
+    elapsed = _number(garmin_activity.get("duration"))
+    other = _number(intervals_activity.get("elapsed_time"))
+    return (
+        elapsed is not None
+        and other is not None
+        and abs(elapsed - other) <= max(120, other * 0.10)
+    )
+
+
+def _intervals_start(intervals_activity: dict[str, Any]) -> datetime | None:
+    return activity_datetime(
+        intervals_activity.get("start_date_local")
+        or intervals_activity.get("start_date")
+    )
 
 
 def _garmin_activity_matches(
     garmin_activity: dict[str, Any], intervals_activity: dict[str, Any]
 ) -> bool:
     garmin_start = activity_datetime(activity_start_local(garmin_activity))
-    intervals_start = activity_datetime(
-        intervals_activity.get("start_date_local")
-        or intervals_activity.get("start_date")
-    )
+    intervals_start = _intervals_start(intervals_activity)
     if garmin_start is None or intervals_start is None:
         return False
-    if abs((garmin_start - intervals_start).total_seconds()) > 30 * 60:
+    if abs(garmin_start - intervals_start) > _GARMIN_DUPLICATE_START_WINDOW:
         return False
     garmin_kind = activity_kind(garmin_activity)
     intervals_kind = activity_kind(intervals_activity)
@@ -223,6 +249,16 @@ def garmin_activity_duplicates_intervals(
     )
 
 
+def _window_bound(start: datetime, offset: timedelta) -> datetime:
+    """Shift a start by the window, clamped at the datetime range limits."""
+    try:
+        return start + offset
+    except OverflowError:
+        if offset > timedelta(0):
+            return datetime.max.replace(tzinfo=start.tzinfo)
+        return datetime.min.replace(tzinfo=start.tzinfo)
+
+
 def filter_garmin_activities(
     activities: Any, intervals_activities: Any
 ) -> tuple[list[dict[str, Any]], int]:
@@ -236,11 +272,31 @@ def filter_garmin_activities(
         if isinstance(intervals_activities, list)
         else []
     )
-    filtered = [
-        item
-        for item in garmin_list
-        if not garmin_activity_duplicates_intervals(item, intervals_list)
-    ]
+    # Only recordings that start within the match window can be duplicates, so
+    # each Garmin activity is compared with that slice of the sorted starts.
+    indexed = sorted(
+        (start, index)
+        for index, item in enumerate(intervals_list)
+        if (start := _intervals_start(item)) is not None
+    )
+    starts = [start for start, _ in indexed]
+
+    def duplicates_intervals(item: dict[str, Any]) -> bool:
+        garmin_start = activity_datetime(activity_start_local(item))
+        if garmin_start is None:
+            return False
+        low = bisect_left(
+            starts, _window_bound(garmin_start, -_GARMIN_DUPLICATE_START_WINDOW)
+        )
+        high = bisect_right(
+            starts, _window_bound(garmin_start, _GARMIN_DUPLICATE_START_WINDOW)
+        )
+        return any(
+            _garmin_activity_matches(item, intervals_list[index])
+            for _, index in indexed[low:high]
+        )
+
+    filtered = [item for item in garmin_list if not duplicates_intervals(item)]
     return filtered, len(garmin_list) - len(filtered)
 
 

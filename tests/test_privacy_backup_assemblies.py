@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 from backend.backup.assembly import (
     BackupAssembly,
@@ -58,6 +58,7 @@ class PrivacyAssemblyTests(unittest.TestCase):
                     planning_revision_service=Mock(),
                     openai_client=Mock(return_value=Mock()),
                     logger=Mock(),
+                    diagnostics_suspended=MagicMock(),
                 ),
                 archive=PrivacyArchiveSettings(
                     data_dir=Mock(return_value=Path("temporary-data")),
@@ -84,7 +85,7 @@ class PrivacyAssemblyTests(unittest.TestCase):
         self.assertIs(first._competitions, competition)
         self.assertIs(first._adaptive_preview, preview)
         self.assertIs(exported._dependencies.database_manager, manager)
-        self.assertIs(exported._dependencies.database_lock, replacement_lock)
+        self.assertFalse(hasattr(exported._dependencies, "database_lock"))
         deletion = assembly.delete_service()
         self.assertIs(deletion._dependencies.database_lock, replacement_lock)
         self.assertIs(deletion._dependencies.maintenance_gate, replacement_gate)
@@ -132,6 +133,8 @@ class BackupAssemblyTests(unittest.TestCase):
                         sync_wake_event=lambda: sync_wake,
                         coach_wake_event=coach_wake,
                         redact=Mock(),
+                        diagnostics_suspended=MagicMock(),
+                        canonical_backfill_start=Mock(),
                     ),
                 )
             )

@@ -104,7 +104,7 @@ class TrainingPlanService:
         self._now = now
 
     def list(self, limit: int = 30) -> list[dict[str, Any]]:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             plans = self._repository.list(db, limit)
             for plan in plans:
                 value = self._key_values.get(

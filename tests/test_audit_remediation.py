@@ -489,6 +489,27 @@ with patch.object(Path, 'read_text', deny):
         self.assertTrue(instructions.startswith(coach_dialogue.INSTRUCTIONS))
         self.assertIn("\n\nFresh Garmin data", instructions)
 
+    def test_cancel_set_before_enqueue_is_persisted_with_the_job(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
+            "Synthetic request",
+            "early-cancel",
+            "synthetic-session",
+            operation_id="early-cancel-operation",
+            cancel_event=cancel_event,
+        )
+
+        with server.database_manager().unit_of_work() as db:
+            receipt = db.execute(
+                "SELECT receipt FROM coach_commands WHERE client_turn_id='early-cancel'"
+            ).fetchone()
+        self.assertTrue(json.loads(receipt["receipt"])["cancel_requested"])
+        self.assertTrue(
+            server.COACH_BACKGROUND_JOBS.job_store().cancel_requested("early-cancel")
+        )
+
     def test_restart_job_observes_cancel_during_session_restore(self):
         server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Synthetic request",

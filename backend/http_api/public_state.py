@@ -54,7 +54,6 @@ class PublicStateDependencies:
     weather_prelude: PublicStateWeatherPrelude
     calendar_projection: PublicStateCalendarProjection
     database_manager: Callable[[], DatabaseManager]
-    database_lock: Any
     key_values: Any
     app_name: str
     app_version: str
@@ -95,16 +94,14 @@ class PublicStateService:
 
     @contextmanager
     def _unit_of_work(self) -> Iterator[tuple[DatabaseManager, Any]]:
-        deps = self._deps
-        with deps.database_lock:
-            manager = deps.database_manager()
-            with manager.unit_of_work() as db:
-                yield manager, db
+        # The bootstrap only reads: one WAL snapshot keeps it off the writer.
+        manager = self._deps.database_manager()
+        with manager.read_snapshot() as db:
+            yield manager, db
 
     def _get_value(self, key: str, manager: DatabaseManager) -> str | None:
-        deps = self._deps
-        with deps.database_lock, manager.unit_of_work() as db:
-            return deps.key_values.get_in_transaction(db, key)
+        with manager.read_snapshot() as db:
+            return self._deps.key_values.get_in_transaction(db, key)
 
     def _library_activity_at(self, manager: DatabaseManager) -> str | None:
         return intervals_state.latest_library_timestamp(
@@ -141,6 +138,7 @@ class PublicStateService:
                 profile=deps.profile.get(),
                 garmin_has_core_error=bool(deps.garmin_sync_state.core_error_entries()),
                 garmin_tokenstore_exists=Path(deps.config.garmin_tokenstore).exists(),
+                read_only=True,
             )
             sync = deps.sync_public_state.browser_state(freshness=freshness)
             return {

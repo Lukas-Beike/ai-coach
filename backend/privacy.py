@@ -39,7 +39,6 @@ from backend.weather import cache as weather_cache
 @dataclass(frozen=True)
 class PrivacyDataExportDependencies:
     database_manager: DatabaseManager
-    database_lock: AbstractContextManager[Any]
     key_value_repository: KeyValueRepository
     profile_service: ProfileService
     workout_library_service: WorkoutLibraryService
@@ -61,10 +60,7 @@ class PrivacyDataExportService:
 
     def _stored_json(self, key: str) -> Any:
         dependencies = self._dependencies
-        with (
-            dependencies.database_lock,
-            dependencies.database_manager.unit_of_work() as db,
-        ):
+        with dependencies.database_manager.reader() as db:
             value = dependencies.key_value_repository.get(db, key)
         try:
             return json.loads(value or "{}")
@@ -73,10 +69,8 @@ class PrivacyDataExportService:
 
     def export(self) -> dict[str, Any]:
         dependencies = self._dependencies
-        with (
-            dependencies.database_lock,
-            dependencies.database_manager.unit_of_work() as db,
-        ):
+        # The export only reads, so one WAL snapshot keeps it off the writer.
+        with dependencies.database_manager.read_snapshot() as db:
             messages = [
                 dict(row)
                 for row in db.execute(
@@ -253,6 +247,7 @@ class PrivacyDeleteDependencies:
     planning_revision_service: PlanningRevisionService
     openai_client: OpenAIResponsesClient
     logger: logging.Logger
+    diagnostics_suspended: Callable[[], AbstractContextManager[None]]
 
 
 class PrivacyDeleteService:
@@ -286,10 +281,7 @@ class PrivacyDeleteService:
 
     def preview(self) -> dict[str, Any]:
         dependencies = self._dependencies
-        with (
-            dependencies.database_lock,
-            dependencies.database_manager.unit_of_work() as db,
-        ):
+        with dependencies.database_manager.read_snapshot() as db:
             counts = self._counts(db)
         return {
             "status": "preview",
@@ -310,10 +302,7 @@ class PrivacyDeleteService:
             )
         dependencies = self._dependencies
         with dependencies.maintenance_gate.restore():
-            with (
-                dependencies.database_lock,
-                dependencies.database_manager.unit_of_work() as db,
-            ):
+            with dependencies.database_manager.reader() as db:
                 conversation_id = (
                     dependencies.key_value_repository.get(db, "openai_conversation_id")
                     or ""
@@ -331,7 +320,10 @@ class PrivacyDeleteService:
                         extra={"event": "privacy_remote_delete_failed"},
                         exc_info=True,
                     )
+            # Flushes stay blocked from before the delete until the cache is dropped,
+            # so deleted diagnostics are neither served nor written back.
             with (
+                dependencies.diagnostics_suspended(),
                 dependencies.database_lock,
                 dependencies.database_manager.unit_of_work() as db,
             ):
@@ -393,6 +385,7 @@ class PrivacyStateDependencies:
     planning_revision_service: PlanningRevisionService
     openai_client: Callable[[], OpenAIResponsesClient]
     logger: logging.Logger
+    diagnostics_suspended: Callable[[], AbstractContextManager[None]]
 
 
 @dataclass(frozen=True)
@@ -440,6 +433,7 @@ class PrivacyAssembly:
         self._planning_revision_service = state.planning_revision_service
         self._openai_client = state.openai_client
         self._logger = state.logger
+        self._diagnostics_suspended = state.diagnostics_suspended
         self._data_dir = archive.data_dir
         self._database_path = archive.database_path
         self._maximum_export_bytes = archive.maximum_export_bytes
@@ -450,7 +444,6 @@ class PrivacyAssembly:
         return PrivacyDataExportService(
             PrivacyDataExportDependencies(
                 database_manager=self._database_manager(),
-                database_lock=self._database_lock(),
                 key_value_repository=self._key_value_repository,
                 profile_service=self._profile_service(),
                 workout_library_service=self._workout_library_service(),
@@ -475,6 +468,7 @@ class PrivacyAssembly:
                 planning_revision_service=self._planning_revision_service,
                 openai_client=self._openai_client(),
                 logger=self._logger,
+                diagnostics_suspended=self._diagnostics_suspended,
             )
         )
 

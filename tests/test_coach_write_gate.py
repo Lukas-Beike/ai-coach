@@ -1,7 +1,10 @@
 """Coach write gate: impact tiers, never a grant of authority."""
 
 import json
+import logging
+import threading
 import unittest
+from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
 
 from backend.coach import write_gate as gate
@@ -11,6 +14,8 @@ from backend.coach.proposal_models import (
     REMOTE_COACH_WRITE_TOOLS,
 )
 from backend.coach.tool_registry import build_tool_contracts
+from backend.coach.training_template_tools import TrainingTemplateToolService
+from backend.coach.turn_write_gate import CoachTurnWriteGate
 
 _DELETE_TOOLS = (
     "delete_competition",
@@ -356,6 +361,64 @@ class DestructiveTierTests(unittest.TestCase):
                         classifier=_Classifier(_verdict(["planning"], delete=True)),
                     ).allowed
                 )
+
+    def test_removing_values_are_read_as_the_handlers_read_them(self):
+        # Handlers strip and casefold action/status before dispatch (plan status
+        # also maps "archiviert" to "archived"), so the gate must classify the
+        # same spellings as deletes.
+        cases = []
+        for value in (" DELETE ", "Delete", "delete\t"):
+            cases += [
+                ("apply_training_changes", {"changes": [{"action": value}]}),
+                ("apply_training_patch", {"changes": [{"action": value}]}),
+                ("manage_training_templates", {"templates": [{"action": value}]}),
+                ("update_training_plan", {"payload": {"action": value}}),
+                ("save_equipment", {"payload": {"name": "Rad", "action": value}}),
+            ]
+        for value in ("Archive", " archive "):
+            cases += [
+                ("apply_training_changes", {"changes": [{"action": value}]}),
+                ("apply_training_patch", {"changes": [{"action": value}]}),
+                ("manage_training_templates", {"templates": [{"action": value}]}),
+            ]
+        for value in (" Archived ", "ARCHIVED", "archiviert", " Archiviert "):
+            cases += [
+                ("update_training_plan", {"payload": {"status": value}}),
+                ("save_equipment", {"payload": {"name": "Rad", "status": value}}),
+            ]
+        for tool, arguments in cases:
+            with self.subTest(tool=tool, arguments=arguments):
+                self.assertIn("delete", gate.call_impact(tool, arguments))
+                domain = gate.TOOL_DOMAIN[tool]
+                self.assertFalse(
+                    _check(
+                        tool,
+                        "Mach das",
+                        arguments=arguments,
+                        classifier=_Classifier(_verdict([domain])),
+                    ).allowed
+                )
+                self.assertTrue(
+                    _check(
+                        tool,
+                        "Lösch das",
+                        arguments=arguments,
+                        classifier=_Classifier(_verdict([domain], delete=True)),
+                    ).allowed
+                )
+
+    def test_plain_values_and_non_removing_actions_stay_local(self):
+        for tool, arguments in (
+            (
+                "update_training_plan",
+                {"payload": {"action": " UPDATE ", "status": "Active"}},
+            ),
+            ("update_training_plan", {"payload": {"action": "update", "status": ""}}),
+            ("manage_training_templates", {"templates": [{"action": " Restore "}]}),
+            ("apply_training_changes", {"changes": [{"action": " Create "}]}),
+        ):
+            with self.subTest(tool=tool, arguments=arguments):
+                self.assertEqual(gate.call_impact(tool, arguments), set())
 
     def test_whole_plan_tools_need_a_confirmed_bulk_change(self):
         for tool in ("replace_training_plan", "commit_training_plan"):
@@ -822,6 +885,86 @@ class OpenAIClassifierTests(unittest.TestCase):
         decision = _check("delete_competition", "Lösch das Rennen", classifier=classify)
         self.assertTrue(decision.allowed)
         self.assertTrue(decision.classifier_used)
+
+
+class _TemplateManager:
+    @contextmanager
+    def unit_of_work(self):
+        yield None
+
+
+class _TemplateLibrary:
+    def __init__(self):
+        self.updated = []
+
+    def update(self, local_id, values):
+        self.updated.append((local_id, values.get("action")))
+        return {"local_id": local_id}
+
+    def create_template(self, values):
+        raise AssertionError("Unexpected create")
+
+
+class CoachToolPathDeleteTests(unittest.TestCase):
+    """Dispatch runs only after the gate allows the call, as in the Coach turn."""
+
+    def _turn(self, message, verdict):
+        return CoachTurnWriteGate(
+            message=message,
+            context={"current_user_message_id": 7},
+            model="test-model",
+            command_receipts=[],
+            read_only_tools=frozenset(),
+            classifier_factory=lambda model: _Classifier(verdict),
+            logger=logging.getLogger("test-coach-write-gate"),
+        )
+
+    def _dispatch(self, turn, arguments, library):
+        denial = turn.denial("manage_training_templates", arguments)
+        if denial is not None:
+            return denial
+        TrainingTemplateToolService(
+            lambda: _TemplateManager(), threading.RLock(), lambda: library
+        ).execute(
+            arguments,
+            {
+                "operation": "manage_training_templates",
+                "authorization_scope": ["library_workout:x"],
+            },
+        )
+        return None
+
+    def test_padded_delete_is_not_dispatched_without_delete_authorization(self):
+        arguments = {"templates": [{"action": " DELETE ", "local_id": "x"}]}
+        library = _TemplateLibrary()
+        denial = self._dispatch(
+            self._turn("Räum die Vorlage auf", _verdict(["planning"])),
+            arguments,
+            library,
+        )
+        self.assertEqual(denial["status"], "not_performed")
+        self.assertEqual(denial["gate_reason"], "impact_not_confirmed")
+        self.assertEqual(library.updated, [])
+
+    def test_padded_archive_is_dispatched_only_with_delete_authorization(self):
+        arguments = {"templates": [{"action": " Archive ", "local_id": "x"}]}
+        library = _TemplateLibrary()
+        self.assertIsNotNone(
+            self._dispatch(
+                self._turn("Mach das", _verdict(["planning"])), arguments, library
+            )
+        )
+        self.assertEqual(library.updated, [])
+        self.assertIsNone(
+            self._dispatch(
+                self._turn(
+                    "Archivier die Vorlage", _verdict(["planning"], delete=True)
+                ),
+                arguments,
+                library,
+            )
+        )
+        self.assertEqual(library.updated, [("x", " Archive ")])
 
 
 if __name__ == "__main__":

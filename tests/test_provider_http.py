@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from urllib.error import HTTPError
 
 import backend.providers.http as http_module
-from backend.errors import AppError
+from backend.errors import AppError, DatabaseBusyError
 from backend.observability import Redactor
 from backend.providers.http import (
     JsonHttpClient,
@@ -119,6 +119,25 @@ class ProviderHTTPTests(unittest.TestCase):
     def setUp(self):
         self.logger = _CallLogger()
         self.capture = _DiagnosticCapture()
+
+    def test_json_http_client_passes_a_busy_local_database_through_unchanged(self):
+        class BusyState(_ProviderState):
+            def record_success(self, provider, status):
+                raise DatabaseBusyError("writer")
+
+        state = BusyState()
+        response = _JSONResponse(b'{"ok": true}', status=200)
+        client = self._client(lambda _request, *, timeout: response, state=state)
+
+        with self.assertRaises(DatabaseBusyError):
+            client.request(
+                "GET", "https://example.test/api/v1/resource", service="openai"
+            )
+        self.assertNotIn("status", [call[0] for call in state.calls])
+        self.assertNotIn(
+            "upstream_network_error",
+            [call[2].get("extra", {}).get("event") for call in self.logger.records],
+        )
 
     def test_json_http_client_success_empty_body_and_observation(self):
         state = _ProviderState()
@@ -968,7 +987,8 @@ class ProviderHTTPTests(unittest.TestCase):
             failure["error"],
             {"type": "AppError", "status": 409, "reason": "already_exists"},
         )
-        self.assertEqual(failure["exception_message"], "synthetic message")
+        self.assertNotIn("exception_message", failure)
+        self.assertNotIn("synthetic message", repr(capture.entries))
 
     def test_external_call_translates_unexpected_exception_with_cause_and_no_leak(self):
         logger = _CallLogger()
@@ -996,9 +1016,8 @@ class ProviderHTTPTests(unittest.TestCase):
             "provider payload must not leak", repr(logger.records[1][2]["extra"])
         )
         self.assertEqual(capture.entries[1][1]["error"], {"type": "RuntimeError"})
-        self.assertEqual(
-            capture.entries[1][1]["exception_message"], "provider payload must not leak"
-        )
+        self.assertNotIn("exception_message", capture.entries[1][1])
+        self.assertNotIn("provider payload must not leak", repr(capture.entries))
 
     def test_external_call_classifies_timeout_without_exposing_error_text(self):
         logger = _CallLogger()

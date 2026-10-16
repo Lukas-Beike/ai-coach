@@ -159,6 +159,8 @@ async function finishRecoveredChatStatus() {
   scrollChatToResponseStart();
 }
 
+const CHAT_STATUS_SAFETY_POLL_MS = 15_000;
+
 function rescheduleChatStatusPoll(delay) {
   if (chatStatusPollWanted()) scheduleChatStatusPoll(delay);
 }
@@ -166,7 +168,18 @@ function rescheduleChatStatusPoll(delay) {
 function settleChatStatusPoll(pollRequest, authFailed, running) {
   if (state.chatStatusPollInFlight !== pollRequest) return;
   state.chatStatusPollInFlight = null;
-  if (!authFailed) rescheduleChatStatusPoll(running ? 1_500 : 5_000);
+  const recheck = state.chatStatusRecheck;
+  state.chatStatusRecheck = false;
+  if (!running) state.chatStatusTurnEnded = false;
+  if (authFailed) return;
+  // A check asked for while this one ran may have missed the change it announced.
+  if (recheck) scheduleChatStatusPoll(0);
+  // A finished turn reads as running until its stream closes, so look again shortly.
+  else if (running && state.chatStatusTurnEnded) rescheduleChatStatusPoll(1_500);
+  // The event stream announces Coach turns; a slow check only guards against a missed
+  // event, and runs early enough to notice a stream that went silent.
+  else if (stateEventStreamHealthy()) rescheduleChatStatusPoll(Math.min(CHAT_STATUS_SAFETY_POLL_MS, stateEventStaleInMs()));
+  else rescheduleChatStatusPoll(running ? 1_500 : 5_000);
 }
 
 async function pollChatStatus() {
@@ -175,7 +188,10 @@ async function pollChatStatus() {
     rescheduleChatStatusPoll(5_000);
     return;
   }
-  if (state.chatStatusPollInFlight) return;
+  if (state.chatStatusPollInFlight) {
+    state.chatStatusRecheck = true;
+    return;
+  }
   const pollRequest = {};
   state.chatStatusPollInFlight = pollRequest;
   let running = false;

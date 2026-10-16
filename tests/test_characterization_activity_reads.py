@@ -12,7 +12,7 @@ import sqlite3
 import tempfile
 import unittest
 from collections.abc import Iterator
-from contextlib import closing, contextmanager, nullcontext
+from contextlib import closing, contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Any, cast
@@ -25,7 +25,10 @@ from backend.activities.read_service import PAGE_DEFAULT, PAGE_MAX, ActivityRead
 from backend.db.manager import DatabaseManager
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
-from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.activity_read_service import (
+    ActivityAnalysisReadService,
+    _activity_equipment,
+)
 from backend.performance.report_service import TrainingRecordsService
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
@@ -54,6 +57,8 @@ class _Database:
 
     def reader(self) -> Any:
         return self.unit_of_work()
+
+    read_snapshot = reader
 
 
 class _Snapshots:
@@ -461,7 +466,9 @@ class ActivitySummaryFingerprintTests(unittest.TestCase):
 class ActivityDetailStalenessCharacterizationTests(_StorageCase):
     RAW = _activity("ride-1", DAY, name="Threshold", moving_time=3600)
 
-    def _detail(self, raw: list[dict[str, Any]]) -> dict[str, Any]:
+    def _detail(
+        self, raw: list[dict[str, Any]], read_equipment: Any = None
+    ) -> dict[str, Any]:
         snapshots = _Snapshots(_snapshot([], raw))
         service = ActivityAnalysisReadService(
             self.database,
@@ -469,8 +476,26 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
             CompactActivityRows(SnapshotActivityRows(snapshots)),
             _Feedback(),
             ActivityDetailStore(self.database),
+            **({} if read_equipment is None else {"read_equipment": read_equipment}),
         )
         return service.detail("ride-1", garmin_snapshot={}, profile={}, today=TODAY)
+
+    def test_detail_reads_the_equipment_of_its_own_activity(self) -> None:
+        requested: list[str] = []
+
+        def read_equipment(activity_id: str) -> dict[str, Any]:
+            requested.append(activity_id)
+            return {
+                "items": [{"id": "bike"}, {"id": "meter"}],
+                "assignments": [
+                    {"activity_id": activity_id, "equipment_id": "bike"},
+                    {"activity_id": activity_id, "equipment_id": "meter"},
+                ],
+            }
+
+        result = self._detail([self.RAW], read_equipment)
+        self.assertEqual(["ride-1"], requested)
+        self.assertEqual(["bike", "meter"], [row["id"] for row in result["equipment"]])
 
     def _save_analysis(self, **overrides: Any) -> None:
         record: dict[str, Any] = {
@@ -528,6 +553,29 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         self.assertIsNone(result["detail_data"]["content_sha256"])
         self.assertEqual([], result["detail_data"]["available_streams"])
         self.assertEqual({}, result["session_analysis"])
+
+
+class ActivityEquipmentTests(unittest.TestCase):
+    def test_every_linked_main_item_and_its_components_are_listed(self) -> None:
+        equipment = {
+            "items": [
+                {"id": "bike"},
+                {"id": "chain", "parent_id": "bike"},
+                {"id": "meter"},
+                {"id": "shoes"},
+            ],
+            "assignments": [
+                {"activity_id": "a1", "equipment_id": "bike"},
+                {"activity_id": "a1", "equipment_id": "meter"},
+                {"activity_id": "a2", "equipment_id": "shoes"},
+                {"activity_id": "a3", "equipment_id": None},
+            ],
+        }
+        self.assertEqual(
+            ["bike", "chain", "meter"],
+            [row["id"] for row in _activity_equipment(equipment, "a1")],
+        )
+        self.assertEqual([], _activity_equipment(equipment, "a3"))
 
 
 class TrainingRecordObservationCharacterizationTests(_StorageCase):
@@ -651,7 +699,6 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
                 weather=Mock(state=Mock(return_value={})),
                 adaptive_followup=Mock(),
                 database_manager_factory=lambda: cast(DatabaseManager, self.database),
-                db_lock=nullcontext(),
                 key_values=Mock(get=Mock(return_value=None)),
                 training_plans=Mock(list=Mock(return_value=[])),
                 external_calendar=Mock(

@@ -2,7 +2,9 @@
 
 The table records the display rules the PWA applied to source labels: which
 provider's series a chart keeps, and which provider wins a tie between equal
-dates. It is read-only policy in the payload and changes no value.
+dates. For ``cycling_w_per_kg`` the current value takes the preferred
+provider's newest point across dates, like the current FTP. It is read-only
+policy in the payload and changes no value.
 """
 
 from collections.abc import Mapping

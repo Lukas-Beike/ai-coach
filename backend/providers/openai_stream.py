@@ -21,6 +21,7 @@ from backend.errors import (
     OPENAI_API_KEY_ERROR,
     AppError,
     ClientDisconnected,
+    DatabaseBusyError,
     ProviderErrorClassifier,
 )
 from backend.providers import http as provider_http
@@ -41,6 +42,7 @@ from backend.providers.openai_requests import (
 from backend.providers.openai_responses import (
     response_diagnostic_content,
     response_diagnostic_details,
+    without_free_text,
 )
 
 if TYPE_CHECKING:
@@ -273,10 +275,12 @@ class OpenAIStreamTelemetry:
                 "diagnostic_id": context.get("diagnostic_id"),
                 "attempt": context.get("attempt"),
                 **response_diagnostic_content(final_response),
-                "provider_error": final_response.get("error")
-                if isinstance(final_response, dict)
-                else None,
-                "provider_response": final_response,
+                "provider_error": without_free_text(
+                    final_response.get("error")
+                    if isinstance(final_response, dict)
+                    else None
+                ),
+                "provider_response": without_free_text(final_response),
             },
         )
 
@@ -702,6 +706,9 @@ class OpenAIStreamClient:
             )
         except HTTPError as exc:
             self._http_error(exc, context, started, stream_state.response_bytes)
+        except DatabaseBusyError:
+            # A local write after the response, such as usage, is no OpenAI timeout.
+            raise
         except TimeoutError as exc:
             self._timeout(
                 exc, cancel_event, context, started, stream_state.response_bytes

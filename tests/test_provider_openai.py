@@ -6,7 +6,7 @@ from types import MappingProxyType, SimpleNamespace
 from unittest import mock
 from urllib.error import HTTPError
 
-from backend.errors import AppError, ClientDisconnected
+from backend.errors import AppError, ClientDisconnected, DatabaseBusyError
 from backend.observability import DiagnosticCapture, Redactor
 from backend.providers import openai as openai_provider
 from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
@@ -187,7 +187,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             "status": "failed",
             "error": {
                 "code": "unknown_schema_failure",
-                "message": "Synthetic schema rejected; synthetic-provider-credential",
+                "message": "Synthetic schema rejected; secret-marker-provider-text; synthetic-provider-credential",
                 "param": "tools[0]",
             },
         }
@@ -197,7 +197,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             b"\n",
         ]
         client = self._stream_client(
-            lambda *_args, **_kwargs: _StreamResponse(lines),
+            lambda *_args, **_kwargs: _StreamResponse(
+                lines, headers={"x-request-id": "req_synthetic123"}
+            ),
             state=ValidatingState(),
             capture=capture,
         )
@@ -245,10 +247,16 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(transport["http_status"], 200)
         self.assertEqual(transport["event_counts"], {"response.failed": 1})
         self.assertEqual(failed["provider_error"]["code"], "unknown_schema_failure")
+        self.assertNotIn("message", failed["provider_error"])
+        self.assertEqual(failed["provider_error_code_raw"], "unknown_schema_failure")
         self.assertEqual(failed["provider_error_parameter"], "tools[0]")
-        self.assertNotIn(
-            "synthetic-provider-credential", values["diagnostic_capture_entries"]
-        )
+        self.assertEqual(failed["request_id"], "req_synthetic123")
+        self.assertNotIn("provider_error_message", failed)
+        for stored in (values["diagnostic_capture_entries"], json.dumps(entries)):
+            self.assertNotIn("secret-marker-provider-text", stored)
+            self.assertNotIn("synthetic-provider-credential", stored)
+        self.assertIn("unknown_schema_failure", values["diagnostic_capture_entries"])
+        self.assertIn("resp_synthetic_failure", values["diagnostic_capture_entries"])
 
     def test_request_with_conversation_retry_returns_without_retry(self):
         calls = []
@@ -1475,7 +1483,8 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(details["provider_error_type"], "invalid_request_error")
         self.assertEqual(details["provider_response_status"], "failed")
         self.assertNotIn("private provider detail", json.dumps(logger.logs))
-        self.assertEqual(details["provider_error_message"], "private provider detail")
+        self.assertNotIn("provider_error_message", details)
+        self.assertNotIn("private provider detail", json.dumps(details))
 
         unsafe_state = StreamReadState(
             headers={"x-request-id": "req_private/text"},
@@ -2063,7 +2072,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(failed["provider_error_present"], "true")
         self.assertNotIn("provider_error_code", failed)
         self.assertNotIn("private", repr((logger.infos, logger.logs)))
-        self.assertEqual(failed["provider_error_message"], "private provider text")
+        self.assertNotIn("provider_error_message", failed)
+        self.assertNotIn("private provider text", repr(capture.events))
+        self.assertNotIn("message", failed["provider_error"])
+        self.assertEqual(failed["provider_error"]["code"], "unknown_private_code")
         self.assertEqual(failed["provider_error_code_raw"], "unknown_private_code")
 
     def test_stream_client_saves_final_response_before_post_read_cancellation(self):
@@ -2394,6 +2406,22 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             (502, "invalid_response"),
         )
         self.assertEqual(state.usage, [])
+
+    def test_stream_client_passes_a_busy_local_database_through_unchanged(self):
+        state = _StreamStateService()
+
+        def busy_usage(*_args):
+            raise DatabaseBusyError("writer")
+
+        state.record_usage = busy_usage
+        response = _StreamResponse(self._stream_lines())
+        client = self._stream_client(lambda *_args, **_kwargs: response, state=state)
+
+        with self.assertRaises(DatabaseBusyError):
+            client.stream({"input": "hello"}, lambda _delta: None)
+        self.assertNotIn(
+            "timeout", [kwargs.get("state") for _args, kwargs in state.status]
+        )
 
     def test_stream_client_timeout_network_and_client_disconnect_contracts(self):
         for failure, status, reason in (

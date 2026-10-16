@@ -14,9 +14,11 @@ from backend.coach.turn_failures import (
     CoachTurnFailureDependencies,
     CoachTurnFailureService,
 )
+from backend.coach.turn_undo import CoachTurnUndoService
+from backend.db import row_factory as production_row_factory
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
-from backend.errors import AppError
+from backend.errors import AppError, DatabaseBusyError
 from backend.runtime.events import StateEventBuffer
 
 
@@ -54,7 +56,7 @@ class CoachTurnFailureTests(unittest.TestCase):
                 "CREATE TABLE coach_commands (client_turn_id TEXT PRIMARY KEY, receipt TEXT, status TEXT, updated_at TEXT)"
             )
             db.execute(
-                "CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT, content TEXT, client_turn_id TEXT, created_at TEXT)"
+                "CREATE TABLE messages (attachments TEXT NOT NULL DEFAULT '[]', id INTEGER PRIMARY KEY, role TEXT, content TEXT, client_turn_id TEXT, created_at TEXT)"
             )
             db.execute(
                 "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
@@ -120,6 +122,61 @@ class CoachTurnFailureTests(unittest.TestCase):
         )
         self.assertEqual(assistants, 1)
         self.assertEqual(len(self.events.since()["events"]), 1)
+
+    def test_applied_tracked_write_stays_undoable_after_a_failed_follow_up(
+        self,
+    ) -> None:
+        with self.manager.unit_of_work() as db:
+            user = self.chat.add(
+                db, "user", "Passe mein Profil an", client_turn_id="turn-1"
+            )
+        change = {
+            "id": "change-1",
+            "entity_type": "profile",
+            "action": "update",
+            "after_hash": "hash-1",
+        }
+        self._seed(
+            {
+                "user_message_id": user["id"],
+                "command_receipts": [
+                    {
+                        "tool": "update_profile",
+                        "result": {"ok": True, "status": "saved"},
+                        "changes": [change],
+                    }
+                ],
+            }
+        )
+
+        result = self.service.persist(
+            "turn-1",
+            {"operation": "update_profile"},
+            AppError(503, "failed", reason="provider_unavailable"),
+        )
+
+        _, stored = self._stored()
+        summary = stored["change_summary"]
+        self.assertEqual(summary["undoable"], True)
+        self.assertEqual(result["message"]["coach_changes"], summary)
+        # The chat reader projects dict rows, as the production database does.
+        reader = DatabaseManager(
+            Path(self.temporary.name) / "failure.sqlite",
+            sqlite3,
+            row_factory=production_row_factory,
+            persist_connections=False,
+        )
+        with reader.reader() as db:
+            reloaded = [m for m in self.chat.list(db) if m["role"] == "assistant"]
+        self.assertEqual(reloaded[0]["coach_changes"], summary)
+
+        history = Mock()
+        undo = CoachTurnUndoService(
+            lambda: self.manager, threading.RLock(), lambda: history, now=self.now
+        )
+        self.assertEqual(undo.undo("turn-1")["status"], "undone")
+        history.apply_many.assert_called_once()
+        self.assertEqual(self._stored()[1]["change_summary"]["undone_at"], self.now())
 
     def test_cancellation_clears_pending_and_completed_replay_does_not_duplicate(
         self,
@@ -199,6 +256,16 @@ class CoachTurnFailureTests(unittest.TestCase):
                 self.assertEqual(status, "failed")
                 self.assertIn(expected, text)
                 self.assertNotIn("private provider text", text)
+
+    def test_busy_local_database_is_explained_as_a_short_retry(self) -> None:
+        status, text, _, _ = self.service._base_response(
+            DatabaseBusyError("writer"), []
+        )
+
+        self.assertEqual(status, "failed")
+        self.assertEqual(
+            text, "Die lokale Datenbank war kurz ausgelastet. Bitte versuche es erneut."
+        )
 
     def test_provider_timeout_is_a_persisted_actionable_chat_message(self) -> None:
         self._assert_persisted_failure(

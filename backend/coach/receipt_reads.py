@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -18,12 +17,10 @@ class CoachCommandReceiptService:
     def __init__(
         self,
         manager_factory: Callable[[], DatabaseManager],
-        database_lock: threading.RLock,
         *,
         now: Callable[[], float] = time.time,
     ) -> None:
         self._manager_factory = manager_factory
-        self._database_lock = database_lock
         self._now = now
 
     def require_owner(self, receipt: dict[str, Any], session_csrf_hash: str) -> None:
@@ -43,7 +40,8 @@ class CoachCommandReceiptService:
                 reason="invalid_client_turn",
             )
 
-        with self._database_lock, self._manager_factory().unit_of_work() as db:
+        # Receipt reads are pure SELECTs; a WAL snapshot never waits for the writer.
+        with self._manager_factory().read_snapshot() as db:
             row = db.execute(
                 "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
                 (turn_id,),

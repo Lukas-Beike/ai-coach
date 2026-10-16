@@ -13,8 +13,11 @@ import threading
 import traceback
 import unittest
 from collections.abc import Callable
+from datetime import date
 
 from server_test_support import ServerTestCase, server
+
+from backend.errors import AppError
 
 WAIT_SECONDS = 15
 
@@ -83,6 +86,25 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
         diary = server.NUTRITION_ASSEMBLY.diary_service
         library = server.NUTRITION_ASSEMBLY.meal_library_service
         day = "2026-01-05"
+        today = date(2026, 1, 5)
+        reports = server.HTTP_API.training_reports()
+
+        def outcome(call: Callable[[], object]) -> object:
+            # A missing record is a normal answer for these reads; a hidden write
+            # still fails loudly on the query-only snapshot instead.
+            try:
+                return call()
+            except AppError as error:
+                return ("app-error", error.status, error.reason)
+
+        def without_clock(payload: dict[str, object]) -> dict[str, object]:
+            # Each call stamps its own generation time; everything else is stable.
+            return {
+                key: value
+                for key, value in payload.items()
+                if key not in {"exported_at", "generated_at"}
+            }
+
         return {
             "profile": lambda: server.ATHLETE_DATA.profile().get(),
             "competitions": lambda: server.PLANNING_DATA.competition().list(limit=100),
@@ -103,6 +125,56 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
                     "csrf-hash"
                 )
             ),
+            "chat_history": lambda: server.HTTP_API.chat_history_page_service().page(
+                limit=20, session_csrf_hash="csrf-hash"
+            ),
+            "chat_receipt": lambda: outcome(
+                lambda: server.COACH_TURNS.command_receipt_service().read(
+                    "missing-turn", "csrf-hash"
+                )
+            ),
+            "proposals": lambda: server.COACH_PROPOSALS.read_service().current(
+                "csrf-hash"
+            ),
+            "sync_jobs": lambda: server.SYNC_JOB_QUEUE.service().list(),
+            "sync_job_state": lambda: outcome(
+                lambda: server.SYNC_JOB_QUEUE.service().state("missing-job")
+            ),
+            "sync_status": lambda: public.sync_public_state_service().state(),
+            "sync_browser_state": lambda: (
+                public.sync_public_state_service().browser_state()
+            ),
+            "activities_page": lambda: server.ACTIVITY_READS.activity_read().page(
+                limit=50, today=today
+            ),
+            "activities_recent": lambda: server.ACTIVITY_READS.activity_read().recent(
+                today=today
+            ),
+            "activity_detail": lambda: outcome(
+                lambda: server.ACTIVITY_READS.activity_read().detail(
+                    "missing-activity", garmin_snapshot={}, profile={}, today=today
+                )
+            ),
+            "library_page": lambda: server.HTTP_API.library_page_service().page(
+                limit=20
+            ),
+            "change_history": lambda: server.HISTORY.change_history_service().list(),
+            "season": lambda: reports.season.season("UTC"),
+            "derived_impact": lambda: reports.derived.impact("UTC"),
+            "readiness": lambda: server.HTTP_API.readiness_service().state(),
+            "privacy_preview": lambda: (
+                server.PRIVACY_ASSEMBLY.delete_service().preview()
+            ),
+            "privacy_export": lambda: without_clock(
+                server.PRIVACY_ASSEMBLY.data_export_service().export()
+            ),
+            "diagnostic_report": lambda: without_clock(
+                server.DIAGNOSTICS_ASSEMBLY.report_service().report()
+            ),
+            "coach_history_diagnostics": lambda: (
+                server.DIAGNOSTICS_ASSEMBLY.coach_history_service().history()
+            ),
+            "wahoo_status": lambda: server.WAHOO_CONNECTION.service().status(),
         }
 
     def test_other_moved_reads_are_not_blocked_and_stay_read_only(self) -> None:

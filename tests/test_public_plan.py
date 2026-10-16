@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
-from threading import Lock
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
@@ -34,7 +33,6 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             "weather": Mock(),
             "followup": Mock(),
             "manager": Mock(),
-            "db_lock": Lock(),
             "key_values": Mock(),
             "plans": Mock(),
             "external": Mock(),
@@ -77,7 +75,6 @@ class PublicPlanStateServiceTests(unittest.TestCase):
                 weather=services["weather"],
                 adaptive_followup=services["followup"],
                 database_manager_factory=services["manager_factory"],
-                db_lock=services["db_lock"],
                 key_values=services["key_values"],
                 training_plans=services["plans"],
                 external_calendar=services["external"],
@@ -198,38 +195,33 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         )
         services["followup"].check.assert_called_once_with("weather")
 
-    def test_history_manager_factory_is_resolved_while_database_lock_is_held(self):
+    def test_refreshing_read_keeps_the_weather_write_outside_the_snapshot(self):
         service, services, _projection, *_ = self.make_service()
-        resolved_while_locked = []
-
-        def resolve_manager():
-            resolved_while_locked.append(services["db_lock"].locked())
-            return services["manager"]
-
-        services["manager_factory"].side_effect = resolve_manager
+        open_snapshots = []
+        snapshot = services["manager"].read_snapshot
+        snapshot.return_value.__enter__.side_effect = lambda: open_snapshots.append(1)
+        snapshot.return_value.__exit__.side_effect = lambda *_: open_snapshots.pop()
+        during_refresh = []
+        services["weather"].state.side_effect = lambda *a, **k: (
+            during_refresh.append(len(open_snapshots)) or {"days": []}
+        )
         with patch(
             "backend.http_api.public_plan.calendar_read_model.project_planning_calendar",
             return_value={},
         ):
             service.read()
 
-        services["manager_factory"].assert_called_once_with()
-        self.assertEqual(resolved_while_locked, [True])
-        services["manager"].unit_of_work.assert_called_once_with()
-        services["manager"].read_snapshot.assert_not_called()
+        self.assertEqual(during_refresh, [0])
+        self.assertEqual(snapshot.call_count, 2)
+        services["manager"].unit_of_work.assert_not_called()
 
-    def test_local_read_uses_one_snapshot_without_lock_or_writer(self):
+    def test_local_read_uses_one_snapshot_without_writer(self):
         service, services, _projection, *_ = self.make_service()
-        locked = []
-        services["manager_factory"].side_effect = lambda: (
-            locked.append(services["db_lock"].locked()) or services["manager"]
-        )
         with patch(
             "backend.http_api.public_plan.calendar_read_model.project_planning_calendar",
             return_value={},
         ):
             service.read(local_only=True)
 
-        self.assertFalse(any(locked))
         services["manager"].read_snapshot.assert_called_once_with()
         services["manager"].unit_of_work.assert_not_called()

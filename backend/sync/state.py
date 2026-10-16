@@ -32,7 +32,7 @@ class SyncStateRepository:
         self, source: str, defaults: Mapping[str, int], all_days: int
     ) -> int:
         default = defaults[source]
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             stored = self._key_value_repository.get(db, f"{source}_sync_days")
         try:
             value = int(stored or default)
@@ -65,7 +65,7 @@ class SyncStateRepository:
         return days
 
     def cursor(self, provider: str, stream: str) -> dict[str, Any]:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             return read_cursor(db, provider, stream)
 
     def update_cursor(
@@ -82,7 +82,7 @@ class SyncStateRepository:
         """Read the stored snapshot, inside the caller's transaction when given."""
         if db is not None:
             return latest_snapshot(db, self._snapshot_repository)
-        with self._database_manager.unit_of_work() as own:
+        with self._database_manager.reader() as own:
             return latest_snapshot(own, self._snapshot_repository)
 
     def latest_metadata(self, db: Any | None = None) -> dict[str, Any]:
