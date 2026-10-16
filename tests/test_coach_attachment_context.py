@@ -71,6 +71,35 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
 
         self.assertFalse(has_prior)
 
+    def test_prior_detection_skips_malformed_later_and_non_integer_receipts(
+        self,
+    ) -> None:
+        self._message(1, [{"type": "image", "name": "old.png"}])
+        self._message(2, [])
+        self._message(3, [{"type": "image", "name": "later.png"}])
+        self._command("later", {"ai_provider": "openai", "user_message_id": 3})
+        self._command("text-id", {"ai_provider": "openai", "user_message_id": "1"})
+        self._command("no-id", {"ai_provider": "openai"})
+        self._command("list", {"ai_provider": "openai"})
+        with self.database_manager.unit_of_work() as db:
+            db.execute("UPDATE coach_commands SET receipt='{' WHERE id='no-id'")
+            db.execute("UPDATE coach_commands SET receipt='[1]' WHERE id='list'")
+
+        _, has_prior = self.service.load_for_receipt({"user_message_id": 2})
+
+        self.assertFalse(has_prior)
+        self._command("prior", {"ai_provider": "openai", "user_message_id": 1})
+        self.assertTrue(self.service.load_for_receipt({"user_message_id": 2})[1])
+
+    def test_prior_detection_ignores_a_prior_message_without_attachments(
+        self,
+    ) -> None:
+        self._message(1, [])
+        self._message(2, [])
+        self._command("prior", {"ai_provider": "openai", "user_message_id": 1})
+
+        self.assertFalse(self.service.load_for_receipt({"user_message_id": 2})[1])
+
     def test_adds_only_attachment_metadata_and_gpx_fit_summaries(self) -> None:
         gpx = {
             "type": "gpx",

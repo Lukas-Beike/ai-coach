@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
 import sqlite3
 import threading
 import time
@@ -136,6 +137,7 @@ from backend.db.manager import (
 )
 from backend.db.manager import (
     DatabaseManager,
+    background_writer,
 )
 from backend.db.repositories import (
     ActivityFeedbackRepository,
@@ -891,10 +893,15 @@ SETTINGS = SettingsService(
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
 )
+# Each flush rewrites the whole capture, so captures are merged on a timer and
+# written as background work that yields to Coach and athlete writes.
+DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS = 30.0
 DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
     REDACTOR,
+    flush_delay_seconds=DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS,
+    timer_context=background_writer,
 )
 
 SYNC_PERSISTENCE = SyncPersistenceAssembly(
@@ -2081,6 +2088,8 @@ def main() -> None:
     sync_worker: sync_worker_runtime.SyncJobWorker | None = None
     daily_loop: sync_scheduler_runtime.DailySyncLoop | None = None
     daily_thread: threading.Thread | None = None
+    # `docker stop` sends SIGTERM; shut down like Ctrl+C so pending work is written.
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     try:
         SYNC_JOB_QUEUE.service().resume_interrupted()
         COACH_BACKGROUND_JOBS.job_store().resume_interrupted(
@@ -2116,12 +2125,14 @@ def main() -> None:
         COACH_JOB_WORKER.stop()
         CANONICAL_BACKFILL.worker.stop()
         server.server_close()
+        DIAGNOSTIC_CAPTURE.close()
         if daily_thread is not None:
             daily_thread.join(timeout=5)
         if sync_worker is not None:
             sync_worker.join(timeout=5)
         COACH_JOB_WORKER.join(timeout=5)
         CANONICAL_BACKFILL.worker.join(timeout=5)
+        DIAGNOSTIC_CAPTURE.flush()
 
 
 if __name__ == "__main__":

@@ -160,7 +160,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 - **Zero-Downtime Maintenance Mode**: Process-level maintenance gate that prevents concurrent writes and ensures transaction safety during database restoration.
 - **Pre-Restore Rollback Copies**: Automated creation of a safety copy of the existing database before executing any database restore or replacement.
 - **Redacted Operational Logging**: Structured server logs that correlate technical operation IDs while stripping authentication headers, tokens, and athlete text.
-- **Always-on Technical Diagnostics**: Bounded diagnostic logger (up to 10,000 entries, 16 MiB total, 1 MiB per entry) recording sanitized Coach requests and responses, provider error details, tool activity, and error traces. Credentials, keys, tokens, and session data are removed before storage.
+- **Always-on Technical Diagnostics**: Bounded diagnostic logger (up to 10,000 entries, 16 MiB total, 1 MiB per entry) recording sanitized Coach requests and responses, provider error details, tool activity, and error traces. Credentials, keys, tokens, and session data are removed before storage. New entries are written to the database in one batch at most 30 seconds after they are captured, as background work, and on shutdown, including `docker stop`; a crash or forced kill can lose the entries of the last 30 seconds.
 
 ---
 

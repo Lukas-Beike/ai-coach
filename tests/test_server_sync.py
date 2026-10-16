@@ -1,6 +1,7 @@
 """Server integration tests for sync."""
 
 import json
+import signal
 import sys
 import tempfile
 import threading
@@ -149,13 +150,44 @@ class ServerSyncTests(ServerTestCase):
             ) as startup_scheduler,
             patch.object(server.SYNC_SCHEDULERS, "daily_loop") as daily_loop_factory,
             patch.object(server.threading, "Thread") as thread_factory,
+            patch.object(server.signal, "signal") as install_signal_handler,
+            patch.object(server.DIAGNOSTIC_CAPTURE, "close") as capture_close,
+            patch.object(server.DIAGNOSTIC_CAPTURE, "flush") as capture_flush,
         ):
             startup_scheduler.return_value.schedule.side_effect = lambda: order.append(
                 "startup-sync"
             )
             daily_loop = Mock()
             daily_loop_factory.return_value = daily_loop
+            shutdown = []
+            for name, step in (
+                ("server-close", http_server.server_close),
+                ("capture-close", capture_close),
+                ("daily-join", thread_factory.return_value.join),
+                ("sync-join", sync_join),
+                ("coach-join", coach_join),
+                ("capture-flush", capture_flush),
+            ):
+                step.side_effect = lambda *_args, name=name, **_kwargs: shutdown.append(
+                    name
+                )
             server.main()
+        install_signal_handler.assert_called_once_with(
+            signal.SIGTERM, signal.default_int_handler
+        )
+        # Pending diagnostics are written before the workers are joined and once more
+        # after them, inside Docker's stop grace period.
+        self.assertEqual(
+            shutdown,
+            [
+                "server-close",
+                "capture-close",
+                "daily-join",
+                "sync-join",
+                "coach-join",
+                "capture-flush",
+            ],
+        )
         http_server_factory.assert_called_once()
         address, handler_class = http_server_factory.call_args.args
         self.assertEqual(address, ("0.0.0.0", server.CONFIG.port))

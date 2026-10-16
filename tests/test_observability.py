@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -522,6 +523,108 @@ class ObservabilityTests(unittest.TestCase):
         self.assertFalse(lock_held_during_set)
         self.assertIn("event-1", store.get("diagnostic_capture_entries"))
 
+    def test_diagnostic_capture_delay_merges_a_burst_into_one_write_off_thread(self):
+        store = _KeyValueStore()
+        written = threading.Event()
+        writes: list[tuple[str, int]] = []
+
+        def recording_set(key: str, value: str) -> None:
+            writes.append((value, threading.get_ident()))
+            store.set(key, value)
+            written.set()
+
+        capture = DiagnosticCapture(
+            store.get,
+            recording_set,
+            Redactor(_config),
+            batch_size=1,
+            flush_delay_seconds=0.3,
+        )
+        capture.capture("provider_request_failed", {"index": 0})
+        capture.capture("provider_request_failed", {"index": 1})
+        capture.capture("synthetic_event", {"index": 2})
+        # Failed events no longer write on the capturing thread; entries stay readable.
+        self.assertEqual(writes, [])
+        self.assertEqual(len(capture.entries()), 3)
+        self.assertTrue(written.wait(5))
+        self.assertEqual(len(writes), 1)
+        payload, thread_id = writes[0]
+        self.assertNotEqual(thread_id, threading.get_ident())
+        self.assertEqual(
+            [entry["details"]["index"] for entry in json.loads(payload)], [0, 1, 2]
+        )
+        written.clear()
+        capture.capture("synthetic_event", {"index": 3})
+        self.assertTrue(written.wait(5))
+        self.assertEqual(len(writes), 2)
+
+    def test_diagnostic_capture_explicit_flush_writes_pending_delayed_entries(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get,
+            store.set,
+            Redactor(_config),
+            batch_size=1,
+            flush_delay_seconds=60,
+        )
+        capture.capture("synthetic_event", {"index": 0})
+        self.assertIsNone(store.get("diagnostic_capture_entries"))
+        capture.flush()
+        self.assertIn("synthetic_event", store.get("diagnostic_capture_entries"))
+        timer = capture._flush_timer
+        self.assertIsNotNone(timer)
+        timer.cancel()
+
+    def test_diagnostic_capture_delay_writes_a_single_ordinary_entry(self):
+        store = _KeyValueStore()
+        written = threading.Event()
+        contexts: list[str] = []
+
+        @contextmanager
+        def timer_context():
+            contexts.append("enter")
+            yield
+
+        def recording_set(key: str, value: str) -> None:
+            store.set(key, value)
+            written.set()
+
+        capture = DiagnosticCapture(
+            store.get,
+            recording_set,
+            Redactor(_config),
+            flush_delay_seconds=0.3,
+            timer_context=timer_context,
+        )
+        capture.capture("synthetic_event", {"index": 0})
+        self.assertTrue(written.wait(5))
+        self.assertIn("synthetic_event", store.get("diagnostic_capture_entries"))
+        self.assertEqual(contexts, ["enter"])
+
+    def test_diagnostic_capture_close_writes_now_and_stops_delaying(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(
+            store.get,
+            store.set,
+            Redactor(_config),
+            flush_delay_seconds=60,
+            timer_context=lambda: self.fail("close must not use the timer context"),
+        )
+        capture.capture("synthetic_event", {"index": 0})
+        timer = capture._flush_timer
+        self.assertIsNotNone(timer)
+
+        capture.close()
+
+        self.assertIn("synthetic_event", store.get("diagnostic_capture_entries"))
+        self.assertIsNone(capture._flush_timer)
+        self.assertFalse(timer.is_alive() and not timer.finished.is_set())
+        capture.capture("event_after_close_failed", {"index": 1})
+        self.assertIn(
+            "event_after_close_failed", store.get("diagnostic_capture_entries")
+        )
+        self.assertIsNone(capture._flush_timer)
+
     def test_diagnostic_capture_default_retains_more_than_1500_entries(self):
         store = _KeyValueStore()
         capture = DiagnosticCapture(store.get, store.set, Redactor(_config))
@@ -849,6 +952,39 @@ class DiagnosticCaptureDiscardTests(unittest.TestCase):
         flusher.join(timeout=5)
 
         self.assertFalse(flusher.is_alive())
+        self.assertNotIn("diagnostic_capture_entries", store.values)
+        self.assertEqual(capture.entries(), [])
+
+    def test_delayed_write_cannot_write_cleared_entries_back_after_suspension(self):
+        store = _KeyValueStore()
+        timer_fired = threading.Event()
+
+        @contextmanager
+        def timer_context():
+            timer_fired.set()
+            yield
+
+        capture = DiagnosticCapture(
+            store.get,
+            store.set,
+            Redactor(_config),
+            flush_delay_seconds=0.1,
+            timer_context=timer_context,
+        )
+        capture.capture("before_delete_marker", {"text": "synthetic before"})
+        timer = capture._flush_timer
+        self.assertIsNotNone(timer)
+
+        with capture.suspended():
+            with store.lock:
+                store.values.clear()
+            # The delayed write starts during the suspension and waits for it.
+            self.assertTrue(timer_fired.wait(5))
+            timer.join(timeout=0.2)
+            self.assertTrue(timer.is_alive(), "the write must wait for the suspension")
+        timer.join(timeout=5)
+
+        self.assertFalse(timer.is_alive())
         self.assertNotIn("diagnostic_capture_entries", store.values)
         self.assertEqual(capture.entries(), [])
 
