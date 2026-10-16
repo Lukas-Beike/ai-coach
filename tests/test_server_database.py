@@ -134,7 +134,6 @@ class ServerDatabaseTests(ServerTestCase):
                         )
                     readiness = ReadinessService(
                         server.database_manager,
-                        server.DB_LOCK,
                         Path(root),
                         runtime_maintenance.MAINTENANCE_GATE,
                     ).state()
@@ -511,13 +510,13 @@ class ServerDatabaseTests(ServerTestCase):
                     raise RuntimeError("database manager is closed")
                 yield object()
 
+            read_snapshot = unit_of_work
+
         old_manager = Manager()
         new_manager = Manager()
         active_manager = [old_manager]
-        database_lock = threading.RLock()
 
         def manager_factory():
-            self.assertTrue(database_lock._is_owned())
             return active_manager[0]
 
         def owner(**methods):
@@ -562,7 +561,6 @@ class ServerDatabaseTests(ServerTestCase):
                 )
             ),
             database_manager=manager_factory,
-            database_lock=database_lock,
             key_values=owner(get=""),
             app_name="Intervals Coach",
             app_version="test",
@@ -1187,11 +1185,11 @@ class ServerDatabaseTests(ServerTestCase):
         )
         statements = []
         connections = []
-        original_unit_of_work = manager.unit_of_work
+        original_read_snapshot = manager.read_snapshot
 
         @contextmanager
-        def traced_unit_of_work():
-            with original_unit_of_work() as db:
+        def traced_read_snapshot():
+            with original_read_snapshot() as db:
                 connections.append(db)
                 db.set_trace_callback(statements.append)
                 try:
@@ -1200,7 +1198,7 @@ class ServerDatabaseTests(ServerTestCase):
                     db.set_trace_callback(None)
 
         with (
-            patch.object(manager, "unit_of_work", side_effect=traced_unit_of_work),
+            patch.object(manager, "read_snapshot", side_effect=traced_read_snapshot),
             patch.object(
                 server.KEY_VALUE_REPOSITORY,
                 "get",
@@ -1565,11 +1563,10 @@ class ServerDatabaseTests(ServerTestCase):
     def test_readiness_fails_when_database_is_unavailable(self):
         manager = server.database_manager()
         with patch.object(
-            manager, "unit_of_work", side_effect=OSError("database unavailable")
+            manager, "read_snapshot", side_effect=OSError("database unavailable")
         ):
             readiness = ReadinessService(
                 lambda: manager,
-                server.DB_LOCK,
                 Path(os.environ["DATA_DIR"]),
                 runtime_maintenance.MAINTENANCE_GATE,
             ).state()
@@ -1583,7 +1580,6 @@ class ServerDatabaseTests(ServerTestCase):
         with tempfile.TemporaryDirectory() as data_dir, maintenance_gate.restore():
             readiness = ReadinessService(
                 server.database_manager,
-                server.DB_LOCK,
                 Path(data_dir),
                 maintenance_gate,
             ).state()

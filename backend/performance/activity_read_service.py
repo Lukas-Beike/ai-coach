@@ -49,11 +49,11 @@ class ActivityAnalysisReadService(ActivityReadService):
     def _performance_inputs(
         self, as_of: date
     ) -> tuple[dict[str, Any], CanonicalPerformanceInputs | None]:
-        """Read the snapshot, and CTL and ATL in the same unit of work when configured."""
+        """Read the snapshot, and CTL and ATL in the same read snapshot when configured."""
         source = self._canonical
         if source is None:
             return self._snapshot(), None
-        with source.database_manager().unit_of_work() as db:
+        with source.database_manager().read_snapshot() as db:
             snapshot = self._snapshot()
             canonical = read_performance_inputs(
                 source.observation_reader(),

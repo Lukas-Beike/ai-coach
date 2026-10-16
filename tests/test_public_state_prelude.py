@@ -15,23 +15,17 @@ from backend.http_api.state_prelude import (
 class PublicStatePreludeTests(unittest.TestCase):
     def setUp(self):
         self.locked = False
-
-        @contextmanager
-        def lock():
-            self.locked = True
-            try:
-                yield
-            finally:
-                self.locked = False
-
-        self.lock = lock()
         self.manager = Mock()
 
         @contextmanager
-        def unit_of_work():
-            yield object()
+        def read_snapshot():
+            self.locked = True
+            try:
+                yield object()
+            finally:
+                self.locked = False
 
-        self.manager.unit_of_work.side_effect = unit_of_work
+        self.manager.read_snapshot.side_effect = read_snapshot
         self.state = Mock()
         self.state.latest_snapshot.return_value = {"recent_activities": []}
         self.feedback = Mock()
@@ -47,7 +41,6 @@ class PublicStatePreludeTests(unittest.TestCase):
             self.planned,
             self.weather,
             self.manager,
-            self.lock,
             lambda: date(2026, 9, 23),
             CalendarWindowRange(35, 35),
         )

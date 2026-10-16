@@ -18,7 +18,6 @@ from backend.diagnostics.report import (
 @dataclass(frozen=True)
 class DiagnosticRuntimeDependencies:
     database_manager: Callable[[], Any]
-    database_lock: Any
     key_values: Any
     config: Callable[[], Any]
     settings: Any
@@ -83,7 +82,6 @@ class DiagnosticsAssembly:
         local = dependencies.local_projections
         report = dependencies.report
         self._database_manager = runtime.database_manager
-        self._database_lock = runtime.database_lock
         self._key_values = runtime.key_values
         self._config = runtime.config
         self._settings = runtime.settings
@@ -117,8 +115,7 @@ class DiagnosticsAssembly:
 
     def coach_history_service(self) -> CoachDiagnosticHistoryService:
         return CoachDiagnosticHistoryService(
-            database=self._database_manager().unit_of_work,
-            db_lock=self._database_lock,
+            database=self._database_manager().read_snapshot,
             redact=self._redactor.sanitize_diagnostic_value,
             receipt_parser=self._receipt_parser,
             allowed_tools=self._allowed_tools(),
@@ -129,7 +126,6 @@ class DiagnosticsAssembly:
         return DiagnosticReportService(
             DiagnosticReportDependencies(
                 database_manager=self._database_manager(),
-                db_lock=self._database_lock,
                 key_values=self._key_values,
                 config=self._config(),
                 settings=self._settings,

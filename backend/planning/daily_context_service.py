@@ -110,7 +110,7 @@ class DailyPlanningContextService:
             if isinstance(snapshot.get("recent_wellness"), list)
             else []
         )
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             garmin = _decode_garmin_snapshot(
                 self._key_value_repository.get(db, _GARMIN_SNAPSHOT_KEY)
             )

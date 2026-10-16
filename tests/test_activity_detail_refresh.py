@@ -29,6 +29,11 @@ class Manager:
             db.row_factory = sqlite3.Row
             yield db
 
+    def reader(self):
+        return self.unit_of_work()
+
+    read_snapshot = reader
+
 
 class ActivityDetailRefreshTests(unittest.TestCase):
     def setUp(self):

@@ -113,7 +113,7 @@ class MorningBatteryStore:
 
     def _read_snapshot(self, db: Any | None = None) -> dict[str, Any]:
         if db is None:
-            with self._manager.unit_of_work() as owned:
+            with self._manager.reader() as owned:
                 return self._read_snapshot(owned)
         try:
             value = json.loads(self._key_values.get(db, _GARMIN_SNAPSHOT_KEY) or "{}")

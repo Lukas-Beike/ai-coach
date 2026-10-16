@@ -12,7 +12,7 @@ import sqlite3
 import tempfile
 import unittest
 from collections.abc import Iterator
-from contextlib import closing, contextmanager, nullcontext
+from contextlib import closing, contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Any, cast
@@ -54,6 +54,8 @@ class _Database:
 
     def reader(self) -> Any:
         return self.unit_of_work()
+
+    read_snapshot = reader
 
 
 class _Snapshots:
@@ -651,7 +653,6 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
                 weather=Mock(state=Mock(return_value={})),
                 adaptive_followup=Mock(),
                 database_manager_factory=lambda: cast(DatabaseManager, self.database),
-                db_lock=nullcontext(),
                 key_values=Mock(get=Mock(return_value=None)),
                 training_plans=Mock(list=Mock(return_value=[])),
                 external_calendar=Mock(

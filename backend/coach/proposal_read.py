@@ -9,10 +9,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from backend.coach.proposal_models import (
-    coach_action_view,
-    prune_expired_coach_proposals,
-)
+from backend.coach.proposal_models import coach_action_view
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
@@ -30,8 +27,9 @@ class CoachProposalReadService:
     def current(self, session_csrf_hash: str) -> list[dict[str, Any]]:
         if not session_csrf_hash:
             return []
-        with self._database_manager.unit_of_work() as db:
-            prune_expired_coach_proposals(db, self._now())
+        # Expired rows are filtered here and deleted on the next proposal write,
+        # so listing proposals never takes the writer.
+        with self._database_manager.read_snapshot() as db:
             rows = db.execute(
                 "SELECT * FROM coach_action_proposals "
                 "WHERE session_csrf_hash=? AND status IN ('preview', 'ready') "

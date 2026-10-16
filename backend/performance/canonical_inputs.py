@@ -117,13 +117,14 @@ def snapshot_with_inputs(
     *,
     as_of: date,
 ) -> tuple[Any, CanonicalPerformanceInputs | None]:
-    """Read a snapshot and its canonical load inputs in one unit of work.
+    """Read a snapshot and its canonical load inputs in one read snapshot.
 
-    Without a canonical source the snapshot is read exactly as before.
+    Without a canonical source the snapshot is read exactly as before. The
+    reads never wait for the writer.
     """
     if source is None:
         return read_snapshot(), None
-    with source.database_manager().unit_of_work() as db:
+    with source.database_manager().read_snapshot() as db:
         snapshot = read_snapshot()
         return snapshot, read_performance_inputs(
             source.observation_reader(),
@@ -137,7 +138,7 @@ def snapshot_with_inputs(
 def activity_rows_for(
     source: CanonicalPerformanceSource | None,
 ) -> tuple[dict[str, Any], ...] | None:
-    """Read the raw activity rows in their own unit of work.
+    """Read the raw activity rows in a read of their own, without the writer.
 
     None without a source or an activity row reader, so the caller keeps reading
     the activities from its snapshot.
@@ -145,7 +146,7 @@ def activity_rows_for(
     reader = None if source is None else source.activity_row_reader()
     if source is None or reader is None:
         return None
-    with source.database_manager().unit_of_work() as db:
+    with source.database_manager().reader() as db:
         return tuple(reader.activity_rows(db))
 
 

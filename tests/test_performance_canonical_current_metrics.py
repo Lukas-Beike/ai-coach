@@ -488,6 +488,8 @@ class _UnitOfWorkManager:
     def unit_of_work(self) -> contextlib.AbstractContextManager[None]:
         return contextlib.nullcontext()
 
+    read_snapshot = unit_of_work
+
 
 class WahooAgeLimitProductionReadTests(unittest.TestCase):
     """A Wahoo FTP or weight older than its limit is not current on the read day.

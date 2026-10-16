@@ -285,7 +285,7 @@ class PlannedUnitService:
         *,
         future_only: bool = False,
     ) -> list[dict[str, Any]]:
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             rows = planned_unit_rows(
                 db,
                 limit,

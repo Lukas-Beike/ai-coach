@@ -39,7 +39,6 @@ from backend.weather import cache as weather_cache
 @dataclass(frozen=True)
 class PrivacyDataExportDependencies:
     database_manager: DatabaseManager
-    database_lock: AbstractContextManager[Any]
     key_value_repository: KeyValueRepository
     profile_service: ProfileService
     workout_library_service: WorkoutLibraryService
@@ -61,10 +60,7 @@ class PrivacyDataExportService:
 
     def _stored_json(self, key: str) -> Any:
         dependencies = self._dependencies
-        with (
-            dependencies.database_lock,
-            dependencies.database_manager.unit_of_work() as db,
-        ):
+        with dependencies.database_manager.reader() as db:
             value = dependencies.key_value_repository.get(db, key)
         try:
             return json.loads(value or "{}")
@@ -73,10 +69,8 @@ class PrivacyDataExportService:
 
     def export(self) -> dict[str, Any]:
         dependencies = self._dependencies
-        with (
-            dependencies.database_lock,
-            dependencies.database_manager.unit_of_work() as db,
-        ):
+        # The export only reads, so one WAL snapshot keeps it off the writer.
+        with dependencies.database_manager.read_snapshot() as db:
             messages = [
                 dict(row)
                 for row in db.execute(
@@ -286,10 +280,7 @@ class PrivacyDeleteService:
 
     def preview(self) -> dict[str, Any]:
         dependencies = self._dependencies
-        with (
-            dependencies.database_lock,
-            dependencies.database_manager.unit_of_work() as db,
-        ):
+        with dependencies.database_manager.read_snapshot() as db:
             counts = self._counts(db)
         return {
             "status": "preview",
@@ -310,10 +301,7 @@ class PrivacyDeleteService:
             )
         dependencies = self._dependencies
         with dependencies.maintenance_gate.restore():
-            with (
-                dependencies.database_lock,
-                dependencies.database_manager.unit_of_work() as db,
-            ):
+            with dependencies.database_manager.reader() as db:
                 conversation_id = (
                     dependencies.key_value_repository.get(db, "openai_conversation_id")
                     or ""
@@ -450,7 +438,6 @@ class PrivacyAssembly:
         return PrivacyDataExportService(
             PrivacyDataExportDependencies(
                 database_manager=self._database_manager(),
-                database_lock=self._database_lock(),
                 key_value_repository=self._key_value_repository,
                 profile_service=self._profile_service(),
                 workout_library_service=self._workout_library_service(),

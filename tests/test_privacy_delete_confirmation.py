@@ -57,6 +57,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
         db = MagicMock()
         db.execute.return_value.fetchone.return_value = {"count": 0}
         dependencies.database_manager.unit_of_work.return_value.__enter__.return_value = db
+        dependencies.database_manager.reader.return_value.__enter__.return_value = db
         dependencies.key_value_repository.get.return_value = ""
 
         result = service.delete(PRIVACY_DELETE_CONFIRMATION_TEXT)
@@ -72,7 +73,8 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
             [call.args[0] for call in db.execute.call_args_list],
         )
         dependencies.maintenance_gate.restore.assert_called_once_with()
-        self.assertEqual(dependencies.database_manager.unit_of_work.call_count, 2)
+        self.assertEqual(dependencies.database_manager.reader.call_count, 1)
+        self.assertEqual(dependencies.database_manager.unit_of_work.call_count, 1)
         dependencies.planning_revision_service.mark_reset_pending.assert_called_once_with()
 
 

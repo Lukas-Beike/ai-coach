@@ -28,8 +28,8 @@ SESSION_TOUCH_INTERVAL_SECONDS = 5 * 60
 SESSION_CLEANUP_INTERVAL_SECONDS = 15 * 60
 SESSION_CLEANUP_BATCH_SIZE = 100
 # Session upkeep (touch, cleanup, expired delete) never decides authentication,
-# so it waits only briefly for the writer and retries on a later request.
-SESSION_MAINTENANCE_WAIT_SECONDS = 1.0
+# so it only tries the locks and the writer once and retries on a later request.
+SESSION_MAINTENANCE_WAIT_SECONDS = 0.0
 
 
 class SessionAuthServiceCache:

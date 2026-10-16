@@ -14,18 +14,6 @@ from backend.diagnostics.report import (
 )
 
 
-class _Lock:
-    def __init__(self):
-        self.entries = 0
-
-    def __enter__(self):
-        self.entries += 1
-        return self
-
-    def __exit__(self, *_args):
-        return False
-
-
 class _Database:
     def __init__(self):
         self.queries = []
@@ -50,14 +38,13 @@ class _DatabaseManager:
         self.transactions = 0
 
     @contextmanager
-    def unit_of_work(self):
+    def read_snapshot(self):
         self.transactions += 1
         yield self.database
 
 
 class DiagnosticReportServiceTests(unittest.TestCase):
     def setUp(self):
-        self.lock = _Lock()
         self.db = _Database()
         self.manager = _DatabaseManager(self.db)
         self.values = {
@@ -118,7 +105,6 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.service = DiagnosticReportService(
             DiagnosticReportDependencies(
                 database_manager=self.manager,
-                db_lock=self.lock,
                 key_values=self.key_values,
                 config=SimpleNamespace(
                     openai_api_key="fake-openai-secret",
@@ -241,11 +227,10 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         ):
             self.assertNotIn(private, serialized)
 
-    def test_database_counts_and_kv_reads_keep_lock_and_unit_of_work(self):
+    def test_database_counts_and_kv_reads_share_one_read_snapshot(self):
         self.service.report()
 
         self.assertEqual(self.manager.transactions, 1)
-        self.assertEqual(self.lock.entries, 1)
         self.assertEqual(len(self.db.queries), 6)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query, _parameters in self.db.queries],
@@ -268,13 +253,13 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.assertEqual(result, {"ok": True, "entries": 0})
         self.capture.clear.assert_called_once_with()
 
-    def test_diagnostic_capture_is_snapshotted_before_database_lock(self):
+    def test_diagnostic_capture_is_snapshotted_before_the_read_snapshot(self):
         self.capture.entries.side_effect = lambda: (
-            self.assertEqual(self.lock.entries, 0)
+            self.assertEqual(self.manager.transactions, 0)
             or [{"operation": "body_battery", "shape": ["bodyBattery"]}]
         )
         self.capture.status.side_effect = lambda: (
-            self.assertEqual(self.lock.entries, 0)
+            self.assertEqual(self.manager.transactions, 0)
             or {
                 "active": True,
                 "entries": 1,
@@ -283,7 +268,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
 
         self.service.report()
 
-        self.assertEqual(self.lock.entries, 1)
+        self.assertEqual(self.manager.transactions, 1)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,11 @@ class Manager:
     def unit_of_work(self):
         yield self.db
 
+    def reader(self):
+        return self.unit_of_work()
+
+    read_snapshot = reader
+
 
 class ExternalCalendarTests(unittest.TestCase):
     def setUp(self):

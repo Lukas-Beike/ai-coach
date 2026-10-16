@@ -26,7 +26,6 @@ class PublicPlanDependencies:
     weather: Any
     adaptive_followup: Any
     database_manager_factory: Callable[[], DatabaseManager]
-    db_lock: Any
     key_values: Any
     training_plans: Any
     external_calendar: Any
@@ -54,7 +53,6 @@ class PublicPlanStateService:
         self._weather = dependencies.weather
         self._adaptive_followup = dependencies.adaptive_followup
         self._database_manager_factory = dependencies.database_manager_factory
-        self._db_lock = dependencies.db_lock
         self._key_values = dependencies.key_values
         self._training_plans = dependencies.training_plans
         self._external_calendar = dependencies.external_calendar
@@ -83,26 +81,29 @@ class PublicPlanStateService:
         return state
 
     def read(self, local_only: bool = False) -> dict[str, Any]:
+        manager = self._database_manager_factory()
+        weather = None
         if not local_only:
-            return self._read(local_only=False)
-        # The local-only plan never refreshes weather or writes, so every read
-        # below shares one read-only snapshot and none waits for the writer.
-        with self._database_manager_factory().read_snapshot():
-            return self._read(local_only=True)
+            # The weather refresh may call the provider and write its cache, so
+            # it is its own step; the read below never waits for the writer.
+            with manager.read_snapshot():
+                canonical_planned = calendar_canonical.canonical_planned_workouts(
+                    [], self._planned_units.list(500)
+                )
+            weather = self._weather.state(canonical_planned, refresh=True)
+            if weather.pop("_refreshed", False):
+                self._adaptive_followup.check("weather")
+        # Every read below shares one read-only snapshot.
+        with manager.read_snapshot():
+            return self._read(weather)
 
-    def _history_and_profiles(self, local_only: bool) -> tuple[Any, Any]:
-        if local_only:
-            manager = self._database_manager_factory()
-            with manager.reader() as db:
-                history = self._key_values.get(db, weather_cache.HISTORY_KEY)
-            return history, ActivityDetailStore(manager).calendar_profiles()
-        with self._db_lock:
-            manager = self._database_manager_factory()
-            with manager.unit_of_work() as db:
-                history = self._key_values.get(db, weather_cache.HISTORY_KEY)
-            return history, ActivityDetailStore(manager).calendar_profiles()
+    def _history_and_profiles(self) -> tuple[Any, Any]:
+        manager = self._database_manager_factory()
+        with manager.reader() as db:
+            history = self._key_values.get(db, weather_cache.HISTORY_KEY)
+        return history, ActivityDetailStore(manager).calendar_profiles()
 
-    def _read(self, local_only: bool) -> dict[str, Any]:
+    def _read(self, weather: dict[str, Any] | None) -> dict[str, Any]:
         snapshot = self._sync_state.latest_snapshot() or {}
         local_planned = self._planned_units.list(500)
         canonical_planned = calendar_canonical.canonical_planned_workouts(
@@ -110,10 +111,9 @@ class PublicPlanStateService:
         )
         activities = self._activity_rows.compact() if self._activity_rows else []
         activities = self._activity_feedback.attach_to_activities(activities[:1000])
-        weather = self._weather.state(canonical_planned, refresh=not local_only)
-        if weather.pop("_refreshed", False):
-            self._adaptive_followup.check("weather")
-        history, profiles = self._history_and_profiles(local_only)
+        if weather is None:
+            weather = self._weather.state(canonical_planned, refresh=False)
+        history, profiles = self._history_and_profiles()
         activities = [
             {**row, "workout_profile": profiles[str(row.get("id"))]["profile"]}
             if isinstance(row, dict)

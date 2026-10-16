@@ -38,6 +38,11 @@ class _Manager:
         self.transactions += 1
         yield self.db
 
+    def reader(self):
+        return self.unit_of_work()
+
+    read_snapshot = reader
+
 
 class _Snapshots:
     def __init__(self, snapshot):
@@ -223,6 +228,11 @@ class _SqliteManager:
     def unit_of_work(self):
         yield self.db
         self.db.commit()
+
+    def reader(self):
+        return self.unit_of_work()
+
+    read_snapshot = reader
 
 
 class MergedDuplicateDeleteTests(unittest.TestCase):

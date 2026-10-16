@@ -120,7 +120,7 @@ class WahooConnectionService:
         return _parse_time(self._utc_now()) or datetime.now(UTC)
 
     def _read(self, key: str) -> str | None:
-        with self._database_lock(), self._database_manager().unit_of_work() as db:
+        with self._database_manager().reader() as db:
             return self._key_values.get(db, key)
 
     def _write(self, key: str, value: dict[str, Any]) -> None:

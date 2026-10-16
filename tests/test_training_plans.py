@@ -36,6 +36,10 @@ class _DatabaseManager:
             self.db.rollback()
             raise
 
+    @contextmanager
+    def reader(self):
+        yield self.db
+
 
 class _Events:
     def __init__(self):
