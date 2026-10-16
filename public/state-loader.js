@@ -193,6 +193,17 @@ function showStateLoadFailure(error) {
   $("#statusDetail").textContent = error.message;
 }
 
+function stateLoadRequest(path, requestedAreas) {
+  const liveAreasOnly = path === LIVE_AREA_REFRESH;
+  return {
+    liveAreasOnly,
+    // A version requested after this point is read by the follow-up load, not this one.
+    liveVersions: liveAreasOnly ? { ...state.requestedStateVersions } : null,
+    query: path.includes("local=1") ? "?local=1" : "",
+    areas: new Set(requestedAreas || ["chat", "plan", "library", "performance", "feedback", "profile"]),
+  };
+}
+
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
   const sessionGeneration = state.sessionGeneration;
@@ -200,11 +211,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const chatContentVersion = state.chatContentVersion;
   const initialLoad = $("#appShell").classList.contains("is-loading");
   try {
-    const liveAreasOnly = path === LIVE_AREA_REFRESH;
-    // A version requested after this point is read by the follow-up load, not this one.
-    const liveVersions = liveAreasOnly ? { ...state.requestedStateVersions } : null;
-    const query = path.includes("local=1") ? "?local=1" : "";
-    const areas = new Set(requestedAreas || ["chat", "plan", "library", "performance", "feedback", "profile"]);
+    const { liveAreasOnly, liveVersions, query, areas } = stateLoadRequest(path, requestedAreas);
     // The area reads do not depend on the bootstrap, so they run alongside it.
     const domainData = loadStateRequests(areas, query);
     // Startup syncs and the one-time canonical backfill can keep the server busy for longer than the default timeout.
