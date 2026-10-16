@@ -153,7 +153,11 @@ class PlannedUnitService:
                 or "T00:00:00"
             )
             restored_target["start_date_local"] = restore_date + suffix
-        if restore_date != current_date or restored_from_hidden:
+        window_changed = any(
+            key in restored_target and restored_target[key] != current_payload.get(key)
+            for key in ("start_date_local", "duration_minutes", "moving_time")
+        )
+        if restore_date != current_date or window_changed or restored_from_hidden:
             self._reject_restore_conflict(
                 entity_id, {**current_payload, **restored_target}
             )

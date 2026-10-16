@@ -7,6 +7,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from functools import partial
 from http.server import (
@@ -767,6 +768,15 @@ HISTORY = HistoryAssembly(
     )
 )
 
+
+def suspend_diagnostic_flushes() -> AbstractContextManager[None]:
+    return DIAGNOSTIC_CAPTURE.suspended()
+
+
+def start_canonical_backfill() -> None:
+    return CANONICAL_BACKFILL.worker.start()
+
+
 PRIVACY_ASSEMBLY = PrivacyAssembly(
     dependencies=PrivacyAssembly.Inputs(
         athlete=PrivacyAthleteSources(
@@ -797,7 +807,7 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
             planning_revision_service=PLANNING_REVISION_SERVICE,
             openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
             logger=LOGGER,
-            diagnostics_suspended=lambda: DIAGNOSTIC_CAPTURE.suspended(),
+            diagnostics_suspended=suspend_diagnostic_flushes,
         ),
         archive=PrivacyArchiveSettings(
             data_dir=lambda: DATA_DIR,
@@ -836,8 +846,8 @@ BACKUP_ASSEMBLY = BackupAssembly(
             sync_wake_event=shared_sync_job_wake_event,
             coach_wake_event=COACH_JOB_WORKER.wake_event,
             redact=REDACTOR.redact_text,
-            diagnostics_suspended=lambda: DIAGNOSTIC_CAPTURE.suspended(),
-            canonical_backfill_start=lambda: CANONICAL_BACKFILL.worker.start(),
+            diagnostics_suspended=suspend_diagnostic_flushes,
+            canonical_backfill_start=start_canonical_backfill,
         ),
     )
 )

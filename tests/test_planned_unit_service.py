@@ -1228,6 +1228,31 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
         self.assertEqual(stored["start_date_local"], "2026-09-21T10:00:00")
         self.assertEqual(stored["name"], "Lauf")
 
+    def test_time_only_undo_is_rejected_when_the_old_slot_was_taken(self):
+        local_id = self.unit("2026-09-21T10:00:00")
+        self.service.update(local_id, {"start_date_local": "2026-09-21T08:00:00"})
+        change_id = self._update_change_id()
+        self.unit("2026-09-21T10:00:00")
+        undo = HistoryUndoService(
+            self.manager,
+            ChangeHistoryService(self.manager, None),
+            None,
+            None,
+            None,
+            self.service,
+            None,
+            self.revisions,
+        )
+
+        with self.assertRaises(AppError) as caught:
+            preview = undo.preview(change_id)
+            undo.apply(preview["proposal"]["payload"])
+
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(
+            self.stored(local_id)["start_date_local"], "2026-09-21T08:00:00"
+        )
+
     def _update_change_id(self):
         with self.manager.reader() as db:
             return db.execute(
