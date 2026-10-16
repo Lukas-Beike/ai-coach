@@ -146,13 +146,15 @@ function mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatCon
   return { failures, appliedAreas };
 }
 
-function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration) {
+function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveVersions) {
   payload.state_versions = { ...state.data?.state_versions };
   for (const area of appliedAreas) {
     if (area === "chat" && chatGeneration !== state.chatGeneration) continue;
     const versionKeys = { feedback: ["checkins", "activity_feedback"], performance: ["performance", providerIds().garmin, "activities"].filter(Boolean) }[area] || [area];
     for (const key of versionKeys) {
-      if (bootstrap.state_versions?.[key] !== undefined) payload.state_versions[key] = bootstrap.state_versions[key];
+      // A live load has no bootstrap; it read at least the versions requested before it started.
+      const version = bootstrap.state_versions?.[key] ?? liveVersions?.[key];
+      if (version !== undefined) payload.state_versions[key] = version;
     }
   }
 }
@@ -181,6 +183,27 @@ function renderCompletedState(payload, liveAreasOnly, failed) {
   scheduleStateSnapshotSave();
 }
 
+// A failed sign-in is handled by the login flow, not the status card.
+function showStateLoadFailure(error) {
+  if (error?.status === 401 || /Authentication/.test(error.message)) return;
+  const statusCard = $("#statusCard");
+  statusCard.hidden = false;
+  statusCard.classList.add("warning");
+  $("#statusTitle").textContent = "Trainingsdaten konnten nicht geladen werden";
+  $("#statusDetail").textContent = error.message;
+}
+
+function stateLoadRequest(path, requestedAreas) {
+  const liveAreasOnly = path === LIVE_AREA_REFRESH;
+  return {
+    liveAreasOnly,
+    // A version requested after this point is read by the follow-up load, not this one.
+    liveVersions: liveAreasOnly ? { ...state.requestedStateVersions } : null,
+    query: path.includes("local=1") ? "?local=1" : "",
+    areas: new Set(requestedAreas || ["chat", "plan", "library", "performance", "feedback", "profile"]),
+  };
+}
+
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
   const sessionGeneration = state.sessionGeneration;
@@ -188,9 +211,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const chatContentVersion = state.chatContentVersion;
   const initialLoad = $("#appShell").classList.contains("is-loading");
   try {
-    const liveAreasOnly = path === LIVE_AREA_REFRESH;
-    const query = path.includes("local=1") ? "?local=1" : "";
-    const areas = new Set(requestedAreas || ["chat", "plan", "library", "performance", "feedback", "profile"]);
+    const { liveAreasOnly, liveVersions, query, areas } = stateLoadRequest(path, requestedAreas);
     // The area reads do not depend on the bootstrap, so they run alongside it.
     const domainData = loadStateRequests(areas, query);
     // Startup syncs and the one-time canonical backfill can keep the server busy for longer than the default timeout.
@@ -207,16 +228,11 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     // Incorporate changes that arrived while these requests were in flight.
     payload.messages = state.data?.messages || [];
     const { failures, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
-    applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration);
+    applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveVersions);
     if (requestSequence === state.loadSequence) renderCompletedState(payload, liveAreasOnly, failures.length > 0);
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
-    if (sessionGeneration !== state.sessionGeneration || error?.status === 401 || /Authentication/.test(error.message)) return;
-    const statusCard = $("#statusCard");
-    statusCard.hidden = false;
-    statusCard.classList.add("warning");
-    $("#statusTitle").textContent = "Trainingsdaten konnten nicht geladen werden";
-    $("#statusDetail").textContent = error.message;
+    if (sessionGeneration === state.sessionGeneration) showStateLoadFailure(error);
   } finally {
     if (sessionGeneration === state.sessionGeneration && $("#appShell").classList.contains("is-loading")) finishAppShellLoading();
   }
@@ -242,8 +258,59 @@ function load(path = "/api/bootstrap", requestedAreas = null) {
     }
   })();
   const tracked = promise.finally(() => {
-    if (state.loadPromise === tracked) state.loadPromise = null;
+    if (state.loadPromise !== tracked) return;
+    state.loadPromise = null;
+    // Versions are only "already requested" while their load chain is open.
+    if (!state.pendingLoads.size && !state.deferredLoad) state.requestedStateVersions = {};
   });
   state.loadPromise = tracked;
   return tracked;
+}
+
+// Background reloads (sync status, state events) wait while a Coach turn works,
+// so the turn is not slowed by bootstrap, plan and performance reads. A turn that
+// runs long cannot hold them back for more than this.
+const BACKGROUND_LOAD_DEFER_MAX_MS = 60_000;
+const BACKGROUND_LOAD_CHECK_MS = 1_000;
+// The transcript and profile follow the Coach turn live, so they never wait.
+const LIVE_WHILE_BUSY_AREAS = new Set(["chat", "profile"]);
+
+function cancelDeferredLoads() {
+  const deferred = state.deferredLoad;
+  state.deferredLoad = null;
+  if (!deferred) return null;
+  clearInterval(deferred.checkTimer);
+  clearTimeout(deferred.capTimer);
+  return deferred;
+}
+
+// Runs the waiting reloads once, merged into one load per path.
+function flushDeferredLoads() {
+  const deferred = cancelDeferredLoads();
+  let promise = Promise.resolve();
+  deferred?.loads.forEach((areas, path) => { promise = load(path, [...areas]); });
+  return promise;
+}
+
+function deferBackgroundLoad(path, areas) {
+  const deferred = state.deferredLoad || (state.deferredLoad = { loads: new Map(), checkTimer: null, capTimer: null });
+  const waiting = deferred.loads.get(path) || new Set();
+  areas.forEach((area) => waiting.add(area));
+  deferred.loads.set(path, waiting);
+  if (!deferred.checkTimer) {
+    deferred.checkTimer = setInterval(() => { if (!state.busy) void flushDeferredLoads().catch(() => {}); }, BACKGROUND_LOAD_CHECK_MS);
+    deferred.capTimer = setTimeout(() => { void flushDeferredLoads().catch(() => {}); }, BACKGROUND_LOAD_DEFER_MAX_MS);
+  }
+}
+
+// Entry point for reloads the athlete did not ask for. Athlete actions and the
+// receipts of their own Coach turn call load() directly and are never deferred.
+function requestBackgroundLoad(path, areas) {
+  const requested = [...new Set(areas || [])];
+  if (!requested.length) return Promise.resolve();
+  if (!state.busy) return load(path, requested);
+  const later = requested.filter((area) => !LIVE_WHILE_BUSY_AREAS.has(area));
+  const live = requested.filter((area) => LIVE_WHILE_BUSY_AREAS.has(area));
+  if (later.length) deferBackgroundLoad(path, later);
+  return live.length ? load(LIVE_AREA_REFRESH, live) : Promise.resolve();
 }
