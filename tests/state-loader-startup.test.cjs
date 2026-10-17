@@ -292,3 +292,90 @@ test("a full storage drops the view cache before the message cache", () => {
   assert.equal(storage.has("coach-view-cache"), false);
   assert.deepEqual(plain(context.readChatCache().messages), [{ id: 1 }]);
 });
+
+const saveDelay = (context) => vm.runInContext("STATE_SNAPSHOT_SAVE_DELAY_MS", context) + 50;
+const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+
+test("each area is rendered and stored as soon as it arrives, without waiting for a slower one", async () => {
+  const { context, state, renders, storage, respond } = loader();
+  const loading = context.load("/api/bootstrap", ["library", "performance"]);
+  respond("/api/bootstrap", { state_versions: { library: 3, performance: 4 } });
+  respond("/api/library?limit=100", { workouts: [{ id: "w1" }], next_cursor: null });
+  await wait(saveDelay(context));
+  // The delayed performance area is still open: library is shown and stored, versions only for it.
+  assert.deepEqual(plain(state.data.library), [{ id: "w1" }]);
+  assert.equal(state.data.performance, undefined);
+  assert.deepEqual(plain(state.data.state_versions), { library: 3 });
+  assert.deepEqual(plain(context.readStateSnapshot().data.library), [{ id: "w1" }]);
+  assert.equal(storage.has("coach-state-snapshot"), true);
+  respond("/api/performance", { performance: { ctl: 40 } });
+  await loading;
+  assert.equal(state.data.state_versions.performance, 4);
+  assert.equal(renders.length, 2);
+  await wait(saveDelay(context));
+  const stored = context.readStateSnapshot().data;
+  assert.deepEqual(plain([stored.library, stored.performance]), [[{ id: "w1" }], { ctl: 40 }]);
+});
+
+test("a partial startup is stored when the app is closed right after an area arrived", async () => {
+  const { context, state, respond } = loader();
+  const loading = context.load("/api/bootstrap", ["library", "performance"]);
+  respond("/api/bootstrap", {});
+  respond("/api/library?limit=100", { workouts: [{ id: "w1" }] });
+  await wait(0);
+  assert.equal(state.initialStateLoaded, false);
+  context.saveStateSnapshot();
+  assert.deepEqual(plain(context.readStateSnapshot().data.library), [{ id: "w1" }]);
+  respond("/api/performance", { performance: {} });
+  await loading;
+});
+
+test("a failed area keeps its previous snapshot value while the others are stored early", async () => {
+  const { context, state, respond } = loader();
+  state.initialStateLoaded = true;
+  state.data = { performance: { ctl: 40 }, library: [{ id: "old" }] };
+  context.saveStateSnapshot();
+  state.replaceDataOnLoad = true;
+  const loading = context.load("/api/bootstrap", ["library", "performance"]);
+  // The bootstrap's placeholders must not replace the pending or failed library.
+  respond("/api/bootstrap", { performance: {}, library: [] });
+  respond("/api/performance", { performance: { ctl: 41 } });
+  await wait(0);
+  context.saveStateSnapshot();
+  let stored = context.readStateSnapshot().data;
+  assert.deepEqual(plain([stored.performance, stored.library]), [{ ctl: 41 }, [{ id: "old" }]]);
+  respond("/api/library?limit=100", Promise.reject(new Error("offline")));
+  await loading;
+  context.saveStateSnapshot();
+  stored = context.readStateSnapshot().data;
+  assert.deepEqual(plain([stored.performance, stored.library]), [{ ctl: 41 }, [{ id: "old" }]]);
+});
+
+test("area responses of a replaced session or load are neither rendered nor stored", async () => {
+  const { context, state, renders, storage, respond } = loader();
+  const loading = context.load("/api/bootstrap", ["library", "performance"]);
+  respond("/api/bootstrap", {});
+  respond("/api/library?limit=100", { workouts: [{ id: "w1" }] });
+  await wait(0);
+  assert.equal(renders.length, 1);
+  state.sessionGeneration += 1;
+  context.clearStateSnapshot();
+  respond("/api/performance", { performance: { ctl: 40 } });
+  await loading;
+  await wait(saveDelay(context));
+  assert.equal(renders.length, 1);
+  assert.equal(storage.size, 0);
+});
+
+test("a load replaced by a newer one does not render or store its late areas", async () => {
+  const { context, state, renders, storage, respond } = loader();
+  const loading = context.load("/api/bootstrap", ["library"]);
+  respond("/api/bootstrap", {});
+  await wait(0);
+  state.loadSequence += 1;
+  respond("/api/library?limit=100", { workouts: [{ id: "late" }] });
+  await loading;
+  await wait(saveDelay(context));
+  assert.equal(renders.length, 0);
+  assert.equal(storage.size, 0);
+});
