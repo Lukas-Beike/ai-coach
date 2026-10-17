@@ -65,22 +65,28 @@ def resolve_client_ip(
     entries a client prepends itself cannot choose its rate-limit bucket.
     """
     trusted = tuple(trusted_proxies)
+    if not trusted:
+        return peer
     peer_address = _parsed_ip(peer)
 
     def is_trusted(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         return any(address in network for network in trusted)
 
-    if peer_address is None or not trusted or not is_trusted(peer_address):
+    if peer_address is None or not is_trusted(peer_address):
         return peer
     client = peer_address
-    hops = [hop for value in forwarded_for for hop in str(value).split(",")]
-    for hop in reversed(hops):
-        address = _parsed_ip(hop)
-        if address is None:
-            break
-        client = address
-        if not is_trusted(address):
-            break
+    # Walk from the right and stop at the first untrusted or malformed hop,
+    # so the cost does not grow with entries a client prepends.
+    for value in reversed(list(forwarded_for)):
+        remaining, separator = str(value), ","
+        while separator:
+            remaining, separator, hop = remaining.rpartition(",")
+            address = _parsed_ip(hop)
+            if address is None:
+                return str(client)
+            client = address
+            if not is_trusted(address):
+                return str(client)
     return str(client)
 
 
@@ -176,12 +182,13 @@ class SessionAuthService:
 
     def client_ip(self, handler: Any) -> str:
         peer = str(handler.client_address[0]) if handler.client_address else "unknown"
+        trusted = getattr(self._config, "trusted_proxies", ())
+        if not trusted:
+            return peer
         headers = getattr(handler, "headers", None)
         get_all = getattr(headers, "get_all", None)
         forwarded = (get_all("X-Forwarded-For") if callable(get_all) else None) or []
-        return resolve_client_ip(
-            peer, forwarded, getattr(self._config, "trusted_proxies", ())
-        )
+        return resolve_client_ip(peer, forwarded, trusted)
 
     @staticmethod
     def cookie_value(handler: Any, name: str) -> str:

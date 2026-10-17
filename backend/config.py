@@ -120,21 +120,33 @@ def _env_bool(environ: Mapping[str, str], name: str, default: bool = False) -> b
     return default if not value else value in {"1", "true", "yes", "on"}
 
 
+def _trusted_network(
+    entry: str,
+) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
+    # strict=True rejects host bits such as 192.168.1.6/24, which would
+    # otherwise widen trust silently to the whole subnet.
+    network = ipaddress.ip_network(entry, strict=True)
+    mapped = getattr(network.network_address, "ipv4_mapped", None)
+    if mapped is not None and network.prefixlen >= 96:
+        # Client addresses are compared unwrapped, so unwrap the entry too.
+        return ipaddress.IPv4Network((mapped, network.prefixlen - 96))
+    return network
+
+
 def _env_networks(
     environ: Mapping[str, str], name: str
-) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+) -> tuple[tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...], int]:
+    """Return the valid networks and the number of rejected entries."""
     networks = []
+    invalid = 0
     for entry in re.split(r"[\s,]+", str(environ.get(name, "")).strip()):
         if not entry:
             continue
         try:
-            networks.append(ipaddress.ip_network(entry, strict=False))
+            networks.append(_trusted_network(entry))
         except ValueError:
-            _LOGGER.warning(
-                "Ignoring invalid trusted proxy address",
-                extra={"event": "config_invalid_trusted_proxy", "setting": name},
-            )
-    return tuple(networks)
+            invalid += 1
+    return tuple(networks), invalid
 
 
 def _env_date(environ: Mapping[str, str], name: str, default: date) -> date:
@@ -172,6 +184,7 @@ class Config:
     wahoo_redirect_uri: str = ""
     sync_history_earliest_date: date = DEFAULT_SYNC_HISTORY_EARLIEST_DATE
     trusted_proxies: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
+    invalid_trusted_proxies: int = 0
 
     @property
     def wahoo_configured(self) -> bool:
@@ -204,6 +217,17 @@ def app_password_storage_warning(data_dir: Path) -> str | None:
         "Wer eine Kopie des Datenverzeichnisses hat, kann sie damit entschlüsseln. "
         "Lege APP_PASSWORD stattdessen als Container-Umgebungsvariable oder in der "
         ".env im Projektverzeichnis fest und entferne den Eintrag aus DATA_DIR/.env."
+    )
+
+
+def trusted_proxy_warning(config: Config) -> str | None:
+    """Describe rejected TRUSTED_PROXY_IPS entries without repeating them."""
+    if not config.invalid_trusted_proxies:
+        return None
+    return (
+        f"{config.invalid_trusted_proxies} Eintrag/Einträge in TRUSTED_PROXY_IPS "
+        "wurden ignoriert. Erlaubt sind IP-Adressen oder Netze ohne Hostanteil, "
+        "z. B. 192.168.1.6 oder 192.168.1.0/24."
     )
 
 
@@ -285,6 +309,9 @@ def load_config(
     target = environ if environ is not None else os.environ
     load_local_env(root, data_dir, target)
     value = target.get
+    trusted_proxies, invalid_trusted_proxies = _env_networks(
+        target, "TRUSTED_PROXY_IPS"
+    )
     return Config(
         port=_env_int(target, "PORT", 8090),
         openai_api_key=value("OPENAI_API_KEY", ""),
@@ -308,5 +335,6 @@ def load_config(
         sync_history_earliest_date=_env_date(
             target, "SYNC_HISTORY_EARLIEST_DATE", DEFAULT_SYNC_HISTORY_EARLIEST_DATE
         ),
-        trusted_proxies=_env_networks(target, "TRUSTED_PROXY_IPS"),
+        trusted_proxies=trusted_proxies,
+        invalid_trusted_proxies=invalid_trusted_proxies,
     )

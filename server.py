@@ -2094,6 +2094,15 @@ def main() -> None:
                 "context": {"reason": storage_warning},
             },
         )
+    proxy_warning = app_config.trusted_proxy_warning(CONFIG)
+    if proxy_warning:
+        LOGGER.warning(
+            "Invalid trusted proxy entries ignored",
+            extra={
+                "event": "config_invalid_trusted_proxy",
+                "context": {"setting": "TRUSTED_PROXY_IPS", "reason": proxy_warning},
+            },
+        )
     LOGGER.info(
         f"{APP_NAME} starting",
         extra={

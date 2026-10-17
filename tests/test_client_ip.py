@@ -1,11 +1,13 @@
 """Rate-limit client addresses honor X-Forwarded-For only from trusted proxies."""
 
 import ipaddress
+import tempfile
 import threading
 import unittest
 from email.message import Message
+from pathlib import Path
 
-from backend.config import Config
+from backend.config import load_config
 from backend.http_api.auth import SessionAuthService, resolve_client_ip
 from backend.http_api.rate_limit import RateLimiter
 
@@ -53,6 +55,18 @@ class ResolveClientIpTests(unittest.TestCase):
             resolve_client_ip("192.168.1.6", ["203.0.113.9, garbage"], PROXY),
             "192.168.1.6",
         )
+        self.assertEqual(
+            resolve_client_ip("192.168.1.6", ["203.0.113.9", ""], PROXY),
+            "192.168.1.6",
+        )
+
+    def test_hops_left_of_the_client_are_not_parsed(self):
+        self.assertEqual(
+            resolve_client_ip(
+                "192.168.1.6", ["garbage", "1.2.3.4, 203.0.113.9"], PROXY
+            ),
+            "203.0.113.9",
+        )
 
     def test_ipv4_mapped_proxy_peer_is_trusted(self):
         self.assertEqual(
@@ -70,30 +84,23 @@ class _Handler:
 
 
 class SessionAuthClientIpTests(unittest.TestCase):
-    def service(self, trusted):
-        config = Config(
-            port=8090,
-            openai_api_key="",
-            openai_base_url="",
-            openai_model="gpt-6-luna",
-            intervals_api_key="",
-            intervals_athlete_id="",
-            garmin_email="",
-            garmin_password="",
-            garmin_tokenstore="",
-            garmin_fixture_path="",
-            calendar_ical_url="",
-            app_password="synthetic-password",
-            secure_cookies=False,
-            data_retention_days=30,
-            trusted_proxies=trusted,
-        )
+    def service(self, trusted_proxy_ips):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = load_config(
+                root,
+                root,
+                {
+                    "APP_PASSWORD": "synthetic-password",
+                    "TRUSTED_PROXY_IPS": trusted_proxy_ips,
+                },
+            )
         return SessionAuthService(
             object(), threading.RLock(), config, True, RateLimiter()
         )
 
     def test_login_rate_limit_buckets_follow_the_forwarded_client(self):
-        service = self.service(PROXY)
+        service = self.service("192.168.1.6")
         self.assertEqual(
             service.client_ip(_Handler("192.168.1.6", ["203.0.113.9"])), "203.0.113.9"
         )
@@ -102,7 +109,7 @@ class SessionAuthClientIpTests(unittest.TestCase):
             "192.168.1.20",
         )
         self.assertEqual(
-            self.service(()).client_ip(_Handler("192.168.1.6", ["203.0.113.9"])),
+            self.service("").client_ip(_Handler("192.168.1.6", ["203.0.113.9"])),
             "192.168.1.6",
         )
 

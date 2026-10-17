@@ -18,6 +18,7 @@ from backend.config import (
     local_env_defines,
     save_persistent_settings,
     security_configuration_error,
+    trusted_proxy_warning,
     validated_openai_base_url,
 )
 from backend.errors import AppError
@@ -106,23 +107,35 @@ class ConfigTests(unittest.TestCase):
 
             default = load_config(root, root, {})
             parsed = load_config(
-                root, root, {"TRUSTED_PROXY_IPS": " 192.168.1.6, fd00::/64 10.0.0.0/8"}
+                root,
+                root,
+                {
+                    "TRUSTED_PROXY_IPS": (
+                        " 192.168.1.6, fd00::/64 10.0.0.0/8 ::ffff:192.168.1.7"
+                    )
+                },
             )
-            with self.assertLogs("backend.config", level="WARNING") as logs:
-                invalid = load_config(
-                    root, root, {"TRUSTED_PROXY_IPS": "192.168.1.6,not-an-ip"}
-                )
+            invalid = load_config(
+                root,
+                root,
+                {"TRUSTED_PROXY_IPS": "192.168.1.6,not-an-ip 192.168.1.6/24"},
+            )
 
         self.assertEqual(default.trusted_proxies, ())
+        self.assertIsNone(trusted_proxy_warning(default))
         self.assertEqual(
             [str(network) for network in parsed.trusted_proxies],
-            ["192.168.1.6/32", "fd00::/64", "10.0.0.0/8"],
+            ["192.168.1.6/32", "fd00::/64", "10.0.0.0/8", "192.168.1.7/32"],
         )
+        self.assertIsNone(trusted_proxy_warning(parsed))
+        # A host address with a mask must not silently widen trust to the subnet.
         self.assertEqual(
             [str(network) for network in invalid.trusted_proxies], ["192.168.1.6/32"]
         )
-        self.assertEqual(len(logs.records), 1)
-        self.assertNotIn("not-an-ip", logs.output[0])
+        self.assertEqual(invalid.invalid_trusted_proxies, 2)
+        warning = trusted_proxy_warning(invalid)
+        self.assertIn("TRUSTED_PROXY_IPS", warning)
+        self.assertNotIn("not-an-ip", warning)
 
     def test_local_env_defines_reports_only_assigned_names(self):
         with tempfile.TemporaryDirectory() as temporary:
