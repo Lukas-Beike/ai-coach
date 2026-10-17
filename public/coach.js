@@ -1826,7 +1826,10 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   root.classList.toggle("has-empty-state", hasEmptyState);
   root.setAttribute("aria-busy", String(Boolean(state.chatRequest || state.chatServerOperationId)));
   $("#chatPanel")?.classList.toggle("chat-empty", hasEmptyState);
-  if (root.dataset.signature === signature) return;
+  if (root.dataset.signature === signature) {
+    rememberChatCache(state.data);
+    return;
+  }
   const shouldScroll = !preserveScroll && (forceScroll || chatIsNearBottom());
   root.dataset.signature = signature;
   root.replaceChildren();
@@ -1849,6 +1852,8 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   updateChatQueueStatus();
   updateChatComposerVisibility();
   if ((state.chatInitialScrollPending || shouldScroll) && !state.chatResponseStarted) scrollChatToLatest();
+  // Shown messages are stored right away, so the next start shows them at once.
+  rememberChatCache(state.data);
 }
 function cancelScheduledChatStreamRender() {
   if (chatStreamRenderFrame != null) cancelAnimationFrame(chatStreamRenderFrame);
