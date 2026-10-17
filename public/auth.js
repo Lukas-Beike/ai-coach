@@ -301,7 +301,9 @@ function loginErrorMessage(exception) {
   const status = exception?.status;
   if (status === 429) {
     const seconds = Number(exception.retryAfter);
-    const wait = !(seconds > 0) ? "" : seconds < 60 ? ` in ${Math.ceil(seconds)} Sekunden` : ` in etwa ${Math.ceil(seconds / 60)} Minuten`;
+    let wait = "";
+    if (seconds >= 60) wait = ` in etwa ${Math.ceil(seconds / 60)} Minuten`;
+    else if (seconds > 0) wait = ` in ${Math.ceil(seconds)} Sekunden`;
     return `Zu viele Anmeldeversuche. Bitte${wait} erneut versuchen.`;
   }
   if (status >= 500) return "Der Server startet gerade oder ist ausgelastet. Bitte in wenigen Sekunden erneut versuchen.";
