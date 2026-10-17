@@ -2094,7 +2094,7 @@ def main() -> None:
                 "context": {"reason": storage_warning},
             },
         )
-    proxy_warning = app_config.trusted_proxy_warning(CONFIG.invalid_trusted_proxies)
+    proxy_warning = app_config.proxy_list_warning(CONFIG.invalid_trusted_proxies)
     if proxy_warning:
         LOGGER.warning(
             "Invalid trusted proxy entries ignored",

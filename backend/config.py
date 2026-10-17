@@ -220,7 +220,7 @@ def data_dir_env_warning(data_dir: Path) -> str | None:
     )
 
 
-def trusted_proxy_warning(invalid_entries: int) -> str | None:
+def proxy_list_warning(invalid_entries: int) -> str | None:
     """Describe rejected TRUSTED_PROXY_IPS entries without repeating them."""
     # The message stays static: the count only decides whether to warn, so no
     # configuration-derived value reaches the log.

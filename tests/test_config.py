@@ -16,9 +16,9 @@ from backend.config import (
     data_dir_env_warning,
     load_config,
     local_env_defines,
+    proxy_list_warning,
     save_persistent_settings,
     security_configuration_error,
-    trusted_proxy_warning,
     validated_openai_base_url,
 )
 from backend.errors import AppError
@@ -122,18 +122,18 @@ class ConfigTests(unittest.TestCase):
             )
 
         self.assertEqual(default.trusted_proxies, ())
-        self.assertIsNone(trusted_proxy_warning(default.invalid_trusted_proxies))
+        self.assertIsNone(proxy_list_warning(default.invalid_trusted_proxies))
         self.assertEqual(
             [str(network) for network in parsed.trusted_proxies],
             ["192.168.1.6/32", "fd00::/64", "10.0.0.0/8", "192.168.1.7/32"],
         )
-        self.assertIsNone(trusted_proxy_warning(parsed.invalid_trusted_proxies))
+        self.assertIsNone(proxy_list_warning(parsed.invalid_trusted_proxies))
         # A host address with a mask must not silently widen trust to the subnet.
         self.assertEqual(
             [str(network) for network in invalid.trusted_proxies], ["192.168.1.6/32"]
         )
         self.assertEqual(invalid.invalid_trusted_proxies, 2)
-        warning = trusted_proxy_warning(invalid.invalid_trusted_proxies)
+        warning = proxy_list_warning(invalid.invalid_trusted_proxies)
         self.assertIn("TRUSTED_PROXY_IPS", warning)
         self.assertNotIn("not-an-ip", warning)
 
