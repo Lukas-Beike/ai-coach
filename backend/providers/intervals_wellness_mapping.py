@@ -326,9 +326,19 @@ def _sport_info_sport(entry: dict[Any, Any]) -> Sport | None:
 def _add_eftp(
     collector: _Collector, scope: _Scope, entry: dict[Any, Any], sport: Sport
 ) -> None:
-    """Read ``mmp_model``'s eFTP first, then the entry's own, as the readers do."""
+    """Read ``mmp_model``'s eFTP first, then the entry's own, as the readers do.
+
+    A zero model value counts as absent, like the legacy reader's ``or`` chain.
+    """
     model = entry.get(_MMP_MODEL_KEY)
-    if isinstance(model, dict) and _first_present(model, _EFTP_MODEL_ALIASES):
+    found = (
+        _first_present(model, _EFTP_MODEL_ALIASES) if isinstance(model, dict) else None
+    )
+    if (
+        isinstance(model, dict)
+        and found is not None
+        and coerce_comma_decimal_number(found[1]) != 0
+    ):
         _add_field(
             collector, scope, model, MetricKind.EFTP, _EFTP_MODEL_ALIASES, sport=sport
         )

@@ -190,6 +190,9 @@ _MAX_HR_KEYS: Final = ("maxHeartRateUsed", "maxHeartRate", "maxHR")
 _MAX_HR_FLOOR: Final = 80.0
 _HEART_RATE_SPORT_KEYS: Final = ("sport", "sportType", "activityType")
 _HEART_RATE_LIST_LIMIT: Final = 100
+# The legacy daily-stats reader's walk limits.
+_DAILY_STATS_VISIT_LIMIT: Final = 2000
+_DAILY_STATS_LIST_LIMIT: Final = 500
 _LATEST_WEIGHT_KEYS: Final = frozenset({"latestWeight"})
 _UNSUPPORTED_SECTIONS: Final = frozenset(
     {"body_battery", "daily_training_status", "training_load_balance"}
@@ -245,6 +248,7 @@ class _Field:
     kind: MetricKind
     source_kind: SourceKind
     sport: Sport | None = None
+    whole: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,8 +356,8 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
         _Group(
             None,
             (
-                _Field(GARMIN_STEPS_ALIASES, MetricKind.STEPS, _DEVICE),
-                _Field(GARMIN_FLOORS_ALIASES, MetricKind.FLOORS, _DEVICE),
+                _Field(GARMIN_STEPS_ALIASES, MetricKind.STEPS, _DEVICE, whole=True),
+                _Field(GARMIN_FLOORS_ALIASES, MetricKind.FLOORS, _DEVICE, whole=True),
                 _Field(
                     GARMIN_TOTAL_KCAL_ALIASES, MetricKind.DAILY_ENERGY_TOTAL, _PROVIDER
                 ),
@@ -670,6 +674,43 @@ def _endurance_records(payload: object) -> object:
     return payload
 
 
+def _daily_stats_records(payload: object) -> object:
+    """Replace undated wrappers by their dated records, as the legacy daily reader.
+
+    A dated record, or an undated one without dated records inside, stays as it is,
+    so its issues keep their reference.
+    """
+    if isinstance(payload, Mapping):
+        return _dated_descendants(payload) or payload
+    if not isinstance(payload, list):
+        return payload
+    records: list[object] = []
+    for item in payload:
+        nested = _dated_descendants(item) if isinstance(item, Mapping) else []
+        records.extend(nested or [item])
+    return records
+
+
+def _dated_descendants(record: Mapping[str, object]) -> list[Mapping[str, object]]:
+    """Dated mappings inside an undated record, in document order; [] if dated."""
+    if _named_value(record, GARMIN_DATE_ALIASES) is not None:
+        return []
+    found: list[Mapping[str, object]] = []
+    stack: list[object] = list(reversed(list(record.values())))
+    visited = 0
+    while stack and visited < _DAILY_STATS_VISIT_LIMIT:
+        item = stack.pop()
+        visited += 1
+        if isinstance(item, Mapping):
+            if _named_value(item, GARMIN_DATE_ALIASES) is not None:
+                found.append(item)
+            else:
+                stack.extend(reversed(list(item.values())))
+        elif isinstance(item, list):
+            stack.extend(reversed(item[:_DAILY_STATS_LIST_LIMIT]))
+    return found
+
+
 def _heart_rate_nodes(value: object) -> Iterator[Mapping[str, object]]:
     """Mappings under one record, the record first, in the legacy reader's order.
 
@@ -875,6 +916,9 @@ class _HealthMapping:
         elif name == _ENDURANCE_SCORE:
             groups = _GROUPED_SECTIONS[name]
             self._map_grouped(name, _endurance_records(payload), groups)
+        elif name == _DAILY_STATS:
+            groups = _GROUPED_SECTIONS[name]
+            self._map_grouped(name, _daily_stats_records(payload), groups)
         else:
             self._map_grouped(name, payload, _GROUPED_SECTIONS[name])
 
@@ -999,6 +1043,8 @@ class _HealthMapping:
         entry = _entry(name, ref, day, group.key, index=index)
         for field in group.fields:
             number = self._group_number(name, group, record, source, field, ref)
+            if number is not None and field.whole:
+                number = float(round(number))
             if number is not None:
                 self.emit(
                     entry,

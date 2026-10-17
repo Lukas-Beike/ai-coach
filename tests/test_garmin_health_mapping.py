@@ -1144,6 +1144,23 @@ class DailyStatsTests(unittest.TestCase):
         )
         self.assertEqual(_issues(result), [])
 
+    def test_daily_stats_counts_are_rounded_like_the_serving_reader(self) -> None:
+        result = _map(
+            {"daily_stats": {"calendarDate": DAY, "totalSteps": 1000.6, "floorsAscended": 4.4}}
+        )
+
+        self.assertEqual(
+            _rows(result), [("floors", 4.0, DAY, "-"), ("steps", 1001.0, DAY, "-")]
+        )
+
+    def test_daily_stats_wrapped_records_are_read(self) -> None:
+        result = _map(
+            {"daily_stats": {"records": [{"calendarDate": DAY, "totalSteps": 1000}]}}
+        )
+
+        self.assertEqual(_rows(result), [("steps", 1000.0, DAY, "-")])
+        self.assertEqual(_issues(result), [])
+
     def test_daily_stats_outside_bounds_or_undated_are_reported(self) -> None:
         result = _map(
             {

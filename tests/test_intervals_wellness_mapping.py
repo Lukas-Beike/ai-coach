@@ -292,6 +292,10 @@ class SportInfoEftpTests(unittest.TestCase):
         entry = {"types": ["Ride"], "mmp_model": {"ftp": 262}, "eftp": 258}
         self.assertEqual(self.eftp(wellness([row(sportInfo=[entry])])), [(Sport.RIDE, 262)])
 
+    def test_zero_mmp_model_falls_back_to_the_entry_eftp(self) -> None:
+        entry = {"types": ["Ride"], "mmp_model": {"ftp": 0}, "eftp": 258}
+        self.assertEqual(self.eftp(wellness([row(sportInfo=[entry])])), [(Sport.RIDE, 258)])
+
     def test_empty_mmp_model_falls_back_to_the_entry_eftp(self) -> None:
         entry = {"type": "VirtualRide", "mmp_model": {"ftp": None}, "eFTP": 255}
         self.assertEqual(
