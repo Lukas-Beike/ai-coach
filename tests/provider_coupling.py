@@ -229,8 +229,6 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
             "backend/performance/session_analysis.py",
             "backend/performance/training_focus.py",
             "backend/performance/training_report.py",
-            "public/analysis.js",
-            "public/performance-view.js",
         )
     },
 }

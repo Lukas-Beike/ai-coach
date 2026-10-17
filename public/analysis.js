@@ -105,6 +105,7 @@ function bindAnalysisPopover(button, info) {
 function analysisChart(title, series, unit, start, end, note, {
   sparse = false, zeroCentered = false, showLegend = true, calendarWeeks = false,
 } = {}) {
+  if (!analysisHasData(series)) return null;
   const section = reportNode("section", null, "analysis-chart-card");
   section.append(reportNode("h3", title));
   const valid = analysisValidPoint;
@@ -142,7 +143,7 @@ function analysisChart(title, series, unit, start, end, note, {
   if (showLegend) section.append(legend);
 
   if (!series.some((item) => item.bars || item.points.filter(valid).length >= 2)) {
-    section.append(reportNode("p", values.length ? "Ein einzelner Messwert zeigt noch keinen Verlauf; mindestens zwei datierte Werte sind erforderlich." : "Noch keine datierten Werte im Zeitraum vorhanden.", "empty"));
+    section.append(reportNode("p", "Ein einzelner Messwert zeigt noch keinen Verlauf; mindestens zwei datierte Werte sind erforderlich.", "empty"));
     appendAnalysisTable(section, title, series, unit);
     return section;
   }
@@ -191,6 +192,21 @@ function analysisReadingDetails(point, unit) {
 
 function analysisValidPoint(point) {
   return point?.value != null && Number.isFinite(Number(point.value));
+}
+
+function analysisHasData(series) {
+  return series.some((item) => item.points.some(analysisValidPoint));
+}
+
+// A chart without any valid point is omitted; its title is collected for one "Keine Daten" line.
+function collectAnalysisChart(missing, title, ...chartArguments) {
+  const chart = analysisChart(title, ...chartArguments);
+  if (!chart) missing.push(title);
+  return chart;
+}
+
+function analysisMissingDataNote(missing) {
+  return missing.length ? reportNode("p", `Keine Daten: ${missing.join(", ")}`, "empty") : null;
 }
 
 function appendAnalysisTable(section, title, series, unit) {
@@ -656,11 +672,8 @@ function renderAnalysisHistory(history) { // NOSONAR
   const periodRoot = document.getElementById("analysisLoadPeriod");
   root.replaceChildren(); loadRoot.replaceChildren(); enduranceRoot.replaceChildren(); periodRoot.replaceChildren();
   if (!history?.start || !history?.end) {
-    const running = makeAnalysisSectionCollapsible(analysisChartGroup("Laufen", [], [], ""), "development-Lauf");
-    running.querySelector(".analysis-section-content").append(predictions);
-    const cycling = makeAnalysisSectionCollapsible(analysisChartGroup("Rad", [], [], ""), "development-Rad");
-    cycling.querySelector(".analysis-section-content").append(powerProfile);
-    root.append(running, cycling);
+    // Without a history window there are no charts, so no empty sport groups; the async tables stay attached.
+    root.append(predictions, powerProfile);
     return;
   }
   const end = history.end;
@@ -673,33 +686,44 @@ function renderAnalysisHistory(history) { // NOSONAR
   }));
   const performanceStart = addDateKey(weekStart, -77);
   const load = history.load || { points: [] };
-  const loadSeries = [{ label: "Akute Belastung", legendLabel: "Akute Belastung", source: "Garmin Connect", unit: "", color: 0, bars: true, connected: true,
+  const loadSeries = [{ label: "Akute Belastung", legendLabel: "Akute Belastung", source: load.source, unit: "", color: 0, bars: true, connected: true,
     cadenceDays: analysisHistoryPeriod === "twelveWeeks" ? 7 : 1, average: true, averageInHeading: true,
     points: analysisHistoryPeriod === "twelveWeeks" ? analysisWeeklyLastPoints(load.points.filter((point) => point.date >= start && point.date <= end).map((point) => ({ date: point.date, value: point.value })), start, end) : load.points.filter((point) => point.date >= start && point.date <= end).map((point) => ({ date: point.date, value: point.value })),
     currentPoint: load.points.filter((point) => point.date >= start && point.date <= end).map((point) => ({ date: point.date, value: point.value })).findLast(analysisValidPoint) }];
   const loadValues = loadSeries[0].points.filter(analysisValidPoint).map((point) => Number(point.value));
   const loadAverage = loadValues.length ? loadValues.reduce((sum, value) => sum + value, 0) / loadValues.length : null;
   const loadTitle = loadAverage == null ? "Akute Belastung" : `Akute Belastung \u00b7 \u00d8 ${analysisValue(loadAverage, "")}`;
-  const loadChart = analysisChart(loadTitle, loadSeries, "", start, end, "Garmin Connect: gemessene akute Trainingsbelastung. Gestrichelte Linie: Durchschnitt der angezeigten Werte. Fehlende Messungen bleiben L\u00fccken.", { calendarWeeks: analysisHistoryPeriod === "twelveWeeks" });
-  loadChart.querySelector(".analysis-chart-legend")?.remove();
-  loadRoot.append(loadChart);
+  const sourcePrefix = (source) => (source ? `${source}: ` : "");
+  const loadMissing = [];
+  const loadChart = collectAnalysisChart(loadMissing, loadTitle, loadSeries, "", start, end, `${sourcePrefix(load.source)}gemessene akute Trainingsbelastung. Gestrichelte Linie: Durchschnitt der angezeigten Werte. Fehlende Messungen bleiben L\u00fccken.`, { calendarWeeks: analysisHistoryPeriod === "twelveWeeks" });
+  if (loadChart) {
+    loadChart.querySelector(".analysis-chart-legend")?.remove();
+    loadRoot.append(loadChart);
+  }
   const timePoints = (history.training_time?.points || []).filter((point) => point.date >= start && point.date <= end).map((point) => ({ date: point.date, value: point.value }));
   if (timePoints.some(analysisValidPoint)) {
     const weekly = analysisHistoryPeriod === "twelveWeeks";
-    const timeSeries = [{ label: weekly ? "Trainingszeit pro Woche" : "Trainingszeit pro Tag", legendLabel: "Trainingszeit", source: history.training_time.source || "Intervals.icu", unit: "h", color: 1, bars: true, connected: true, cadenceDays: weekly ? 7 : 1, average: true, averageInHeading: true, points: weekly ? analysisWeeklySumPoints(timePoints, start, end) : timePoints }];
+    const timeSeries = [{ label: weekly ? "Trainingszeit pro Woche" : "Trainingszeit pro Tag", legendLabel: "Trainingszeit", source: history.training_time.source, unit: "h", color: 1, bars: true, connected: true, cadenceDays: weekly ? 7 : 1, average: true, averageInHeading: true, points: weekly ? analysisWeeklySumPoints(timePoints, start, end) : timePoints }];
     const timeValues = timeSeries[0].points.filter(analysisValidPoint).map((point) => Number(point.value));
     const timeAverage = timeValues.reduce((sum, value) => sum + value, 0) / timeValues.length;
-    const timeChart = analysisChart(`Trainingszeit \u00b7 \u00d8 ${analysisValue(timeAverage, "h")}${weekly ? " pro Woche" : " pro Tag"}`, timeSeries, "h", start, end, "Intervals.icu: Summe der Bewegungszeit erfasster Aktivit\u00e4ten, jede Aktivit\u00e4t einmal. Tage und Wochen ohne erfasste Dauer bleiben L\u00fccken.", { calendarWeeks: weekly });
-    timeChart.querySelector(".analysis-chart-legend")?.remove();
-    loadRoot.append(timeChart);
+    const timeTitle = timeValues.length ? `Trainingszeit \u00b7 \u00d8 ${analysisValue(timeAverage, "h")}${weekly ? " pro Woche" : " pro Tag"}` : "Trainingszeit";
+    const timeChart = collectAnalysisChart(loadMissing, timeTitle, timeSeries, "h", start, end, `${sourcePrefix(history.training_time.source)}Summe der Bewegungszeit erfasster Aktivit\u00e4ten, jede Aktivit\u00e4t einmal. Tage und Wochen ohne erfasste Dauer bleiben L\u00fccken.`, { calendarWeeks: weekly });
+    if (timeChart) {
+      timeChart.querySelector(".analysis-chart-legend")?.remove();
+      loadRoot.append(timeChart);
+    }
+  } else {
+    loadMissing.push("Trainingszeit");
   }
+  const loadMissingNote = analysisMissingDataNote(loadMissing);
+  if (loadMissingNote) loadRoot.append(loadMissingNote);
   const performanceSeries = [
     ["cycling_ftp_watts", "Rad · FTP", "W", 0],
     ["cycling_eftp_watts", "Rad · eFTP", "W", 1],
     ["run_threshold_pace_seconds_per_km", "Lauf · Schwellenpace", "s/km", 2],
     ["cycling_vo2max_ml_kg_min", "Rad · VO₂max", "ml/kg/min", 3],
     ["running_vo2max_ml_kg_min", "Lauf · VO₂max", "ml/kg/min", 4],
-  ].flatMap(([key, label, unit, color]) => (history.metrics?.[key] || []).filter((item) => isPreferredSource(item, history.preferred_providers?.[key], key === "cycling_eftp_watts" ? "Intervals.icu" : "Garmin Connect")).map((item) => ({
+  ].flatMap(([key, label, unit, color]) => (history.metrics?.[key] || []).filter((item) => isPreferredSource(item, history.preferred_providers?.[key])).map((item) => ({
     label: `${label} · ${item.source}`, legendLabel: label.replace(/^Rad \u00b7 /, ""), source: item.source, unit, color,
     line: key === "cycling_eftp_watts" || key.includes("vo2max") ? "dashed" : "solid",
     cadenceDays: key === "cycling_ftp_watts" ? 1 : 7,
@@ -709,13 +733,16 @@ function renderAnalysisHistory(history) { // NOSONAR
   })));
   for (const [sport, title, primaryUnit] of [["Lauf", "Laufen", "s/km"], ["Rad", "Rad", "W"]]) {
     const sportSeries = performanceSeries.filter((item) => item.label.startsWith(sport));
-    const charts = [[primaryUnit, primaryUnit === "W" ? "Leistungsschwelle · FTP / eFTP" : "Schwellenpace"], ["ml/kg/min", "VO₂max · Schätzung"]].map(([unit, metric]) => analysisChart(metric, sportSeries.filter((item) => item.unit === unit), unit, performanceStart, end, "", { compactInfo: true, sparse: true, includeCoverage: false, showLegend: unit === "W", calendarWeeks: true }));
+    const missing = [];
+    const charts = [[primaryUnit, primaryUnit === "W" ? "Leistungsschwelle · FTP / eFTP" : "Schwellenpace"], ["ml/kg/min", "VO₂max · Schätzung"]].map(([unit, metric]) => collectAnalysisChart(missing, metric, sportSeries.filter((item) => item.unit === unit), unit, performanceStart, end, "", { compactInfo: true, sparse: true, includeCoverage: false, showLegend: unit === "W", calendarWeeks: true })).filter(Boolean);
     if (sport === "Lauf") {
       const extra = document.createDocumentFragment();
-      renderProviderMetrics({ running_tolerance: history.provider_metrics?.running_tolerance }, extra, performanceStart, end);
+      renderProviderMetrics({ running_tolerance: history.provider_metrics?.running_tolerance }, extra, performanceStart, end, missing);
       charts.push(...extra.children);
     }
     const group = analysisChartGroup(title, charts, sportSeries, "Letzte 12 Kalenderwochen einschließlich der laufenden Woche: alle datierten Garmin-FTP-Werte, letzter gültiger Wochenwert für Schwellenpace, Wochenmedian für eFTP und VO₂max. Fehlende Messungen bleiben Lücken. Garmin; nur eFTP: Intervals.icu. VO₂max und eFTP sind Schätzungen. Quellen und Messdatum bleiben sichtbar.");
+    const missingNote = analysisMissingDataNote(missing);
+    if (missingNote) group.append(missingNote);
     makeAnalysisSectionCollapsible(group, `development-${sport}`);
     if (sport === "Lauf") group.querySelector(".analysis-section-content").append(predictions);
     else group.querySelector(".analysis-section-content").prepend(powerProfile);
@@ -726,13 +753,19 @@ function renderAnalysisHistory(history) { // NOSONAR
   const enduranceScore = otherMetrics.endurance_score;
   delete otherMetrics.running_tolerance;
   delete otherMetrics.endurance_score;
-  renderProviderMetrics({ endurance_score: enduranceScore }, extra, performanceStart, end);
+  const enduranceMissing = [];
+  renderProviderMetrics({ endurance_score: enduranceScore }, extra, performanceStart, end, enduranceMissing);
   while (extra.firstElementChild) enduranceRoot.append(makeAnalysisSectionCollapsible(extra.firstElementChild, "endurance-score"));
-  renderProviderMetrics(otherMetrics, extra, performanceStart, end);
+  const enduranceMissingNote = analysisMissingDataNote(enduranceMissing);
+  if (enduranceMissingNote) enduranceRoot.append(enduranceMissingNote);
+  const otherMissing = [];
+  renderProviderMetrics(otherMetrics, extra, performanceStart, end, otherMissing);
   while (extra.firstElementChild) {
     const chart = extra.firstElementChild;
     root.append(makeAnalysisSectionCollapsible(chart, chart.querySelector("h3").textContent));
   }
+  const otherMissingNote = analysisMissingDataNote(otherMissing);
+  if (otherMissingNote) root.append(otherMissingNote);
   for (const target of [root, loadRoot, enduranceRoot]) target.querySelectorAll("details:not([data-analysis-section])").forEach((details) => { details.open = openDetails.has(`${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`); });
 }
 
@@ -771,13 +804,14 @@ function providerMetricValue(metric, values) {
   return undefined;
 }
 
-function renderProviderMetrics(metrics, root, start, end) {
+function renderProviderMetrics(metrics, root, start, end, missing) {
   Object.entries(metrics || {}).forEach(([key, item], index) => {
     const raw = (Array.isArray(item?.points) ? item.points : []).map((point) => ({ date: point?.date, value: providerMetricValue(key, point?.values) })).filter((point) => point.date && point.value !== undefined);
-    if (!raw.some(analysisValidPoint)) return;
+    if (!raw.some(analysisValidPoint)) { missing.push(providerMetricLabel(key)); return; }
     const points = analysisWeeklyPerformancePoints(raw, start, end, false);
-    const series = [{ label: providerMetricLabel(key), legendLabel: providerMetricLabel(key), source: item.source || "Garmin Connect", unit: providerMetricUnit(key), color: index, cadenceDays: 7, points, currentPoint: raw.filter((point) => point.date <= end).findLast(analysisValidPoint) }];
-    const chart = analysisChart(providerMetricLabel(key), series, providerMetricUnit(key), start, end, "", { sparse: true, showLegend: false, calendarWeeks: true });
+    const series = [{ label: providerMetricLabel(key), legendLabel: providerMetricLabel(key), source: item.source, unit: providerMetricUnit(key), color: index, cadenceDays: 7, points, currentPoint: raw.filter((point) => point.date <= end).findLast(analysisValidPoint) }];
+    const chart = collectAnalysisChart(missing, providerMetricLabel(key), series, providerMetricUnit(key), start, end, "", { sparse: true, showLegend: false, calendarWeeks: true });
+    if (!chart) return;
     chart.querySelector(".analysis-chart-legend")?.remove();
     root.append(chart);
   });
@@ -811,7 +845,7 @@ function bodySeriesPoints(item, window, period = bodyHistoryPeriod) {
 
 function bodyMetricChart(metric, title, unit, window, period, preferred = {}) {
   const power = metric === "cycling_w_per_kg";
-  const entries = (window.metrics?.[metric] || []).filter((item) => power || isPreferredSource(item, preferred[metric], "Garmin Connect"));
+  const entries = (window.metrics?.[metric] || []).filter((item) => power || isPreferredSource(item, preferred[metric]));
   const series = entries.map((item, index) => ({
     label: power ? [item.power_method, item.source].filter(Boolean).join(" \u00b7 ") : title,
     legendLabel: power ? item.source : title,
@@ -831,6 +865,7 @@ function bodyMetricChart(metric, title, unit, window, period, preferred = {}) {
       ? "W/kg verwendet FTP (Garmin Connect) oder eFTP (Intervals.icu) und ein höchstens sieben Tage altes gemessenes Gewicht."
       : "Gemessene Verlaufswerte. Fehlende Messungen werden nicht ergänzt.",
     { sparse: true });
+  if (!chart) return null;
   chart.dataset.bodyMetric = metric;
   if (period === "twelveWeeks") chart.querySelectorAll(".analysis-info-tooltip").forEach((info) => {
     info.append(reportNode("p", "12 rollierende Wochen: Median der Messungen je Woche. Datum nennt den letzten Messwert der Woche.", "analysis-reference-note"));
@@ -859,7 +894,7 @@ function renderBodyAnalysis(body) {
   const rows = reportNode("tbody");
   for (const [metric, title, unit] of metrics) {
     const readings = Object.values(body?.windows || {}).flatMap((window) => (window.metrics?.[metric] || [])
-      .filter((item) => isPreferredSource(item, preferred[metric], "Garmin Connect"))
+      .filter((item) => isPreferredSource(item, preferred[metric]))
       .flatMap((item) => (item.points || []).filter((point) => point.date >= window.start && point.date <= window.end && analysisValidPoint(point))));
     readings.sort((a, b) => (a.observed_at || a.date).localeCompare(b.observed_at || b.date));
     const latest = readings.at(-1);
@@ -880,9 +915,13 @@ function renderBodyAnalysis(body) {
     root.append(reportNode("p", "Noch keine Body-Historie verfügbar.", "empty"));
     return;
   }
+  const missing = [];
   for (const [metric, title, unit] of metrics) {
-    root.append(bodyMetricChart(metric, title, unit, window, bodyHistoryPeriod, preferred));
+    const chart = bodyMetricChart(metric, title, unit, window, bodyHistoryPeriod, preferred);
+    if (chart) root.append(chart); else missing.push(title);
   }
+  const missingNote = analysisMissingDataNote(missing);
+  if (missingNote) root.append(missingNote);
   root.querySelectorAll("details").forEach((details) => { details.open = openDetails.has(details.querySelector("summary")?.textContent); });
 }
 
@@ -1064,7 +1103,7 @@ function selectedRecoveryBaselines(report) {
   return ["sleep", "hrv", "resting_hr"].flatMap((metric) => {
     const candidates = (report?.baselines || []).filter((item) => item.metric === metric);
     candidates.sort((a, b) => String(b.observed_at).localeCompare(String(a.observed_at))
-      || Number(isPreferredSource(b, preferred[metric], "Intervals.icu")) - Number(isPreferredSource(a, preferred[metric], "Intervals.icu"))
+      || Number(isPreferredSource(b, preferred[metric])) - Number(isPreferredSource(a, preferred[metric]))
       || b.history.length - a.history.length);
     return candidates.slice(0, 1);
   });
@@ -1114,14 +1153,18 @@ function renderRecoveryCharts(report, root) {
       coverage: `${analysisCoverageText(readings.length, expectedDays, "Tagen")}${rangeDescription}`, points };
   });
   const note = "Schlaf zeigt den Durchschnitt der angezeigten Messungen. Persönliche Normalbereiche werden nur für HRV und Ruhepuls angezeigt.";
+  const missing = [];
   const charts = series.map((item) => {
     const values = item.points.filter(analysisValidPoint).map((point) => Number(point.value));
     const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
     const title = average == null ? item.legendLabel : `${item.legendLabel} · Ø ${analysisValue(average, item.unit)}`;
-    return analysisChart(title, [item], item.unit, start, end, "", { compactInfo: true, includeCoverage: false, showLegend: false });
-  });
+    return collectAnalysisChart(missing, title, [item], item.unit, start, end, "", { compactInfo: true, includeCoverage: false, showLegend: false });
+  }).filter(Boolean);
   root.append(analysisPeriodControls("Zeitraum für Erholung", recoveryHistoryPeriod, (period) => { recoveryHistoryPeriod = period; renderPersonalRecovery(report); }));
-  root.append(analysisChartGroup(`Erholung · ${recoveryHistoryPeriod === "twelveWeeks" ? "Letzte 12 Wochen" : "Letzte 14 Tage"}`, charts, series, note));
+  const group = analysisChartGroup(`Erholung · ${recoveryHistoryPeriod === "twelveWeeks" ? "Letzte 12 Wochen" : "Letzte 14 Tage"}`, charts, series, note);
+  const missingNote = analysisMissingDataNote(missing);
+  if (missingNote) group.append(missingNote);
+  root.append(group);
 }
 
 function renderPersonalRecovery(report) {
@@ -1297,7 +1340,7 @@ function appendSeasonEvidence(preparation, section) {
   details.append(reportNode("summary", "Beobachtete Nachweise und Lücken"));
   details.append(reportNode("p", `Zielkontext · Sport: ${target.sport || "unbekannt"} · Distanz: ${target.distance_confirmed ? seasonDistance(target.distance_meters) : "unbekannt"} · Ziel: ${target.target_confirmed ? target.target : "unbekannt"} · Quelle: ${target.source || "unbekannt"}`));
   details.append(reportNode("p", `Wöchentlicher beobachteter Umfang · Status: ${seasonStatusLabel(weekly.status)} · ${weekly.weeks_with_sessions ?? 0}/${weekly.weeks_total ?? 12} Wochen mit Einheiten · ${weekly.sessions ?? 0} Einheiten · Dauer: ${seasonDuration(weekly.duration_seconds)} (${weekly.duration_known_sessions ?? 0} bekannte Einheiten) · Distanz: ${seasonDistance(weekly.distance_meters)} (${weekly.distance_known_sessions ?? 0} bekannte Einheiten) · Quelle: ${weekly.source || "unbekannt"}`));
-  appendSeasonWeeklyHistory(preparation.weeks || [], weekly.source || "Intervals.icu recorded activities", details);
+  appendSeasonWeeklyHistory(preparation.weeks || [], weekly.source || "unbekannt", details);
   details.append(reportNode("p", `Lange Einheit · Status: ${seasonStatusLabel(long.status)} · ${analysisCountLabel(long.sessions, "Nachweis", "Nachweise")} · längste Dauer: ${seasonDuration(long.duration_seconds)} · längste Distanz: ${seasonDistance(long.distance_meters)} · Quelle: ${long.source || "unbekannt"}`));
   const dimensions = specificity.known_dimensions || {};
   details.append(reportNode("p", `Spezifitätsnachweise · Status: ${seasonStatusLabel(specificity.status)} · Ausdauer: ${dimensions.aerobic ?? 0} · Power-Profil: ${dimensions.power_profile ?? 0} · Intervallqualität: ${dimensions.interval_quality ?? 0} · Quelle: ${specificity.source || "unbekannt"}`));

@@ -108,9 +108,8 @@ function metricSourceClass(metricData) {
   const provider = metricData?.source_provider;
   if (typeof provider === "string" && /^[a-z0-9-]+$/.test(provider)) return `metric-${provider}`;
   const source = metricData?.source;
-  if (source === "Garmin Connect") return "metric-garmin";
   if (source === "Manuell") return "metric-manual";
-  if (source && (source.startsWith("Intervals.icu") || source === "Aus Aktivitäten")) return "metric-intervals";
+  if (source === "Aus Aktivitäten") return "metric-intervals";
   return "";
 }
 
@@ -191,6 +190,8 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
   const caption = document.createElement("span");
   const source = metricSourceDetails(metricData);
   const { value, unit } = metricValueParts(metricData);
+  // A tile without a value is hidden; an editable one stays so the value can still be entered.
+  if (value == null && !editable?.key) return;
   if (value == null) metric.textContent = "—";
   else if (formatter) metric.textContent = formatter(value);
   else metric.textContent = `${value}${unit ? " " + unit : ""}`;
@@ -258,9 +259,9 @@ function currentPerformanceValues(metrics, history) {
   const pulse = [values.running_max_hr_bpm, values.cycling_max_hr_bpm].filter((item) => item?.value != null && Number.isFinite(Number(item.value))).sort((a, b) => Number(b.value) - Number(a.value))[0];
   values.max_hr_bpm = pulse;
   const preferred = history?.body?.preferred_providers?.cycling_w_per_kg;
-  const points = (history?.body?.windows?.["12w"]?.metrics?.cycling_w_per_kg || []).flatMap((item) => (item.points || []).filter(analysisValidPoint).map((point) => ({ ...point, source: item.source, ..."source_provider" in item ? { source_provider: item.source_provider } : {}, unit: "W/kg" }))).sort((a, b) => b.date.localeCompare(a.date) || Number(isPreferredSource(b, preferred, "Garmin Connect")) - Number(isPreferredSource(a, preferred, "Garmin Connect")));
+  const points = (history?.body?.windows?.["12w"]?.metrics?.cycling_w_per_kg || []).flatMap((item) => (item.points || []).filter(analysisValidPoint).map((point) => ({ ...point, source: item.source, ..."source_provider" in item ? { source_provider: item.source_provider } : {}, unit: "W/kg" }))).sort((a, b) => b.date.localeCompare(a.date) || Number(isPreferredSource(b, preferred)) - Number(isPreferredSource(a, preferred)));
   // The preferred provider's newest point wins even when another provider is newer; others only fill in when it has none.
-  values.cycling_w_per_kg = (preferred === undefined ? undefined : points.find((point) => isPreferredSource(point, preferred, "Garmin Connect"))) || points[0];
+  values.cycling_w_per_kg = (preferred === undefined ? undefined : points.find((point) => isPreferredSource(point, preferred))) || points[0];
   return values;
 }
 
@@ -291,15 +292,18 @@ function renderCurrentPerformance(metrics, history) {
     const body = reportNode("tbody");
     for (const [key, label] of items) {
       const metric = metrics?.[key];
+      if (metric?.value == null) continue;
       const row = reportNode("tr"); row.dataset.metric = key;
       const heading = reportNode("th", label); heading.scope = "row";
-      row.append(heading, reportNode("td", metric?.value == null ? "\u2014" : analysisValue(metric.value, metric.unit || "")));
+      row.append(heading, reportNode("td", analysisValue(metric.value, metric.unit || "")));
       body.append(row);
     }
+    if (!body.childElementCount) continue;
     table.append(body);
     if (sport === "Allgemein") table.classList.add("current-performance-general");
     grid.append(table);
   }
+  if (!grid.childElementCount) grid.append(reportNode("p", "Noch keine aktuellen Leistungswerte.", "empty"));
   root.append(grid);
   makeAnalysisSectionCollapsible(root, "current-performance");
 }

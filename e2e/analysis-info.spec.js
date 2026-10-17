@@ -77,14 +77,15 @@ test("@responsive current performance groups real values by sport before the cha
   } });
   const root = page.locator("#currentPerformance");
   await expect(root).toBeVisible();
-  await expect(root.locator("caption")).toHaveText(["Allgemein", "Laufen", "Radfahren"]);
+  await expect(root.locator("caption")).toHaveText(["Laufen", "Radfahren"]);
   await expect(root.locator("[data-metric='cycling_ftp_watts']")).toContainText("280 W");
   await expect(root.locator("small")).toHaveCount(0);
   await expect(root).not.toContainText("Garmin");
   await expect(root).not.toContainText("Intervals.icu");
   await expect(root).not.toContainText("01.10.2026");
   await expect(root.locator("[data-metric='run_threshold_pace_seconds_per_km']")).toContainText("4:30");
-  await expect(root.locator("[data-metric='run_threshold_watts'] td")).toHaveText("\u2014");
+  await expect(root.locator("[data-metric='run_threshold_watts']")).toHaveCount(0);
+  await expect(root.locator("td").filter({ hasText: "\u2014" })).toHaveCount(0);
   await expect(root).not.toContainText("5 km");
   expect(await root.evaluate((element) => !!(element.compareDocumentPosition(document.getElementById("analysisHistoryCharts")) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
   expect((await new AxeBuilder({ page }).include("#currentPerformance").analyze()).violations).toEqual([]);
@@ -468,4 +469,29 @@ test("@responsive legend info buttons are at least 44x44 and never overlap each 
       expect(overlaps, `legend buttons ${first} and ${second} overlap`).toBe(false);
     }
   }
+});
+
+test("@responsive empty performance charts are omitted and listed once as missing data", async ({ page }) => {
+  await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-08", load: { points: [] }, metrics: {
+    cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }],
+    run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: null }, { date: "2026-09-08", value: null }] }],
+  } } });
+  const root = page.locator("#analysisHistoryCharts");
+  await expect(root.locator("svg")).toHaveCount(1);
+  await expect(root.getByRole("heading", { name: "Schwellenpace", exact: true })).toHaveCount(0);
+  const missing = root.locator("p.empty", { hasText: "Keine Daten:" });
+  await expect(missing).toHaveCount(2);
+  await expect(missing.first()).toContainText("Schwellenpace");
+  await expect(root.locator("p.empty", { hasText: "Keine Daten:" }).filter({ hasText: "FTP" })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("@responsive performance without any history renders no empty sport groups or tiles", async ({ page }) => {
+  await performanceFixture(page, { history: { load: { points: [] }, metrics: {} } });
+  const root = page.locator("#analysisHistoryCharts");
+  await expect(root.locator(".analysis-group-title")).toHaveCount(0);
+  await expect(root.locator("svg")).toHaveCount(0);
+  await expect(page.locator("#currentPerformance table")).toHaveCount(0);
+  await expect(page.locator("#currentPerformance")).toContainText("Noch keine aktuellen Leistungswerte.");
+  await expect(page.locator("#currentPerformance")).not.toContainText("—");
 });
