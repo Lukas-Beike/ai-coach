@@ -54,6 +54,26 @@ def _activities_and_wellness(
     return activities, wellness_rows
 
 
+def _unavailable_context(
+    garmin: dict[str, Any], profile: dict[str, Any], today: date
+) -> dict[str, Any]:
+    """Projection without an Intervals.icu snapshot: Garmin-only recovery and load."""
+    unavailable = {
+        "available": False,
+        "source": performance_current_metrics.PROVIDER_INTERVALS_NAME,
+        "as_of": None,
+        "metrics": {},
+        "personal_recovery": personal_recovery([], garmin, profile, today),
+        "training_focus": training_focus(
+            None, garmin, today, str(profile.get("timezone") or "UTC")
+        ),
+    }
+    load_projection = garmin_projection.garmin_training_load_projection(garmin, today)
+    if load_projection:
+        unavailable["garmin_training_load"] = load_projection
+    return unavailable
+
+
 def current_performance_context(
     snapshot: dict[str, Any] | None,
     garmin: dict[str, Any],
@@ -69,22 +89,7 @@ def current_performance_context(
     recovery values, when given.
     """
     if not snapshot:
-        unavailable = {
-            "available": False,
-            "source": performance_current_metrics.PROVIDER_INTERVALS_NAME,
-            "as_of": None,
-            "metrics": {},
-            "personal_recovery": personal_recovery([], garmin, profile, today),
-            "training_focus": training_focus(
-                None, garmin, today, str(profile.get("timezone") or "UTC")
-            ),
-        }
-        load_projection = garmin_projection.garmin_training_load_projection(
-            garmin, today
-        )
-        if load_projection:
-            unavailable["garmin_training_load"] = load_projection
-        return unavailable
+        return _unavailable_context(garmin, profile, today)
 
     athlete_value = snapshot.get("athlete")
     athlete: dict[str, Any] = athlete_value if isinstance(athlete_value, dict) else {}

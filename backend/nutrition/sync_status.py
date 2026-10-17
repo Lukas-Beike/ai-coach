@@ -101,25 +101,11 @@ class NutritionSyncStatusService:
                 snapshot,
                 summary["date"],
                 today,
-                measured=None if measured is None else measured.get(summary["date"], {}),
+                measured=None
+                if measured is None
+                else measured.get(summary["date"], {}),
             )
-            intake = summary["total_kcal"] if summary["entry_count"] else None
-            consumed = expenditure["total_kcal"]
-            days.append(
-                {
-                    "date": summary["date"],
-                    "intake_kcal": intake,
-                    "expenditure_kcal": consumed,
-                    "balance_kcal": intake - consumed
-                    if intake is not None and consumed is not None
-                    else None,
-                    "energy_expenditure": expenditure,
-                    **{
-                        key: summary[f"total_{key}"] if summary["entry_count"] else None
-                        for key in ("carbs_g", "protein_g", "fat_g")
-                    },
-                }
-            )
+            days.append(_week_day(summary, expenditure))
         averages = {}
         for key in ("intake_kcal", "expenditure_kcal", "carbs_g", "protein_g", "fat_g"):
             values = [day[key] for day in days if day[key] is not None]
@@ -195,3 +181,23 @@ class NutritionSyncStatusService:
             return self._nutrition_repository.mark_date_synced(
                 db, validated_date, revision, now_str
             )
+
+
+def _week_day(summary: dict[str, Any], expenditure: dict[str, Any]) -> dict[str, Any]:
+    """One closed day of the week summary: logged intake against expenditure."""
+    logged = bool(summary["entry_count"])
+    intake = summary["total_kcal"] if logged else None
+    consumed = expenditure["total_kcal"]
+    return {
+        "date": summary["date"],
+        "intake_kcal": intake,
+        "expenditure_kcal": consumed,
+        "balance_kcal": intake - consumed
+        if intake is not None and consumed is not None
+        else None,
+        "energy_expenditure": expenditure,
+        **{
+            key: summary[f"total_{key}"] if logged else None
+            for key in ("carbs_g", "protein_g", "fat_g")
+        },
+    }

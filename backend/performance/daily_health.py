@@ -184,6 +184,37 @@ def daily_energy_expenditure(
     return result
 
 
+def _window_values(
+    health_by_date: Mapping[str, Mapping[str, Any]], cutoff: date, end_date: date
+) -> tuple[dict[str, list[float]], dict[str, set[str]]]:
+    """Collect each daily total and its sources for the days in the window."""
+    values: dict[str, list[float]] = {key: [] for key in GARMIN_DAILY_HEALTH_FIELDS}
+    sources: dict[str, set[str]] = {key: set() for key in GARMIN_DAILY_HEALTH_FIELDS}
+    for record_date, health in health_by_date.items():
+        try:
+            current = date.fromisoformat(iso_date_prefix(record_date))
+        except ValueError:
+            continue
+        if not cutoff <= current <= end_date:
+            continue
+        for metric_name, metric_values in values.items():
+            number = _as_number(health.get(metric_name))
+            if number is not None:
+                metric_values.append(float(number))
+                if health.get("source"):
+                    sources[metric_name].add(str(health["source"]))
+    return values, sources
+
+
+def _window_average(metric_name: str, numbers: list[float]) -> float | int | None:
+    """Counts average to whole numbers, energy keeps two decimals."""
+    if not numbers:
+        return None
+    if metric_name in {"steps", "floors"}:
+        return round(sum(numbers) / len(numbers))
+    return round(sum(numbers) / len(numbers), 2)
+
+
 def garmin_daily_health_metrics(
     snapshot: dict[str, Any],
     days: int,
@@ -198,24 +229,11 @@ def garmin_daily_health_metrics(
     without it they are read from the Garmin snapshot. Freshness is sync status
     and is always read from the snapshot.
     """
-    cutoff = end_date - timedelta(days=days - 1)
-    values: dict[str, list[float]] = {key: [] for key in GARMIN_DAILY_HEALTH_FIELDS}
-    sources: dict[str, set[str]] = {key: set() for key in GARMIN_DAILY_HEALTH_FIELDS}
     if health_by_date is None:
         health_by_date = garmin_daily_health_by_date(snapshot)
-    for record_date, health in health_by_date.items():
-        try:
-            current = date.fromisoformat(iso_date_prefix(record_date))
-        except ValueError:
-            continue
-        if not cutoff <= current <= end_date:
-            continue
-        for metric_name, _metric_values in values.items():
-            number = _as_number(health.get(metric_name))
-            if number is not None:
-                _metric_values.append(float(number))
-                if health.get("source"):
-                    sources[metric_name].add(str(health["source"]))
+    values, sources = _window_values(
+        health_by_date, end_date - timedelta(days=days - 1), end_date
+    )
     units = {
         "steps": "Schritte/Tag",
         "floors": "Stockwerke/Tag",
@@ -223,12 +241,7 @@ def garmin_daily_health_metrics(
     }
     result: dict[str, dict[str, Any]] = {}
     for metric_name, numbers in values.items():
-        if not numbers:
-            average: float | int | None = None
-        elif metric_name in {"steps", "floors"}:
-            average = round(sum(numbers) / len(numbers))
-        else:
-            average = round(sum(numbers) / len(numbers), 2)
+        average = _window_average(metric_name, numbers)
         result[f"{metric_name}_7d"] = performance_freshness.garmin_metric_freshness(
             snapshot,
             "daily_stats",
