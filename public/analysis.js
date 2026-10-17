@@ -109,7 +109,6 @@ function analysisChart(title, series, unit, start, end, note, {
   const section = reportNode("section", null, "analysis-chart-card");
   section.append(reportNode("h3", title));
   const valid = analysisValidPoint;
-  const values = series.flatMap((item) => item.points.filter(valid));
 
   const legend = reportNode("ul", null, "analysis-chart-legend");
   series.forEach((item, index) => {
@@ -706,7 +705,8 @@ function renderAnalysisHistory(history) { // NOSONAR
     const timeSeries = [{ label: weekly ? "Trainingszeit pro Woche" : "Trainingszeit pro Tag", legendLabel: "Trainingszeit", source: history.training_time.source, unit: "h", color: 1, bars: true, connected: true, cadenceDays: weekly ? 7 : 1, average: true, averageInHeading: true, points: weekly ? analysisWeeklySumPoints(timePoints, start, end) : timePoints }];
     const timeValues = timeSeries[0].points.filter(analysisValidPoint).map((point) => Number(point.value));
     const timeAverage = timeValues.reduce((sum, value) => sum + value, 0) / timeValues.length;
-    const timeTitle = timeValues.length ? `Trainingszeit \u00b7 \u00d8 ${analysisValue(timeAverage, "h")}${weekly ? " pro Woche" : " pro Tag"}` : "Trainingszeit";
+    const timeCadence = weekly ? " pro Woche" : " pro Tag";
+    const timeTitle = timeValues.length ? `Trainingszeit \u00b7 \u00d8 ${analysisValue(timeAverage, "h")}${timeCadence}` : "Trainingszeit";
     const timeChart = collectAnalysisChart(loadMissing, timeTitle, timeSeries, "h", start, end, `${sourcePrefix(history.training_time.source)}Summe der Bewegungszeit erfasster Aktivit\u00e4ten, jede Aktivit\u00e4t einmal. Tage und Wochen ohne erfasste Dauer bleiben L\u00fccken.`, { calendarWeeks: weekly });
     if (timeChart) {
       timeChart.querySelector(".analysis-chart-legend")?.remove();
