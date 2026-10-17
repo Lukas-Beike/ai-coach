@@ -686,12 +686,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/http_api/handler.py",
-      "code": "arg-type",
-      "message_sha256": "454abbaab0cc1828be65fbd1b78572b7e7e5ed8bc7cca575ab77dc69909bdeeb"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_executor.py",
       "code": "arg-type",
       "message_sha256": "457c40ecf7d19bbe1d602a357c1208738bebc65456b705296ef3d4e104a497bd"

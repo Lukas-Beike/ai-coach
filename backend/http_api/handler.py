@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from backend.errors import AppError, public_error_contract, public_error_payload
+from backend.errors import (
+    DATABASE_BUSY_MESSAGE,
+    AppError,
+    DatabaseBusyError,
+    public_error_contract,
+    public_error_payload,
+)
 from backend.http_api.requests import (
     read_audio_body as read_request_audio_body,
 )
@@ -29,6 +35,19 @@ from backend.http_api.requests import (
 from backend.http_api.static_assets import StaticAssetService
 from backend.observability import http_access_log_level, redact_request_query
 from backend.runtime.socket_deadline import SocketDeadline
+
+# A busy writer or reader pool clears once the current unit of work commits.
+DATABASE_BUSY_RETRY_AFTER_SECONDS = 5
+
+
+def database_busy_error() -> AppError:
+    """Return the retryable public error for a busy local database."""
+    return AppError(
+        503,
+        DATABASE_BUSY_MESSAGE,
+        reason=DatabaseBusyError.reason,
+        retry_after_seconds=DATABASE_BUSY_RETRY_AFTER_SECONDS,
+    )
 
 
 @dataclass(frozen=True)
@@ -152,6 +171,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.dependencies.route_dispatcher.handle_get(self, path)
         except AppError as exc:
             self._send_app_error(exc, "GET")
+        except DatabaseBusyError:
+            self._send_app_error(database_busy_error(), "GET")
         except Exception:
             self.dependencies.logger.exception(
                 "Unhandled GET error",
@@ -192,6 +213,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
         except AppError as exc:
             self._send_app_error(exc, "POST")
+        except DatabaseBusyError:
+            self._send_app_error(database_busy_error(), "POST")
         except Exception:
             self.dependencies.logger.exception(
                 "Unhandled POST error",
@@ -234,6 +257,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.dependencies.route_dispatcher.handle_put(self, path)
         except AppError as exc:
             self._send_app_error(exc, "PUT")
+        except DatabaseBusyError:
+            self._send_app_error(database_busy_error(), "PUT")
         except Exception:
             self.dependencies.logger.exception(
                 "Unhandled PUT error",
@@ -314,11 +339,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "HTTP application error",
                 extra={"event": "http_app_error", "context": context},
             )
-        headers = (
-            {"WWW-Authenticate": "Session"}
-            if status == 401 and error.upstream_status is None
-            else None
-        )
+        headers: dict[str, str | list[str]] | None = None
+        if status == 401 and error.upstream_status is None:
+            headers = {"WWW-Authenticate": "Session"}
+        elif status in {429, 503} and type(error.retry_after_seconds) is int:
+            headers = {"Retry-After": str(max(0, error.retry_after_seconds))}
         self.send_json(
             status,
             public_error_payload(

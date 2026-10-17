@@ -7,6 +7,7 @@ import logging
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 from collections.abc import Callable, Mapping
 from contextlib import nullcontext
@@ -20,6 +21,7 @@ from zoneinfo import ZoneInfo
 from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.vocabulary import ActivityLinkKind, MetricKind, ProviderId
 from backend.db import DatabaseManager, canonical_store, row_factory
+from backend.db import manager as manager_module
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.diagnostics.canonical_backfill import summarize_canonical_backfill
@@ -1745,6 +1747,41 @@ class WorkerTests(BackfillFixture):
 
         self.assertEqual(len(calls), 2)
         backfill.mark_failed.assert_not_called()
+
+    def test_batches_yield_the_writer_to_a_waiting_foreground_request(self) -> None:
+        # At startup the backfill loops batch after batch; each batch must run
+        # as a background writer so a login waiting for the writer is served
+        # after the current batch instead of after the whole loop.
+        batch_started = threading.Event()
+        foreground_done = threading.Event()
+        flags: list[bool] = []
+        batches_before_foreground: list[int] = []
+
+        def run_batch(db: Any) -> BatchReport:
+            flags.append(manager_module._BACKGROUND_WRITER.get())
+            batch_started.set()
+            time.sleep(0.01)
+            done = foreground_done.is_set() or len(flags) >= 500
+            return BatchReport(items=1, done=done)
+
+        def foreground() -> None:
+            batch_started.wait(5)
+            with self.manager.unit_of_work(timeout=2):
+                batches_before_foreground.append(len(flags))
+            foreground_done.set()
+
+        backfill = Mock()
+        backfill.run_batch.side_effect = run_batch
+        worker = self.make_worker(backfill, database=self.manager)
+        waiter = threading.Thread(target=foreground)
+        waiter.start()
+        worker.run_loop()
+        waiter.join(5)
+
+        self.assertTrue(foreground_done.is_set())
+        self.assertTrue(flags and all(flags))
+        self.assertLessEqual(batches_before_foreground[0], 5)
+        self.assertFalse(manager_module._BACKGROUND_WRITER.get())
 
     def test_loop_ends_when_the_backfill_reports_done(self) -> None:
         backfill = Mock()

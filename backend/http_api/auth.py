@@ -30,6 +30,15 @@ SESSION_CLEANUP_BATCH_SIZE = 100
 # Session upkeep (touch, cleanup, expired delete) never decides authentication,
 # so it only tries the locks and the writer once and retries on a later request.
 SESSION_MAINTENANCE_WAIT_SECONDS = 0.0
+# Login and logout write one session row in their own unit of work. They wait
+# only for the writer, never for the shared database lock: multi-repository
+# writers hold that lock while they themselves wait for the writer, so queuing
+# behind it made a login wait for several background units without a bound.
+# The writer wait stays well below the browser's request timeout, so a busy
+# writer answers with a retryable 503 instead of a hung or failed request.
+# A restore still cannot interleave: restore_drain blocks new leases and waits
+# for active ones before the database file is swapped.
+SESSION_WRITE_WAIT_SECONDS = 10.0
 
 
 class SessionAuthServiceCache:
@@ -254,8 +263,9 @@ class SessionAuthService:
         now = time.time()
         with (
             self._session_lock,
-            self._database_lock,
-            self._database_manager.unit_of_work() as db,
+            self._database_manager.unit_of_work(
+                timeout=SESSION_WRITE_WAIT_SECONDS
+            ) as db,
         ):
             self._sessions.create(
                 db,
@@ -278,8 +288,9 @@ class SessionAuthService:
             return
         with (
             self._session_lock,
-            self._database_lock,
-            self._database_manager.unit_of_work() as db,
+            self._database_manager.unit_of_work(
+                timeout=SESSION_WRITE_WAIT_SECONDS
+            ) as db,
         ):
             self._sessions.delete(db, self.session_token_hash(token))
 
