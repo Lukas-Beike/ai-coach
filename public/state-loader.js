@@ -43,8 +43,16 @@ let stateSnapshotSaveTimer = null;
 let viewCacheEpoch = 0;
 // A load with failed areas still stores the loaded areas and keeps the previous
 // snapshot's values for the failed ones, so a slow area does not hold back the
-// next start.
-let stateSnapshotIncomplete = false;
+// next start. The bootstrap sends placeholders for these keys, so each failed
+// area takes exactly its own keys from the previous snapshot. Chat and profile
+// come with the bootstrap itself.
+let stateSnapshotFailedAreas = [];
+const AREA_SNAPSHOT_KEYS = {
+  plan: ["plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning"],
+  weather: ["weather"],
+  library: ["library", "library_next_cursor"],
+  feedback: ["checkins", "local_feedback", "activity_feedback"],
+};
 
 function previousSnapshotData() {
   try {
@@ -57,7 +65,12 @@ function saveStateSnapshot() {
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
   if (!state.initialStateLoaded || !state.data || state.replaceDataOnLoad) return;
-  const data = stateSnapshotIncomplete ? { ...previousSnapshotData(), ...state.data } : state.data;
+  const previous = stateSnapshotFailedAreas.length ? previousSnapshotData() : {};
+  const data = { ...state.data };
+  for (const area of stateSnapshotFailedAreas) {
+    const keys = area === "performance" ? ["performance", providerIds().garmin, "activities"] : AREA_SNAPSHOT_KEYS[area] || [];
+    for (const key of keys) if (key && key in previous) data[key] = previous[key];
+  }
   const snapshot = JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data });
   try {
     localStorage.setItem(STATE_SNAPSHOT_KEY, snapshot);
@@ -193,13 +206,14 @@ function applyLoadedArea(payload, area, result, error, bootstrap, chatGeneration
 
 function mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion) {
   const failures = [];
+  const failedAreas = [];
   const appliedAreas = [];
   results.forEach(([area, result, error]) => {
     const outcome = applyLoadedArea(payload, area, result, error, bootstrap, chatGeneration, chatContentVersion);
-    if (outcome.error) failures.push(outcome.error);
+    if (outcome.error) { failures.push(outcome.error); failedAreas.push(area); }
     if (outcome.applied) appliedAreas.push(outcome.area);
   });
-  return { failures, appliedAreas };
+  return { failures, failedAreas, appliedAreas };
 }
 
 function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveVersions) {
@@ -232,10 +246,10 @@ function renderLoadedState(payload, liveAreasOnly) {
   render(payload);
 }
 
-// Renders the merged areas and stores them unless an area failed to load.
-function renderCompletedState(payload, liveAreasOnly, failed) {
+// Renders the merged areas and stores them; failed areas keep their stored values.
+function renderCompletedState(payload, liveAreasOnly, failedAreas) {
   renderLoadedState(payload, liveAreasOnly);
-  if (!liveAreasOnly) stateSnapshotIncomplete = failed;
+  if (!liveAreasOnly) stateSnapshotFailedAreas = failedAreas;
   scheduleStateSnapshotSave();
 }
 
@@ -283,9 +297,9 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     if (sessionGeneration !== state.sessionGeneration || requestSequence !== state.loadSequence) return;
     // Incorporate changes that arrived while these requests were in flight.
     payload.messages = state.data?.messages || [];
-    const { failures, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
+    const { failures, failedAreas, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
     applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveVersions);
-    if (requestSequence === state.loadSequence) renderCompletedState(payload, liveAreasOnly, failures.length > 0);
+    if (requestSequence === state.loadSequence) renderCompletedState(payload, liveAreasOnly, failedAreas);
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
     if (sessionGeneration === state.sessionGeneration) showStateLoadFailure(error);

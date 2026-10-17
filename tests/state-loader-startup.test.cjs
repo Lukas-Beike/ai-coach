@@ -224,19 +224,20 @@ test("a load with failed areas stores the loaded areas and keeps the previous fa
   state.initialStateLoaded = true;
   state.data = { performance: { ctl: 40 }, library: [{ id: "w1" }] };
   context.saveStateSnapshot();
-  // A start from the snapshot replaces all data, so the failed library is missing.
+  // A start from the snapshot replaces all data; the bootstrap's placeholders stand in for the failed library.
   state.replaceDataOnLoad = true;
+  const placeholders = { state_versions: {}, performance: {}, library: [], checkins: [], weather: {} };
   const failing = context.load("/api/bootstrap", ["performance", "library"]);
-  respond("/api/bootstrap", { state_versions: {} });
+  respond("/api/bootstrap", placeholders);
   respond("/api/performance", { performance: { ctl: 41 } });
   respond("/api/library?limit=100", Promise.reject(new Error("offline")));
   await failing;
-  assert.equal(state.data.library, undefined);
+  assert.deepEqual(plain(state.data.library), []);
   context.saveStateSnapshot();
   const stored = context.readStateSnapshot().data;
   assert.deepEqual(plain([stored.performance, stored.library]), [{ ctl: 41 }, [{ id: "w1" }]]);
   const complete = context.load("/api/bootstrap?local=1", ["performance"]);
-  respond("/api/bootstrap?local=1", { state_versions: {} });
+  respond("/api/bootstrap?local=1", placeholders);
   await complete;
   context.saveStateSnapshot();
   assert.equal(context.readStateSnapshot().data.performance.ctl, 41);
