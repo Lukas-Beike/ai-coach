@@ -496,3 +496,13 @@ test("a live area refresh leaves the cached-message sync note alone", async () =
   assert.equal(state.chatCacheSyncing, true);
   assert.deepEqual(syncCalls, []);
 });
+
+test("a load without the chat area leaves the cached-message sync note alone", async () => {
+  const { context, state, syncCalls, respond } = syncingLoader();
+  const loading = context.load("/api/bootstrap?local=1", ["library"]);
+  respond("/api/bootstrap?local=1", {});
+  respond("/api/library?limit=100", { workouts: [] });
+  await loading;
+  assert.equal(state.chatCacheSyncing, true);
+  assert.deepEqual(syncCalls, []);
+});

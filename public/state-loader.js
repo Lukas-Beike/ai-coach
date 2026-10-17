@@ -372,14 +372,16 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   } catch (error) {
     if (sessionGeneration === state.sessionGeneration) showStateLoadFailure(error);
   } finally {
-    if (sessionGeneration === state.sessionGeneration) finishStateLoad(path);
+    if (sessionGeneration === state.sessionGeneration) finishStateLoad(path, requestedAreas);
   }
 }
 
-function finishStateLoad(path) {
+function finishStateLoad(path, requestedAreas) {
   if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
   // The fresh chat load ended, with messages or with an error shown by showStateLoadFailure.
-  if (state.chatCacheSyncing && path !== LIVE_AREA_REFRESH) setChatCacheSyncing(false);
+  // A load without the chat area, such as a plan route's, leaves the note to the chat load.
+  const chatLoad = path !== LIVE_AREA_REFRESH && (!requestedAreas || requestedAreas.includes("chat"));
+  if (state.chatCacheSyncing && chatLoad) setChatCacheSyncing(false);
 }
 
 function areaLoading(area) {
