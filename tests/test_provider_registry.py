@@ -12,6 +12,7 @@ import unittest
 from datetime import UTC, datetime
 from typing import Any
 
+from backend.canonical.vocabulary import MetricKind
 from backend.config import Config
 from backend.http_api.sync_commands import PROVIDER_NOT_CONFIGURED_MESSAGES
 from backend.providers.descriptors import (
@@ -232,6 +233,19 @@ class DefaultDescriptorParityTests(unittest.TestCase):
         self.assertEqual(("weather",), registry.ids_with(Capability.WEATHER_FORECAST))
         self.assertEqual(("calendar",), registry.ids_with(Capability.PUBLIC_CALENDAR))
         self.assertEqual(("intervals",), registry.ids_with(Capability.PLANNED_EVENTS))
+        self.assertEqual(("intervals",), registry.ids_with(Capability.METRIC_EXPORT))
+        self.assertEqual(
+            {
+                MetricKind.WEIGHT,
+                MetricKind.BODY_FAT,
+                MetricKind.RESTING_HR,
+                MetricKind.FTP,
+                MetricKind.THRESHOLD_HR,
+                MetricKind.MAX_HR,
+                MetricKind.THRESHOLD_PACE,
+            },
+            registry.get("intervals").metric_exports,
+        )
         # Wahoo reads body and threshold values only as lowest-priority fallbacks.
         self.assertEqual(
             ("intervals", "garmin", "wahoo"), registry.ids_with(Capability.BODY)
@@ -365,6 +379,19 @@ class DescriptorValidationTests(unittest.TestCase):
             _descriptor(capabilities=["activities"])  # type: ignore[arg-type]
         with self.assertRaisesRegex(ValueError, "capabilities"):
             _descriptor(capabilities=frozenset({"activities"}))  # type: ignore[arg-type]
+
+    def test_metric_exports_are_declared_with_the_capability(self) -> None:
+        with self.assertRaisesRegex(ValueError, "METRIC_EXPORT"):
+            dataclasses.replace(
+                _descriptor(), metric_exports=frozenset({MetricKind.WEIGHT})
+            )
+        with self.assertRaisesRegex(ValueError, "METRIC_EXPORT"):
+            _descriptor(capabilities=frozenset({Capability.METRIC_EXPORT}))
+        with self.assertRaisesRegex(ValueError, "metric_exports"):
+            dataclasses.replace(
+                _descriptor(capabilities=frozenset({Capability.METRIC_EXPORT})),
+                metric_exports=frozenset({"weight"}),  # type: ignore[arg-type]
+            )
 
     def test_descriptor_requires_freshness_area_values(self) -> None:
         with self.assertRaisesRegex(ValueError, "freshness_areas"):

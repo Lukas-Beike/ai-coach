@@ -304,8 +304,89 @@ function renderCurrentPerformance(metrics, history) {
     grid.append(table);
   }
   if (!grid.childElementCount) grid.append(reportNode("p", "Noch keine aktuellen Leistungswerte.", "empty"));
-  root.append(grid);
+  root.append(grid, metricExportActions());
   makeAnalysisSectionCollapsible(root, "current-performance");
+}
+
+// Sending is always preview -> explicit confirmation -> execute; the server rejects unconfirmed requests.
+function metricExportActions() {
+  const actions = reportNode("div", null, "metric-export-actions");
+  const button = reportNode("button", "Werte an Anbieter senden", "secondary-button");
+  button.type = "button";
+  const recalcLabel = reportNode("label", null, "metric-export-recalc");
+  const recalc = document.createElement("input");
+  recalc.type = "checkbox";
+  recalcLabel.append(recalc, " Herzfrequenzzonen beim Anbieter neu berechnen");
+  button.addEventListener("click", () => { void exportCurrentMetrics(button, recalc); });
+  actions.append(button, recalcLabel);
+  return actions;
+}
+
+function metricExportValue(value, unit) {
+  if (unit === "m/s" && Number(value) > 0) return analysisValue(1000 / Number(value), "s/km");
+  return analysisValue(value, unit);
+}
+
+function metricExportLine(item) {
+  const labels = { weight: "Gewicht", body_fat: "Körperfett", resting_hr: "Ruhepuls", ftp: "FTP", threshold_hr: "Schwellen-Herzfrequenz", max_hr: "Maximale Herzfrequenz", threshold_pace: "Schwellenpace" };
+  const sport = { ride: "Rad", run: "Lauf" }[item.sport];
+  const sportSuffix = sport ? ` (${sport})` : "";
+  const metric = `${labels[item.metric] || item.metric}${sportSuffix}`;
+  const remote = item.current_remote_value == null ? "dort noch kein Wert" : `dort bisher ${metricExportValue(item.current_remote_value, item.unit)}`;
+  return `• ${metric}: ${metricExportValue(item.value, item.unit)} vom ${dateLabel(item.observed_on)} · Quelle: ${item.source_label || "unbekannt"} → ${item.target_label} (${remote})`;
+}
+
+function metricExportSummary(preview, items, recalc) {
+  const label = preview.provider_label || "Anbieter";
+  const skipped = (preview.items || []).length - items.length;
+  // Zone recalculation only concerns threshold settings, so only they mention it.
+  const zones = items.some((item) => item.zone_recalc)
+    ? ["", recalc ? `${label} berechnet die Herzfrequenzzonen neu.` : `Die Herzfrequenzzonen in ${label} bleiben unverändert.`]
+    : [];
+  return [
+    `Diese Werte werden an ${label} gesendet. Nur die genannten Felder ändern sich.`,
+    "",
+    ...items.map(metricExportLine),
+    ...(skipped > 0 ? ["", `${skipped} weitere Werte sind dort bereits aktuell oder schon gesendet und werden nicht gesendet.`] : []),
+    ...zones,
+  ].join("\n");
+}
+
+function metricExportRequest(preview, items, recalc) {
+  return {
+    confirmed: true,
+    provider: preview.provider,
+    recalc_hr_zones: recalc,
+    // The previewed target value lets the server refuse a value changed there since.
+    metrics: items.map(({ key, observed_on, value, current_remote_value }) => ({ key, observed_on, value, current_remote_value })),
+  };
+}
+
+function metricExportReceiptText(receipt) {
+  const label = receipt.provider_label || "Anbieter";
+  if (!receipt.failed) return `${receipt.exported} Werte an ${label} gesendet`;
+  return `${receipt.exported} Werte an ${label} gesendet, ${receipt.failed} fehlgeschlagen`;
+}
+
+async function exportCurrentMetrics(button, recalcInput) {
+  button.disabled = true;
+  try {
+    const preview = await api("/api/metric-export/preview", { method: "POST", body: JSON.stringify({}) });
+    const label = preview.provider_label || "Anbieter";
+    const items = (preview.items || []).filter((item) => item.selectable);
+    if (!items.length) {
+      toast(`Keine neuen Werte für ${label}.`);
+      return;
+    }
+    const recalc = Boolean(recalcInput?.checked && preview.recalc_hr_zones_available && items.some((item) => item.zone_recalc));
+    if (!await requestConfirmation(metricExportSummary(preview, items, recalc), { title: `An ${label} senden?`, confirmLabel: "Senden" })) return;
+    const receipt = await api("/api/metric-export/execute", { method: "POST", body: JSON.stringify(metricExportRequest(preview, items, recalc)) });
+    toast(metricExportReceiptText(receipt), receipt.failed > 0);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function renderPerformance(performance, { refreshCharts = true } = {}) {

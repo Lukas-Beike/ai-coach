@@ -296,3 +296,36 @@ class IntervalsClient:
 
     def delete_activity(self, activity_id: str) -> Any:
         return self.delete(f"/activity/{quote(activity_id, safe='')}")
+
+    def get_wellness(self, day: str) -> Any:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        return self.get(f"/athlete/{athlete}/wellness/{quote(day, safe='')}")
+
+    def get_sport_settings(self, sport_type: str) -> Any:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        return self.get(
+            f"/athlete/{athlete}/sport-settings/{quote(sport_type, safe='')}"
+        )
+
+    def update_wellness(self, day: str, fields: Mapping[str, Any]) -> Any:
+        """Write only the given wellness fields of one day; others stay unchanged."""
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        record_day = quote(day, safe="")
+        return self.put(
+            f"/athlete/{athlete}/wellness/{record_day}", {"id": day, **fields}
+        )
+
+    def update_sport_settings(
+        self,
+        sport_type: str,
+        fields: Mapping[str, Any],
+        *,
+        recalc_hr_zones: bool = False,
+    ) -> Any:
+        """Write only the given fields of one sport's settings, such as Ride or Run."""
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        sport = quote(sport_type, safe="")
+        params = {"recalcHrZones": "true" if recalc_hr_zones else "false"}
+        return self.put(
+            f"/athlete/{athlete}/sport-settings/{sport}", dict(fields), params
+        )
