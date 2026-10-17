@@ -1,5 +1,6 @@
-function render(data) {
-  if (AppRouter.baseRoute() === "nutrition") { if (state.route === "nutrition/products") void loadNutritionProducts("", { background: true }); else void loadNutrition(); }
+// A load renders once per arriving area; only its first render reloads the open nutrition view.
+function render(data, { reloadRoute = true } = {}) {
+  if (reloadRoute && AppRouter.baseRoute() === "nutrition") { if (state.route === "nutrition/products") void loadNutritionProducts("", { background: true }); else void loadNutrition(); }
   const firstRender = !state.data;
   state.data = data;
   renderAppVersion(data.app);
@@ -264,9 +265,9 @@ function bootstrapPayload(bootstrap, liveAreasOnly) {
   return payload;
 }
 
-function renderLoadedState(payload, liveAreasOnly) {
+function renderLoadedState(payload, liveAreasOnly, options) {
   if (!liveAreasOnly) state.replaceDataOnLoad = false;
-  render(payload);
+  render(payload, options);
 }
 
 // While the device snapshot is shown, pending areas keep its values on screen.
@@ -281,8 +282,8 @@ function withShownSnapshotAreas(payload, pendingAreas) {
 }
 
 // Renders the merged areas and stores them; failed areas keep their stored values.
-function renderCompletedState(payload, liveAreasOnly, failedAreas) {
-  renderLoadedState(withShownSnapshotAreas(payload, failedAreas), liveAreasOnly);
+function renderCompletedState(payload, liveAreasOnly, failedAreas, options) {
+  renderLoadedState(withShownSnapshotAreas(payload, failedAreas), liveAreasOnly, options);
   if (!liveAreasOnly) {
     stateSnapshotFailedAreas = failedAreas;
     stateSnapshotReady = true;
@@ -330,8 +331,8 @@ async function renderAreasAsTheyArrive(domainData, areas, load) {
     if (!outcome.appliedAreas.length) return;
     outcome.appliedAreas.forEach((area) => unsettled.delete(area));
     applyLoadedStateVersions(payload, outcome.appliedAreas, bootstrap, chatGeneration, liveVersions);
+    renderCompletedState(payload, liveAreasOnly, [...unsettled], { reloadRoute: !rendered });
     rendered = true;
-    renderCompletedState(payload, liveAreasOnly, [...unsettled]);
   }));
   return { failures, unsettled, rendered };
 }

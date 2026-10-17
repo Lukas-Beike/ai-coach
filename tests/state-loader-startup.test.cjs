@@ -276,6 +276,39 @@ test("after a privacy deletion, loading areas show placeholders, not the deleted
   await loading;
 });
 
+test("a load reloads the open route view only with its first area render", async () => {
+  const { context, state, respond } = loader();
+  const reloads = [];
+  context.render = (data, { reloadRoute = true } = {}) => { state.data = data; reloads.push(reloadRoute); };
+  const loading = context.load("/api/bootstrap", ["performance", "library", "feedback"]);
+  respond("/api/bootstrap", { state_versions: {} });
+  respond("/api/performance", { performance: {} });
+  respond("/api/library?limit=100", { workouts: [] });
+  respond("/api/feedback", { checkins: [] });
+  await loading;
+  assert.deepEqual(reloads, [true, false, false]);
+});
+
+test("a later load without a failed area still stores that area from the shown snapshot", async () => {
+  const { context, state, respond } = loader();
+  state.data = { performance: { ctl: 40 }, library: [{ id: "w1" }] };
+  state.replaceDataOnLoad = true;
+  context.markStateSnapshotShown(true);
+  const placeholders = { state_versions: {}, performance: {}, library: [] };
+  const start = context.load("/api/bootstrap", ["performance", "library"]);
+  respond("/api/bootstrap", placeholders);
+  respond("/api/performance", { performance: { ctl: 41 } });
+  respond("/api/library?limit=100", Promise.reject(new Error("offline")));
+  await start;
+  const later = context.load("/api/bootstrap?local=1", ["feedback"]);
+  respond("/api/bootstrap?local=1", placeholders);
+  respond("/api/feedback", { checkins: [{ id: "c1" }] });
+  await later;
+  context.saveStateSnapshot();
+  const stored = context.readStateSnapshot().data;
+  assert.deepEqual(plain([stored.performance, stored.library, stored.checkins]), [{ ctl: 41 }, [{ id: "w1" }], [{ id: "c1" }]]);
+});
+
 test("loaded state renders as real data, so it may notify", async () => {
   const { context, state, respond } = loader();
   const flags = [];
