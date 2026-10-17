@@ -85,10 +85,51 @@ test("current W/kg uses the preferred provider's newest point and falls back to 
   const tie = wPerKg([intervals([{ date: "2026-10-15", value: 3.4 }]), garmin([{ date: "2026-10-15", value: 3.2 }])], { cycling_w_per_kg: "garmin" });
   assert.equal(tie.value, 3.2, "the preferred Garmin point wins a same-date tie");
   const unlabelled = (series) => series.map(({ source_provider, ...item }) => item);
-  const legacyTie = wPerKg(unlabelled([intervals([{ date: "2026-10-15", value: 3.4 }]), garmin([{ date: "2026-10-15", value: 3.2 }])]), {});
-  assert.equal(legacyTie.value, 3.2, "without a recorded preference the Garmin label wins a same-date tie");
+  const byLabel = wPerKg(unlabelled([garmin([{ date: "2026-10-10", value: 3.1 }]), intervals([{ date: "2026-10-15", value: 3.4 }])]), { cycling_w_per_kg: "garmin" });
+  assert.equal(byLabel.value, 3.4, "display labels are never compared, so a series without a provider id is not preferred");
 
   const none = wPerKg([garmin([{ date: "2026-10-10", value: 3.1 }]), intervals([{ date: "2026-10-15", value: 3.4 }])], {});
   assert.equal(none.value, 3.4, "a metric without a preference keeps the newest point");
   assert.equal(wPerKg([], { cycling_w_per_kg: "garmin" }), undefined, "no points at all stay empty");
+});
+
+test("analysisHasData is true only when a series holds a valid finite point", () => {
+  const { analysisValidPoint, analysisHasData } = loadFunctions("analysis.js", ["analysisValidPoint", "analysisHasData"]);
+  const has = (...seriesPoints) => analysisHasData(seriesPoints.map((points) => ({ points })));
+  assert.equal(has(), false, "no series at all");
+  assert.equal(has([]), false, "a series without points");
+  assert.equal(has([{ date: "2026-10-10", value: null }, { date: "2026-10-11", value: "x" }]), false, "only invalid points");
+  assert.equal(has([{ date: "2026-10-10", value: null }], [{ date: "2026-10-11", value: 0 }]), true, "partially filled: a zero is a valid measurement");
+  assert.equal(has([{ date: "2026-10-10", value: 3.1 }, { date: "2026-10-11", value: 3.4 }]), true, "filled");
+  assert.equal(analysisValidPoint({ value: Infinity }), false);
+});
+
+test("an analysis chart without data is omitted and its title is listed once as missing", () => {
+  const { analysisChart, collectAnalysisChart, analysisMissingDataNote } = loadFunctions(
+    "analysis.js",
+    ["analysisValidPoint", "analysisHasData", "analysisChart", "collectAnalysisChart", "analysisMissingDataNote"],
+    {
+      reportNode: (tag, text, className) => ({ tag, text, className }),
+    },
+  );
+  const empty = [{ label: "Garmin", points: [{ date: "2026-10-10", value: null }] }];
+  assert.equal(analysisChart("Ruhepuls", empty, "bpm", "2026-10-01", "2026-10-17", ""), null);
+
+  const missing = [];
+  assert.equal(collectAnalysisChart(missing, "Ruhepuls", empty, "bpm", "2026-10-01", "2026-10-17", ""), null);
+  assert.equal(collectAnalysisChart(missing, "HRV", [], "ms", "2026-10-01", "2026-10-17", ""), null);
+  assert.deepEqual(Array.from(missing), ["Ruhepuls", "HRV"]);
+  assert.deepEqual({ ...analysisMissingDataNote(missing) }, { tag: "p", text: "Keine Daten: Ruhepuls, HRV", className: "empty" });
+  assert.equal(analysisMissingDataNote([]), null, "nothing missing renders no line");
+});
+
+test("a filled analysis chart is kept and is not listed as missing", () => {
+  const chart = { title: "Gewicht" };
+  const { collectAnalysisChart } = loadFunctions("analysis.js", ["collectAnalysisChart"], {
+    analysisChart: (title) => (title === "Gewicht" ? chart : null),
+  });
+  const missing = [];
+  assert.equal(collectAnalysisChart(missing, "Gewicht", [{ points: [{ value: 72 }] }]), chart);
+  assert.equal(collectAnalysisChart(missing, "Körperfett", []), null);
+  assert.deepEqual(Array.from(missing), ["Körperfett"], "only the empty chart is listed");
 });

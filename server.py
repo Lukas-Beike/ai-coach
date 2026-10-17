@@ -369,6 +369,7 @@ from backend.sync.library_assembly import (
     WorkoutLibraryState,
     WorkoutLibrarySyncAssembly,
 )
+from backend.sync.metric_export_assembly import build_metric_export_service
 from backend.sync.persistence_assembly import SyncPersistenceAssembly
 from backend.sync.planned_calendar_assembly import (
     PlannedCalendarLocalState,
@@ -1875,6 +1876,14 @@ CANONICAL_READ = build_canonical_read(
     legacy=CANONICAL_SNAPSHOT_PROJECTION,
     key_values=KEY_VALUE_REPOSITORY,
 )
+METRIC_EXPORT = build_metric_export_service(
+    database_manager,
+    lambda: CANONICAL_READ,
+    database_lock=DB_LOCK,
+    intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+    today=lambda: ATHLETE_CLOCK.now().date(),
+    utc_now=lambda: datetime.now(UTC),
+)
 
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,
@@ -2056,6 +2065,7 @@ HTTP_API = HttpApiAssembly(
                 audio_transcription=MODEL_TRANSPORT.audio_transcription_client,
             ),
             wahoo=WAHOO_CONNECTION.service,
+            metric_export=lambda: METRIC_EXPORT,
         ),
     ),
 )

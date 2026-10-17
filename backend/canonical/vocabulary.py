@@ -177,6 +177,8 @@ class RemoteEntityKind(StrEnum):
     LIBRARY_WORKOUT = "library_workout"
     PLANNED_UNIT = "planned_unit"
     COMPETITION = "competition"
+    # A canonical metric value written to a provider field by an explicit export.
+    OBSERVATION = "observation"
 
 
 class RemoteLinkState(StrEnum):

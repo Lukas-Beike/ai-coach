@@ -12,19 +12,22 @@ test("@responsive performance keeps Garmin measurements and one cycling best per
   await page.evaluate(() => {
     const history = structuredClone(state.data.performance.history);
     history.end = "2026-10-04";
-    history.metrics.cycling_ftp_watts = [{ source: "Garmin Connect", points: [
+    history.preferred_providers = { cycling_ftp_watts: "garmin" };
+    history.body.preferred_providers = { cycling_w_per_kg: "garmin" };
+    history.metrics.cycling_ftp_watts = [{ source: "Garmin Connect", source_provider: "garmin", points: [
       { date: "2026-10-01", value: 270 }, { date: "2026-10-02", value: 272 }, { date: "2026-10-03", value: 275 },
     ] }];
     history.cycling_power_profile = { points: [
       { duration_seconds: 60, watts: 420, status: "ok", date: "2026-10-01", source: "Intervals.icu" },
     ] };
     history.body.windows["12w"].metrics.cycling_w_per_kg = [
-      { source: "Garmin Connect", points: [{ date: "2026-10-03", value: 3.8 }] },
-      { source: "Intervals.icu", points: [{ date: "2026-10-03", value: 3.9 }] },
+      { source: "Garmin Connect", source_provider: "garmin", points: [{ date: "2026-10-03", value: 3.8 }] },
+      { source: "Intervals.icu", source_provider: "intervals", points: [{ date: "2026-10-03", value: 3.9 }] },
     ];
     state.data.performance = { ...state.data.performance, history, metrics: {
       ...state.data.performance.metrics,
       running_max_hr_bpm: { value: 190, unit: "bpm" }, cycling_max_hr_bpm: { value: 185, unit: "bpm" },
+      run_threshold_hr_bpm: { value: 170, unit: "bpm" },
     } };
     renderPerformance(state.data.performance);
   });
@@ -32,6 +35,7 @@ test("@responsive performance keeps Garmin measurements and one cycling best per
   await expect(current.getByRole("rowheader", { name: "Maximale Herzfrequenz" })).toHaveCount(1);
   await expect(current.locator('[data-metric="max_hr_bpm"]')).toContainText("190 bpm");
   await expect(current.locator('[data-metric="cycling_w_per_kg"]')).toContainText("3,8 W/kg");
+  await expect(current.locator('[data-metric="run_threshold_watts"]')).toHaveCount(0);
   const order = await current.evaluate((root) => {
     const tables = root.querySelectorAll(".current-performance-table");
     const general = tables[0].getBoundingClientRect();
