@@ -12,9 +12,9 @@ Migration is incomplete: the freshness projection still keeps its per-area
 fallback sources and configured predicates in backend/sync/freshness.py, and
 those must move into descriptors in a later change.
 
-Capabilities describe what each provider can supply. They are declarative and
-have no production consumer yet; ``ProviderRegistry.ids_with`` is their only
-reader.
+Capabilities describe what each provider can supply. They are declarative;
+``ProviderRegistry.ids_with`` reads them, and the explicit library and metric
+exports check that their target declares the export capability.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId
 
 INTERVALS_ID = ProviderId.INTERVALS.value
 GARMIN_ID = ProviderId.GARMIN.value
@@ -73,6 +73,7 @@ class Capability(StrEnum):
     PLANNED_EVENTS = "planned_events"
     COMPETITIONS = "competitions"
     WORKOUT_EXPORT = "workout_export"
+    METRIC_EXPORT = "metric_export"
     WEATHER_FORECAST = "weather_forecast"
     PUBLIC_CALENDAR = "public_calendar"
 
@@ -109,6 +110,15 @@ def _require_text_set(value: object, name: str) -> None:
         raise TypeError(f"{name} must be a frozenset of text")
     for item in value:
         _require_text(item, name)
+
+
+def _require_metric_exports(value: object, capabilities: frozenset[Capability]) -> None:
+    if not isinstance(value, frozenset) or not all(
+        isinstance(kind, MetricKind) for kind in value
+    ):
+        raise ValueError("metric_exports must be a frozenset of MetricKind values")
+    if bool(value) != (Capability.METRIC_EXPORT in capabilities):
+        raise ValueError("metric_exports must be declared with METRIC_EXPORT")
 
 
 def _require_route_path(value: object, name: str) -> None:
@@ -184,6 +194,8 @@ class ProviderDescriptor:
 
     The orchestration fields default to the generic refresh-only behaviour.
     ``coach_rank`` of ``None`` means the provider is not a Coach refresh target.
+    ``metric_exports`` names the metrics an explicit metric export may write and
+    is non-empty exactly when the provider declares ``METRIC_EXPORT``.
     """
 
     provider_id: str
@@ -201,6 +213,7 @@ class ProviderDescriptor:
     not_configured_message: str | None = None
     manual_sync: ManualSyncRoute | None = None
     full_resync_path: str | None = None
+    metric_exports: frozenset[MetricKind] = frozenset()
 
     def __post_init__(self) -> None:
         _require_text(self.provider_id, "provider_id")
@@ -240,6 +253,7 @@ class ProviderDescriptor:
             raise ValueError("manual_sync must be a ManualSyncRoute")
         if self.full_resync_path is not None:
             _require_route_path(self.full_resync_path, "full_resync_path")
+        _require_metric_exports(self.metric_exports, self.capabilities)
 
 
 DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
@@ -257,6 +271,7 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
                 Capability.PLANNED_EVENTS,
                 Capability.COMPETITIONS,
                 Capability.WORKOUT_EXPORT,
+                Capability.METRIC_EXPORT,
             }
         ),
         freshness_areas=(
@@ -314,6 +329,19 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         ),
         # Full-resync route; ProviderRegistry.full_resync_routes lists it.
         full_resync_path="/api/intervals/full-resync",
+        # Body metrics go to the wellness day, thresholds to the Ride or Run sport
+        # settings; backend/sync/intervals_metric_export.py maps the fields.
+        metric_exports=frozenset(
+            {
+                MetricKind.WEIGHT,
+                MetricKind.BODY_FAT,
+                MetricKind.RESTING_HR,
+                MetricKind.FTP,
+                MetricKind.THRESHOLD_HR,
+                MetricKind.MAX_HR,
+                MetricKind.THRESHOLD_PACE,
+            }
+        ),
     ),
     ProviderDescriptor(
         provider_id=GARMIN_ID,

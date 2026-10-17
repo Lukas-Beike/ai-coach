@@ -80,8 +80,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_two(self) -> None:
-        self.assertEqual(2, MAPPER_VERSION)
+    def test_mapper_version_is_three(self) -> None:
+        self.assertEqual(3, MAPPER_VERSION)
 
     def test_fixture_maps_every_record_without_issues(self) -> None:
         result = _map(*_fixture_rows())
@@ -101,6 +101,8 @@ class VersionAndFixtureTests(unittest.TestCase):
         self.assertEqual(72.0, first.load)
         self.assertIs(LoadModel.GARMIN_TRAINING_LOAD, first.load_model)
         self.assertEqual(142.0, first.avg_hr)
+        self.assertEqual(171.0, first.max_hr)
+        self.assertEqual(156.0, second.max_hr)
         self.assertIsNone(first.avg_power)
         self.assertEqual("Synthetic morning ride", first.name)
         self.assertIs(Sport.RUN, second.sport)
@@ -591,6 +593,7 @@ class DurationAndDistanceTests(unittest.TestCase):
             ({"distance": 2_000_001}, "distance"),
             ({"averageHR": 0}, "averageHR"),
             ({"averageHR": 300}, "averageHR"),
+            ({"maxHR": 300}, "maxHR"),
             ({"activityTrainingLoad": 10_001}, "activityTrainingLoad"),
         )
         for overrides, field in cases:
@@ -618,6 +621,17 @@ class DurationAndDistanceTests(unittest.TestCase):
         assert low is not None and high is not None
         self.assertEqual(20.0, low.avg_hr)
         self.assertEqual(250.0, high.avg_hr)
+
+    def test_max_hr_prefers_max_hr_over_max_heart_rate(self) -> None:
+        both, _ = _one(maxHR=180, maxHeartRate=175)
+        alias, _ = _one(maxHR=None, maxHeartRate=175)
+        absent, issues = _one(maxHR=None)
+
+        assert both is not None and alias is not None and absent is not None
+        self.assertEqual(180.0, both.max_hr)
+        self.assertEqual(175.0, alias.max_hr)
+        self.assertIsNone(absent.max_hr)
+        self.assertEqual((), issues)
 
 
 class TrainingLoadAndPowerTests(unittest.TestCase):

@@ -166,6 +166,8 @@ def _garmin_measurements(
 def _garmin_ftp(
     garmin: dict[str, Any], today: date
 ) -> dict[date, tuple[float, str, Any]]:
+    # Remaining snapshot read: the Garmin FTP history and performance history are
+    # accumulated across syncs and have no observation series with equal history.
     result: dict[date, tuple[float, str, Any]] = {}
     synced_at = _sync_timestamp(garmin, "cycling_ftp")
     history_synced_at = _sync_timestamp(garmin, "cycling_ftp_history")

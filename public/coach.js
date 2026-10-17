@@ -222,7 +222,7 @@ async function loadInitialState() {
   await load("/api/bootstrap?local=1", ["chat", "performance", "feedback", "profile", "plan", "library"]);
   if (sessionGeneration !== state.sessionGeneration) return;
   // An update start whose fresh data failed shows the stored data and retries.
-  if (!state.data && showStateSnapshot(readStateSnapshot())) { retryBootstrapAuth(); return; }
+  if (!state.data && showStateSnapshot(readStateSnapshot(), { syncing: false })) { retryBootstrapAuth(); return; }
   state.initialStateLoaded = true;
   scheduleStateSnapshotSave();
   if (state.chatInitialScrollPending && AppRouter.baseRoute() === "coach") scrollChatToLatest();
@@ -1110,16 +1110,29 @@ function updateChatComposerVisibility() {
   const jump = $("#chatJumpToComposer");
   const active = panel.classList.contains("active");
   const nearBottom = chatIsNearBottom();
+  // Cached messages are not current yet: the sync note takes the place of the jump button.
+  const syncing = Boolean(state.chatCacheSyncing) && active;
+  const syncNote = $("#chatSyncStatus");
+  if (syncNote) syncNote.hidden = !syncing;
   // Reaching the latest content re-enables following; a hidden panel measures the wrong scroller and must not change it.
   if (active && nearBottom) {
     state.chatFollowLatest = true;
     state.chatUnseenContent = false;
   }
   if (jump) {
-    jump.hidden = nearBottom || !$("#messages")?.childElementCount || !active;
+    jump.hidden = syncing || nearBottom || !$("#messages")?.childElementCount || !active;
     updateChatJumpLabel(jump);
   }
 }
+
+// While the Coach shows cached messages the chat stays at the newest one until the fresh load ends or fails.
+function setChatCacheSyncing(syncing) {
+  state.chatCacheSyncing = syncing;
+  if (syncing) state.chatFollowLatest = true;
+  updateChatComposerVisibility();
+  if (syncing) scrollChatToLatest();
+}
+globalThis.addEventListener("load", () => { if (state.chatCacheSyncing) scrollChatToLatest(); });
 
 // Content that arrives while the reader is scrolled away is flagged so the jump button can say so.
 function markChatContentArrived() {
@@ -1826,7 +1839,10 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   root.classList.toggle("has-empty-state", hasEmptyState);
   root.setAttribute("aria-busy", String(Boolean(state.chatRequest || state.chatServerOperationId)));
   $("#chatPanel")?.classList.toggle("chat-empty", hasEmptyState);
-  if (root.dataset.signature === signature) return;
+  if (root.dataset.signature === signature) {
+    rememberChatCache(state.data);
+    return;
+  }
   const shouldScroll = !preserveScroll && (forceScroll || chatIsNearBottom());
   root.dataset.signature = signature;
   root.replaceChildren();
@@ -1849,6 +1865,8 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   updateChatQueueStatus();
   updateChatComposerVisibility();
   if ((state.chatInitialScrollPending || shouldScroll) && !state.chatResponseStarted) scrollChatToLatest();
+  // Shown messages are stored right away, so the next start shows them at once.
+  rememberChatCache(state.data);
 }
 function cancelScheduledChatStreamRender() {
   if (chatStreamRenderFrame != null) cancelAnimationFrame(chatStreamRenderFrame);
@@ -1928,7 +1946,7 @@ function scrollChatToLatest() {
   const root = $("#messages");
   if (!panel?.classList.contains("active") || !root) return;
   requestAnimationFrame(() => {
-    if (state.chatInitialScrollPending && (!state.initialStateLoaded || document.readyState !== "complete")) return;
+    if (state.chatInitialScrollPending && ((!state.initialStateLoaded && !state.chatCacheSyncing) || document.readyState !== "complete")) return;
     root.scrollTop = root.scrollHeight;
     chatScrollAnchors.messages = root.scrollTop;
     const target = chatLatestVisibleNode(root);
@@ -2086,7 +2104,7 @@ function renderContextPreview(preview) {
     ["Aktuelle Leistungsdaten", preview.structured_athlete_context?.current_performance],
     ["Erholungskontext", preview.structured_athlete_context?.recovery],
     ["Gesprächskontinuität", preview.conversation],
-    ["Intervals.icu-Snapshot", preview.latest_intervals_snapshot],
+    ["Aktivitäten", preview.latest_activities],
     ["Letzte Chat-Eingabe", preview.chat_prompt],
     ["Coach-Kontext (vollständiger Text)", preview.context_text],
   ];

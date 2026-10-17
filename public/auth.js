@@ -57,6 +57,7 @@ function showLogin() {
   state.chatProposalRefreshInFlight = false;
   state.chatProposalRefreshQueued = false;
   state.chatInitialScrollPending = true;
+  state.chatCacheSyncing = false;
   state.chatScrollY = null;
   state.chatScrollRestoring = false;
   cancelScheduledChatStreamRender();
@@ -212,12 +213,15 @@ function showAppShellLoading({ updated = false } = {}) {
 // Shows the device snapshot before the session check, so a start does not wait
 // for the network. The fresh bootstrap replaces it; an unauthenticated start
 // clears it through showLogin.
-function showStateSnapshot(snapshot) {
+function showStateSnapshot(snapshot, { syncing = true } = {}) {
   if (!snapshot) return false;
   state.replaceDataOnLoad = true;
+  state.chatCacheSyncing = syncing && Boolean(snapshot.data?.messages?.length);
   try {
     render(snapshot.data);
+    markStateSnapshotShown(true);
   } catch {
+    state.chatCacheSyncing = false;
     // A snapshot from earlier assets may not fit the current views.
     clearStateSnapshot();
     state.data = null;
@@ -284,7 +288,8 @@ async function bootstrapAuth() {
     } else showLogin();
   } catch {
     renderConnectivityStatus(false);
-    if (shellShown || (updated && showStateSnapshot(snapshot))) {
+    setChatCacheSyncing(false);
+    if (shellShown || (updated && showStateSnapshot(snapshot, { syncing: false }))) {
       // An offline start keeps the stored data and checks the session again later.
       retryBootstrapAuth();
       return;
@@ -292,6 +297,25 @@ async function bootstrapAuth() {
     $("#loginError").textContent = "Server nicht erreichbar.";
     showLogin();
   } finally { clearTimeout(timeout); }
+}
+
+
+// Maps a failed login request to its own message. A wrong password (401), the
+// request timeout, a missing connection and a lasting server error such as an
+// incomplete secure configuration keep the text api() already built.
+function loginErrorMessage(exception) {
+  const status = exception?.status;
+  if (status === 429) {
+    const seconds = Number(exception.retryAfter);
+    let wait = "";
+    if (seconds >= 60) wait = ` in etwa ${Math.ceil(seconds / 60)} Minuten`;
+    else if (seconds > 0) wait = ` in ${Math.ceil(seconds)} Sekunden`;
+    return `Zu viele Anmeldeversuche. Bitte${wait} erneut versuchen.`;
+  }
+  // Only a retryable answer (Retry-After) or a gateway without a server answer is transient.
+  const transient = exception.retryAfter != null || status === 502 || status === 504 || exception.reason === "invalid_json";
+  if (status >= 500 && transient) return "Der Server startet gerade oder ist ausgelastet. Bitte in wenigen Sekunden erneut versuchen.";
+  return exception.message;
 }
 
 
@@ -314,7 +338,7 @@ async function login(event) {
     notePwaActivity();
     await loadInitialState();
   } catch (exception) {
-    error.textContent = exception.message;
+    error.textContent = loginErrorMessage(exception);
   } finally {
     button.disabled = false;
     button.classList.remove("is-loading");

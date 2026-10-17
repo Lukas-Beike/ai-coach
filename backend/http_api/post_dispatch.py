@@ -16,6 +16,7 @@ from backend.http_api.diagnostics_delete_post import DiagnosticsDeletePostRoutes
 from backend.http_api.equipment_post import EquipmentPostRoutes
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
+from backend.http_api.metric_export_post import MetricExportPostRoutes
 from backend.http_api.nutrition import NutritionPostRoutes
 from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
 from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
@@ -43,6 +44,7 @@ class HttpAuthenticatedPostRoutes:
     analysis: AnalysisRoutes | None = None
     equipment: EquipmentPostRoutes | None = None
     wahoo: WahooPostRoutes | None = None
+    metric_export: MetricExportPostRoutes | None = None
 
 
 class HttpPostDispatcher:
@@ -72,6 +74,7 @@ class HttpPostDispatcher:
         self._analysis = authenticated_routes.analysis
         self._equipment = authenticated_routes.equipment
         self._wahoo = authenticated_routes.wahoo
+        self._metric_export = authenticated_routes.metric_export
 
     def handle_before_auth(self, handler: Any, path: str) -> bool:
         return self._auth_routes.handle(handler, path) or self._restore_route.handle(
@@ -118,6 +121,6 @@ class HttpPostDispatcher:
     def _handle_optional(self, handler: Any, path: str) -> bool:
         return any(
             route.handle(handler, path)
-            for route in (self._equipment, self._wahoo)
+            for route in (self._equipment, self._wahoo, self._metric_export)
             if route is not None
         )

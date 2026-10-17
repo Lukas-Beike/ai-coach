@@ -4,6 +4,8 @@ Every batch runs inside the maintenance gate, outermost, and then the writer uni
 work, so a restore never overlaps a batch. The stop event is checked between
 batches. A failed batch rolls back, and the failure is recorded as ``failed`` in its
 own transaction; the next startup resumes from the last committed cursor.
+Batches run as background writers, so a waiting foreground request (a login,
+for example) is served between two batches instead of queuing behind the loop.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import threading
 from collections.abc import Callable
 from typing import Any, Final
 
+from backend.db.manager import background_writer
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill import BatchReport, CanonicalBackfill
@@ -63,6 +66,10 @@ class CanonicalBackfillWorker:
 
     def run_loop(self) -> None:
         """Run batches until the backfill is complete, a batch fails, or stop is requested."""
+        with background_writer():
+            self._run_batches()
+
+    def _run_batches(self) -> None:
         while not self._stop_event.is_set():
             try:
                 report = self._run_batch()

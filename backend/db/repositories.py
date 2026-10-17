@@ -83,12 +83,36 @@ class NutritionProductRepository:
         if barcode:
             clauses.append("barcode = ?")
             params.append(barcode)
-        if query:
-            clauses.append(
-                "(name LIKE ? COLLATE NOCASE OR brand LIKE ? COLLATE NOCASE)"
+        # Every word must appear in the name or brand, so "Arla Skyr" finds
+        # the saved product "Skyr" of brand "Arla". An empty query lists all;
+        # a whitespace-only or overlong query matches nothing rather than a
+        # broader set. Words shorter than three characters must start a word,
+        # so "Ei" finds "Eier" but not "Reisnudeln". Separators around a word
+        # are ignored, so "Haferflocken, Banane" and "Müsli (Bio)" still match.
+        terms = [
+            term
+            for word in (query or "").split()
+            if (term := word.strip(",.()/-!?:;+&"))
+        ]
+        if query and not 1 <= len(terms) <= 20:
+            return []
+        for term in terms:
+            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            patterns = (
+                (f"{escaped}%", *(f"%{sep}{escaped}%" for sep in " -/(,.+&"))
+                if len(term) < 3
+                else (f"%{escaped}%",)
             )
-            pattern = f"%{query}%"
-            params.extend((pattern, pattern))
+            clauses.append(
+                "("
+                + " OR ".join(
+                    f"{column} LIKE ? ESCAPE '\\' COLLATE NOCASE"
+                    for column in ("name", "brand")
+                    for _ in patterns
+                )
+                + ")"
+            )
+            params.extend(patterns * 2)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         rows = db.execute(
             self._SELECT

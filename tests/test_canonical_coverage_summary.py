@@ -80,12 +80,12 @@ class CanonicalCoverageSummaryTests(unittest.TestCase):
         garmin = providers[str(ProviderId.GARMIN)]
         self.assertEqual(intervals["sync_time_stored"], True)
         self.assertEqual(intervals["activities"], 5)
-        self.assertEqual(intervals["observations"], 32)
+        self.assertEqual(intervals["observations"], 39)
         self.assertEqual(intervals["issues"][str(IssueReason.UNSUPPORTED)], 0)
         self.assertEqual(garmin["sync_time_stored"], True)
         self.assertEqual(garmin["activities"], 2)
-        self.assertEqual(garmin["observations"], 18)
-        self.assertEqual(garmin["issues"][str(IssueReason.UNSUPPORTED)], 3)
+        self.assertEqual(garmin["observations"], 19)
+        self.assertEqual(garmin["issues"][str(IssueReason.UNSUPPORTED)], 2)
 
     def test_every_issue_reason_is_reported_with_an_explicit_count(self) -> None:
         coverage = ProviderCoverage(

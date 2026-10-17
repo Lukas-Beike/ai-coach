@@ -35,6 +35,7 @@ _DAILY_FIELDS: tuple[tuple[str, MetricKind], ...] = (
 _LOAD_FIELDS: tuple[tuple[str, MetricKind], ...] = (
     ("ctl", MetricKind.CTL),
     ("atl", MetricKind.ATL),
+    ("tsb", MetricKind.FORM),
 )
 
 
@@ -293,9 +294,9 @@ def canonical_planning_recovery(
 
     ``reader`` must already be the source chosen for the unit of work. Each value
     is the observation the daily source rule selects for its day: Garmin before
-    Intervals.icu for sleep, HRV and resting HR, the reverse for readiness. CTL and
-    ATL come from Intervals.icu only. Every value carries the source label of the
-    provider that supplied it.
+    Intervals.icu for sleep, HRV and resting HR, the reverse for readiness. CTL,
+    ATL and form (TSB) come from Intervals.icu only. Every value carries the source
+    label of the provider that supplied it.
     """
     recovery_by_date: dict[str, dict[str, Any]] = {}
     for field, kind in _DAILY_FIELDS:
@@ -329,52 +330,20 @@ def _add_observations(
         )
 
 
-def add_intervals_form(
-    recovery_by_date: dict[str, dict[str, Any]],
-    wellness_rows: Any,
-    *,
-    start: date,
-    end: date,
-) -> None:
-    """Add the Intervals.icu form (TSB) of each day in the window.
-
-    Form has no canonical observation, so it stays a read of the stored wellness
-    rows. Nothing else is read from them, and the window comes from the caller.
-    """
-    if not isinstance(wellness_rows, list):
-        return
-    for row in wellness_rows:
-        if not isinstance(row, dict):
-            continue
-        record_date = _planning_context_date(_first_present(row, _ROW_DATE_KEYS))
-        form = _first_present(row, ("tsb", "form"))
-        if form is None or not start.isoformat() <= record_date <= end.isoformat():
-            continue
-        _add_planning_recovery_value(
-            recovery_by_date.setdefault(record_date, {}),
-            "tsb",
-            form,
-            INTERVALS_WELLNESS_SOURCE,
-        )
-
-
 def planning_recovery_view(
     reader: ObservationReader,
     db: Any,
     *,
     start: date,
     end: date,
-    wellness_rows: Any,
     morning_battery_history: Any,
     morning_body_battery: Any,
 ) -> dict[str, dict[str, Any]]:
-    """Combine canonical recovery with the values that have no canonical form.
+    """Combine canonical recovery with the body battery, which has no metric kind.
 
-    Form (TSB) comes from the stored wellness rows and body battery from the
-    morning history and the current morning reading.
+    Body battery comes from the morning history and the current morning reading.
     """
     recovery_by_date = canonical_planning_recovery(reader, db, start=start, end=end)
-    add_intervals_form(recovery_by_date, wellness_rows, start=start, end=end)
     _add_morning_battery_recovery(
         recovery_by_date, morning_battery_history, morning_body_battery
     )

@@ -80,6 +80,7 @@ def _wellness_history(
 
 
 def _load_history(dates: list[str], garmin: dict[str, Any]) -> list[dict[str, Any]]:
+    # Remaining snapshot read: Garmin training status (acute load) has no metric kind.
     observations = {
         day.isoformat(): acute_load_value(row)
         for row in _rows(garmin.get("training_status"))
@@ -121,6 +122,8 @@ def _training_time_history(
 def _garmin_values(
     key: str, garmin: dict[str, Any], start: date, today: date
 ) -> dict[str, float]:
+    # Remaining snapshot read: the performance history and the FTP history are
+    # accumulated across syncs and have no observation series with equal history.
     observations = {}
     for row in _rows(garmin.get("performance_history")):
         day = _day(row.get("date"))
@@ -230,6 +233,7 @@ def analysis_history(
             else canonical.history_wellness_rows,
             activity_rows=None if canonical is None else canonical.activity_rows,
         ),
+        # Remaining snapshot read: the power curve has no metric kind.
         "cycling_power_profile": {
             **(snapshot.get("cycling_power_profile") or {}),
             "points": [
@@ -250,6 +254,8 @@ def analysis_history(
 def _provider_metrics(
     garmin: dict[str, Any], start: date, today: date
 ) -> dict[str, Any]:
+    # Remaining snapshot read: ENDURANCE_SCORE carries only the overall score, not
+    # the scalar fields and weekly records shown here; running tolerance has no kind.
     cached = garmin.get("provider_metrics") or {}
     metrics = dict(cached) if isinstance(cached, dict) else {}
     for key in ("endurance_score", "running_tolerance"):

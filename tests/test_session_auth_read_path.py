@@ -15,7 +15,7 @@ from backend.config import Config
 from backend.db import row_factory
 from backend.db.manager import DatabaseManager
 from backend.db.schema import initialize_schema
-from backend.errors import AppError
+from backend.errors import AppError, DatabaseBusyError
 from backend.http_api import auth as http_auth
 from backend.http_api.auth import SESSION_COOKIE, SessionAuthService
 from backend.http_api.rate_limit import RateLimiter
@@ -233,6 +233,50 @@ class SessionAuthReadPathTests(unittest.TestCase):
         with self.assertRaises(AppError) as failure:
             self.auth.login_user(handler_for(), "wrong-password")
         self.assertEqual(failure.exception.status, 401)
+
+    def test_login_and_logout_do_not_queue_behind_the_shared_database_lock(
+        self,
+    ) -> None:
+        # Startup writers hold the shared lock while they wait for the writer;
+        # a login must not inherit that wait.
+        holding, release = threading.Event(), threading.Event()
+
+        def hold_lock() -> None:
+            with self.database_lock:
+                holding.set()
+                release.wait(10)
+
+        holder = threading.Thread(target=hold_lock)
+        holder.start()
+        self.addCleanup(holder.join, 5)
+        self.addCleanup(release.set)
+        self.assertTrue(holding.wait(5))
+        result = cast(
+            dict,
+            self.run_blocking(
+                lambda: self.auth.login_user(handler_for(), "synthetic-password")
+            ),
+        )
+        token = result["session_token"]
+        self.assertTrue(self.auth.authenticated_session(handler_for(token)))
+
+        def logout() -> bool:
+            self.auth.logout_user(handler_for(token))
+            return True
+
+        self.run_blocking(logout)
+        self.assertIsNone(self.auth.authenticated_session(handler_for(token)))
+
+    def test_login_wait_for_a_busy_writer_is_bounded(self) -> None:
+        self.hold_writer()
+        started = time.monotonic()
+        with (
+            patch.object(http_auth, "SESSION_WRITE_WAIT_SECONDS", 0.1),
+            self.assertRaises(DatabaseBusyError),
+        ):
+            self.auth.login_user(handler_for(), "synthetic-password")
+        self.assertLess(time.monotonic() - started, 3)
+        self.assertLess(http_auth.SESSION_WRITE_WAIT_SECONDS, 25)
 
     def test_csrf_is_enforced_against_the_session_hash(self) -> None:
         token, csrf = self.add_session("csrf")

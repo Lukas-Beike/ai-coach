@@ -128,6 +128,7 @@ class ActivityRecord:
     energy_kj: float | None = None
     # Elapsed time when ``duration_s`` is moving time (Intervals.icu); otherwise None.
     elapsed_duration_s: float | None = None
+    max_hr: float | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
@@ -214,5 +215,10 @@ class ActivityRecord:
                 0.0,
                 MAX_ACTIVITY_DURATION_S,
             ),
+        )
+        object.__setattr__(
+            self,
+            "max_hr",
+            optional_bounded_number(self.max_hr, "max_hr", *HEART_RATE_BOUNDS),
         )
         optional_text(self.name, "name", max_length=200)

@@ -127,6 +127,7 @@ def _record(row: dict[str, Any]) -> ActivityRecord:
         avg_cadence=row["avg_cadence"],
         energy_kj=row["energy_kj"],
         elapsed_duration_s=canonical_store.activity_elapsed_duration(row["details"]),
+        max_hr=canonical_store.activity_max_hr(row["details"]),
     )
 
 

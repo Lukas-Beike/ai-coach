@@ -90,7 +90,7 @@ def sport_records(
 
 class ModuleContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 5)
+        self.assertEqual(MAPPER_VERSION, 6)
 
     def test_naive_retrieved_at_is_a_programming_error_for_both_mappers(self) -> None:
         naive_time = naive("2026-10-11T08:00:00")
@@ -117,10 +117,11 @@ class WellnessFixtureTests(unittest.TestCase):
     def test_fixture_maps_without_issues(self) -> None:
         self.assertEqual(self.result.issues, ())
 
-    def test_each_fixture_row_yields_eight_observations(self) -> None:
+    def test_each_fixture_row_yields_ten_observations(self) -> None:
         # Per row: weight, restingHR, hrv, sleepSecs, sleepScore, readiness,
-        # ctl (ctLoad duplicates it) and atl (atlLoad duplicates it).
-        self.assertEqual(len(self.result.records), 3 * 8)
+        # ctl (ctLoad duplicates it), atl (atlLoad duplicates it), tsb and the
+        # Ride sportInfo eFTP.
+        self.assertEqual(len(self.result.records), 3 * 10)
         for day in ("2026-10-08", "2026-10-09", "2026-10-10"):
             day_kinds = {
                 record.kind
@@ -138,6 +139,8 @@ class WellnessFixtureTests(unittest.TestCase):
                     MetricKind.READINESS,
                     MetricKind.CTL,
                     MetricKind.ATL,
+                    MetricKind.FORM,
+                    MetricKind.EFTP,
                 },
             )
 
@@ -164,13 +167,18 @@ class WellnessFixtureTests(unittest.TestCase):
         self.assertEqual(values[MetricKind.CTL].unit, "load")
         self.assertEqual(values[MetricKind.ATL].value, 60.4)
         self.assertEqual(values[MetricKind.ATL].unit, "load")
+        self.assertEqual(values[MetricKind.FORM].value, -8.3)
+        self.assertEqual(values[MetricKind.FORM].unit, "load")
+        self.assertEqual(values[MetricKind.EFTP].value, 258)
+        self.assertEqual(values[MetricKind.EFTP].unit, "W")
 
-    def test_sport_info_and_unlisted_keys_are_ignored_without_issues(self) -> None:
+    def test_unlisted_keys_are_ignored_and_only_eftp_has_a_sport(self) -> None:
         kinds_seen = {record.kind for record in self.result.records}
         self.assertNotIn(MetricKind.FTP, kinds_seen)
         self.assertNotIn(MetricKind.TRAINING_LOAD, kinds_seen)
         for record in self.result.records:
-            self.assertIsNone(record.sport)
+            expected = Sport.RIDE if record.kind is MetricKind.EFTP else None
+            self.assertIs(record.sport, expected)
             self.assertIsNone(record.observed_at)
 
     def test_provenance_names_the_intervals_row(self) -> None:
@@ -215,13 +223,117 @@ class WellnessFieldTests(unittest.TestCase):
     def test_row_without_mapped_fields_is_kept_empty_not_dropped_with_issue(
         self,
     ) -> None:
-        result = wellness([row(tsb=-8.3, rampRate=1.2, sportInfo=[])])
+        result = wellness([row(rampRate=1.2, fatigue=2, sportInfo=[])])
         self.assertEqual(result.records, ())
         self.assertEqual(result.issues, ())
 
     def test_numeric_text_with_dot_decimal_is_accepted(self) -> None:
         result = wellness([row(weight=" 70.4 ")])
         self.assertEqual(only_value(result), 70.4)
+
+
+class FormTests(unittest.TestCase):
+    def test_reported_tsb_is_provider_reported_form(self) -> None:
+        result = wellness([row(tsb=-8.3, ctl=50, atl=40)])
+        form = [record for record in result.records if record.kind is MetricKind.FORM]
+        self.assertEqual(len(form), 1)
+        self.assertEqual(form[0].value.value, -8.3)
+        self.assertIs(form[0].provenance.source_kind, SourceKind.PROVIDER_REPORTED)
+
+    def test_form_aliases_follow_the_reader_order(self) -> None:
+        self.assertEqual(
+            kinds(wellness([row(form=3, freshness=4)]))[MetricKind.FORM], 3
+        )
+        self.assertEqual(kinds(wellness([row(freshness=4)]))[MetricKind.FORM], 4)
+
+    def test_zero_form_is_a_value(self) -> None:
+        self.assertEqual(kinds(wellness([row(tsb=0)]))[MetricKind.FORM], 0)
+
+    def test_without_tsb_form_is_ctl_minus_atl_and_derived(self) -> None:
+        result = wellness([row(ctl=52.1, atl=60.43)])
+        form = [record for record in result.records if record.kind is MetricKind.FORM]
+        self.assertEqual(len(form), 1)
+        self.assertEqual(form[0].value.value, -8.33)
+        self.assertEqual(form[0].value.unit, "load")
+        self.assertIs(form[0].provenance.source_kind, SourceKind.DERIVED)
+        self.assertIs(form[0].provenance.provider, ProviderId.INTERVALS)
+        self.assertEqual(form[0].provenance.source_record_id, ROW_DAY)
+        self.assertIsNone(form[0].sport)
+
+    def test_derivation_matches_the_legacy_form_reader(self) -> None:
+        from backend.performance.wellness import wellness_form_value
+
+        source = row(ctl=52.1, atl=60.43)
+        self.assertEqual(
+            kinds(wellness([source]))[MetricKind.FORM], wellness_form_value(source)
+        )
+
+    def test_form_is_not_derived_from_one_load_or_a_rejected_load(self) -> None:
+        self.assertNotIn(MetricKind.FORM, kinds(wellness([row(ctl=50)])))
+        self.assertNotIn(MetricKind.FORM, kinds(wellness([row(ctl=50, atl=-1)])))
+
+    def test_rejected_tsb_is_reported_and_not_derived(self) -> None:
+        result = wellness([row(tsb="fresh", ctl=50, atl=40)])
+        self.assertNotIn(MetricKind.FORM, kinds(result))
+        self.assertEqual(
+            issue_tuples(result), [(ROW_DAY, "tsb", IssueReason.INVALID_NUMBER)]
+        )
+
+
+class SportInfoEftpTests(unittest.TestCase):
+    def eftp(self, result: MappingResult[Observation]) -> list[tuple[Sport | None, float]]:
+        return [
+            (record.sport, record.value.value)
+            for record in result.records
+            if record.kind is MetricKind.EFTP
+        ]
+
+    def test_mmp_model_ftp_wins_over_the_entry_eftp(self) -> None:
+        entry = {"types": ["Ride"], "mmp_model": {"ftp": 262}, "eftp": 258}
+        self.assertEqual(self.eftp(wellness([row(sportInfo=[entry])])), [(Sport.RIDE, 262)])
+
+    def test_zero_mmp_model_falls_back_to_the_entry_eftp(self) -> None:
+        entry = {"types": ["Ride"], "mmp_model": {"ftp": 0}, "eftp": 258}
+        self.assertEqual(self.eftp(wellness([row(sportInfo=[entry])])), [(Sport.RIDE, 258)])
+
+    def test_empty_mmp_model_falls_back_to_the_entry_eftp(self) -> None:
+        entry = {"type": "VirtualRide", "mmp_model": {"ftp": None}, "eFTP": 255}
+        self.assertEqual(
+            self.eftp(wellness([row(sport_info=[entry])])), [(Sport.RIDE, 255)]
+        )
+
+    def test_each_sport_keeps_its_first_entry(self) -> None:
+        entries = [
+            {"types": ["Ride"], "eftp": 258},
+            {"types": ["VirtualRide"], "eftp": 240},
+            {"types": ["Run"], "eftp": 310},
+        ]
+        self.assertEqual(
+            self.eftp(wellness([row(sportInfo=entries)])),
+            [(Sport.RIDE, 258), (Sport.RUN, 310)],
+        )
+
+    def test_zero_eftp_is_unset(self) -> None:
+        entry = {"types": ["Ride"], "eftp": 0}
+        result = wellness([row(sportInfo=[entry])])
+        self.assertEqual((result.records, result.issues), ((), ()))
+
+    def test_untyped_entries_are_skipped_and_malformed_lists_reported(self) -> None:
+        result = wellness([row(sportInfo=[{"eftp": 258}, "Ride"])])
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            issue_tuples(result), [(ROW_DAY, "sportInfo", IssueReason.INVALID_TYPE)]
+        )
+        result = wellness([row(sportInfo={"types": ["Ride"]})])
+        self.assertEqual(
+            issue_tuples(result), [(ROW_DAY, "sportInfo", IssueReason.INVALID_TYPE)]
+        )
+
+    def test_implausible_eftp_is_out_of_range(self) -> None:
+        result = wellness([row(sportInfo=[{"types": ["Ride"], "eftp": 9000}])])
+        self.assertEqual(
+            issue_tuples(result), [(ROW_DAY, "eftp", IssueReason.OUT_OF_RANGE)]
+        )
 
 
 class CommaDecimalTests(unittest.TestCase):
@@ -552,6 +664,7 @@ class AthleteFixtureTests(unittest.TestCase):
                 (MetricKind.FTP, Sport.RIDE, 260),
                 (MetricKind.THRESHOLD_HR, Sport.RIDE, 168),
                 (MetricKind.MAX_HR, Sport.RIDE, 190),
+                (MetricKind.EFTP, Sport.RIDE, 258),
                 (MetricKind.FTP, Sport.RUN, 290),
                 (MetricKind.THRESHOLD_HR, Sport.RUN, 172),
                 (MetricKind.MAX_HR, Sport.RUN, 192),
@@ -587,7 +700,19 @@ class AthleteFixtureTests(unittest.TestCase):
                 MetricKind.MAX_HR,
                 MetricKind.THRESHOLD_PACE,
                 MetricKind.WEIGHT,
+                MetricKind.EFTP,
             },
+        )
+
+    def test_sport_setting_mmp_model_eftp_wins_and_zero_is_unset(self) -> None:
+        athlete = {
+            "sportSettings": [
+                {"types": ["Ride"], "mmp_model": {"eFTP": 263}, "eftp": 258},
+                {"types": ["Run"], "eftp": 0},
+            ]
+        }
+        self.assertEqual(
+            sport_records(thresholds(athlete)), {(MetricKind.EFTP, Sport.RIDE, 263)}
         )
 
     def test_provenance_names_the_athlete_record(self) -> None:

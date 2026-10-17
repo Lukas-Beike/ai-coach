@@ -19,7 +19,7 @@ from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
 from backend.performance.body import body_history
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
-from backend.performance.daily_health import garmin_daily_expenditure
+from backend.performance.daily_health import daily_energy_expenditure
 from backend.performance.garmin_metrics import garmin_performance_metrics
 from backend.providers.calendar import parse_ical_calendar
 from e2e import fixture_runtime
@@ -191,8 +191,8 @@ class StandardFixtureDataTests(unittest.TestCase):
         garmin = fixture_runtime._fixture_demo_garmin(
             self.today, fixture_runtime.demo_performance_history(self.today)
         )
-        today = garmin_daily_expenditure(garmin, self.today.isoformat(), self.today)
-        zero_day = garmin_daily_expenditure(
+        today = daily_energy_expenditure(garmin, self.today.isoformat(), self.today)
+        zero_day = daily_energy_expenditure(
             garmin, (self.today - timedelta(days=12)).isoformat(), self.today
         )
 

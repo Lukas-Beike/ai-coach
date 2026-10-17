@@ -27,9 +27,11 @@ from backend.canonical.vocabulary import (
 
 ACTIVITY_ID_PREFIX: Final = "act_"
 ATHLETE_SERIES: Final = "athlete"
+_ATHLETE_SERIES_KINDS: Final = frozenset({MetricKind.WEIGHT, MetricKind.EFTP})
 OBSERVATION_DETAILS: Final = "{}"
 ACTIVITY_DETAILS: Final = "{}"
 _ELAPSED_DURATION_KEY: Final = "elapsed_duration_s"
+_MAX_HR_KEY: Final = "max_hr"
 _PROVIDER_RECORD_EXISTS: Final = (
     "SELECT 1 AS present FROM provider_records "
     "WHERE provider = ? AND record_kind = ? AND source_record_id = ?"
@@ -635,8 +637,9 @@ def observation_natural_key(observation: Observation) -> str:
     """Return provider|metric|sport|series|(observed_at or observed_on).
 
     NULL parts are empty strings. The series part is empty except for a weight
-    that the Intervals.icu athlete profile reports (see ``_observation_series``),
-    which therefore never shares a key with the wellness weight of the same day.
+    or eFTP that the Intervals.icu athlete profile reports (see
+    ``_observation_series``), which therefore never shares a key with the
+    wellness value of the same day.
     """
     provider = observation.provenance.provider
     sport = observation.sport
@@ -657,17 +660,19 @@ def observation_natural_key(observation: Observation) -> str:
 
 
 def _observation_series(observation: Observation) -> str:
-    """Return ``athlete`` for an Intervals.icu athlete-profile weight, else empty.
+    """Return ``athlete`` for an Intervals.icu athlete-profile value, else empty.
 
-    A wellness row is identified by its ISO day, so a weight whose source record
-    is anything else comes from the athlete record. The consumers tell the two
-    apart by the same rule. Both values are kept: the current-metrics reader
-    shows the wellness weight first and the athlete weight as its fallback.
+    Only weight and eFTP come from both records. A wellness row is identified by
+    its ISO day, so such a value whose source record is anything else comes from
+    the athlete record. The consumers tell the two apart by the same rule. Both
+    values are kept: the current-metrics reader shows the wellness weight first
+    and the athlete weight as its fallback, and the athlete eFTP before the
+    wellness eFTP.
     """
     provenance = observation.provenance
     if (
         provenance.provider is ProviderId.INTERVALS
-        and observation.kind is MetricKind.WEIGHT
+        and observation.kind in _ATHLETE_SERIES_KINDS
         and provenance.source_record_id != observation.observed_on.isoformat()
     ):
         return ATHLETE_SERIES
@@ -1005,22 +1010,38 @@ def _activity_values(
 
 def _activity_details(record: ActivityRecord) -> str:
     # The projection owns the whole details object; no other writer adds keys.
-    if record.elapsed_duration_s is None:
+    # Values without a column of their own live here, so no migration is needed.
+    details = {
+        key: value
+        for key, value in (
+            (_ELAPSED_DURATION_KEY, record.elapsed_duration_s),
+            (_MAX_HR_KEY, record.max_hr),
+        )
+        if value is not None
+    }
+    if not details:
         return ACTIVITY_DETAILS
-    return json.dumps(
-        {_ELAPSED_DURATION_KEY: record.elapsed_duration_s}, separators=(",", ":")
-    )
+    return json.dumps(details, separators=(",", ":"))
 
 
 def activity_elapsed_duration(details: object) -> float | None:
     """Return the elapsed duration stored in an activity's details, if any."""
+    return _activity_detail_number(details, _ELAPSED_DURATION_KEY)
+
+
+def activity_max_hr(details: object) -> float | None:
+    """Return the maximum heart rate stored in an activity's details, if any."""
+    return _activity_detail_number(details, _MAX_HR_KEY)
+
+
+def _activity_detail_number(details: object, key: str) -> float | None:
     if not isinstance(details, str):
         return None
     try:
         loaded = json.loads(details)
     except ValueError, RecursionError:
         return None
-    value = loaded.get(_ELAPSED_DURATION_KEY) if isinstance(loaded, dict) else None
+    value = loaded.get(key) if isinstance(loaded, dict) else None
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return float(value)

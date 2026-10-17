@@ -34,4 +34,24 @@ test.describe("login dialog", () => {
     await expect(loginDialog).toBeVisible();
     await expect(passwordInput).toBeFocused();
   });
+
+  for (const [status, headers, expected] of [
+    [429, { "Retry-After": "600" }, "Zu viele Anmeldeversuche. Bitte in etwa 10 Minuten erneut versuchen."],
+    [503, { "Retry-After": "5" }, "Der Server startet gerade oder ist ausgelastet. Bitte in wenigen Sekunden erneut versuchen."],
+  ]) {
+    test(`a ${status} answer shows its own message instead of the timeout text @responsive`, async ({ page }) => {
+      let attempts = 0;
+      await page.route("**/api/login", async (route) => {
+        attempts += 1;
+        await route.fulfill({ status, headers, contentType: "application/json", body: JSON.stringify({ error: "Serverfehler", reason: "mocked" }) });
+      });
+      await page.goto("/");
+      await expect(page.locator("#loginDialog")).toBeVisible();
+      await page.getByLabel("Passwort", { exact: true }).fill("any-fake-password");
+      await page.getByRole("button", { name: "Anmelden", exact: true }).click();
+      await expect(page.locator("#loginError")).toHaveText(expected);
+      await expect(page.locator("#loginError")).not.toContainText("25 Sekunden");
+      expect(attempts).toBe(1);
+    });
+  }
 });

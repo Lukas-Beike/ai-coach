@@ -85,6 +85,19 @@ class MetricKind(StrEnum):
     CTL = "ctl"
     ATL = "atl"
     TRAINING_LOAD = "training_load"
+    FORM = "form"
+    EFTP = "eftp"
+    RUN_THRESHOLD_POWER = "run_threshold_power"
+    DAILY_ENERGY_TOTAL = "daily_energy_total"
+    DAILY_ENERGY_ACTIVE = "daily_energy_active"
+    STEPS = "steps"
+    FLOORS = "floors"
+    STRESS = "stress"
+    RACE_PREDICTION_5K = "race_prediction_5k"
+    RACE_PREDICTION_10K = "race_prediction_10k"
+    RACE_PREDICTION_HALF = "race_prediction_half"
+    RACE_PREDICTION_FULL = "race_prediction_full"
+    ENDURANCE_SCORE = "endurance_score"
 
     @property
     def unit(self) -> str:
@@ -109,6 +122,19 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.CTL: "load",
     MetricKind.ATL: "load",
     MetricKind.TRAINING_LOAD: "load",
+    MetricKind.FORM: "load",
+    MetricKind.EFTP: "W",
+    MetricKind.RUN_THRESHOLD_POWER: "W",
+    MetricKind.DAILY_ENERGY_TOTAL: "kcal",
+    MetricKind.DAILY_ENERGY_ACTIVE: "kcal",
+    MetricKind.STEPS: "count",
+    MetricKind.FLOORS: "count",
+    MetricKind.STRESS: "score",
+    MetricKind.RACE_PREDICTION_5K: "s",
+    MetricKind.RACE_PREDICTION_10K: "s",
+    MetricKind.RACE_PREDICTION_HALF: "s",
+    MetricKind.RACE_PREDICTION_FULL: "s",
+    MetricKind.ENDURANCE_SCORE: "score",
 }
 
 
@@ -151,6 +177,8 @@ class RemoteEntityKind(StrEnum):
     LIBRARY_WORKOUT = "library_workout"
     PLANNED_UNIT = "planned_unit"
     COMPETITION = "competition"
+    # A canonical metric value written to a provider field by an explicit export.
+    OBSERVATION = "observation"
 
 
 class RemoteLinkState(StrEnum):

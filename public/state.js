@@ -44,6 +44,8 @@ globalThis.AppState = (() => {
     chatProposalRefreshInFlight: false,
     chatProposalRefreshQueued: false,
     chatInitialScrollPending: true,
+    // The Coach shows messages from the device cache until the fresh chat load ends.
+    chatCacheSyncing: false,
     chatScrollY: null,
     chatScrollRestoring: false,
     chatFollowLatest: true,

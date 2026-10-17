@@ -27,6 +27,40 @@ GARMIN_BODY_FAT_ALIASES = (
 GARMIN_WEIGHT_ALIASES = ("weight", "weightKg", "weight_kg", "value")
 GARMIN_WEIGHT_UNIT_ALIASES = ("unitKey", "unit", "weightUnit")
 GARMIN_RUNNING_THRESHOLD_ALIASES = ("speed", "speedInMetersPerSecond", "thresholdPace")
+GARMIN_STEPS_ALIASES = ("totalSteps", "total_steps", "steps", "stepCount", "step_count")
+GARMIN_FLOORS_ALIASES = (
+    "floorsAscended",
+    "floors_ascended",
+    "floors",
+    "floorsUp",
+    "floors_up",
+)
+GARMIN_TOTAL_KCAL_ALIASES = (
+    "totalKilocalories",
+    "total_kilocalories",
+    "totalCalories",
+    "total_calories",
+    "calories",
+)
+GARMIN_ACTIVE_KCAL_ALIASES = (
+    "activeKilocalories",
+    "active_kilocalories",
+    "activeCalories",
+    "active_calories",
+    "activeCaloriesBurned",
+    "active_calories_burned",
+)
+GARMIN_ENDURANCE_SCORE_ALIASES = ("overallScore",)
+GARMIN_ENDURANCE_WRAPPER_KEYS = ("enduranceScoreDTO", "enduranceScoreDTOList")
+GARMIN_RACE_TIME_ALIASES = (
+    "raceTime",
+    "racePredictionTime",
+    "predictedTime",
+    "time",
+    "seconds",
+    "value",
+)
+GARMIN_RACE_DISTANCE_ALIASES = ("raceDistance", "distanceName", "raceType", "distance")
 
 
 def first_present(item: Any, keys: tuple[str, ...]) -> Any:

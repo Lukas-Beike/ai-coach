@@ -4,7 +4,7 @@ const AxeBuilder = require("@axe-core/playwright").default;
 function bodyHistory() {
   const start = "2026-07-15";
   const dates = Array.from({ length: 84 }, (_, index) => new Date(Date.parse(`${start}T12:00:00Z`) + index * 86400000).toISOString().slice(0, 10));
-  const make = (source, metric, transform) => ({ source, unit: metric === "weight_kg" ? "kg" : metric === "body_fat_pct" ? "%" : "W/kg",
+  const make = (source, metric, transform) => ({ source, source_provider: source.startsWith("Garmin") ? "garmin" : "intervals", unit: metric === "weight_kg" ? "kg" : metric === "body_fat_pct" ? "%" : "W/kg",
     ...(metric === "cycling_w_per_kg" ? { power_method: source === "Garmin Connect" ? "FTP" : "eFTP" } : {}),
     points: dates.map((date, index) => {
       const missingWeek = index >= 35 && index <= 41;
@@ -25,7 +25,7 @@ function bodyHistory() {
     cycling_w_per_kg: [make("Garmin Connect", "cycling_w_per_kg", (index) => (280 + index) / 70), make("Intervals.icu", "cycling_w_per_kg", (index) => (270 + index) / 71)],
   };
   const end = dates.at(-1);
-  return { start, end, load: { points: [] }, metrics: {}, body: { version: 1, default_window: "12w", windows: {
+  return { start, end, load: { points: [] }, metrics: {}, body: { version: 1, default_window: "12w", preferred_providers: { weight_kg: "garmin", body_fat_pct: "garmin", cycling_w_per_kg: "garmin" }, windows: {
     "14d": { start: dates.at(-14), end, days: 14, metrics: Object.fromEntries(Object.entries(metrics).map(([key, values]) => [key, values.map((item) => ({ ...item, points: item.points.slice(-14) }))])) },
     "12w": { start, end, days: 84, metrics },
   } } };
@@ -64,13 +64,15 @@ test("@responsive Body plots measurements and W/kg appears only in the cycling t
     const body = structuredClone(state.data.performance.history.body);
     for (const window of Object.values(body.windows)) {
       for (const metric of ["weight_kg", "body_fat_pct"]) {
-        window.metrics[metric] = window.metrics[metric].filter((item) => item.source !== "Garmin Connect");
+        window.metrics[metric] = window.metrics[metric].filter((item) => item.source_provider !== "garmin");
       }
     }
     renderBodyAnalysis(body);
   });
   await expect(overview.locator("td")).toHaveText(["—", "—"]);
   await expect(root.locator("circle[data-series]")).toHaveCount(0);
+  await expect(root.locator("[data-body-metric]")).toHaveCount(0);
+  await expect(root.locator("p.empty")).toHaveText("Keine Daten: Gewicht, Körperfett");
   expect(await new AxeBuilder({ page }).include("#bodyAnalysisCharts").analyze()).toEqual(expect.objectContaining({ violations: [] }));
   await expect(root.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(0);
   await page.evaluate(() => { location.hash = "#analysis/performance"; });

@@ -24,6 +24,9 @@ MAX_ACTIVITY_ELEVATION_M: Final = 100_000.0
 MAX_ACTIVITY_CADENCE_RPM: Final = 300.0
 MAX_ACTIVITY_ENERGY_KJ: Final = 1_000_000.0
 
+# Seconds, as accepted by the legacy Garmin race-prediction reader.
+RACE_PREDICTION_BOUNDS: Final = (60.0, 100_000.0)
+
 METRIC_BOUNDS: Final[Mapping[MetricKind, tuple[float, float]]] = {
     MetricKind.WEIGHT: (20.0, 400.0),
     MetricKind.BODY_FAT: (1.0, 80.0),
@@ -42,6 +45,20 @@ METRIC_BOUNDS: Final[Mapping[MetricKind, tuple[float, float]]] = {
     MetricKind.CTL: (0.0, 10_000.0),
     MetricKind.ATL: (0.0, 10_000.0),
     MetricKind.TRAINING_LOAD: (0.0, 10_000.0),
+    # Form (CTL minus ATL) is negative while fatigue outweighs fitness.
+    MetricKind.FORM: (-10_000.0, 10_000.0),
+    MetricKind.EFTP: (0.0, 2_500.0),
+    MetricKind.RUN_THRESHOLD_POWER: (0.0, 2_500.0),
+    MetricKind.DAILY_ENERGY_TOTAL: (0.0, 20_000.0),
+    MetricKind.DAILY_ENERGY_ACTIVE: (0.0, 20_000.0),
+    MetricKind.STEPS: (0.0, 200_000.0),
+    MetricKind.FLOORS: (0.0, 1_000.0),
+    MetricKind.STRESS: (0.0, 100.0),
+    MetricKind.RACE_PREDICTION_5K: RACE_PREDICTION_BOUNDS,
+    MetricKind.RACE_PREDICTION_10K: RACE_PREDICTION_BOUNDS,
+    MetricKind.RACE_PREDICTION_HALF: RACE_PREDICTION_BOUNDS,
+    MetricKind.RACE_PREDICTION_FULL: RACE_PREDICTION_BOUNDS,
+    MetricKind.ENDURANCE_SCORE: (0.0, 20_000.0),
 }
 
 

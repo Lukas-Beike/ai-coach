@@ -44,6 +44,9 @@ SNAPSHOT_SECTIONS = (
     "cycling_ftp",
     "cycling_ftp_history",
     "weight",
+    "daily_stats",
+    "race_predictions",
+    "endurance_score",
     "body_battery",
     "daily_training_status",
     "training_load_balance",
@@ -64,19 +67,23 @@ EXPECTED_FIXTURE_ROWS: list[tuple[str, float, str, str]] = [
     ("threshold_pace", 3.6, "2026-10-11", "run"),
     ("threshold_hr", 168.0, "2026-10-11", "run"),
     ("threshold_hr", 160.0, "2026-10-11", "ride"),
+    ("run_threshold_power", 290.0, "2026-10-11", "run"),
     ("ftp", 260.0, "2026-10-10", "ride"),
     ("ftp", 258.0, "2026-10-05", "ride"),
     ("ftp", 260.0, "2026-10-10", "ride"),
     ("weight", 72.1, "2026-10-08", "-"),
     ("weight", 71.5, "2026-10-10", "-"),
+    ("steps", 8421.0, "2026-10-10", "-"),
+    ("floors", 7.0, "2026-10-10", "-"),
+    ("daily_energy_total", 2310.0, "2026-10-10", "-"),
+    ("race_prediction_5k", 1320.0, "2026-10-11", "run"),
+    ("race_prediction_10k", 2790.0, "2026-10-11", "run"),
+    ("race_prediction_half", 6150.0, "2026-10-11", "run"),
+    ("race_prediction_full", 13050.0, "2026-10-11", "run"),
+    ("endurance_score", 6850.0, "2026-10-05", "-"),
 ]
 
 EXPECTED_FIXTURE_ISSUES: list[Triple] = [
-    (
-        "running_threshold[0]",
-        "power.functionalThresholdPower",
-        IssueReason.UNSUPPORTED,
-    ),
     (None, "body_battery", IssueReason.UNSUPPORTED),
     (None, "daily_training_status", IssueReason.UNSUPPORTED),
     (None, "training_load_balance", IssueReason.UNSUPPORTED),
@@ -1102,9 +1109,223 @@ class SleepScoreZeroTests(unittest.TestCase):
         )
 
 
+class DailyStatsTests(unittest.TestCase):
+    def test_daily_stats_map_counts_and_energy_with_units(self) -> None:
+        result = _map(
+            {
+                "daily_stats": {
+                    "summaryDate": DAY,
+                    "steps": 0,
+                    "floorsUp": 3,
+                    "totalCalories": "2400",
+                    "activeKilocalories": 610,
+                }
+            }
+        )
+
+        self.assertEqual(
+            _rows(result),
+            [
+                ("daily_energy_active", 610.0, DAY, "-"),
+                ("daily_energy_total", 2400.0, DAY, "-"),
+                ("floors", 3.0, DAY, "-"),
+                ("steps", 0.0, DAY, "-"),
+            ],
+        )
+        self.assertEqual(_find(result, MetricKind.STEPS).value.unit, "count")
+        self.assertEqual(_find(result, MetricKind.DAILY_ENERGY_TOTAL).value.unit, "kcal")
+        self.assertIs(
+            _find(result, MetricKind.STEPS).provenance.source_kind,
+            SourceKind.DEVICE_MEASURED,
+        )
+        self.assertIs(
+            _find(result, MetricKind.DAILY_ENERGY_ACTIVE).provenance.source_kind,
+            SourceKind.PROVIDER_REPORTED,
+        )
+        self.assertEqual(_issues(result), [])
+
+    def test_daily_stats_counts_are_rounded_like_the_serving_reader(self) -> None:
+        result = _map(
+            {"daily_stats": {"calendarDate": DAY, "totalSteps": 1000.6, "floorsAscended": 4.4}}
+        )
+
+        self.assertEqual(
+            _rows(result), [("floors", 4.0, DAY, "-"), ("steps", 1001.0, DAY, "-")]
+        )
+
+    def test_daily_stats_wrapped_records_are_read(self) -> None:
+        result = _map(
+            {"daily_stats": {"records": [{"calendarDate": DAY, "totalSteps": 1000}]}}
+        )
+
+        self.assertEqual(_rows(result), [("steps", 1000.0, DAY, "-")])
+        self.assertEqual(_issues(result), [])
+
+    def test_daily_stats_outside_bounds_or_undated_are_reported(self) -> None:
+        result = _map(
+            {
+                "daily_stats": [
+                    {"calendarDate": DAY, "totalSteps": 250_000, "totalKilocalories": 0},
+                    {"totalSteps": 100},
+                ]
+            }
+        )
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            _issues(result),
+            [
+                ("daily_stats[0]", "totalSteps", IssueReason.OUT_OF_RANGE),
+                ("daily_stats[0]", "totalKilocalories", IssueReason.OUT_OF_RANGE),
+                ("daily_stats[1]", "calendarDate", IssueReason.MISSING),
+            ],
+        )
+
+
+class RacePredictionTests(unittest.TestCase):
+    def _seconds(self, payload: object) -> dict[str, float]:
+        result = _map({"race_predictions": payload})
+        return {obs.kind.value: obs.value.value for obs in result.records}
+
+    def test_keyed_times_accept_numbers_text_and_milliseconds(self) -> None:
+        self.assertEqual(
+            self._seconds(
+                {
+                    "calendarDate": DAY,
+                    "time5K": 1310,
+                    "time10K": "46:30",
+                    "timeHalfMarathon": "1:42:30",
+                    "timeMarathon": 13_050_000,
+                }
+            ),
+            {
+                "race_prediction_5k": 1310.0,
+                "race_prediction_10k": 2790.0,
+                "race_prediction_half": 6150.0,
+                "race_prediction_full": 13050.0,
+            },
+        )
+
+    def test_distance_records_pair_with_their_time(self) -> None:
+        result = _map(
+            {
+                "race_predictions": [
+                    {"calendarDate": DAY, "raceDistance": "5K", "raceTime": 1320},
+                    {"calendarDate": DAY, "distanceName": "Marathon", "seconds": 13100},
+                ]
+            }
+        )
+
+        self.assertEqual(
+            _rows(result),
+            [
+                ("race_prediction_5k", 1320.0, DAY, "run"),
+                ("race_prediction_full", 13100.0, DAY, "run"),
+            ],
+        )
+        observation = _find(result, MetricKind.RACE_PREDICTION_5K, Sport.RUN)
+        self.assertEqual(observation.value.unit, "s")
+        self.assertEqual(
+            observation.provenance.source_record_id,
+            f"race_predictions:{DAY}:0:race_prediction_5k",
+        )
+
+    def test_wrapped_prediction_lists_are_read_like_the_legacy_reader(self) -> None:
+        self.assertEqual(
+            self._seconds(
+                {
+                    "racePredictions": [
+                        {"raceDistance": "5K", "raceTime": 1310},
+                        {"raceDistance": "5K", "raceTime": 1400},
+                        {"raceDistance": "halfMarathon", "raceTime": "01:42:30"},
+                    ],
+                    "10k": {"predictedTime": 2740},
+                    "marathon": {"racePredictionTime": 2_400_000},
+                }
+            ),
+            {
+                "race_prediction_5k": 1310.0,
+                "race_prediction_10k": 2740.0,
+                "race_prediction_half": 6150.0,
+                "race_prediction_full": 2400.0,
+            },
+        )
+
+    def test_unreadable_candidate_does_not_hide_a_later_readable_time(self) -> None:
+        result = _map(
+            {
+                "race_predictions": {
+                    "5k": "fast",
+                    "racePredictions": [{"raceDistance": "5K", "raceTime": 1310}],
+                }
+            }
+        )
+
+        self.assertEqual(
+            _rows(result), [("race_prediction_5k", 1310.0, "2026-10-11", "run")]
+        )
+        self.assertEqual(_issues(result), [])
+
+    def test_undated_predictions_use_the_sync_day(self) -> None:
+        result = _map({"race_predictions": {"5k": {"raceTime": 1320}}})
+
+        self.assertEqual(_rows(result), [("race_prediction_5k", 1320.0, "2026-10-11", "run")])
+
+    def test_unreadable_and_implausible_times_are_reported(self) -> None:
+        result = _map(
+            {"race_predictions": {"5k": "fast", "10k": {"raceTime": 30}, "other": 1}}
+        )
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            _issues(result),
+            [
+                ("race_predictions[0]", "5k", IssueReason.INVALID_NUMBER),
+                ("race_predictions[0]", "10k", IssueReason.OUT_OF_RANGE),
+            ],
+        )
+
+
+class EnduranceScoreTests(unittest.TestCase):
+    def test_wrapped_endurance_score_is_mapped(self) -> None:
+        result = _map(
+            {
+                "endurance_score": {
+                    "enduranceScoreDTO": {
+                        "calendarDate": DAY,
+                        "overallScore": 7012,
+                        "groupMap": {"running": {"contribution": 40}},
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(_rows(result), [("endurance_score", 7012.0, DAY, "-")])
+        self.assertEqual(_find(result, MetricKind.ENDURANCE_SCORE).value.unit, "score")
+        self.assertEqual(_issues(result), [])
+
+    def test_endurance_score_list_wrapper_and_bounds(self) -> None:
+        result = _map(
+            {
+                "endurance_score": {
+                    "enduranceScoreDTOList": [
+                        {"calendarDate": DAY, "overallScore": 6900},
+                        {"calendarDate": "2026-10-09", "overallScore": 25_000},
+                    ]
+                }
+            }
+        )
+
+        self.assertEqual(_rows(result), [("endurance_score", 6900.0, DAY, "-")])
+        self.assertEqual(
+            _issues(result),
+            [("endurance_score[1]", "overallScore", IssueReason.OUT_OF_RANGE)],
+        )
+
+
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 4)
+        self.assertEqual(MAPPER_VERSION, 5)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):
@@ -1135,10 +1356,7 @@ class ContractTests(unittest.TestCase):
             {
                 "activities": [{"activityId": 1}],
                 "gear": {"id": 2},
-                "daily_stats": {"calendarDate": DAY, "totalSteps": 8421},
                 "training_status": {"acuteTrainingLoadDTO": {"acuteTrainingLoad": 480}},
-                "race_predictions": {"5k": {"raceTime": 1320}},
-                "endurance_score": [{"calendarDate": DAY, "overallScore": 6850}],
                 "running_tolerance": [{"calendarDate": DAY, "toleranceScore": 72}],
                 "unknown_provider_key": {"calendarDate": DAY, "value": 1},
             }
@@ -1165,6 +1383,24 @@ class ContractTests(unittest.TestCase):
         )
 
         self.assertEqual(_rows(result), [("threshold_pace", 3.6, DAY, "run")])
+        self.assertEqual(_issues(result), [])
+
+    def test_power_block_maps_running_threshold_power(self) -> None:
+        result = _map(
+            {
+                "running_threshold": {
+                    "calendarDate": DAY,
+                    "power": {"functionalThresholdPower": 285},
+                }
+            }
+        )
+
+        observation = _find(result, MetricKind.RUN_THRESHOLD_POWER, Sport.RUN)
+        self.assertEqual(observation.value.unit, "W")
+        self.assertEqual(
+            observation.provenance.source_record_id, f"running_threshold:{DAY}:power"
+        )
+        self.assertIs(observation.provenance.source_kind, SourceKind.PROVIDER_REPORTED)
         self.assertEqual(_issues(result), [])
 
     def test_power_block_as_text_is_reported(self) -> None:

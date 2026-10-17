@@ -626,6 +626,9 @@ def current_performance_metrics(
     latest_ride_eftp = _first_present(
         latest_ride_activity, intervals_perf_fields.ESTIMATED_FTP_ALIASES
     )
+    # Remaining snapshot read: EFTP observations are stored, but the current value
+    # follows the first matching sport setting, then sportInfo, then the latest
+    # ride, an order the observations do not yet reproduce.
     current_ride_eftp = _intervals_eftp_value(ride) or _intervals_eftp_value(
         wellness_ride
     )

@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=317">
+  <link rel="stylesheet" href="/styles.css?v=320">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -91,6 +91,7 @@
             <button type="button" id="cancelChatButton" class="composer-stop-button" hidden aria-label="Antwort stoppen" title="Antwort stoppen"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg></button>
             <button type="submit" id="sendButton" aria-label="Senden" title="Senden"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m0 0 6 6m-6-6-6 6"></path></svg></button>
           </div>
+          <output id="chatSyncStatus" class="chat-sync" aria-live="polite" hidden><span class="chat-sync-spinner" aria-hidden="true"></span>Nachrichten werden synchronisiert…</output>
           <button type="button" id="chatJumpToComposer" class="chat-jump" hidden aria-label="Zu den neuesten Nachrichten springen" title="Zu den neuesten Nachrichten springen">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14m0 0 5-5m-5 5-5-5"></path></svg>
             <span class="chat-jump-label" hidden>Neue Antwort</span>
@@ -221,7 +222,14 @@
             <label>Verfügbarkeit pro Woche<textarea name="availability" rows="3" placeholder="Tage, Zeiten, bevorzugter Ruhetag…"></textarea></label>
             <label>Rahmenbedingungen<textarea name="constraints" rows="3" placeholder="Verletzungen, Reisen, feste Grenzen…"></textarea></label>
             <label>Ausrüstung<textarea name="equipment" rows="2" placeholder="Rad, Smarttrainer, Gym, Powermeter…"></textarea></label>
-            <label>Trainingspräferenzen<textarea name="training_preferences" rows="3" placeholder="Drinnen/draußen, bevorzugte Einheiten, Ruhetage…"></textarea></label>
+            <fieldset class="profile-subsection"><legend>Trainingspräferenzen</legend>
+              <label>Allgemein<textarea name="training_preferences" rows="2" placeholder="Drinnen/draußen, Ruhetage, Trainingszeiten…"></textarea></label>
+              <label>Laufen<textarea name="training_preferences_running" rows="2" placeholder="Strecken, Untergrund, Laufband, bevorzugte Einheiten…"></textarea></label>
+              <label>Radfahren<textarea name="training_preferences_cycling" rows="2" placeholder="Rolle oder draußen, Gruppenfahrten, bevorzugte Intervalle…"></textarea></label>
+              <label>Schwimmen<textarea name="training_preferences_swimming" rows="2" placeholder="Becken oder Freiwasser, Technik, Hilfsmittel…"></textarea></label>
+              <label>Krafttraining<textarea name="training_preferences_strength" rows="2" placeholder="Gym oder zu Hause, Geräte, Übungen, Häufigkeit…"></textarea></label>
+              <label>Mobility<textarea name="training_preferences_mobility" rows="2" placeholder="Yoga, Dehnen, Faszienrolle, Dauer, Tageszeit…"></textarea></label>
+            </fieldset>
             <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Intervals.icu stehen…"></textarea></label>
             <label>Persönliches Schlafziel (Stunden)<input name="sleep_target_hours" type="number" min="4" max="12" step="0.25" placeholder="Optional, zum Beispiel 8"><small>Bestätigtes Ziel für die Auswertung bekannter Nächte; keine automatische Vorgabe.</small></label>
             <div class="form-grid">
@@ -463,22 +471,22 @@
   </dialog>
   <script src="/api.js?v=224" defer></script>
   <script src="/navigation.js?v=233" defer></script>
-  <script src="/state.js?v=224" defer></script>
+  <script src="/state.js?v=225" defer></script>
   <script src="/views.js?v=227" defer></script>
   <script src="/plan-views.js?v=11" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=30" defer></script>
-  <script src="/shared.js?v=12" defer></script>
-  <script src="/auth.js?v=8" defer></script>
+  <script src="/coach.js?v=33" defer></script>
+  <script src="/shared.js?v=14" defer></script>
+  <script src="/auth.js?v=11" defer></script>
   <script src="/sync-status.js?v=12" defer></script>
   <script src="/notifications.js?v=4" defer></script>
   <script src="/nutrition.js?v=31" defer></script>
-  <script src="/analysis.js?v=117" defer></script>
+  <script src="/analysis.js?v=119" defer></script>
   <script src="/activity-details.js?v=13" defer></script>
-  <script src="/performance-view.js?v=13" defer></script>
+  <script src="/performance-view.js?v=18" defer></script>
   <script src="/diagnostics.js?v=4" defer></script>
-  <script src="/state-loader.js?v=10" defer></script>
+  <script src="/state-loader.js?v=14" defer></script>
   <script src="/sync-actions.js?v=5" defer></script>
   <script src="/wahoo-connection.js?v=4" defer></script>
   <script src="/settings.js?v=8" defer></script>

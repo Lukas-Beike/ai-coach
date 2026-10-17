@@ -54,6 +54,26 @@ def _activities_and_wellness(
     return activities, wellness_rows
 
 
+def _unavailable_context(
+    garmin: dict[str, Any], profile: dict[str, Any], today: date
+) -> dict[str, Any]:
+    """Projection without an Intervals.icu snapshot: Garmin-only recovery and load."""
+    unavailable = {
+        "available": False,
+        "source": performance_current_metrics.PROVIDER_INTERVALS_NAME,
+        "as_of": None,
+        "metrics": {},
+        "personal_recovery": personal_recovery([], garmin, profile, today),
+        "training_focus": training_focus(
+            None, garmin, today, str(profile.get("timezone") or "UTC")
+        ),
+    }
+    load_projection = garmin_projection.garmin_training_load_projection(garmin, today)
+    if load_projection:
+        unavailable["garmin_training_load"] = load_projection
+    return unavailable
+
+
 def current_performance_context(
     snapshot: dict[str, Any] | None,
     garmin: dict[str, Any],
@@ -65,25 +85,11 @@ def current_performance_context(
     """Compose the current performance projection from explicit inputs.
 
     ``canonical`` replaces CTL and ATL in the load context, the sport thresholds and
-    VO2max, and the matching recovery values, when given.
+    VO2max, the Garmin performance values, the daily totals and the matching
+    recovery values, when given.
     """
     if not snapshot:
-        unavailable = {
-            "available": False,
-            "source": performance_current_metrics.PROVIDER_INTERVALS_NAME,
-            "as_of": None,
-            "metrics": {},
-            "personal_recovery": personal_recovery([], garmin, profile, today),
-            "training_focus": training_focus(
-                None, garmin, today, str(profile.get("timezone") or "UTC")
-            ),
-        }
-        load_projection = garmin_projection.garmin_training_load_projection(
-            garmin, today
-        )
-        if load_projection:
-            unavailable["garmin_training_load"] = load_projection
-        return unavailable
+        return _unavailable_context(garmin, profile, today)
 
     athlete_value = snapshot.get("athlete")
     athlete: dict[str, Any] = athlete_value if isinstance(athlete_value, dict) else {}
@@ -116,7 +122,9 @@ def current_performance_context(
     metrics = performance_current_metrics.current_performance_metrics(
         snapshot,
         profile,
-        performance_garmin_metrics.garmin_performance_metrics(garmin, today),
+        performance_garmin_metrics.garmin_performance_metrics(
+            garmin, today, None if canonical is None else canonical.garmin
+        ),
         canonical=None if canonical is None else canonical.current,
         activities=activities,
         wellness_rows=wellness_rows,
@@ -138,6 +146,7 @@ def current_performance_context(
             7,
             today - timedelta(days=1),
             today,
+            health_by_date=None if canonical is None else canonical.daily_health,
         )
     )
     comparisons = performance_comparisons.performance_comparisons(

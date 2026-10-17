@@ -95,7 +95,7 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
                 "conversation",
                 "chat_prompt",
                 "structured_athlete_context",
-                "latest_intervals_snapshot",
+                "latest_activities",
                 "projection",
                 "context_text",
                 "local_training_library",
@@ -110,7 +110,7 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
         self.messages.list.assert_called_once_with()
         self.structured_context.build.assert_called_once_with()
         self.assertIs(
-            preview["latest_intervals_snapshot"],
+            preview["latest_activities"],
             preview["structured_athlete_context"]["activities"],
         )
 
@@ -130,7 +130,7 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
         projected_plan = preview["projection"]
         self.assertGreaterEqual(len(projected_plan["truncated_sections"]), 1)
         self.assertEqual(
-            preview["latest_intervals_snapshot"]["recent_activities_by_sport"][
+            preview["latest_activities"]["recent_activities_by_sport"][
                 "Laufen"
             ][0],
             {

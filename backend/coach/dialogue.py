@@ -187,8 +187,11 @@ read_profile then update_profile with local_profile scope. A short acceptance
 of your visible concrete profile proposal authorizes that update. Use only
 the requested fields and their current expected_value; preserve existing facts
 when adding text. Daily walking habits belong in training_background or
-training_preferences, today's condition in save_checkin, a week's constraints
-in the plan. Never tell the athlete to enter supported profile changes manually.
+training_preferences. Sport-specific preferences belong in
+training_preferences_running, training_preferences_cycling,
+training_preferences_swimming, training_preferences_strength or
+training_preferences_mobility; general ones in training_preferences. Today's condition belongs in save_checkin, a week's
+constraints in the plan. Never tell the athlete to enter supported profile changes manually.
 
 New schedules use apply_training_patch or replace_training_plan directly.
 stage_training_plan is for requested drafts only. commit_training_plan may use

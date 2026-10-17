@@ -95,7 +95,11 @@ def compact_garmin_context(value: Any, depth: int = 0) -> Any:
 def garmin_training_load_projection(
     snapshot: dict[str, Any], current_date: date
 ) -> dict[str, Any]:
-    """Project new Garmin load endpoints with source and freshness attached."""
+    """Project new Garmin load endpoints with source and freshness attached.
+
+    Remaining snapshot read: training load balance and daily training status have
+    no metric kind.
+    """
     freshness = performance_freshness.garmin_source_freshness(snapshot, current_date)
     result: dict[str, Any] = {}
     balance = _primary_device_record(
