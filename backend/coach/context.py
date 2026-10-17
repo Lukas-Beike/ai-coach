@@ -1186,7 +1186,7 @@ class CoachContextPreviewService:
                 "note": "Diese Eingabe wird getrennt vom Coach-Kontext/instructions an den ausgewählten KI-Anbieter übergeben.",
             },
             "structured_athlete_context": preview_structured_context,
-            "latest_intervals_snapshot": preview_structured_context["activities"],
+            "latest_activities": preview_structured_context["activities"],
             "projection": projection,
             "context_text": context_text,
             "local_training_library": coach_workout_library(

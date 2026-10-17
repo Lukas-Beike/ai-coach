@@ -2104,7 +2104,7 @@ function renderContextPreview(preview) {
     ["Aktuelle Leistungsdaten", preview.structured_athlete_context?.current_performance],
     ["Erholungskontext", preview.structured_athlete_context?.recovery],
     ["Gesprächskontinuität", preview.conversation],
-    ["Intervals.icu-Snapshot", preview.latest_intervals_snapshot],
+    ["Aktivitäten", preview.latest_activities],
     ["Letzte Chat-Eingabe", preview.chat_prompt],
     ["Coach-Kontext (vollständiger Text)", preview.context_text],
   ];

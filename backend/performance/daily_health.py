@@ -1,11 +1,20 @@
-"""Garmin daily-health normalization and aggregate projections."""
+"""Daily-health normalization and aggregate projections.
 
+Steps, floors and the total and active energy come from the canonical
+observations when a reader is given (``read_daily_health_by_date``). Resting energy
+has no metric kind, so the resting calories and the projection reference stay on
+the Garmin snapshot; freshness and the read window are sync status and stay there
+too.
+"""
+
+from collections.abc import Iterable, Mapping
 from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.records import Observation
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import freshness as performance_freshness
 from backend.performance import recovery as performance_recovery
 from backend.providers.garmin_fields import (
@@ -16,6 +25,7 @@ from backend.providers.garmin_fields import (
 )
 from backend.providers.garmin_fields import first_present as _first_present
 from backend.providers.source_labels import SourceView, provider_label
+from backend.runtime.ports import ObservationReader
 
 GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.DAILY_HEALTH)
 
@@ -39,6 +49,14 @@ GARMIN_DAILY_EXPENDITURE_FIELDS = {
         "basalMetabolicRateKilocalories",
     ),
     "total_kcal": GARMIN_DAILY_HEALTH_FIELDS["calories"],
+}
+
+# Daily totals by canonical kind and the field of the date-indexed view.
+DAILY_HEALTH_KINDS: Mapping[MetricKind, str] = {
+    MetricKind.STEPS: "steps",
+    MetricKind.FLOORS: "floors",
+    MetricKind.DAILY_ENERGY_TOTAL: "calories",
+    MetricKind.DAILY_ENERGY_ACTIVE: "active_kcal",
 }
 
 
@@ -74,14 +92,53 @@ def garmin_daily_health_by_date(
     return health_by_date
 
 
-def garmin_daily_expenditure(
-    snapshot: dict[str, Any] | None, requested_date: str, current_date: date
-) -> dict[str, Any]:
-    """Return Garmin's measured daily calorie components for one local date.
+def read_daily_health_by_date(
+    reader: ObservationReader,
+    db: Any,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build the date-indexed daily totals from the canonical observations.
 
-    Total expenditure is only reported when Garmin supplied a total directly;
-    active and resting components are not summed to manufacture a total. For the
-    running day, a separate derived projection is added (see
+    ``reader`` must already be the source chosen for the unit of work. The shape is
+    that of ``garmin_daily_health_by_date`` plus ``active_kcal``. Per day and kind
+    the latest observation wins; ``source`` names the providers of the day's values.
+    """
+    latest: dict[str, dict[str, Observation]] = {}
+    for kind, name in DAILY_HEALTH_KINDS.items():
+        for item in reader.observations(db, kind, start=start, end=end):
+            day = latest.setdefault(item.observed_on.isoformat(), {})
+            if name not in day or _order(item) >= _order(day[name]):
+                day[name] = item
+    health_by_date: dict[str, dict[str, Any]] = {}
+    for record_date, values in sorted(latest.items()):
+        health: dict[str, Any] = {
+            name: _canonical_number(name, item.value.value)
+            for name, item in values.items()
+        }
+        health["source"] = _sources(values.values())
+        health_by_date[record_date] = health
+    return health_by_date
+
+
+def daily_energy_expenditure(
+    snapshot: dict[str, Any] | None,
+    requested_date: str,
+    current_date: date,
+    *,
+    measured: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the measured daily calorie components for one local date.
+
+    ``measured`` is the day's entry of ``read_daily_health_by_date`` (an empty
+    mapping when the day has none); when given, the total and active energy come
+    from it, otherwise from the Garmin snapshot. The resting calories have no
+    metric kind and stay on the snapshot.
+
+    Total expenditure is only reported when the provider supplied a total
+    directly; active and resting components are not summed to manufacture a
+    total. For the running day, a separate derived projection is added (see
     ``_projected_expenditure``).
     """
     if not isinstance(snapshot, dict):
@@ -95,6 +152,11 @@ def garmin_daily_expenditure(
         day = None
     is_future = day is None or day > current_date
     _expenditure_values(snapshot, requested_date, is_future, values)
+    source = GARMIN_PERFORMANCE_SOURCE
+    if measured is not None:
+        _measured_values(measured, is_future, values)
+        if values["total_kcal"] is not None or values["active_kcal"] is not None:
+            source = str(measured.get("source") or source)
     has_measurement = any(value is not None for value in values.values())
     source_freshness = snapshot.get("source_freshness")
     if not isinstance(source_freshness, dict):
@@ -105,7 +167,7 @@ def garmin_daily_expenditure(
     result = {
         **values,
         **_projected_expenditure(snapshot, values, day, current_date),
-        "source": GARMIN_PERFORMANCE_SOURCE if has_measurement else None,
+        "source": source if has_measurement else None,
         "measured_date": requested_date if has_measurement else None,
         "freshness": freshness.get("freshness", "unknown"),
         "fetched_at": freshness.get("fetched_at"),
@@ -122,23 +184,56 @@ def garmin_daily_expenditure(
     return result
 
 
-def garmin_daily_health_metrics(
-    snapshot: dict[str, Any], days: int, end_date: date, current_date: date
-) -> dict[str, dict[str, Any]]:
-    """Return daily Garmin health totals averaged over the requested window."""
-    cutoff = end_date - timedelta(days=days - 1)
+def _window_values(
+    health_by_date: Mapping[str, Mapping[str, Any]], cutoff: date, end_date: date
+) -> tuple[dict[str, list[float]], dict[str, set[str]]]:
+    """Collect each daily total and its sources for the days in the window."""
     values: dict[str, list[float]] = {key: [] for key in GARMIN_DAILY_HEALTH_FIELDS}
-    for record_date, health in garmin_daily_health_by_date(snapshot).items():
+    sources: dict[str, set[str]] = {key: set() for key in GARMIN_DAILY_HEALTH_FIELDS}
+    for record_date, health in health_by_date.items():
         try:
             current = date.fromisoformat(iso_date_prefix(record_date))
         except ValueError:
             continue
         if not cutoff <= current <= end_date:
             continue
-        for metric_name, _metric_values in values.items():
+        for metric_name, metric_values in values.items():
             number = _as_number(health.get(metric_name))
             if number is not None:
-                _metric_values.append(float(number))
+                metric_values.append(float(number))
+                if health.get("source"):
+                    sources[metric_name].add(str(health["source"]))
+    return values, sources
+
+
+def _window_average(metric_name: str, numbers: list[float]) -> float | int | None:
+    """Counts average to whole numbers, energy keeps two decimals."""
+    if not numbers:
+        return None
+    if metric_name in {"steps", "floors"}:
+        return round(sum(numbers) / len(numbers))
+    return round(sum(numbers) / len(numbers), 2)
+
+
+def garmin_daily_health_metrics(
+    snapshot: dict[str, Any],
+    days: int,
+    end_date: date,
+    current_date: date,
+    *,
+    health_by_date: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Return daily health totals averaged over the requested window.
+
+    ``health_by_date`` holds the canonical totals of ``read_daily_health_by_date``;
+    without it they are read from the Garmin snapshot. Freshness is sync status
+    and is always read from the snapshot.
+    """
+    if health_by_date is None:
+        health_by_date = garmin_daily_health_by_date(snapshot)
+    values, sources = _window_values(
+        health_by_date, end_date - timedelta(days=days - 1), end_date
+    )
     units = {
         "steps": "Schritte/Tag",
         "floors": "Stockwerke/Tag",
@@ -146,19 +241,14 @@ def garmin_daily_health_metrics(
     }
     result: dict[str, dict[str, Any]] = {}
     for metric_name, numbers in values.items():
-        if not numbers:
-            average: float | int | None = None
-        elif metric_name in {"steps", "floors"}:
-            average = round(sum(numbers) / len(numbers))
-        else:
-            average = round(sum(numbers) / len(numbers), 2)
+        average = _window_average(metric_name, numbers)
         result[f"{metric_name}_7d"] = performance_freshness.garmin_metric_freshness(
             snapshot,
             "daily_stats",
             _metric(
                 average,
                 units[metric_name],
-                GARMIN_PERFORMANCE_SOURCE,
+                ", ".join(sorted(sources[metric_name])) or GARMIN_PERFORMANCE_SOURCE,
                 "Durchschnitt der letzten 7 Tage",
             ),
             current_date,
@@ -270,3 +360,37 @@ def _expenditure_values(
             value = _as_number(_first_present(record, keys))
             if value is not None and value >= 0:
                 values[field] = value
+
+
+def _measured_values(
+    measured: Mapping[str, Any], is_future: bool, values: dict[str, Any]
+) -> None:
+    """Replace the snapshot's total and active energy by the canonical values."""
+    for field, name in (("total_kcal", "calories"), ("active_kcal", "active_kcal")):
+        value = None if is_future else _as_number(measured.get(name))
+        values[field] = value if value is not None and value >= 0 else None
+
+
+def _canonical_number(name: str, value: float) -> float | int | None:
+    number = _as_number(value)
+    if number is not None and name in {"steps", "floors"}:
+        return round(float(number))
+    return number
+
+
+def _sources(observations: Iterable[Observation]) -> str:
+    return ", ".join(
+        sorted(
+            {
+                provider_label(item.provenance.provider, SourceView.DAILY_HEALTH)
+                for item in observations
+                if item.provenance.provider is not None
+            }
+        )
+    )
+
+
+def _order(item: Observation) -> tuple[bool, float]:
+    """Order one day's observations: a timestamped, later record wins."""
+    stamp = item.observed_at.timestamp() if item.observed_at is not None else 0.0
+    return item.observed_at is not None, stamp

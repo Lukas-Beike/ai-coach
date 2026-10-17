@@ -25,6 +25,7 @@ from backend.nutrition.models import (
     validate_iso_date,
 )
 from backend.nutrition.sync_status import NutritionSyncStatusService
+from backend.runtime.ports import ObservationReader
 
 INVALID_ENTRY_ID = "Ungültige Eintrags-ID."
 ENTRY_NOT_FOUND = "Ernährungseintrag nicht gefunden."
@@ -48,6 +49,7 @@ class NutritionDiaryService:
         utc_now: Callable[[], str],
         local_now: Callable[[], datetime],
         meal_library: NutritionMealLibraryService,
+        observation_reader: Callable[[], ObservationReader] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock
@@ -56,7 +58,12 @@ class NutritionDiaryService:
         self._local_now = local_now
         self._meal_library = meal_library
         self._sync_status = NutritionSyncStatusService(
-            database_manager, db_lock, nutrition_repository, utc_now, local_now
+            database_manager,
+            db_lock,
+            nutrition_repository,
+            utc_now,
+            local_now,
+            observation_reader,
         )
 
     def log_product(

@@ -161,7 +161,11 @@ class GarminProjectionService:
                 )
             ),
             "has_readiness": recovery["readiness"],
-            "has_race_predictions": bool(snapshot.get("race_predictions")),
+            "has_race_predictions": (
+                bool(snapshot.get("race_predictions"))
+                if state is None
+                else bool(state.metrics.race_predictions)
+            ),
             "has_weight": performance_metrics["weight_kg"]["value"] is not None,
             "has_max_hr": any(
                 performance_metrics[key]["value"] is not None

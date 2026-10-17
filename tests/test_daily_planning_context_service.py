@@ -177,12 +177,12 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
                 self.assertEqual(result, [])
 
     def test_corrupt_history_is_empty_and_does_not_break_garmin_projection(self):
-        self.key_values.values.update(
+        self.key_values.values["morning_body_battery_history"] = "not-json"
+        self.observations = RecordingReader(
             {
-                "garmin_snapshot": json.dumps(
-                    {"daily_stats": [{"date": "2026-09-20", "steps": 12000}]}
-                ),
-                "morning_body_battery_history": "not-json",
+                MetricKind.STEPS: [
+                    recovery_observation(MetricKind.STEPS, 12000, "2026-09-20")
+                ]
             }
         )
 
@@ -194,8 +194,9 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
     def test_merges_recovery_health_weather_feedback_and_checkin(self):
         self.key_values.values.update(
             {
+                # Stored daily totals are no longer read; the observation wins.
                 "garmin_snapshot": json.dumps(
-                    {"daily_stats": [{"date": "2026-09-20", "totalSteps": 9000}]}
+                    {"daily_stats": [{"date": "2026-09-20", "totalSteps": 1}]}
                 ),
                 "morning_body_battery_history": json.dumps({"2026-09-19": 64}),
             }
@@ -212,6 +213,14 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
                         MetricKind.CTL, 80, "2026-09-20", ProviderId.INTERVALS
                     )
                 ],
+                MetricKind.FORM: [
+                    recovery_observation(
+                        MetricKind.FORM, 20, "2026-09-20", ProviderId.INTERVALS
+                    )
+                ],
+                MetricKind.STEPS: [
+                    recovery_observation(MetricKind.STEPS, 9000, "2026-09-20")
+                ],
             }
         )
         self.morning_battery.record = {
@@ -227,16 +236,8 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
             }
         ]
         result = self.service.build(
-            snapshot={
-                "recent_wellness": [
-                    {
-                        "id": "2026-09-20",
-                        "ctl": 80,
-                        "atl": 60,
-                        "tsb": 20,
-                    }
-                ]
-            },
+            # The Intervals.icu snapshot is no longer read for form.
+            snapshot={"recent_wellness": [{"id": "2026-09-20", "tsb": -99}]},
             planned=[{"id": "unit-1", "start_date_local": "2026-09-20"}],
             weather={"days": [{"date": "2026-09-20", "temperature_max": 17}]},
             checkins=[{"checkin_date": "2026-09-20", "motivation": 9}],
@@ -248,7 +249,9 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         self.assertEqual(today["recovery"]["ctl"], 80)
         self.assertEqual(today["recovery"]["tsb"], 20)
         self.assertEqual(today["recovery"]["body_battery"], 76)
-        self.assertEqual(today["health"]["steps"], 9000)
+        self.assertEqual(
+            today["health"], {"steps": 9000, "source": "Garmin Connect"}
+        )
         self.assertEqual(today["weather"]["temperature_max"], 17)
         self.assertEqual(today["activity_feedback"][0]["activity_id"], "activity-1")
         self.assertEqual(today["checkin"]["motivation"], 9)

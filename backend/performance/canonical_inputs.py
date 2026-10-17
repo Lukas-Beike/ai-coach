@@ -17,6 +17,9 @@ Current sport thresholds and VO2max come from the latest Intervals sync, see
 readiness come from ``backend.performance.canonical_recovery``. The 7-day resting HR
 and readiness averages come from ``backend.performance.canonical_recovery_averages``
 and replace the legacy average only when both cover the same days with equal values.
+The Garmin performance values come from ``backend.performance.garmin_canonical`` and
+the daily totals (steps, floors, energy) of the recent days from
+``backend.performance.daily_health``.
 
 Without a usable wellness day the inputs still carry the activities and the
 wellness rows, and no load, Intervals threshold or recovery value; a stored Wahoo
@@ -56,6 +59,11 @@ from backend.performance.canonical_recovery_averages import (
     CanonicalRecoveryAverageInputs,
     read_recovery_average_inputs,
 )
+from backend.performance.daily_health import read_daily_health_by_date
+from backend.performance.garmin_canonical import (
+    GarminCanonicalMetrics,
+    read_garmin_state,
+)
 from backend.performance.source_policy import select_current
 from backend.runtime.ports import (
     ActivityRowReader,
@@ -80,6 +88,10 @@ class CanonicalPerformanceInputs:
     performance context and ``history_wellness_rows`` those of the history views,
     which also keep the raw snapshot rows as carrier. Both are None when the inputs
     were built without wellness rows.
+
+    ``garmin`` holds the Garmin performance values and ``daily_health`` the daily
+    totals of the last ``DAILY_HEALTH_DAYS`` days by ISO date; both are None when
+    they were not read.
     """
 
     wellness_day: date | None
@@ -93,6 +105,8 @@ class CanonicalPerformanceInputs:
     activities: tuple[dict[str, Any], ...] | None = None
     wellness_rows: tuple[dict[str, Any], ...] | None = None
     history_wellness_rows: tuple[dict[str, Any], ...] | None = None
+    garmin: GarminCanonicalMetrics | None = None
+    daily_health: Mapping[str, Mapping[str, Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +131,8 @@ class CanonicalPerformanceSource:
 
 # Activities older than this are not read for the performance inputs.
 ACTIVITY_HISTORY_DAYS: Final = 365
+# Daily totals of the days before ``as_of`` that the 7-day averages read.
+DAILY_HEALTH_DAYS: Final = 7
 
 
 def snapshot_with_inputs(
@@ -279,12 +295,14 @@ class _ReadOnceReader:
 
 @dataclass(frozen=True, slots=True)
 class _CarriedRows:
-    """The activity and wellness rows every canonical performance input carries."""
+    """The rows and Garmin values every canonical performance input carries."""
 
     activity_rows: tuple[dict[str, Any], ...] | None
     activities: tuple[dict[str, Any], ...] | None
     wellness_rows: tuple[dict[str, Any], ...]
     history_wellness_rows: tuple[dict[str, Any], ...]
+    garmin: GarminCanonicalMetrics
+    daily_health: Mapping[str, Mapping[str, Any]]
 
     def inputs(
         self,
@@ -309,6 +327,8 @@ class _CarriedRows:
             activities=self.activities,
             wellness_rows=self.wellness_rows,
             history_wellness_rows=self.history_wellness_rows,
+            garmin=self.garmin,
+            daily_health=self.daily_health,
         )
 
 
@@ -356,6 +376,10 @@ def read_performance_inputs(
         activities=activities,
         wellness_rows=tuple(rows),
         history_wellness_rows=tuple(history),
+        garmin=read_garmin_state(reader, db).metrics,
+        daily_health=read_daily_health_by_date(
+            reader, db, start=as_of - timedelta(days=DAILY_HEALTH_DAYS), end=as_of
+        ),
     )
     latest_day = (
         canonical_sections.row_day(max(rows, key=_row_id_text)) if rows else None

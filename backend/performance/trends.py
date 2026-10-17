@@ -23,6 +23,8 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 def garmin_history_average(
     snapshot: dict[str, Any], key: str, days: int, end_date: date
 ) -> float | None:
+    # Remaining snapshot read: the accumulated Garmin performance history has no
+    # observation series with equal history.
     cutoff = end_date - timedelta(days=days - 1)
     values: list[float] = []
     history = (

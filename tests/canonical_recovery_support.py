@@ -41,7 +41,7 @@ def recovery_observation(
     )
     return Observation(
         kind=kind,
-        value=MetricValue(value, UNITS[kind]),
+        value=MetricValue(value, UNITS.get(kind, kind.unit)),
         observed_on=date.fromisoformat(day),
         observed_at=None,
         provenance=Provenance(

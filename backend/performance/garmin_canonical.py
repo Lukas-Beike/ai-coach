@@ -1,16 +1,17 @@
 """Garmin health values read through the canonical observation port.
 
 The Garmin snapshot sections that have canonical observations (sleep, HRV, resting
-HR, readiness, weight, FTP, VO2max, thresholds and profile max HR) are read here
-from the observations of the Garmin provider, so the readers no longer depend on
-those snapshot sections. Which source serves the observations (the legacy
-projection or the canonical tables) is decided by the injected reader.
+HR, readiness, weight, FTP, VO2max, thresholds including the running threshold
+power, profile max HR and race predictions) are read here from the observations of
+the Garmin provider, so the readers no longer depend on those snapshot sections.
+Which source serves the observations (the legacy projection or the canonical
+tables) is decided by the injected reader.
 
 Selection follows the legacy readers: the latest observed day wins, and on one day
 a timestamped record beats an untimed one and a later record beats an earlier one.
-Values with no canonical form (the running threshold power, the heart rate
-fallbacks from activities, race predictions, Body Battery, training status and
-freshness) stay on the snapshot path of their owners.
+Values with no canonical form (the heart rate fallbacks from Garmin activities,
+Body Battery, training status and freshness) stay on the snapshot path of their
+owners.
 """
 
 from __future__ import annotations
@@ -31,6 +32,14 @@ _PACE_SECONDS_PER_KM_RANGE = (120, 900)
 _MAX_HR_RANGE = (80, 260)
 _WEIGHT_KG_RANGE = (30, 300)
 _VO2MAX_RANGE = (20, 100)
+_RUN_THRESHOLD_POWER_RANGE = (50, 800)
+# Race prediction kinds by the legacy metric key that shows them.
+RACE_PREDICTION_KEYS: Mapping[MetricKind, str] = {
+    MetricKind.RACE_PREDICTION_5K: "run_5k_seconds",
+    MetricKind.RACE_PREDICTION_10K: "run_10k_seconds",
+    MetricKind.RACE_PREDICTION_HALF: "run_half_marathon_seconds",
+    MetricKind.RACE_PREDICTION_FULL: "run_marathon_seconds",
+}
 _MAX_HR_CATEGORIES: Mapping[Sport | None, str] = {
     Sport.RIDE: "cycling",
     Sport.RUN: "running",
@@ -44,17 +53,20 @@ class GarminCanonicalMetrics:
 
     ``profile_max_hr`` maps the legacy categories ``cycling``, ``running`` and
     ``generic`` to the profile max heart rate of the latest day of that category;
-    the highest value resolves records of that one day.
+    the highest value resolves records of that one day. ``race_predictions`` maps
+    the legacy keys ``run_5k_seconds`` and so on to the latest predicted time.
     """
 
     weight_kg: float | None = None
     cycling_ftp_watts: float | None = None
     cycling_vo2max: float | None = None
     running_vo2max: float | None = None
+    run_threshold_watts: float | None = None
     run_threshold_pace_seconds_per_km: int | None = None
     run_threshold_hr_bpm: float | None = None
     bike_threshold_hr_bpm: float | None = None
     profile_max_hr: Mapping[str, float] = field(default_factory=dict)
+    race_predictions: Mapping[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +128,8 @@ _READ_KINDS = (
     MetricKind.THRESHOLD_HR,
     MetricKind.THRESHOLD_PACE,
     MetricKind.MAX_HR,
+    MetricKind.RUN_THRESHOLD_POWER,
+    *RACE_PREDICTION_KEYS,
 )
 
 
@@ -139,12 +153,21 @@ def _metrics(
         cycling_ftp_watts=_latest_value(by_kind[MetricKind.FTP], Sport.RIDE),
         cycling_vo2max=_bounded(_latest_value(vo2, Sport.RIDE), _VO2MAX_RANGE),
         running_vo2max=_bounded(_running_vo2max(vo2), _VO2MAX_RANGE),
+        run_threshold_watts=_bounded(
+            _latest_value(by_kind[MetricKind.RUN_THRESHOLD_POWER], Sport.RUN),
+            _RUN_THRESHOLD_POWER_RANGE,
+        ),
         run_threshold_pace_seconds_per_km=_pace_seconds_per_km(
             _latest_value(by_kind[MetricKind.THRESHOLD_PACE], Sport.RUN)
         ),
         run_threshold_hr_bpm=_latest_value(threshold_hr, Sport.RUN),
         bike_threshold_hr_bpm=_latest_value(threshold_hr, Sport.RIDE),
         profile_max_hr=_profile_max_hr(by_kind[MetricKind.MAX_HR]),
+        race_predictions={
+            key: value
+            for kind, key in RACE_PREDICTION_KEYS.items()
+            if (value := _latest_value(by_kind[kind], Sport.RUN)) is not None
+        },
     )
 
 

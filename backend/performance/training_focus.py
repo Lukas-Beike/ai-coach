@@ -53,6 +53,7 @@ def training_focus(
         key: {"load": 0.0, "sessions": 0}
         for key in ("low_aerobic", "high_aerobic", "anaerobic")
     }
+    # Remaining snapshot read: Garmin training effect and load focus have no kind.
     dedicated_rows = garmin.get("training_load_activities")
     has_dedicated_loads = isinstance(dedicated_rows, list) and bool(dedicated_rows)
     activity_source = (
