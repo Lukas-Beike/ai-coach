@@ -152,6 +152,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 
 ### Privacy, Security & Data Management
 - **SQLCipher AES-256 Encryption**: Complete encryption of all athlete data, metrics, database-stored provider tokens (Wahoo), chat history, and attachments at rest using `APP_PASSWORD`. The Garmin token store is a separate plaintext file and is not covered; see Garmin setup.
+- **Database Key Placement**: Keep `APP_PASSWORD` in the container environment or the project-root `.env`. If it is found in `DATA_DIR/.env`, beside the encrypted database, startup logs a warning (never the value), because a copy of the data directory would then include its key.
 - **Strict Session Security**: High-security session cookies hardened with `HttpOnly`, `SameSite=Strict`, and optional `Secure` flags.
 - **Bounded HTTP Input**: At most 32 active handlers, with separate 20-second absolute limits for request headers and bodies. Login admission is checked before reading its body; these input limits do not shorten Coach responses or SSE streams.
 - **Zero Third-Party Trackers**: Self-hosted architecture containing zero tracking scripts, third-party analytics, external CDNs, or telemetry reporting.
@@ -266,6 +267,7 @@ All configuration is loaded from container environment variables or a local `.en
 | `WAHOO_REDIRECT_URI` | *None* | No | Full HTTPS callback URL, `https://<app-host>/api/wahoo/callback`. Never derived from the request Host header. |
 | `CALENDAR_ICAL_URL` | *None* | No | Private read-only iCalendar (ICS) feed URL from Google Calendar, iCloud, or Outlook. |
 | `COOKIE_SECURE` | `false` | No | Set to `true` when running behind an HTTPS reverse proxy to add the `Secure` flag to cookies. |
+| `TRUSTED_PROXY_IPS` | *None* | No | Comma- or space-separated reverse-proxy addresses or CIDR networks (e.g. `192.168.1.6`). Only requests whose direct peer is in this list have `X-Forwarded-For` honored; the rightmost untrusted hop then becomes the client IP for login and API rate limits. The proxy must append the address it sees (nginx: `$proxy_add_x_forwarded_for`). List only the proxies themselves: a network that also contains clients, such as the whole LAN, lets those clients choose their rate-limit address through the header. Invalid entries, including a host address with a mask such as `192.168.1.6/24`, are ignored with a startup warning. |
 | `DATA_RETENTION_DAYS` | `-1` | No | `-1` (or any value ≤ 0) retains data indefinitely; positive values are clamped to 30–3650 days and remove older chat messages and snapshots at startup. |
 | `SYNC_HISTORY_EARLIEST_DATE` | `2000-01-01` | No | ISO date (`YYYY-MM-DD`) that bounds the historical Intervals.icu/Garmin backfill. The backfill walks back in 90-day chunks, never beyond this date, and stops after 180 consecutive days without records. An invalid value is ignored with a logged warning. |
 | `PORT` | `8090` | No | Internal HTTP port the application listens on. |
@@ -389,7 +391,7 @@ server {
     }
 }
 ```
-*When deploying behind HTTPS, remember to set `COOKIE_SECURE=true` in your `.env`.*
+*When deploying behind HTTPS, remember to set `COOKIE_SECURE=true` in your `.env`. Set `TRUSTED_PROXY_IPS` to the address the app sees as the proxy's connection peer so rate limits apply per real client instead of to the proxy; without it, every request is attributed to the proxy. That is the proxy host's LAN address for a separate proxy (for example `TRUSTED_PROXY_IPS=192.168.1.6`), the proxy container's address for a proxy on the same Docker network, or `127.0.0.1` or the Docker bridge gateway for a same-host proxy like the nginx example above.*
 
 ### Garmin Authentication & MFA Setup
 
