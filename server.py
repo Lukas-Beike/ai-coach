@@ -1882,7 +1882,7 @@ METRIC_EXPORT = build_metric_export_service(
     database_lock=DB_LOCK,
     intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
     today=lambda: ATHLETE_CLOCK.now().date(),
-    utc_now=runtime_clock.utc_now,
+    utc_now=lambda: datetime.now(UTC),
 )
 
 CANONICAL_BACKFILL = build_canonical_backfill(

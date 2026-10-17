@@ -10,6 +10,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from server_test_support import ServerTestCase, create_test_session, server
@@ -24,6 +25,7 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
+from backend.config import Config
 from backend.db.canonical_store import observation_natural_key
 from backend.db.remote_links import RemoteLinkRepository
 from backend.db.schema import initialize_schema
@@ -32,7 +34,11 @@ from backend.http_api import server as http_server_module
 from backend.providers.intervals_client import IntervalsClient
 from backend.sync.intervals_metric_export import IntervalsMetricExport
 from backend.sync.metric_export import MetricExportService
-from backend.sync.metric_export_port import MetricExportPort, MetricWrite
+from backend.sync.metric_export_port import (
+    MetricExportField,
+    MetricExportPort,
+    MetricWrite,
+)
 
 TODAY = date(2026, 10, 12)
 NOW = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
@@ -118,8 +124,13 @@ class IntervalsMetricExportEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.request = Mock(return_value={})
         config = SimpleNamespace(intervals_api_key="key", intervals_athlete_id="i1")
-        self.client = IntervalsClient(config, request=self.request)
+        self.client = IntervalsClient(cast(Config, config), request=self.request)
         self.port = IntervalsMetricExport(lambda: self.client)
+
+    def field(self, kind: MetricKind, sport: Sport | None = None) -> MetricExportField:
+        field = self.port.field_for(kind, sport)
+        assert field is not None
+        return field
 
     def write(self, kind, sport, value, *, recalc=False) -> None:
         field = self.port.field_for(kind, sport)
@@ -178,7 +189,7 @@ class IntervalsMetricExportEndpointTests(unittest.TestCase):
             "locked": True,
             "lthr": float("nan"),
         }
-        field = self.port.field_for(MetricKind.WEIGHT, None)
+        field = self.field(MetricKind.WEIGHT)
         self.assertEqual(
             self.port.read_record(field, date(2026, 10, 1)),
             {"weight": 70.4, "restingHR": 48.0},
@@ -190,7 +201,7 @@ class IntervalsMetricExportEndpointTests(unittest.TestCase):
         )
         self.request.reset_mock()
         self.request.return_value = {"ftp": 255}
-        settings = self.port.field_for(MetricKind.FTP, None)
+        settings = self.field(MetricKind.FTP)
         self.assertEqual(
             self.port.read_record(settings, date(2026, 10, 1)), {"ftp": 255.0}
         )
@@ -201,8 +212,8 @@ class IntervalsMetricExportEndpointTests(unittest.TestCase):
         )
 
     def test_a_missing_wellness_day_reads_empty_and_bad_replies_fail(self) -> None:
-        weight = self.port.field_for(MetricKind.WEIGHT, None)
-        ftp = self.port.field_for(MetricKind.FTP, None)
+        weight = self.field(MetricKind.WEIGHT)
+        ftp = self.field(MetricKind.FTP)
         self.request.side_effect = AppError(
             404, RAW, reason="upstream_rejected", upstream_status=404
         )
@@ -219,7 +230,7 @@ class IntervalsMetricExportEndpointTests(unittest.TestCase):
         self.assertIsNone(self.port.field_for(MetricKind.THRESHOLD_PACE, Sport.RIDE))
         self.assertIsNone(self.port.field_for(MetricKind.MAX_HR, None))
         self.assertEqual(
-            self.port.field_for(MetricKind.THRESHOLD_PACE, Sport.RUN).field,
+            self.field(MetricKind.THRESHOLD_PACE, Sport.RUN).field,
             "threshold_pace",
         )
 
@@ -464,7 +475,7 @@ class MetricExportServiceTests(unittest.TestCase):
             "current_remote_value": None,
         }
         without_remote = {key: entry[key] for key in ("key", "observed_on", "value")}
-        invalid = (
+        invalid: tuple[Any, ...] = (
             [],
             [without_remote],
             [{**entry, "current_remote_value": "71"}],
