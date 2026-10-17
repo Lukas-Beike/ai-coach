@@ -1251,6 +1251,21 @@ class RacePredictionTests(unittest.TestCase):
             },
         )
 
+    def test_unreadable_candidate_does_not_hide_a_later_readable_time(self) -> None:
+        result = _map(
+            {
+                "race_predictions": {
+                    "5k": "fast",
+                    "racePredictions": [{"raceDistance": "5K", "raceTime": 1310}],
+                }
+            }
+        )
+
+        self.assertEqual(
+            _rows(result), [("race_prediction_5k", 1310.0, "2026-10-11", "run")]
+        )
+        self.assertEqual(_issues(result), [])
+
     def test_undated_predictions_use_the_sync_day(self) -> None:
         result = _map({"race_predictions": {"5k": {"raceTime": 1320}}})
 

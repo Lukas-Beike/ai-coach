@@ -625,31 +625,49 @@ def _race_fields(record: Mapping[str, object]) -> dict[MetricKind, tuple[str, ob
 
     A record's distance/time pair comes first, then its named keys; nested containers
     such as ``{"racePredictions": [...]}`` are searched in place, bounded like the
-    legacy reader. The first value found for a kind wins.
+    legacy reader. The first readable time found for a kind wins, as the legacy
+    reader skips unreadable candidates; a kind without one keeps its first
+    unreadable candidate so the issue is reported.
     """
     found: dict[MetricKind, tuple[str, object]] = {}
-    _collect_race_fields(record, found, depth=0)
-    return found
+    unreadable: dict[MetricKind, tuple[str, object]] = {}
+    _collect_race_fields(record, found, unreadable, depth=0)
+    return {**{k: v for k, v in unreadable.items() if k not in found}, **found}
 
 
 def _collect_race_fields(
     record: Mapping[str, object],
     found: dict[MetricKind, tuple[str, object]],
+    unreadable: dict[MetricKind, tuple[str, object]],
     *,
     depth: int,
 ) -> None:
     distance = _first_value(record, GARMIN_RACE_DISTANCE_ALIASES)
     time = _named_value(record, _RACE_PAIR_TIME_KEYS)
     kind = _race_kind(distance) if isinstance(distance, str) else None
-    if kind is not None and time is not None and kind not in found:
-        found[kind] = time
+    if kind is not None and time is not None:
+        _claim_race(kind, time, found, unreadable)
     for key, value in record.items():
         kind = _race_kind(key)
-        if kind is not None and kind not in found:
-            found[kind] = (key, value)
+        if kind is not None:
+            _claim_race(kind, (key, value), found, unreadable)
         if depth < _RACE_DEPTH_LIMIT:
             for child in _race_children(value):
-                _collect_race_fields(child, found, depth=depth + 1)
+                _collect_race_fields(child, found, unreadable, depth=depth + 1)
+
+
+def _claim_race(
+    kind: MetricKind,
+    candidate: tuple[str, object],
+    found: dict[MetricKind, tuple[str, object]],
+    unreadable: dict[MetricKind, tuple[str, object]],
+) -> None:
+    if kind in found:
+        return
+    if _race_seconds(candidate[1]) is not None:
+        found[kind] = candidate
+    else:
+        unreadable.setdefault(kind, candidate)
 
 
 def _race_children(value: object) -> list[Mapping[str, object]]:
