@@ -82,6 +82,17 @@ function calendarMetricNumber(value, suffix = "") {
   return `${AppFormat.number(number, { digits: Number.isInteger(number) ? 0 : 1 })}${suffix}`;
 }
 
+// DWD levels (0–3 index) or Open-Meteo/CAMS concentrations become one short pollen line.
+function plannedPollenLabel(pollen) {
+  if (!pollen || typeof pollen !== "object") return "";
+  const source = pollen.source === "DWD" ? pollen.levels : pollen.concentrations;
+  if (!source || typeof source !== "object") return "";
+  const entries = Object.entries(source)
+    .filter(([, value]) => value != null && String(value) !== "0" && String(value) !== "")
+    .map(([name, value]) => `${name} ${value}`);
+  return entries.length ? `Pollen: ${entries.join(", ")}` : "Pollen: keine Belastung";
+}
+
 // Every activity with a positive distance adds to the total; only distance sports without one count as missing.
 function calendarWeekDistanceLabel(activities) {
   const measured = activities.filter((entry) => Number(entry.distance) > 0);
@@ -456,6 +467,29 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       metrics.textContent = values.join(" · ");
       body.append(metrics);
     }
+    appendPlannedAirInsight(body, weather);
+  }
+
+  function appendPlannedAirInsight(body, weather) {
+    const air = weather.air_quality && typeof weather.air_quality === "object" ? weather.air_quality : {};
+    const aqi = calendarMetricNumber(air.european_aqi_max);
+    const pollen = plannedPollenLabel(weather.pollen);
+    const values = [
+      aqi ? `AQI ${aqi}${air.european_aqi_category ? " (" + air.european_aqi_category + ")" : ""}` : "",
+      calendarMetricNumber(air.uv_index_max) ? `UV ${calendarMetricNumber(air.uv_index_max)}` : "",
+      pollen,
+    ].filter(Boolean);
+    if (!values.length) return;
+    const line = document.createElement("p");
+    line.className = "planned-air-quality";
+    line.textContent = values.join(" · ");
+    line.title = [
+      aqi ? "Luftqualität: Europäischer AQI (Open-Meteo/CAMS)" : null,
+      weather.pollen?.source === "DWD"
+        ? `Pollenflug-Gefahrenindex 0–3: Deutscher Wetterdienst${weather.pollen.region ? " · " + weather.pollen.region : ""}`
+        : pollen ? "Pollen: Körner/m³ (Open-Meteo/CAMS)" : null,
+    ].filter(Boolean).join(" · ");
+    body.append(line);
   }
 
   function plannedDayInsights(weather) {
