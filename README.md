@@ -444,7 +444,7 @@ Conversational turns are persisted in `coach_commands`; provider synchronization
 ### Provider Data Handling
 - **Intervals.icu Activity Pull**: Ingests new completed workouts with full telemetry (duration, distance, TSS, HR zones, power curves). Large imports are safely fetched in paginated windows.
 - **Garmin Sleep Gate & Body Battery**: Morning synchronization deliberately halts until Garmin's sleep window completes. Body Battery tracking captures the final pre-sleep value and the wake-up value within 60 minutes of rising, retrying up to 3 times with 15-minute intervals.
-- **Open-Meteo Weather**: Forecasts are fetched for the athlete's coordinates and cached for 3 hours. Short-range predictions use Germany's DWD ICON-D2 model, transitioning to ECMWF IFS HRES for 14-day projections.
+- **Open-Meteo Weather**: Forecasts are fetched for the athlete's coordinates and cached for 3 hours. For locations in Germany, the first two days use the DWD ICON-D2 model; other locations and the remaining days up to 14 use ECMWF IFS HRES.
 - **iCalendar (ICS) Life Constraints**: The external feed is parsed up to 8 weeks out. Events containing `[NO_TRAINING]`, `[NO_INTENSITY]`, or `[SHORT_ONLY]` in their description are tagged as training constraints.
 
 ---
