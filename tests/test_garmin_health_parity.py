@@ -39,6 +39,7 @@ FIXTURE_NAMES = (
     "cycling_ftp_history",
     "running_threshold",
     "heart_rate_zones",
+    "race_predictions",
 )
 
 
@@ -368,6 +369,24 @@ class RecoveryAndPerformanceParityTests(unittest.TestCase):
         self.assertEqual(run_hr, self.metrics["run_threshold_hr_bpm"]["value"])
         self.assertEqual(ride_hr, self.metrics["bike_threshold_hr_bpm"]["value"])
 
+    def test_running_threshold_power_matches_legacy_running_watts(self) -> None:
+        _, watts = _latest_value(self.result, MetricKind.RUN_THRESHOLD_POWER, Sport.RUN)
+
+        self.assertEqual(watts, self.metrics["run_threshold_watts"]["value"])
+
+    def test_race_predictions_match_legacy_seconds(self) -> None:
+        legacy = {
+            MetricKind.RACE_PREDICTION_5K: "run_5k_seconds",
+            MetricKind.RACE_PREDICTION_10K: "run_10k_seconds",
+            MetricKind.RACE_PREDICTION_HALF: "run_half_marathon_seconds",
+            MetricKind.RACE_PREDICTION_FULL: "run_marathon_seconds",
+        }
+        for kind, key in legacy.items():
+            with self.subTest(kind=kind):
+                _, seconds = _latest_value(self.result, kind, Sport.RUN)
+
+                self.assertEqual(seconds, self.metrics[key]["value"])
+
     def test_threshold_pace_converts_to_legacy_seconds_per_kilometre(self) -> None:
         # The mapper keeps Garmin's m/s speed. The legacy reader shows s/km.
         _, speed = _latest_value(self.result, MetricKind.THRESHOLD_PACE, Sport.RUN)
@@ -453,28 +472,6 @@ class NamedDeviationTests(unittest.TestCase):
 
         self.assertEqual(context["hrv"], 58)
         self.assertEqual(result.records, ())
-
-    def test_running_threshold_power_is_unsupported_not_running_watts(self) -> None:
-        snapshot = _fixture_snapshot()
-        metrics = garmin_metrics.garmin_performance_metrics(snapshot, TODAY)
-        result = _map(snapshot)
-
-        self.assertEqual(metrics["run_threshold_watts"]["value"], 290)
-        self.assertFalse(
-            [
-                obs
-                for obs in result.records
-                if obs.kind is MetricKind.FTP and obs.sport is Sport.RUN
-            ]
-        )
-        self.assertIn(
-            (
-                "running_threshold[0]",
-                "power.functionalThresholdPower",
-                IssueReason.UNSUPPORTED,
-            ),
-            [(i.record_ref, i.field, i.reason) for i in result.issues],
-        )
 
 
 if __name__ == "__main__":

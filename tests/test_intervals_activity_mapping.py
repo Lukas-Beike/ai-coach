@@ -75,9 +75,9 @@ def load_fixture_rows() -> list[dict[str, Any]]:
 
 
 class ModuleContractTests(unittest.TestCase):
-    def test_mapper_version_is_two(self) -> None:
-        # Version 2 keeps elapsed_time as elapsed_duration_s.
-        self.assertEqual(2, MAPPER_VERSION)
+    def test_mapper_version_is_three(self) -> None:
+        # Version 2 keeps elapsed_time as elapsed_duration_s; version 3 max_hr.
+        self.assertEqual(3, MAPPER_VERSION)
 
     def test_retrieved_at_must_be_timezone_aware(self) -> None:
         with self.assertRaises(ValueError):
@@ -128,6 +128,7 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(72.0, record.load)
         self.assertEqual(LoadModel.INTERVALS_TRAINING_LOAD, record.load_model)
         self.assertEqual(142.0, record.avg_hr)
+        self.assertEqual(171.0, record.max_hr)
         self.assertEqual(198.0, record.avg_power)
 
     def test_run_without_elapsed_or_power_uses_moving_time(self) -> None:
@@ -136,6 +137,7 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(Sport.RUN, record.sport)
         self.assertEqual(2400.0, record.duration_s)
         self.assertEqual(150.0, record.avg_hr)
+        self.assertIsNone(record.max_hr)
         self.assertIsNone(record.avg_power)
 
     def test_naive_wall_times_across_dst_transitions_are_localised(self) -> None:
@@ -418,6 +420,10 @@ class AliasTests(unittest.TestCase):
     def test_average_heart_rate_precedes_legacy_alias(self) -> None:
         self.assertEqual(142.0, map_one(average_heartrate=142, averageHR=140).avg_hr)
 
+    def test_max_heart_rate_precedes_legacy_alias(self) -> None:
+        self.assertEqual(181.0, map_one(max_heartrate=181, maxHR=175).max_hr)
+        self.assertEqual(175.0, map_one(maxHR=175).max_hr)
+
     def test_numeric_text_is_accepted(self) -> None:
         self.assertEqual(5400.0, map_one(moving_time=" 5400 ").duration_s)
 
@@ -689,6 +695,7 @@ class MalformedInputTests(unittest.TestCase):
             ({"average_watts": -5}, "average_watts", IssueReason.OUT_OF_RANGE),
             ({"distance": 2_000_001}, "distance", IssueReason.OUT_OF_RANGE),
             ({"average_heartrate": 300}, "average_heartrate", IssueReason.OUT_OF_RANGE),
+            ({"max_heartrate": 300}, "max_heartrate", IssueReason.OUT_OF_RANGE),
             (
                 {"icu_training_load": 10_001},
                 "icu_training_load",

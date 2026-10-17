@@ -95,7 +95,7 @@ def observation(
 ) -> Observation:
     return Observation(
         kind=kind,
-        value=MetricValue(value=value, unit="kg"),
+        value=MetricValue(value=value, unit=kind.unit),
         observed_on=observed_on,
         observed_at=observed_at,
         provenance=provenance(source_record_id, provider=provider),
@@ -340,6 +340,33 @@ class ObservationStoreTests(StoreFixture):
             self.assertIs(self.write(second), WriteOutcome.WRITTEN)
             values = self.db.execute("SELECT value FROM observations").fetchall()
             self.assertEqual(sorted(row[0] for row in values), [70.0, 72.5])
+
+    def test_athlete_profile_eftp_has_its_own_series(self) -> None:
+        wellness = observation(
+            258.0, kind=MetricKind.EFTP, sport=Sport.RIDE, source_record_id="2026-10-01"
+        )
+        athlete = observation(
+            262.0, kind=MetricKind.EFTP, sport=Sport.RIDE, source_record_id="i12345"
+        )
+        self.assertEqual(
+            canonical_store.observation_natural_key(athlete),
+            "intervals|eftp|ride|athlete|2026-10-01",
+        )
+        self.assertEqual(
+            canonical_store.observation_natural_key(wellness),
+            "intervals|eftp|ride||2026-10-01",
+        )
+        self.assertIs(self.write(wellness), WriteOutcome.WRITTEN)
+        self.assertIs(self.write(athlete), WriteOutcome.WRITTEN)
+        self.assertEqual(self.count("observations"), 2)
+
+    def test_other_athlete_profile_kinds_share_the_daily_key(self) -> None:
+        ftp = observation(
+            260.0, kind=MetricKind.FTP, sport=Sport.RIDE, source_record_id="i12345"
+        )
+        self.assertEqual(
+            canonical_store.observation_natural_key(ftp), "intervals|ftp|ride||2026-10-01"
+        )
 
     def test_insert_unchanged_and_update_by_natural_key(self) -> None:
         self.assertIs(self.write(observation()), WriteOutcome.WRITTEN)
@@ -687,6 +714,39 @@ class ActivityMetricStoreTests(StoreFixture):
             canonical_store.ACTIVITY_DETAILS,
             self.one("SELECT details FROM activity_records")[0],
         )
+
+    def test_max_hr_is_kept_in_the_details_beside_elapsed_duration(self) -> None:
+        def write(record: ActivityRecord) -> WriteOutcome:
+            return canonical_store.upsert_activity_record(
+                self.db,
+                record,
+                local_date=date(2026, 6, 1),
+                mapper_version=3,
+                fetched_at=STAMP,
+                now=STAMP,
+            )
+
+        record = replace(activity("walk-1"), max_hr=171.0)
+        self.assertIs(WriteOutcome.WRITTEN, write(record))
+        self.assertEqual(
+            '{"max_hr":171.0}', self.one("SELECT details FROM activity_records")[0]
+        )
+
+        both = replace(record, elapsed_duration_s=4520.0)
+        self.assertIs(WriteOutcome.UPDATED, write(both))
+        self.assertIs(WriteOutcome.UNCHANGED, write(both))
+        details = self.one("SELECT details FROM activity_records")[0]
+        self.assertEqual('{"elapsed_duration_s":4520.0,"max_hr":171.0}', details)
+        row = canonical_store.active_activity_rows(self.db)[0]
+        self.assertEqual(171.0, canonical_store.activity_max_hr(row["details"]))
+        self.assertEqual(
+            4520.0, canonical_store.activity_elapsed_duration(row["details"])
+        )
+
+    def test_unreadable_details_have_no_max_hr(self) -> None:
+        for details in (None, "{", "[]", "{}", '{"max_hr":"171"}', '{"max_hr":true}'):
+            with self.subTest(details=details):
+                self.assertIsNone(canonical_store.activity_max_hr(details))
 
     def test_unreadable_details_have_no_elapsed_duration(self) -> None:
         for details in (
