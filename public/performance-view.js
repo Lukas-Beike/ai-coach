@@ -330,7 +330,8 @@ function metricExportValue(value, unit) {
 function metricExportLine(item) {
   const labels = { weight: "Gewicht", body_fat: "Körperfett", resting_hr: "Ruhepuls", ftp: "FTP", threshold_hr: "Schwellen-Herzfrequenz", max_hr: "Maximale Herzfrequenz", threshold_pace: "Schwellenpace" };
   const sport = { ride: "Rad", run: "Lauf" }[item.sport];
-  const metric = `${labels[item.metric] || item.metric}${sport ? ` (${sport})` : ""}`;
+  const sportSuffix = sport ? ` (${sport})` : "";
+  const metric = `${labels[item.metric] || item.metric}${sportSuffix}`;
   const remote = item.current_remote_value == null ? "dort noch kein Wert" : `dort bisher ${metricExportValue(item.current_remote_value, item.unit)}`;
   return `• ${metric}: ${metricExportValue(item.value, item.unit)} vom ${dateLabel(item.observed_on)} · Quelle: ${item.source_label || "unbekannt"} → ${item.target_label} (${remote})`;
 }

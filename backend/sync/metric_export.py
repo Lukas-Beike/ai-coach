@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -131,6 +131,39 @@ class MetricExportService:
         }
 
     def export(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        target, requested, recalc = self._validated_request(payload)
+        port = self._port(target)
+        if recalc and not port.supports_hr_zone_recalc:
+            raise AppError(
+                400,
+                "Das Zielsystem kann Herzfrequenzzonen nicht neu berechnen.",
+                reason="invalid_metric_export",
+            )
+        selected = self._selected(target, port, requested)
+        groups: dict[str, list[_Candidate]] = {}
+        for candidate in selected:
+            groups.setdefault(candidate.record, []).append(candidate)
+        label = self._registry.get(target.value).label
+        items: list[dict[str, Any]] = []
+        for group in groups.values():
+            failure = self._write(port, group, recalc_hr_zones=recalc)
+            if failure is None:
+                self._record(target, group)
+            items.extend(self._group_items(group, failure, label))
+        exported = sum(1 for item in items if item["status"] == EXPORTED)
+        return {
+            "ok": exported == len(items),
+            "provider": target.value,
+            "provider_label": label,
+            "recalc_hr_zones": recalc,
+            "exported": exported,
+            "failed": len(items) - exported,
+            "items": items,
+        }
+
+    def _validated_request(
+        self, payload: Mapping[str, Any]
+    ) -> tuple[ProviderId, list[tuple[str, str, float]], bool]:
         if not isinstance(payload, Mapping) or payload.get("confirmed") is not True:
             raise AppError(
                 400,
@@ -151,13 +184,14 @@ class MetricExportService:
             raise AppError(
                 400, "Ungültige Zonen-Option.", reason="invalid_metric_export"
             )
-        port = self._port(target)
-        if recalc and not port.supports_hr_zone_recalc:
-            raise AppError(
-                400,
-                "Das Zielsystem kann Herzfrequenzzonen nicht neu berechnen.",
-                reason="invalid_metric_export",
-            )
+        return target, requested, recalc
+
+    def _selected(
+        self,
+        target: ProviderId,
+        port: MetricExportPort,
+        requested: Sequence[tuple[str, str, float]],
+    ) -> list[_Candidate]:
         ready = {
             candidate.key: candidate
             for candidate in self._candidates(target, port)
@@ -177,35 +211,22 @@ class MetricExportService:
                     reason="metric_export_changed",
                 )
             selected.append(candidate)
+        return selected
 
-        groups: dict[str, list[_Candidate]] = {}
-        for candidate in selected:
-            groups.setdefault(candidate.record, []).append(candidate)
-        label = self._registry.get(target.value).label
+    def _group_items(
+        self, group: Sequence[_Candidate], failure: str | None, label: str
+    ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
-        for group in groups.values():
-            failure = self._write(port, group, recalc_hr_zones=recalc)
+        for candidate in group:
+            item = self._receipt_item(candidate)
             if failure is None:
-                self._record(target, group)
-            for candidate in group:
-                item = self._receipt_item(candidate)
-                if failure is None:
-                    item["status"] = EXPORTED
-                else:
-                    item["status"] = FAILED
-                    item["reason"] = failure
-                    item["error"] = f"Senden an {label} fehlgeschlagen."
-                items.append(item)
-        exported = sum(1 for item in items if item["status"] == EXPORTED)
-        return {
-            "ok": exported == len(items),
-            "provider": target.value,
-            "provider_label": label,
-            "recalc_hr_zones": recalc,
-            "exported": exported,
-            "failed": len(items) - exported,
-            "items": items,
-        }
+                item["status"] = EXPORTED
+            else:
+                item["status"] = FAILED
+                item["reason"] = failure
+                item["error"] = f"Senden an {label} fehlgeschlagen."
+            items.append(item)
+        return items
 
     def _target(self, raw: Any) -> ProviderId:
         exporting = self._registry.ids_with(Capability.METRIC_EXPORT)
@@ -265,24 +286,9 @@ class MetricExportService:
         candidates: list[_Candidate] = []
         with self._database_manager().reader() as db:
             for kind in sorted(kinds, key=lambda item: item.value):
-                sources: dict[str, tuple[MetricExportField, Observation]] = {}
-                remotes: dict[str, list[Observation]] = {}
-                for observation in reader.observations(db, kind, start=start):
-                    field = port.field_for(kind, observation.sport)
-                    if field is None:
-                        continue
-                    key = _item_key(field)
-                    provider = observation.provenance.provider
-                    if provider is target:
-                        remotes.setdefault(key, []).append(observation)
-                    elif provider is not None:
-                        # Provider-less values (AI estimates, athlete entries)
-                        # have no verifiable origin and are not offered.
-                        current = sources.get(key)
-                        if current is None or _recency(observation) > _recency(
-                            current[1]
-                        ):
-                            sources[key] = (field, observation)
+                sources, remotes = self._partition(
+                    reader.observations(db, kind, start=start), target, port
+                )
                 for key, (field, source) in sorted(sources.items()):
                     candidates.append(
                         self._candidate(
@@ -290,6 +296,33 @@ class MetricExportService:
                         )
                     )
         return candidates
+
+    @staticmethod
+    def _partition(
+        observations: Iterable[Observation],
+        target: ProviderId,
+        port: MetricExportPort,
+    ) -> tuple[
+        dict[str, tuple[MetricExportField, Observation]], dict[str, list[Observation]]
+    ]:
+        """Split observations into the newest export source and target values."""
+        sources: dict[str, tuple[MetricExportField, Observation]] = {}
+        remotes: dict[str, list[Observation]] = {}
+        for observation in observations:
+            field = port.field_for(observation.kind, observation.sport)
+            if field is None:
+                continue
+            key = _item_key(field)
+            provider = observation.provenance.provider
+            if provider is target:
+                remotes.setdefault(key, []).append(observation)
+            elif provider is not None:
+                # Provider-less values (AI estimates, athlete entries)
+                # have no verifiable origin and are not offered.
+                current = sources.get(key)
+                if current is None or _recency(observation) > _recency(current[1]):
+                    sources[key] = (field, observation)
+        return sources, remotes
 
     def _candidate(
         self,

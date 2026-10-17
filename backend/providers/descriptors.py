@@ -112,6 +112,15 @@ def _require_text_set(value: object, name: str) -> None:
         _require_text(item, name)
 
 
+def _require_metric_exports(value: object, capabilities: frozenset[Capability]) -> None:
+    if not isinstance(value, frozenset) or not all(
+        isinstance(kind, MetricKind) for kind in value
+    ):
+        raise ValueError("metric_exports must be a frozenset of MetricKind values")
+    if bool(value) != (Capability.METRIC_EXPORT in capabilities):
+        raise ValueError("metric_exports must be declared with METRIC_EXPORT")
+
+
 def _require_route_path(value: object, name: str) -> None:
     _require_text(value, name)
     if not str(value).startswith("/"):
@@ -244,12 +253,7 @@ class ProviderDescriptor:
             raise ValueError("manual_sync must be a ManualSyncRoute")
         if self.full_resync_path is not None:
             _require_route_path(self.full_resync_path, "full_resync_path")
-        if not isinstance(self.metric_exports, frozenset) or not all(
-            isinstance(kind, MetricKind) for kind in self.metric_exports
-        ):
-            raise ValueError("metric_exports must be a frozenset of MetricKind values")
-        if bool(self.metric_exports) != (Capability.METRIC_EXPORT in self.capabilities):
-            raise ValueError("metric_exports must be declared with METRIC_EXPORT")
+        _require_metric_exports(self.metric_exports, self.capabilities)
 
 
 DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
