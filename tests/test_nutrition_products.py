@@ -143,6 +143,18 @@ class NutritionProductContractTests(unittest.TestCase):
             with self.subTest(query=query):
                 self.assertEqual(self.library.list_products(query=query), [])
 
+    def test_short_search_words_must_start_a_word(self):
+        self.library.save_product(
+            self.product_payload(barcode=None, name="Reisnudeln mit Brokkoli")
+        )
+        self.library.save_product(self.product_payload(barcode=None, name="Bio Eier"))
+
+        names = [p["name"] for p in self.library.list_products(query="Ei")]
+
+        self.assertEqual(names, ["Bio Eier"])
+        self.assertEqual(self.library.list_products(query="Ei Brokkoli"), [])
+        self.assertEqual(len(self.library.list_products(query="nudeln brokkoli")), 1)
+
     def test_unknown_barcode_falls_back_to_food_database_and_labels_source(self):
         result = self.library.lookup_product({"barcode": "4006381333999"})
 

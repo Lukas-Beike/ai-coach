@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import unittest
@@ -157,6 +158,16 @@ class OpenFoodFactsTests(unittest.TestCase):
         self.assertIn("tag_0=germany", opener.call_args.args[0].full_url)
         with self.assertRaises(AppError):
             client.search("Synthetic tenth")
+
+    def test_truncated_provider_response_is_reported_as_unavailable(self):
+        opener = Mock(side_effect=http.client.IncompleteRead(b"partial"))
+        client = OpenFoodFactsClient(opener=opener)
+
+        with self.assertRaises(AppError) as raised:
+            client.search("Skyr")
+
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(raised.exception.reason, "food_database_unavailable")
 
     def test_provider_backoff_and_errors_do_not_expose_query_or_response(self):
         clock = Mock(return_value=0)

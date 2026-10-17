@@ -86,18 +86,26 @@ class NutritionProductRepository:
         # Every word must appear in the name or brand, so "Arla Skyr" finds
         # the saved product "Skyr" of brand "Arla". An empty query lists all;
         # a whitespace-only or overlong query matches nothing rather than a
-        # broader set.
+        # broader set. Words shorter than three characters must start a word,
+        # so "Ei" finds "Eier" but not "Reisnudeln".
         terms = (query or "").split()
         if query and not 1 <= len(terms) <= 20:
             return []
         for term in terms:
-            clauses.append(
-                "(name LIKE ? ESCAPE '\\' COLLATE NOCASE"
-                " OR brand LIKE ? ESCAPE '\\' COLLATE NOCASE)"
-            )
             escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            pattern = f"%{escaped}%"
-            params.extend((pattern, pattern))
+            patterns = (
+                (f"{escaped}%", f"% {escaped}%") if len(term) < 3 else (f"%{escaped}%",)
+            )
+            clauses.append(
+                "("
+                + " OR ".join(
+                    f"{column} LIKE ? ESCAPE '\\' COLLATE NOCASE"
+                    for column in ("name", "brand")
+                    for _ in patterns
+                )
+                + ")"
+            )
+            params.extend(patterns * 2)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         rows = db.execute(
             self._SELECT

@@ -181,22 +181,18 @@ class CoachReadToolService:
             and source in {"bls", "open_food_facts"}
         ):
             local_products = nutrition.list_products(query=query)[:10]
-            if local_products and len(query) < 2:
-                # Too short for the external database, but saved products match.
-                return {"ok": True, "foods": [], "local_products": local_products}
             try:
                 result = nutrition.food_database.lookup(
                     {**arguments, "query": query, "source": source}
                 )
             except AppError as exc:
-                # Saved products stay usable while the external database is down.
-                # Rate limits (429) count as unavailable too.
-                if not local_products or (exc.status < 500 and exc.status != 429):
+                # Saved matches stay usable whenever the external lookup fails.
+                if not local_products:
                     raise
                 result = {
                     "ok": True,
                     "foods": [],
-                    "notice": "Externe Lebensmitteldatenbank nicht erreichbar; nur gespeicherte Produkte verfügbar.",
+                    "notice": f"Externe Lebensmitteldatenbank lieferte keine Treffer ({exc.message}); nur gespeicherte Produkte verfügbar.",
                 }
             return (
                 {**result, "local_products": local_products}
