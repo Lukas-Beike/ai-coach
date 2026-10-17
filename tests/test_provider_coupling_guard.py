@@ -3,33 +3,41 @@
 import json
 import tempfile
 import unittest
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 try:
     from .provider_coupling import (
         BASELINE_PATH,
+        OWNER_READ_ALLOWLIST,
         PROVIDER_LITERAL_ALLOWED_FILES,
         SOURCE_ROOT,
         CouplingEntry,
         compare_coupling,
         load_baseline,
         render_baseline,
+        scan_owner_reads,
         scan_provider_coupling,
         snapshot_refusals,
+        stale_owner_allowlist,
+        unallowed_owner_reads,
         write_baseline,
     )
 except ImportError:
     from provider_coupling import (
         BASELINE_PATH,
+        OWNER_READ_ALLOWLIST,
         PROVIDER_LITERAL_ALLOWED_FILES,
         SOURCE_ROOT,
         CouplingEntry,
         compare_coupling,
         load_baseline,
         render_baseline,
+        scan_owner_reads,
         scan_provider_coupling,
         snapshot_refusals,
+        stale_owner_allowlist,
+        unallowed_owner_reads,
         write_baseline,
     )
 
@@ -42,7 +50,10 @@ def _summary(entries: list[CouplingEntry]) -> list[tuple[str, str, str, int]]:
     return [(entry.rule, entry.path, entry.token, entry.count) for entry in entries]
 
 
-def _scan_files(files: Mapping[str, str]) -> list[CouplingEntry]:
+def _scan_files(
+    files: Mapping[str, str],
+    scan: Callable[[Path], list[CouplingEntry]] = scan_provider_coupling,
+) -> list[CouplingEntry]:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         # A scan root must contain the full source layout; empty files keep it so.
@@ -53,7 +64,7 @@ def _scan_files(files: Mapping[str, str]) -> list[CouplingEntry]:
             path = root / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-        return scan_provider_coupling(root)
+        return scan(root)
 
 
 class ProviderCouplingRatchetTests(unittest.TestCase):
@@ -397,6 +408,200 @@ class ProviderCouplingScannerTests(unittest.TestCase):
             path.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaises(ValueError):
                 load_baseline(path)
+
+
+def _owner_reads(files: Mapping[str, str]) -> list[tuple[str, str, str, int]]:
+    return _summary(_scan_files(files, scan_owner_reads))
+
+
+class OwnerReadGuardTests(unittest.TestCase):
+    def test_consumers_cannot_read_raw_snapshots(self) -> None:
+        entries = _owner_reads(
+            {
+                "backend/performance/consumer.py": (
+                    'raw = kv.get(db, "garmin_snapshot")\n'
+                    'other = {"intervals_snapshot": 1}\n'
+                    "snapshot = self._sync_state.latest_snapshot()\n"
+                    "again = latest_snapshot(db)\n"
+                    "# garmin_snapshot in a comment is ignored\n"
+                ),
+                "server.py": 'key = "garmin_snapshot"\n',
+            }
+        )
+        self.assertEqual(
+            [
+                (
+                    "snapshot_key",
+                    "backend/performance/consumer.py",
+                    "garmin_snapshot",
+                    1,
+                ),
+                (
+                    "snapshot_key",
+                    "backend/performance/consumer.py",
+                    "intervals_snapshot",
+                    1,
+                ),
+                (
+                    "snapshot_key",
+                    "backend/performance/consumer.py",
+                    "latest_snapshot",
+                    2,
+                ),
+                ("snapshot_key", "server.py", "garmin_snapshot", 1),
+            ],
+            entries,
+        )
+
+    def test_aliased_and_quoted_snapshot_reader_references_are_flagged(self) -> None:
+        entries = _owner_reads(
+            {
+                "backend/performance/consumer.py": (
+                    "from backend.sync.state import latest_snapshot as read_raw\n"
+                    'reader = getattr(state, "latest_snapshot")\n'
+                    "raw = read_raw(db)\n"
+                ),
+            }
+        )
+        self.assertEqual(
+            [
+                (
+                    "snapshot_key",
+                    "backend/performance/consumer.py",
+                    "latest_snapshot",
+                    2,
+                )
+            ],
+            entries,
+        )
+
+    def test_snapshot_keys_embedded_in_strings_are_flagged_but_not_docstrings(
+        self,
+    ) -> None:
+        entries = _owner_reads(
+            {
+                "backend/athlete/consumer.py": (
+                    '"""Formerly read garmin_snapshot directly."""\n'
+                    "row = db.execute(\n"
+                    "    \"SELECT value FROM kv WHERE key='garmin_snapshot'\"\n"
+                    ").fetchone()\n"
+                    'note = f"intervals_snapshot:{day}"\n'
+                    'unrelated = "garmin_snapshots_total"\n'
+                ),
+            }
+        )
+        self.assertEqual(
+            [
+                ("snapshot_key", "backend/athlete/consumer.py", "garmin_snapshot", 1),
+                (
+                    "snapshot_key",
+                    "backend/athlete/consumer.py",
+                    "intervals_snapshot",
+                    1,
+                ),
+            ],
+            entries,
+        )
+
+    def test_athlete_views_are_in_the_source_label_scope(self) -> None:
+        entries = _owner_reads(
+            {"backend/athlete/consumer.py": 'item = {"source": "Garmin Connect"}\n'}
+        )
+        self.assertEqual(
+            [("source_label", "backend/athlete/consumer.py", "Garmin Connect", 1)],
+            entries,
+        )
+
+    def test_provider_display_names_are_flagged_only_as_exact_labels(self) -> None:
+        entries = _owner_reads(
+            {
+                "backend/coach/consumer.py": (
+                    'source = "Garmin Connect"\n'
+                    'prose = "Garmin Connect Radaktivitäten"\n'
+                    'also = "Intervals.icu"\n'
+                ),
+                "public/analysis.js": 'const s = "Garmin Connect";\n',
+            }
+        )
+        self.assertEqual(
+            [
+                ("source_label", "backend/coach/consumer.py", "Garmin Connect", 1),
+                ("source_label", "backend/coach/consumer.py", "Intervals.icu", 1),
+                ("source_label", "public/analysis.js", "Garmin Connect", 1),
+            ],
+            entries,
+        )
+
+    def test_label_owners_and_connection_copy_are_out_of_scope(self) -> None:
+        label = 'source = "Garmin Connect"\n'
+        entries = _owner_reads(
+            {
+                "backend/providers/source_labels.py": label,
+                "backend/sync/commands.py": label,
+                "backend/sync/garmin.py": label,
+                "public/sync-status.js": "const s = 'Garmin Connect';\n",
+                "public/nutrition.js": "const s = 'Garmin Connect';\n",
+            }
+        )
+        self.assertEqual([], entries)
+
+    def test_allowlisted_owners_pass_and_other_files_fail(self) -> None:
+        entries = _scan_files(
+            {
+                "backend/sync/garmin_snapshot_writer.py": 'KEY = "garmin_snapshot"\n',
+                "backend/performance/consumer.py": 'KEY = "garmin_snapshot"\n',
+                "public/performance-view.js": "const s = 'Intervals.icu';\n",
+                "public/analysis.js": "const s = 'x';\n",
+            },
+            scan_owner_reads,
+        )
+        allowlist = {
+            ("snapshot_key", "backend/sync/garmin_snapshot_writer.py"): "writer"
+        }
+        self.assertEqual(
+            [
+                ("snapshot_key", "backend/performance/consumer.py"),
+                ("source_label", "public/performance-view.js"),
+            ],
+            [
+                (entry.rule, entry.path)
+                for entry in unallowed_owner_reads(entries, allowlist)
+            ],
+        )
+
+    def test_stale_allowlist_entries_are_reported(self) -> None:
+        entries = [
+            _entry("snapshot_key", "backend/sync/garmin.py", "latest_snapshot", 1)
+        ]
+        allowlist = {
+            ("snapshot_key", "backend/sync/garmin.py"): "writer",
+            ("snapshot_key", "backend/sync/gone.py"): "writer",
+        }
+        self.assertEqual(
+            [("snapshot_key", "backend/sync/gone.py")],
+            stale_owner_allowlist(entries, allowlist),
+        )
+
+    def test_source_tree_reads_only_through_allowlisted_owners(self) -> None:
+        self.assertEqual(
+            [],
+            [
+                (entry.rule, entry.path, entry.token)
+                for entry in unallowed_owner_reads(scan_owner_reads())
+            ],
+            "A consumer reads a raw provider snapshot or hardcodes a provider "
+            "label. Read canonical observations and take labels from "
+            "backend/providers/source_labels.py.",
+        )
+
+    def test_owner_allowlist_has_no_stale_entries(self) -> None:
+        self.assertEqual([], stale_owner_allowlist(scan_owner_reads()))
+
+    def test_owner_allowlist_is_explained_and_the_baseline_stays_empty(self) -> None:
+        for (_rule, relative_path), reason in OWNER_READ_ALLOWLIST.items():
+            self.assertTrue((SOURCE_ROOT / relative_path).is_file(), relative_path)
+            self.assertTrue(reason.strip(), relative_path)
+        self.assertEqual([], load_baseline())
 
 
 if __name__ == "__main__":
