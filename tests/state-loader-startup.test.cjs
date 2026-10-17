@@ -41,6 +41,7 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
     document: { currentScript: { src: asset } },
     setTimeout,
     clearTimeout,
+    btoa,
     localStorage: {
       getItem: (key) => (storage.has(key) ? storage.get(key) : null),
       setItem: (key, value) => storage.set(key, String(value)),
@@ -218,18 +219,22 @@ test("a full storage drops the view cache before the state snapshot", () => {
   assert.deepEqual(plain(context.readStateSnapshot().data), { messages: [{ id: 1 }] });
 });
 
-test("a load with failed areas keeps the previous snapshot", async () => {
+test("a load with failed areas stores the loaded areas and keeps the previous failed ones", async () => {
   const { context, state, respond } = loader();
   state.initialStateLoaded = true;
-  state.data = { performance: { ctl: 40 } };
+  state.data = { performance: { ctl: 40 }, library: [{ id: "w1" }] };
   context.saveStateSnapshot();
+  // A start from the snapshot replaces all data, so the failed library is missing.
+  state.replaceDataOnLoad = true;
   const failing = context.load("/api/bootstrap", ["performance", "library"]);
   respond("/api/bootstrap", { state_versions: {} });
   respond("/api/performance", { performance: { ctl: 41 } });
   respond("/api/library?limit=100", Promise.reject(new Error("offline")));
   await failing;
+  assert.equal(state.data.library, undefined);
   context.saveStateSnapshot();
-  assert.deepEqual(plain(context.readStateSnapshot().data), { performance: { ctl: 40 } });
+  const stored = context.readStateSnapshot().data;
+  assert.deepEqual(plain([stored.performance, stored.library]), [{ ctl: 41 }, [{ id: "w1" }]]);
   const complete = context.load("/api/bootstrap?local=1", ["performance"]);
   respond("/api/bootstrap?local=1", { state_versions: {} });
   await complete;
@@ -247,4 +252,42 @@ test("loaded state renders as real data, so it may notify", async () => {
   respond("/api/performance", { performance: {} });
   await loading;
   assert.deepEqual(flags, [false]);
+});
+
+test("shown messages are cached at once as the latest page and replace older snapshot messages", () => {
+  const first = loader();
+  first.state.initialStateLoaded = true;
+  first.state.data = { messages: [{ id: 1, content: "alt" }], messages_generation: "g1" };
+  first.context.saveStateSnapshot();
+  const messages = Array.from({ length: 25 }, (_, index) => ({ id: index + 1, role: "user", content: `m${index + 1}` }));
+  first.context.rememberChatCache({ messages: [...messages, { client_turn_id: "pending", role: "user" }], messages_generation: "g1", messages_next_cursor: null });
+  const snapshot = loader({ storage: first.storage }).context.readStateSnapshot();
+  assert.equal(snapshot.data.messages.length, vm.runInContext("CHAT_CACHE_LIMIT", first.context));
+  assert.deepEqual([snapshot.data.messages[0].id, snapshot.data.messages.at(-1).id], [6, 25]);
+  // The server cursor for "before message 6": base64url of the JSON id.
+  assert.equal(snapshot.data.messages_next_cursor, Buffer.from("6").toString("base64url"));
+  assert.equal(snapshot.data.messages_generation, "g1");
+  // A complete page keeps the server cursor; placeholder data is never cached.
+  first.context.rememberChatCache({ messages: messages.slice(0, 3), messages_generation: "g1", messages_next_cursor: "older" });
+  first.state.replaceDataOnLoad = true;
+  first.context.rememberChatCache({ messages: [{ id: 99 }], messages_generation: "g1" });
+  const cached = first.context.readChatCache();
+  assert.deepEqual([cached.messages.length, cached.next_cursor], [3, "older"]);
+  first.context.clearStateSnapshot();
+  assert.equal(first.storage.size, 0);
+});
+
+test("a full storage drops the view cache before the message cache", () => {
+  class FullStorage extends Map {
+    set(key, value) {
+      if (key === "coach-chat-cache" && this.has("coach-view-cache")) throw new Error("QuotaExceededError");
+      return super.set(key, value);
+    }
+  }
+  const { context, state, storage } = loader({ storage: new FullStorage() });
+  state.data = {};
+  context.rememberViewCache("/api/nutrition/week", { days: [1] }, 0);
+  context.rememberChatCache({ messages: [{ id: 1 }] });
+  assert.equal(storage.has("coach-view-cache"), false);
+  assert.deepEqual(plain(context.readChatCache().messages), [{ id: 1 }]);
 });

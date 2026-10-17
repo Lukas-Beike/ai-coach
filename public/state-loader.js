@@ -41,22 +41,33 @@ let stateSnapshotSaveTimer = null;
 // Changes when the device data is cleared, so a view read that started before
 // a logout or privacy deletion neither renders nor caches its response.
 let viewCacheEpoch = 0;
-// A load with failed areas keeps the previous snapshot instead of storing partial state.
+// A load with failed areas still stores the loaded areas and keeps the previous
+// snapshot's values for the failed ones, so a slow area does not hold back the
+// next start.
 let stateSnapshotIncomplete = false;
+
+function previousSnapshotData() {
+  try {
+    const snapshot = JSON.parse(localStorage.getItem(STATE_SNAPSHOT_KEY) || "null");
+    return snapshot?.asset === STATE_SNAPSHOT_ASSET && snapshot.data && typeof snapshot.data === "object" ? snapshot.data : {};
+  } catch { return {}; }
+}
 
 function saveStateSnapshot() {
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
-  if (!state.initialStateLoaded || !state.data || state.replaceDataOnLoad || stateSnapshotIncomplete) return;
-  const snapshot = JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: state.data });
+  if (!state.initialStateLoaded || !state.data || state.replaceDataOnLoad) return;
+  const data = stateSnapshotIncomplete ? { ...previousSnapshotData(), ...state.data } : state.data;
+  const snapshot = JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data });
   try {
     localStorage.setItem(STATE_SNAPSHOT_KEY, snapshot);
   } catch {
-    // The view cache gives way to the state snapshot when storage is full.
+    // The view cache gives way to the state snapshot when storage is full; the
+    // separately stored messages stay.
     try {
       localStorage.removeItem(VIEW_CACHE_KEY);
       localStorage.setItem(STATE_SNAPSHOT_KEY, snapshot);
-    } catch { clearStateSnapshot(); }
+    } catch { try { localStorage.removeItem(STATE_SNAPSHOT_KEY); } catch { } }
   }
 }
 
@@ -66,11 +77,54 @@ function scheduleStateSnapshotSave() {
   if (stateSnapshotSaveTimer === null) stateSnapshotSaveTimer = setTimeout(saveStateSnapshot, STATE_SNAPSHOT_SAVE_DELAY_MS);
 }
 
+// The latest stored Coach messages, written as soon as loaded messages are shown.
+// The state snapshot waits for the area loads, so a start takes its messages
+// from here; older messages load page by page when scrolling up.
+const CHAT_CACHE_KEY = "coach-chat-cache";
+const CHAT_CACHE_LIMIT = 20;
+let chatCacheValue = null;
+
+// Same encoding as the server's chat history cursor: the oldest kept message id.
+function chatHistoryCursor(messageId) {
+  return btoa(JSON.stringify(Number(messageId))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+function rememberChatCache(data) {
+  if (!data || state.replaceDataOnLoad || !Array.isArray(data.messages)) return;
+  const stored = data.messages.filter((message) => message?.id != null && Number.isSafeInteger(Number(message.id)));
+  const messages = stored.slice(-CHAT_CACHE_LIMIT);
+  const value = JSON.stringify({
+    generation: data.messages_generation ?? null,
+    messages,
+    next_cursor: stored.length > messages.length ? chatHistoryCursor(messages[0].id) : data.messages_next_cursor ?? null,
+  });
+  if (value === chatCacheValue) return;
+  try {
+    localStorage.setItem(CHAT_CACHE_KEY, value);
+  } catch {
+    // The messages take precedence over the view cache when storage is full.
+    try {
+      localStorage.removeItem(VIEW_CACHE_KEY);
+      localStorage.setItem(CHAT_CACHE_KEY, value);
+    } catch { return; }
+  }
+  chatCacheValue = value;
+}
+
+function readChatCache() {
+  try {
+    const cache = JSON.parse(localStorage.getItem(CHAT_CACHE_KEY) || "null");
+    return Array.isArray(cache?.messages) ? cache : null;
+  } catch { return null; }
+}
+
 function readStateSnapshot() {
   try {
     const snapshot = JSON.parse(localStorage.getItem(STATE_SNAPSHOT_KEY) || "null");
     if (!snapshot?.data || typeof snapshot.data !== "object") return null;
-    return { data: snapshot.data, updated: snapshot.asset !== STATE_SNAPSHOT_ASSET };
+    const chat = readChatCache();
+    const data = chat ? { ...snapshot.data, messages: chat.messages, messages_next_cursor: chat.next_cursor, messages_generation: chat.generation } : snapshot.data;
+    return { data, updated: snapshot.asset !== STATE_SNAPSHOT_ASSET };
   } catch { return null; }
 }
 
@@ -78,9 +132,11 @@ function clearStateSnapshot() {
   viewCacheEpoch += 1;
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
+  chatCacheValue = null;
   try {
     localStorage.removeItem(STATE_SNAPSHOT_KEY);
     localStorage.removeItem(VIEW_CACHE_KEY);
+    localStorage.removeItem(CHAT_CACHE_KEY);
   } catch { }
 }
 
