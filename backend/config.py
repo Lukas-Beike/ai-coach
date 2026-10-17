@@ -229,7 +229,7 @@ def proxy_list_warning(invalid_entries: int) -> str | None:
     return (
         "Ungültige Einträge in TRUSTED_PROXY_IPS "
         "wurden ignoriert. Erlaubt sind IP-Adressen oder Netze ohne Hostanteil, "
-        "z. B. 192.168.1.6 oder 192.168.1.0/24."
+        "z. B. 192.168.1.6. Trage nur die Proxys selbst ein."
     )
 
 
