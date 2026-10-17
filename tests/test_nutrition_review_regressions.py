@@ -110,6 +110,11 @@ class NutritionReviewRegressionTests(unittest.TestCase):
         meal_library.food_database.lookup.assert_called_once_with(
             {"query": "Skyr", "source": "open_food_facts"}
         )
+        meal_library.food_database.lookup.reset_mock()
+        short = service.execute("lookup_food", {"query": "E", "source": "bls"})
+        assert isinstance(short, dict)
+        self.assertEqual(short["local_products"], [{"id": "local-oats"}])
+        meal_library.food_database.lookup.assert_not_called()
         meal_library.food_database.lookup.side_effect = AppError(400, "Ungültig.")
         with self.assertRaises(AppError):
             service.execute("lookup_food", {"query": "Skyr", "source": "bls"})

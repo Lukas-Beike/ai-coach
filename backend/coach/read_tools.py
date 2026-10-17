@@ -181,6 +181,9 @@ class CoachReadToolService:
             and source in {"bls", "open_food_facts"}
         ):
             local_products = nutrition.list_products(query=query)[:10]
+            if local_products and len(query) < 2:
+                # Too short for the external database, but saved products match.
+                return {"ok": True, "foods": [], "local_products": local_products}
             try:
                 result = nutrition.food_database.lookup(
                     {**arguments, "query": query, "source": source}
