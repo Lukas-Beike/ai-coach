@@ -613,6 +613,21 @@ def _race_kind(key: object) -> MetricKind | None:
     )
 
 
+def _race_fields(record: Mapping[str, object]) -> dict[MetricKind, tuple[str, object]]:
+    """Race kind to (field, value): a distance/time pair first, then named keys."""
+    found: dict[MetricKind, tuple[str, object]] = {}
+    distance = _first_value(record, GARMIN_RACE_DISTANCE_ALIASES)
+    time = _named_value(record, _RACE_PAIR_TIME_KEYS)
+    kind = _race_kind(distance) if isinstance(distance, str) else None
+    if kind is not None and time is not None:
+        found[kind] = time
+    for key, value in record.items():
+        kind = _race_kind(key)
+        if kind is not None and kind not in found:
+            found[kind] = (key, value)
+    return found
+
+
 def _colon_seconds(text: str) -> float | None:
     """Seconds of ``mm:ss`` or ``h:mm:ss`` text, or None for any other text."""
     parts = text.strip().split(":")
@@ -909,17 +924,7 @@ class _HealthMapping:
             day = self._record_day(record, ref, fallback=self._sync_day)
             if day is None:
                 continue
-            found: dict[MetricKind, tuple[str, object]] = {}
-            distance = _first_value(record, GARMIN_RACE_DISTANCE_ALIASES)
-            time = _named_value(record, _RACE_PAIR_TIME_KEYS)
-            kind = _race_kind(distance) if isinstance(distance, str) else None
-            if kind is not None and time is not None:
-                found[kind] = time
-            for key, value in record.items():
-                kind = _race_kind(key)
-                if kind is not None and kind not in found:
-                    found[kind] = (key, value)
-            for kind, (field, value) in found.items():
+            for kind, (field, value) in _race_fields(record).items():
                 self._emit_race(kind, field, value, ref, day, index)
 
     def _emit_race(
