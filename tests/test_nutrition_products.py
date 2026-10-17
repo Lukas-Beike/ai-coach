@@ -167,6 +167,7 @@ class NutritionProductContractTests(unittest.TestCase):
         for query, name in (
             ("Haferflocken, Banane", "Haferflocken Banane"),
             ("Müsli (Bio)", "Müsli"),
+            ("Banane!", "Haferflocken Banane"),
         ):
             with self.subTest(query=query):
                 names = [p["name"] for p in self.library.list_products(query=query)]

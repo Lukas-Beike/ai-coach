@@ -90,14 +90,16 @@ class NutritionProductRepository:
         # so "Ei" finds "Eier" but not "Reisnudeln". Separators around a word
         # are ignored, so "Haferflocken, Banane" and "Müsli (Bio)" still match.
         terms = [
-            term for word in (query or "").split() if (term := word.strip(",.()/-"))
+            term
+            for word in (query or "").split()
+            if (term := word.strip(",.()/-!?:;+&"))
         ]
         if query and not 1 <= len(terms) <= 20:
             return []
         for term in terms:
             escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             patterns = (
-                (f"{escaped}%", *(f"%{sep}{escaped}%" for sep in " -/(,."))
+                (f"{escaped}%", *(f"%{sep}{escaped}%" for sep in " -/(,.+&"))
                 if len(term) < 3
                 else (f"%{escaped}%",)
             )
