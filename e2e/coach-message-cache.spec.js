@@ -93,7 +93,7 @@ test("cached latest messages show before the start answers and older ones page i
   }, LAST_ID);
   await expect(syncNote).toBeVisible();
   await expect(syncNote).toHaveText("Nachrichten werden synchronisiert…");
-  await expect(syncNote).toHaveAttribute("role", "status");
+  await expect(page.getByRole("status").filter({ hasText: "Nachrichten werden synchronisiert…" })).toBeVisible();
   await expect(page.locator("#chatJumpToComposer")).toBeHidden();
   await expect.poll(newestInView).toBe(true);
   // Leaving and returning to the Coach during the sync starts at the newest message again.
