@@ -391,7 +391,7 @@ server {
     }
 }
 ```
-*When deploying behind HTTPS, remember to set `COOKIE_SECURE=true` in your `.env`. Set `TRUSTED_PROXY_IPS` to the proxy's address (for example `TRUSTED_PROXY_IPS=192.168.1.6`) so rate limits apply per real client instead of to the proxy; without it, every request is attributed to the proxy.*
+*When deploying behind HTTPS, remember to set `COOKIE_SECURE=true` in your `.env`. Set `TRUSTED_PROXY_IPS` to the address the app sees as the proxy's connection peer so rate limits apply per real client instead of to the proxy; without it, every request is attributed to the proxy. That is the proxy host's LAN address for a separate proxy (for example `TRUSTED_PROXY_IPS=192.168.1.6`), the proxy container's address or Docker network for a proxy on the same Docker network, or `127.0.0.1` or the Docker bridge gateway for a same-host proxy like the nginx example above.*
 
 ### Garmin Authentication & MFA Setup
 
