@@ -71,23 +71,36 @@ class WeatherProviderTests(unittest.TestCase):
         params = parse_qs(urlsplit(requests[1][1]).query)
         self.assertEqual(params["forecast_days"], ["7"])
 
-    def test_non_german_and_outside_nrw_skip_icon_d2(self):
+    def test_non_german_location_skips_icon_d2(self):
+        base = self.forecast()
+        client, requests = self.make_client(self.location(country_code="NL"), base)
+
+        result = client.fetch("Amsterdam")
+
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(result["model"], "ECMWF IFS HRES (3–14 Tage)")
+        self.assertIs(result["forecast"], base)
+        self.logger.warning.assert_not_called()
+
+    def test_german_locations_outside_nrw_use_icon_d2(self):
         for location in (
-            self.location(country_code="NL"),
-            self.location(latitude=52.7),
+            self.location(latitude=48.14, longitude=11.58),
+            self.location(latitude=54.32, longitude=10.14),
         ):
             with self.subTest(location=location):
-                base = self.forecast()
-                client, requests = self.make_client(location, base)
+                icon = self.forecast(hourly_values=[8], daily_values=[16])
+                client, requests = self.make_client(
+                    location, self.forecast(), icon_forecast=icon
+                )
 
-                result = client.fetch("Münster")
+                result = client.fetch("München")
 
-                self.assertEqual(len(requests), 2)
-                self.assertEqual(result["model"], "ECMWF IFS HRES (3–14 Tage)")
-                self.assertIs(result["forecast"], base)
-                self.logger.warning.assert_not_called()
+                self.assertEqual(len(requests), 3)
+                self.assertEqual(
+                    result["model"], "ICON-D2 (0–2 Tage) + ECMWF IFS HRES (3–14 Tage)"
+                )
 
-    def test_nrw_merges_icon_d2_and_preserves_request_contract(self):
+    def test_german_location_merges_icon_d2_and_preserves_request_contract(self):
         base = self.forecast()
         original_base = copy.deepcopy(base)
         icon = self.forecast(hourly_values=[8], daily_values=[16])

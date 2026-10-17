@@ -12,8 +12,6 @@ from backend.errors import AppError
 from backend.providers import weather_data as weather_forecast
 
 WEATHER_ICON_D2_DAYS = 2
-NRW_LATITUDE_BOUNDS = (50.3, 52.6)
-NRW_LONGITUDE_BOUNDS = (5.5, 9.6)
 LOGGER = logging.getLogger("intervals_coach")
 
 
@@ -111,12 +109,7 @@ class WeatherClient:
         params: dict[str, Any],
         forecast: dict[str, Any],
     ) -> tuple[dict[str, Any], str]:
-        if location["country_code"] != "DE" or not (
-            NRW_LATITUDE_BOUNDS[0] <= location["latitude"] <= NRW_LATITUDE_BOUNDS[1]
-            and NRW_LONGITUDE_BOUNDS[0]
-            <= location["longitude"]
-            <= NRW_LONGITUDE_BOUNDS[1]
-        ):
+        if location["country_code"] != "DE":
             return forecast, "ECMWF IFS HRES (3–14 Tage)"
 
         short_params = dict(params)
