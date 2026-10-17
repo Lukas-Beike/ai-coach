@@ -64,17 +64,25 @@ function previousSnapshotData() {
   } catch { return {}; }
 }
 
-function saveStateSnapshot() {
-  clearTimeout(stateSnapshotSaveTimer);
-  stateSnapshotSaveTimer = null;
-  if (!(state.initialStateLoaded || stateSnapshotReady) || !state.data || state.replaceDataOnLoad) return;
+// The current state, with the stored keys of areas that are pending or failed.
+function stateSnapshotData() {
   const previous = stateSnapshotFailedAreas.length ? previousSnapshotData() : {};
   const data = { ...state.data };
   for (const area of stateSnapshotFailedAreas) {
     const keys = area === "performance" ? ["performance", providerIds().garmin, "activities"] : AREA_SNAPSHOT_KEYS[area] || [];
     for (const key of keys) if (key && key in previous) data[key] = previous[key];
   }
-  const snapshot = JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data });
+  return data;
+}
+
+function saveStateSnapshot() {
+  clearTimeout(stateSnapshotSaveTimer);
+  stateSnapshotSaveTimer = null;
+  if (!(state.initialStateLoaded || stateSnapshotReady) || !state.data || state.replaceDataOnLoad) return;
+  writeStateSnapshot(JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: stateSnapshotData() }));
+}
+
+function writeStateSnapshot(snapshot) {
   try {
     localStorage.setItem(STATE_SNAPSHOT_KEY, snapshot);
   } catch {
@@ -281,6 +289,30 @@ function stateLoadRequest(path, requestedAreas) {
   };
 }
 
+// Each area is rendered and stored as soon as it arrives, not when the slowest one does.
+async function renderAreasAsTheyArrive(domainData, areas, load) {
+  const { current, payload, bootstrap, chatGeneration, chatContentVersion, liveVersions, liveAreasOnly } = load;
+  const failures = [];
+  // Areas without loaded data yet, still pending or failed, keep their stored values.
+  const unsettled = new Set(areas);
+  if (areas.has("plan")) unsettled.delete("weather");
+  let rendered = false;
+  await Promise.all(domainData.map(async (request) => {
+    const result = await request;
+    if (!current()) return;
+    // Incorporate changes that arrived while these requests were in flight.
+    payload.messages = state.data?.messages || [];
+    const outcome = mergeLoadedResults(payload, [result], bootstrap, chatGeneration, chatContentVersion);
+    failures.push(...outcome.failures);
+    if (!outcome.appliedAreas.length) return;
+    outcome.appliedAreas.forEach((area) => unsettled.delete(area));
+    applyLoadedStateVersions(payload, outcome.appliedAreas, bootstrap, chatGeneration, liveVersions);
+    rendered = true;
+    renderCompletedState(payload, liveAreasOnly, [...unsettled]);
+  }));
+  return { failures, unsettled, rendered };
+}
+
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
   const sessionGeneration = state.sessionGeneration;
@@ -301,25 +333,9 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
     }
     const current = () => sessionGeneration === state.sessionGeneration && requestSequence === state.loadSequence;
-    const failures = [];
-    // Areas without loaded data yet, still pending or failed, keep their stored values.
-    const unsettled = new Set(areas);
-    if (areas.has("plan")) unsettled.delete("weather");
-    let rendered = false;
-    // Each area is rendered and stored as soon as it arrives, not when the slowest one does.
-    await Promise.all(domainData.map(async (request) => {
-      const result = await request;
-      if (!current()) return;
-      // Incorporate changes that arrived while these requests were in flight.
-      payload.messages = state.data?.messages || [];
-      const outcome = mergeLoadedResults(payload, [result], bootstrap, chatGeneration, chatContentVersion);
-      failures.push(...outcome.failures);
-      if (!outcome.appliedAreas.length) return;
-      outcome.appliedAreas.forEach((area) => unsettled.delete(area));
-      applyLoadedStateVersions(payload, outcome.appliedAreas, bootstrap, chatGeneration, liveVersions);
-      rendered = true;
-      renderCompletedState(payload, liveAreasOnly, [...unsettled]);
-    }));
+    const { failures, unsettled, rendered } = await renderAreasAsTheyArrive(domainData, areas, {
+      current, payload, bootstrap, chatGeneration, chatContentVersion, liveVersions, liveAreasOnly,
+    });
     if (!current()) return;
     if (!rendered) renderCompletedState(payload, liveAreasOnly, [...unsettled]);
     else if (!liveAreasOnly) {
