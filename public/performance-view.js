@@ -311,12 +311,12 @@ function renderCurrentPerformance(metrics, history) {
 // Sending is always preview -> explicit confirmation -> execute; the server rejects unconfirmed requests.
 function metricExportActions() {
   const actions = reportNode("div", null, "metric-export-actions");
-  const button = reportNode("button", "An Intervals.icu senden", "secondary-button");
+  const button = reportNode("button", "Werte an Anbieter senden", "secondary-button");
   button.type = "button";
   const recalcLabel = reportNode("label", null, "metric-export-recalc");
   const recalc = document.createElement("input");
   recalc.type = "checkbox";
-  recalcLabel.append(recalc, " Herzfrequenzzonen dort neu berechnen");
+  recalcLabel.append(recalc, " Herzfrequenzzonen beim Anbieter neu berechnen");
   button.addEventListener("click", () => { void exportCurrentMetrics(button, recalc); });
   actions.append(button, recalcLabel);
   return actions;
