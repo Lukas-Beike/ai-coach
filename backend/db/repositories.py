@@ -87,8 +87,11 @@ class NutritionProductRepository:
         # the saved product "Skyr" of brand "Arla". An empty query lists all;
         # a whitespace-only or overlong query matches nothing rather than a
         # broader set. Words shorter than three characters must start a word,
-        # so "Ei" finds "Eier" but not "Reisnudeln".
-        terms = (query or "").split()
+        # so "Ei" finds "Eier" but not "Reisnudeln". Separators around a word
+        # are ignored, so "Haferflocken, Banane" and "Müsli (Bio)" still match.
+        terms = [
+            term for word in (query or "").split() if (term := word.strip(",.()/-"))
+        ]
         if query and not 1 <= len(terms) <= 20:
             return []
         for term in terms:

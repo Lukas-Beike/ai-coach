@@ -900,8 +900,8 @@ Beschreibt der Athlet eine Mahlzeit mit Zutaten und Mengen, gleicht der Coach
 jede Zutat zuerst mit den gespeicherten Produkten ab und nutzt passende
 Produkte mit ihrer ID; die Textsuche findet ein Produkt, wenn jedes Suchwort in
 Name oder Marke vorkommt (`%` und `_` zählen wörtlich; Wörter mit weniger als
-drei Zeichen müssen ein Wort beginnen, damit „Ei“ nicht „Reisnudeln“ findet). Erst für Zutaten ohne passendes Produkt fragt er BLS
-oder Open Food Facts ab; auch dann liefert die Suche bis zu zehn passende
+drei Zeichen müssen ein Wort beginnen, damit „Ei“ nicht „Reisnudeln“ findet; Satzzeichen wie Kommas oder Klammern um ein Wort werden ignoriert). Erst für Zutaten ohne passendes Produkt fragt er BLS
+oder Open Food Facts ab; auch dann liefert die Suche passende
 gespeicherte Produkte mit, auch wenn die externe Datenbank nicht erreichbar ist
 oder die Anfrage ablehnt. Ein
 Treffer aus einer Onlinequelle wird erst nach Prüfung und ausdrücklicher

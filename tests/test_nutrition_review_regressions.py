@@ -57,7 +57,8 @@ class NutritionReviewRegressionTests(unittest.TestCase):
             "foods": [{"id": "bls:123"}],
             "source": "bls",
         }
-        meal_library.list_products.return_value = [{"id": "local-oats"}]
+        saved = [{"id": f"local-oats-{index}"} for index in range(12)]
+        meal_library.list_products.return_value = saved
         service = CoachReadToolService(
             Mock(),
             Mock(),
@@ -77,7 +78,8 @@ class NutritionReviewRegressionTests(unittest.TestCase):
 
         assert isinstance(result, dict)
         self.assertEqual(result["source"], "bls")
-        self.assertEqual(result["local_products"], [{"id": "local-oats"}])
+        # Same saved matches as a lookup without an explicit source.
+        self.assertEqual(result["local_products"], saved)
         meal_library.list_products.assert_called_once_with(query="Haferflocken")
 
     def test_explicit_source_outage_still_returns_saved_products(self) -> None:

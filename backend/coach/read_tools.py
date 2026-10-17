@@ -180,7 +180,7 @@ class CoachReadToolService:
             and not arguments.get("barcode")
             and source in {"bls", "open_food_facts"}
         ):
-            local_products = nutrition.list_products(query=query)[:10]
+            local_products = nutrition.list_products(query=query)
             try:
                 result = nutrition.food_database.lookup(
                     {**arguments, "query": query, "source": source}

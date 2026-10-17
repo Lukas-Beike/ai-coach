@@ -156,6 +156,23 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual(self.library.list_products(query="Ei Brokkoli"), [])
         self.assertEqual(len(self.library.list_products(query="nudeln brokkoli")), 1)
 
+    def test_search_ignores_separators_around_words(self):
+        self.library.save_product(
+            self.product_payload(barcode=None, name="Haferflocken Banane", brand=None)
+        )
+        self.library.save_product(
+            self.product_payload(barcode=None, name="Müsli", brand="Bio")
+        )
+
+        for query, name in (
+            ("Haferflocken, Banane", "Haferflocken Banane"),
+            ("Müsli (Bio)", "Müsli"),
+        ):
+            with self.subTest(query=query):
+                names = [p["name"] for p in self.library.list_products(query=query)]
+                self.assertEqual(names, [name])
+        self.assertEqual(self.library.list_products(query="( - )"), [])
+
     def test_unknown_barcode_falls_back_to_food_database_and_labels_source(self):
         result = self.library.lookup_product({"barcode": "4006381333999"})
 
