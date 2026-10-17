@@ -86,7 +86,7 @@ let chatCacheValue = null;
 
 // Same encoding as the server's chat history cursor: the oldest kept message id.
 function chatHistoryCursor(messageId) {
-  return btoa(JSON.stringify(Number(messageId))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  return btoa(JSON.stringify(Number(messageId))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 function rememberChatCache(data) {
