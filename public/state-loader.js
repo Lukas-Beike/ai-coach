@@ -56,6 +56,17 @@ const AREA_SNAPSHOT_KEYS = {
 // Set once loaded (not placeholder) data is rendered, so areas arriving during
 // startup are stored before the whole start has finished; reset with the device data.
 let stateSnapshotReady = false;
+// Set while the shown data comes from the device snapshot, so areas that have not
+// arrived keep showing it instead of the bootstrap's placeholders; reset with the device data.
+let stateSnapshotShown = false;
+
+function markStateSnapshotShown(shown) {
+  stateSnapshotShown = shown;
+}
+
+function areaSnapshotKeys(area) {
+  return area === "performance" ? ["performance", providerIds().garmin, "activities"] : AREA_SNAPSHOT_KEYS[area] || [];
+}
 
 function previousSnapshotData() {
   try {
@@ -69,8 +80,7 @@ function stateSnapshotData() {
   const previous = stateSnapshotFailedAreas.length ? previousSnapshotData() : {};
   const data = { ...state.data };
   for (const area of stateSnapshotFailedAreas) {
-    const keys = area === "performance" ? ["performance", providerIds().garmin, "activities"] : AREA_SNAPSHOT_KEYS[area] || [];
-    for (const key of keys) if (key && key in previous) data[key] = previous[key];
+    for (const key of areaSnapshotKeys(area)) if (key && key in previous) data[key] = previous[key];
   }
   return data;
 }
@@ -155,6 +165,7 @@ function readStateSnapshot() {
 function clearStateSnapshot() {
   viewCacheEpoch += 1;
   stateSnapshotReady = false;
+  stateSnapshotShown = false;
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
   chatCacheValue = null;
@@ -258,12 +269,24 @@ function renderLoadedState(payload, liveAreasOnly) {
   render(payload);
 }
 
+// While the device snapshot is shown, pending areas keep its values on screen.
+function withShownSnapshotAreas(payload, pendingAreas) {
+  if (!stateSnapshotShown) return payload;
+  const shown = state.data || {};
+  const view = { ...payload };
+  for (const area of pendingAreas) {
+    for (const key of areaSnapshotKeys(area)) if (key && shown[key] !== undefined) view[key] = shown[key];
+  }
+  return view;
+}
+
 // Renders the merged areas and stores them; failed areas keep their stored values.
 function renderCompletedState(payload, liveAreasOnly, failedAreas) {
-  renderLoadedState(payload, liveAreasOnly);
+  renderLoadedState(withShownSnapshotAreas(payload, failedAreas), liveAreasOnly);
   if (!liveAreasOnly) {
     stateSnapshotFailedAreas = failedAreas;
     stateSnapshotReady = true;
+    if (!failedAreas.length) stateSnapshotShown = false;
   }
   scheduleStateSnapshotSave();
 }

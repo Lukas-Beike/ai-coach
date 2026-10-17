@@ -243,6 +243,39 @@ test("a load with failed areas stores the loaded areas and keeps the previous fa
   assert.equal(context.readStateSnapshot().data.performance.ctl, 41);
 });
 
+test("areas still loading keep the shown snapshot instead of the bootstrap placeholders", async () => {
+  const { context, state, respond, renders } = loader();
+  state.data = { performance: { ctl: 40 }, library: [{ id: "w1" }], checkins: [{ id: "c1" }] };
+  state.replaceDataOnLoad = true;
+  context.markStateSnapshotShown(true);
+  const placeholders = { state_versions: {}, performance: {}, library: [], checkins: [] };
+  const loading = context.load("/api/bootstrap", ["performance", "library", "feedback"]);
+  respond("/api/bootstrap", placeholders);
+  respond("/api/performance", { performance: { ctl: 41 } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(plain([state.data.performance, state.data.library, state.data.checkins]), [{ ctl: 41 }, [{ id: "w1" }], [{ id: "c1" }]]);
+  respond("/api/library?limit=100", { workouts: [{ id: "w2" }] });
+  respond("/api/feedback", { checkins: [] });
+  await loading;
+  assert.deepEqual(plain([state.data.library, state.data.checkins]), [[{ id: "w2" }], []]);
+  assert.ok(renders.length >= 2);
+});
+
+test("after a privacy deletion, loading areas show placeholders, not the deleted data", async () => {
+  const { context, state, respond } = loader();
+  context.markStateSnapshotShown(true);
+  context.clearStateSnapshot();
+  state.data = { performance: { ctl: 40 }, library: [{ id: "w1" }] };
+  state.replaceDataOnLoad = true;
+  const loading = context.load("/api/bootstrap", ["performance", "library"]);
+  respond("/api/bootstrap", { state_versions: {}, performance: {}, library: [] });
+  respond("/api/performance", { performance: { ctl: 41 } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(plain(state.data.library), []);
+  respond("/api/library?limit=100", { workouts: [] });
+  await loading;
+});
+
 test("loaded state renders as real data, so it may notify", async () => {
   const { context, state, respond } = loader();
   const flags = [];
