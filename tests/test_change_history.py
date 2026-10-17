@@ -172,6 +172,7 @@ class ChangeHistoryTests(unittest.TestCase):
             "training_preferences_cycling": "",
             "training_preferences_swimming": "",
             "training_preferences_strength": "",
+            "training_preferences_mobility": "",
         }
         before_sport_preferences = {
             "name": "Ada",

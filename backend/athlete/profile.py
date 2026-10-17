@@ -26,6 +26,7 @@ DEFAULT_PROFILE = {
     "training_preferences_cycling": "",
     "training_preferences_swimming": "",
     "training_preferences_strength": "",
+    "training_preferences_mobility": "",
     "performance_notes": "",
     "weight_kg": "",
     "body_fat_pct": "",
