@@ -217,6 +217,7 @@ function showStateSnapshot(snapshot) {
   state.replaceDataOnLoad = true;
   try {
     render(snapshot.data);
+    markStateSnapshotShown(true);
   } catch {
     // A snapshot from earlier assets may not fit the current views.
     clearStateSnapshot();

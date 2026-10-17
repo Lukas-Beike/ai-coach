@@ -1,5 +1,6 @@
-function render(data) {
-  if (AppRouter.baseRoute() === "nutrition") { if (state.route === "nutrition/products") void loadNutritionProducts("", { background: true }); else void loadNutrition(); }
+// A load renders once per arriving area; only its first render reloads the open nutrition view.
+function render(data, { reloadRoute = true } = {}) {
+  if (reloadRoute && AppRouter.baseRoute() === "nutrition") { if (state.route === "nutrition/products") void loadNutritionProducts("", { background: true }); else void loadNutrition(); }
   const firstRender = !state.data;
   state.data = data;
   renderAppVersion(data.app);
@@ -41,22 +42,67 @@ let stateSnapshotSaveTimer = null;
 // Changes when the device data is cleared, so a view read that started before
 // a logout or privacy deletion neither renders nor caches its response.
 let viewCacheEpoch = 0;
-// A load with failed areas keeps the previous snapshot instead of storing partial state.
-let stateSnapshotIncomplete = false;
+// A load with failed areas still stores the loaded areas and keeps the previous
+// snapshot's values for the failed ones, so a slow area does not hold back the
+// next start. The bootstrap sends placeholders for these keys, so each failed
+// area takes exactly its own keys from the previous snapshot. Chat and profile
+// come with the bootstrap itself.
+let stateSnapshotFailedAreas = [];
+const AREA_SNAPSHOT_KEYS = {
+  plan: ["plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning"],
+  weather: ["weather"],
+  library: ["library", "library_next_cursor"],
+  feedback: ["checkins", "local_feedback", "activity_feedback"],
+};
+// Set once loaded (not placeholder) data is rendered, so areas arriving during
+// startup are stored before the whole start has finished; reset with the device data.
+let stateSnapshotReady = false;
+// Set while the shown data comes from the device snapshot, so areas that have not
+// arrived keep showing it instead of the bootstrap's placeholders; reset with the device data.
+let stateSnapshotShown = false;
+
+function markStateSnapshotShown(shown) {
+  stateSnapshotShown = shown;
+}
+
+function areaSnapshotKeys(area) {
+  return area === "performance" ? ["performance", providerIds().garmin, "activities"] : AREA_SNAPSHOT_KEYS[area] || [];
+}
+
+function previousSnapshotData() {
+  try {
+    const snapshot = JSON.parse(localStorage.getItem(STATE_SNAPSHOT_KEY) || "null");
+    return snapshot?.asset === STATE_SNAPSHOT_ASSET && snapshot.data && typeof snapshot.data === "object" ? snapshot.data : {};
+  } catch { return {}; }
+}
+
+// The current state, with the stored keys of areas that are pending or failed.
+function stateSnapshotData() {
+  const previous = stateSnapshotFailedAreas.length ? previousSnapshotData() : {};
+  const data = { ...state.data };
+  for (const area of stateSnapshotFailedAreas) {
+    for (const key of areaSnapshotKeys(area)) if (key && key in previous) data[key] = previous[key];
+  }
+  return data;
+}
 
 function saveStateSnapshot() {
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
-  if (!state.initialStateLoaded || !state.data || state.replaceDataOnLoad || stateSnapshotIncomplete) return;
-  const snapshot = JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: state.data });
+  if (!(state.initialStateLoaded || stateSnapshotReady) || !state.data || state.replaceDataOnLoad) return;
+  writeStateSnapshot(JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: stateSnapshotData() }));
+}
+
+function writeStateSnapshot(snapshot) {
   try {
     localStorage.setItem(STATE_SNAPSHOT_KEY, snapshot);
   } catch {
-    // The view cache gives way to the state snapshot when storage is full.
+    // The view cache gives way to the state snapshot when storage is full; the
+    // separately stored messages stay.
     try {
       localStorage.removeItem(VIEW_CACHE_KEY);
       localStorage.setItem(STATE_SNAPSHOT_KEY, snapshot);
-    } catch { clearStateSnapshot(); }
+    } catch { try { localStorage.removeItem(STATE_SNAPSHOT_KEY); } catch { } }
   }
 }
 
@@ -66,21 +112,68 @@ function scheduleStateSnapshotSave() {
   if (stateSnapshotSaveTimer === null) stateSnapshotSaveTimer = setTimeout(saveStateSnapshot, STATE_SNAPSHOT_SAVE_DELAY_MS);
 }
 
+// The latest stored Coach messages, written as soon as loaded messages are shown.
+// The state snapshot waits for the area loads, so a start takes its messages
+// from here; older messages load page by page when scrolling up.
+const CHAT_CACHE_KEY = "coach-chat-cache";
+const CHAT_CACHE_LIMIT = 20;
+let chatCacheValue = null;
+
+// Same encoding as the server's chat history cursor: the oldest kept message id.
+function chatHistoryCursor(messageId) {
+  return btoa(JSON.stringify(Number(messageId))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+function rememberChatCache(data) {
+  if (!data || state.replaceDataOnLoad || !Array.isArray(data.messages)) return;
+  const stored = data.messages.filter((message) => message?.id != null && Number.isSafeInteger(Number(message.id)));
+  const messages = stored.slice(-CHAT_CACHE_LIMIT);
+  const value = JSON.stringify({
+    generation: data.messages_generation ?? null,
+    messages,
+    next_cursor: stored.length > messages.length ? chatHistoryCursor(messages[0].id) : data.messages_next_cursor ?? null,
+  });
+  if (value === chatCacheValue) return;
+  try {
+    localStorage.setItem(CHAT_CACHE_KEY, value);
+  } catch {
+    // The messages take precedence over the view cache when storage is full.
+    try {
+      localStorage.removeItem(VIEW_CACHE_KEY);
+      localStorage.setItem(CHAT_CACHE_KEY, value);
+    } catch { return; }
+  }
+  chatCacheValue = value;
+}
+
+function readChatCache() {
+  try {
+    const cache = JSON.parse(localStorage.getItem(CHAT_CACHE_KEY) || "null");
+    return Array.isArray(cache?.messages) ? cache : null;
+  } catch { return null; }
+}
+
 function readStateSnapshot() {
   try {
     const snapshot = JSON.parse(localStorage.getItem(STATE_SNAPSHOT_KEY) || "null");
     if (!snapshot?.data || typeof snapshot.data !== "object") return null;
-    return { data: snapshot.data, updated: snapshot.asset !== STATE_SNAPSHOT_ASSET };
+    const chat = readChatCache();
+    const data = chat ? { ...snapshot.data, messages: chat.messages, messages_next_cursor: chat.next_cursor, messages_generation: chat.generation } : snapshot.data;
+    return { data, updated: snapshot.asset !== STATE_SNAPSHOT_ASSET };
   } catch { return null; }
 }
 
 function clearStateSnapshot() {
   viewCacheEpoch += 1;
+  stateSnapshotReady = false;
+  stateSnapshotShown = false;
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
+  chatCacheValue = null;
   try {
     localStorage.removeItem(STATE_SNAPSHOT_KEY);
     localStorage.removeItem(VIEW_CACHE_KEY);
+    localStorage.removeItem(CHAT_CACHE_KEY);
   } catch { }
 }
 
@@ -115,10 +208,11 @@ function loadStateRequests(areas, query) {
   if (areas.has("performance")) requests.push(["performance", api("/api/performance")]);
   if (areas.has("feedback")) requests.push(["feedback", api("/api/feedback")]);
   if (areas.has("profile")) requests.push(["profile", api("/api/profile")]);
-  return Promise.all(requests.map(async ([area, request]) => {
+  // One settled promise per area, so each area is applied as soon as it arrives.
+  return requests.map(async ([area, request]) => {
     try { return [area, await request, null]; }
     catch (error) { return [area, null, error]; }
-  }));
+  });
 }
 
 function applyLoadedArea(payload, area, result, error, bootstrap, chatGeneration, chatContentVersion) {
@@ -171,15 +265,30 @@ function bootstrapPayload(bootstrap, liveAreasOnly) {
   return payload;
 }
 
-function renderLoadedState(payload, liveAreasOnly) {
+function renderLoadedState(payload, liveAreasOnly, options) {
   if (!liveAreasOnly) state.replaceDataOnLoad = false;
-  render(payload);
+  render(payload, options);
 }
 
-// Renders the merged areas and stores them unless an area failed to load.
-function renderCompletedState(payload, liveAreasOnly, failed) {
-  renderLoadedState(payload, liveAreasOnly);
-  if (!liveAreasOnly) stateSnapshotIncomplete = failed;
+// While the device snapshot is shown, pending areas keep its values on screen.
+function withShownSnapshotAreas(payload, pendingAreas) {
+  if (!stateSnapshotShown) return payload;
+  const shown = state.data || {};
+  const view = { ...payload };
+  for (const area of pendingAreas) {
+    for (const key of areaSnapshotKeys(area)) if (key && shown[key] !== undefined) view[key] = shown[key];
+  }
+  return view;
+}
+
+// Renders the merged areas and stores them; failed areas keep their stored values.
+function renderCompletedState(payload, liveAreasOnly, failedAreas, options) {
+  renderLoadedState(withShownSnapshotAreas(payload, failedAreas), liveAreasOnly, options);
+  if (!liveAreasOnly) {
+    stateSnapshotFailedAreas = failedAreas;
+    stateSnapshotReady = true;
+    if (!failedAreas.length) stateSnapshotShown = false;
+  }
   scheduleStateSnapshotSave();
 }
 
@@ -204,6 +313,30 @@ function stateLoadRequest(path, requestedAreas) {
   };
 }
 
+// Each area is rendered and stored as soon as it arrives, not when the slowest one does.
+async function renderAreasAsTheyArrive(domainData, areas, load) {
+  const { current, payload, bootstrap, chatGeneration, chatContentVersion, liveVersions, liveAreasOnly } = load;
+  const failures = [];
+  // Areas without loaded data yet, still pending or failed, keep their stored values.
+  const unsettled = new Set(areas);
+  if (areas.has("plan")) unsettled.delete("weather");
+  let rendered = false;
+  await Promise.all(domainData.map(async (request) => {
+    const result = await request;
+    if (!current()) return;
+    // Incorporate changes that arrived while these requests were in flight.
+    payload.messages = state.data?.messages || [];
+    const outcome = mergeLoadedResults(payload, [result], bootstrap, chatGeneration, chatContentVersion);
+    failures.push(...outcome.failures);
+    if (!outcome.appliedAreas.length) return;
+    outcome.appliedAreas.forEach((area) => unsettled.delete(area));
+    applyLoadedStateVersions(payload, outcome.appliedAreas, bootstrap, chatGeneration, liveVersions);
+    renderCompletedState(payload, liveAreasOnly, [...unsettled], { reloadRoute: !rendered });
+    rendered = true;
+  }));
+  return { failures, unsettled, rendered };
+}
+
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
   const sessionGeneration = state.sessionGeneration;
@@ -223,13 +356,16 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       // A stored snapshot may already have revealed the shell.
       if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
     }
-    const results = await domainData;
-    if (sessionGeneration !== state.sessionGeneration || requestSequence !== state.loadSequence) return;
-    // Incorporate changes that arrived while these requests were in flight.
-    payload.messages = state.data?.messages || [];
-    const { failures, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
-    applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveVersions);
-    if (requestSequence === state.loadSequence) renderCompletedState(payload, liveAreasOnly, failures.length > 0);
+    const current = () => sessionGeneration === state.sessionGeneration && requestSequence === state.loadSequence;
+    const { failures, unsettled, rendered } = await renderAreasAsTheyArrive(domainData, areas, {
+      current, payload, bootstrap, chatGeneration, chatContentVersion, liveVersions, liveAreasOnly,
+    });
+    if (!current()) return;
+    if (!rendered) renderCompletedState(payload, liveAreasOnly, [...unsettled]);
+    else if (!liveAreasOnly) {
+      stateSnapshotFailedAreas = [...unsettled];
+      scheduleStateSnapshotSave();
+    }
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
     if (sessionGeneration === state.sessionGeneration) showStateLoadFailure(error);

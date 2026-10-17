@@ -22,7 +22,9 @@
   `service-worker.js` so a fresh installation receives a consistent current asset set. Do not add
   interactive application update dialogs, cache conversion or earlier-client support.
 - The last loaded state and recent view reads are stored on the device, so a
-  start or view shows them at once while fresh data loads. After an update the
+  start or view shows them at once while fresh data loads. The latest 20 Coach
+  messages are stored separately as soon as they are shown and take precedence
+  over the view cache; older messages load when scrolling up. After an update the
   start shows a non-interactive "Update wird verarbeitet…" loading screen until
   the fresh bootstrap arrives; the previous snapshot is shown only when the
   server cannot be reached. Logout, a 401, an
