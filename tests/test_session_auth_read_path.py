@@ -259,7 +259,12 @@ class SessionAuthReadPathTests(unittest.TestCase):
         )
         token = result["session_token"]
         self.assertTrue(self.auth.authenticated_session(handler_for(token)))
-        self.run_blocking(lambda: self.auth.logout_user(handler_for(token)) or True)
+
+        def logout() -> bool:
+            self.auth.logout_user(handler_for(token))
+            return True
+
+        self.run_blocking(logout)
         self.assertIsNone(self.auth.authenticated_session(handler_for(token)))
 
     def test_login_wait_for_a_busy_writer_is_bounded(self) -> None:
