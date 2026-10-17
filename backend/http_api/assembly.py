@@ -30,6 +30,7 @@ from backend.http_api.handler import (
 from backend.http_api.history_get import HistoryGetRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.library_page import LibraryPageService
+from backend.http_api.metric_export_post import MetricExportPostRoutes
 from backend.http_api.nutrition import (
     NutritionGetRoutes,
     NutritionPostRoutes,
@@ -262,6 +263,7 @@ class HttpDomainRouteServices:
     sync: HttpSyncServices
     nutrition: HttpNutritionServices
     wahoo: Callable[[], Any] | None = None
+    metric_export: Callable[[], Any] | None = None
 
 
 class HttpApiAssembly:
@@ -293,6 +295,7 @@ class HttpApiAssembly:
         sync = dependencies.domains.sync
         nutrition = dependencies.domains.nutrition
         wahoo_connection_service = dependencies.domains.wahoo
+        metric_export_service = dependencies.domains.metric_export
         resources = core.resources
         handler_services = core.handler
         handler_configuration = handler_services.handler_configuration
@@ -568,6 +571,11 @@ class HttpApiAssembly:
             if wahoo_connection_service
             else None
         )
+        self.metric_export_post_routes = (
+            MetricExportPostRoutes(metric_export_service)
+            if metric_export_service
+            else None
+        )
         self.route_dispatcher = HttpRouteDispatcher(
             (
                 self.public_get_routes,
@@ -607,6 +615,7 @@ class HttpApiAssembly:
             self.analysis_routes,
             self.equipment_post_routes,
             self.wahoo_post_routes,
+            self.metric_export_post_routes,
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,
