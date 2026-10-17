@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import http.client
 import math
 import re
 import threading
@@ -229,7 +230,13 @@ class OpenFoodFactsClient:
             )
         except HTTPError as exc:
             self._raise_http_error(exc)
-        except URLError, OSError, ProviderInvalidResponse, ProviderResponseTooLarge:
+        except (
+            URLError,
+            OSError,
+            http.client.HTTPException,
+            ProviderInvalidResponse,
+            ProviderResponseTooLarge,
+        ):
             raise AppError(
                 502, UNAVAILABLE, reason="food_database_unavailable"
             ) from None

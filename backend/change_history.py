@@ -56,6 +56,11 @@ PROFILE_FIELDS = {
     "constraints",
     "equipment",
     "training_preferences",
+    "training_preferences_running",
+    "training_preferences_cycling",
+    "training_preferences_swimming",
+    "training_preferences_strength",
+    "training_preferences_mobility",
     "coaching_style",
     "timezone",
     "weather_location",
@@ -199,22 +204,35 @@ def audit_hash(value: dict[str, Any] | None) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-# Projection fields added after released history rows were recorded. Such rows
-# were hashed without these fields, so they stay matchable by stripping them.
-_FIELDS_ADDED_TO_AUDIT = {
-    "profile": ("sleep_target_hours", "fueling_tolerance"),
-    "planned_unit": ("start_date_local",),
+# Projection fields added after released history rows were recorded, oldest
+# generation first. Such rows were hashed without the fields of every later
+# generation, so they stay matchable by stripping those generations.
+_FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
+    "profile": (
+        ("sleep_target_hours", "fueling_tolerance"),
+        (
+            "training_preferences_running",
+            "training_preferences_cycling",
+            "training_preferences_swimming",
+            "training_preferences_strength",
+            "training_preferences_mobility",
+        ),
+    ),
+    "planned_unit": (("start_date_local",),),
 }
 
 
 def accepted_audit_hashes(entity_type: str, value: dict[str, Any] | None) -> set[str]:
     """Return the hashes a current projection may match for a recorded row."""
-    full_hash = audit_hash(value)
-    added = _FIELDS_ADDED_TO_AUDIT.get(entity_type, ())
-    if not value or not any(field in value for field in added):
-        return {full_hash}
-    legacy = {key: item for key, item in value.items() if key not in added}
-    return {full_hash, audit_hash(legacy)}
+    accepted = {audit_hash(value)}
+    if not value:
+        return accepted
+    legacy = dict(value)
+    for added in reversed(_FIELDS_ADDED_TO_AUDIT.get(entity_type, ())):
+        if any(field in legacy for field in added):
+            legacy = {key: item for key, item in legacy.items() if key not in added}
+            accepted.add(audit_hash(legacy))
+    return accepted
 
 
 def audit_diff(

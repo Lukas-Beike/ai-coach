@@ -5,7 +5,7 @@ import unittest
 from backend.coach.dialogue import INSTRUCTIONS
 from backend.coach.prompt import COACH_PROMPT
 
-EXPECTED_SHA256 = "5446c57ca5e45e3d6689bd9ed3869c94fa38dae4ad896c5b639ecbb3e1c19d18"
+EXPECTED_SHA256 = "be355a5fed8ba777f634cc70305c0d1c59cb3bb3f82688c6a45822fe33b463d4"
 
 
 class CoachPromptTests(unittest.TestCase):
@@ -27,6 +27,7 @@ class CoachPromptTests(unittest.TestCase):
             "Never silently change durable athlete facts, target events, constraints, or preferences",
             "Concrete time-window recommendations are only available for the next five days",
             "Reply in German unless the athlete explicitly asks for another language.",
+            "first match every ingredient against the athlete's saved local products",
         )
         for marker in required_markers:
             with self.subTest(marker=marker):

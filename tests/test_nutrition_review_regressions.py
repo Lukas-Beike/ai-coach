@@ -19,6 +19,7 @@ from backend.errors import AppError
 class NutritionReviewRegressionTests(unittest.TestCase):
     def test_explicit_text_source_bypasses_local_products(self) -> None:
         meal_library = Mock()
+        meal_library.list_products.return_value = []
         meal_library.food_database.lookup.return_value = {
             "ok": True,
             "foods": [{"id": "bls:123"}],
@@ -47,6 +48,83 @@ class NutritionReviewRegressionTests(unittest.TestCase):
             {"query": "Haferflocken", "source": "bls"}
         )
         meal_library.lookup_product.assert_not_called()
+        self.assertNotIn("local_products", result)
+
+    def test_explicit_text_source_still_returns_matching_saved_products(self) -> None:
+        meal_library = Mock()
+        meal_library.food_database.lookup.return_value = {
+            "ok": True,
+            "foods": [{"id": "bls:123"}],
+            "source": "bls",
+        }
+        saved = [{"id": f"local-oats-{index}"} for index in range(12)]
+        meal_library.list_products.return_value = saved
+        service = CoachReadToolService(
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            training_change_limit=366,
+            nutrition_meal_library=Mock(return_value=meal_library),
+        )
+
+        result = service.execute(
+            "lookup_food", {"query": "Haferflocken", "source": "bls"}
+        )
+
+        assert isinstance(result, dict)
+        self.assertEqual(result["source"], "bls")
+        # Same saved matches as a lookup without an explicit source.
+        self.assertEqual(result["local_products"], saved)
+        meal_library.list_products.assert_called_once_with(query="Haferflocken")
+
+    def test_explicit_source_outage_still_returns_saved_products(self) -> None:
+        meal_library = Mock()
+        meal_library.food_database.lookup.side_effect = AppError(
+            429, "Lebensmitteldatenbank ist vorübergehend ausgelastet."
+        )
+        meal_library.list_products.return_value = [{"id": "local-oats"}]
+        service = CoachReadToolService(
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            training_change_limit=366,
+            nutrition_meal_library=Mock(return_value=meal_library),
+        )
+
+        result = service.execute(
+            "lookup_food", {"query": " Skyr ", "source": " Open_Food_Facts "}
+        )
+
+        assert isinstance(result, dict)
+        self.assertEqual(result["foods"], [])
+        self.assertEqual(result["local_products"], [{"id": "local-oats"}])
+        meal_library.lookup_product.assert_not_called()
+        meal_library.food_database.lookup.assert_called_once_with(
+            {"query": "Skyr", "source": "open_food_facts"}
+        )
+        for status in (400, 404, 502):
+            meal_library.food_database.lookup.side_effect = AppError(status, "Fehler.")
+            with self.subTest(status=status):
+                fallback = service.execute(
+                    "lookup_food", {"query": "Skyr", "source": "bls"}
+                )
+                assert isinstance(fallback, dict)
+                self.assertEqual(fallback["local_products"], [{"id": "local-oats"}])
+                self.assertIn("Fehler.", fallback["notice"])
+
+        meal_library.list_products.return_value = []
+        with self.assertRaises(AppError):
+            service.execute("lookup_food", {"query": "Haferflocken", "source": "bls"})
 
     def test_barcode_source_keeps_local_first_lookup(self) -> None:
         meal_library = Mock()

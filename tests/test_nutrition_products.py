@@ -124,6 +124,56 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual(result["foods"][0]["id"], saved["id"])
         self.food_database.lookup.assert_not_called()
 
+    def test_text_lookup_matches_saved_product_by_words_in_any_order(self):
+        saved = self.library.save_product(self.product_payload())
+
+        result = self.library.lookup_product({"query": "rheinnatur cocoa whey"})
+
+        self.assertEqual(result["source"], "local")
+        self.assertEqual(result["foods"][0]["id"], saved["id"])
+        self.assertEqual(self.library.list_products(query="Whey Vanilla"), [])
+        self.food_database.lookup.assert_not_called()
+
+    def test_text_search_treats_wildcards_literally_and_blank_queries_match_nothing(
+        self,
+    ):
+        self.library.save_product(self.product_payload())
+
+        for query in ("   ", "%", "_", "whey %"):
+            with self.subTest(query=query):
+                self.assertEqual(self.library.list_products(query=query), [])
+
+    def test_short_search_words_must_start_a_word(self):
+        self.library.save_product(
+            self.product_payload(barcode=None, name="Reisnudeln mit Brokkoli")
+        )
+        self.library.save_product(self.product_payload(barcode=None, name="Bio Eier"))
+        self.library.save_product(self.product_payload(barcode=None, name="Hof-Eier"))
+
+        names = {p["name"] for p in self.library.list_products(query="Ei")}
+
+        self.assertEqual(names, {"Bio Eier", "Hof-Eier"})
+        self.assertEqual(self.library.list_products(query="Ei Brokkoli"), [])
+        self.assertEqual(len(self.library.list_products(query="nudeln brokkoli")), 1)
+
+    def test_search_ignores_separators_around_words(self):
+        self.library.save_product(
+            self.product_payload(barcode=None, name="Haferflocken Banane", brand=None)
+        )
+        self.library.save_product(
+            self.product_payload(barcode=None, name="Müsli", brand="Bio")
+        )
+
+        for query, name in (
+            ("Haferflocken, Banane", "Haferflocken Banane"),
+            ("Müsli (Bio)", "Müsli"),
+            ("Banane!", "Haferflocken Banane"),
+        ):
+            with self.subTest(query=query):
+                names = [p["name"] for p in self.library.list_products(query=query)]
+                self.assertEqual(names, [name])
+        self.assertEqual(self.library.list_products(query="( - )"), [])
+
     def test_unknown_barcode_falls_back_to_food_database_and_labels_source(self):
         result = self.library.lookup_product({"barcode": "4006381333999"})
 

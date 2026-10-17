@@ -175,8 +175,30 @@ class CoachReadToolService:
     ) -> dict[str, Any]:
         source = str(arguments.get("source") or "").strip().lower()
         query = str(arguments.get("query") or arguments.get("q") or "").strip()
-        if query and not arguments.get("barcode") and source in {"bls", "off"}:
-            return nutrition.food_database.lookup(arguments)
+        if (
+            query
+            and not arguments.get("barcode")
+            and source in {"bls", "open_food_facts"}
+        ):
+            local_products = nutrition.list_products(query=query)
+            try:
+                result = nutrition.food_database.lookup(
+                    {**arguments, "query": query, "source": source}
+                )
+            except AppError as exc:
+                # Saved matches stay usable whenever the external lookup fails.
+                if not local_products:
+                    raise
+                result = {
+                    "ok": True,
+                    "foods": [],
+                    "notice": f"Externe Suche nicht möglich: {exc.message} Nur gespeicherte Produkte verfügbar.",
+                }
+            return (
+                {**result, "local_products": local_products}
+                if local_products
+                else result
+            )
         if arguments.get("barcode") or arguments.get("query"):
             return nutrition.lookup_product(arguments)
         return nutrition.food_database.lookup(arguments)
