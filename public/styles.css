@@ -1497,7 +1497,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-warning-checklist { margin: 8px 0 0; padding-left: 1.25em; }
 .nutrition-product-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .nutrition-product-card { display: grid; gap: 7px; }
-.nutrition-low-confidence { border-color: var(--nutrition-warning-border); box-shadow: 0 0 0 1px var(--nutrition-warning-border); }
+.nutrition-low-confidence { box-shadow: 0 0 0 1px var(--nutrition-warning-border); }
 #nutritionBarcodeVideo { display: block; width: 100%; max-height: 40vh; object-fit: cover; border-radius: 12px; background: var(--black); }
 :root .activity-detail-dialog {
   width: min(760px, calc(100vw - 24px));
@@ -1599,6 +1599,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 [hidden] { display: none; }
 .analysis-form-area { fill: var(--chart-series-2); opacity: .15; stroke: none; }
 .analysis-range-whisker { stroke-width: 8px; stroke-linecap: round; opacity: .25; }
+.nutrition-low-confidence { border-color: var(--nutrition-warning-border); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

@@ -12,7 +12,7 @@ test("visibility, chart variants and reduced motion override component styles", 
       <video id="nutritionBarcodeVideo" hidden></video>
       <div class="auth-loading" hidden></div>
       <div class="coach-receipts"></div><div class="chat-queue-status"></div>
-      <div class="nutrition-card nutrition-low-confidence"></div>
+      <input class="nutrition-low-confidence" aria-label="Uncertain nutrition value">
       <div class="analysis-chart-card"><svg>
         <path class="analysis-form-area" data-series="2" data-color="2" d="M0 0L10 10Z" />
         <path class="analysis-range-whisker" data-series="1" data-color="1" d="M0 0L10 10" />
@@ -33,6 +33,11 @@ test("visibility, chart variants and reduced motion override component styles", 
     await expect(page.locator(".analysis-form-area")).toHaveCSS("stroke", "none");
     await expect(page.locator(".analysis-range-whisker")).toHaveCSS("stroke-width", "8px");
     await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("border-top-color", "rgb(220, 164, 72)");
+    await page.locator(".nutrition-low-confidence").focus();
+    await expect(page.locator(".nutrition-low-confidence")).toBeFocused();
+    await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("border-top-color", "rgb(220, 164, 72)");
+    await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("box-shadow", `${theme === "dark" ? "rgba(16, 163, 127, 0.17)" : "rgba(8, 120, 95, 0.1)"} 0px 0px 0px 3px`);
+    await page.locator(".nutrition-low-confidence").blur();
   }
   await page.emulateMedia({ reducedMotion: "reduce" });
   for (const selector of [".skeleton", ".icon-button.busy", ".coach-provider-item > span", ".voice-button.recording"]) {
