@@ -22,12 +22,20 @@ test("a rate-limited login without a wait hint still says so", () => {
   assert.equal(context.loginErrorMessage(failure(429, "server text")), "Zu viele Anmeldeversuche. Bitte erneut versuchen.");
 });
 
-test("a busy or failing server is reported as such, not as a timeout", () => {
-  for (const status of [500, 503]) {
-    const message = context.loginErrorMessage(failure(status, "Interner Fehler", 5));
+test("a busy or unreachable server is reported as such, not as a timeout", () => {
+  for (const exception of [failure(503, "Datenbank ausgelastet", 5), failure(502, "Anfrage fehlgeschlagen (502)"), failure(504, "Anfrage fehlgeschlagen (504)")]) {
+    const message = context.loginErrorMessage(exception);
     assert.match(message, /startet gerade oder ist ausgelastet/);
     assert.doesNotMatch(message, /25 Sekunden/);
   }
+  const noJson = Object.assign(failure(500, "Anfrage fehlgeschlagen (500)"), { reason: "invalid_json" });
+  assert.match(context.loginErrorMessage(noJson), /startet gerade oder ist ausgelastet/);
+});
+
+test("a lasting server error keeps its own message instead of asking to retry", () => {
+  const configuration = "Die sichere App-Konfiguration ist unvollständig.";
+  assert.equal(context.loginErrorMessage(failure(503, configuration)), configuration);
+  assert.equal(context.loginErrorMessage(failure(500, "Interner Serverfehler")), "Interner Serverfehler");
 });
 
 test("a wrong password, a timeout and a missing connection keep their own text", () => {
