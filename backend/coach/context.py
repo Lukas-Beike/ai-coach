@@ -661,7 +661,7 @@ class CoachStructuredContextService:
             "weather": weather,
             "daily_planning_context": daily_context,
             "source_policy": {
-                "weather": "Open-Meteo forecast for the profile location; daily values up to 14 days, time-window recommendations only for the next 5 days and outdoor run/ride sessions",
+                "weather": "Open-Meteo forecast for the profile location; daily values up to 14 days, time-window recommendations only for the next 5 days and outdoor run/ride sessions; air_quality is the Open-Meteo/CAMS European AQI forecast for about 5 days; pollen uses the official DWD pollen-flight hazard index (0-3) for German regions for up to 3 days, otherwise Open-Meteo/CAMS concentrations",
                 "local_feedback": "Athlete-entered subjective signals and availability; not copied from Garmin or Intervals.icu",
                 "activity_feedback": "Athlete-entered notes about completed activities; not copied from Garmin or Intervals.icu",
                 "planning": "Local source of truth after the one-time Intervals.icu import; completed Intervals.icu activities remain authoritative and remote plan writes require an explicit request",

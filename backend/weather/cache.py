@@ -137,6 +137,16 @@ def unavailable_state(refresh: bool, error: str | None) -> dict[str, Any]:
     }
 
 
+def attribution(cached: dict[str, Any]) -> str:
+    """Name every source whose data appears in the projected weather."""
+    sources = ["Open-Meteo.com"]
+    if cached.get("air_quality_source"):
+        sources.append("Copernicus Atmosphere Monitoring Service (CAMS)")
+    if isinstance(cached.get("pollen"), dict):
+        sources.append("Deutscher Wetterdienst (Pollenflug-Gefahrenindex)")
+    return f"Wetterdaten: {', '.join(sources)} (CC BY 4.0)"
+
+
 def ready_state(
     state: WeatherCacheState,
     planned: list[dict[str, Any]] | None,
@@ -150,11 +160,11 @@ def ready_state(
         "configured": True,
         "state": "stale" if state.error else "ready",
         "provider": "Open-Meteo",
-        "attribution": "Wetterdaten: Open-Meteo.com (CC BY 4.0)",
+        "attribution": attribution(state.cached),
         "model": state.cached.get("model"),
         "location": state.cached.get("location"),
         "fetched_at": state.cached.get("fetched_at"),
-        "days": projection.daily_summary(forecast),
+        "days": projection.daily_summary(forecast, state.cached.get("pollen")),
         "recommendations": recommendations.weather_recommendations(
             planned, forecast, today
         ),
