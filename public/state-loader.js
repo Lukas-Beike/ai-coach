@@ -333,6 +333,8 @@ async function renderAreasAsTheyArrive(domainData, areas, load) {
     applyLoadedStateVersions(payload, outcome.appliedAreas, bootstrap, chatGeneration, liveVersions);
     renderCompletedState(payload, liveAreasOnly, [...unsettled], { reloadRoute: !rendered });
     rendered = true;
+    // The fresh messages are shown; slower areas need not hold the sync note.
+    if (state.chatCacheSyncing && outcome.appliedAreas.includes("chat")) setChatCacheSyncing(false);
   }));
   return { failures, unsettled, rendered };
 }
@@ -370,8 +372,14 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   } catch (error) {
     if (sessionGeneration === state.sessionGeneration) showStateLoadFailure(error);
   } finally {
-    if (sessionGeneration === state.sessionGeneration && $("#appShell").classList.contains("is-loading")) finishAppShellLoading();
+    if (sessionGeneration === state.sessionGeneration) finishStateLoad(path);
   }
+}
+
+function finishStateLoad(path) {
+  if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
+  // The fresh chat load ended, with messages or with an error shown by showStateLoadFailure.
+  if (state.chatCacheSyncing && path !== LIVE_AREA_REFRESH) setChatCacheSyncing(false);
 }
 
 function areaLoading(area) {
