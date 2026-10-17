@@ -148,10 +148,11 @@ class NutritionProductContractTests(unittest.TestCase):
             self.product_payload(barcode=None, name="Reisnudeln mit Brokkoli")
         )
         self.library.save_product(self.product_payload(barcode=None, name="Bio Eier"))
+        self.library.save_product(self.product_payload(barcode=None, name="Hof-Eier"))
 
-        names = [p["name"] for p in self.library.list_products(query="Ei")]
+        names = {p["name"] for p in self.library.list_products(query="Ei")}
 
-        self.assertEqual(names, ["Bio Eier"])
+        self.assertEqual(names, {"Bio Eier", "Hof-Eier"})
         self.assertEqual(self.library.list_products(query="Ei Brokkoli"), [])
         self.assertEqual(len(self.library.list_products(query="nudeln brokkoli")), 1)
 

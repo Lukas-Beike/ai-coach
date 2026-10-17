@@ -94,7 +94,9 @@ class NutritionProductRepository:
         for term in terms:
             escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             patterns = (
-                (f"{escaped}%", f"% {escaped}%") if len(term) < 3 else (f"%{escaped}%",)
+                (f"{escaped}%", *(f"%{sep}{escaped}%" for sep in " -/(,."))
+                if len(term) < 3
+                else (f"%{escaped}%",)
             )
             clauses.append(
                 "("

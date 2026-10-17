@@ -192,7 +192,7 @@ class CoachReadToolService:
                 result = {
                     "ok": True,
                     "foods": [],
-                    "notice": f"Externe Lebensmitteldatenbank lieferte keine Treffer ({exc.message}); nur gespeicherte Produkte verfügbar.",
+                    "notice": f"Externe Suche nicht möglich: {exc.message} Nur gespeicherte Produkte verfügbar.",
                 }
             return (
                 {**result, "local_products": local_products}
