@@ -272,8 +272,10 @@ from backend.privacy import (
     PrivacyStateDependencies,
 )
 from backend.provider_credentials import ProviderCredentialService
+from backend.providers import air_quality as air_quality_provider
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
+from backend.providers import dwd_pollen as dwd_pollen_provider
 from backend.providers import http as provider_http
 from backend.providers import state as provider_state
 from backend.providers import weather as weather_provider
@@ -1373,6 +1375,12 @@ WEATHER_ASSEMBLY = WeatherAssembly(
                 runtime_clock.utc_now,
                 LOGGER,
                 forecast_days=forecast_days,
+                air_quality_client=air_quality_provider.AirQualityClient(
+                    PROVIDER_TRANSPORT.json_http_client().request
+                ),
+                pollen_client=dwd_pollen_provider.DwdPollenClient(
+                    PROVIDER_TRANSPORT.json_http_client().request
+                ),
             ),
             refresh_tracker=PROVIDER_SYNC.refresh_tracker,
             operation_context=sync_observation.OPERATION_CONTEXT,

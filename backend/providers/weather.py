@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from backend.errors import AppError
+from backend.providers import air_quality as air_quality_data
 from backend.providers import weather_data as weather_forecast
 
 WEATHER_ICON_D2_DAYS = 2
@@ -24,7 +25,11 @@ def _weather_number(value: Any) -> float | None:
 
 
 class WeatherClient:
-    """Fetch a geocoded Open-Meteo forecast with an optional ICON-D2 overlay."""
+    """Fetch a geocoded Open-Meteo forecast with optional overlays.
+
+    ICON-D2, air quality, and DWD pollen are best-effort: their failures are
+    logged and never fail the weather forecast itself.
+    """
 
     def __init__(
         self,
@@ -33,11 +38,15 @@ class WeatherClient:
         logger: Any = None,
         *,
         forecast_days: int,
+        air_quality_client: Any = None,
+        pollen_client: Any = None,
     ) -> None:
         self._request = request
         self._now = now
         self._logger = logger if logger is not None else LOGGER
         self._forecast_days = forecast_days
+        self._air_quality_client = air_quality_client
+        self._pollen_client = pollen_client
 
     def fetch(self, query: str) -> dict[str, Any]:
         """Return the forecast for ``query`` without changing input data."""
@@ -59,13 +68,38 @@ class WeatherClient:
                 502, "Open-Meteo hat keine vollständige Wettervorhersage geliefert."
             )
         forecast, model = self._fetch_icon_d2(location, forecast_params, forecast)
-        return {
+        air_quality = self._optional(
+            self._air_quality_client, location, "weather_air_quality_failed"
+        )
+        if air_quality is not None:
+            forecast = air_quality_data.merge_air_quality(forecast, air_quality)
+        result = {
             "query": query[:200],
             "location": location,
             "model": model,
             "forecast": forecast,
             "fetched_at": self._now(),
         }
+        if air_quality is not None:
+            result["air_quality_source"] = "Open-Meteo/CAMS"
+        pollen = self._optional(
+            self._pollen_client, location, "weather_dwd_pollen_failed"
+        )
+        if pollen is not None:
+            result["pollen"] = pollen
+        return result
+
+    def _optional(self, client: Any, location: dict[str, Any], event: str) -> Any:
+        if client is None:
+            return None
+        try:
+            return client.fetch(location)
+        except Exception as exc:  # noqa: BLE001 - optional source must not fail weather
+            self._logger.warning(
+                "Optional weather source failed",
+                extra={"event": event, "context": {"error_type": type(exc).__name__}},
+            )
+            return None
 
     def _geocoded_location(self, query: str) -> dict[str, Any]:
         geocode_url = "https://geocoding-api.open-meteo.com/v1/search?" + urlencode(

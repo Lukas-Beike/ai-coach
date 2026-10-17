@@ -52,6 +52,8 @@ WEATHER_FIELDS = (
     "forecast_location",
     "archived_forecast",
     "rain_peak_time",
+    "air_quality",
+    "pollen",
 )
 APPOINTMENT_FIELDS = (
     "id",
