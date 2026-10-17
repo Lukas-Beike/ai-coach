@@ -221,6 +221,9 @@ _RACE_SLOTS: Final = (
     (("5k", "5km", "5000m"), MetricKind.RACE_PREDICTION_5K),
 )
 _MILLISECONDS_ABOVE: Final = 100_000.0
+# Nested race-prediction containers: the legacy reader's list limit, bounded depth.
+_RACE_LIST_LIMIT: Final = 100
+_RACE_DEPTH_LIMIT: Final = 8
 # The legacy reader pairs a distance with a time, but not with a bare "value".
 _RACE_PAIR_TIME_KEYS: Final = tuple(
     key for key in GARMIN_RACE_TIME_ALIASES if key != "value"
@@ -618,18 +621,44 @@ def _race_kind(key: object) -> MetricKind | None:
 
 
 def _race_fields(record: Mapping[str, object]) -> dict[MetricKind, tuple[str, object]]:
-    """Race kind to (field, value): a distance/time pair first, then named keys."""
+    """Race kind to (field, value) in the legacy reader's depth-first order.
+
+    A record's distance/time pair comes first, then its named keys; nested containers
+    such as ``{"racePredictions": [...]}`` are searched in place, bounded like the
+    legacy reader. The first value found for a kind wins.
+    """
     found: dict[MetricKind, tuple[str, object]] = {}
+    _collect_race_fields(record, found, depth=0)
+    return found
+
+
+def _collect_race_fields(
+    record: Mapping[str, object],
+    found: dict[MetricKind, tuple[str, object]],
+    *,
+    depth: int,
+) -> None:
     distance = _first_value(record, GARMIN_RACE_DISTANCE_ALIASES)
     time = _named_value(record, _RACE_PAIR_TIME_KEYS)
     kind = _race_kind(distance) if isinstance(distance, str) else None
-    if kind is not None and time is not None:
+    if kind is not None and time is not None and kind not in found:
         found[kind] = time
     for key, value in record.items():
         kind = _race_kind(key)
         if kind is not None and kind not in found:
             found[kind] = (key, value)
-    return found
+        if depth < _RACE_DEPTH_LIMIT:
+            for child in _race_children(value):
+                _collect_race_fields(child, found, depth=depth + 1)
+
+
+def _race_children(value: object) -> list[Mapping[str, object]]:
+    """Nested prediction records: a mapping, or the mappings of a bounded list."""
+    if isinstance(value, Mapping):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value[:_RACE_LIST_LIMIT] if isinstance(item, Mapping)]
+    return []
 
 
 def _colon_seconds(text: str) -> float | None:

@@ -1230,6 +1230,27 @@ class RacePredictionTests(unittest.TestCase):
             f"race_predictions:{DAY}:0:race_prediction_5k",
         )
 
+    def test_wrapped_prediction_lists_are_read_like_the_legacy_reader(self) -> None:
+        self.assertEqual(
+            self._seconds(
+                {
+                    "racePredictions": [
+                        {"raceDistance": "5K", "raceTime": 1310},
+                        {"raceDistance": "5K", "raceTime": 1400},
+                        {"raceDistance": "halfMarathon", "raceTime": "01:42:30"},
+                    ],
+                    "10k": {"predictedTime": 2740},
+                    "marathon": {"racePredictionTime": 2_400_000},
+                }
+            ),
+            {
+                "race_prediction_5k": 1310.0,
+                "race_prediction_10k": 2740.0,
+                "race_prediction_half": 6150.0,
+                "race_prediction_full": 2400.0,
+            },
+        )
+
     def test_undated_predictions_use_the_sync_day(self) -> None:
         result = _map({"race_predictions": {"5k": {"raceTime": 1320}}})
 
