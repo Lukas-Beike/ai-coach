@@ -13,7 +13,12 @@ from backend.providers.intervals_activity_keys import (
     WEIGHTED_AVG_SPEED,
     WEIGHTED_AVG_WATTS,
 )
-from backend.providers.intervals_performance_fields import CONFIGURED_FTP, TRAINING_LOAD
+from backend.providers.intervals_performance_fields import (
+    CONFIGURED_FTP,
+    HEART_RATE_ZONE_TIMES,
+    TRAINING_LOAD,
+    ZONE_TIMES,
+)
 
 COACH_ACTIVITY_DETAIL_FIELDS = (
     "start_date_local",
@@ -96,6 +101,7 @@ COACH_ACTIVITY_DETAIL_LAP_FIELDS = (
 )
 COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS = 2000
 COACH_ACTIVITY_DETAIL_MAX_LAPS = 200
+COACH_ACTIVITY_DETAIL_MAX_ZONES = 20
 
 
 def _analysis_scalar(value: Any, *, limit: int = 200) -> Any:
@@ -141,6 +147,23 @@ def _analysis_laps(value: Any) -> list[dict[str, Any]]:
     return laps
 
 
+def _zone_times(value: Any) -> list[Any]:
+    """Keep recorded zone durations as numbers or bounded ``{id, secs}`` items."""
+    if not isinstance(value, list):
+        return []
+    zones: list[Any] = []
+    for item in value[:COACH_ACTIVITY_DETAIL_MAX_ZONES]:
+        if isinstance(item, dict):
+            secs = _analysis_scalar(item.get("secs"))
+            if isinstance(secs, (int, float)) and not isinstance(secs, bool):
+                zones.append({"id": str(item.get("id") or "")[:20], "secs": secs})
+        else:
+            # Plain lists are positional (Z1, Z2, ...), so invalid entries stay as gaps.
+            number = isinstance(item, (int, float)) and not isinstance(item, bool)
+            zones.append(_analysis_scalar(item) if number else None)
+    return zones
+
+
 def detailed_activity(activity: Any) -> dict[str, Any]:
     """Project one activity for detailed coaching without raw metadata."""
     if not isinstance(activity, dict):
@@ -162,6 +185,10 @@ def detailed_activity(activity: Any) -> dict[str, Any]:
         }
         if projected_streams:
             projected["streams"] = projected_streams
+    for key in (HEART_RATE_ZONE_TIMES, ZONE_TIMES):
+        zones = _zone_times(activity.get(key))
+        if zones:
+            projected[key] = zones
     laps = _analysis_laps(activity.get("laps"))
     if laps:
         projected["laps"] = laps

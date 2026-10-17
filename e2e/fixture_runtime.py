@@ -2076,6 +2076,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 "moving_time": 3600,
                 "distance": 25000,
                 "icu_training_load": 50,
+                "icu_hr_zone_times": [600, 1800, 600, 450, 150],
             }
             _merge_snapshot_activities([activity])
             detailed = {
@@ -2085,6 +2086,8 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                     "time": list(range(3601)),
                     "watts": [200] * 3601,
                     "heartrate": [140] * 3601,
+                    # Sub-zero readings guard against clamping temperature at 0 °C.
+                    "temperature": [-5 + index % 4 for index in range(3601)],
                 },
             }
             ActivityDetailStore(server.database_manager()).save(
@@ -2100,7 +2103,16 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                     "source": "Intervals.icu",
                     "observed_at": datetime.now(UTC).isoformat(),
                     "full_resolution": True,
-                    "available_streams": ["time", "watts", "heartrate"],
+                    "available_streams": [
+                        "time",
+                        "watts",
+                        "heartrate",
+                        "temperature",
+                    ],
+                    "coverage": {
+                        name: {"points": len(values), "valid_points": len(values)}
+                        for name, values in detailed["streams"].items()
+                    },
                 },
             )
             self.send_json(200, {"activity_id": activity["id"]})

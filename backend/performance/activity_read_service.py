@@ -18,6 +18,10 @@ from backend.performance.canonical_inputs import (
     read_performance_inputs,
 )
 from backend.performance.context import current_performance_context
+from backend.providers.intervals_performance_fields import (
+    HEART_RATE_ZONE_TIMES,
+    ZONE_TIMES,
+)
 from backend.providers.source_labels import SourceView, provider_label
 from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
 
@@ -102,7 +106,13 @@ class ActivityAnalysisReadService(ActivityReadService):
             and cached["summary_sha256"] != summary_fingerprint(activity)
         )
         if cached:
-            activity = {**activity, **cached["activity"]}
+            # Zone times are outside the fingerprint, so the live row stays authoritative.
+            live_zones = {
+                key: activity[key]
+                for key in (HEART_RATE_ZONE_TIMES, ZONE_TIMES)
+                if key in activity
+            }
+            activity = {**activity, **cached["activity"], **live_zones}
         feedback = next(
             (
                 item

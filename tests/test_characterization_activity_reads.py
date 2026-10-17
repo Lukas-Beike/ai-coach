@@ -408,6 +408,17 @@ class ActivitySummaryFingerprintTests(unittest.TestCase):
             original, summary_fingerprint({**BASE_SUMMARY, "name": "Other"})
         )
 
+    def test_fingerprint_ignores_recorded_zone_times(self) -> None:
+        # Records stored before zone times entered the projection stay current.
+        with_zones = {
+            **BASE_SUMMARY,
+            "icu_hr_zone_times": [600, 1800, 600],
+            "icu_zone_times": [{"id": "Z1", "secs": 300}],
+        }
+        self.assertEqual(
+            summary_fingerprint(BASE_SUMMARY), summary_fingerprint(with_zones)
+        )
+
     def test_fingerprint_ignores_streams_and_laps(self) -> None:
         with_detail = {
             **BASE_SUMMARY,
@@ -537,6 +548,17 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         # stale cached value (3600) is still shown.
         self.assertEqual(3600, result["activity"]["moving_time"])
         self.assertTrue(result["detail_data"]["full_resolution"])
+
+    def test_live_zone_times_override_cached_zone_times(self) -> None:
+        # Zone times are outside the fingerprint, so recalculated provider zones
+        # must win over the cached detail projection without marking it stale.
+        self._save_analysis(
+            activity={"name": "Threshold", "icu_hr_zone_times": [100, 200]}
+        )
+        live = {**self.RAW, "icu_hr_zone_times": [300, 400]}
+        result = self._detail([live])
+        self.assertFalse(result["detail_data"]["stale"])
+        self.assertEqual([300, 400], result["activity"]["icu_hr_zone_times"])
 
     def test_record_without_fingerprint_is_never_stale(self) -> None:
         # Quirk pinned: a falsy summary_sha256 disables the staleness check.

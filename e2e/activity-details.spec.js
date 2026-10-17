@@ -97,3 +97,31 @@ test("@responsive activity stream aliases render once with canonical preference"
     expect(headings.filter((heading) => heading.startsWith("Geschwindigkeit"))).toHaveLength(1);
   }
 });
+
+test("@responsive analysis sessions list expands Garmin-style charts", async ({ page, request }) => {
+  const seed = await request.get("/api/fixture/activity");
+  expect(seed.ok()).toBeTruthy();
+  await page.goto("/#analysis/sessions");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const nav = page.getByRole("navigation", { name: "Analysebereiche" });
+  await expect(nav.getByRole("link", { name: "Einheiten" })).toHaveAttribute("aria-current", "page");
+  await expect(page.locator("#sessionPerformance")).toBeHidden();
+  const item = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic ride <img src=x>" }).first();
+  await item.locator("summary").click();
+  await expect(item.locator(".activity-analysis-stats")).toContainText("25,0 km");
+  const power = item.getByRole("img", { name: /^Leistung: Ø 200/ });
+  await expect(power).toBeVisible();
+  await expect(item.getByRole("img", { name: /^Herzfrequenz: Ø 140/ })).toBeVisible();
+  const box = await power.boundingBox();
+  await power.dispatchEvent("pointerdown", { clientX: box.x + box.width * 0.6, clientY: box.y + box.height / 2 });
+  await expect(item.locator(".is-power .activity-analysis-readout")).toContainText("200 W");
+  await expect(item.locator(".activity-analysis-zones").filter({ hasText: "Zeit in HF-Zonen" })).toContainText("Z2");
+  const temperatureTicks = await item.locator(".is-temperature svg text").allTextContents();
+  expect(temperatureTicks.some((text) => /^[-\u2212]\d/.test(text))).toBeTruthy();
+  await expect(item).toContainText("Datenabdeckung");
+  expect(await item.locator("img").count()).toBe(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  for (const link of await nav.getByRole("link").all()) {
+    expect(await link.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBeTruthy();
+  }
+});

@@ -11,6 +11,7 @@ test("visibility, chart variants and reduced motion override component styles", 
       <div id="settingsPanel" class="panel active" hidden></div>
       <video id="nutritionBarcodeVideo" hidden></video>
       <div class="auth-loading" hidden></div>
+      <section id="activityAnalysis" class="activity-analysis" hidden></section>
       <div class="coach-receipts"></div><div class="chat-queue-status"></div>
       <input class="nutrition-low-confidence" aria-label="Uncertain nutrition value">
       <div class="analysis-chart-card"><svg>
