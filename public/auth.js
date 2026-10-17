@@ -295,6 +295,20 @@ async function bootstrapAuth() {
 }
 
 
+// Maps a failed login request to its own message. A wrong password (401), the
+// request timeout and a missing connection keep the text api() already built.
+function loginErrorMessage(exception) {
+  const status = exception?.status;
+  if (status === 429) {
+    const seconds = Number(exception.retryAfter);
+    const wait = !(seconds > 0) ? "" : seconds < 60 ? ` in ${Math.ceil(seconds)} Sekunden` : ` in etwa ${Math.ceil(seconds / 60)} Minuten`;
+    return `Zu viele Anmeldeversuche. Bitte${wait} erneut versuchen.`;
+  }
+  if (status >= 500) return "Der Server startet gerade oder ist ausgelastet. Bitte in wenigen Sekunden erneut versuchen.";
+  return exception.message;
+}
+
+
 async function login(event) {
   event.preventDefault();
   const button = $("#loginButton");
@@ -314,7 +328,7 @@ async function login(event) {
     notePwaActivity();
     await loadInitialState();
   } catch (exception) {
-    error.textContent = exception.message;
+    error.textContent = loginErrorMessage(exception);
   } finally {
     button.disabled = false;
     button.classList.remove("is-loading");
