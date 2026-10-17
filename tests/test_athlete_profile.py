@@ -24,11 +24,16 @@ class AthleteProfileTests(unittest.TestCase):
                 "constraints": "",
                 "equipment": "",
                 "training_preferences": "",
-                "training_preferences_running": "",
-                "training_preferences_cycling": "",
-                "training_preferences_swimming": "",
-                "training_preferences_strength": "",
-                "training_preferences_mobility": "",
+                **{
+                    f"training_preferences_{sport}": ""
+                    for sport in (
+                        "running",
+                        "cycling",
+                        "swimming",
+                        "strength",
+                        "mobility",
+                    )
+                },
                 "performance_notes": "",
                 "weight_kg": "",
                 "body_fat_pct": "",
