@@ -730,7 +730,7 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
   pointer-events: none;
 }
 .composer .chat-sync[hidden] { display: none; }
-.chat-sync-spinner { width: 14px; height: 14px; flex: none; border: 2px solid var(--focus-accent-border); border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+.chat-sync-spinner { width: 14px; height: 14px; flex: none; border: 2px solid var(--line-strong); border-top-color: var(--accent-bright); border-radius: 50%; animation: spin .8s linear infinite; }
 .composer .attachment-button {
   display: grid;
   flex: 0 0 44px;
