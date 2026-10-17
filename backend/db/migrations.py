@@ -2,8 +2,10 @@
 
 The oldest supported schema is version 9, written by release 1.13.x. Older
 databases and backups are rejected unchanged; upgrade them with release 1.13.6
-first. When CURRENT_SCHEMA_VERSION is bumped, freeze the outgoing schema as a
-fixture and add a versioned, transactional upgrade step here.
+first. Its frozen fixture is tests/fixtures/schema_v9.sql.txt. When
+CURRENT_SCHEMA_VERSION is bumped, keep every released fixture from version 9
+onward, freeze the outgoing schema, and add a versioned, transactional upgrade
+step here so each supported release still reaches the current schema.
 """
 
 from __future__ import annotations

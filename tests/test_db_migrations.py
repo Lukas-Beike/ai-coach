@@ -16,6 +16,8 @@ from backend.db.schema import (
 )
 
 INTERVALS = ProviderId.INTERVALS.value
+OLDEST_SUPPORTED_VERSION = 9
+OLDEST_SUPPORTED_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v9.sql.txt"
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -56,8 +58,31 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         self.assertEqual(list(db.iterdump()), before)
         self.assertTrue(database_schema_is_current(db))
 
+    def test_oldest_supported_release_schema_upgrades_to_current(self):
+        # Release 1.13.6 is the migration baseline. A schema change must keep
+        # this fixture and add a transactional upgrade step from version 9.
+        db = self.connect()
+        db.executescript(OLDEST_SUPPORTED_FIXTURE.read_text(encoding="utf-8"))
+        db.execute(
+            "INSERT INTO messages(role, content, created_at) "
+            "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
+        )
+        db.commit()
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], OLDEST_SUPPORTED_VERSION
+        )
+        migrate_schema(db)
+        db.commit()
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("SELECT content FROM messages").fetchone()[0], "Hallo"
+        )
+
     def test_older_or_newer_schema_version_is_rejected_without_modification(self):
-        for version in (0, 8, CURRENT_SCHEMA_VERSION + 1):
+        for version in (0, OLDEST_SUPPORTED_VERSION - 1, CURRENT_SCHEMA_VERSION + 1):
             with self.subTest(version=version):
                 db = self.current_database()
                 db.execute(f"PRAGMA user_version = {version}")
