@@ -445,3 +445,64 @@ test("a load replaced by a newer one does not render or store its late areas", a
   assert.equal(renders.length, 0);
   assert.equal(storage.size, 0);
 });
+
+// The Coach shows device-cached messages with a sync note until the fresh load ends.
+function syncingLoader() {
+  const loaded = loader();
+  loaded.state.chatCacheSyncing = true;
+  loaded.syncCalls = [];
+  loaded.context.setChatCacheSyncing = (value) => { loaded.state.chatCacheSyncing = value; loaded.syncCalls.push(value); };
+  loaded.context.showStateLoadFailure = () => {};
+  return loaded;
+}
+
+test("the cached-message sync note stays until the fresh chat load completes", async () => {
+  const { context, state, syncCalls, respond } = syncingLoader();
+  const loading = context.load("/api/bootstrap?local=1", ["chat"]);
+  respond("/api/bootstrap?local=1", {});
+  await Promise.resolve();
+  assert.equal(state.chatCacheSyncing, true);
+  respond("/api/chat/history?limit=100", { messages: [] });
+  await loading;
+  assert.deepEqual(syncCalls, [false]);
+});
+
+test("the sync note ends with the fresh messages, not with a slower area", async () => {
+  const { context, state, syncCalls, respond } = syncingLoader();
+  const loading = context.load("/api/bootstrap?local=1", ["chat", "library"]);
+  respond("/api/bootstrap?local=1", {});
+  respond("/api/chat/history?limit=100", { messages: [] });
+  for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
+  assert.equal(state.chatCacheSyncing, false);
+  respond("/api/library?limit=100", { workouts: [] });
+  await loading;
+  assert.deepEqual(syncCalls, [false]);
+});
+
+test("a failed start load ends the cached-message sync note", async () => {
+  const { context, state, syncCalls } = syncingLoader();
+  context.api = () => Promise.reject(new Error("offline"));
+  await context.load("/api/bootstrap?local=1", ["chat"]);
+  assert.equal(state.chatCacheSyncing, false);
+  assert.deepEqual(syncCalls, [false]);
+});
+
+test("a live area refresh leaves the cached-message sync note alone", async () => {
+  const { context, state, syncCalls, respond } = syncingLoader();
+  state.data = { profile: {}, state_versions: {} };
+  const loading = context.load(vm.runInContext("LIVE_AREA_REFRESH", context), ["weather"]);
+  respond("/api/weather", { days: [] });
+  await loading;
+  assert.equal(state.chatCacheSyncing, true);
+  assert.deepEqual(syncCalls, []);
+});
+
+test("a load without the chat area leaves the cached-message sync note alone", async () => {
+  const { context, state, syncCalls, respond } = syncingLoader();
+  const loading = context.load("/api/bootstrap?local=1", ["library"]);
+  respond("/api/bootstrap?local=1", {});
+  respond("/api/library?limit=100", { workouts: [] });
+  await loading;
+  assert.equal(state.chatCacheSyncing, true);
+  assert.deepEqual(syncCalls, []);
+});

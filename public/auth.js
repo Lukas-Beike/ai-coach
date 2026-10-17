@@ -57,6 +57,7 @@ function showLogin() {
   state.chatProposalRefreshInFlight = false;
   state.chatProposalRefreshQueued = false;
   state.chatInitialScrollPending = true;
+  state.chatCacheSyncing = false;
   state.chatScrollY = null;
   state.chatScrollRestoring = false;
   cancelScheduledChatStreamRender();
@@ -212,13 +213,15 @@ function showAppShellLoading({ updated = false } = {}) {
 // Shows the device snapshot before the session check, so a start does not wait
 // for the network. The fresh bootstrap replaces it; an unauthenticated start
 // clears it through showLogin.
-function showStateSnapshot(snapshot) {
+function showStateSnapshot(snapshot, { syncing = true } = {}) {
   if (!snapshot) return false;
   state.replaceDataOnLoad = true;
+  state.chatCacheSyncing = syncing && Boolean(snapshot.data?.messages?.length);
   try {
     render(snapshot.data);
     markStateSnapshotShown(true);
   } catch {
+    state.chatCacheSyncing = false;
     // A snapshot from earlier assets may not fit the current views.
     clearStateSnapshot();
     state.data = null;
@@ -285,7 +288,8 @@ async function bootstrapAuth() {
     } else showLogin();
   } catch {
     renderConnectivityStatus(false);
-    if (shellShown || (updated && showStateSnapshot(snapshot))) {
+    setChatCacheSyncing(false);
+    if (shellShown || (updated && showStateSnapshot(snapshot, { syncing: false }))) {
       // An offline start keeps the stored data and checks the session again later.
       retryBootstrapAuth();
       return;

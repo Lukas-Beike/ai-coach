@@ -333,6 +333,8 @@ async function renderAreasAsTheyArrive(domainData, areas, load) {
     applyLoadedStateVersions(payload, outcome.appliedAreas, bootstrap, chatGeneration, liveVersions);
     renderCompletedState(payload, liveAreasOnly, [...unsettled], { reloadRoute: !rendered });
     rendered = true;
+    // The fresh messages are shown; slower areas need not hold the sync note.
+    if (state.chatCacheSyncing && outcome.appliedAreas.includes("chat")) setChatCacheSyncing(false);
   }));
   return { failures, unsettled, rendered };
 }
@@ -370,8 +372,16 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   } catch (error) {
     if (sessionGeneration === state.sessionGeneration) showStateLoadFailure(error);
   } finally {
-    if (sessionGeneration === state.sessionGeneration && $("#appShell").classList.contains("is-loading")) finishAppShellLoading();
+    if (sessionGeneration === state.sessionGeneration) finishStateLoad(path, requestedAreas);
   }
+}
+
+function finishStateLoad(path, requestedAreas) {
+  if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
+  // The fresh chat load ended, with messages or with an error shown by showStateLoadFailure.
+  // A load without the chat area, such as a plan route's, leaves the note to the chat load.
+  const chatLoad = path !== LIVE_AREA_REFRESH && (!requestedAreas || requestedAreas.includes("chat"));
+  if (state.chatCacheSyncing && chatLoad) setChatCacheSyncing(false);
 }
 
 function areaLoading(area) {

@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=317">
+  <link rel="stylesheet" href="/styles.css?v=318">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -91,6 +91,7 @@
             <button type="button" id="cancelChatButton" class="composer-stop-button" hidden aria-label="Antwort stoppen" title="Antwort stoppen"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg></button>
             <button type="submit" id="sendButton" aria-label="Senden" title="Senden"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m0 0 6 6m-6-6-6 6"></path></svg></button>
           </div>
+          <output id="chatSyncStatus" class="chat-sync" aria-live="polite" hidden><span class="chat-sync-spinner" aria-hidden="true"></span>Nachrichten werden synchronisiert…</output>
           <button type="button" id="chatJumpToComposer" class="chat-jump" hidden aria-label="Zu den neuesten Nachrichten springen" title="Zu den neuesten Nachrichten springen">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14m0 0 5-5m-5 5-5-5"></path></svg>
             <span class="chat-jump-label" hidden>Neue Antwort</span>
@@ -463,14 +464,14 @@
   </dialog>
   <script src="/api.js?v=224" defer></script>
   <script src="/navigation.js?v=233" defer></script>
-  <script src="/state.js?v=224" defer></script>
+  <script src="/state.js?v=225" defer></script>
   <script src="/views.js?v=227" defer></script>
   <script src="/plan-views.js?v=11" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=31" defer></script>
-  <script src="/shared.js?v=12" defer></script>
-  <script src="/auth.js?v=10" defer></script>
+  <script src="/coach.js?v=32" defer></script>
+  <script src="/shared.js?v=13" defer></script>
+  <script src="/auth.js?v=11" defer></script>
   <script src="/sync-status.js?v=12" defer></script>
   <script src="/notifications.js?v=4" defer></script>
   <script src="/nutrition.js?v=31" defer></script>
@@ -478,7 +479,7 @@
   <script src="/activity-details.js?v=13" defer></script>
   <script src="/performance-view.js?v=13" defer></script>
   <script src="/diagnostics.js?v=4" defer></script>
-  <script src="/state-loader.js?v=13" defer></script>
+  <script src="/state-loader.js?v=14" defer></script>
   <script src="/sync-actions.js?v=5" defer></script>
   <script src="/wahoo-connection.js?v=4" defer></script>
   <script src="/settings.js?v=8" defer></script>

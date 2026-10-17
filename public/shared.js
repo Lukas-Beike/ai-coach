@@ -143,7 +143,7 @@ function renderActiveRoute(mainRoute, panelRoute) {
 function restoreRouteScroll(mainRoute, returningToChat, shouldFocusPlannedToday) {
   if (mainRoute === "coach") {
     if (state.chatResponseScrollPending) scrollChatToResponseStart();
-    else if (state.chatInitialScrollPending) scrollChatToLatest();
+    else if (state.chatInitialScrollPending || state.chatCacheSyncing) scrollChatToLatest();
     else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest();
     if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground(state.chatContentVersion);
     return;
