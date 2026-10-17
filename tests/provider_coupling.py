@@ -120,7 +120,8 @@ RULE_SOURCE_LABEL = "source_label"
 #
 # ``snapshot_key`` flags, in backend/**/*.py and server.py, a quoted raw snapshot
 # key-value key and any reference to ``latest_snapshot`` (the Intervals.icu raw
-# snapshot reader). Consumers read canonical observations instead.
+# snapshot reader), including an aliased import and a quoted name such as a
+# ``getattr`` argument. Consumers read canonical observations instead.
 SNAPSHOT_KEY_LITERALS = frozenset({"garmin_snapshot", "intervals_snapshot"})
 SNAPSHOT_READ_NAME = "latest_snapshot"
 # ``source_label`` flags a quoted string that is exactly a provider display name.
@@ -358,8 +359,11 @@ def _snapshot_key_tokens(text: str) -> list[str]:
     for node in ast.walk(ast.parse(text)):
         if isinstance(node, ast.Constant) and node.value in SNAPSHOT_KEY_LITERALS:
             tokens.append(node.value)
-        elif (isinstance(node, ast.Attribute) and node.attr == SNAPSHOT_READ_NAME) or (
-            isinstance(node, ast.Name) and node.id == SNAPSHOT_READ_NAME
+        elif (
+            (isinstance(node, ast.Attribute) and node.attr == SNAPSHOT_READ_NAME)
+            or (isinstance(node, ast.Name) and node.id == SNAPSHOT_READ_NAME)
+            or (isinstance(node, ast.alias) and node.name == SNAPSHOT_READ_NAME)
+            or (isinstance(node, ast.Constant) and node.value == SNAPSHOT_READ_NAME)
         ):
             tokens.append(SNAPSHOT_READ_NAME)
     return tokens

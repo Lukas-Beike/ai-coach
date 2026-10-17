@@ -453,6 +453,28 @@ class OwnerReadGuardTests(unittest.TestCase):
             entries,
         )
 
+    def test_aliased_and_quoted_snapshot_reader_references_are_flagged(self) -> None:
+        entries = _owner_reads(
+            {
+                "backend/performance/consumer.py": (
+                    "from backend.sync.state import latest_snapshot as read_raw\n"
+                    'reader = getattr(state, "latest_snapshot")\n'
+                    "raw = read_raw(db)\n"
+                ),
+            }
+        )
+        self.assertEqual(
+            [
+                (
+                    "snapshot_key",
+                    "backend/performance/consumer.py",
+                    "latest_snapshot",
+                    2,
+                )
+            ],
+            entries,
+        )
+
     def test_provider_display_names_are_flagged_only_as_exact_labels(self) -> None:
         entries = _owner_reads(
             {
