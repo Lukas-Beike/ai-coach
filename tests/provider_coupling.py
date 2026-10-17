@@ -121,8 +121,11 @@ RULE_SOURCE_LABEL = "source_label"
 # ``snapshot_key`` flags, in backend/**/*.py and server.py, a quoted raw snapshot
 # key-value key and any reference to ``latest_snapshot`` (the Intervals.icu raw
 # snapshot reader), including an aliased import and a quoted name such as a
-# ``getattr`` argument. Consumers read canonical observations instead.
+# ``getattr`` argument. A key embedded in a larger string, such as SQL against the
+# kv table, counts too; docstrings do not. Consumers read canonical observations
+# instead.
 SNAPSHOT_KEY_LITERALS = frozenset({"garmin_snapshot", "intervals_snapshot"})
+SNAPSHOT_KEY_PATTERN = re.compile(r"\b(garmin_snapshot|intervals_snapshot)\b")
 SNAPSHOT_READ_NAME = "latest_snapshot"
 # ``source_label`` flags a quoted string that is exactly a provider display name.
 # Exact matches are data/source labels; prose such as "Mit Garmin Connect
@@ -133,6 +136,7 @@ SNAPSHOT_READ_NAME = "latest_snapshot"
 # provider for a user action and stays out of scope.
 SOURCE_LABEL_LITERALS = frozenset({"Garmin Connect", "Intervals.icu"})
 SOURCE_LABEL_SCOPES = (
+    "backend/athlete/",
     "backend/coach/",
     "backend/http_api/",
     "backend/nutrition/",
@@ -156,6 +160,10 @@ _LEGACY_LABEL = (
     "backend/providers/source_labels.py"
 )
 _AWAITING_BODY_BATTERY = "awaiting-kind: morning body battery"
+_AWAITING_EQUIPMENT = (
+    "awaiting-record: equipment reads Garmin gear from the raw snapshot until "
+    "canonical equipment records exist"
+)
 _AWAITING_RESTING_ENERGY = (
     "awaiting-kind: resting calories; also the daily-stats sync status"
 )
@@ -180,6 +188,8 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
         "backend/performance/morning_battery_service.py",
     ): "writer: morning body battery rewrites the stored Garmin snapshot",
     (RULE_SNAPSHOT_KEY, "backend/activities/read_service.py"): _SYNC_STATUS,
+    (RULE_SNAPSHOT_KEY, "backend/athlete/equipment.py"): _AWAITING_EQUIPMENT,
+    (RULE_SOURCE_LABEL, "backend/athlete/equipment.py"): _LEGACY_LABEL,
     (RULE_SNAPSHOT_KEY, "backend/diagnostics/report.py"): _SYNC_STATUS,
     (RULE_SNAPSHOT_KEY, "backend/nutrition/sync_status.py"): _AWAITING_RESTING_ENERGY,
     (
@@ -355,11 +365,23 @@ def scan_provider_coupling(root: Path = SOURCE_ROOT) -> list[CouplingEntry]:
 
 
 def _snapshot_key_tokens(text: str) -> list[str]:
+    tree = ast.parse(text)
+    docstrings = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    }
     tokens: list[str] = []
-    for node in ast.walk(ast.parse(text)):
-        if isinstance(node, ast.Constant) and node.value in SNAPSHOT_KEY_LITERALS:
-            tokens.append(node.value)
-        elif (
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+        ):
+            tokens.extend(SNAPSHOT_KEY_PATTERN.findall(node.value))
+        if (
             (isinstance(node, ast.Attribute) and node.attr == SNAPSHOT_READ_NAME)
             or (isinstance(node, ast.Name) and node.id == SNAPSHOT_READ_NAME)
             or (isinstance(node, ast.alias) and node.name == SNAPSHOT_READ_NAME)

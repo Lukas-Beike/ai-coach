@@ -475,6 +475,43 @@ class OwnerReadGuardTests(unittest.TestCase):
             entries,
         )
 
+    def test_snapshot_keys_embedded_in_strings_are_flagged_but_not_docstrings(
+        self,
+    ) -> None:
+        entries = _owner_reads(
+            {
+                "backend/athlete/consumer.py": (
+                    '"""Formerly read garmin_snapshot directly."""\n'
+                    "row = db.execute(\n"
+                    "    \"SELECT value FROM kv WHERE key='garmin_snapshot'\"\n"
+                    ").fetchone()\n"
+                    'note = f"intervals_snapshot:{day}"\n'
+                    'unrelated = "garmin_snapshots_total"\n'
+                ),
+            }
+        )
+        self.assertEqual(
+            [
+                ("snapshot_key", "backend/athlete/consumer.py", "garmin_snapshot", 1),
+                (
+                    "snapshot_key",
+                    "backend/athlete/consumer.py",
+                    "intervals_snapshot",
+                    1,
+                ),
+            ],
+            entries,
+        )
+
+    def test_athlete_views_are_in_the_source_label_scope(self) -> None:
+        entries = _owner_reads(
+            {"backend/athlete/consumer.py": 'item = {"source": "Garmin Connect"}\n'}
+        )
+        self.assertEqual(
+            [("source_label", "backend/athlete/consumer.py", "Garmin Connect", 1)],
+            entries,
+        )
+
     def test_provider_display_names_are_flagged_only_as_exact_labels(self) -> None:
         entries = _owner_reads(
             {
@@ -501,7 +538,7 @@ class OwnerReadGuardTests(unittest.TestCase):
             {
                 "backend/providers/source_labels.py": label,
                 "backend/sync/commands.py": label,
-                "backend/athlete/equipment.py": label,
+                "backend/sync/garmin.py": label,
                 "public/sync-status.js": "const s = 'Garmin Connect';\n",
                 "public/nutrition.js": "const s = 'Garmin Connect';\n",
             }
