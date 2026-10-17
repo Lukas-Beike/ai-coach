@@ -935,6 +935,146 @@ class ReprojectionTests(BackfillFixture):
             [{"mapped_version": current}],
         )
 
+    def test_wellness_stored_at_the_previous_version_gains_form_and_eftp(
+        self,
+    ) -> None:
+        current = canonical_plans.current_mapper_versions()[
+            f"{INTERVALS}.{canonical_plans.WELLNESS_RECORD_KIND}"
+        ]
+        with self.manager.unit_of_work() as db:
+            canonical_store.upsert_provider_record(
+                db,
+                provider=INTERVALS,
+                record_kind=canonical_plans.WELLNESS_RECORD_KIND,
+                source_record_id="2026-10-08",
+                payload={
+                    "id": "2026-10-08",
+                    "ctl": 50,
+                    "atl": 40,
+                    "sportInfo": [{"types": ["Ride"], "eftp": 258}],
+                },
+                mapper_version=current - 1,
+                fetched_at=NOW,
+                now=NOW,
+            )
+
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        self.assertEqual(
+            self.rows(
+                "SELECT metric, value, source_kind, sport, mapper_version "
+                "FROM observations ORDER BY metric"
+            ),
+            [
+                {
+                    "metric": metric.value,
+                    "value": value,
+                    "source_kind": source_kind,
+                    "sport": sport,
+                    "mapper_version": current,
+                }
+                for metric, value, source_kind, sport in (
+                    (MetricKind.ATL, 40.0, "provider_reported", None),
+                    (MetricKind.CTL, 50.0, "provider_reported", None),
+                    (MetricKind.EFTP, 258.0, "provider_reported", "ride"),
+                    (MetricKind.FORM, 10.0, "derived", None),
+                )
+            ],
+        )
+
+    def test_reprojected_activities_gain_their_maximum_heart_rate(self) -> None:
+        ride = {**intervals_activity("1"), "max_heartrate": 171}
+        self.insert_snapshot(self.manager, intervals_snapshot([ride]))
+        self.set_garmin(
+            self.manager,
+            garmin_payload(activities=[{**garmin_activity(1), "maxHR": 168}]),
+        )
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+        with self.manager.unit_of_work() as db:
+            # The state the previous activity mappers left: no maximum heart rate.
+            db.execute("UPDATE activity_records SET details = '{}'")
+
+        bumped = {
+            key: canonical_plans._MAPPER_VERSIONS[key] + 1
+            for key in ((INTERVALS, ACTIVITY_KIND), (GARMIN, ACTIVITY_KIND))
+        }
+        with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
+            self.run_to_completion(backfill)
+
+        self.assertEqual(
+            {
+                row["provider"]: canonical_store.activity_max_hr(row["details"])
+                for row in self.rows(
+                    "SELECT provider, details FROM activity_records"
+                )
+            },
+            {INTERVALS: 171.0, GARMIN: 168.0},
+        )
+
+    def test_garmin_health_stored_at_the_previous_version_gains_run_power(
+        self,
+    ) -> None:
+        current = canonical_plans.current_mapper_versions()[f"{GARMIN}.{HEALTH_KIND}"]
+        section = "running_threshold"
+        with self.manager.unit_of_work() as db:
+            canonical_store.upsert_provider_record(
+                db,
+                provider=GARMIN,
+                record_kind=HEALTH_KIND,
+                source_record_id=section,
+                payload={section: load_fixture("garmin", f"{section}.json")},
+                mapper_version=current - 1,
+                fetched_at=NOW,
+                now=NOW,
+            )
+
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        self.assertEqual(self.summary(backfill)["providers"][GARMIN]["reprojected"], 1)
+        self.assertEqual(
+            self.rows(
+                "SELECT value, unit, mapper_version FROM observations WHERE metric = ?",
+                (MetricKind.RUN_THRESHOLD_POWER.value,),
+            ),
+            [{"value": 290.0, "unit": "W", "mapper_version": current}],
+        )
+
+    def test_garmin_snapshot_backfill_writes_the_new_health_sections(self) -> None:
+        sections = ("daily_stats", "race_predictions", "endurance_score")
+        self.set_garmin(
+            self.manager,
+            garmin_payload(
+                **{name: load_fixture("garmin", f"{name}.json") for name in sections}
+            ),
+        )
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        self.assertEqual(
+            {
+                row["metric"]
+                for row in self.rows(
+                    "SELECT metric FROM observations WHERE provider = ?", (GARMIN,)
+                )
+            },
+            {
+                kind.value
+                for kind in (
+                    MetricKind.STEPS,
+                    MetricKind.FLOORS,
+                    MetricKind.DAILY_ENERGY_TOTAL,
+                    MetricKind.RACE_PREDICTION_5K,
+                    MetricKind.RACE_PREDICTION_10K,
+                    MetricKind.RACE_PREDICTION_HALF,
+                    MetricKind.RACE_PREDICTION_FULL,
+                    MetricKind.ENDURANCE_SCORE,
+                )
+            },
+        )
+
     def test_deleted_raw_records_are_skipped(self) -> None:
         backfill = self.populate()
         with self.manager.unit_of_work() as db:

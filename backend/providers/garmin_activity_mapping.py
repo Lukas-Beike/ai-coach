@@ -27,6 +27,8 @@ the same moment.
   time against the Intervals.icu moving time.
 * ``distance`` (metres), ``activityTrainingLoad`` (Garmin training load),
   ``averageHR`` (bpm), ``avgPower``, then ``averagePower`` (watts).
+* ``maxHR``, then ``maxHeartRate`` (bpm) -> ``max_hr``, the aliases that
+  ``performance.max_hr`` reads first.
 * ``activityName`` (text, stripped and truncated to 200 characters).
 
 Sport and environment. A known ``typeKey`` uses ``GARMIN_ACTIVITY_TYPES``. An
@@ -69,7 +71,8 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-MAPPER_VERSION: Final = 2
+# Version 3: maps the activity's maximum heart rate.
+MAPPER_VERSION: Final = 3
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -78,6 +81,7 @@ _ROW_FIELD: Final = "activity"
 _DURATION_KEYS: Final = ("duration", "movingTime")
 _MOVING_DURATION_KEYS: Final = ("movingDuration",)
 _POWER_KEYS: Final = ("avgPower", "averagePower")
+_MAX_HR_KEYS: Final = ("maxHR", "maxHeartRate")
 
 # Exact Garmin activityType.typeKey values. The environment is set only where the
 # key names it; otherwise UNKNOWN, which the activity name may still refine.
@@ -166,6 +170,7 @@ def _map_row(
         row, ("activityTrainingLoad",), (0.0, MAX_ACTIVITY_LOAD), ref, issues
     )
     avg_hr = _optional_number(row, ("averageHR",), HEART_RATE_BOUNDS, ref, issues)
+    max_hr = _optional_number(row, _MAX_HR_KEYS, HEART_RATE_BOUNDS, ref, issues)
     avg_power = _optional_number(
         row, _POWER_KEYS, (0.0, MAX_ACTIVITY_POWER_W), ref, issues
     )
@@ -187,6 +192,7 @@ def _map_row(
         avg_hr=avg_hr,
         avg_power=avg_power,
         name=name,
+        max_hr=max_hr,
     )
 
 

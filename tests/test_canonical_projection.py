@@ -110,7 +110,9 @@ class FixtureProjectionTests(unittest.TestCase):
             sorted(record.started_at for record in activities),
         )
         # The fixture athlete's weight is one more Intervals observation (mapper v2).
-        self.assertEqual(len(observations), 50)
+        # Intervals wellness v6 adds FORM and eFTP per row plus the athlete eFTP;
+        # Garmin health v5 adds the running threshold power.
+        self.assertEqual(len(observations), 58)
         for record in activities:
             self.assertEqual(record.provenance.retrieved_at, SYNCED_AT)
 
@@ -123,13 +125,15 @@ class FixtureProjectionTests(unittest.TestCase):
         intervals = coverage[ProviderId.INTERVALS]
         garmin = coverage[ProviderId.GARMIN]
         self.assertEqual(intervals.activity_count, 5)
-        # Includes the fixture athlete's weight (mapper v2).
-        self.assertEqual(intervals.observation_count, 32)
+        # Includes the fixture athlete's weight (mapper v2), and per wellness row
+        # FORM and eFTP plus the athlete eFTP (mapper v6).
+        self.assertEqual(intervals.observation_count, 39)
         self.assertEqual(intervals.retrieved_at, SYNCED_AT)
         self.assertEqual(garmin.activity_count, 2)
-        self.assertEqual(garmin.observation_count, 18)
+        # Includes the running threshold power (mapper v5).
+        self.assertEqual(garmin.observation_count, 19)
         self.assertEqual(garmin.retrieved_at, SYNCED_AT)
-        self.assertEqual(garmin.issue_counts[IssueReason.UNSUPPORTED], 3)
+        self.assertEqual(garmin.issue_counts[IssueReason.UNSUPPORTED], 2)
         self.assertEqual(intervals.issue_counts[IssueReason.UNSUPPORTED], 0)
 
     def test_observed_range_matches_the_provider_observations(self) -> None:
@@ -416,7 +420,7 @@ class CoverageTests(unittest.TestCase):
         garmin = coverage[ProviderId.GARMIN]
         self.assertEqual(garmin.activity_count, 0)
         self.assertEqual(garmin.issue_counts[IssueReason.INVALID_TYPE], 1)
-        self.assertEqual(garmin.issue_counts[IssueReason.UNSUPPORTED], 3)
+        self.assertEqual(garmin.issue_counts[IssueReason.UNSUPPORTED], 2)
         intervals = coverage[ProviderId.INTERVALS]
         self.assertEqual(intervals.issue_counts[IssueReason.INVALID_TYPE], 1)
         self.assertEqual(intervals.activity_count, 5)

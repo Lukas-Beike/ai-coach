@@ -573,12 +573,11 @@ class ThresholdParityTests(unittest.TestCase):
             frozenset({"max_heartrate"}),
         )
 
-    def test_pinned_eftp_is_read_by_legacy_but_not_mapped(self) -> None:
-        # The mapper does not read Intervals' estimated FTP. Legacy reports it
-        # separately as cycling_eftp_watts, which is 258 in the fixture.
+    def test_eftp_matches_legacy_cycling_eftp(self) -> None:
+        # Legacy reports Intervals' estimated FTP as cycling_eftp_watts.
         result = map_thresholds(self.athlete)
         self.assertEqual(self.legacy["cycling_eftp_watts"]["value"], 258)
-        self.assertNotIn(258.0, [record.value.value for record in result.records])
+        self.assertEqual(first_value(result, MetricKind.EFTP, sport=Sport.RIDE), 258)
 
     def test_zero_values_mean_unset_in_both_readers(self) -> None:
         athlete = {

@@ -8,38 +8,25 @@ from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import freshness as performance_freshness
 from backend.performance import recovery as performance_recovery
+from backend.providers.garmin_fields import (
+    GARMIN_ACTIVE_KCAL_ALIASES,
+    GARMIN_FLOORS_ALIASES,
+    GARMIN_STEPS_ALIASES,
+    GARMIN_TOTAL_KCAL_ALIASES,
+)
 from backend.providers.garmin_fields import first_present as _first_present
 from backend.providers.source_labels import SourceView, provider_label
 
 GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.DAILY_HEALTH)
 
 GARMIN_DAILY_HEALTH_FIELDS = {
-    "steps": ("totalSteps", "total_steps", "steps", "stepCount", "step_count"),
-    "floors": (
-        "floorsAscended",
-        "floors_ascended",
-        "floors",
-        "floorsUp",
-        "floors_up",
-    ),
-    "calories": (
-        "totalKilocalories",
-        "total_kilocalories",
-        "totalCalories",
-        "total_calories",
-        "calories",
-    ),
+    "steps": GARMIN_STEPS_ALIASES,
+    "floors": GARMIN_FLOORS_ALIASES,
+    "calories": GARMIN_TOTAL_KCAL_ALIASES,
 }
 
 GARMIN_DAILY_EXPENDITURE_FIELDS = {
-    "active_kcal": (
-        "activeKilocalories",
-        "active_kilocalories",
-        "activeCalories",
-        "active_calories",
-        "activeCaloriesBurned",
-        "active_calories_burned",
-    ),
+    "active_kcal": GARMIN_ACTIVE_KCAL_ALIASES,
     "resting_kcal": (
         "bmrKilocalories",
         "bmr_kilocalories",

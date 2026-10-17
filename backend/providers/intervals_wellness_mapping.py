@@ -16,9 +16,21 @@ as ``"1,200"`` are rejected, as the readers read them.
 Wellness rows
     ``id`` is the ISO calendar date (``YYYY-MM-DD``) and is required. Each
     field listed in ``_WELLNESS_FIELDS`` yields one observation. Every other
-    key, including ``tsb``, ``rampRate``, ``fatigue``, ``sportInfo`` and the
-    unlisted wellness keys, is ignored without an issue: most wellness keys are
-    deliberately unmapped, so reporting each one would only add noise.
+    key, including ``rampRate``, ``fatigue`` and the unlisted wellness keys, is
+    ignored without an issue: most wellness keys are deliberately unmapped, so
+    reporting each one would only add noise.
+
+    FORM is the reported ``tsb``, ``form`` or ``freshness``. A row without one
+    stores its mapped CTL minus its mapped ATL, rounded to two decimals, as a
+    DERIVED observation, as ``performance.wellness.wellness_form_value`` derives
+    it. Storing the derived value keeps one form series per day for every
+    consumer instead of each one deriving it again.
+
+    Each ``sportInfo`` (or ``sport_info``) entry yields an EFTP observation with
+    the sport that its first ``types`` text, or else its ``type``, classifies to.
+    The value is ``mmp_model``'s ``ftp``, ``eftp`` or ``eFTP``, else the entry's
+    ``eftp`` or ``eFTP``, as ``performance.eftp`` reads it. Only the first entry
+    of each sport is mapped.
 
 Athlete thresholds
     ``sportSettings`` (with the snake_case alias ``sport_settings`` as the
@@ -40,8 +52,11 @@ Athlete thresholds
 
     Top-level ``icu_ftp`` becomes a Ride FTP observation only when no Ride FTP
     observation was mapped. A rejected sportSettings FTP therefore allows the
-    fallback, which ``current_metrics`` does not do. ``sportInfo``, ``eftp``
-    and warm-up or cool-down times are not read.
+    fallback, which ``current_metrics`` does not do. Each entry's eFTP is read
+    as in wellness ``sportInfo`` and stored with the entry's sport. Its key has
+    the athlete series (see ``backend.db.canonical_store``), so it never
+    replaces the wellness eFTP of the same day. Warm-up or cool-down times are
+    not read.
 
 Athlete record
     ``weight`` (kg) is observed with sport None on the caller's ``observed_on``,
@@ -54,16 +69,17 @@ Athlete record
     a zero athlete-wide lthr is 0 bpm in ``current_metrics`` but unset here;
     a rejected sport value lets the athlete-wide fallback apply, as the top-level
     FTP does. Text with underscore digit separators or non-ASCII digits is
-    rejected by ``coerce_number``'s rules, though the readers accept it. Athlete-wide
-    VO2max, athlete body fat, activity-derived max HR and wellness ``sportInfo``
-    are not mapped.
+    rejected by ``coerce_number``'s rules, though the readers accept it. A
+    rejected ``tsb`` does not fall back to CTL minus ATL, and the derivation also
+    uses ``ctLoad`` and ``atlLoad``. Athlete-wide VO2max, athlete body fat and
+    activity-derived max HR are not mapped.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any, Final
 
@@ -86,9 +102,10 @@ from backend.canonical.vocabulary import (
 )
 
 # Version 4: the athlete-profile weight has its own observation key, so it no
-# longer overwrites the wellness weight of the same day. Re-projection rewrites
-# rows written at older versions.
-MAPPER_VERSION: Final = 5
+# longer overwrites the wellness weight of the same day. Version 6: wellness rows
+# add FORM and the sportInfo EFTP; sport settings add EFTP. Re-projection
+# rewrites rows written at older versions.
+MAPPER_VERSION: Final = 6
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
 _DAY_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
@@ -104,6 +121,7 @@ _UNSET_WHEN_ZERO: Final = frozenset(
         MetricKind.MAX_HR,
         MetricKind.THRESHOLD_PACE,
         MetricKind.VO2MAX,
+        MetricKind.EFTP,
     }
 )
 
@@ -131,6 +149,11 @@ _WELLNESS_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
     (MetricKind.ATL, ("atl", "atlLoad")),
 )
 
+_FORM_ALIASES: Final = ("tsb", "form", "freshness")
+_SPORT_INFO_KEYS: Final = ("sport_info", "sportInfo")
+_MMP_MODEL_KEY: Final = "mmp_model"
+_EFTP_MODEL_ALIASES: Final = ("ftp", "eftp", "eFTP")
+_EFTP_ALIASES: Final = ("eftp", "eFTP")
 _LTHR_ALIASES: Final = ("lthr",)
 _MAX_HR_ALIASES: Final = ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")
 _SPORT_SETTING_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
@@ -237,8 +260,80 @@ def _map_wellness_row(
         observed_on=observed_on,
         provenance=_provenance(record_id, retrieved_at),
     )
+    first = len(collector.records)
     for kind, aliases in _WELLNESS_FIELDS:
         _add_field(collector, scope, row, kind, aliases)
+    _add_form(collector, scope, row, collector.records[first:])
+    _map_sport_info(row, scope, collector)
+
+
+def _add_form(
+    collector: _Collector,
+    scope: _Scope,
+    row: dict[Any, Any],
+    mapped: list[Observation],
+) -> None:
+    """Map the reported form, else derive it from this row's CTL and ATL."""
+    if _first_present(row, _FORM_ALIASES) is not None:
+        _add_field(collector, scope, row, MetricKind.FORM, _FORM_ALIASES)
+        return
+    loads = {
+        observation.kind: observation.value.value
+        for observation in mapped
+        if observation.kind in (MetricKind.CTL, MetricKind.ATL)
+    }
+    if len(loads) != 2:
+        return
+    # Both loads lie in 0..10000, so their difference is inside the FORM bounds.
+    form = round(loads[MetricKind.CTL] - loads[MetricKind.ATL], 2)
+    collector.records.append(
+        Observation(
+            kind=MetricKind.FORM,
+            value=MetricValue(form, MetricKind.FORM.unit),
+            observed_on=scope.observed_on,
+            observed_at=None,
+            provenance=replace(scope.provenance, source_kind=SourceKind.DERIVED),
+        )
+    )
+
+
+def _map_sport_info(row: dict[Any, Any], scope: _Scope, collector: _Collector) -> None:
+    found = _first_present(row, _SPORT_INFO_KEYS)
+    if found is None:
+        return
+    name, entries = found
+    if not isinstance(entries, list):
+        collector.reject(scope.record_ref, name, IssueReason.INVALID_TYPE)
+        return
+    seen: set[Sport] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            collector.reject(scope.record_ref, name, IssueReason.INVALID_TYPE)
+            continue
+        sport = _sport_info_sport(entry)
+        if sport is None or sport in seen:
+            continue
+        seen.add(sport)
+        _add_eftp(collector, scope, entry, sport)
+
+
+def _sport_info_sport(entry: dict[Any, Any]) -> Sport | None:
+    types = entry.get("types")
+    text = types[0] if isinstance(types, list) and types else entry.get("type")
+    return classify_sport_text(text) if isinstance(text, str) else None
+
+
+def _add_eftp(
+    collector: _Collector, scope: _Scope, entry: dict[Any, Any], sport: Sport
+) -> None:
+    """Read ``mmp_model``'s eFTP first, then the entry's own, as the readers do."""
+    model = entry.get(_MMP_MODEL_KEY)
+    if isinstance(model, dict) and _first_present(model, _EFTP_MODEL_ALIASES):
+        _add_field(
+            collector, scope, model, MetricKind.EFTP, _EFTP_MODEL_ALIASES, sport=sport
+        )
+        return
+    _add_field(collector, scope, entry, MetricKind.EFTP, _EFTP_ALIASES, sport=sport)
 
 
 def _wellness_day(
@@ -305,6 +400,7 @@ def _map_sport_setting(entry: object, scope: _Scope, collector: _Collector) -> N
         return
     for kind, aliases in _SPORT_SETTING_FIELDS:
         _add_field(collector, scope, entry, kind, aliases, sport=sport)
+    _add_eftp(collector, scope, entry, sport)
     vo2max_aliases = _VO2MAX_ALIASES_BY_SPORT.get(sport)
     if vo2max_aliases is not None:
         _add_field(

@@ -22,6 +22,8 @@ produces an issue, and the next alias is tried:
   elapsed time when Garmin sends no moving time. A malformed ``elapsed_time`` is
   reported once.
 * average heart rate: ``average_heartrate`` before ``averageHR``.
+* maximum heart rate: ``max_heartrate`` before ``maxHR``, as activity_validation
+  reads it.
 * average power: ``average_watts`` before ``average_power``, as
   activity_validation does. ``icu_average_watts`` is not read because no reader
   or fixture carries it.
@@ -75,7 +77,8 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-MAPPER_VERSION: Final = 2
+# Version 3: maps the activity's maximum heart rate.
+MAPPER_VERSION: Final = 3
 INTERVALS_LABEL: Final = "Intervals.icu"
 MAX_ACTIVITY_ID_LENGTH: Final = 200
 MAX_NAME_LENGTH: Final = 200
@@ -86,6 +89,7 @@ _ELAPSED_TIME_KEYS: Final = ("elapsed_time",)
 _DISTANCE_KEYS: Final = ("distance",)
 _LOAD_KEYS: Final = ("icu_training_load",)
 _AVERAGE_HR_KEYS: Final = ("average_heartrate", "averageHR")
+_MAX_HR_KEYS: Final = ("max_heartrate", "maxHR")
 _AVERAGE_POWER_KEYS: Final = ("average_watts", "average_power")
 _IDENTITY_KEYS: Final = (
     "type",
@@ -375,6 +379,7 @@ def _map_row(
         avg_power=reader.number(_AVERAGE_POWER_KEYS, 0.0, MAX_ACTIVITY_POWER_W),
         name=reader.name(),
         elapsed_duration_s=elapsed_time,
+        max_hr=reader.number(_MAX_HR_KEYS, *HEART_RATE_BOUNDS),
     )
 
 

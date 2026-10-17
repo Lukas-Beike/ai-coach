@@ -316,6 +316,16 @@ class ActivityRecordTests(unittest.TestCase):
             ):
                 activity(avg_hr=avg_hr)
 
+    def test_max_hr_is_optional_and_bounded(self) -> None:
+        self.assertIsNone(activity().max_hr)
+        self.assertEqual(181.0, activity(max_hr=181).max_hr)
+        for max_hr in (5.0, 300.0):
+            with (
+                self.subTest(max_hr=max_hr),
+                self.assertRaisesRegex(ValueError, "max_hr must be between 20 and 250"),
+            ):
+                activity(max_hr=max_hr)
+
     def test_requires_timezone_aware_start(self) -> None:
         with self.assertRaisesRegex(ValueError, "started_at must be"):
             activity(started_at=NAIVE_MORNING)
