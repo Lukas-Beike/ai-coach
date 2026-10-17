@@ -13,7 +13,9 @@ from unittest import mock
 import backend
 from backend.config import (
     Config,
+    app_password_storage_warning,
     load_config,
+    local_env_defines,
     save_persistent_settings,
     security_configuration_error,
     validated_openai_base_url,
@@ -97,6 +99,55 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(invalid.sync_history_earliest_date, date(2000, 1, 1))
         self.assertEqual(len(logs.records), 1)
         self.assertNotIn("not-a-date", logs.output[0])
+
+    def test_trusted_proxies_parse_addresses_and_networks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            default = load_config(root, root, {})
+            parsed = load_config(
+                root, root, {"TRUSTED_PROXY_IPS": " 192.168.1.6, fd00::/64 10.0.0.0/8"}
+            )
+            with self.assertLogs("backend.config", level="WARNING") as logs:
+                invalid = load_config(
+                    root, root, {"TRUSTED_PROXY_IPS": "192.168.1.6,not-an-ip"}
+                )
+
+        self.assertEqual(default.trusted_proxies, ())
+        self.assertEqual(
+            [str(network) for network in parsed.trusted_proxies],
+            ["192.168.1.6/32", "fd00::/64", "10.0.0.0/8"],
+        )
+        self.assertEqual(
+            [str(network) for network in invalid.trusted_proxies], ["192.168.1.6/32"]
+        )
+        self.assertEqual(len(logs.records), 1)
+        self.assertNotIn("not-an-ip", logs.output[0])
+
+    def test_local_env_defines_reports_only_assigned_names(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            env_path = Path(temporary) / ".env"
+            self.assertFalse(local_env_defines(env_path, "APP_PASSWORD"))
+            env_path.write_text(
+                "# APP_PASSWORD=commented\nAPP_PASSWORD=\nOTHER=1\n", encoding="utf-8"
+            )
+            self.assertFalse(local_env_defines(env_path, "APP_PASSWORD"))
+            env_path.write_text(
+                "export APP_PASSWORD='synthetic-value'\n", encoding="utf-8"
+            )
+            self.assertTrue(local_env_defines(env_path, "APP_PASSWORD"))
+
+    def test_app_password_storage_warning_never_contains_the_value(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            self.assertIsNone(app_password_storage_warning(data_dir))
+            (data_dir / ".env").write_text(
+                "APP_PASSWORD=synthetic-secret-value\n", encoding="utf-8"
+            )
+            warning = app_password_storage_warning(data_dir)
+        self.assertIsNotNone(warning)
+        self.assertIn("DATA_DIR/.env", warning)
+        self.assertNotIn("synthetic-secret-value", warning)
 
     def test_security_error_order_and_success(self):
         config = Config(

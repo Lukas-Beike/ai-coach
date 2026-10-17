@@ -53,6 +53,12 @@ test("logout shows the login screen after the server confirmed the logout", asyn
   assert.deepEqual(toasts, []);
 });
 
+test("the login screen clears the device snapshot, view and message caches", () => {
+  // showLogin runs after logout, a 401 and an unauthenticated start; the caches
+  // hold athlete data and are removed by clearStateSnapshot (state-loader tests).
+  assert.match(extractFunction(authSource, "showLogin"), /^\s*clearStateSnapshot\(\);$/m);
+});
+
 test("a failed logout request keeps the app open, reports the error and allows a retry", async () => {
   const { context, counts, toasts } = logoutHarness(async () => { throw httpError(500, "Serverfehler"); });
   await context.logout();

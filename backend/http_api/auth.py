@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import secrets
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from http.cookies import CookieError, SimpleCookie
 from typing import Any
@@ -39,6 +40,48 @@ SESSION_MAINTENANCE_WAIT_SECONDS = 0.0
 # A restore still cannot interleave: restore_drain blocks new leases and waits
 # for active ones before the database file is swapped.
 SESSION_WRITE_WAIT_SECONDS = 10.0
+
+TrustedNetworks = Iterable[ipaddress.IPv4Network | ipaddress.IPv6Network]
+
+
+def _parsed_ip(
+    value: str,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        address = ipaddress.ip_address(value.strip())
+    except ValueError:
+        return None
+    mapped = getattr(address, "ipv4_mapped", None)
+    return mapped or address
+
+
+def resolve_client_ip(
+    peer: str, forwarded_for: Iterable[str], trusted_proxies: TrustedNetworks
+) -> str:
+    """Return the request's client address for rate limiting.
+
+    ``X-Forwarded-For`` is honored only when the socket peer is a configured
+    trusted proxy. The chain is read from the right, skipping trusted hops, so
+    entries a client prepends itself cannot choose its rate-limit bucket.
+    """
+    trusted = tuple(trusted_proxies)
+    peer_address = _parsed_ip(peer)
+
+    def is_trusted(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        return any(address in network for network in trusted)
+
+    if peer_address is None or not trusted or not is_trusted(peer_address):
+        return peer
+    client = peer_address
+    hops = [hop for value in forwarded_for for hop in str(value).split(",")]
+    for hop in reversed(hops):
+        address = _parsed_ip(hop)
+        if address is None:
+            break
+        client = address
+        if not is_trusted(address):
+            break
+    return str(client)
 
 
 class SessionAuthServiceCache:
@@ -131,9 +174,14 @@ class SessionAuthService:
     def rate_limiter(self) -> RateLimiter:
         return self._rate_limiter
 
-    @staticmethod
-    def client_ip(handler: Any) -> str:
-        return str(handler.client_address[0]) if handler.client_address else "unknown"
+    def client_ip(self, handler: Any) -> str:
+        peer = str(handler.client_address[0]) if handler.client_address else "unknown"
+        headers = getattr(handler, "headers", None)
+        get_all = getattr(headers, "get_all", None)
+        forwarded = (get_all("X-Forwarded-For") if callable(get_all) else None) or []
+        return resolve_client_ip(
+            peer, forwarded, getattr(self._config, "trusted_proxies", ())
+        )
 
     @staticmethod
     def cookie_value(handler: Any, name: str) -> str:

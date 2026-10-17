@@ -2085,6 +2085,15 @@ def main() -> None:
             },
         )
         raise SystemExit(configuration_error)
+    storage_warning = app_config.app_password_storage_warning(DATA_DIR)
+    if storage_warning:
+        LOGGER.warning(
+            "APP_PASSWORD stored in the data directory",
+            extra={
+                "event": "app_password_in_data_dir",
+                "context": {"reason": storage_warning},
+            },
+        )
     LOGGER.info(
         f"{APP_NAME} starting",
         extra={

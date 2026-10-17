@@ -99,6 +99,15 @@ def load_local_env(
                 target[parsed[0]] = parsed[1]
 
 
+def local_env_defines(env_path: Path, name: str) -> bool:
+    """Report whether a local .env file assigns ``name``; never returns values."""
+    for raw_line in _read_local_env(env_path):
+        parsed = _parse_local_env_line(raw_line)
+        if parsed and parsed[0] == name and parsed[1]:
+            return True
+    return False
+
+
 def _env_int(environ: Mapping[str, str], name: str, default: int) -> int:
     try:
         return int(environ.get(name, str(default)))
@@ -109,6 +118,23 @@ def _env_int(environ: Mapping[str, str], name: str, default: int) -> int:
 def _env_bool(environ: Mapping[str, str], name: str, default: bool = False) -> bool:
     value = str(environ.get(name, "")).strip().casefold()
     return default if not value else value in {"1", "true", "yes", "on"}
+
+
+def _env_networks(
+    environ: Mapping[str, str], name: str
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    networks = []
+    for entry in re.split(r"[\s,]+", str(environ.get(name, "")).strip()):
+        if not entry:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            _LOGGER.warning(
+                "Ignoring invalid trusted proxy address",
+                extra={"event": "config_invalid_trusted_proxy", "setting": name},
+            )
+    return tuple(networks)
 
 
 def _env_date(environ: Mapping[str, str], name: str, default: date) -> date:
@@ -145,6 +171,7 @@ class Config:
     wahoo_client_secret: str = ""
     wahoo_redirect_uri: str = ""
     sync_history_earliest_date: date = DEFAULT_SYNC_HISTORY_EARLIEST_DATE
+    trusted_proxies: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
 
     @property
     def wahoo_configured(self) -> bool:
@@ -166,6 +193,18 @@ def security_configuration_error(
     if not sqlcipher_available:
         return "SQLCipher ist nicht verfügbar; die verschlüsselte Datenbank kann nicht geöffnet werden."
     return None
+
+
+def app_password_storage_warning(data_dir: Path) -> str | None:
+    """Warn when the database key is persisted beside the encrypted database."""
+    if not local_env_defines(data_dir / ".env", "APP_PASSWORD"):
+        return None
+    return (
+        "APP_PASSWORD steht in DATA_DIR/.env neben der verschlüsselten Datenbank. "
+        "Wer eine Kopie des Datenverzeichnisses hat, kann sie damit entschlüsseln. "
+        "Lege APP_PASSWORD stattdessen als Container-Umgebungsvariable oder in der "
+        ".env im Projektverzeichnis fest und entferne den Eintrag aus DATA_DIR/.env."
+    )
 
 
 def _submitted_settings(values: Any) -> dict[str, str]:
@@ -269,4 +308,5 @@ def load_config(
         sync_history_earliest_date=_env_date(
             target, "SYNC_HISTORY_EARLIEST_DATE", DEFAULT_SYNC_HISTORY_EARLIEST_DATE
         ),
+        trusted_proxies=_env_networks(target, "TRUSTED_PROXY_IPS"),
     )
