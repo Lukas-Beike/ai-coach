@@ -83,7 +83,7 @@ class NutritionReviewRegressionTests(unittest.TestCase):
     def test_explicit_source_outage_still_returns_saved_products(self) -> None:
         meal_library = Mock()
         meal_library.food_database.lookup.side_effect = AppError(
-            502, "Lebensmitteldatenbank ist nicht erreichbar."
+            429, "Lebensmitteldatenbank ist vorübergehend ausgelastet."
         )
         meal_library.list_products.return_value = [{"id": "local-oats"}]
         service = CoachReadToolService(
@@ -100,12 +100,19 @@ class NutritionReviewRegressionTests(unittest.TestCase):
         )
 
         result = service.execute(
-            "lookup_food", {"query": "Haferflocken", "source": "bls"}
+            "lookup_food", {"query": " Skyr ", "source": " Open_Food_Facts "}
         )
 
         assert isinstance(result, dict)
         self.assertEqual(result["foods"], [])
         self.assertEqual(result["local_products"], [{"id": "local-oats"}])
+        meal_library.lookup_product.assert_not_called()
+        meal_library.food_database.lookup.assert_called_once_with(
+            {"query": "Skyr", "source": "open_food_facts"}
+        )
+        meal_library.food_database.lookup.side_effect = AppError(400, "Ungültig.")
+        with self.assertRaises(AppError):
+            service.execute("lookup_food", {"query": "Skyr", "source": "bls"})
 
         meal_library.list_products.return_value = []
         with self.assertRaises(AppError):

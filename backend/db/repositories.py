@@ -84,8 +84,9 @@ class NutritionProductRepository:
             clauses.append("barcode = ?")
             params.append(barcode)
         # Every word must appear in the name or brand, so "Arla Skyr" finds
-        # the saved product "Skyr" of brand "Arla". A blank or overlong query
-        # matches nothing rather than a broader set.
+        # the saved product "Skyr" of brand "Arla". An empty query lists all;
+        # a whitespace-only or overlong query matches nothing rather than a
+        # broader set.
         terms = (query or "").split()
         if query and not 1 <= len(terms) <= 20:
             return []

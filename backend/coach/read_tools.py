@@ -175,13 +175,20 @@ class CoachReadToolService:
     ) -> dict[str, Any]:
         source = str(arguments.get("source") or "").strip().lower()
         query = str(arguments.get("query") or arguments.get("q") or "").strip()
-        if query and not arguments.get("barcode") and source in {"bls", "off"}:
+        if (
+            query
+            and not arguments.get("barcode")
+            and source in {"bls", "open_food_facts"}
+        ):
             local_products = nutrition.list_products(query=query)[:10]
             try:
-                result = nutrition.food_database.lookup(arguments)
+                result = nutrition.food_database.lookup(
+                    {**arguments, "query": query, "source": source}
+                )
             except AppError as exc:
                 # Saved products stay usable while the external database is down.
-                if not local_products or exc.status < 500:
+                # Rate limits (429) count as unavailable too.
+                if not local_products or (exc.status < 500 and exc.status != 429):
                     raise
                 result = {
                     "ok": True,
