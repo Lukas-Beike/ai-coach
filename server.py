@@ -2085,7 +2085,7 @@ def main() -> None:
             },
         )
         raise SystemExit(configuration_error)
-    storage_warning = app_config.app_password_storage_warning(DATA_DIR)
+    storage_warning = app_config.data_dir_env_warning(DATA_DIR)
     if storage_warning:
         LOGGER.warning(
             "APP_PASSWORD stored in the data directory",
@@ -2094,7 +2094,7 @@ def main() -> None:
                 "context": {"reason": storage_warning},
             },
         )
-    proxy_warning = app_config.trusted_proxy_warning(CONFIG)
+    proxy_warning = app_config.trusted_proxy_warning(CONFIG.invalid_trusted_proxies)
     if proxy_warning:
         LOGGER.warning(
             "Invalid trusted proxy entries ignored",

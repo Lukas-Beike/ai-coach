@@ -13,7 +13,7 @@ from unittest import mock
 import backend
 from backend.config import (
     Config,
-    app_password_storage_warning,
+    data_dir_env_warning,
     load_config,
     local_env_defines,
     save_persistent_settings,
@@ -122,18 +122,18 @@ class ConfigTests(unittest.TestCase):
             )
 
         self.assertEqual(default.trusted_proxies, ())
-        self.assertIsNone(trusted_proxy_warning(default))
+        self.assertIsNone(trusted_proxy_warning(default.invalid_trusted_proxies))
         self.assertEqual(
             [str(network) for network in parsed.trusted_proxies],
             ["192.168.1.6/32", "fd00::/64", "10.0.0.0/8", "192.168.1.7/32"],
         )
-        self.assertIsNone(trusted_proxy_warning(parsed))
+        self.assertIsNone(trusted_proxy_warning(parsed.invalid_trusted_proxies))
         # A host address with a mask must not silently widen trust to the subnet.
         self.assertEqual(
             [str(network) for network in invalid.trusted_proxies], ["192.168.1.6/32"]
         )
         self.assertEqual(invalid.invalid_trusted_proxies, 2)
-        warning = trusted_proxy_warning(invalid)
+        warning = trusted_proxy_warning(invalid.invalid_trusted_proxies)
         self.assertIn("TRUSTED_PROXY_IPS", warning)
         self.assertNotIn("not-an-ip", warning)
 
@@ -150,14 +150,14 @@ class ConfigTests(unittest.TestCase):
             )
             self.assertTrue(local_env_defines(env_path, "APP_PASSWORD"))
 
-    def test_app_password_storage_warning_never_contains_the_value(self):
+    def test_data_dir_env_warning_never_contains_the_value(self):
         with tempfile.TemporaryDirectory() as temporary:
             data_dir = Path(temporary)
-            self.assertIsNone(app_password_storage_warning(data_dir))
+            self.assertIsNone(data_dir_env_warning(data_dir))
             (data_dir / ".env").write_text(
                 "APP_PASSWORD=synthetic-secret-value\n", encoding="utf-8"
             )
-            warning = app_password_storage_warning(data_dir)
+            warning = data_dir_env_warning(data_dir)
         self.assertIsNotNone(warning)
         self.assertIn("DATA_DIR/.env", warning)
         self.assertNotIn("synthetic-secret-value", warning)

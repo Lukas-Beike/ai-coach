@@ -208,7 +208,7 @@ def security_configuration_error(
     return None
 
 
-def app_password_storage_warning(data_dir: Path) -> str | None:
+def data_dir_env_warning(data_dir: Path) -> str | None:
     """Warn when the database key is persisted beside the encrypted database."""
     if not local_env_defines(data_dir / ".env", "APP_PASSWORD"):
         return None
@@ -220,12 +220,12 @@ def app_password_storage_warning(data_dir: Path) -> str | None:
     )
 
 
-def trusted_proxy_warning(config: Config) -> str | None:
+def trusted_proxy_warning(invalid_entries: int) -> str | None:
     """Describe rejected TRUSTED_PROXY_IPS entries without repeating them."""
-    if not config.invalid_trusted_proxies:
+    if not invalid_entries:
         return None
     return (
-        f"{config.invalid_trusted_proxies} Eintrag/Einträge in TRUSTED_PROXY_IPS "
+        f"{invalid_entries} Eintrag/Einträge in TRUSTED_PROXY_IPS "
         "wurden ignoriert. Erlaubt sind IP-Adressen oder Netze ohne Hostanteil, "
         "z. B. 192.168.1.6 oder 192.168.1.0/24."
     )
