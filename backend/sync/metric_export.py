@@ -1,9 +1,10 @@
 """Explicit, previewed export of canonical body and threshold metrics.
 
 The preview lists, per target field, the newest local value that another
-provider supplied, next to the value the target last reported. Execute writes
-only what a confirmed request names: the target provider and every metric with
-the exact day and value of the preview. A value the target itself reported is
+provider supplied, next to the target's current value read live. Execute reads
+the target again and writes only what a confirmed request names: the target
+provider and every metric with the exact day, value and current target value of
+the preview. A value the target itself reported is
 never sent back to it; only values another provider reported are offered, so
 AI estimates are never exported. Each written field is recorded in
 ``remote_links`` so the same value is not offered again.
@@ -18,7 +19,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any, Final
+from typing import Any, Final, TypeGuard
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import (
@@ -49,9 +50,16 @@ _MAX_REQUESTED_METRICS: Final = 32
 READY = "ready"
 UNCHANGED = "unchanged"
 ALREADY_EXPORTED = "already_exported"
-REMOTE_NEWER = "remote_newer"
 EXPORTED = "exported"
 FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class _Requested:
+    key: str
+    observed_on: str
+    value: float
+    remote: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +68,8 @@ class _Candidate:
     field: MetricExportField
     record: str
     source: Observation
-    remote: Observation | None
+    # The target's live value of the field, read for this preview or execute.
+    remote: float | None
     status: str
 
     @property
@@ -84,6 +93,20 @@ def _recency(observation: Observation) -> tuple[date, float, float]:
 
 def _same_value(left: float, right: float) -> bool:
     return math.isclose(left, right, rel_tol=1e-3, abs_tol=1e-6)
+
+
+def _is_number(value: object) -> TypeGuard[int | float]:
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def _same_remote(left: float | None, right: float | None) -> bool:
+    if left is None or right is None:
+        return left is None and right is None
+    return _same_value(left, right)
 
 
 def _baseline(remote_id: str, value: float) -> str:
@@ -140,13 +163,21 @@ class MetricExportService:
                 reason="invalid_metric_export",
             )
         selected = self._selected(target, port, requested)
+        if recalc and not any(candidate.field.zone_recalc for candidate in selected):
+            raise AppError(
+                400,
+                "Die Zonen-Option gilt nur für Schwellenwerte.",
+                reason="invalid_metric_export",
+            )
         groups: dict[str, list[_Candidate]] = {}
         for candidate in selected:
             groups.setdefault(candidate.record, []).append(candidate)
         label = self._registry.get(target.value).label
         items: list[dict[str, Any]] = []
         for group in groups.values():
-            failure = self._write(port, group, recalc_hr_zones=recalc)
+            failure = self._write(
+                port, group, recalc_hr_zones=recalc and group[0].field.zone_recalc
+            )
             if failure is None:
                 self._record(target, group)
             items.extend(self._group_items(group, failure, label))
@@ -163,7 +194,7 @@ class MetricExportService:
 
     def _validated_request(
         self, payload: Mapping[str, Any]
-    ) -> tuple[ProviderId, list[tuple[str, str, float]], bool]:
+    ) -> tuple[ProviderId, list[_Requested], bool]:
         if not isinstance(payload, Mapping) or payload.get("confirmed") is not True:
             raise AppError(
                 400,
@@ -190,20 +221,23 @@ class MetricExportService:
         self,
         target: ProviderId,
         port: MetricExportPort,
-        requested: Sequence[tuple[str, str, float]],
+        requested: Sequence[_Requested],
     ) -> list[_Candidate]:
+        # Candidates are rebuilt from live target values, so a value that changed
+        # at the target since the preview is never overwritten unseen.
         ready = {
             candidate.key: candidate
             for candidate in self._candidates(target, port)
             if candidate.status == READY
         }
         selected: list[_Candidate] = []
-        for key, observed_on, value in requested:
-            candidate = ready.get(key)
+        for entry in requested:
+            candidate = ready.get(entry.key)
             if (
                 candidate is None
-                or candidate.source.observed_on.isoformat() != observed_on
-                or not _same_value(candidate.value, value)
+                or candidate.source.observed_on.isoformat() != entry.observed_on
+                or not _same_value(candidate.value, entry.value)
+                or not _same_remote(candidate.remote, entry.remote)
             ):
                 raise AppError(
                     409,
@@ -249,7 +283,7 @@ class MetricExportService:
         return factory()
 
     @staticmethod
-    def _requested(raw: Any) -> list[tuple[str, str, float]]:
+    def _requested(raw: Any) -> list[_Requested]:
         invalid = AppError(
             400,
             "Die Auswahl der Kennzahlen ist ungültig.",
@@ -257,23 +291,30 @@ class MetricExportService:
         )
         if not isinstance(raw, list) or not 1 <= len(raw) <= _MAX_REQUESTED_METRICS:
             raise invalid
-        requested: list[tuple[str, str, float]] = []
+        requested: list[_Requested] = []
         for entry in raw:
-            if not isinstance(entry, Mapping):
+            if not isinstance(entry, Mapping) or "current_remote_value" not in entry:
                 raise invalid
             key = entry.get("key")
             observed_on = entry.get("observed_on")
             value = entry.get("value")
+            remote = entry.get("current_remote_value")
             if (
                 not isinstance(key, str)
                 or not isinstance(observed_on, str)
-                or isinstance(value, bool)
-                or not isinstance(value, int | float)
-                or not math.isfinite(value)
+                or not _is_number(value)
+                or not (remote is None or _is_number(remote))
             ):
                 raise invalid
-            requested.append((key, observed_on, float(value)))
-        if len({key for key, _, _ in requested}) != len(requested):
+            requested.append(
+                _Requested(
+                    key,
+                    observed_on,
+                    float(value),
+                    None if remote is None else float(remote),
+                )
+            )
+        if len({entry.key for entry in requested}) != len(requested):
             raise invalid
         return requested
 
@@ -283,90 +324,102 @@ class MetricExportService:
         kinds = self._registry.get(target.value).metric_exports
         start = self._today() - timedelta(days=_LOOKBACK_DAYS)
         reader = self._observation_reader()
-        candidates: list[_Candidate] = []
+        offered: list[tuple[str, MetricExportField, Observation, bool]] = []
         with self._database_manager().reader() as db:
             for kind in sorted(kinds, key=lambda item: item.value):
-                sources, remotes = self._partition(
+                sources = self._sources(
                     reader.observations(db, kind, start=start), target, port
                 )
                 for key, (field, source) in sorted(sources.items()):
-                    candidates.append(
-                        self._candidate(
-                            db, target, port, key, field, source, remotes.get(key, [])
+                    offered.append(
+                        (
+                            key,
+                            field,
+                            source,
+                            self._exported(db, target, port, field, source),
                         )
                     )
+        # Target values are read live after the database read: cached target
+        # observations can be older than the target's current state.
+        records: dict[str, Mapping[str, float]] = {}
+        candidates: list[_Candidate] = []
+        for key, field, source, exported in offered:
+            record = port.remote_record(field, source.observed_on)
+            if record not in records:
+                records[record] = self._read_record(target, port, field, source)
+            remote = records[record].get(field.field)
+            if remote is not None and _same_value(remote, source.value.value):
+                status = UNCHANGED
+            elif exported:
+                status = ALREADY_EXPORTED
+            else:
+                status = READY
+            candidates.append(_Candidate(key, field, record, source, remote, status))
         return candidates
 
     @staticmethod
-    def _partition(
+    def _sources(
         observations: Iterable[Observation],
         target: ProviderId,
         port: MetricExportPort,
-    ) -> tuple[
-        dict[str, tuple[MetricExportField, Observation]], dict[str, list[Observation]]
-    ]:
-        """Split observations into the newest export source and target values."""
+    ) -> dict[str, tuple[MetricExportField, Observation]]:
+        """Return the newest exportable value per target field."""
         sources: dict[str, tuple[MetricExportField, Observation]] = {}
-        remotes: dict[str, list[Observation]] = {}
         for observation in observations:
+            provider = observation.provenance.provider
+            # Values the target reported are never sent back; provider-less
+            # values (AI estimates, athlete entries) have no verifiable origin.
+            if provider is None or provider is target:
+                continue
             field = port.field_for(observation.kind, observation.sport)
             if field is None:
                 continue
             key = _item_key(field)
-            provider = observation.provenance.provider
-            if provider is target:
-                remotes.setdefault(key, []).append(observation)
-            elif provider is not None:
-                # Provider-less values (AI estimates, athlete entries)
-                # have no verifiable origin and are not offered.
-                current = sources.get(key)
-                if current is None or _recency(observation) > _recency(current[1]):
-                    sources[key] = (field, observation)
-        return sources, remotes
+            current = sources.get(key)
+            if current is None or _recency(observation) > _recency(current[1]):
+                sources[key] = (field, observation)
+        return sources
 
-    def _candidate(
+    def _exported(
         self,
         db: Any,
         target: ProviderId,
         port: MetricExportPort,
-        key: str,
         field: MetricExportField,
         source: Observation,
-        remotes: Sequence[Observation],
-    ) -> _Candidate:
-        # A dated field compares with the target's value of the same day; a
-        # setting compares with the target's newest value.
-        matching = [
-            remote
-            for remote in remotes
-            if not field.dated or remote.observed_on == source.observed_on
-        ]
-        remote = max(matching, key=_recency) if matching else None
-        record = port.remote_record(field, source.observed_on)
-        candidate = _Candidate(key, field, record, source, remote, READY)
+    ) -> bool:
+        """Return whether this exact value was already sent to the target field."""
         link = self._links.get(
             db,
             RemoteEntityKind.OBSERVATION,
             observation_natural_key(source),
             target.value,
         )
-        if remote is not None and _same_value(remote.value.value, source.value.value):
-            status = UNCHANGED
-        elif (
+        remote_id = f"{port.remote_record(field, source.observed_on)}/{field.field}"
+        return (
             link is not None
             and link.sync_state is RemoteLinkState.SYNCED
-            and link.baseline_hash == _baseline(candidate.remote_id, candidate.value)
-        ):
-            status = ALREADY_EXPORTED
-        elif (
-            remote is not None
-            and not field.dated
-            and remote.observed_on > source.observed_on
-        ):
-            status = REMOTE_NEWER
-        else:
-            return candidate
-        return _Candidate(key, field, record, source, remote, status)
+            and link.baseline_hash == _baseline(remote_id, source.value.value)
+        )
+
+    def _read_record(
+        self,
+        target: ProviderId,
+        port: MetricExportPort,
+        field: MetricExportField,
+        source: Observation,
+    ) -> Mapping[str, float]:
+        try:
+            return port.read_record(field, source.observed_on)
+        except Exception as exc:  # noqa: BLE001 - reported safely, never raw
+            _LOGGER.warning("Metric export read failed (%s)", type(exc).__name__)
+            label = self._registry.get(target.value).label
+            raise AppError(
+                502,
+                f"Die aktuellen Werte von {label} konnten nicht gelesen werden; "
+                "nichts wurde gesendet.",
+                reason="metric_export_remote_unavailable",
+            ) from None
 
     @staticmethod
     def _base_item(candidate: _Candidate) -> dict[str, Any]:
@@ -384,7 +437,6 @@ class MetricExportService:
         }
 
     def _preview_item(self, candidate: _Candidate) -> dict[str, Any]:
-        remote = candidate.remote
         provider = candidate.source.provenance.provider
         return {
             **self._base_item(candidate),
@@ -392,19 +444,16 @@ class MetricExportService:
             "source_label": observation_source_label(
                 candidate.source, SourceView.CURRENT_METRIC
             ),
-            "current_remote_value": remote.value.value if remote else None,
-            "current_remote_observed_on": (
-                remote.observed_on.isoformat() if remote else None
-            ),
+            "current_remote_value": candidate.remote,
+            "zone_recalc": candidate.field.zone_recalc,
             "status": candidate.status,
             "selectable": candidate.status == READY,
         }
 
     def _receipt_item(self, candidate: _Candidate) -> dict[str, Any]:
-        remote = candidate.remote
         return {
             **self._base_item(candidate),
-            "previous_remote_value": remote.value.value if remote else None,
+            "previous_remote_value": candidate.remote,
         }
 
     @staticmethod

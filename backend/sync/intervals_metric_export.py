@@ -3,11 +3,12 @@
 REST transport lives in ``backend.providers.intervals_client``. Field names are
 the ones the read mapping (``backend.providers.intervals_wellness_mapping``)
 accepts, so an exported value reads back as the same canonical metric. The
-client is resolved per write, so a preview never opens the transport.
+client is resolved per call; a preview only reads the records of offered values.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Any, Final
@@ -77,6 +78,7 @@ class IntervalsMetricExport:
             setting,
             False,
             f"Sporteinstellungen {_SPORT_LABELS[sport]} · {setting}",
+            zone_recalc=True,
         )
 
     def remote_record(self, field: MetricExportField, observed_on: date) -> str:
@@ -85,6 +87,38 @@ class IntervalsMetricExport:
         if field.sport is None:
             raise ValueError("A sport-settings field needs a sport.")
         return f"{_SPORT_SETTINGS_RECORD}/{_SPORT_TYPES[field.sport]}"
+
+    def read_record(
+        self, field: MetricExportField, observed_on: date
+    ) -> dict[str, float]:
+        client = self._client_factory()
+        try:
+            if field.dated:
+                record = client.get_wellness(observed_on.isoformat())
+            else:
+                if field.sport is None:
+                    raise ValueError("A sport-settings field needs a sport.")
+                record = client.get_sport_settings(_SPORT_TYPES[field.sport])
+        except AppError as exc:
+            if field.dated and exc.upstream_status == 404:
+                return {}
+            raise
+        if record is None and field.dated:
+            return {}
+        if not isinstance(record, dict):
+            raise AppError(
+                502,
+                "Intervals.icu hat keine lesbaren Werte geliefert.",
+                reason="upstream_invalid_response",
+            )
+        return {
+            name: float(value)
+            for name, value in record.items()
+            if isinstance(name, str)
+            and isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        }
 
     def write(self, writes: Sequence[MetricWrite], *, recalc_hr_zones: bool) -> None:
         if not writes:

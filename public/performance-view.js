@@ -339,13 +339,16 @@ function metricExportLine(item) {
 function metricExportSummary(preview, items, recalc) {
   const label = preview.provider_label || "Anbieter";
   const skipped = (preview.items || []).length - items.length;
+  // Zone recalculation only concerns threshold settings, so only they mention it.
+  const zones = items.some((item) => item.zone_recalc)
+    ? ["", recalc ? `${label} berechnet die Herzfrequenzzonen neu.` : `Die Herzfrequenzzonen in ${label} bleiben unverändert.`]
+    : [];
   return [
     `Diese Werte werden an ${label} gesendet. Nur die genannten Felder ändern sich.`,
     "",
     ...items.map(metricExportLine),
-    ...(skipped > 0 ? ["", `${skipped} weitere Werte sind dort bereits aktuell oder neuer und werden nicht gesendet.`] : []),
-    "",
-    recalc ? `${label} berechnet die Herzfrequenzzonen neu.` : `Die Herzfrequenzzonen in ${label} bleiben unverändert.`,
+    ...(skipped > 0 ? ["", `${skipped} weitere Werte sind dort bereits aktuell oder schon gesendet und werden nicht gesendet.`] : []),
+    ...zones,
   ].join("\n");
 }
 
@@ -354,7 +357,8 @@ function metricExportRequest(preview, items, recalc) {
     confirmed: true,
     provider: preview.provider,
     recalc_hr_zones: recalc,
-    metrics: items.map(({ key, observed_on, value }) => ({ key, observed_on, value })),
+    // The previewed target value lets the server refuse a value changed there since.
+    metrics: items.map(({ key, observed_on, value, current_remote_value }) => ({ key, observed_on, value, current_remote_value })),
   };
 }
 
@@ -374,7 +378,7 @@ async function exportCurrentMetrics(button, recalcInput) {
       toast(`Keine neuen Werte für ${label}.`);
       return;
     }
-    const recalc = Boolean(recalcInput?.checked && preview.recalc_hr_zones_available);
+    const recalc = Boolean(recalcInput?.checked && preview.recalc_hr_zones_available && items.some((item) => item.zone_recalc));
     if (!await requestConfirmation(metricExportSummary(preview, items, recalc), { title: `An ${label} senden?`, confirmLabel: "Senden" })) return;
     const receipt = await api("/api/metric-export/execute", { method: "POST", body: JSON.stringify(metricExportRequest(preview, items, recalc)) });
     toast(metricExportReceiptText(receipt), receipt.failed > 0);

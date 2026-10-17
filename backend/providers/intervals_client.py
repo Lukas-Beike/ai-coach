@@ -297,6 +297,16 @@ class IntervalsClient:
     def delete_activity(self, activity_id: str) -> Any:
         return self.delete(f"/activity/{quote(activity_id, safe='')}")
 
+    def get_wellness(self, day: str) -> Any:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        return self.get(f"/athlete/{athlete}/wellness/{quote(day, safe='')}")
+
+    def get_sport_settings(self, sport_type: str) -> Any:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        return self.get(
+            f"/athlete/{athlete}/sport-settings/{quote(sport_type, safe='')}"
+        )
+
     def update_wellness(self, day: str, fields: Mapping[str, Any]) -> Any:
         """Write only the given wellness fields of one day; others stay unchanged."""
         athlete = quote(self.config.intervals_athlete_id, safe="")

@@ -28,9 +28,9 @@ const PREVIEW = {
   provider_label: "Intervals.icu",
   recalc_hr_zones_available: true,
   items: [
-    { key: "weight|", metric: "weight", sport: null, value: 70.4, unit: "kg", observed_on: "2026-10-10", source_label: "Garmin Connect", target_label: "Wellness · weight", current_remote_value: 71.2, selectable: true },
-    { key: "max_hr|run", metric: "max_hr", sport: "run", value: 191, unit: "bpm", observed_on: "2026-10-01", source_label: "", target_label: "Sporteinstellungen Lauf · max_hr", current_remote_value: null, selectable: true },
-    { key: "ftp|ride", metric: "ftp", sport: "ride", value: 250, unit: "W", observed_on: "2026-09-01", source_label: "Garmin Connect", target_label: "Sporteinstellungen Rad · ftp", current_remote_value: 255, selectable: false },
+    { key: "weight|", metric: "weight", sport: null, value: 70.4, unit: "kg", observed_on: "2026-10-10", source_label: "Garmin Connect", target_label: "Wellness · weight", current_remote_value: 71.2, zone_recalc: false, selectable: true },
+    { key: "max_hr|run", metric: "max_hr", sport: "run", value: 191, unit: "bpm", observed_on: "2026-10-01", source_label: "", target_label: "Sporteinstellungen Lauf · max_hr", current_remote_value: null, zone_recalc: true, selectable: true },
+    { key: "ftp|ride", metric: "ftp", sport: "ride", value: 250, unit: "W", observed_on: "2026-09-01", source_label: "Garmin Connect", target_label: "Sporteinstellungen Rad · ftp", current_remote_value: 250, zone_recalc: true, selectable: false },
   ],
 };
 
@@ -42,9 +42,15 @@ test("the confirmation names the target, every value, its source, field and the 
   assert.equal(lines[0], "Diese Werte werden an Intervals.icu gesendet. Nur die genannten Felder ändern sich.");
   assert.ok(lines.includes("• Gewicht: 70.4 kg vom D:2026-10-10 · Quelle: Garmin Connect → Wellness · weight (dort bisher 71.2 kg)"));
   assert.ok(lines.includes("• Maximale Herzfrequenz (Lauf): 191 bpm vom D:2026-10-01 · Quelle: unbekannt → Sporteinstellungen Lauf · max_hr (dort noch kein Wert)"));
-  assert.ok(lines.includes("1 weitere Werte sind dort bereits aktuell oder neuer und werden nicht gesendet."));
+  assert.ok(lines.includes("1 weitere Werte sind dort bereits aktuell oder schon gesendet und werden nicht gesendet."));
   assert.equal(lines.at(-1), "Die Herzfrequenzzonen in Intervals.icu bleiben unverändert.");
   assert.equal(metricExportSummary(PREVIEW, items, true).split("\n").at(-1), "Intervals.icu berechnet die Herzfrequenzzonen neu.");
+});
+
+test("the zone line is shown only when a threshold setting is sent", () => {
+  const { metricExportSummary } = load();
+  const summary = metricExportSummary(PREVIEW, PREVIEW.items.slice(0, 1), true);
+  assert.ok(!summary.includes("Herzfrequenzzonen"));
 });
 
 test("threshold pace is shown per kilometre", () => {
@@ -53,14 +59,14 @@ test("threshold pace is shown per kilometre", () => {
   assert.equal(metricExportValue(0, "m/s"), "0 m/s");
 });
 
-test("the execute request is confirmed, names the provider and sends only key, day and value", () => {
+test("the execute request is confirmed, names the provider and sends key, day, value and the previewed target value", () => {
   const { metricExportRequest } = load();
   const request = metricExportRequest(PREVIEW, PREVIEW.items.slice(0, 1), true);
   assert.deepEqual(JSON.parse(JSON.stringify(request)), {
     confirmed: true,
     provider: "intervals",
     recalc_hr_zones: true,
-    metrics: [{ key: "weight|", observed_on: "2026-10-10", value: 70.4 }],
+    metrics: [{ key: "weight|", observed_on: "2026-10-10", value: 70.4, current_remote_value: 71.2 }],
   });
 });
 
@@ -99,7 +105,15 @@ test("a confirmed export sends the selectable preview items and the zone option"
   assert.equal(calls[1].body.confirmed, true);
   assert.equal(calls[1].body.recalc_hr_zones, true);
   assert.deepEqual(calls[1].body.metrics.map((item) => item.key), ["weight|", "max_hr|run"]);
+  assert.deepEqual(calls[1].body.metrics.map((item) => item.current_remote_value), [71.2, null]);
   assert.deepEqual(toasts, [{ message: "2 Werte an Intervals.icu gesendet", isError: false }]);
+});
+
+test("the zone option is not sent when only wellness values are selected", async () => {
+  const preview = { ...PREVIEW, items: PREVIEW.items.slice(0, 1) };
+  const { context, calls } = harness({ confirm: true, preview });
+  await context.exportCurrentMetrics({ disabled: false }, { checked: true });
+  assert.equal(calls[1].body.recalc_hr_zones, false);
 });
 
 test("nothing new to send asks for no confirmation", async () => {

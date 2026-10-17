@@ -169,6 +169,52 @@ class IntervalsMetricExportEndpointTests(unittest.TestCase):
             ),
         )
 
+    def test_reads_return_only_finite_numbers_of_the_record(self) -> None:
+        self.request.return_value = {
+            "id": "2026-10-01",
+            "weight": 70.4,
+            "restingHR": 48,
+            "bodyFat": None,
+            "locked": True,
+            "lthr": float("nan"),
+        }
+        field = self.port.field_for(MetricKind.WEIGHT, None)
+        self.assertEqual(
+            self.port.read_record(field, date(2026, 10, 1)),
+            {"weight": 70.4, "restingHR": 48.0},
+        )
+        method, url, *_ = self.request.call_args.args
+        self.assertEqual(
+            (method, url),
+            ("GET", "https://intervals.icu/api/v1/athlete/i1/wellness/2026-10-01"),
+        )
+        self.request.reset_mock()
+        self.request.return_value = {"ftp": 255}
+        settings = self.port.field_for(MetricKind.FTP, None)
+        self.assertEqual(
+            self.port.read_record(settings, date(2026, 10, 1)), {"ftp": 255.0}
+        )
+        method, url, *_ = self.request.call_args.args
+        self.assertEqual(
+            (method, url),
+            ("GET", "https://intervals.icu/api/v1/athlete/i1/sport-settings/Ride"),
+        )
+
+    def test_a_missing_wellness_day_reads_empty_and_bad_replies_fail(self) -> None:
+        weight = self.port.field_for(MetricKind.WEIGHT, None)
+        ftp = self.port.field_for(MetricKind.FTP, None)
+        self.request.side_effect = AppError(
+            404, RAW, reason="upstream_rejected", upstream_status=404
+        )
+        self.assertEqual(self.port.read_record(weight, date(2026, 10, 1)), {})
+        with self.assertRaises(AppError):
+            self.port.read_record(ftp, date(2026, 10, 1))
+        self.request.side_effect = None
+        self.request.return_value = ["unexpected"]
+        with self.assertRaises(AppError) as caught:
+            self.port.read_record(weight, date(2026, 10, 1))
+        self.assertEqual(caught.exception.reason, "upstream_invalid_response")
+
     def test_unsupported_fields_are_not_mapped(self) -> None:
         self.assertIsNone(self.port.field_for(MetricKind.THRESHOLD_PACE, Sport.RIDE))
         self.assertIsNone(self.port.field_for(MetricKind.MAX_HR, None))
@@ -183,7 +229,16 @@ class MetricExportServiceTests(unittest.TestCase):
         self.database = FakeDatabase()
         self.addCleanup(self.database.db.close)
         self.reader = FakeReader()
+        # Live target state: wellness per day and sport settings per sport.
+        self.wellness: dict[str, dict] = {}
+        self.settings: dict[str, dict] = {}
         self.client = Mock()
+        self.client.get_wellness.side_effect = lambda day: dict(
+            self.wellness.get(day, {})
+        )
+        self.client.get_sport_settings.side_effect = lambda sport: dict(
+            self.settings.get(sport, {})
+        )
         self.client.update_wellness.return_value = {}
         self.client.update_sport_settings.return_value = {}
         self.client_factory = Mock(return_value=self.client)
@@ -211,6 +266,7 @@ class MetricExportServiceTests(unittest.TestCase):
                     "key": item["key"],
                     "observed_on": item["observed_on"],
                     "value": item["value"],
+                    "current_remote_value": item["current_remote_value"],
                 }
                 for item in preview_items
             ],
@@ -226,10 +282,12 @@ class MetricExportServiceTests(unittest.TestCase):
             "intervals",
         )
 
-    def test_preview_lists_source_target_and_current_remote_value(self) -> None:
+    def test_preview_lists_source_target_and_live_remote_value(self) -> None:
+        # The cached target value is stale; the preview shows the live one.
+        self.wellness["2026-10-10"] = {"weight": 71.2, "bodyFat": 15.0}
         self.add(
             obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN),
-            obs(MetricKind.WEIGHT, 71.2, date(2026, 10, 10), ProviderId.INTERVALS),
+            obs(MetricKind.WEIGHT, 72.0, date(2026, 10, 10), ProviderId.INTERVALS),
             obs(
                 MetricKind.MAX_HR,
                 191,
@@ -254,13 +312,20 @@ class MetricExportServiceTests(unittest.TestCase):
         self.assertEqual(weight["target_label"], "Wellness · weight")
         self.assertEqual(weight["remote_record"], "wellness/2026-10-10")
         self.assertEqual(weight["current_remote_value"], 71.2)
+        self.assertNotIn("current_remote_observed_on", weight)
         self.assertEqual(weight["status"], "ready")
         self.assertTrue(weight["selectable"])
+        self.assertFalse(weight["zone_recalc"])
         self.assertEqual(items["max_hr|run"]["target_field"], "max_hr")
         self.assertEqual(items["max_hr|run"]["remote_record"], "sport-settings/Run")
         self.assertIsNone(items["max_hr|run"]["current_remote_value"])
+        self.assertTrue(items["max_hr|run"]["zone_recalc"])
         self.assertEqual(items["ftp|ride"]["remote_record"], "sport-settings/Ride")
-        self.client_factory.assert_not_called()
+        # Each offered record is read once; nothing is written by a preview.
+        self.client.get_wellness.assert_called_once_with("2026-10-10")
+        self.assertEqual(self.client.get_sport_settings.call_count, 2)
+        self.client.update_wellness.assert_not_called()
+        self.client.update_sport_settings.assert_not_called()
 
     def test_values_from_the_target_or_without_provider_are_never_offered(
         self,
@@ -270,22 +335,88 @@ class MetricExportServiceTests(unittest.TestCase):
             provider_less(MetricKind.FTP, 280, date(2026, 10, 10)),
         )
         self.assertEqual(self.service.preview({})["items"], [])
+        self.client_factory.assert_not_called()
 
-    def test_same_or_newer_remote_values_are_not_selectable(self) -> None:
+    def test_live_equal_values_are_not_selectable(self) -> None:
+        self.wellness["2026-10-10"] = {"weight": 70.0}
+        self.settings["Ride"] = {"ftp": 250}
         self.add(
             obs(MetricKind.WEIGHT, 70.0, date(2026, 10, 10), ProviderId.GARMIN),
-            obs(MetricKind.WEIGHT, 70.0, date(2026, 10, 10), ProviderId.INTERVALS),
             obs(MetricKind.FTP, 250, date(2026, 9, 1), ProviderId.GARMIN),
-            obs(MetricKind.FTP, 255, date(2026, 10, 1), ProviderId.INTERVALS),
         )
         items = self.items()
         self.assertEqual(items["weight|"]["status"], "unchanged")
-        self.assertEqual(items["ftp|ride"]["status"], "remote_newer")
+        self.assertEqual(items["ftp|ride"]["status"], "unchanged")
         self.assertFalse(any(item["selectable"] for item in items.values()))
         with self.assertRaises(AppError) as caught:
             self.confirm(items.values())
         self.assertEqual(caught.exception.reason, "metric_export_changed")
-        self.client_factory.assert_not_called()
+        self.client.update_wellness.assert_not_called()
+        self.client.update_sport_settings.assert_not_called()
+
+    def test_a_setting_stays_selectable_when_only_the_target_fetch_is_newer(
+        self,
+    ) -> None:
+        # The fetch day of a cached target setting says nothing about when the
+        # setting changed, so an older local threshold is still offered.
+        self.settings["Ride"] = {"ftp": 255}
+        self.add(
+            obs(MetricKind.FTP, 250, date(2026, 9, 1), ProviderId.GARMIN),
+            obs(MetricKind.FTP, 255, date(2026, 10, 1), ProviderId.INTERVALS),
+        )
+        ftp = self.items()["ftp|ride"]
+        self.assertEqual(ftp["status"], "ready")
+        self.assertEqual(ftp["current_remote_value"], 255)
+        self.confirm([ftp])
+        self.client.update_sport_settings.assert_called_once_with(
+            "Ride", {"ftp": 250}, recalc_hr_zones=False
+        )
+
+    def test_a_target_value_changed_since_the_preview_sends_nothing(self) -> None:
+        self.wellness["2026-10-10"] = {"weight": 71.2}
+        self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
+        preview = list(self.items().values())
+        self.wellness["2026-10-10"] = {"weight": 72.5}
+        with self.assertRaises(AppError) as caught:
+            self.confirm(preview)
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(caught.exception.reason, "metric_export_changed")
+        self.client.update_wellness.assert_not_called()
+
+    def test_an_unreadable_target_fails_safely_before_any_write(self) -> None:
+        self.add(obs(MetricKind.FTP, 250, date(2026, 9, 1), ProviderId.GARMIN))
+        self.client.get_sport_settings.side_effect = AppError(
+            502, RAW, reason="upstream_rejected", upstream_status=500
+        )
+        for call in (
+            lambda: self.service.preview({}),
+            lambda: self.service.export(
+                {
+                    "confirmed": True,
+                    "provider": "intervals",
+                    "metrics": [
+                        {
+                            "key": "ftp|ride",
+                            "observed_on": "2026-09-01",
+                            "value": 250,
+                            "current_remote_value": None,
+                        }
+                    ],
+                }
+            ),
+        ):
+            with (
+                self.assertLogs("backend.sync.metric_export", "WARNING") as logs,
+                self.assertRaises(AppError) as caught,
+            ):
+                call()
+            self.assertEqual(caught.exception.status, 502)
+            self.assertEqual(
+                caught.exception.reason, "metric_export_remote_unavailable"
+            )
+            self.assertNotIn("RAW-UPSTREAM", str(caught.exception))
+            self.assertNotIn("RAW-UPSTREAM", "\n".join(logs.output))
+        self.client.update_sport_settings.assert_not_called()
 
     def test_values_outside_the_lookback_are_not_offered(self) -> None:
         self.add(obs(MetricKind.WEIGHT, 70.0, date(2026, 6, 1), ProviderId.GARMIN))
@@ -293,7 +424,14 @@ class MetricExportServiceTests(unittest.TestCase):
 
     def test_execute_requires_confirmation_and_a_named_provider(self) -> None:
         self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
-        metrics = [{"key": "weight|", "observed_on": "2026-10-10", "value": 70.4}]
+        metrics = [
+            {
+                "key": "weight|",
+                "observed_on": "2026-10-10",
+                "value": 70.4,
+                "current_remote_value": None,
+            }
+        ]
         cases = (
             ({"provider": "intervals", "metrics": metrics}, "confirmation_required"),
             (
@@ -319,9 +457,18 @@ class MetricExportServiceTests(unittest.TestCase):
 
     def test_invalid_or_changed_selections_send_nothing(self) -> None:
         self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
-        entry = {"key": "weight|", "observed_on": "2026-10-10", "value": 70.4}
+        entry = {
+            "key": "weight|",
+            "observed_on": "2026-10-10",
+            "value": 70.4,
+            "current_remote_value": None,
+        }
+        without_remote = {key: entry[key] for key in ("key", "observed_on", "value")}
         invalid = (
             [],
+            [without_remote],
+            [{**entry, "current_remote_value": "71"}],
+            [{**entry, "current_remote_value": float("inf")}],
             "weight|",
             [{**entry, "value": True}],
             [{**entry, "value": float("nan")}],
@@ -351,6 +498,7 @@ class MetricExportServiceTests(unittest.TestCase):
             {**entry, "value": 69.0},
             {**entry, "observed_on": "2026-10-09"},
             {**entry, "key": "ftp|ride"},
+            {**entry, "current_remote_value": 71.2},
         )
         for metric in changed:
             with self.subTest(metric=metric):
@@ -364,7 +512,7 @@ class MetricExportServiceTests(unittest.TestCase):
                     )
                 self.assertEqual(caught.exception.status, 409)
                 self.assertEqual(caught.exception.reason, "metric_export_changed")
-        self.client_factory.assert_not_called()
+        self.client.update_wellness.assert_not_called()
 
     def test_confirmed_export_writes_records_and_reports_previous_value(
         self,
@@ -378,12 +526,8 @@ class MetricExportServiceTests(unittest.TestCase):
             ProviderId.GARMIN,
             sport=Sport.RUN,
         )
-        self.add(
-            weight,
-            body_fat,
-            max_hr,
-            obs(MetricKind.WEIGHT, 71.2, date(2026, 10, 10), ProviderId.INTERVALS),
-        )
+        self.wellness["2026-10-10"] = {"weight": 71.2}
+        self.add(weight, body_fat, max_hr)
         receipt = self.confirm(self.items().values())
 
         self.assertTrue(receipt["ok"])
@@ -424,6 +568,24 @@ class MetricExportServiceTests(unittest.TestCase):
         self.confirm(self.items().values(), recalc_hr_zones=True)
         self.client.update_sport_settings.assert_called_once_with(
             "Run", {"lthr": 170}, recalc_hr_zones=True
+        )
+
+    def test_recalc_applies_only_to_threshold_settings(self) -> None:
+        self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
+        wellness_only = list(self.items().values())
+        with self.assertRaises(AppError) as caught:
+            self.confirm(wellness_only, recalc_hr_zones=True)
+        self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(caught.exception.reason, "invalid_metric_export")
+        self.client.update_wellness.assert_not_called()
+
+        self.add(obs(MetricKind.FTP, 250, date(2026, 9, 1), ProviderId.GARMIN))
+        self.confirm(self.items().values(), recalc_hr_zones=True)
+        self.client.update_wellness.assert_called_once_with(
+            "2026-10-10", {"weight": 70.4}
+        )
+        self.client.update_sport_settings.assert_called_once_with(
+            "Ride", {"ftp": 250}, recalc_hr_zones=True
         )
 
     def test_a_newer_export_takes_over_the_field_link(self) -> None:
@@ -540,7 +702,12 @@ class MetricExportHttpTests(ServerTestCase):
             {
                 "provider": "intervals",
                 "metrics": [
-                    {"key": "weight|", "observed_on": "2026-10-10", "value": 70}
+                    {
+                        "key": "weight|",
+                        "observed_on": "2026-10-10",
+                        "value": 70,
+                        "current_remote_value": None,
+                    }
                 ],
             },
         )
@@ -553,7 +720,12 @@ class MetricExportHttpTests(ServerTestCase):
                 "confirmed": True,
                 "provider": "intervals",
                 "metrics": [
-                    {"key": "weight|", "observed_on": "2026-10-10", "value": 70}
+                    {
+                        "key": "weight|",
+                        "observed_on": "2026-10-10",
+                        "value": 70,
+                        "current_remote_value": None,
+                    }
                 ],
             },
         )
