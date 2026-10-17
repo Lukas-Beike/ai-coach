@@ -53,6 +53,9 @@ const AREA_SNAPSHOT_KEYS = {
   library: ["library", "library_next_cursor"],
   feedback: ["checkins", "local_feedback", "activity_feedback"],
 };
+// Set once loaded (not placeholder) data is rendered, so areas arriving during
+// startup are stored before the whole start has finished; reset with the device data.
+let stateSnapshotReady = false;
 
 function previousSnapshotData() {
   try {
@@ -64,7 +67,7 @@ function previousSnapshotData() {
 function saveStateSnapshot() {
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
-  if (!state.initialStateLoaded || !state.data || state.replaceDataOnLoad) return;
+  if (!(state.initialStateLoaded || stateSnapshotReady) || !state.data || state.replaceDataOnLoad) return;
   const previous = stateSnapshotFailedAreas.length ? previousSnapshotData() : {};
   const data = { ...state.data };
   for (const area of stateSnapshotFailedAreas) {
@@ -143,6 +146,7 @@ function readStateSnapshot() {
 
 function clearStateSnapshot() {
   viewCacheEpoch += 1;
+  stateSnapshotReady = false;
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
   chatCacheValue = null;
@@ -184,10 +188,11 @@ function loadStateRequests(areas, query) {
   if (areas.has("performance")) requests.push(["performance", api("/api/performance")]);
   if (areas.has("feedback")) requests.push(["feedback", api("/api/feedback")]);
   if (areas.has("profile")) requests.push(["profile", api("/api/profile")]);
-  return Promise.all(requests.map(async ([area, request]) => {
+  // One settled promise per area, so each area is applied as soon as it arrives.
+  return requests.map(async ([area, request]) => {
     try { return [area, await request, null]; }
     catch (error) { return [area, null, error]; }
-  }));
+  });
 }
 
 function applyLoadedArea(payload, area, result, error, bootstrap, chatGeneration, chatContentVersion) {
@@ -206,14 +211,13 @@ function applyLoadedArea(payload, area, result, error, bootstrap, chatGeneration
 
 function mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion) {
   const failures = [];
-  const failedAreas = [];
   const appliedAreas = [];
   results.forEach(([area, result, error]) => {
     const outcome = applyLoadedArea(payload, area, result, error, bootstrap, chatGeneration, chatContentVersion);
-    if (outcome.error) { failures.push(outcome.error); failedAreas.push(area); }
+    if (outcome.error) failures.push(outcome.error);
     if (outcome.applied) appliedAreas.push(outcome.area);
   });
-  return { failures, failedAreas, appliedAreas };
+  return { failures, appliedAreas };
 }
 
 function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveVersions) {
@@ -249,7 +253,10 @@ function renderLoadedState(payload, liveAreasOnly) {
 // Renders the merged areas and stores them; failed areas keep their stored values.
 function renderCompletedState(payload, liveAreasOnly, failedAreas) {
   renderLoadedState(payload, liveAreasOnly);
-  if (!liveAreasOnly) stateSnapshotFailedAreas = failedAreas;
+  if (!liveAreasOnly) {
+    stateSnapshotFailedAreas = failedAreas;
+    stateSnapshotReady = true;
+  }
   scheduleStateSnapshotSave();
 }
 
@@ -293,13 +300,32 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       // A stored snapshot may already have revealed the shell.
       if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
     }
-    const results = await domainData;
-    if (sessionGeneration !== state.sessionGeneration || requestSequence !== state.loadSequence) return;
-    // Incorporate changes that arrived while these requests were in flight.
-    payload.messages = state.data?.messages || [];
-    const { failures, failedAreas, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
-    applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration, liveVersions);
-    if (requestSequence === state.loadSequence) renderCompletedState(payload, liveAreasOnly, failedAreas);
+    const current = () => sessionGeneration === state.sessionGeneration && requestSequence === state.loadSequence;
+    const failures = [];
+    // Areas without loaded data yet, still pending or failed, keep their stored values.
+    const unsettled = new Set(areas);
+    if (areas.has("plan")) unsettled.delete("weather");
+    let rendered = false;
+    // Each area is rendered and stored as soon as it arrives, not when the slowest one does.
+    await Promise.all(domainData.map(async (request) => {
+      const result = await request;
+      if (!current()) return;
+      // Incorporate changes that arrived while these requests were in flight.
+      payload.messages = state.data?.messages || [];
+      const outcome = mergeLoadedResults(payload, [result], bootstrap, chatGeneration, chatContentVersion);
+      failures.push(...outcome.failures);
+      if (!outcome.appliedAreas.length) return;
+      outcome.appliedAreas.forEach((area) => unsettled.delete(area));
+      applyLoadedStateVersions(payload, outcome.appliedAreas, bootstrap, chatGeneration, liveVersions);
+      rendered = true;
+      renderCompletedState(payload, liveAreasOnly, [...unsettled]);
+    }));
+    if (!current()) return;
+    if (!rendered) renderCompletedState(payload, liveAreasOnly, [...unsettled]);
+    else if (!liveAreasOnly) {
+      stateSnapshotFailedAreas = [...unsettled];
+      scheduleStateSnapshotSave();
+    }
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
     if (sessionGeneration === state.sessionGeneration) showStateLoadFailure(error);
