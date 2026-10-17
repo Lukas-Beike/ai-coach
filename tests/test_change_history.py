@@ -163,6 +163,30 @@ class ChangeHistoryTests(unittest.TestCase):
             {change_history.audit_hash(value)},
         )
 
+    def test_each_released_profile_generation_stays_matchable(self):
+        value = {
+            "name": "Ada",
+            "sleep_target_hours": "7.5",
+            "fueling_tolerance": "gel",
+            "training_preferences_running": "trails",
+            "training_preferences_cycling": "",
+            "training_preferences_swimming": "",
+            "training_preferences_strength": "",
+        }
+        before_sport_preferences = {
+            "name": "Ada",
+            "sleep_target_hours": "7.5",
+            "fueling_tolerance": "gel",
+        }
+        self.assertEqual(
+            change_history.accepted_audit_hashes("profile", value),
+            {
+                change_history.audit_hash(value),
+                change_history.audit_hash(before_sport_preferences),
+                change_history.audit_hash({"name": "Ada"}),
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

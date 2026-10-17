@@ -83,11 +83,13 @@ class NutritionProductRepository:
         if barcode:
             clauses.append("barcode = ?")
             params.append(barcode)
-        if query:
+        # Every word must appear in the name or brand, so "Arla Skyr" finds
+        # the saved product "Skyr" of brand "Arla".
+        for term in (query or "").split()[:8]:
             clauses.append(
                 "(name LIKE ? COLLATE NOCASE OR brand LIKE ? COLLATE NOCASE)"
             )
-            pattern = f"%{query}%"
+            pattern = f"%{term}%"
             params.extend((pattern, pattern))
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         rows = db.execute(

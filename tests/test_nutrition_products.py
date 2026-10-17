@@ -124,6 +124,16 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual(result["foods"][0]["id"], saved["id"])
         self.food_database.lookup.assert_not_called()
 
+    def test_text_lookup_matches_saved_product_by_words_in_any_order(self):
+        saved = self.library.save_product(self.product_payload())
+
+        result = self.library.lookup_product({"query": "rheinnatur cocoa whey"})
+
+        self.assertEqual(result["source"], "local")
+        self.assertEqual(result["foods"][0]["id"], saved["id"])
+        self.assertEqual(self.library.list_products(query="Whey Vanilla"), [])
+        self.food_database.lookup.assert_not_called()
+
     def test_unknown_barcode_falls_back_to_food_database_and_labels_source(self):
         result = self.library.lookup_product({"barcode": "4006381333999"})
 

@@ -222,7 +222,13 @@
             <label>Verfügbarkeit pro Woche<textarea name="availability" rows="3" placeholder="Tage, Zeiten, bevorzugter Ruhetag…"></textarea></label>
             <label>Rahmenbedingungen<textarea name="constraints" rows="3" placeholder="Verletzungen, Reisen, feste Grenzen…"></textarea></label>
             <label>Ausrüstung<textarea name="equipment" rows="2" placeholder="Rad, Smarttrainer, Gym, Powermeter…"></textarea></label>
-            <label>Trainingspräferenzen<textarea name="training_preferences" rows="3" placeholder="Drinnen/draußen, bevorzugte Einheiten, Ruhetage…"></textarea></label>
+            <fieldset><legend>Trainingspräferenzen</legend>
+              <label>Allgemein<textarea name="training_preferences" rows="2" placeholder="Drinnen/draußen, Ruhetage, Trainingszeiten…"></textarea></label>
+              <label>Laufen<textarea name="training_preferences_running" rows="2" placeholder="Strecken, Untergrund, Laufband, bevorzugte Einheiten…"></textarea></label>
+              <label>Radfahren<textarea name="training_preferences_cycling" rows="2" placeholder="Rolle oder draußen, Gruppenfahrten, bevorzugte Intervalle…"></textarea></label>
+              <label>Schwimmen<textarea name="training_preferences_swimming" rows="2" placeholder="Becken oder Freiwasser, Technik, Hilfsmittel…"></textarea></label>
+              <label>Krafttraining<textarea name="training_preferences_strength" rows="2" placeholder="Gym oder zu Hause, Geräte, Übungen, Häufigkeit…"></textarea></label>
+            </fieldset>
             <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Intervals.icu stehen…"></textarea></label>
             <label>Persönliches Schlafziel (Stunden)<input name="sleep_target_hours" type="number" min="4" max="12" step="0.25" placeholder="Optional, zum Beispiel 8"><small>Bestätigtes Ziel für die Auswertung bekannter Nächte; keine automatische Vorgabe.</small></label>
             <div class="form-grid">

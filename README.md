@@ -51,6 +51,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 - **Responses API Support**: Uses OpenAI Responses-compatible APIs with real-time SSE token streaming. Chat Completions and provider fallback are unsupported.
 - **Durable Turn Queueing**: Every chat request is persisted in a durable SQLite background queue before processing, enabling seamless answer recovery across network drops or browser reloads.
 - **Permanent Fact Memorization**: Conversational profile updates save athlete preferences, equipment notes, and constraints to the durable profile when the athlete explicitly asks in Coach Chat; no separate UI confirmation is needed.
+- **Sport-Specific Training Preferences**: The profile keeps general training preferences plus separate preferences for running, cycling, swimming, and strength training; the Coach saves sport-specific wishes in the matching field.
 - **Server-Side Write Gate**: Every Coach write tool call is checked by impact, not by wording. In a turn started by the athlete's own message, reversible local edits run directly and appear under the answer as "Geändert: …" with undo where fully tracked. Deleting or archiving records, replacing or committing a whole plan, and changing more than 7 records in one turn additionally need a small model classifier to confirm that the athlete explicitly asked for exactly that in the same data area (a requested deletion of a meal never confirms deleting a race); otherwise, or when the classifier fails, the Coach asks one clarification question and nothing is changed. Intervals.icu writes need the athlete's message (or a short "ja" to the Coach's sync offer) to name the sync; the classifier can never authorize them. Adaptive replans keep their preview approval: only the athlete's very next message after the published preview can apply it, and the classifier must confirm that this message accepts the previewed change as proposed (a bare "danke", an unrelated message, or a rejection that asks for a different change instead does not); an illness-pause sync to Intervals.icu additionally needs the named sync and is built from the stored preview. A turn makes at most 25 changes.
 - **Request-Specific Context Projection**: Compact daily, activity and dialogue windows for routine turns; detailed local context and additional tools are available on demand, with conservative fallback for continuations.
 - **Targeted Clarification Protocol**: Ambiguous coaching prompts generate a single, concrete clarification question stored locally across reloads and model switches until answered.
@@ -894,7 +895,13 @@ Trainingsverpflegung hat keine eigene Anzeige, API oder Coach-Aktion mehr. Die l
 
 Die Ernährungsbibliothek speichert bestätigte Einzelprodukte getrennt von
 Mahlzeitvorlagen und Tagebucheinträgen. Ein Barcode sucht zuerst in dieser
-lokalen Produktbibliothek und verwendet Open Food Facts nur als Fallback. Ein
+lokalen Produktbibliothek und verwendet Open Food Facts nur als Fallback.
+Beschreibt der Athlet eine Mahlzeit mit Zutaten und Mengen, gleicht der Coach
+jede Zutat zuerst mit den gespeicherten Produkten ab und nutzt passende
+Produkte mit ihrer ID; die Textsuche findet ein Produkt, wenn jedes Suchwort in
+Name oder Marke vorkommt. Erst für Zutaten ohne passendes Produkt fragt er BLS
+oder Open Food Facts ab; auch dann liefert die Suche passende gespeicherte
+Produkte mit. Ein
 Treffer aus einer Onlinequelle wird erst nach Prüfung und ausdrücklicher
 Bestätigung lokal gespeichert; BLS, Open Food Facts, Verpackungsangabe und
 Das Modell kennt die Quellenkennzeichnung `fddb_export`, aber es gibt keinen
