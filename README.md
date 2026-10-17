@@ -899,9 +899,9 @@ lokalen Produktbibliothek und verwendet Open Food Facts nur als Fallback.
 Beschreibt der Athlet eine Mahlzeit mit Zutaten und Mengen, gleicht der Coach
 jede Zutat zuerst mit den gespeicherten Produkten ab und nutzt passende
 Produkte mit ihrer ID; die Textsuche findet ein Produkt, wenn jedes Suchwort in
-Name oder Marke vorkommt. Erst für Zutaten ohne passendes Produkt fragt er BLS
-oder Open Food Facts ab; auch dann liefert die Suche passende gespeicherte
-Produkte mit. Ein
+Name oder Marke vorkommt (`%` und `_` zählen wörtlich). Erst für Zutaten ohne passendes Produkt fragt er BLS
+oder Open Food Facts ab; auch dann liefert die Suche bis zu zehn passende
+gespeicherte Produkte mit, selbst wenn die externe Datenbank nicht erreichbar ist. Ein
 Treffer aus einer Onlinequelle wird erst nach Prüfung und ausdrücklicher
 Bestätigung lokal gespeichert; BLS, Open Food Facts, Verpackungsangabe und
 Das Modell kennt die Quellenkennzeichnung `fddb_export`, aber es gibt keinen

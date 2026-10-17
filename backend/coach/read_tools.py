@@ -176,8 +176,18 @@ class CoachReadToolService:
         source = str(arguments.get("source") or "").strip().lower()
         query = str(arguments.get("query") or arguments.get("q") or "").strip()
         if query and not arguments.get("barcode") and source in {"bls", "off"}:
-            result = nutrition.food_database.lookup(arguments)
-            local_products = nutrition.list_products(query=query)
+            local_products = nutrition.list_products(query=query)[:10]
+            try:
+                result = nutrition.food_database.lookup(arguments)
+            except AppError as exc:
+                # Saved products stay usable while the external database is down.
+                if not local_products or exc.status < 500:
+                    raise
+                result = {
+                    "ok": True,
+                    "foods": [],
+                    "notice": "Externe Lebensmitteldatenbank nicht erreichbar; nur gespeicherte Produkte verfügbar.",
+                }
             return (
                 {**result, "local_products": local_products}
                 if local_products

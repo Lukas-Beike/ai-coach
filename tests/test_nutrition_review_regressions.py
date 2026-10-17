@@ -80,6 +80,37 @@ class NutritionReviewRegressionTests(unittest.TestCase):
         self.assertEqual(result["local_products"], [{"id": "local-oats"}])
         meal_library.list_products.assert_called_once_with(query="Haferflocken")
 
+    def test_explicit_source_outage_still_returns_saved_products(self) -> None:
+        meal_library = Mock()
+        meal_library.food_database.lookup.side_effect = AppError(
+            502, "Lebensmitteldatenbank ist nicht erreichbar."
+        )
+        meal_library.list_products.return_value = [{"id": "local-oats"}]
+        service = CoachReadToolService(
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            training_change_limit=366,
+            nutrition_meal_library=Mock(return_value=meal_library),
+        )
+
+        result = service.execute(
+            "lookup_food", {"query": "Haferflocken", "source": "bls"}
+        )
+
+        assert isinstance(result, dict)
+        self.assertEqual(result["foods"], [])
+        self.assertEqual(result["local_products"], [{"id": "local-oats"}])
+
+        meal_library.list_products.return_value = []
+        with self.assertRaises(AppError):
+            service.execute("lookup_food", {"query": "Haferflocken", "source": "bls"})
+
     def test_barcode_source_keeps_local_first_lookup(self) -> None:
         meal_library = Mock()
         meal_library.lookup_product.return_value = {

@@ -84,12 +84,18 @@ class NutritionProductRepository:
             clauses.append("barcode = ?")
             params.append(barcode)
         # Every word must appear in the name or brand, so "Arla Skyr" finds
-        # the saved product "Skyr" of brand "Arla".
-        for term in (query or "").split()[:8]:
+        # the saved product "Skyr" of brand "Arla". A blank or overlong query
+        # matches nothing rather than a broader set.
+        terms = (query or "").split()
+        if query and not 1 <= len(terms) <= 20:
+            return []
+        for term in terms:
             clauses.append(
-                "(name LIKE ? COLLATE NOCASE OR brand LIKE ? COLLATE NOCASE)"
+                "(name LIKE ? ESCAPE '\\' COLLATE NOCASE"
+                " OR brand LIKE ? ESCAPE '\\' COLLATE NOCASE)"
             )
-            pattern = f"%{term}%"
+            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
             params.extend((pattern, pattern))
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         rows = db.execute(
