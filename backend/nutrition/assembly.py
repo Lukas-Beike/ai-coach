@@ -18,12 +18,14 @@ from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.photo import NutritionPhotoExtractionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.providers.intervals import IntervalsApiClient
+from backend.runtime.ports import ObservationReader
 
 
 @dataclass(frozen=True)
 class NutritionPersistence:
     database_manager: Callable[[], Any]
     database_lock: Any
+    observation_reader: Callable[[], ObservationReader] | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,7 @@ class NutritionAssembly:
         self._config = dependencies.runtime.config
         self._database_manager = dependencies.persistence.database_manager
         self._database_lock = dependencies.persistence.database_lock
+        self._observation_reader = dependencies.persistence.observation_reader
         self._utc_now = dependencies.runtime.utc_now
         self._local_now = dependencies.runtime.local_now
         self._intervals_request = dependencies.runtime.intervals_request
@@ -82,6 +85,7 @@ class NutritionAssembly:
             utc_now=self._utc_now,
             local_now=self._local_now,
             meal_library=self.meal_library_service(),
+            observation_reader=self._observation_reader,
         )
 
     def _photo_extractor(self) -> NutritionPhotoExtractionService | None:

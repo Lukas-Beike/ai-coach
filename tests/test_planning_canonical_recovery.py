@@ -1,11 +1,11 @@
 """Planning daily recovery is read from canonical observations.
 
-Sleep, HRV, resting HR, readiness, CTL and ATL come from the injected observation
-reader over a window that ends on the athlete's local date. Form (TSB) and body
-battery have no canonical form and stay reads of the stored wellness rows and the
-morning battery. The populated temporary database tests prove that the table-served
-view equals the stored-snapshot reference view and does not depend on the canonical
-sections of the snapshot. All providers are mocked and all storage is temporary.
+Sleep, HRV, resting HR, readiness, CTL, ATL, form (TSB) and the daily totals come
+from the injected observation reader over a window that ends on the athlete's local
+date. Body battery is not mapped to observations and stays a read of the morning
+battery. The populated temporary database tests prove that the table-served view
+equals the stored-snapshot reference view and does not depend on the snapshot. All
+providers are mocked and all storage is temporary.
 """
 
 from __future__ import annotations
@@ -243,6 +243,7 @@ class CanonicalPlanningRecoveryTests(unittest.TestCase):
                     MetricKind.RESTING_HR,
                     MetricKind.CTL,
                     MetricKind.ATL,
+                    MetricKind.FORM,
                 )
             ],
         )
@@ -251,17 +252,18 @@ class CanonicalPlanningRecoveryTests(unittest.TestCase):
 class PlanningRecoveryViewTests(unittest.TestCase):
     def test_form_and_body_battery_are_added_to_the_canonical_view(self) -> None:
         reader = RecordingReader(
-            {MetricKind.SLEEP_SCORE: [_observation(MetricKind.SLEEP_SCORE, 84)]}
+            {
+                MetricKind.SLEEP_SCORE: [_observation(MetricKind.SLEEP_SCORE, 84)],
+                MetricKind.FORM: [
+                    _observation(MetricKind.FORM, -4.5, provider=ProviderId.INTERVALS)
+                ],
+            }
         )
         view = planning_recovery_view(
             reader,
             "db",
             start=WINDOW[0],
             end=WINDOW[1],
-            wellness_rows=[
-                {"id": DAY, "tsb": -4.5, "ctl": 99, "sleepScore": 10},
-                {"id": "2026-01-01", "tsb": 3},
-            ],
             morning_battery_history={DAY: 61},
             morning_body_battery=None,
         )
@@ -278,8 +280,6 @@ class PlanningRecoveryViewTests(unittest.TestCase):
                 },
             },
         )
-        # Rows outside the window, and every other wellness field, are ignored.
-        self.assertNotIn("2026-01-01", view)
 
 
 class DailyPlanningCanonicalWiringTests(unittest.TestCase):
@@ -300,7 +300,8 @@ class DailyPlanningCanonicalWiringTests(unittest.TestCase):
         self.assertEqual(manager.units, 1)
         self.assertEqual(reader.selected, 1)
         self.assertEqual({call[1:] for call in reader.calls}, {WINDOW})
-        self.assertEqual(len(reader.calls), 7)
+        # Five recovery kinds, CTL, ATL and form, then the four daily totals.
+        self.assertEqual(len(reader.calls), 12)
         by_date = {day["date"]: day for day in result}
         self.assertEqual(by_date[DAY]["recovery"]["resting_hr"], 49)
         self.assertEqual(by_date[OTHER_DAY]["recovery"]["sleep_score"], 80)
@@ -355,7 +356,6 @@ class CanonicalPlanningEndToEndTests(CanonicalReadFixture):
                 db,
                 start=WINDOW[0],
                 end=WINDOW[1],
-                wellness_rows=self.intervals["recent_wellness"],
                 morning_battery_history={},
                 morning_body_battery=None,
             )
@@ -382,11 +382,8 @@ class CanonicalPlanningEndToEndTests(CanonicalReadFixture):
         populate(self)
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
-        # Only the compact wellness rows stay: they carry the form.
-        stripped = {
-            "recent_wellness": self.intervals["recent_wellness"],
-            "synced_at": self.intervals["synced_at"],
-        }
+        # No snapshot section is read any more, not even the wellness rows.
+        stripped = {"synced_at": self.intervals["synced_at"]}
         counting = _CountingSelector(selector)
         with_sections = _build(
             _service(self.manager, self.key_values, counting), self.intervals
@@ -408,6 +405,11 @@ class CanonicalPlanningEndToEndTests(CanonicalReadFixture):
                 "resting_hr",
                 "ctl",
                 "atl",
+                "form",
+                "steps",
+                "floors",
+                "daily_energy_total",
+                "daily_energy_active",
             },
         )
 

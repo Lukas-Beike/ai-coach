@@ -65,7 +65,8 @@ def current_performance_context(
     """Compose the current performance projection from explicit inputs.
 
     ``canonical`` replaces CTL and ATL in the load context, the sport thresholds and
-    VO2max, and the matching recovery values, when given.
+    VO2max, the Garmin performance values, the daily totals and the matching
+    recovery values, when given.
     """
     if not snapshot:
         unavailable = {
@@ -116,7 +117,9 @@ def current_performance_context(
     metrics = performance_current_metrics.current_performance_metrics(
         snapshot,
         profile,
-        performance_garmin_metrics.garmin_performance_metrics(garmin, today),
+        performance_garmin_metrics.garmin_performance_metrics(
+            garmin, today, None if canonical is None else canonical.garmin
+        ),
         canonical=None if canonical is None else canonical.current,
         activities=activities,
         wellness_rows=wellness_rows,
@@ -138,6 +141,7 @@ def current_performance_context(
             7,
             today - timedelta(days=1),
             today,
+            health_by_date=None if canonical is None else canonical.daily_health,
         )
     )
     comparisons = performance_comparisons.performance_comparisons(

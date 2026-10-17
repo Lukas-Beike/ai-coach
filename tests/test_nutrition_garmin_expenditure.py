@@ -6,6 +6,7 @@ import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 
+from canonical_daily_health_support import MappedDailyReader
 from nutrition_service_support import build_nutrition_services
 
 from backend.db.manager import DatabaseManager
@@ -55,6 +56,62 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
         self.assertEqual(expenditure["synced_at"], "2026-09-24T08:00:00Z")
         self.assertTrue(expenditure["provisional"])
         self.assertEqual(expenditure["status"], "measured")
+
+    def test_day_and_week_read_measured_energy_from_observations(self) -> None:
+        reader = MappedDailyReader(
+            {
+                "daily_stats": [
+                    {"date": "2026-09-17", "totalKilocalories": 2000},
+                    {"date": "2026-09-18", "totalKilocalories": 2100},
+                    {
+                        "date": "2026-09-24",
+                        "totalKilocalories": 2100,
+                        "activeKilocalories": 600,
+                    },
+                ]
+            }
+        )
+        service, _ = build_nutrition_services(
+            self.manager,
+            threading.Lock(),
+            lambda: self.fixed_now,
+            lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
+            observation_reader=lambda: reader,
+        )
+        with self.manager.unit_of_work() as db:
+            # The snapshot keeps only the resting calories and the sync status.
+            db.execute(
+                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
+                (
+                    "garmin_snapshot",
+                    json.dumps(
+                        {
+                            "daily_stats": [
+                                {"date": "2026-09-24", "bmrKilocalories": 1500}
+                            ],
+                            "source_freshness": {
+                                "daily_stats": {"freshness": "current"}
+                            },
+                        }
+                    ),
+                    self.fixed_now,
+                ),
+            )
+
+        day = service.get_day_summary("2026-09-24")["energy_expenditure"]
+        week = service.get_week_summary()
+
+        self.assertEqual(
+            (day["total_kcal"], day["active_kcal"], day["resting_kcal"]),
+            (2100, 600, 1500),
+        )
+        self.assertEqual(day["source"], "Garmin Connect")
+        self.assertEqual(day["freshness"], "current")
+        self.assertEqual(day["status"], "measured")
+        self.assertEqual(
+            [entry["energy_expenditure"]["total_kcal"] for entry in week["days"][:3]],
+            [2000, 2100, None],
+        )
 
     def test_malformed_garmin_snapshot_leaves_local_day_summary_available(self) -> None:
         with self.manager.unit_of_work() as db:

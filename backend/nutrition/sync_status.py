@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.db.manager import DatabaseManager
@@ -13,7 +13,12 @@ from backend.db.repositories import KeyValueRepository, NutritionRepository
 from backend.errors import AppError
 from backend.nutrition.contracts import nutrition_approval_item
 from backend.nutrition.models import validate_iso_date
-from backend.performance.daily_health import garmin_daily_expenditure
+from backend.performance.canonical_inputs import resolve_reader
+from backend.performance.daily_health import (
+    daily_energy_expenditure,
+    read_daily_health_by_date,
+)
+from backend.runtime.ports import ObservationReader
 
 
 class NutritionSyncStatusService:
@@ -24,7 +29,9 @@ class NutritionSyncStatusService:
         nutrition_repository: NutritionRepository,
         utc_now: Callable[[], str],
         local_now: Callable[[], datetime],
+        observation_reader: Callable[[], ObservationReader] | None = None,
     ) -> None:
+        self._observation_reader = observation_reader
         self._database_manager = database_manager
         self._db_lock = db_lock
         self._nutrition_repository = nutrition_repository
@@ -36,17 +43,36 @@ class NutritionSyncStatusService:
         validated_date = validate_iso_date(meal_date)
         with self._database_manager.read_snapshot() as db:
             summary = self._nutrition_repository.day_summary(db, validated_date)
+            # The snapshot only carries the resting calories (no metric kind) and
+            # the daily-stats sync status.
             serialized_garmin = self._key_value_repository.get(db, "garmin_snapshot")
+            measured = self._measured_energy(db, validated_date, validated_date)
         try:
             garmin_snapshot = json.loads(serialized_garmin or "{}")
         except TypeError, ValueError:
             garmin_snapshot = {}
         if not isinstance(garmin_snapshot, dict):
             garmin_snapshot = {}
-        summary["energy_expenditure"] = garmin_daily_expenditure(
-            garmin_snapshot, validated_date, self._local_now().date()
+        summary["energy_expenditure"] = daily_energy_expenditure(
+            garmin_snapshot,
+            validated_date,
+            self._local_now().date(),
+            measured=None if measured is None else measured.get(validated_date, {}),
         )
         return summary
+
+    def _measured_energy(
+        self, db: Any, start: str, end: str
+    ) -> dict[str, dict[str, Any]] | None:
+        """Read the canonical daily energy, or None without an observation reader."""
+        if self._observation_reader is None:
+            return None
+        return read_daily_health_by_date(
+            resolve_reader(self._observation_reader(), db),
+            db,
+            start=date.fromisoformat(start),
+            end=date.fromisoformat(end),
+        )
 
     def get_sync_snapshot(self, meal_date: str) -> dict[str, Any]:
         validated_date = validate_iso_date(meal_date)
@@ -64,13 +90,19 @@ class NutritionSyncStatusService:
                 self._nutrition_repository.day_summary(db, day) for day in dates
             ]
             serialized = self._key_value_repository.get(db, "garmin_snapshot")
+            measured = self._measured_energy(db, dates[0], dates[-1])
         try:
             snapshot = json.loads(serialized or "{}")
         except TypeError, ValueError:
             snapshot = {}
         days = []
         for summary in summaries:
-            expenditure = garmin_daily_expenditure(snapshot, summary["date"], today)
+            expenditure = daily_energy_expenditure(
+                snapshot,
+                summary["date"],
+                today,
+                measured=None if measured is None else measured.get(summary["date"], {}),
+            )
             intake = summary["total_kcal"] if summary["entry_count"] else None
             consumed = expenditure["total_kcal"]
             days.append(

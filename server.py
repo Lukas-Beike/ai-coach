@@ -1129,7 +1129,9 @@ WAHOO_SYNC = WahooSyncAssembly(
 )
 NUTRITION_ASSEMBLY = NutritionAssembly(
     dependencies=NutritionAssembly.Inputs(
-        persistence=NutritionPersistence(database_manager, DB_LOCK),
+        persistence=NutritionPersistence(
+            database_manager, DB_LOCK, observation_reader=lambda: CANONICAL_READ
+        ),
         runtime=NutritionRuntime(
             config=lambda: CONFIG,
             utc_now=runtime_clock.utc_now,

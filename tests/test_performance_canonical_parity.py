@@ -52,6 +52,7 @@ from backend.performance.canonical_recovery import CanonicalRecoveryInputs
 from backend.performance.canonical_recovery_averages import (
     CanonicalRecoveryAverageInputs,
 )
+from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.load_context import performance_load_context
 from backend.providers.snapshot_projection import project_intervals_snapshot
 from backend.runtime.ports import ObservationReader
@@ -67,6 +68,9 @@ _NO_PERSONAL_RECOVERY = CanonicalPersonalRecoveryInputs(
     resting_hr={ProviderId.INTERVALS: {}, ProviderId.GARMIN: {}}
 )
 _NO_RECOVERY_AVERAGES = CanonicalRecoveryAverageInputs(resting_hr=(), readiness=())
+# One unbounded read per kind: the wellness and current-metric kinds, then the
+# Garmin performance kinds and the daily totals not read before.
+_UNIT_READS = 24
 
 
 class StubObservationReader(ObservationReader):
@@ -187,6 +191,8 @@ def _assert_load_inputs(
             recovery=_NO_RECOVERY,
             personal_recovery=_NO_PERSONAL_RECOVERY,
             recovery_averages=_NO_RECOVERY_AVERAGES,
+            garmin=GarminCanonicalMetrics(),
+            daily_health={},
         ),
     )
 
@@ -565,8 +571,8 @@ class CanonicalWiringTests(unittest.TestCase):
             return_value={},
         ) as project:
             service.performance_state()
-        self.assertEqual(manager.events, ["enter", *["read"] * 13, "exit"])
-        self.assertEqual(reader.db_seen, ["db"] * 13)
+        self.assertEqual(manager.events, ["enter", *["read"] * _UNIT_READS, "exit"])
+        self.assertEqual(reader.db_seen, ["db"] * _UNIT_READS)
         _assert_load_inputs(self, project.call_args.kwargs["canonical"])
 
     def test_public_performance_keeps_the_legacy_call_without_wellness(self) -> None:
@@ -616,7 +622,7 @@ class CanonicalWiringTests(unittest.TestCase):
         )
         read_snapshot, canonical, _ = service._performance_inputs(PARITY_TODAY)
         self.assertIs(read_snapshot, snapshot)
-        self.assertEqual(reader.db_seen, ["db"] * 13)
+        self.assertEqual(reader.db_seen, ["db"] * _UNIT_READS)
         self.assertEqual(_present(canonical).ctl, 50.0)
 
     def test_activity_performance_inputs_without_a_source_read_nothing_extra(
@@ -689,7 +695,7 @@ class CanonicalWiringTests(unittest.TestCase):
         self.assertIs(read, snapshot)
         self.assertEqual(
             manager.events,
-            ["enter", "snapshot", *["read"] * 13, "exit"],
+            ["enter", "snapshot", *["read"] * _UNIT_READS, "exit"],
         )
         with (
             patch(
@@ -747,7 +753,7 @@ class CanonicalWiringTests(unittest.TestCase):
             ),
         )
         prelude = _prelude(snapshot, manager, service.canonical_inputs).read(True)
-        self.assertEqual(manager.events, ["enter", *["read"] * 13, "exit"])
+        self.assertEqual(manager.events, ["enter", *["read"] * _UNIT_READS, "exit"])
         _assert_load_inputs(self, prelude.performance_inputs)
         with patch(
             "backend.http_api.public_performance.performance_context.current_performance_context",
@@ -852,7 +858,7 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         )
         legacy = _service(self.intervals, None, self.garmin).performance_state()
         canonical = _service(self.intervals, source, self.garmin).performance_state()
-        self.assertEqual(counting.calls, 13)
+        self.assertEqual(counting.calls, _UNIT_READS)
         self.assertEqual(_normalized_state(canonical), _normalized_state(legacy))
 
     def test_selector_chooses_its_source_once_for_both_load_reads(self) -> None:
