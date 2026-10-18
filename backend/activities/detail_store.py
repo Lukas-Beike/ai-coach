@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from typing import Any
 
 from backend.activities.detail_projection import detailed_activity
@@ -12,6 +13,9 @@ from backend.providers.intervals_performance_fields import (
     HEART_RATE_ZONE_TIMES,
     ZONE_TIMES,
 )
+
+# A separate key keeps failures out of the `activity_detail:%` detail scans.
+_FAILURE = "activity_detail_failure"
 
 
 def summary_fingerprint(activity: dict[str, Any]) -> str:
@@ -32,9 +36,9 @@ class ActivityDetailStore:
         self._database_manager = database_manager
 
     @staticmethod
-    def _key(activity_id: str) -> str:
+    def _key(activity_id: str, prefix: str = "activity_detail") -> str:
         digest = hashlib.sha256(activity_id.encode()).hexdigest()
-        return f"activity_detail:{digest}"
+        return f"{prefix}:{digest}"
 
     def get(self, activity_id: str) -> dict[str, Any] | None:
         with self._database_manager.reader() as db:
@@ -59,6 +63,46 @@ class ActivityDetailStore:
                 "updated_at=excluded.updated_at",
                 (self._key(activity_id), payload, value["observed_at"]),
             )
+            db.execute(
+                "DELETE FROM kv WHERE key=?", (self._key(activity_id, _FAILURE),)
+            )
+
+    def save_failure(
+        self, activity_id: str, summary_sha256: str, message: str, observed_at: str
+    ) -> None:
+        """Remember why the newest summary has no details; stored details stay."""
+        payload = json.dumps(
+            {
+                "summary_sha256": summary_sha256,
+                "message": message,
+                "observed_at": observed_at,
+            },
+            ensure_ascii=False,
+        )
+        with self._database_manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+                "updated_at=excluded.updated_at",
+                (self._key(activity_id, _FAILURE), payload, observed_at),
+            )
+
+    def failures(self, activity_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+        """Return the recorded load failure per activity id."""
+        keys = {self._key(item, _FAILURE): item for item in set(activity_ids)}
+        if not keys:
+            return {}
+        with self._database_manager.reader() as db:
+            rows = db.execute(
+                f"SELECT key, value FROM kv WHERE key IN ({','.join('?' * len(keys))})",
+                tuple(keys),
+            ).fetchall()
+        result = {}
+        for row in rows:
+            value = json.loads(row["value"])
+            if isinstance(value, dict):
+                result[keys[row["key"]]] = value
+        return result
 
     def calendar_profiles(self) -> dict[str, dict[str, Any]]:
         with self._database_manager.reader() as db:

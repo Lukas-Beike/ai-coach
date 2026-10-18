@@ -139,6 +139,30 @@ test("@responsive analysis shows running step frequency and cycling cadence", as
   await expect(ride.getByRole("img", { name: /^Kadenz: Ø 86/ })).toBeVisible();
 });
 
+test("@responsive analysis lists sessions whose details failed to load", async ({ page }) => {
+  const message = "Intervals.icu hat für diese Einheit keine Detaildaten geliefert.";
+  const summaries = [
+    { id: "synthetic-failed", name: "Synthetic failed <img src=x>", type: "Ride", start_date_local: "2026-10-17T08:00:00", moving_time: 3, detail_error: message },
+  ];
+  await page.route(/\/api\/activities(\?|\/)/, (route) => {
+    const id = new URL(route.request().url()).pathname.split("/")[3];
+    const body = id
+      ? { activity: { id }, detail_data: { load_error: { message, observed_at: "2026-10-17T09:00:00Z" } } }
+      : { activities: summaries, snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null };
+    return route.fulfill({ json: body });
+  });
+  await page.goto("/#analysis/sessions");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const item = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic failed <img src=x>" });
+  const flag = item.locator("summary > .activity-analysis-error");
+  await expect(flag).toHaveText("Details nicht geladen");
+  await expect(flag).toHaveAttribute("title", message);
+  await item.locator("summary").click();
+  await expect(item.locator(".activity-analysis-panel .activity-analysis-error")).toContainText(message);
+  expect(await item.locator("img").count()).toBe(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
 test("@responsive analysis sessions list expands Garmin-style charts", async ({ page, request }) => {
   const seed = await request.get("/api/fixture/activity");
   expect(seed.ok()).toBeTruthy();

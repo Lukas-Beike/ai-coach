@@ -151,6 +151,14 @@ class ActivityReadService:
         attached = self._with_local_ids(
             self._feedback_service.attach_to_activities(page)
         )
+        failures = (
+            self._detail_store.failures(_page_key(item)[1] for item in attached)
+            if self._detail_store
+            else {}
+        )
+        for item in attached:
+            failure = failures.get(_page_key(item)[1])
+            item["detail_error"] = failure["message"] if failure else None
         return {
             "snapshot_synced_at": synced_at,
             "activities": attached,

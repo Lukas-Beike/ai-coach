@@ -232,7 +232,8 @@ class ActivityPageCharacterizationTests(_StorageCase):
         ]
         result = self._page(rows)
         expected = [
-            {**row, "local_activity_id": None} for row in (rows[1], rows[0], rows[2])
+            {**row, "local_activity_id": None, "detail_error": None}
+            for row in (rows[1], rows[0], rows[2])
         ]
         self.assertEqual(expected, result["activities"])
 
@@ -575,6 +576,22 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         self.assertIsNone(result["detail_data"]["content_sha256"])
         self.assertEqual([], result["detail_data"]["available_streams"])
         self.assertEqual({}, result["session_analysis"])
+        self.assertIsNone(result["detail_data"]["load_error"])
+
+    def test_recorded_load_failure_is_reported_until_details_are_saved(self) -> None:
+        store = ActivityDetailStore(self.database)
+        store.save_failure(
+            "ride-1", "0" * 64, "Detaildaten fehlerhaft.", "2026-05-04T06:00:00Z"
+        )
+        self.assertEqual(
+            {
+                "message": "Detaildaten fehlerhaft.",
+                "observed_at": "2026-05-04T06:00:00Z",
+            },
+            self._detail([self.RAW])["detail_data"]["load_error"],
+        )
+        self._save_analysis()
+        self.assertIsNone(self._detail([self.RAW])["detail_data"]["load_error"])
 
 
 class ActivityEquipmentTests(unittest.TestCase):

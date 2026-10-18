@@ -132,6 +132,11 @@ class ActivityAnalysisReadService(ActivityReadService):
             self._read_equipment(normalized_id), normalized_id
         )
         local_ids = self._references.local_ids([normalized_id])
+        failure = (
+            self._detail_store.failures([normalized_id]).get(normalized_id)
+            if self._detail_store
+            else None
+        )
         return {
             "ok": True,
             "snapshot_synced_at": snapshot.get("synced_at"),
@@ -148,7 +153,7 @@ class ActivityAnalysisReadService(ActivityReadService):
             else {},
             "activity_id": normalized_id,
             "local_activity_id": local_ids.get(normalized_id),
-            "detail_data": _detail_metadata(cached, stale, activity),
+            "detail_data": _detail_metadata(cached, stale, activity, failure),
             "data_scope": "bounded sanitized detail projection of exactly one Intervals.icu activity",
         }
 
@@ -191,9 +196,15 @@ def _raw_activity(
 
 
 def _detail_metadata(
-    cached: dict | None, stale: bool, activity: dict
+    cached: dict | None, stale: bool, activity: dict, failure: dict | None = None
 ) -> dict[str, Any]:
     return {
+        "load_error": {
+            "message": failure.get("message"),
+            "observed_at": failure.get("observed_at"),
+        }
+        if failure
+        else None,
         "source": provider_label(ProviderId.INTERVALS, SourceView.ACTIVITY_DETAIL),
         "observed_at": cached.get("observed_at") if cached else None,
         "full_resolution": bool(cached and cached.get("full_resolution")),

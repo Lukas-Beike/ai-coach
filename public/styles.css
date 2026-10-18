@@ -1636,6 +1636,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .activity-analysis-title strong { overflow: hidden; color: var(--ink); font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
 .activity-analysis-title .muted { font-size: .72rem; }
 .activity-analysis-load { flex: 0 0 auto; color: var(--muted); font-size: .72rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.activity-analysis-error { color: var(--danger-ink); font-size: .78rem; font-weight: 600; }
+summary > .activity-analysis-error { flex: 0 0 auto; font-size: .72rem; font-weight: 700; }
 .activity-analysis-panel { display: grid; gap: 16px; padding: 0 14px 14px; }
 .activity-analysis-panel > p { margin: 0; font-size: .72rem; }
 .activity-analysis-panel h4 { margin: 0; color: var(--ink); font-size: .85rem; }

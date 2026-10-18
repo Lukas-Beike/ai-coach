@@ -317,6 +317,7 @@
     const coverage = Object.entries(metadata.coverage || {}).map(([name, value]) => `${name}: ${value?.valid_points}/${value?.points} Messwerte`);
     if (coverage.length) panel.append(node("p", `Datenabdeckung · ${coverage.join(" · ")}`, "muted"));
     if (metadata.stale) panel.append(node("p", "Die Zusammenfassung hat sich seit dem Laden geändert. Aktualisiere die Detaildaten.", "muted"));
+    if (metadata.load_error?.message) panel.append(node("p", `${metadata.load_error.message} Automatischer Ladeversuch: ${formatTime(metadata.load_error.observed_at)}`, "activity-analysis-error"));
   }
 
   function renderPanel(panel, summary, payload, epoch) {
@@ -335,6 +336,8 @@
       if (section) panel.append(section);
     }
     appendSourceNotes(panel, metadata, charts.length > 0);
+    // A successful reload clears the list marker without reloading the list.
+    if (payload) panel.parentElement?.querySelector("summary > .activity-analysis-error")?.toggleAttribute("hidden", !metadata.load_error);
     if (ActivityDetails.isIntervalsActivity(summary)) appendRefresh(panel, summary, metadata, epoch);
   }
 
@@ -392,6 +395,11 @@
     const facts = [day ? dateLabel(day) : null, sportLabel(activity), finite(activity.moving_time) ? AppFormat.duration(activity.moving_time) : null, AppFormat.distance(activity.distance)].filter(Boolean);
     text.append(node("span", facts.join(" · "), "muted"));
     summary.append(text);
+    if (activity.detail_error) {
+      const flag = node("span", "Details nicht geladen", "activity-analysis-error");
+      flag.title = activity.detail_error;
+      summary.append(flag);
+    }
     if (finite(activity.training_load)) summary.append(node("span", `${numberText(activity.training_load)} Last`, "activity-analysis-load"));
     const panel = node("div", null, "activity-analysis-panel");
     entry.append(summary, panel);

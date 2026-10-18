@@ -167,7 +167,8 @@ class ActivityDetailRefreshService:
 
         ``guard`` wraps each provider refresh, so a full resync waits for one
         activity rather than the whole run. Invalid or missing data of one
-        activity is skipped; a rate limit, outage or authentication failure ends
+        activity is recorded and not retried until its summary changes or the
+        athlete reloads it; a rate limit, outage or authentication failure ends
         the run, so it is not retried per activity and the next refresh tries
         again.
         """
@@ -181,10 +182,15 @@ class ActivityDetailRefreshService:
             reverse=True,
         )[:limit]
         fetched = failed = 0
+        known_failures = self._store.failures(str(row["id"]) for row in recent)
         for row in recent:
             activity_id = str(row["id"])
+            fingerprint = summary_fingerprint(row)
             stored = self._store.get(activity_id)
-            if stored and stored.get("summary_sha256") == summary_fingerprint(row):
+            if stored and stored.get("summary_sha256") == fingerprint:
+                continue
+            # A recorded failure is retried only for a changed summary or by request.
+            if known_failures.get(activity_id, {}).get("summary_sha256") == fingerprint:
                 continue
             try:
                 with guard():
@@ -204,6 +210,9 @@ class ActivityDetailRefreshService:
                 )
                 if stops:
                     break
+                self._store.save_failure(
+                    activity_id, fingerprint, _failure_message(error), self._utc_now()
+                )
                 continue
             fetched += 1
         return {"fetched": fetched, "failed": failed}
@@ -219,6 +228,18 @@ def _activity_specific_failure(error: Exception) -> bool:
     if error.upstream_status is not None:
         return reason in {"upstream_not_found", "upstream_rejected"}
     return status == 502 and reason != "provider_network_error"
+
+
+def _failure_message(error: Exception) -> str:
+    """Fixed text only: provider responses are never echoed to the athlete."""
+    if (
+        isinstance(error, AppError)
+        and public_error_contract(error)[1] == "upstream_not_found"
+    ):
+        return "Intervals.icu hat für diese Einheit keine Detaildaten geliefert."
+    return (
+        "Die Detaildaten dieser Einheit waren fehlerhaft und wurden nicht übernommen."
+    )
 
 
 def _validate_time_axis(streams: dict[str, list[Any]]) -> None:
