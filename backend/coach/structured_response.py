@@ -10,6 +10,7 @@ from typing import Any
 
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.job_store import CoachJobStore
+from backend.coach.limits import COACH_LONG_PLAN_MAX_OUTPUT_TOKENS
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.response_transport import (
     CoachResponseTransport,
@@ -17,6 +18,7 @@ from backend.coach.response_transport import (
 )
 from backend.errors import AppError
 from backend.providers.openai_requests import RESUMABLE_POLL_REASONS
+from backend.providers.openai_responses import response_text
 
 
 @dataclass
@@ -41,11 +43,14 @@ class CoachStructuredResponseService:
         recovery: CoachConversationRecoveryService,
         retry_policy: CoachResponseRetryPolicy,
         jobs: CoachJobStore,
+        *,
+        reasoning_retry_max_output_tokens: int = COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
     ) -> None:
         self._transport = transport
         self._recovery = recovery
         self._retry_policy = retry_policy
         self._jobs = jobs
+        self._reasoning_retry_max_output_tokens = reasoning_retry_max_output_tokens
 
     def respond(
         self,
@@ -86,7 +91,7 @@ class CoachStructuredResponseService:
         for attempt in range(3):
             raise_if_chat_cancelled(cancel_event)
             try:
-                return self._send(
+                response = self._send(
                     payload,
                     resume_id=state.resume_id,
                     checkpoint=checkpoint,
@@ -130,10 +135,37 @@ class CoachStructuredResponseService:
                     raise
                 state.resume_id = ""
                 self._retry_policy.wait(delay, cancel_event, attempt)
+                continue
+            if not self._spent_on_reasoning(response, payload, state):
+                return response
+            # Reasoning used the whole budget before any text or tool call, so
+            # nothing was streamed or executed and the request can be repeated.
+            limit = self._reasoning_retry_max_output_tokens
+            payload = {**payload, "max_output_tokens": limit}
+            request_payload["max_output_tokens"] = limit
+            state.resume_id = ""
         raise AppError(
             502,
             "Der KI-Dienst konnte die Antwort nicht fertigstellen.",
             reason="response_failed",
+        )
+
+    def _spent_on_reasoning(
+        self, response: dict[str, Any], payload: dict[str, Any], state: _ResponseState
+    ) -> bool:
+        details = response.get("incomplete_details")
+        return (
+            response.get("status") == "incomplete"
+            and isinstance(details, dict)
+            and details.get("reason") == "max_output_tokens"
+            and not state.request_delta_emitted
+            and not response_text(response)
+            and not any(
+                isinstance(item, dict) and item.get("type") == "function_call"
+                for item in response.get("output") or []
+            )
+            and (payload.get("max_output_tokens") or 0)
+            < self._reasoning_retry_max_output_tokens
         )
 
     def _send(
