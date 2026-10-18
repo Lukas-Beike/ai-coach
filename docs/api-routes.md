@@ -93,6 +93,9 @@ return a secret: the response is the credential status only.
   never echoed back. A string
   stores the value; `null` or a blank string clears the value stored in the app,
   so the environment value applies again. Each field is validated server-side.
+  Changing the effective `intervals_athlete_id` returns `409` while Intervals.icu
+  records or sync cursors are stored, because they are not scoped by athlete; a
+  privacy delete clears them first.
   The response is the credential status: per field `source` (`db`, `env` or
   `none`), `configured`, and `value` only for non-secret fields, plus
   `garmin_connected`, `openai_configured`, `intervals_configured`,

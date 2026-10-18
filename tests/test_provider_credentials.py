@@ -74,6 +74,8 @@ class ProviderCredentialTests(unittest.TestCase):
             "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, "
             "updated_at TEXT NOT NULL)"
         )
+        for table in ("provider_records", "provider_sync_cursors"):
+            self.connection.execute(f"CREATE TABLE {table} (provider TEXT NOT NULL)")
         self.holder = {"config": self.env_config}
         self.service = ProviderCredentialService(
             env_config=self.env_config,
@@ -81,6 +83,7 @@ class ProviderCredentialTests(unittest.TestCase):
             database_lock=nullcontext,
             key_values=KeyValueRepository(lambda: "2026-10-18T00:00:00Z"),
             apply_config=self._apply,
+            current_config=lambda: self.holder["config"],
         )
 
     def tearDown(self) -> None:
@@ -96,6 +99,25 @@ class ProviderCredentialTests(unittest.TestCase):
         ).fetchone()
         return row["value"] if row else None
 
+    def test_athlete_change_is_rejected_while_intervals_data_exists(self):
+        # Without Intervals data the athlete may change freely.
+        self.service.update({"intervals_athlete_id": "i111"})
+        self.connection.execute(
+            "INSERT INTO provider_sync_cursors VALUES ('intervals')"
+        )
+        self.connection.commit()
+        for change in (
+            {"intervals_athlete_id": "i222"},
+            {"intervals_athlete_id": None},
+        ):
+            with self.assertRaises(AppError) as rejected:
+                self.service.update(change)
+            self.assertEqual(rejected.exception.status, 409)
+        self.assertEqual(self.holder["config"].intervals_athlete_id, "i111")
+        # The same athlete and other fields still save.
+        self.service.update({"intervals_athlete_id": " i111 ", "openai_api_key": "k2"})
+        self.assertEqual(self.holder["config"].openai_api_key, "k2")
+
     def test_stored_value_overrides_env_and_clearing_restores_env(self):
         self.service.update({"openai_api_key": "db-openai-key"})
         self.assertEqual(self.holder["config"].openai_api_key, "db-openai-key")
@@ -103,6 +125,22 @@ class ProviderCredentialTests(unittest.TestCase):
         self.service.update({"openai_api_key": None})
         self.assertEqual(self.holder["config"].openai_api_key, "env-openai-key")
         self.assertIsNone(self._stored_row(PROVIDER_CREDENTIALS_KEY))
+
+    def test_refresh_keeps_runtime_settings_outside_the_credentials(self):
+        # A runtime value that differs from the environment, such as a patched
+        # database key, survives refreshes; only credential fields change.
+        self.holder["config"] = dataclasses.replace(
+            self.env_config, app_password="runtime-password", openai_api_key="patched"
+        )
+        self.service.refresh()
+        self.assertEqual(self.holder["config"].app_password, "runtime-password")
+        self.assertEqual(self.holder["config"].openai_api_key, "patched")
+
+        self.service.update({"openai_api_key": "db-openai-key"})
+        self.assertEqual(self.holder["config"].openai_api_key, "db-openai-key")
+        self.service.update({"openai_api_key": None})
+        self.assertEqual(self.holder["config"].openai_api_key, "env-openai-key")
+        self.assertEqual(self.holder["config"].app_password, "runtime-password")
 
     def test_empty_string_clears_like_null(self):
         self.service.update({"intervals_api_key": "db-intervals"})
@@ -228,6 +266,10 @@ class ProviderCredentialTests(unittest.TestCase):
             database_lock=lock,
             key_values=KeyValueRepository(lambda: "2026-10-18T00:00:00Z"),
             apply_config=lambda config: applied_under_lock.append(bool(held)),
+        )
+        self.connection.execute(
+            "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
+            (PROVIDER_CREDENTIALS_KEY, '{"openai_api_key":"db-key"}', "now"),
         )
         service.refresh()
         self.assertEqual(applied_under_lock, [True])

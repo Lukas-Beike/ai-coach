@@ -109,7 +109,8 @@ def effective_config(env_config: Config, stored: Mapping[str, str]) -> Config:
         overrides[field] = value
     if not overrides:
         return env_config
-    return dataclasses.replace(env_config, **overrides)
+    updated: Config = dataclasses.replace(env_config, **overrides)
+    return updated
 
 
 def credential_status(
@@ -186,6 +187,16 @@ def _validated_change(field: str, value: object) -> str | None:
     return text
 
 
+def _intervals_data_exists(db: Any) -> bool:
+    provider = ProviderId.INTERVALS.value
+    return any(
+        db.execute(
+            f"SELECT 1 FROM {table} WHERE provider = ? LIMIT 1", (provider,)
+        ).fetchone()
+        for table in ("provider_records", "provider_sync_cursors")
+    )
+
+
 def validated_changes(values: object) -> dict[str, str | None]:
     """Validate a whole submission before anything is written."""
     if not isinstance(values, dict):
@@ -205,8 +216,13 @@ class ProviderCredentialService:
         key_values: KeyValueRepository,
         apply_config: Callable[[Config], None],
         garmin_connection: Callable[[], dict[str, Any]] | None = None,
+        current_config: Callable[[], Config] | None = None,
     ) -> None:
         self._env_config = env_config
+        # The running configuration; refresh only changes credential fields on it.
+        self._current_config = current_config or (lambda: env_config)
+        # Fields a previous refresh overrode from the database.
+        self._overridden: frozenset[str] = frozenset()
         self._database_manager = database_manager
         self._database_lock = database_lock
         self._key_values = key_values
@@ -249,12 +265,31 @@ class ProviderCredentialService:
         """Recompute the runtime configuration from env plus stored credentials.
 
         Read and apply happen under the database lock, so concurrent saves or a
-        privacy deletion apply their configurations in commit order.
+        privacy deletion apply their configurations in commit order. Only
+        credential fields change: a field no longer stored returns to its
+        environment value, and every other runtime setting is kept.
         """
         with self._database_lock():
-            effective = effective_config(self._env_config, self._read_stored())
-            self._apply_config(effective)
+            stored = self._read_stored()
+            current = self._current_config()
+            base = dataclasses.replace(
+                current,
+                **{
+                    field: getattr(self._env_config, field)
+                    for field in self._overridden
+                },
+            )
+            effective = effective_config(base, stored)
+            self._overridden = frozenset(stored) & CREDENTIAL_FIELDS
+            if effective != current:
+                self._apply_config(effective)
         return effective
+
+    def _athlete_id(self, stored: Mapping[str, str]) -> str:
+        value = (
+            stored.get("intervals_athlete_id") or self._env_config.intervals_athlete_id
+        )
+        return str(value or "").strip()
 
     def update(self, values: object) -> dict[str, Any]:
         """Apply a validated submission; null or empty clears a field."""
@@ -264,11 +299,25 @@ class ProviderCredentialService:
                 current = stored_credentials(
                     self._key_values.get(db, PROVIDER_CREDENTIALS_KEY)
                 )
+                previous_athlete = self._athlete_id(current)
                 for field, value in changes.items():
                     if value is None:
                         current.pop(field, None)
                     else:
                         current[field] = value
+                # Records and cursors are not scoped by athlete; syncing another
+                # athlete into them would mix both histories.
+                if (
+                    previous_athlete
+                    and self._athlete_id(current) != previous_athlete
+                    and _intervals_data_exists(db)
+                ):
+                    raise AppError(
+                        409,
+                        "Die Intervals.icu-Athlete-ID kann nicht geändert werden, "
+                        "solange Intervals.icu-Daten gespeichert sind. Lösche "
+                        "zuerst die lokalen Daten unter Datenschutz.",
+                    )
                 if current:
                     self._key_values.set(
                         db,

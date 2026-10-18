@@ -44,6 +44,8 @@ class RestoreDependencies:
     redact: Callable[[str], str]
     diagnostics_suspended: Callable[[], AbstractContextManager[None]]
     canonical_backfill_start: Callable[[], None]
+    # Re-derives the runtime configuration from the restored stored credentials.
+    refresh_credentials: Callable[[], Any] | None = None
 
 
 class DatabaseRestoreService:
@@ -80,6 +82,9 @@ class DatabaseRestoreService:
     def _resume(self) -> None:
         dependencies = self._dependencies
         try:
+            # Restored jobs must run against the restored provider accounts.
+            if dependencies.refresh_credentials is not None:
+                dependencies.refresh_credentials()
             dependencies.sync_jobs.resume_interrupted()
             dependencies.coach_jobs.resume_interrupted(dependencies.coach_failures)
             # Restored canonical backfill state may be unfinished; the worker exits

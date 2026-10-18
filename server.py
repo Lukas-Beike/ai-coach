@@ -624,7 +624,8 @@ PROVIDER_SYNC = ProviderSyncAssembly(
 def morning_body_battery_service() -> MorningBodyBatteryService:
     """Compose morning recovery orchestration from concrete runtime resources."""
     manager = database_manager()
-    config_id = CONFIG_GENERATION
+    # The generation guards against a reused id after CONFIG is replaced.
+    config_id = (id(CONFIG), CONFIG_GENERATION)
     return MORNING_BODY_BATTERY_SERVICE_CACHE.get(
         manager,
         config_id,
@@ -872,6 +873,7 @@ BACKUP_ASSEMBLY = BackupAssembly(
             redact=REDACTOR.redact_text,
             diagnostics_suspended=suspend_diagnostic_flushes,
             canonical_backfill_start=start_canonical_backfill,
+            refresh_credentials=lambda: refresh_runtime_config(),
         ),
     )
 )
@@ -934,6 +936,7 @@ PROVIDER_CREDENTIAL_SERVICE = ProviderCredentialService(
     key_values=KEY_VALUE_REPOSITORY,
     apply_config=apply_runtime_config,
     garmin_connection=lambda: GARMIN_LOGIN.status(),
+    current_config=lambda: CONFIG,
 )
 
 
