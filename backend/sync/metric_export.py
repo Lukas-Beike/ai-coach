@@ -1,4 +1,4 @@
-"""Explicit, previewed export of canonical body and threshold metrics.
+"""Manual and automatic export of canonical body and threshold metrics.
 
 The preview lists, per target field, the newest local value that another
 provider supplied, next to the target's current value read live. Execute reads
@@ -8,13 +8,19 @@ the preview. A value the target itself reported is
 never sent back to it; only values another provider reported are offered, so
 AI estimates are never exported. Each written field is recorded in
 ``remote_links`` so the same value is not offered again.
+
+Successful current Garmin synchronization also exports Garmin measurements with
+unchanged heart-rate zones and durable comparison baselines protecting later
+target-side edits.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import math
+import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -26,9 +32,11 @@ from backend.canonical.vocabulary import (
     ProviderId,
     RemoteEntityKind,
     RemoteLinkState,
+    SourceKind,
 )
 from backend.db.canonical_store import observation_natural_key
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
+from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError, public_error_contract
 from backend.providers.descriptors import Capability
 from backend.providers.source_labels import SourceView, observation_source_label
@@ -118,7 +126,7 @@ def _item_key(field: MetricExportField) -> str:
 
 
 class MetricExportService:
-    """Preview and execute confirmed metric exports to one provider."""
+    """Own confirmed exports and automatic Garmin measurement synchronization."""
 
     def __init__(
         self,
@@ -140,6 +148,8 @@ class MetricExportService:
         self._utc_now = utc_now
         self._registry = registry
         self._links = links or RemoteLinkRepository()
+        self._key_values = KeyValueRepository(lambda: self._utc_now().isoformat())
+        self._export_lock = threading.Lock()
 
     def preview(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
         raw = (payload or {}).get("provider")
@@ -154,6 +164,10 @@ class MetricExportService:
         }
 
     def export(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        with self._export_lock:
+            return self._export(payload)
+
+    def _export(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         target, requested, recalc = self._validated_request(payload)
         port = self._port(target)
         if recalc and not port.supports_hr_zone_recalc:
@@ -179,7 +193,7 @@ class MetricExportService:
                 port, group, recalc_hr_zones=recalc and group[0].field.zone_recalc
             )
             if failure is None:
-                self._record(target, group)
+                self._record(target, port, group)
             items.extend(self._group_items(group, failure, label))
         exported = sum(1 for item in items if item["status"] == EXPORTED)
         return {
@@ -191,6 +205,104 @@ class MetricExportService:
             "failed": len(items) - exported,
             "items": items,
         }
+
+    def configure_automatic(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Persist explicit athlete consent for the named automatic export."""
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("confirmed") is not True
+            or payload.get("provider") != ProviderId.INTERVALS.value
+            or payload.get("source") != ProviderId.GARMIN.value
+            or not isinstance(payload.get("enabled"), bool)
+        ):
+            raise AppError(
+                400,
+                "Der automatische Garmin-Abgleich mit Intervals.icu muss ausdrücklich bestätigt werden.",
+                reason="confirmation_required",
+            )
+        with (
+            self._export_lock,
+            self._database_lock,
+            self._database_manager().unit_of_work() as db,
+        ):
+            self._key_values.set(
+                db,
+                "garmin_metric_export_enabled",
+                "true" if payload["enabled"] else "false",
+            )
+        return {"enabled": payload["enabled"]}
+
+    def sync_garmin(self) -> dict[str, Any] | None:
+        """Apply Garmin measurements, preserving later changes at Intervals.icu.
+
+        This internal sync entry point never accepts HTTP/Coach payloads. The
+        first transfer protects unknown existing target values; later transfers compare
+        the live target against the last accepted value, including across restarts.
+        """
+        with self._export_lock:
+            with self._database_manager().reader() as db:
+                if self._key_values.get(db, "garmin_metric_export_enabled") != "true":
+                    return None
+            target = ProviderId.INTERVALS
+            port = self._port(target)
+            candidates = self._candidates(
+                target, port, source_provider=ProviderId.GARMIN
+            )
+            groups: dict[str, list[_Candidate]] = {}
+            conflicts = 0
+            for candidate in candidates:
+                if candidate.status == UNCHANGED:
+                    self._record(target, port, [candidate])
+                elif candidate.status == ALREADY_EXPORTED or self._automatic_conflict(
+                    target, candidate
+                ):
+                    conflicts += 1
+                elif candidate.status == READY:
+                    groups.setdefault(candidate.record, []).append(candidate)
+            items: list[dict[str, Any]] = []
+            for group in groups.values():
+                # Re-read immediately before writing, just like the manual preview.
+                try:
+                    current = self._read_record(
+                        target, port, group[0].field, group[0].source
+                    )
+                except AppError:
+                    items.extend(
+                        self._group_items(group, "target_unavailable", "Intervals.icu")
+                    )
+                    continue
+                stable = [
+                    item
+                    for item in group
+                    if _same_remote(current.get(item.field.field), item.remote)
+                ]
+                conflicts += len(group) - len(stable)
+                if not stable:
+                    continue
+                failure = self._write(port, stable, recalc_hr_zones=False)
+                if failure is None:
+                    self._record(target, port, stable)
+                items.extend(self._group_items(stable, failure, "Intervals.icu"))
+            exported = sum(item["status"] == EXPORTED for item in items)
+            return {
+                "exported": exported,
+                "failed": len(items) - exported,
+                "conflicts": conflicts,
+            }
+
+    @staticmethod
+    def _baseline_key(target: ProviderId, candidate: _Candidate) -> str:
+        return f"metric_export_baseline:{target.value}:{candidate.remote_id}"
+
+    def _automatic_conflict(self, target: ProviderId, candidate: _Candidate) -> bool:
+        with self._database_manager().reader() as db:
+            raw = self._key_values.get(db, self._baseline_key(target, candidate))
+        if raw is None:
+            return candidate.remote is not None
+        baseline = json.loads(raw)
+        return baseline["record"] == candidate.record and not _same_remote(
+            candidate.remote, baseline["value"]
+        )
 
     def _validated_request(
         self, payload: Mapping[str, Any]
@@ -319,7 +431,11 @@ class MetricExportService:
         return requested
 
     def _candidates(
-        self, target: ProviderId, port: MetricExportPort
+        self,
+        target: ProviderId,
+        port: MetricExportPort,
+        *,
+        source_provider: ProviderId | None = None,
     ) -> list[_Candidate]:
         kinds = self._registry.get(target.value).metric_exports
         start = self._today() - timedelta(days=_LOOKBACK_DAYS)
@@ -328,7 +444,23 @@ class MetricExportService:
         with self._database_manager().reader() as db:
             for kind in sorted(kinds, key=lambda item: item.value):
                 sources = self._sources(
-                    reader.observations(db, kind, start=start), target, port
+                    (
+                        item
+                        for item in reader.observations(
+                            db, kind, start=start, end=self._today()
+                        )
+                        if source_provider is None
+                        or (
+                            item.provenance.provider is source_provider
+                            and item.provenance.source_kind
+                            in {
+                                SourceKind.PROVIDER_REPORTED,
+                                SourceKind.DEVICE_MEASURED,
+                            }
+                        )
+                    ),
+                    target,
+                    port,
                 )
                 for key, (field, source) in sorted(sources.items()):
                     offered.append(
@@ -348,7 +480,9 @@ class MetricExportService:
             if record not in records:
                 records[record] = self._read_record(target, port, field, source)
             remote = records[record].get(field.field)
-            if remote is not None and _same_value(remote, source.value.value):
+            if remote is not None and _same_value(
+                remote, port.normalize_value(field, source.value.value)
+            ):
                 status = UNCHANGED
             elif exported:
                 status = ALREADY_EXPORTED
@@ -399,7 +533,8 @@ class MetricExportService:
         return (
             link is not None
             and link.sync_state is RemoteLinkState.SYNCED
-            and link.baseline_hash == _baseline(remote_id, source.value.value)
+            and link.baseline_hash
+            == _baseline(remote_id, port.normalize_value(field, source.value.value))
         )
 
     def _read_record(
@@ -475,10 +610,18 @@ class MetricExportService:
             return "request_failed"
         return None
 
-    def _record(self, target: ProviderId, group: Sequence[_Candidate]) -> None:
+    def _record(
+        self, target: ProviderId, port: MetricExportPort, group: Sequence[_Candidate]
+    ) -> None:
         synced_at = self._utc_now().isoformat()
         with self._database_lock, self._database_manager().unit_of_work() as db:
             for candidate in group:
+                sent_value = port.normalize_value(candidate.field, candidate.value)
+                self._key_values.set(
+                    db,
+                    self._baseline_key(target, candidate),
+                    json.dumps({"record": candidate.record, "value": sent_value}),
+                )
                 local_id = observation_natural_key(candidate.source)
                 # A field holds one value, so a newer export takes over its link.
                 holder = self._links.get_by_remote_id(
@@ -496,7 +639,7 @@ class MetricExportService:
                         provider=target.value,
                         sync_state=RemoteLinkState.SYNCED,
                         remote_id=candidate.remote_id,
-                        baseline_hash=_baseline(candidate.remote_id, candidate.value),
+                        baseline_hash=_baseline(candidate.remote_id, sent_value),
                         last_synced_at=synced_at,
                     ),
                 )
