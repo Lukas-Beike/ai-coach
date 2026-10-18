@@ -88,7 +88,8 @@ class CoachStructuredResponseService:
                 },
             )
 
-        for attempt in range(3):
+        attempt = 0
+        while attempt < 3:
             raise_if_chat_cancelled(cancel_event)
             try:
                 response = self._send(
@@ -109,29 +110,31 @@ class CoachStructuredResponseService:
                     cancel_event,
                     background_owned=background_owned,
                 )
-                if resumed is not None:
-                    return resumed
-                if self._recovery.recover_if_invalid(
-                    exc,
-                    payload,
-                    request_payload,
-                    context=context,
-                    message=message,
-                    command_receipts=command_receipts,
-                    attachments=attachments,
-                    client_turn_id=client_turn_id,
-                    recovery_state=recovery_state,
-                    request_delta_emitted=state.request_delta_emitted,
-                    attempt=attempt,
-                ):
+                if resumed is None:
+                    if not self._recovery.recover_if_invalid(
+                        exc,
+                        payload,
+                        request_payload,
+                        context=context,
+                        message=message,
+                        command_receipts=command_receipts,
+                        attachments=attachments,
+                        client_turn_id=client_turn_id,
+                        recovery_state=recovery_state,
+                        request_delta_emitted=state.request_delta_emitted,
+                        attempt=attempt,
+                    ):
+                        self._wait_before_retry(exc, state, cancel_event, attempt)
                     state.resume_id = ""
+                    attempt += 1
                     continue
-                self._wait_before_retry(exc, state, cancel_event, attempt)
-                continue
-            if attempt == 2 or not self._spent_on_reasoning(response, payload, state):
+                response = resumed
+            if not self._spent_on_reasoning(response, payload, state):
                 return response
             # Reasoning used the whole budget before any text or tool call, so
             # nothing was streamed or executed and the request can be repeated.
+            # The larger-budget request does not consume a transport retry, so
+            # it is always sent even after earlier retryable failures.
             limit = self._reasoning_retry_max_output_tokens
             payload = {**payload, "max_output_tokens": limit}
             request_payload["max_output_tokens"] = limit
