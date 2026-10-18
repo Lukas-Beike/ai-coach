@@ -10,7 +10,7 @@ from unittest.mock import Mock
 from activity_row_support import FixedActivityRows
 
 from backend.activities.detail_store import ActivityDetailStore
-from backend.errors import AppError
+from backend.errors import AppError, ProviderErrorClassifier, provider_error
 from backend.sync.activity_details import (
     MAX_STREAM_POINTS,
     ActivityDetailRefreshService,
@@ -220,17 +220,45 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertIsNotNone(self.store.get("a03"))
         self.assertNotIn("Synthetic invalid streams", "\n".join(logs.output))
 
-    def test_authentication_failure_stops_the_run(self):
+    def run_with_failure_on_a11(self, error):
+        self.api.get.reset_mock()
+        with self.manager.unit_of_work() as db:
+            db.execute("DELETE FROM kv")
+
         def failing(path, params):
             if "a11" in path:
-                raise AppError(502, "Synthetic auth", reason="upstream_auth")
+                raise error
             return self.provider(path, params)
 
         self.api.get.side_effect = failing
         with self.assertLogs("backend.sync.activity_details", "WARNING"):
-            result = self.service().prefetch_recent()
-        self.assertEqual({"fetched": 1, "failed": 1}, result)
-        self.assertEqual(["a12", "a11"], self.fetched_ids())
+            return self.service().prefetch_recent()
+
+    def test_missing_remote_activity_is_skipped(self):
+        error = ProviderErrorClassifier.classify_upstream(
+            "Synthetic not found", upstream_status=404, reason="provider_http_error"
+        )
+        self.assertEqual(
+            {"fetched": 9, "failed": 1}, self.run_with_failure_on_a11(error)
+        )
+
+    def test_provider_wide_failures_stop_the_run(self):
+        for upstream_status in (401, 403, 503):
+            with self.subTest(upstream_status=upstream_status):
+                error = ProviderErrorClassifier.classify_upstream(
+                    "Synthetic upstream",
+                    upstream_status=upstream_status,
+                    reason="provider_http_error",
+                )
+                self.assertEqual(
+                    {"fetched": 1, "failed": 1}, self.run_with_failure_on_a11(error)
+                )
+                self.assertEqual(["a12", "a11"], self.fetched_ids())
+        with self.subTest("network"):
+            self.assertEqual(
+                {"fetched": 1, "failed": 1},
+                self.run_with_failure_on_a11(provider_error("intervals", "network")),
+            )
 
     def test_rate_limit_stops_without_raising(self):
         def failing(path, params):

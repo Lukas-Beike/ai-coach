@@ -27,7 +27,7 @@ from backend.activities.detail_projection import (
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.canonical.activity_detail import MAX_STREAM_POINTS
-from backend.errors import AppError
+from backend.errors import AppError, public_error_contract
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 from backend.planning.target_snapshot import freeze_targets
@@ -213,11 +213,12 @@ def _activity_specific_failure(error: Exception) -> bool:
     """Whether a refresh failed for this activity alone, not the provider."""
     if isinstance(error, ValueError):
         return True
-    return (
-        isinstance(error, AppError)
-        and error.status == 502
-        and error.reason != "upstream_auth"
-    )
+    if not isinstance(error, AppError):
+        return False
+    status, reason = public_error_contract(error)
+    if error.upstream_status is not None:
+        return reason in {"upstream_not_found", "upstream_rejected"}
+    return status == 502 and reason != "provider_network_error"
 
 
 def _validate_time_axis(streams: dict[str, list[Any]]) -> None:
