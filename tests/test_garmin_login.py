@@ -12,9 +12,10 @@ import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from backend.config import load_config
+from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.http_api.garmin_post import (
@@ -144,8 +145,10 @@ class GarminLoginTests(unittest.TestCase):
         self.next_client: FakeClient = FakeClient()
         self.factory_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self.tokens = GarminTokenStore(
-            database_manager=lambda: FakeManager(self.connection),
-            database_lock=lambda: nullcontext(),
+            database_manager=lambda: cast(
+                DatabaseManager, FakeManager(self.connection)
+            ),
+            database_lock=nullcontext,
             key_values=self.key_values,
             tokenstore_path=lambda: str(self.tokenstore),
             registry=self.registry,

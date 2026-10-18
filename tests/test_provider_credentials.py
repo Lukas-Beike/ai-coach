@@ -13,11 +13,13 @@ import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
+from typing import cast
 
 from backend import privacy
 from backend import provider_credentials as credentials_module
 from backend.backup import export
 from backend.config import load_config
+from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.http_api.credentials_put import CredentialsPutRoutes
@@ -79,8 +81,10 @@ class ProviderCredentialTests(unittest.TestCase):
         self.holder = {"config": self.env_config}
         self.service = ProviderCredentialService(
             env_config=self.env_config,
-            database_manager=lambda: FakeManager(self.connection),
-            database_lock=lambda: nullcontext(),
+            database_manager=lambda: cast(
+                DatabaseManager, FakeManager(self.connection)
+            ),
+            database_lock=nullcontext,
             key_values=KeyValueRepository(lambda: "2026-10-18T00:00:00Z"),
             apply_config=self._apply,
             current_config=lambda: self.holder["config"],
