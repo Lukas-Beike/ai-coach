@@ -330,7 +330,7 @@ async function configureAutomaticMetricExport(enabled, button) {
   if (!await requestConfirmation(message, { title: enabled ? "Automatischen Abgleich aktivieren?" : "Automatischen Abgleich deaktivieren?" })) return;
   button.disabled = true;
   try {
-    await api("/api/metric-export/automatic", { method: "POST", body: JSON.stringify({ enabled, confirmed: true, source: "garmin", provider: "intervals" }) });
+    await api("/api/metric-export/automatic", { method: "POST", body: JSON.stringify({ enabled, confirmed: true, source: providerIds().garmin, provider: providerIds().intervals }) });
     await load();
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; }

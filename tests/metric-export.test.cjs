@@ -42,6 +42,7 @@ test("confirmed automatic consent names Garmin and Intervals.icu and reloads sta
   let loads = 0;
   const context = vm.createContext({
     requestConfirmation: async () => true,
+    providerIds: () => ({ garmin: "garmin", intervals: "intervals" }),
     api: async (route, options) => calls.push({ route, body: JSON.parse(options.body) }),
     load: async () => { loads++; },
     toast: (message) => assert.fail(message),

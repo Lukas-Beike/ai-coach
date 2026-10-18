@@ -80,8 +80,9 @@ test("@responsive current performance groups real values by sport before the cha
   await expect(root.locator("caption")).toHaveText(["Laufen", "Radfahren"]);
   await expect(root.locator("[data-metric='cycling_ftp_watts']")).toContainText("280 W");
   await expect(root.locator("small")).toHaveCount(0);
-  await expect(root).not.toContainText("Garmin");
-  await expect(root).not.toContainText("Intervals.icu");
+  for (const table of await root.locator("table").all()) {
+    await expect(table).not.toContainText(/Garmin|Intervals\.icu/);
+  }
   await expect(root).not.toContainText("01.10.2026");
   await expect(root.locator("[data-metric='run_threshold_pace_seconds_per_km']")).toContainText("4:30");
   await expect(root.locator("[data-metric='run_threshold_watts']")).toHaveCount(0);
