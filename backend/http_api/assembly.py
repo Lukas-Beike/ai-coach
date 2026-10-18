@@ -24,6 +24,7 @@ from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.equipment_post import EquipmentPostRoutes
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.feedback_post import FeedbackPostRoutes
+from backend.http_api.garmin_post import GarminPostRoutes
 from backend.http_api.handler import (
     HttpRequestHandlerDependencies,
     create_request_handler,
@@ -266,6 +267,7 @@ class HttpDomainRouteServices:
     wahoo: Callable[[], Any] | None = None
     metric_export: Callable[[], Any] | None = None
     provider_credentials: Any | None = None
+    garmin_login: Callable[[], Any] | None = None
 
 
 class HttpApiAssembly:
@@ -577,6 +579,10 @@ class HttpApiAssembly:
             if wahoo_connection_service
             else None
         )
+        garmin_login_service = dependencies.domains.garmin_login
+        self.garmin_post_routes = (
+            GarminPostRoutes(garmin_login_service) if garmin_login_service else None
+        )
         self.metric_export_post_routes = (
             MetricExportPostRoutes(metric_export_service)
             if metric_export_service
@@ -627,6 +633,7 @@ class HttpApiAssembly:
             self.equipment_post_routes,
             self.wahoo_post_routes,
             self.metric_export_post_routes,
+            self.garmin_post_routes,
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,

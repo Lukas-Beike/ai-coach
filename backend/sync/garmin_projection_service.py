@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from backend.activities.duplicates import filter_garmin_activities
@@ -18,6 +17,7 @@ from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import garmin_projection
 from backend.performance.garmin_canonical import GarminCanonicalState, read_garmin_state
 from backend.performance.morning_battery_service import MorningBodyBatteryService
+from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
 from backend.runtime.ports import ActivityRowReader, ObservationReader
 from backend.sync.garmin import GarminPayloadService, GarminSyncStateService
@@ -128,6 +128,10 @@ class GarminProjectionService:
         parsed_error = self._redactor.sanitize_log_value(parsed_error)
         with self._database_manager.reader() as db:
             last_sync_at = self._key_value_repository.get(db, "last_garmin_sync_at")
+            tokens_connected = garmin_tokens_connected(
+                lambda key: self._key_value_repository.get(db, key),
+                self._config.garmin_tokenstore,
+            )
         recovery = _recovery_presence(snapshot, state)
 
         return {
@@ -135,7 +139,7 @@ class GarminProjectionService:
             "configured": bool(
                 self._config.garmin_fixture_path
                 or self._config.garmin_email
-                or Path(self._config.garmin_tokenstore).exists()
+                or tokens_connected
             ),
             "source": snapshot.get("source")
             or ("library" if self._garmin_client_factory.available() else None),

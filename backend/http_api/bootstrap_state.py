@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from backend.canonical.public_metrics import neutral_calendar_entries
 from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
-from backend.provider_credentials import WAHOO_TOKENS_KEY
+from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
 from backend.sync.intervals_state import latest_library_timestamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.wahoo_connection import connection_status
@@ -89,7 +88,10 @@ class PublicBootstrapService:
                 garmin_has_core_error=bool(
                     deps.garmin_sync_state_service().core_error_entries()
                 ),
-                garmin_tokenstore_exists=Path(deps.config.garmin_tokenstore).exists(),
+                garmin_tokenstore_exists=garmin_tokens_connected(
+                    lambda key: deps.key_values.get_in_transaction(db, key),
+                    deps.config.garmin_tokenstore,
+                ),
                 read_only=True,
             )
             jobs = deps.sync_job_queue_service().list()

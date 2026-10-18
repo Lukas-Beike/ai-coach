@@ -6,7 +6,6 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from backend.canonical.public_metrics import neutral_activity_records
@@ -22,7 +21,7 @@ from backend.http_api.state_prelude import (
     PublicStateWeatherPrelude,
 )
 from backend.planning import season as planning_season
-from backend.provider_credentials import WAHOO_TOKENS_KEY
+from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
 from backend.runtime.ports import ProviderStateReader
 from backend.sync import intervals_state
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
@@ -139,7 +138,10 @@ class PublicStateService:
             freshness = deps.provider_freshness.current(
                 profile=deps.profile.get(),
                 garmin_has_core_error=bool(deps.garmin_sync_state.core_error_entries()),
-                garmin_tokenstore_exists=Path(deps.config.garmin_tokenstore).exists(),
+                garmin_tokenstore_exists=garmin_tokens_connected(
+                    lambda key: self._get_value(key, deps.database_manager()),
+                    deps.config.garmin_tokenstore,
+                ),
                 read_only=True,
             )
             sync = deps.sync_public_state.browser_state(freshness=freshness)

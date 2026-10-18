@@ -15,6 +15,7 @@ from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 from backend.http_api.diagnostics_delete_post import DiagnosticsDeletePostRoutes
 from backend.http_api.equipment_post import EquipmentPostRoutes
 from backend.http_api.feedback_post import FeedbackPostRoutes
+from backend.http_api.garmin_post import GarminPostRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.metric_export_post import MetricExportPostRoutes
 from backend.http_api.nutrition import NutritionPostRoutes
@@ -45,6 +46,7 @@ class HttpAuthenticatedPostRoutes:
     equipment: EquipmentPostRoutes | None = None
     wahoo: WahooPostRoutes | None = None
     metric_export: MetricExportPostRoutes | None = None
+    garmin: GarminPostRoutes | None = None
 
 
 class HttpPostDispatcher:
@@ -75,6 +77,7 @@ class HttpPostDispatcher:
         self._equipment = authenticated_routes.equipment
         self._wahoo = authenticated_routes.wahoo
         self._metric_export = authenticated_routes.metric_export
+        self._garmin = authenticated_routes.garmin
 
     def handle_before_auth(self, handler: Any, path: str) -> bool:
         return self._auth_routes.handle(handler, path) or self._restore_route.handle(
@@ -121,6 +124,11 @@ class HttpPostDispatcher:
     def _handle_optional(self, handler: Any, path: str) -> bool:
         return any(
             route.handle(handler, path)
-            for route in (self._equipment, self._wahoo, self._metric_export)
+            for route in (
+                self._equipment,
+                self._wahoo,
+                self._metric_export,
+                self._garmin,
+            )
             if route is not None
         )

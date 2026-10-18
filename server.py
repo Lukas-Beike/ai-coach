@@ -342,6 +342,11 @@ from backend.sync.garmin_assembly import (
     GarminSyncControl,
     GarminSyncTelemetry,
 )
+from backend.sync.garmin_login import (
+    GarminLoginService,
+    GarminSecretRegistry,
+    GarminTokenStore,
+)
 from backend.sync.garmin_projection_service import GarminCanonicalSources
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
@@ -479,7 +484,10 @@ CONFIG_GENERATION = 0
 
 
 LOGGER = logging.getLogger("intervals_coach")
-REDACTOR = observability.Redactor(lambda: CONFIG)
+GARMIN_SECRET_REGISTRY = GarminSecretRegistry()
+REDACTOR = observability.Redactor(
+    lambda: CONFIG, extra_secrets=GARMIN_SECRET_REGISTRY.values
+)
 
 
 KEY_VALUE_REPOSITORY = KeyValueRepository(runtime_clock.utc_now)
@@ -631,6 +639,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
                 ATHLETE_CLOCK,
                 DIAGNOSTIC_CAPTURE,
                 LOGGER,
+                garmin_tokens=GARMIN_TOKENS,
             ),
             observability.safe_diagnostic_error,
         ),
@@ -918,6 +927,7 @@ PROVIDER_CREDENTIAL_SERVICE = ProviderCredentialService(
     database_lock=lambda: DB_LOCK,
     key_values=KEY_VALUE_REPOSITORY,
     apply_config=apply_runtime_config,
+    garmin_connection=lambda: GARMIN_LOGIN.status(),
 )
 
 
@@ -956,6 +966,22 @@ def sync_daily_markers() -> DailySyncMarkerService:
     return SYNC_PERSISTENCE.daily_markers(registry=provider_runtime().static)
 
 
+GARMIN_TOKENS = GarminTokenStore(
+    database_manager=database_manager,
+    database_lock=lambda: DB_LOCK,
+    key_values=KEY_VALUE_REPOSITORY,
+    tokenstore_path=lambda: CONFIG.garmin_tokenstore,
+    registry=GARMIN_SECRET_REGISTRY,
+    env_credentials=lambda: bool(CONFIG.garmin_email and CONFIG.garmin_password),
+)
+GARMIN_LOGIN = GarminLoginService(
+    config=lambda: CONFIG,
+    client_factory=lambda email, password, **options: (
+        GARMIN_ASSEMBLY.client_factory().create(email, password, **options)
+    ),
+    tokens=GARMIN_TOKENS,
+    registry=GARMIN_SECRET_REGISTRY,
+)
 GARMIN_ASSEMBLY = GarminAssembly(
     dependencies=GarminAssembly.Inputs(
         provider=GarminProviderSettings(
@@ -993,6 +1019,7 @@ GARMIN_ASSEMBLY = GarminAssembly(
             activity_rows=lambda: CANONICAL_READ,
             observations=lambda: CANONICAL_READ,
         ),
+        tokens=GARMIN_TOKENS,
     )
 )
 
@@ -2100,6 +2127,7 @@ HTTP_API = HttpApiAssembly(
             wahoo=WAHOO_CONNECTION.service,
             metric_export=lambda: METRIC_EXPORT,
             provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
+            garmin_login=lambda: GARMIN_LOGIN,
         ),
     ),
 )

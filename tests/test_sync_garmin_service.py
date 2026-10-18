@@ -604,7 +604,9 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
                 "safe-result",
             )
 
-        self.factory.create.assert_called_once_with("athlete@example.invalid", "secret")
+        self.factory.create.assert_called_once_with(
+            "athlete@example.invalid", "secret", return_on_mfa=True
+        )
         self.profile.get.assert_called_once_with()
         external_call.assert_called_once()
         self.assertIs(

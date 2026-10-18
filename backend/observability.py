@@ -13,7 +13,7 @@ import logging
 import re
 import sys
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -373,8 +373,15 @@ def sanitized_provider_payload(value: Any) -> Any:
 class Redactor:
     """Redact secrets and sensitive provider metadata from values and errors."""
 
-    def __init__(self, config_supplier: Callable[[], Config]) -> None:
+    def __init__(
+        self,
+        config_supplier: Callable[[], Config],
+        extra_secrets: Callable[[], Iterable[str]] | None = None,
+    ) -> None:
         self._config_supplier = config_supplier
+        # Runtime-only secrets (for example Garmin OAuth tokens held in the
+        # database) that are not part of the Config object.
+        self._extra_secrets = extra_secrets
 
     def safe_calendar_url(self) -> str:
         config = self._config_supplier()
@@ -418,7 +425,8 @@ class Redactor:
             getattr(config, "app_password", ""),
             getattr(config, "wahoo_client_secret", ""),
         )
-        for secret_value in secret_values:
+        extra_values = tuple(self._extra_secrets()) if self._extra_secrets else ()
+        for secret_value in (*secret_values, *extra_values):
             for pattern in _secret_patterns(str(secret_value or "")):
                 redacted = pattern.sub(_REDACTED, redacted)
         redacted = re.sub(

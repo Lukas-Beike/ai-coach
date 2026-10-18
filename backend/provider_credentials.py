@@ -18,6 +18,7 @@ import json
 import logging
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
+from pathlib import Path
 from typing import Any
 
 from backend.canonical.vocabulary import ProviderId
@@ -30,13 +31,17 @@ _LOGGER = logging.getLogger(__name__)
 
 PROVIDER_CREDENTIALS_KEY = "provider_credentials"
 GARMIN_TOKENS_KEY = "garmin_oauth_tokens"
+# "disconnected" after an explicit disconnect, so a preserved legacy token file
+# is not imported again on the next sync.
+GARMIN_TOKENSTORE_STATE_KEY = "garmin_tokenstore_state"
+GARMIN_TOKENSTORE_DISCONNECTED = "disconnected"
 WAHOO_TOKENS_KEY = f"{ProviderId.WAHOO.value}_oauth_tokens"
 WAHOO_STATE_KEY = f"{ProviderId.WAHOO.value}_oauth_state"
 # Keys that must never leave the database through export, diagnostics or context.
 WAHOO_SECRET_KEYS = frozenset({WAHOO_TOKENS_KEY, WAHOO_STATE_KEY})
-CREDENTIAL_KV_KEYS = frozenset({PROVIDER_CREDENTIALS_KEY, GARMIN_TOKENS_KEY}) | (
-    WAHOO_SECRET_KEYS
-)
+CREDENTIAL_KV_KEYS = frozenset(
+    {PROVIDER_CREDENTIALS_KEY, GARMIN_TOKENS_KEY, GARMIN_TOKENSTORE_STATE_KEY}
+) | (WAHOO_SECRET_KEYS)
 
 # Secret values: never returned, only their source and presence.
 SECRET_FIELDS = frozenset(
@@ -54,6 +59,11 @@ MAX_VALUE_LENGTH = 4096
 SOURCE_DB = "db"
 SOURCE_ENV = "env"
 SOURCE_NONE = "none"
+# Garmin connection sources: where the login tokens currently come from.
+GARMIN_SOURCE_DB = "db"
+GARMIN_SOURCE_FILE = "file"
+GARMIN_SOURCE_ENV = "env"
+GARMIN_SOURCE_NONE = "none"
 
 
 def _is_control(char: str) -> bool:
@@ -106,7 +116,7 @@ def credential_status(
     env_config: Config,
     stored: Mapping[str, str],
     *,
-    garmin_tokens_present: bool,
+    garmin_source: str = GARMIN_SOURCE_NONE,
 ) -> dict[str, Any]:
     """Project per-field source and presence without any secret value."""
     effective = effective_config(env_config, stored)
@@ -127,7 +137,8 @@ def credential_status(
         fields[field] = entry
     return {
         "fields": fields,
-        "garmin_connected": bool(garmin_tokens_present),
+        "garmin_connected": garmin_source in {GARMIN_SOURCE_DB, GARMIN_SOURCE_FILE},
+        "garmin_connection_source": garmin_source,
         "openai_configured": bool(effective.openai_api_key.strip()),
         "intervals_configured": bool(
             effective.intervals_api_key.strip()
@@ -135,6 +146,21 @@ def credential_status(
         ),
         "wahoo_configured": effective.wahoo_configured,
     }
+
+
+def garmin_tokens_connected(
+    read_value: Callable[[str], str | None], tokenstore_path: str
+) -> bool:
+    """Configured signal: a DB token exists, or an un-imported legacy file does.
+
+    Mirrors ``GarminTokenStore.source()`` without requiring a live store, so
+    read-only status sites can use the same rule as the login service.
+    """
+    if (read_value(GARMIN_TOKENS_KEY) or "").strip():
+        return True
+    if read_value(GARMIN_TOKENSTORE_STATE_KEY) == GARMIN_TOKENSTORE_DISCONNECTED:
+        return False
+    return Path(tokenstore_path).exists()
 
 
 def _validated_change(field: str, value: object) -> str | None:
@@ -178,12 +204,14 @@ class ProviderCredentialService:
         database_lock: Callable[[], AbstractContextManager[Any]],
         key_values: KeyValueRepository,
         apply_config: Callable[[Config], None],
+        garmin_connection: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._env_config = env_config
         self._database_manager = database_manager
         self._database_lock = database_lock
         self._key_values = key_values
         self._apply_config = apply_config
+        self._garmin_connection = garmin_connection
 
     def _read_stored(self) -> dict[str, str]:
         with self._database_manager().reader() as db:
@@ -191,16 +219,31 @@ class ProviderCredentialService:
                 self._key_values.get(db, PROVIDER_CREDENTIALS_KEY)
             )
 
-    def _garmin_tokens_present(self) -> bool:
+    def _garmin_status(self) -> dict[str, Any]:
+        if self._garmin_connection is not None:
+            return self._garmin_connection()
         with self._database_manager().reader() as db:
-            return bool(self._key_values.get(db, GARMIN_TOKENS_KEY))
+            source = (
+                GARMIN_SOURCE_DB
+                if self._key_values.get(db, GARMIN_TOKENS_KEY)
+                else GARMIN_SOURCE_NONE
+            )
+        return {
+            "connected": source == GARMIN_SOURCE_DB,
+            "source": source,
+            "mfa_pending": False,
+        }
 
     def status(self) -> dict[str, Any]:
-        return credential_status(
-            self._env_config,
-            self._read_stored(),
-            garmin_tokens_present=self._garmin_tokens_present(),
-        )
+        garmin = self._garmin_status()
+        return {
+            **credential_status(
+                self._env_config,
+                self._read_stored(),
+                garmin_source=str(garmin.get("source") or GARMIN_SOURCE_NONE),
+            ),
+            "garmin_connection": garmin,
+        }
 
     def refresh(self) -> Config:
         """Recompute the runtime configuration from env plus stored credentials."""

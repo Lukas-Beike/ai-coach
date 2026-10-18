@@ -6,7 +6,6 @@ import platform
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
 from typing import Any
 
 from backend.athlete.profile import ProfileService
@@ -29,6 +28,7 @@ from backend.diagnostics.canonical_read import (
 from backend.diagnostics.history import CoachDiagnosticHistoryService
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.observability import DiagnosticCapture, Redactor
+from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.state import ProviderStateService
 from backend.runtime.ports import (
@@ -172,9 +172,10 @@ class DiagnosticReportService:
                     garmin_has_core_error=bool(
                         deps.garmin_sync_state.core_error_entries()
                     ),
-                    garmin_tokenstore_exists=Path(
-                        deps.config.garmin_tokenstore
-                    ).exists(),
+                    garmin_tokenstore_exists=garmin_tokens_connected(
+                        lambda key: deps.key_values.get(db, key),
+                        deps.config.garmin_tokenstore,
+                    ),
                     read_only=True,
                 ),
                 "external_calendar": {

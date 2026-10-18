@@ -24,6 +24,7 @@ from backend.http_api.credentials_put import CredentialsPutRoutes
 from backend.provider_credentials import (
     CREDENTIAL_KV_KEYS,
     GARMIN_TOKENS_KEY,
+    GARMIN_TOKENSTORE_STATE_KEY,
     PROVIDER_CREDENTIALS_KEY,
     WAHOO_STATE_KEY,
     WAHOO_TOKENS_KEY,
@@ -172,7 +173,7 @@ class ProviderCredentialTests(unittest.TestCase):
 
     def test_status_reports_none_when_neither_db_nor_env_is_set(self):
         config = dataclasses.replace(self.env_config, wahoo_client_secret="")
-        status = credential_status(config, {}, garmin_tokens_present=False)
+        status = credential_status(config, {})
         self.assertEqual(
             status["fields"]["wahoo_client_secret"],
             {"source": "none", "configured": False},
@@ -186,7 +187,21 @@ class ProviderCredentialTests(unittest.TestCase):
         )
         status = self.service.status()
         self.assertTrue(status["garmin_connected"])
+        self.assertEqual(
+            status["garmin_connection"],
+            {"connected": True, "source": "db", "mfa_pending": False},
+        )
         self.assertNotIn("synthetic", json.dumps(status))
+
+    def test_garmin_connection_supplier_drives_the_status(self):
+        self.service._garmin_connection = lambda: {
+            "connected": False,
+            "source": "none",
+            "mfa_pending": True,
+        }
+        status = self.service.status()
+        self.assertFalse(status["garmin_connected"])
+        self.assertTrue(status["garmin_connection"]["mfa_pending"])
 
     def test_wipe_then_refresh_returns_to_environment(self):
         self.service.update({"openai_api_key": "db-openai-key"})
@@ -201,6 +216,7 @@ class ProviderCredentialTests(unittest.TestCase):
                 {
                     PROVIDER_CREDENTIALS_KEY,
                     GARMIN_TOKENS_KEY,
+                    GARMIN_TOKENSTORE_STATE_KEY,
                     WAHOO_TOKENS_KEY,
                     WAHOO_STATE_KEY,
                 }

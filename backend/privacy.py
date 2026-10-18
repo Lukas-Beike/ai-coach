@@ -30,7 +30,11 @@ from backend.planning.competition_service import CompetitionService
 from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.training_plans import TrainingPlanService
-from backend.provider_credentials import CREDENTIAL_KV_KEYS
+from backend.provider_credentials import (
+    CREDENTIAL_KV_KEYS,
+    GARMIN_TOKENSTORE_DISCONNECTED,
+    GARMIN_TOKENSTORE_STATE_KEY,
+)
 from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.maintenance import MaintenanceGate
 from backend.weather import cache as weather_cache
@@ -203,7 +207,7 @@ PRIVACY_DELETE_SCOPE = (
     ("sessions", "Anmeldesitzungen", ("sessions",)),
     (
         "settings",
-        "Profil, Einstellungen, Zugangsdaten, Garmin-Tokens, Syncstatus und lokale Caches",
+        "Profil, Einstellungen, Zugangsdaten, Garmin-Verbindung und Garmin-Tokens, Syncstatus und lokale Caches",
         ("kv",),
     ),
     ("history", "Lokale Änderungshistorie", ("change_history",)),
@@ -342,6 +346,10 @@ class PrivacyDeleteService:
                 for table in deleted_tables:
                     db.execute(f"DELETE FROM {table}")
                 db.execute("DELETE FROM kv")
+                # Keep a preserved legacy Garmin token file from being re-imported.
+                dependencies.key_value_repository.set(
+                    db, GARMIN_TOKENSTORE_STATE_KEY, GARMIN_TOKENSTORE_DISCONNECTED
+                )
                 dependencies.key_value_repository.set(
                     db, "profile", json.dumps(DEFAULT_PROFILE)
                 )

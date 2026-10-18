@@ -78,6 +78,36 @@ provider-keyed.
 | PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile | CSRF |
 | PUT | `/api/athlete-context` | Replace profile and competitions | CSRF |
 | PUT | `/api/nutrition/entry` | Update a nutrition entry | CSRF |
+| PUT | `/api/settings/credentials` | Save or clear provider credentials stored in the encrypted database (see below) | CSRF |
+
+### Provider credentials and Garmin login
+
+These routes are reached from **Mehr > Anbindungen > Zugangsdaten**. They never
+return a secret: the response is the credential status only.
+
+- `PUT /api/settings/credentials` takes a JSON object whose keys are credential
+  fields (`openai_api_key`, `openai_base_url`, `intervals_api_key`,
+  `intervals_athlete_id`, `wahoo_client_id`, `wahoo_client_secret`). A string
+  stores the value; `null` or a blank string clears the value stored in the app,
+  so the environment value applies again. Each field is validated server-side.
+  The response is the credential status: per field `source` (`db`, `env` or
+  `none`), `configured`, and `value` only for non-secret fields, plus
+  `garmin_connected`, `openai_configured`, `intervals_configured`,
+  `wahoo_configured` and `garmin_connection` (`connected`, `source`,
+  `mfa_pending`).
+- `POST /api/garmin/login` takes `{"email": "...", "password": "..."}`. The
+  password is used once and never stored. The response is `{"status":
+  "connected"}` or `{"status": "mfa_required"}`, plus the current
+  `connected`, `source` and `mfa_pending` fields. An MFA challenge keeps its pending login on the
+  server until a code is submitted or a new login starts.
+- `POST /api/garmin/login/mfa` takes `{"code": "..."}` and completes the pending
+  login. The response is `{"status": "connected"}` with the same fields.
+- `POST /api/garmin/disconnect` takes an empty JSON object, deletes the stored
+  Garmin tokens and returns `{"status": "disconnected"}` with the same fields. Garmin data already stored
+  locally is kept.
+
+Each POST and PUT above requires the session cookie and `X-CSRF-Token`.
+Errors are JSON with a German `error` message and no secret or raw provider text.
 
 The former `/api/logs/clear` and `/api/diagnostics/clear` aliases are not
 registered. Static files and the application shell are served separately from

@@ -64,6 +64,30 @@ def refresh_morning_battery_after_sync(
     return morning_battery.refresh(cancel_event=cancel_event)
 
 
+GARMIN_MFA_REQUIRED_MESSAGE = (
+    "Garmin verlangt MFA. Bitte Garmin in den Zugangsdaten neu verbinden."
+)
+
+
+def _garmin_login_argument(config: Config, garmin_tokens: Any | None) -> str:
+    """Tokens from the database when stored, else the legacy file rules."""
+    if garmin_tokens is not None:
+        return garmin_tokens.login_argument()
+    return config.garmin_tokenstore
+
+
+def _garmin_tokenstore_present(config: Config, garmin_tokens: Any | None) -> bool:
+    if garmin_tokens is not None:
+        return garmin_tokens.connected()
+    return Path(config.garmin_tokenstore).exists()
+
+
+def _persist_garmin_tokens(garmin_tokens: Any | None, client: Any) -> None:
+    """Store refreshed or first-imported tokens after a successful collection."""
+    if garmin_tokens is not None:
+        garmin_tokens.write_back(client)
+
+
 class GarminRemoteReader:
     """Authenticate and collect one bounded Garmin SDK snapshot."""
 
@@ -80,6 +104,7 @@ class GarminRemoteReader:
         earliest_date: date,
         chunk_days: int,
         all_sync_days: int,
+        garmin_tokens: Any | None = None,
     ) -> None:
         self._config = config
         self._client_factory = client_factory
@@ -92,13 +117,15 @@ class GarminRemoteReader:
         self._earliest_date = earliest_date
         self._chunk_days = chunk_days
         self._all_sync_days = all_sync_days
+        self._garmin_tokens = garmin_tokens
 
     def available(self) -> bool:
         return self._client_factory.available()
 
     def configured(self) -> bool:
         return self.available() and bool(
-            self._config.garmin_email or Path(self._config.garmin_tokenstore).exists()
+            self._config.garmin_email
+            or _garmin_tokenstore_present(self._config, self._garmin_tokens)
         )
 
     def fetch(
@@ -121,7 +148,9 @@ class GarminRemoteReader:
         client = self._client_factory.create(
             self._config.garmin_email or None,
             self._config.garmin_password or None,
+            return_on_mfa=True,
         )
+        login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
 
         def call_external(
             service: str,
@@ -145,10 +174,12 @@ class GarminRemoteReader:
         mfa_status, _ = call_external(
             GARMIN_ID,
             "login",
-            lambda: client.login(self._config.garmin_tokenstore),
+            lambda: client.login(login_argument),
             {
                 "email_configured": bool(self._config.garmin_email),
-                "tokenstore_exists": Path(self._config.garmin_tokenstore).exists(),
+                "tokenstore_exists": _garmin_tokenstore_present(
+                    self._config, self._garmin_tokens
+                ),
             },
         )
         if mfa_status:
@@ -159,11 +190,7 @@ class GarminRemoteReader:
                     "context": {"service": GARMIN_ID, "operation": "login"},
                 },
             )
-            raise AppError(
-                401,
-                "Garmin verlangt MFA. Ein Tokenstore muss einmalig außerhalb "
-                "des Servers eingerichtet werden.",
-            )
+            raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
 
         payload = collect_garmin_data(
             client,
@@ -189,6 +216,7 @@ class GarminRemoteReader:
                 ),
             ),
         )
+        _persist_garmin_tokens(self._garmin_tokens, client)
         self._raise_if_cancelled(cancel_event)
         return payload, windows
 
@@ -219,6 +247,7 @@ class GarminMorningRemoteReader:
         athlete_clock: Any,
         diagnostic_capture: Any,
         logger: logging.Logger,
+        garmin_tokens: Any | None = None,
     ) -> None:
         self._config = config
         self._client_factory = client_factory
@@ -226,30 +255,37 @@ class GarminMorningRemoteReader:
         self._athlete_clock = athlete_clock
         self._diagnostic_capture = diagnostic_capture
         self._logger = logger
+        self._garmin_tokens = garmin_tokens
 
     def configured(self) -> bool:
         return self._client_factory.available() and bool(
-            self._config.garmin_email or Path(self._config.garmin_tokenstore).exists()
+            self._config.garmin_email
+            or _garmin_tokenstore_present(self._config, self._garmin_tokens)
         )
 
     def fetch(self, checkin_date: date) -> tuple[Any, Any]:
         client = self._client_factory.create(
             self._config.garmin_email or None,
             self._config.garmin_password or None,
+            return_on_mfa=True,
         )
         profile_timezone = timezone_name(self._profile_service.get().get("timezone"))
         fallback_zone = self._athlete_clock.now().tzinfo or timezone.utc
-        return garmin_morning.fetch_morning_body_battery(
+        result = garmin_morning.fetch_morning_body_battery(
             client,
             checkin_date,
-            tokenstore=self._config.garmin_tokenstore,
+            tokenstore=_garmin_login_argument(self._config, self._garmin_tokens),
             email_configured=bool(self._config.garmin_email),
-            tokenstore_exists=Path(self._config.garmin_tokenstore).exists(),
+            tokenstore_exists=_garmin_tokenstore_present(
+                self._config, self._garmin_tokens
+            ),
             profile_timezone=profile_timezone,
             fallback_zone=fallback_zone,
             external_call=self._external_call,
             sleep_bounds=performance_morning_battery.sleep_bounds,
         )
+        _persist_garmin_tokens(self._garmin_tokens, client)
+        return result
 
     def _external_call(
         self,
