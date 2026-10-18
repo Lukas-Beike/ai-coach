@@ -15,6 +15,11 @@ class MetricExportPostRoutes:
         self._metric_export = metric_export
 
     def handle(self, handler: Any, path: str) -> bool:
+        if path == "/api/metric-export/automatic":
+            handler.send_json(
+                200, self._metric_export().configure_automatic(handler.read_json())
+            )
+            return True
         if path == "/api/metric-export/preview":
             handler.send_json(200, self._metric_export().preview(handler.read_json()))
             return True

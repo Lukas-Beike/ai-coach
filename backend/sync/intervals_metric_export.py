@@ -88,6 +88,10 @@ class IntervalsMetricExport:
             raise ValueError("A sport-settings field needs a sport.")
         return f"{_SPORT_SETTINGS_RECORD}/{_SPORT_TYPES[field.sport]}"
 
+    @staticmethod
+    def normalize_value(field: MetricExportField, value: float) -> float:
+        return _remote_number(field.kind, value)
+
     def read_record(
         self, field: MetricExportField, observed_on: date
     ) -> dict[str, float]:
@@ -131,7 +135,7 @@ class IntervalsMetricExport:
         ):
             raise ValueError("One write must target one remote record.")
         fields: dict[str, Any] = {
-            item.field.field: _remote_number(item.field.kind, item.value)
+            item.field.field: self.normalize_value(item.field, item.value)
             for item in writes
         }
         client = self._client_factory()

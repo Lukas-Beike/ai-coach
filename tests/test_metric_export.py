@@ -262,6 +262,15 @@ class MetricExportServiceTests(unittest.TestCase):
             utc_now=lambda: NOW,
         )
 
+        self.service.configure_automatic(
+            {
+                "enabled": True,
+                "confirmed": True,
+                "source": "garmin",
+                "provider": "intervals",
+            }
+        )
+
     def add(self, *items: Observation) -> None:
         self.reader.items.extend(items)
 
@@ -293,6 +302,63 @@ class MetricExportServiceTests(unittest.TestCase):
             "intervals",
         )
 
+    def test_automatic_export_requires_persisted_named_consent(self):
+        self.database.db.execute(
+            "DELETE FROM kv WHERE key='garmin_metric_export_enabled'"
+        )
+        self.assertIsNone(self.service.sync_garmin())
+        self.service.configure_automatic(
+            {
+                "enabled": False,
+                "confirmed": True,
+                "source": "garmin",
+                "provider": "intervals",
+            }
+        )
+        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
+        self.assertIsNone(self.service.sync_garmin())
+        self.client_factory.assert_not_called()
+        for payload in (
+            {"enabled": True},
+            {
+                "enabled": True,
+                "confirmed": True,
+                "source": "garmin",
+                "provider": "wahoo",
+            },
+        ):
+            with self.assertRaises(AppError):
+                self.service.configure_automatic(payload)
+        self.assertIsNone(self.service.sync_garmin())
+
+    def test_new_wellness_day_preserves_existing_target_value(self):
+        self.add(obs(MetricKind.WEIGHT, 70, date(2026, 10, 10), ProviderId.GARMIN))
+        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.add(obs(MetricKind.WEIGHT, 71, TODAY, ProviderId.GARMIN))
+        self.wellness[TODAY.isoformat()] = {"weight": 72}
+        self.assertEqual(self.service.sync_garmin()["conflicts"], 1)
+        self.assertEqual(self.client.update_wellness.call_count, 1)
+
+    def test_normalized_body_fat_does_not_conflict_and_accepts_updates(self):
+        self.add(obs(MetricKind.BODY_FAT, 15.06, TODAY, ProviderId.GARMIN))
+        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.wellness[TODAY.isoformat()] = {"bodyFat": 15.1}
+        self.assertEqual(
+            self.service.sync_garmin(), {"exported": 0, "failed": 0, "conflicts": 0}
+        )
+        self.reader.items = [obs(MetricKind.BODY_FAT, 15.26, TODAY, ProviderId.GARMIN)]
+        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.assertEqual(
+            self.client.update_wellness.call_args.args,
+            (TODAY.isoformat(), {"bodyFat": 15.3}),
+        )
+
+    def test_initial_existing_setting_requires_an_accepted_baseline(self):
+        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
+        self.settings["Ride"] = {"ftp": 240}
+        self.assertEqual(self.service.sync_garmin()["conflicts"], 1)
+        self.client.update_sport_settings.assert_not_called()
+
     def test_a_late_read_failure_preserves_prior_success_and_other_groups(self):
         self.add(
             obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN),
@@ -301,9 +367,9 @@ class MetricExportServiceTests(unittest.TestCase):
             ),
         )
         self.client.get_sport_settings.side_effect = [
-            {"ftp": 240},
-            {"lthr": 150},
-            {"ftp": 240},
+            {},
+            {},
+            {},
             RuntimeError(RAW),
         ]
         with self.assertLogs("backend.sync.metric_export", "WARNING"):
@@ -316,13 +382,12 @@ class MetricExportServiceTests(unittest.TestCase):
 
     def test_automatic_garmin_export_is_idempotent_and_preserves_zones(self):
         self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
-        self.settings["Ride"] = {"ftp": 240}
         receipt = self.service.sync_garmin()
         self.assertEqual(receipt, {"exported": 1, "failed": 0, "conflicts": 0})
         self.client.update_sport_settings.assert_called_once_with(
             "Ride", {"ftp": 250}, recalc_hr_zones=False
         )
-        self.settings["Ride"]["ftp"] = 250
+        self.settings["Ride"] = {"ftp": 250}
         self.assertEqual(self.service.sync_garmin()["exported"], 0)
         self.assertEqual(self.client.update_sport_settings.call_count, 1)
 
@@ -400,7 +465,7 @@ class MetricExportServiceTests(unittest.TestCase):
 
     def test_target_change_during_automatic_export_is_not_overwritten(self):
         self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
-        self.client.get_sport_settings.side_effect = [{"ftp": 240}, {"ftp": 260}]
+        self.client.get_sport_settings.side_effect = [{}, {"ftp": 260}]
         self.assertEqual(self.service.sync_garmin()["conflicts"], 1)
         self.client.update_sport_settings.assert_not_called()
 
@@ -814,12 +879,35 @@ class MetricExportHttpTests(ServerTestCase):
         return response, data
 
     def test_routes_require_session_and_csrf(self):
-        for path in ("/api/metric-export/preview", "/api/metric-export/execute"):
+        for path in (
+            "/api/metric-export/preview",
+            "/api/metric-export/execute",
+            "/api/metric-export/automatic",
+        ):
             with self.subTest(path=path):
                 response, _ = self.call(path, session=False, csrf=False)
                 self.assertEqual(response.status, 401)
                 response, _ = self.call(path, csrf=False)
                 self.assertEqual(response.status, 403)
+        self.transport.assert_not_called()
+
+    def test_automatic_configuration_requires_explicit_source_target_and_confirmation(
+        self,
+    ):
+        response, _ = self.call("/api/metric-export/automatic", {"enabled": True})
+        self.assertEqual(response.status, 400)
+        for enabled in (True, False):
+            response, data = self.call(
+                "/api/metric-export/automatic",
+                {
+                    "enabled": enabled,
+                    "confirmed": True,
+                    "source": "garmin",
+                    "provider": "intervals",
+                },
+            )
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(data), {"enabled": enabled})
         self.transport.assert_not_called()
 
     def test_preview_and_unconfirmed_execute(self):

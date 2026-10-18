@@ -193,7 +193,7 @@ class MetricExportService:
                 port, group, recalc_hr_zones=recalc and group[0].field.zone_recalc
             )
             if failure is None:
-                self._record(target, group)
+                self._record(target, port, group)
             items.extend(self._group_items(group, failure, label))
         exported = sum(1 for item in items if item["status"] == EXPORTED)
         return {
@@ -206,14 +206,43 @@ class MetricExportService:
             "items": items,
         }
 
-    def sync_garmin(self) -> dict[str, Any]:
+    def configure_automatic(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Persist explicit athlete consent for the named automatic export."""
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("confirmed") is not True
+            or payload.get("provider") != ProviderId.INTERVALS.value
+            or payload.get("source") != ProviderId.GARMIN.value
+            or not isinstance(payload.get("enabled"), bool)
+        ):
+            raise AppError(
+                400,
+                "Der automatische Garmin-Abgleich mit Intervals.icu muss ausdrücklich bestätigt werden.",
+                reason="confirmation_required",
+            )
+        with (
+            self._export_lock,
+            self._database_lock,
+            self._database_manager().unit_of_work() as db,
+        ):
+            self._key_values.set(
+                db,
+                "garmin_metric_export_enabled",
+                "true" if payload["enabled"] else "false",
+            )
+        return {"enabled": payload["enabled"]}
+
+    def sync_garmin(self) -> dict[str, Any] | None:
         """Apply Garmin measurements, preserving later changes at Intervals.icu.
 
         This internal sync entry point never accepts HTTP/Coach payloads. The
-        first transfer establishes Garmin authority; subsequent transfers compare
+        first transfer protects unknown existing target values; later transfers compare
         the live target against the last accepted value, including across restarts.
         """
         with self._export_lock:
+            with self._database_manager().reader() as db:
+                if self._key_values.get(db, "garmin_metric_export_enabled") != "true":
+                    return None
             target = ProviderId.INTERVALS
             port = self._port(target)
             candidates = self._candidates(
@@ -222,12 +251,12 @@ class MetricExportService:
             groups: dict[str, list[_Candidate]] = {}
             conflicts = 0
             for candidate in candidates:
-                if candidate.status == ALREADY_EXPORTED or self._automatic_conflict(
+                if candidate.status == UNCHANGED:
+                    self._record(target, port, [candidate])
+                elif candidate.status == ALREADY_EXPORTED or self._automatic_conflict(
                     target, candidate
                 ):
                     conflicts += 1
-                elif candidate.status == UNCHANGED:
-                    self._record(target, [candidate])
                 elif candidate.status == READY:
                     groups.setdefault(candidate.record, []).append(candidate)
             items: list[dict[str, Any]] = []
@@ -252,7 +281,7 @@ class MetricExportService:
                     continue
                 failure = self._write(port, stable, recalc_hr_zones=False)
                 if failure is None:
-                    self._record(target, stable)
+                    self._record(target, port, stable)
                 items.extend(self._group_items(stable, failure, "Intervals.icu"))
             exported = sum(item["status"] == EXPORTED for item in items)
             return {
@@ -263,14 +292,13 @@ class MetricExportService:
 
     @staticmethod
     def _baseline_key(target: ProviderId, candidate: _Candidate) -> str:
-        # One entry per metric/sport, so daily wellness records do not grow this store.
-        return f"metric_export_baseline:{target.value}:{candidate.key}"
+        return f"metric_export_baseline:{target.value}:{candidate.remote_id}"
 
     def _automatic_conflict(self, target: ProviderId, candidate: _Candidate) -> bool:
         with self._database_manager().reader() as db:
             raw = self._key_values.get(db, self._baseline_key(target, candidate))
         if raw is None:
-            return False
+            return candidate.remote is not None
         baseline = json.loads(raw)
         return baseline["record"] == candidate.record and not _same_remote(
             candidate.remote, baseline["value"]
@@ -452,7 +480,9 @@ class MetricExportService:
             if record not in records:
                 records[record] = self._read_record(target, port, field, source)
             remote = records[record].get(field.field)
-            if remote is not None and _same_value(remote, source.value.value):
+            if remote is not None and _same_value(
+                remote, port.normalize_value(field, source.value.value)
+            ):
                 status = UNCHANGED
             elif exported:
                 status = ALREADY_EXPORTED
@@ -503,7 +533,8 @@ class MetricExportService:
         return (
             link is not None
             and link.sync_state is RemoteLinkState.SYNCED
-            and link.baseline_hash == _baseline(remote_id, source.value.value)
+            and link.baseline_hash
+            == _baseline(remote_id, port.normalize_value(field, source.value.value))
         )
 
     def _read_record(
@@ -579,14 +610,17 @@ class MetricExportService:
             return "request_failed"
         return None
 
-    def _record(self, target: ProviderId, group: Sequence[_Candidate]) -> None:
+    def _record(
+        self, target: ProviderId, port: MetricExportPort, group: Sequence[_Candidate]
+    ) -> None:
         synced_at = self._utc_now().isoformat()
         with self._database_lock, self._database_manager().unit_of_work() as db:
             for candidate in group:
+                sent_value = port.normalize_value(candidate.field, candidate.value)
                 self._key_values.set(
                     db,
                     self._baseline_key(target, candidate),
-                    json.dumps({"record": candidate.record, "value": candidate.value}),
+                    json.dumps({"record": candidate.record, "value": sent_value}),
                 )
                 local_id = observation_natural_key(candidate.source)
                 # A field holds one value, so a newer export takes over its link.
@@ -605,7 +639,7 @@ class MetricExportService:
                         provider=target.value,
                         sync_state=RemoteLinkState.SYNCED,
                         remote_id=candidate.remote_id,
-                        baseline_hash=_baseline(candidate.remote_id, candidate.value),
+                        baseline_hash=_baseline(candidate.remote_id, sent_value),
                         last_synced_at=synced_at,
                     ),
                 )

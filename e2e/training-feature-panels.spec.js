@@ -6,7 +6,12 @@ test("@responsive current metrics describe automatic Garmin transfer and show it
   const panel = page.locator("#currentPerformance");
   const toggle = panel.locator("summary");
   if (await toggle.count() && !await panel.locator("details").evaluate((node) => node.open)) await toggle.click();
-  await expect(panel.getByText(/automatisch an Intervals\.icu/)).toBeVisible();
+  await expect(panel.getByText(/automatisch an Intervals\.icu senden/)).toBeVisible();
+  await panel.getByRole("button", { name: "Garmin → Intervals.icu automatisch abgleichen" }).click();
+  await page.getByRole("dialog").filter({ hasText: "Automatischen Abgleich aktivieren?" }).getByRole("button", { name: "Bestätigen", exact: true }).click();
+  await expect(panel.getByRole("button", { name: "Automatischen Abgleich deaktivieren" })).toBeVisible();
+  await page.reload();
+  await expect(panel.getByRole("button", { name: "Automatischen Abgleich deaktivieren" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Werte an Anbieter senden" })).toHaveCount(0);
   await expect(panel.getByRole("checkbox")).toHaveCount(0);
   await page.evaluate(() => {
@@ -14,6 +19,9 @@ test("@responsive current metrics describe automatic Garmin transfer and show it
     renderCurrentPerformance(state.data.performance.metrics, state.data.performance.history);
   });
   await expect(panel.getByText("Intervals.icu: 2 Messwerte gesendet, 1 Konflikte, 0 fehlgeschlagen.")).toBeVisible();
+  await panel.getByRole("button", { name: "Automatischen Abgleich deaktivieren" }).click();
+  await page.getByRole("dialog").filter({ hasText: "Automatischen Abgleich deaktivieren?" }).getByRole("button", { name: "Bestätigen", exact: true }).click();
+  await expect(panel.getByRole("button", { name: "Garmin → Intervals.icu automatisch abgleichen" })).toBeVisible();
 });
 
 test("@responsive chart readings keep their coordinates and legible labels", async ({ page }) => {
