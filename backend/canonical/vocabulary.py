@@ -188,3 +188,82 @@ class RemoteLinkState(StrEnum):
     PENDING = "pending"
     # A remote identifier is known and was reconciled with the local entity.
     SYNCED = "synced"
+
+
+class ActivityDetailKind(StrEnum):
+    """One detail set stored per provider activity and kind (schema version 10)."""
+
+    STREAMS = "streams"
+    LAPS = "laps"
+    HEART_RATE_ZONES = "heart_rate_zones"
+    POWER_ZONES = "power_zones"
+
+
+class ActivityDetailOrigin(StrEnum):
+    """How a detail set reached the database."""
+
+    # Mapped from a provider response fetched by this build.
+    FETCH = "fetch"
+    # Mapped from a detail document cached by an earlier release.
+    LEGACY_BACKFILL = "legacy_backfill"
+
+
+class StreamChannel(StrEnum):
+    """Time-series channels, each in one canonical unit named by its suffix."""
+
+    TIME_S = "time_s"
+    DISTANCE_M = "distance_m"
+    ALTITUDE_M = "altitude_m"
+    GRADE_PCT = "grade_pct"
+    SPEED_MPS = "speed_mps"
+    POWER_W = "power_w"
+    HEART_RATE_BPM = "heart_rate_bpm"
+    CADENCE_RPM = "cadence_rpm"
+    TEMPERATURE_C = "temperature_c"
+    # 1 while moving, 0 while paused.
+    MOVING = "moving"
+
+
+class StreamResolution(StrEnum):
+    """Whether a stream set keeps every recorded point."""
+
+    FULL = "full"
+    DOWNSAMPLED = "downsampled"
+
+
+class LapKind(StrEnum):
+    LAP = "lap"
+    WORK = "work"
+    RECOVERY = "recovery"
+    WARMUP = "warmup"
+    COOLDOWN = "cooldown"
+
+
+class LapSource(StrEnum):
+    """What produced a lap set."""
+
+    # Intervals detected or labelled by the provider's analysis.
+    PROVIDER_INTERVALS = "provider_intervals"
+    # Laps recorded by the device (manual or automatic lap button).
+    DEVICE_LAPS = "device_laps"
+    # Fixed-distance splits computed by the provider.
+    SPLITS = "splits"
+
+
+class ZoneMetric(StrEnum):
+    HEART_RATE = "heart_rate"
+    POWER = "power"
+
+    @property
+    def detail_kind(self) -> ActivityDetailKind:
+        if self is ZoneMetric.HEART_RATE:
+            return ActivityDetailKind.HEART_RATE_ZONES
+        return ActivityDetailKind.POWER_ZONES
+
+
+class ZoneBoundarySource(StrEnum):
+    """Where the zone boundaries of a time-in-zone distribution came from."""
+
+    PROVIDER_REPORTED = "provider_reported"
+    PROFILE = "profile"
+    UNKNOWN = "unknown"

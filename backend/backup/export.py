@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from backend import change_history
+from backend.db.activity_detail_store import analysis_export_rows, stream_export_rows
 from backend.errors import AppError
 from backend.observability import sanitized_provider_payload
 from backend.planning import season as planning_season
@@ -40,12 +41,19 @@ TimeoutErrorFactory = Callable[[], Exception]
 # Version 5 exports stored sports in the canonical vocabulary: competitions gain
 # environment and sport_detail, workouts and planned units carry sport,
 # environment and sport_detail instead of type (schema v9).
-PRIVACY_EXPORT_FORMAT_VERSION = 5
+# Version 6 adds the canonical activity detail files (schema v10); stream
+# channels carry decoded point lists with null for gaps.
+PRIVACY_EXPORT_FORMAT_VERSION = 6
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
     "activity_records.jsonl",
     "observations.jsonl",
+    "activity_detail_sets.jsonl",
+    "activity_stream_channels.jsonl",
+    "activity_laps.jsonl",
+    "activity_zone_times.jsonl",
+    "activity_detail_analysis.jsonl",
     "athlete_checkins.jsonl",
     "activity_feedback.jsonl",
     "external_calendar_events.jsonl",
@@ -412,6 +420,35 @@ class PrivacyArchiveExportService:
                             "FROM observations ORDER BY observed_on, metric, id"
                         )
                     ),
+                    deadline,
+                )
+                for table, order in (
+                    ("activity_detail_sets", "provider, provider_activity_id, detail_kind"),
+                    ("activity_laps", "provider, provider_activity_id, lap_index"),
+                    (
+                        "activity_zone_times",
+                        "provider, provider_activity_id, detail_kind, zone_index",
+                    ),
+                ):
+                    self._write_jsonl(
+                        archive,
+                        table + ".jsonl",
+                        (
+                            dict(row)
+                            for row in db.execute(f"SELECT * FROM {table} ORDER BY {order}")
+                        ),
+                        deadline,
+                    )
+                self._write_jsonl(
+                    archive,
+                    "activity_stream_channels.jsonl",
+                    stream_export_rows(db),
+                    deadline,
+                )
+                self._write_jsonl(
+                    archive,
+                    "activity_detail_analysis.jsonl",
+                    analysis_export_rows(db),
                     deadline,
                 )
                 archive.writestr(

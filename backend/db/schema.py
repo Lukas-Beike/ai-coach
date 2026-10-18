@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable
 from contextlib import closing
 from enum import StrEnum
 from functools import lru_cache
 from typing import Any
 
 from backend.canonical.vocabulary import (
+    ActivityDetailKind,
+    ActivityDetailOrigin,
     ActivityLinkKind,
     ActivityRecordState,
     ActivitySessionState,
@@ -397,6 +400,74 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "updated_at",
     },
     "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
+    "activity_detail_sets": {
+        "provider",
+        "provider_activity_id",
+        "detail_kind",
+        "mapper_version",
+        "origin",
+        "source_kind",
+        "recorded_by",
+        "source_record_id",
+        "resolution",
+        "lap_source",
+        "zone_boundary_source",
+        "summary_sha256",
+        "content_sha256",
+        "fetched_at",
+        "created_at",
+        "updated_at",
+    },
+    "activity_stream_channels": {
+        "provider",
+        "provider_activity_id",
+        "detail_kind",
+        "channel",
+        "point_count",
+        "valid_count",
+        "data",
+    },
+    "activity_laps": {
+        "provider",
+        "provider_activity_id",
+        "detail_kind",
+        "lap_index",
+        "kind",
+        "start_offset_s",
+        "end_offset_s",
+        "name",
+        "moving_duration_s",
+        "distance_m",
+        "avg_hr",
+        "max_hr",
+        "avg_power",
+        "max_power",
+        "normalized_power",
+        "avg_cadence",
+        "avg_speed_mps",
+        "elevation_gain_m",
+        "load",
+        "intensity_pct",
+    },
+    "activity_zone_times": {
+        "provider",
+        "provider_activity_id",
+        "detail_kind",
+        "zone_index",
+        "seconds",
+        "lower_bound",
+        "upper_bound",
+        "label",
+    },
+    "activity_detail_analysis": {
+        "activity_id",
+        "analysis_version",
+        "input_sha256",
+        "payload",
+        "computed_at",
+        "created_at",
+        "updated_at",
+    },
 }
 
 CURRENT_DATABASE_INDEXES = {
@@ -425,7 +496,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -437,7 +508,11 @@ CURRENT_SCHEMA_VERSION = 9
 
 
 def _sql_in_list(enum_type: type[StrEnum]) -> str:
-    return ", ".join(f"'{member.value}'" for member in enum_type.__members__.values())
+    return _sql_in_list_of(enum_type.__members__.values())
+
+
+def _sql_in_list_of(members: Iterable[StrEnum]) -> str:
+    return ", ".join(f"'{member.value}'" for member in members)
 
 
 _PROVIDER_RECORD_STATES = _sql_in_list(ProviderRecordState)
@@ -647,6 +722,123 @@ REMOTE_LINKS_DDL = """
     CREATE UNIQUE INDEX idx_remote_links_remote_id
         ON remote_links(provider, entity_kind, remote_id) WHERE remote_id IS NOT NULL;
 """
+
+
+# Canonical activity detail (schema version 10): one set per provider activity
+# and detail kind, so every provider keeps its own alternative streams, laps and
+# zone times for the same session. Sets reference their activity record, whose
+# deletion is a tombstone; readers filter on active records and sessions, so the
+# detail of a deleted activity is hidden, not destroyed. Only the closed kind and
+# origin vocabularies are CHECKed; resolution, lap source, boundary source,
+# channel and lap kind are validated by backend.canonical.activity_detail.
+# Stream channels hold zlib-compressed little-endian float64 points (NaN = gap).
+# The analysis row caches values computed for one canonical session.
+# The schema-version-10 migration executes this same text.
+_DETAIL_KINDS = _sql_in_list(ActivityDetailKind)
+_DETAIL_ORIGINS = _sql_in_list(ActivityDetailOrigin)
+_ZONE_DETAIL_KINDS = _sql_in_list_of(
+    (ActivityDetailKind.HEART_RATE_ZONES, ActivityDetailKind.POWER_ZONES)
+)
+
+ACTIVITY_DETAIL_DDL = f"""
+    CREATE TABLE activity_detail_sets (
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        provider_activity_id TEXT NOT NULL CHECK (length(provider_activity_id) BETWEEN 1 AND 256),
+        detail_kind TEXT NOT NULL CHECK (detail_kind IN ({_DETAIL_KINDS})),
+        mapper_version INTEGER NOT NULL CHECK (mapper_version >= 1),
+        origin TEXT NOT NULL CHECK (origin IN ({_DETAIL_ORIGINS})),
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        source_record_id TEXT CHECK (source_record_id IS NULL OR length(source_record_id) BETWEEN 1 AND 256),
+        resolution TEXT CHECK (resolution IS NULL OR length(resolution) BETWEEN 1 AND 32),
+        lap_source TEXT CHECK (lap_source IS NULL OR length(lap_source) BETWEEN 1 AND 32),
+        zone_boundary_source TEXT CHECK (zone_boundary_source IS NULL OR length(zone_boundary_source) BETWEEN 1 AND 32),
+        summary_sha256 TEXT CHECK (summary_sha256 IS NULL OR length(summary_sha256) = 64),
+        content_sha256 TEXT NOT NULL CHECK (length(content_sha256) = 64),
+        fetched_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, provider_activity_id, detail_kind),
+        FOREIGN KEY (provider, provider_activity_id)
+            REFERENCES activity_records(provider, provider_activity_id),
+        CHECK ((detail_kind = 'streams') = (resolution IS NOT NULL)),
+        CHECK ((detail_kind = 'laps') = (lap_source IS NOT NULL)),
+        CHECK ((detail_kind IN ({_ZONE_DETAIL_KINDS})) = (zone_boundary_source IS NOT NULL))
+    );
+    CREATE TABLE activity_stream_channels (
+        provider TEXT NOT NULL,
+        provider_activity_id TEXT NOT NULL,
+        detail_kind TEXT NOT NULL DEFAULT 'streams' CHECK (detail_kind = 'streams'),
+        channel TEXT NOT NULL CHECK (length(channel) BETWEEN 1 AND 64),
+        point_count INTEGER NOT NULL CHECK (point_count BETWEEN 1 AND 172800),
+        valid_count INTEGER NOT NULL CHECK (valid_count BETWEEN 0 AND point_count),
+        data BLOB NOT NULL CHECK (typeof(data) = 'blob' AND length(data) BETWEEN 1 AND 4194304),
+        PRIMARY KEY (provider, provider_activity_id, channel),
+        FOREIGN KEY (provider, provider_activity_id, detail_kind)
+            REFERENCES activity_detail_sets(provider, provider_activity_id, detail_kind)
+            ON DELETE CASCADE
+    );
+    CREATE TABLE activity_laps (
+        provider TEXT NOT NULL,
+        provider_activity_id TEXT NOT NULL,
+        detail_kind TEXT NOT NULL DEFAULT 'laps' CHECK (detail_kind = 'laps'),
+        lap_index INTEGER NOT NULL CHECK (lap_index BETWEEN 0 AND 199),
+        kind TEXT NOT NULL CHECK (length(kind) BETWEEN 1 AND 32),
+        start_offset_s REAL NOT NULL CHECK (start_offset_s >= 0),
+        end_offset_s REAL NOT NULL CHECK (end_offset_s >= start_offset_s),
+        name TEXT CHECK (name IS NULL OR length(name) BETWEEN 1 AND 200),
+        moving_duration_s REAL,
+        distance_m REAL,
+        avg_hr REAL,
+        max_hr REAL,
+        avg_power REAL,
+        max_power REAL,
+        normalized_power REAL,
+        avg_cadence REAL,
+        avg_speed_mps REAL,
+        elevation_gain_m REAL,
+        load REAL,
+        intensity_pct REAL,
+        PRIMARY KEY (provider, provider_activity_id, lap_index),
+        FOREIGN KEY (provider, provider_activity_id, detail_kind)
+            REFERENCES activity_detail_sets(provider, provider_activity_id, detail_kind)
+            ON DELETE CASCADE
+    );
+    CREATE TABLE activity_zone_times (
+        provider TEXT NOT NULL,
+        provider_activity_id TEXT NOT NULL,
+        detail_kind TEXT NOT NULL CHECK (detail_kind IN ({_ZONE_DETAIL_KINDS})),
+        zone_index INTEGER NOT NULL CHECK (zone_index BETWEEN 1 AND 20),
+        seconds REAL NOT NULL CHECK (seconds >= 0),
+        lower_bound REAL,
+        upper_bound REAL,
+        label TEXT CHECK (label IS NULL OR length(label) BETWEEN 1 AND 64),
+        PRIMARY KEY (provider, provider_activity_id, detail_kind, zone_index),
+        FOREIGN KEY (provider, provider_activity_id, detail_kind)
+            REFERENCES activity_detail_sets(provider, provider_activity_id, detail_kind)
+            ON DELETE CASCADE
+    );
+    CREATE TABLE activity_detail_analysis (
+        activity_id TEXT PRIMARY KEY REFERENCES activity_sessions(activity_id),
+        analysis_version INTEGER NOT NULL CHECK (analysis_version >= 1),
+        input_sha256 TEXT NOT NULL CHECK (length(input_sha256) = 64),
+        payload TEXT NOT NULL CHECK (json_valid(payload) AND json_type(payload) = 'object'),
+        computed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+"""
+
+
+def execute_ddl(db: Any, ddl: str) -> None:
+    """Run DDL statement by statement inside the caller's transaction.
+
+    executescript() would commit first, so creation and migration could not
+    stay atomic. None of the DDL constants contains a semicolon inside a string.
+    """
+    for statement in ddl.split(";"):
+        if statement.strip():
+            db.execute(statement)
 
 
 def initialize_schema(db: Any) -> None:
@@ -971,12 +1163,9 @@ def _create_schema_statements(db: Any) -> None:
         "CREATE INDEX idx_planned_units_date ON planned_units(json_extract(payload, '$.date'))"
     )
 
-    for statement in PROVIDER_TABLES_DDL.split(";"):
-        if statement.strip():
-            db.execute(statement)
-    for statement in REMOTE_LINKS_DDL.split(";"):
-        if statement.strip():
-            db.execute(statement)
+    execute_ddl(db, PROVIDER_TABLES_DDL)
+    execute_ddl(db, REMOTE_LINKS_DDL)
+    execute_ddl(db, ACTIVITY_DETAIL_DDL)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 

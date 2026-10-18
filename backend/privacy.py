@@ -224,9 +224,15 @@ PRIVACY_DELETE_SCOPE = (
     (
         "provider_data",
         "Kanonische Provider-Aktivitäten, Beobachtungen und Provider-Records",
-        # Children first: activity_records references activity_sessions.
+        # Children first: detail rows reference their set, sets reference
+        # activity_records and analysis rows and records reference sessions.
         (
             "observations",
+            "activity_stream_channels",
+            "activity_laps",
+            "activity_zone_times",
+            "activity_detail_sets",
+            "activity_detail_analysis",
             "activity_records",
             "activity_sessions",
             "provider_records",
