@@ -197,6 +197,8 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.morning = RecordingService()
         self.fixture = RecordingFixtureLoader()
         self.nutrition = MockNutritionSync()
+        self.details = Mock()
+        self.details.prefetch_recent.return_value = {"fetched": 2, "failed": 0}
         self.executor = self.make_executor()
 
     def make_executor(self) -> SyncJobExecutor:
@@ -212,6 +214,7 @@ class SyncJobExecutorTests(unittest.TestCase):
                     competition_sync_service=self.competitions,
                     sync_operation_observer=self.observer,
                     intervals_resync_gate=self.gate,
+                    activity_detail_service=self.details,
                 ),
                 garmin_jobs=GarminSyncJobOwner(
                     historical_sync=historical_sync,
@@ -676,6 +679,41 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.executor.run(self.job("intervals"))
 
         self.assertEqual(len(self.competitions.calls), 1)
+
+    def test_refresh_prefetches_recent_details_with_provider_gate(self) -> None:
+        def prefetch(guard):
+            self.assertEqual(self.gate.active, 0)
+            with guard():
+                self.assertEqual(self.gate.active, 1)
+            return {"fetched": 2, "failed": 0}
+
+        self.details.prefetch_recent.side_effect = prefetch
+
+        result = self.executor.execute(self.job("intervals"))
+
+        self.details.prefetch_recent.assert_called_once()
+        self.assertEqual(result["detail_prefetch"], {"fetched": 2, "failed": 0})
+        self.assertEqual(result["competitions"], {"status": "ok", "count": 2})
+
+    def test_prefetch_error_keeps_refresh_and_competitions(self) -> None:
+        self.details.prefetch_recent.side_effect = RuntimeError("fake prefetch failure")
+
+        result = self.executor.execute(self.job("intervals"))
+
+        self.assertEqual(result["detail_prefetch"], {"status": "error"})
+        self.assertEqual(result["competitions"], {"status": "ok", "count": 2})
+        self.assertNotEqual(result.get("status"), "failed")
+
+    def test_historical_chunk_does_not_prefetch_details(self) -> None:
+        self.executor.run(
+            self.job(
+                "intervals",
+                "historical_backfill",
+                {"days": 90, "end_date": "2026-09-01"},
+            )
+        )
+
+        self.details.prefetch_recent.assert_not_called()
 
     def test_run_survives_failure_while_recording_failure(self) -> None:
         self.intervals.error = RuntimeError("provider failure")

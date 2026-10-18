@@ -1,12 +1,18 @@
-"""Explicit read-only loading of full-resolution Intervals activity data."""
+"""Read-only loading of full-resolution Intervals activity data.
+
+The newest activities are prefetched after each Intervals refresh; older ones
+load on the athlete's explicit request.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from itertools import pairwise
 from typing import Any
 from urllib.parse import quote
@@ -31,6 +37,10 @@ from backend.providers.intervals_activity_fields import (
 )
 from backend.runtime.ports import ActivityRowReader
 
+_LOGGER = logging.getLogger(__name__)
+
+# The analysis tab opens these without a click; older activities load on request.
+PREFETCH_RECENT_ACTIVITIES = 10
 MAX_DETAIL_BYTES = 24 * 1024 * 1024
 ACTIVITY_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,200}")
 
@@ -147,6 +157,48 @@ class ActivityDetailRefreshService:
             raise AppError(502, "Die Detaildaten überschreiten die unterstützte Größe.")
         self._store.save(activity_id, record)
         return {"status": "completed", "activity_id": activity_id}
+
+    def prefetch_recent(
+        self,
+        guard: Callable[[], AbstractContextManager[Any]] = nullcontext,
+        limit: int = PREFETCH_RECENT_ACTIVITIES,
+    ) -> dict[str, int]:
+        """Load missing or outdated details of the newest local activities.
+
+        ``guard`` wraps each provider refresh, so a full resync waits for one
+        activity rather than the whole run. The first failure ends the run, so
+        an outage or rate limit is not retried per activity; the next refresh
+        tries again.
+        """
+        if not self._configured:
+            return {"fetched": 0, "failed": 0}
+        with self._database_manager.unit_of_work() as db:
+            rows = self._row_reader.activity_rows(db)
+        recent = sorted(
+            (row for row in rows if row.get("id")),
+            key=lambda row: str(row.get("start_date_local") or ""),
+            reverse=True,
+        )[:limit]
+        fetched = 0
+        for row in recent:
+            activity_id = str(row["id"])
+            stored = self._store.get(activity_id)
+            if stored and stored.get("summary_sha256") == summary_fingerprint(row):
+                continue
+            try:
+                with guard():
+                    self.refresh(activity_id)
+            except Exception as error:  # noqa: BLE001 - prefetch never fails the refresh
+                _LOGGER.warning(
+                    "activity detail prefetch stopped",
+                    extra={
+                        "event": "activity_detail_prefetch_failed",
+                        "error_class": type(error).__name__,
+                    },
+                )
+                return {"fetched": fetched, "failed": 1}
+            fetched += 1
+        return {"fetched": fetched, "failed": 0}
 
 
 def _validate_time_axis(streams: dict[str, list[Any]]) -> None:

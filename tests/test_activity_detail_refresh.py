@@ -144,3 +144,93 @@ class ActivityDetailRefreshTests(unittest.TestCase):
                 normalize_sync_job_request(
                     provider, "activity_details", payload, all_sync_days=-1
                 )
+
+
+class ActivityDetailPrefetchTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.manager = Manager(Path(self.directory.name) / "fixture.sqlite")
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+            )
+        self.store = ActivityDetailStore(self.manager)
+        self.rows = [
+            {"id": f"a{day:02d}", "start_date_local": f"2026-10-{day:02d}T08:00:00"}
+            for day in range(1, 13)
+        ]
+        self.api = Mock()
+        self.api.get.side_effect = self.provider
+
+    def provider(self, path, params):
+        activity_id = path.split("/")[2]
+        if path.endswith("/streams"):
+            return [{"type": "time", "data": [0, 1]}]
+        return {"id": activity_id}
+
+    def service(self, configured=True):
+        return ActivityDetailRefreshService(
+            api_client=self.api,
+            database_manager=self.manager,
+            row_reader=FixedActivityRows(self.rows),
+            store=self.store,
+            utc_now=lambda: "2026-10-18T08:00:00Z",
+            configured=configured,
+        )
+
+    def fetched_ids(self):
+        return [
+            call.args[0].split("/")[2]
+            for call in self.api.get.call_args_list
+            if not call.args[0].endswith("/streams")
+        ]
+
+    def test_loads_only_the_ten_newest_activities_once(self):
+        self.assertEqual(
+            {"fetched": 10, "failed": 0}, self.service().prefetch_recent()
+        )
+        self.assertEqual([f"a{day:02d}" for day in range(12, 2, -1)], self.fetched_ids())
+        self.assertIsNone(self.store.get("a02"))
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
+        self.api.get.assert_not_called()
+
+    def test_changed_summary_is_loaded_again(self):
+        self.service().prefetch_recent()
+        self.rows[-1] = {**self.rows[-1], "name": "Renamed in Intervals.icu"}
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_recent())
+        self.assertEqual(["a12"], self.fetched_ids())
+
+    def test_first_failure_stops_without_raising(self):
+        def failing(path, params):
+            if "a11" in path:
+                raise AppError(429, "Synthetic rate limit")
+            return self.provider(path, params)
+
+        self.api.get.side_effect = failing
+        with self.assertLogs("backend.sync.activity_details", "WARNING") as logs:
+            result = self.service().prefetch_recent()
+        self.assertEqual({"fetched": 1, "failed": 1}, result)
+        self.assertEqual(["a12", "a11"], self.fetched_ids())
+        self.assertNotIn("Synthetic rate limit", "\n".join(logs.output))
+
+    def test_guard_wraps_each_provider_refresh(self):
+        events = []
+
+        @contextmanager
+        def guard():
+            events.append("enter")
+            yield
+            events.append("exit")
+
+        self.rows = self.rows[:2]
+        self.service().prefetch_recent(guard)
+        self.assertEqual(["enter", "exit", "enter", "exit"], events)
+
+    def test_unconfigured_provider_is_not_called(self):
+        self.assertEqual(
+            {"fetched": 0, "failed": 0}, self.service(configured=False).prefetch_recent()
+        )
+        self.api.get.assert_not_called()

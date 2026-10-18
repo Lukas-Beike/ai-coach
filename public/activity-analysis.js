@@ -53,6 +53,12 @@
     return { label: "Pace", unit: kind === "swim" ? "min/100 m" : "min/km", convert: (v) => (v >= 0.3 ? meters / v : null), format: clock, invert: true, color: "speed" };
   }
 
+  function cadenceChannel(activity) {
+    const { label, unit, factor } = ActivityDetails.cadenceDisplay(activity);
+    const convert = (value) => value * factor;
+    return { key: "cadence", label, unit, convert, color: "cadence", format: (v) => numberText(v), floorAtZero: true, average: finite(activity.average_cadence) ? convert(activity.average_cadence) : null, max: finite(activity.max_cadence) ? convert(activity.max_cadence) : null };
+  }
+
   function channels(activity) {
     const streams = activity.streams || {};
     const speedKey = ["velocity_smooth", "velocity", "speed"].find((key) => Array.isArray(streams[key]));
@@ -62,7 +68,7 @@
       { key: "heartrate", label: "Herzfrequenz", unit: "bpm", color: "heart", format: (v) => numberText(v), floorAtZero: true, average: activity.average_heartrate, max: activity.max_heartrate },
       speedKey && { ...speed, key: speedKey, average: finite(activity.average_speed) ? speed.convert(activity.average_speed) : null, max: finite(activity.max_speed) ? speed.convert(activity.max_speed) : null },
       powerKey && { key: powerKey, label: "Leistung", unit: "W", color: "power", format: (v) => numberText(v), floorAtZero: true, average: activity.average_watts, max: activity.max_watts },
-      { key: "cadence", label: "Kadenz", unit: "/min", color: "cadence", format: (v) => numberText(v), floorAtZero: true, average: activity.average_cadence, max: activity.max_cadence },
+      cadenceChannel(activity),
       { key: "altitude", label: "Höhe", unit: "m", color: "elevation", format: (v) => numberText(v), elevation: true },
       { key: "temperature", label: "Temperatur", unit: "°C", color: "temperature", format: (v) => numberText(v, 1), average: activity.average_temp, max: activity.max_temp },
     ].filter((channel) => channel && Array.isArray(streams[channel.key]));
@@ -214,6 +220,7 @@
   function overview(activity) {
     const speed = speedChannel(activity);
     const averageSpeed = speedText(speed, activity.average_speed);
+    const cadence = cadenceChannel(activity);
     const values = [
       ["Distanz", AppFormat.distance(activity.distance)],
       ["Bewegungszeit", duration(activity.moving_time)],
@@ -224,7 +231,7 @@
       ["Ø Leistung", measure(activity.average_watts, "W")],
       ["Normalized Power", [activity.weighted_average_watts, activity.normalized_power].map((value) => measure(value, "W")).find(Boolean)],
       ["Max. Leistung", measure(activity.max_watts, "W")],
-      ["Ø Kadenz", measure(activity.average_cadence, "/min")],
+      [`Ø ${cadence.label}`, measure(cadence.average, cadence.unit)],
       ["Anstieg", measure(activity.total_elevation_gain, "m")],
       ["Kalorien", measure(activity.calories, "kcal")],
       ["Trainingsbelastung", measure(activity.training_load)],
@@ -331,7 +338,7 @@
     if (ActivityDetails.isIntervalsActivity(summary)) appendRefresh(panel, summary, metadata, epoch);
   }
 
-  // Missing detail is requested only through the athlete's explicit refresh action.
+  // The newest activities are preloaded after each Intervals.icu refresh; older ones load through this action.
   function appendRefresh(panel, summary, metadata, epoch) {
     const status = node("p", "", "muted"); status.setAttribute("role", "status");
     const refresh = node("button", metadata.observed_at ? "Detaildaten aktualisieren" : "Detaildaten laden", "secondary-button");
