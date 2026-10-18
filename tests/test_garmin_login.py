@@ -7,6 +7,7 @@ touched.
 
 import sqlite3
 import tempfile
+import threading
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
@@ -28,6 +29,8 @@ from backend.provider_credentials import (
     garmin_tokens_connected,
 )
 from backend.sync.garmin_login import (
+    EMPTY_TOKENSTORE,
+    MAX_MFA_ATTEMPTS,
     MFA_TTL_SECONDS,
     GarminLoginService,
     GarminSecretRegistry,
@@ -69,8 +72,9 @@ class FakeManager:
 
 
 class FakeSdkTokens:
-    def __init__(self, blob: str) -> None:
+    def __init__(self, blob: str, *, authenticated: bool = True) -> None:
         self.blob = blob
+        self.is_authenticated = authenticated
 
     def dumps(self) -> str:
         return self.blob
@@ -86,14 +90,21 @@ class FakeClient:
         blob: str = BLOB,
         login_error: BaseException | None = None,
         mfa_codes: tuple[str, ...] = (),
+        authenticated: bool = True,
     ) -> None:
         self.needs_mfa = needs_mfa
         self.login_error = login_error
         self.mfa_codes = mfa_codes
-        self.client = FakeSdkTokens(blob)
+        self.client = FakeSdkTokens(blob, authenticated=authenticated)
         self.resumed_with: list[str] = []
+        self.login_arguments: list[Any] = []
+        # Set by tests that act while the SDK login is in flight.
+        self.during_login: Any = None
 
-    def login(self, *_: Any) -> tuple[bool, None]:
+    def login(self, *args: Any) -> tuple[bool, None]:
+        self.login_arguments.append(args)
+        if self.during_login is not None:
+            self.during_login()
         if self.login_error is not None:
             raise self.login_error
         return self.needs_mfa, None
@@ -120,7 +131,7 @@ class GarminLoginTests(unittest.TestCase):
         self.config = load_config(
             self.root, self.root / "data", {"APP_PASSWORD": "x" * 12}
         )
-        self.connection = sqlite3.connect(":memory:")
+        self.connection = sqlite3.connect(":memory:", check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute(
             "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, "
@@ -172,6 +183,8 @@ class GarminLoginTests(unittest.TestCase):
         self.assertFalse(result["mfa_pending"])
         self.assertEqual(self._stored(GARMIN_TOKENS_KEY), BLOB)
         self.assertTrue(self.factory_calls[0][1]["return_on_mfa"])
+        # Inline empty JSON: no token file, no GARMINTOKENS and no SDK dump.
+        self.assertEqual(self.clients[0].login_arguments, [(EMPTY_TOKENSTORE,)])
         # The password is used for the call only; it is not stored anywhere.
         stored_values = " ".join(
             str(row["value"]) for row in self.connection.execute("SELECT value FROM kv")
@@ -188,7 +201,7 @@ class GarminLoginTests(unittest.TestCase):
 
         with self.assertRaises(AppError) as wrong:
             self.service.submit_mfa({"code": "000000"})
-        self.assertEqual(wrong.exception.status, 401)
+        self.assertEqual(wrong.exception.status, 422)
         self.assertNotIn("SDK says", wrong.exception.message)
         self.assertTrue(self.service.status()["mfa_pending"])
 
@@ -224,7 +237,7 @@ class GarminLoginTests(unittest.TestCase):
         )
         with self.assertRaises(AppError) as auth:
             self.service.login(self._login_body())
-        self.assertEqual(auth.exception.status, 401)
+        self.assertEqual(auth.exception.status, 422)
         self.assertNotIn(PASSWORD, auth.exception.message)
 
         self.next_client = FakeClient(login_error=ConnectionError("network down"))
@@ -245,10 +258,7 @@ class GarminLoginTests(unittest.TestCase):
         # The preserved file is not imported again after an explicit disconnect.
         self.assertTrue(self.tokenstore.exists())
         self.assertEqual(self.tokens.source(), "none")
-        self.assertEqual(
-            self.tokens.login_argument(),
-            str(self.tokenstore) + ".disconnected",
-        )
+        self.assertEqual(self.tokens.login_argument(), EMPTY_TOKENSTORE)
 
     def test_legacy_file_is_imported_once_and_never_deleted(self):
         self.tokenstore.write_text(BLOB, encoding="utf-8")
@@ -257,7 +267,7 @@ class GarminLoginTests(unittest.TestCase):
         self.assertEqual(self.tokens.login_argument(), str(self.tokenstore))
 
         client = FakeClient(blob=BLOB)
-        self.tokens.write_back(client)
+        self.tokens.write_back(client, str(self.tokenstore))
         self.assertEqual(self._stored(GARMIN_TOKENS_KEY), BLOB)
         self.assertTrue(self.tokenstore.exists())
         self.assertEqual(self.service.status()["source"], "db")
@@ -265,7 +275,7 @@ class GarminLoginTests(unittest.TestCase):
     def test_refreshed_tokens_are_written_back(self):
         self.next_client = FakeClient(blob=BLOB)
         self.service.login(self._login_body())
-        self.tokens.write_back(FakeClient(blob=REFRESHED_BLOB))
+        self.tokens.write_back(FakeClient(blob=REFRESHED_BLOB), BLOB)
         self.assertEqual(self._stored(GARMIN_TOKENS_KEY), REFRESHED_BLOB)
         self.assertNotIn(BLOB, self.registry.values())
         self.assertIn("tok-cccccccccccc", self.registry.values())
@@ -279,8 +289,100 @@ class GarminLoginTests(unittest.TestCase):
             def client(self):
                 raise RuntimeError(f"leaked {BLOB}")
 
-        self.tokens.write_back(BrokenClient())
+        with self.assertLogs("backend.sync.garmin_login", "WARNING") as logs:
+            self.tokens.write_back(BrokenClient(), BLOB)
         self.assertEqual(self._stored(GARMIN_TOKENS_KEY), BLOB)
+        self.assertNotIn("tok-aaaaaaaaaaaa", "\n".join(logs.output))
+
+    def test_write_back_is_skipped_after_disconnect_or_newer_login(self):
+        self.next_client = FakeClient(blob=BLOB)
+        self.service.login(self._login_body())
+        login_argument = self.tokens.login_argument()
+        self.service.disconnect()
+        # A sync that started before the disconnect must not restore its tokens.
+        self.tokens.write_back(FakeClient(blob=REFRESHED_BLOB), login_argument)
+        self.assertIsNone(self._stored(GARMIN_TOKENS_KEY))
+        # Nor may a credential login (env fallback) after the disconnect persist.
+        self.tokens.write_back(FakeClient(blob=REFRESHED_BLOB), EMPTY_TOKENSTORE)
+        self.assertIsNone(self._stored(GARMIN_TOKENS_KEY))
+        self.assertEqual(self.tokens.source(), "none")
+
+        self.service.login(self._login_body())
+        newer = '{"di_token": "tok-eeeeeeeeeeee", "di_refresh_token": "ref-ffff"}'
+        self.connection.execute(
+            "UPDATE kv SET value = ? WHERE key = ?", (newer, GARMIN_TOKENS_KEY)
+        )
+        # The sync logged in with the old blob; the newer login wins.
+        self.tokens.write_back(FakeClient(blob=REFRESHED_BLOB), BLOB)
+        self.assertEqual(self._stored(GARMIN_TOKENS_KEY), newer)
+
+    def test_write_back_skips_unauthenticated_or_empty_tokens(self):
+        self.next_client = FakeClient(blob=BLOB)
+        self.service.login(self._login_body())
+        self.tokens.write_back(
+            FakeClient(blob=REFRESHED_BLOB, authenticated=False), BLOB
+        )
+        self.tokens.write_back(FakeClient(blob="{}"), BLOB)
+        self.assertEqual(self._stored(GARMIN_TOKENS_KEY), BLOB)
+
+    def test_mfa_attempts_are_capped(self):
+        self.next_client = FakeClient(needs_mfa=True, mfa_codes=("123456",))
+        self.service.login(self._login_body())
+        for _ in range(MAX_MFA_ATTEMPTS - 1):
+            with self.assertRaises(AppError) as wrong:
+                self.service.submit_mfa({"code": "000000"})
+            self.assertEqual(wrong.exception.status, 422)
+        with self.assertRaises(AppError) as capped:
+            self.service.submit_mfa({"code": "000000"})
+        self.assertEqual(capped.exception.status, 409)
+        self.assertFalse(self.service.status()["mfa_pending"])
+        with self.assertRaises(AppError) as gone:
+            self.service.submit_mfa({"code": "123456"})
+        self.assertEqual(gone.exception.status, 409)
+        self.assertIsNone(self._stored(GARMIN_TOKENS_KEY))
+
+    def test_disconnect_during_login_discards_the_result(self):
+        client = FakeClient(blob=BLOB)
+        client.during_login = self.service.disconnect
+        self.next_client = client
+        with self.assertRaises(AppError) as superseded:
+            self.service.login(self._login_body())
+        self.assertEqual(superseded.exception.status, 409)
+        self.assertIsNone(self._stored(GARMIN_TOKENS_KEY))
+
+        mfa_client = FakeClient(needs_mfa=True, mfa_codes=("123456",))
+        mfa_client.during_login = self.service.disconnect
+        self.next_client = mfa_client
+        with self.assertRaises(AppError):
+            self.service.login(self._login_body())
+        self.assertFalse(self.service.status()["mfa_pending"])
+
+    def test_status_does_not_wait_for_a_login_in_flight(self):
+        entered = threading.Event()
+        release = threading.Event()
+        client = FakeClient(blob=BLOB)
+
+        def block() -> None:
+            entered.set()
+            release.wait(5)
+
+        client.during_login = block
+        self.next_client = client
+        worker = threading.Thread(target=self.service.login, args=(self._login_body(),))
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            status: list[dict[str, Any]] = []
+            reader = threading.Thread(
+                target=lambda: status.append(self.service.status())
+            )
+            reader.start()
+            reader.join(2)
+            self.assertFalse(reader.is_alive())
+            self.assertFalse(status[0]["connected"])
+        finally:
+            release.set()
+            worker.join(5)
 
     def test_token_values_are_registered_for_redaction(self):
         self.next_client = FakeClient(blob=BLOB)

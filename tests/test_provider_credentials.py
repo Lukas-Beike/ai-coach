@@ -21,6 +21,7 @@ from backend.config import load_config
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.http_api.credentials_put import CredentialsPutRoutes
+from backend.observability import Redactor, config_secret_values
 from backend.provider_credentials import (
     CREDENTIAL_KV_KEYS,
     GARMIN_TOKENS_KEY,
@@ -208,6 +209,40 @@ class ProviderCredentialTests(unittest.TestCase):
         self.connection.execute("DELETE FROM kv")
         self.service.refresh()
         self.assertEqual(self.holder["config"].openai_api_key, "env-openai-key")
+
+    def test_refresh_applies_the_configuration_under_the_database_lock(self):
+        held: list[bool] = []
+        applied_under_lock: list[bool] = []
+
+        @contextmanager
+        def lock() -> Iterator[None]:
+            held.append(True)
+            try:
+                yield
+            finally:
+                held.pop()
+
+        service = ProviderCredentialService(
+            env_config=self.env_config,
+            database_manager=lambda: FakeManager(self.connection),
+            database_lock=lock,
+            key_values=KeyValueRepository(lambda: "2026-10-18T00:00:00Z"),
+            apply_config=lambda config: applied_under_lock.append(bool(held)),
+        )
+        service.refresh()
+        self.assertEqual(applied_under_lock, [True])
+
+    def test_environment_secret_stays_redacted_while_a_stored_value_overrides_it(
+        self,
+    ):
+        self.service.update({"openai_api_key": "db-openai-key"})
+        redactor = Redactor(
+            lambda: self.holder["config"],
+            extra_secrets=lambda: config_secret_values(self.env_config),
+        )
+        redacted = redactor.redact_text("keys env-openai-key and db-openai-key")
+        self.assertNotIn("env-openai-key", redacted)
+        self.assertNotIn("db-openai-key", redacted)
 
     def test_credential_kv_keys_cover_every_stored_secret_key(self):
         self.assertEqual(

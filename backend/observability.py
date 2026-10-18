@@ -155,6 +155,23 @@ def _secret_variants(value: Any) -> set[str]:
 
 
 @lru_cache(maxsize=32)
+def config_secret_values(config: Any) -> tuple[str, ...]:
+    """Return the secret-bearing values of one configuration for redaction."""
+    return tuple(
+        str(getattr(config, name, "") or "")
+        for name in (
+            "openai_api_key",
+            "intervals_api_key",
+            "garmin_email",
+            "garmin_password",
+            "garmin_tokenstore",
+            "garmin_fixture_path",
+            "app_password",
+            "wahoo_client_secret",
+        )
+    )
+
+
 def _secret_patterns(value: str) -> tuple[re.Pattern[str], ...]:
     """Compile one secret's case-insensitive variant patterns, longest first."""
     return tuple(
@@ -415,16 +432,7 @@ class Redactor:
         for pattern in _secret_patterns(calendar_url):
             redacted = pattern.sub(calendar_safe_url, redacted)
         redacted = URL_VALUE_RE.sub(_redact_url, redacted)
-        secret_values = (
-            getattr(config, "openai_api_key", ""),
-            getattr(config, "intervals_api_key", ""),
-            getattr(config, "garmin_email", ""),
-            getattr(config, "garmin_password", ""),
-            getattr(config, "garmin_tokenstore", ""),
-            getattr(config, "garmin_fixture_path", ""),
-            getattr(config, "app_password", ""),
-            getattr(config, "wahoo_client_secret", ""),
-        )
+        secret_values = config_secret_values(config)
         extra_values = tuple(self._extra_secrets()) if self._extra_secrets else ()
         for secret_value in (*secret_values, *extra_values):
             for pattern in _secret_patterns(str(secret_value or "")):

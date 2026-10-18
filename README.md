@@ -401,16 +401,16 @@ Intervals.icu, OpenAI and Wahoo credentials can be entered under **Mehr > Anbind
 - **Badges:** each field shows "In der App gespeichert", "Aus Umgebung" or "Nicht gesetzt". "Entfernen" deletes only the value stored in the app and asks for confirmation.
 - **Secrets:** API keys and client secrets are never shown again after saving, and the form is cleared on submit. Non-secret values (OpenAI base URL, Intervals.icu athlete ID, Wahoo client ID) are shown as the current value.
 - **Timing:** changes apply without a container restart.
-- **Privacy delete:** the local data purge removes stored credentials and Garmin tokens. It does not change the external Garmin, Intervals.icu or Wahoo accounts.
+- **Privacy delete:** the local data purge removes stored credentials and Garmin tokens. A legacy token file at `/data/garmin_tokens` stays on disk, as every token store is preserved, but it is no longer used; delete it on the host if it should go too. It does not change the external Garmin, Intervals.icu or Wahoo accounts.
 
 ### Garmin Authentication & MFA Setup
 
 Garmin Connect enforces Multi-Factor Authentication (MFA). The primary way to connect is the UI:
 
 1. Open **Mehr > Anbindungen > Zugangsdaten** and enter your Garmin E-Mail and password, then choose "Bei Garmin anmelden". The password is sent once to the server and is never stored; the form is cleared as soon as it is submitted.
-2. If Garmin requests a verification code, the card switches to a code step. Enter the code sent to your email or mobile device. "Abbrechen" returns to the login form.
+2. If Garmin requests a verification code, the card switches to a code step. Enter the code sent to your email or mobile device. "Abbrechen" returns to the login form; the pending login expires on the server after 10 minutes.
 3. On success the card shows "Verbunden" with the source "In der App gespeichert". The Garmin OAuth tokens are stored in the encrypted database, not in a file.
-4. **Disconnect:** "Garmin trennen" (after a confirmation) deletes the stored Garmin tokens. Already loaded data stays in the local database.
+4. **Disconnect:** "Garmin trennen" (after a confirmation) deletes the stored Garmin tokens. Already loaded data stays in the local database. A preserved token file is not used again. If `GARMIN_EMAIL` and `GARMIN_PASSWORD` are still set in the environment, syncs may still log in with them, but their tokens are not stored until the next login in the app.
 
 An existing token file at `/data/garmin_tokens` is imported once when the database has no Garmin tokens yet. The file is left in place and is not deleted by the import. Because it is plaintext JSON protected only by owner-only file permissions, keep `/data` and every backup of it on encrypted host storage, and treat the file like a password.
 

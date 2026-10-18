@@ -246,9 +246,14 @@ class ProviderCredentialService:
         }
 
     def refresh(self) -> Config:
-        """Recompute the runtime configuration from env plus stored credentials."""
-        effective = effective_config(self._env_config, self._read_stored())
-        self._apply_config(effective)
+        """Recompute the runtime configuration from env plus stored credentials.
+
+        Read and apply happen under the database lock, so concurrent saves or a
+        privacy deletion apply their configurations in commit order.
+        """
+        with self._database_lock():
+            effective = effective_config(self._env_config, self._read_stored())
+            self._apply_config(effective)
         return effective
 
     def update(self, values: object) -> dict[str, Any]:

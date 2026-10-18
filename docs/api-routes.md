@@ -87,7 +87,10 @@ return a secret: the response is the credential status only.
 
 - `PUT /api/settings/credentials` takes a JSON object whose keys are credential
   fields (`openai_api_key`, `openai_base_url`, `intervals_api_key`,
-  `intervals_athlete_id`, `wahoo_client_id`, `wahoo_client_secret`). A string
+  `intervals_athlete_id`, `wahoo_client_id`, `wahoo_client_secret`,
+  `garmin_email`). `garmin_email` has no UI field; it pairs with the
+  environment `GARMIN_PASSWORD` fallback and is reported as configured only,
+  never echoed back. A string
   stores the value; `null` or a blank string clears the value stored in the app,
   so the environment value applies again. Each field is validated server-side.
   The response is the credential status: per field `source` (`db`, `env` or
@@ -99,9 +102,13 @@ return a secret: the response is the credential status only.
   password is used once and never stored. The response is `{"status":
   "connected"}` or `{"status": "mfa_required"}`, plus the current
   `connected`, `source` and `mfa_pending` fields. An MFA challenge keeps its pending login on the
-  server until a code is submitted or a new login starts.
+  server for 10 minutes, until a code is submitted or a new login starts;
+  cancelling in the UI does not discard it. Wrong Garmin credentials return
+  `422`, an unreachable Garmin returns `502`.
 - `POST /api/garmin/login/mfa` takes `{"code": "..."}` and completes the pending
-  login. The response is `{"status": "connected"}` with the same fields.
+  login. The response is `{"status": "connected"}` with the same fields. A wrong
+  code returns `422` and keeps the pending login for another attempt; a missing
+  or expired one returns `409`.
 - `POST /api/garmin/disconnect` takes an empty JSON object, deletes the stored
   Garmin tokens and returns `{"status": "disconnected"}` with the same fields. Garmin data already stored
   locally is kept.

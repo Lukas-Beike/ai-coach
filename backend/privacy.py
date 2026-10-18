@@ -241,7 +241,11 @@ _REMOTE_LINK_KINDS_BY_CATEGORY = {
 }
 PRIVACY_REMOTE_SCOPE = (
     "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
-    "Garmin-Konto und Garmin-Daten bleiben unverändert.",
+    (
+        "Garmin-Konto und Garmin-Daten bleiben unverändert. Eine ältere "
+        "Garmin-Token-Datei im Datenverzeichnis bleibt erhalten, wird aber nicht "
+        "mehr verwendet."
+    ),
     "Externe Kalenderquelle und deren Anbieter bleiben unverändert.",
 )
 

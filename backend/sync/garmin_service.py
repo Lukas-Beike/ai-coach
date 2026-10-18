@@ -82,10 +82,12 @@ def _garmin_tokenstore_present(config: Config, garmin_tokens: Any | None) -> boo
     return Path(config.garmin_tokenstore).exists()
 
 
-def _persist_garmin_tokens(garmin_tokens: Any | None, client: Any) -> None:
-    """Store refreshed or first-imported tokens after a successful collection."""
+def _persist_garmin_tokens(
+    garmin_tokens: Any | None, client: Any, login_argument: str
+) -> None:
+    """Store refreshed or first-imported tokens, even when collection failed."""
     if garmin_tokens is not None:
-        garmin_tokens.write_back(client)
+        garmin_tokens.write_back(client, login_argument)
 
 
 class GarminRemoteReader:
@@ -192,31 +194,35 @@ class GarminRemoteReader:
             )
             raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
 
-        payload = collect_garmin_data(
-            client,
-            windows,
-            start=windows[0][0],
-            today=today,
-            synced_at=self._utc_now(),
-            external_call=call_external,
-            redact=self._redactor,
-            warn=self._warn,
-            status=status,
-            capability_allowed=self._state_service.capability_allowed,
-            capability_failure=self._state_service.record_capability_failure,
-            capability_success=self._state_service.record_capability_success,
-            options=GarminCollectionOptions(
-                include_recovery=(
-                    end_date is None and days != self._all_sync_days
-                    if include_recovery is None
-                    else include_recovery
+        try:
+            payload = collect_garmin_data(
+                client,
+                windows,
+                start=windows[0][0],
+                today=today,
+                synced_at=self._utc_now(),
+                external_call=call_external,
+                redact=self._redactor,
+                warn=self._warn,
+                status=status,
+                capability_allowed=self._state_service.capability_allowed,
+                capability_failure=self._state_service.record_capability_failure,
+                capability_success=self._state_service.record_capability_success,
+                options=GarminCollectionOptions(
+                    include_recovery=(
+                        end_date is None and days != self._all_sync_days
+                        if include_recovery is None
+                        else include_recovery
+                    ),
+                    include_current_metrics=(
+                        end_date is None and days != self._all_sync_days
+                    ),
                 ),
-                include_current_metrics=(
-                    end_date is None and days != self._all_sync_days
-                ),
-            ),
-        )
-        _persist_garmin_tokens(self._garmin_tokens, client)
+            )
+        finally:
+            # The login may already have refreshed the tokens; keep them even
+            # when a later request fails.
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
         self._raise_if_cancelled(cancel_event)
         return payload, windows
 
@@ -271,21 +277,23 @@ class GarminMorningRemoteReader:
         )
         profile_timezone = timezone_name(self._profile_service.get().get("timezone"))
         fallback_zone = self._athlete_clock.now().tzinfo or timezone.utc
-        result = garmin_morning.fetch_morning_body_battery(
-            client,
-            checkin_date,
-            tokenstore=_garmin_login_argument(self._config, self._garmin_tokens),
-            email_configured=bool(self._config.garmin_email),
-            tokenstore_exists=_garmin_tokenstore_present(
-                self._config, self._garmin_tokens
-            ),
-            profile_timezone=profile_timezone,
-            fallback_zone=fallback_zone,
-            external_call=self._external_call,
-            sleep_bounds=performance_morning_battery.sleep_bounds,
-        )
-        _persist_garmin_tokens(self._garmin_tokens, client)
-        return result
+        login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
+        try:
+            return garmin_morning.fetch_morning_body_battery(
+                client,
+                checkin_date,
+                tokenstore=login_argument,
+                email_configured=bool(self._config.garmin_email),
+                tokenstore_exists=_garmin_tokenstore_present(
+                    self._config, self._garmin_tokens
+                ),
+                profile_timezone=profile_timezone,
+                fallback_zone=fallback_zone,
+                external_call=self._external_call,
+                sleep_bounds=performance_morning_battery.sleep_bounds,
+            )
+        finally:
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 
     def _external_call(
         self,

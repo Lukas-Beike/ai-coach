@@ -383,7 +383,7 @@ class GarminSyncServiceTests(unittest.TestCase):
 
 
 class GarminRemoteReaderTests(unittest.TestCase):
-    def make_reader(self, client_factory, state=None):
+    def make_reader(self, client_factory, state=None, garmin_tokens=None):
         self.state = state or Mock()
         return GarminRemoteReader(
             _config(),
@@ -397,7 +397,34 @@ class GarminRemoteReaderTests(unittest.TestCase):
             date(2000, 1, 1),
             90,
             -1,
+            garmin_tokens=garmin_tokens,
         )
+
+    def test_tokens_are_persisted_with_the_login_argument_even_on_failure(self):
+        client = Mock()
+        client.login.return_value = (False, None)
+        factory = Mock()
+        factory.available.return_value = True
+        factory.create.return_value = client
+        tokens = Mock()
+        tokens.login_argument.return_value = '{"di_token": "synthetic"}'
+        reader = self.make_reader(factory, garmin_tokens=tokens)
+        with (
+            patch(
+                "backend.sync.garmin_service.provider_http.external_call",
+                side_effect=lambda _service, _operation, call, _details, **_kwargs: (
+                    call()
+                ),
+            ),
+            patch(
+                "backend.sync.garmin_service.collect_garmin_data",
+                side_effect=RuntimeError("collection failed"),
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            reader.fetch(1, None, status=Mock())
+        client.login.assert_called_once_with('{"di_token": "synthetic"}')
+        tokens.write_back.assert_called_once_with(client, '{"di_token": "synthetic"}')
 
     def test_reader_logs_in_and_collects_with_historical_options(self):
         client = Mock()
@@ -519,7 +546,7 @@ class GarminSyncJobOwnerTests(unittest.TestCase):
 
 
 class GarminMorningRemoteReaderTests(unittest.TestCase):
-    def make_reader(self, config=None, factory=None):
+    def make_reader(self, config=None, factory=None, garmin_tokens=None):
         self.config = config or _config()
         self.factory = factory or Mock()
         self.client = Mock()
@@ -537,6 +564,26 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
             self.clock,
             self.diagnostic_capture,
             self.logger,
+            garmin_tokens=garmin_tokens,
+        )
+
+    def test_fetch_persists_tokens_even_when_the_read_fails(self):
+        tokens = Mock()
+        tokens.login_argument.return_value = '{"di_token": "synthetic"}'
+        reader = self.make_reader(garmin_tokens=tokens)
+        with (
+            patch(
+                "backend.sync.garmin_service.garmin_morning.fetch_morning_body_battery",
+                side_effect=RuntimeError("read failed"),
+            ) as fetch,
+            self.assertRaises(RuntimeError),
+        ):
+            reader.fetch(date(2026, 9, 4))
+        self.assertEqual(
+            fetch.call_args.kwargs["tokenstore"], '{"di_token": "synthetic"}'
+        )
+        tokens.write_back.assert_called_once_with(
+            self.client, '{"di_token": "synthetic"}'
         )
 
     def test_configuration_requires_available_client_and_email_or_tokenstore(self):

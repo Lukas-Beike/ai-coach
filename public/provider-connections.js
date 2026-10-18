@@ -37,8 +37,11 @@ const GARMIN_SOURCE_LABELS = Object.freeze({
 // Requests in flight per card (GARMIN_CARD for the Garmin card). Re-renders from
 // polling keep these controls disabled until the request settles.
 const providerCredentialBusy = new Set();
-// Set while the Garmin login response reports MFA, until the fresh state arrives.
 const GARMIN_CARD = "garmin-login";
+// Garmin login can take longer than the default request timeout.
+const GARMIN_LOGIN_TIMEOUT_MS = 55_000;
+// Set when the login response reports MFA, so a stale or failed reload still shows
+// the code step. Cleared by a successful code, cancel or disconnect.
 let garminMfaHint = false;
 // Set by "Abbrechen" in the MFA step so the login form returns without a reload.
 let garminLoginRestarted = false;
@@ -184,6 +187,7 @@ async function saveProviderCredentials(event, provider) {
     const input = $("#" + credentialFieldIds(field).input);
     if (!input) continue;
     values[field] = input.value;
+    // Cleared even when the save fails, so secrets never linger in the DOM.
     input.value = "";
   }
   const errorId = credentialFormIds(provider).error;
@@ -242,7 +246,11 @@ async function submitGarminLogin(event) {
   garminLoginRestarted = false;
   try {
     await runCredentialRequest(GARMIN_CARD, async () => {
-      const result = await api("/api/garmin/login", { method: "POST", body: JSON.stringify({ email, password }) });
+      const result = await api("/api/garmin/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+        timeoutMs: GARMIN_LOGIN_TIMEOUT_MS,
+      });
       garminMfaHint = result?.status === "mfa_required";
       toast(garminMfaHint ? "Bitte den Bestätigungscode von Garmin eingeben" : "Garmin verbunden");
       await load();
@@ -250,7 +258,6 @@ async function submitGarminLogin(event) {
   } catch (error) {
     setCredentialError("garmin-login-error", error.message);
   } finally {
-    garminMfaHint = false;
     renderProviderCredentials(state.data || {});
   }
 }
@@ -267,7 +274,11 @@ async function submitGarminMfa(event) {
   setCredentialError("garmin-mfa-error", "");
   try {
     await runCredentialRequest(GARMIN_CARD, async () => {
-      await api("/api/garmin/login/mfa", { method: "POST", body: JSON.stringify({ code }) });
+      await api("/api/garmin/login/mfa", {
+        method: "POST",
+        body: JSON.stringify({ code }),
+        timeoutMs: GARMIN_LOGIN_TIMEOUT_MS,
+      });
       garminMfaHint = false;
       toast("Garmin verbunden");
       await load();
@@ -277,7 +288,8 @@ async function submitGarminMfa(event) {
   }
 }
 
-// Leaves the MFA step for the login form; the server's pending login is replaced by the next login.
+// Leaves the MFA step for the login form. The server keeps the pending login until it
+// expires (10 minutes) or the next login replaces it.
 function cancelGarminMfa() {
   garminMfaHint = false;
   garminLoginRestarted = true;
@@ -294,6 +306,7 @@ async function disconnectGarmin() {
   try {
     await runCredentialRequest(GARMIN_CARD, async () => {
       await api("/api/garmin/disconnect", { method: "POST", body: "{}" });
+      garminMfaHint = false;
       garminLoginRestarted = false;
       toast("Garmin getrennt");
       await load();

@@ -41,11 +41,14 @@ MFA_TTL_SECONDS = 600
 MAX_FIELD_LENGTH = 512
 MIN_MFA_CODE_LENGTH = 4
 MAX_MFA_CODE_LENGTH = 10
+# Wrong codes accepted per pending login before it is discarded.
+MAX_MFA_ATTEMPTS = 5
 # Token strings shorter than this are not registered for redaction.
 MIN_SECRET_LENGTH = 8
-# Appended to the legacy path when no file may be read, so the SDK never falls
-# back to its default token location and the path itself never exists.
-ABSENT_TOKENSTORE_SUFFIX = ".disconnected"
+# Passed as the SDK tokenstore when no stored token may be used. It is inline
+# JSON without tokens: the SDK neither reads a file nor the GARMINTOKENS
+# variable, falls back to the credential login and never dumps to a path.
+EMPTY_TOKENSTORE = "{}"
 
 LOGIN_FAILED_MESSAGE = (
     "Garmin-Anmeldung fehlgeschlagen. Bitte E-Mail und Passwort prüfen."
@@ -56,6 +59,12 @@ LOGIN_UNAVAILABLE_MESSAGE = (
 MFA_INVALID_MESSAGE = "Der MFA-Code ist ungültig. Bitte erneut eingeben."
 MFA_NOT_PENDING_MESSAGE = "Keine Garmin-Anmeldung mit MFA aktiv. Bitte erneut anmelden."
 MFA_EXPIRED_MESSAGE = "Die MFA-Anmeldung ist abgelaufen. Bitte erneut anmelden."
+MFA_ATTEMPTS_MESSAGE = (
+    "Zu viele falsche MFA-Codes. Bitte die Garmin-Anmeldung neu starten."
+)
+LOGIN_SUPERSEDED_MESSAGE = (
+    "Die Garmin-Anmeldung wurde inzwischen getrennt oder neu gestartet."
+)
 INVALID_FIELD_MESSAGE = "Ungültige Garmin-Eingabe."
 TOKEN_EXPORT_MESSAGE = "Garmin-Tokens konnten nicht übernommen werden."
 
@@ -181,7 +190,7 @@ class GarminTokenStore:
             return blob
         if self._legacy_readable():
             return str(self._legacy_path())
-        return str(self._legacy_path()) + ABSENT_TOKENSTORE_SUFFIX
+        return EMPTY_TOKENSTORE
 
     def store(self, blob: str) -> None:
         if not blob:
@@ -191,15 +200,40 @@ class GarminTokenStore:
             self._key_values.delete(db, GARMIN_TOKENSTORE_STATE_KEY)
         self._registry.replace_tokens(blob)
 
-    def write_back(self, client: Any) -> None:
-        """Store the SDK's current token blob when it differs from the stored one.
+    def write_back(self, client: Any, login_argument: str) -> None:
+        """Store the SDK's current token blob after a sync used ``login_argument``.
 
         This records refreshed tokens and performs the one-time import of a
-        legacy file. Failures are logged without exception text, because the
-        SDK error may echo token material.
+        legacy file. The write is a compare-and-set: it happens only while the
+        stored blob is still the one the sync logged in with, so a disconnect,
+        privacy deletion or new login during the sync is never undone, and a
+        credential login after a disconnect is not persisted. Failures are
+        logged without exception text, because the SDK error may echo token
+        material.
         """
         try:
             current = client.client.dumps()
+            if not _token_values(current) or not client.client.is_authenticated:
+                return
+            expected = (
+                login_argument
+                if login_argument.lstrip().startswith("{")
+                and login_argument != EMPTY_TOKENSTORE
+                else None
+            )
+            with self._database_lock(), self._database_manager().unit_of_work() as db:
+                stored = self._key_values.get(db, GARMIN_TOKENS_KEY) or None
+                disconnected = (
+                    self._key_values.get(db, GARMIN_TOKENSTORE_STATE_KEY)
+                    == GARMIN_TOKENSTORE_DISCONNECTED
+                )
+                if stored != expected or (expected is None and disconnected):
+                    return
+                if current == stored:
+                    return
+                self._key_values.set(db, GARMIN_TOKENS_KEY, current)
+                self._key_values.delete(db, GARMIN_TOKENSTORE_STATE_KEY)
+            self._registry.replace_tokens(current)
         except Exception as exc:  # noqa: BLE001 - never surface SDK internals
             _LOGGER.warning(
                 "Garmin token write-back skipped",
@@ -208,9 +242,6 @@ class GarminTokenStore:
                     "context": {"error_type": type(exc).__name__},
                 },
             )
-            return
-        if current and current != self._read_blob():
-            self.store(current)
 
     def clear(self) -> None:
         """Remove the stored tokens and block the legacy file until reconnect."""
@@ -226,6 +257,8 @@ class GarminTokenStore:
 class _PendingMfa:
     client: Any
     expires_at: float
+    generation: int
+    failures: int = 0
 
 
 def _text_field(body: object, name: str) -> str:
@@ -266,11 +299,18 @@ class GarminLoginService:
         self._tokens = tokens
         self._registry = registry
         self._clock = clock
-        # One pending MFA slot: a second login replaces it.
+        # One pending MFA slot: a second login replaces it. ``_lock`` guards only
+        # the slot and is never held across SDK calls, so status reads stay fast;
+        # ``_flow_lock`` serializes the slow login and MFA calls themselves.
         self._lock = threading.Lock()
+        self._flow_lock = threading.Lock()
         self._pending: _PendingMfa | None = None
+        # Bumped by every login start and disconnect, so the result of an
+        # outdated flow is never stored.
+        self._generation = 0
 
     def _mfa_active(self) -> bool:
+        """Callers must hold ``self._lock``."""
         pending = self._pending
         if pending is None:
             return False
@@ -279,46 +319,51 @@ class GarminLoginService:
             return False
         return True
 
-    def _snapshot(self) -> dict[str, Any]:
-        """Status without the lock; callers must already hold ``self._lock``."""
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            mfa_pending = self._mfa_active()
         source = self._tokens.source()
         return {
             "connected": source in {GARMIN_SOURCE_DB, GARMIN_SOURCE_FILE},
             "source": source,
-            "mfa_pending": self._mfa_active(),
+            "mfa_pending": mfa_pending,
         }
-
-    def status(self) -> dict[str, Any]:
-        with self._lock:
-            return self._snapshot()
 
     def login(self, body: object) -> dict[str, Any]:
         email = _text_field(body, "email")
         password = _text_field(body, "password")
-        with self._lock:
-            self._pending = None
+        with self._flow_lock:
+            with self._lock:
+                self._pending = None
+                self._generation += 1
+                generation = self._generation
             with self._registry.hold(email, password):
                 client = self._client_factory(email, password, return_on_mfa=True)
                 try:
-                    needs_mfa, _ = client.login()
+                    needs_mfa, _ = client.login(EMPTY_TOKENSTORE)
                 except Exception as exc:  # noqa: BLE001 - SDK text is not shown
                     raise self._login_error(exc) from None
                 if needs_mfa:
-                    self._pending = _PendingMfa(
-                        client=client, expires_at=self._clock() + MFA_TTL_SECONDS
-                    )
-                    return {"status": "mfa_required", **self._snapshot()}
-                self._store(client)
-                return {"status": "connected", **self._snapshot()}
+                    with self._lock:
+                        self._ensure_current(generation)
+                        self._pending = _PendingMfa(
+                            client=client,
+                            expires_at=self._clock() + MFA_TTL_SECONDS,
+                            generation=generation,
+                        )
+                    return {"status": "mfa_required", **self.status()}
+                self._store(client, generation)
+                return {"status": "connected", **self.status()}
 
     def submit_mfa(self, body: object) -> dict[str, Any]:
         code = _mfa_code(body)
-        with self._lock:
-            if self._pending is None:
-                raise AppError(409, MFA_NOT_PENDING_MESSAGE)
-            if not self._mfa_active():
-                raise AppError(409, MFA_EXPIRED_MESSAGE)
-            pending = self._pending
+        with self._flow_lock:
+            with self._lock:
+                if self._pending is None:
+                    raise AppError(409, MFA_NOT_PENDING_MESSAGE)
+                if not self._mfa_active():
+                    raise AppError(409, MFA_EXPIRED_MESSAGE)
+                pending = self._pending
             try:
                 pending.client.resume_login(None, code)
             except Exception as exc:  # noqa: BLE001 - keep the slot for a retry
@@ -329,23 +374,41 @@ class GarminLoginService:
                         "context": {"error_type": type(exc).__name__},
                     },
                 )
-                raise AppError(401, MFA_INVALID_MESSAGE) from None
-            self._pending = None
-            self._store(pending.client)
-            return {"status": "connected", **self._snapshot()}
+                with self._lock:
+                    pending.failures += 1
+                    if pending.failures >= MAX_MFA_ATTEMPTS:
+                        if self._pending is pending:
+                            self._pending = None
+                        raise AppError(409, MFA_ATTEMPTS_MESSAGE) from None
+                raise AppError(422, MFA_INVALID_MESSAGE) from None
+            with self._lock:
+                if self._pending is pending:
+                    self._pending = None
+            self._store(pending.client, pending.generation)
+            return {"status": "connected", **self.status()}
 
     def disconnect(self) -> dict[str, Any]:
         with self._lock:
             self._pending = None
-            self._tokens.clear()
-            return {"status": "disconnected", **self._snapshot()}
+            self._generation += 1
+        self._tokens.clear()
+        return {"status": "disconnected", **self.status()}
 
-    def _store(self, client: Any) -> None:
+    def _ensure_current(self, generation: int) -> None:
+        """Callers must hold ``self._lock``."""
+        if generation != self._generation:
+            raise AppError(409, LOGIN_SUPERSEDED_MESSAGE)
+
+    def _store(self, client: Any, generation: int) -> None:
         try:
             blob = client.client.dumps()
         except Exception as exc:  # noqa: BLE001 - never surface SDK internals
             raise self._token_error(exc) from None
-        self._tokens.store(blob)
+        # Checked and stored under the slot lock, so a disconnect that starts
+        # after this point clears the stored blob again.
+        with self._lock:
+            self._ensure_current(generation)
+            self._tokens.store(blob)
 
     @staticmethod
     def _login_error(exc: BaseException) -> AppError:
@@ -357,7 +420,7 @@ class GarminLoginService:
             },
         )
         if type(exc).__name__ in {"GarminConnectAuthenticationError"}:
-            return AppError(401, LOGIN_FAILED_MESSAGE)
+            return AppError(422, LOGIN_FAILED_MESSAGE)
         return AppError(502, LOGIN_UNAVAILABLE_MESSAGE)
 
     @staticmethod
