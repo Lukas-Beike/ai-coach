@@ -151,7 +151,11 @@ class GarminProjectionService:
             "source": snapshot.get("source")
             or ("library" if self._garmin_client_factory.available() else None),
             "last_sync_at": last_sync_at,
-            "metric_export_status": metric_export_status,
+            **(
+                {"metric_export_status": metric_export_status}
+                if metric_export_status
+                else {}
+            ),
             "metric_export_enabled": metric_export_enabled,
             "last_error": parsed_error,
             "pagination": snapshot.get("provider_sync", {}).get("pagination", {}),

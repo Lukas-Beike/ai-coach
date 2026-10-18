@@ -169,6 +169,17 @@ class GarminProjectionServiceTests(unittest.TestCase):
         ):
             self.assertEqual(service.public_state()["metric_export_status"], receipt)
 
+    def test_missing_export_receipt_is_omitted_but_disabled_consent_is_explicit(self):
+        service, _ = self._service()
+        with patch.object(
+            performance_garmin_metrics,
+            "garmin_performance_metrics",
+            return_value=_metrics(),
+        ):
+            result = service.public_state()
+        self.assertNotIn("metric_export_status", result)
+        self.assertIs(result["metric_export_enabled"], False)
+
     def test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors(self):
         duplicate = {
             "activityId": 1,
