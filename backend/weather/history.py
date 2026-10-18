@@ -29,7 +29,7 @@ def remember_forecasts(history: Any, *caches: Any) -> dict[str, Any]:
             continue
         location = cached.get("location")
         location_name = location.get("name") if isinstance(location, dict) else None
-        for row in projection.daily_summary(cached["forecast"]):
+        for row in projection.daily_summary(cached["forecast"], cached.get("pollen")):
             result[row["date"]] = {
                 **row,
                 "forecast_saved_at": cached.get("fetched_at"),

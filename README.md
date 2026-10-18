@@ -14,7 +14,7 @@ Intervals Coach is intentionally standalone and designed for operation on a trus
 - **Local Source of Truth**: The local SQLCipher database is the authoritative source for future planned units, training goals, workout templates, and athlete feedback. Intervals.icu remains the authoritative record of completed historical activities.
 - **Explicit Action Gate**: Local Coach actions follow the athlete's direct request. Intervals.icu writes show a separate, session-bound preview that the athlete must approve before a job is queued; the preview expires and rechecks its target before execution.
 - **Plan Replacement**: A requested full plan replacement archives local Coach, library, and imported Intervals units within the selected period (or selected plan). Competitions and external calendar blockers remain protected. Remote changes require a separate approved synchronization.
-- **Untrusted External Content**: Data received from Intervals.icu, Garmin Connect, Open-Meteo, and external iCalendar feeds is strictly treated as untrusted data, never as system instructions.
+- **Untrusted External Content**: Data received from Intervals.icu, Garmin Connect, Open-Meteo, the DWD, and external iCalendar feeds is strictly treated as untrusted data, never as system instructions.
 - **Zero Cloud Telemetry**: Biometric data, activity recordings, API keys, database keys, and athlete conversations never leave the host server, except when sending sanitized coaching prompts to the user's selected AI provider.
 - **Standard-Library Foundation**: The backend runs on Python's native `http.server` without heavyweight web frameworks. Application logic is modularized under `backend/`, keeping `server.py` strictly as a composition root.
 
@@ -111,7 +111,8 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 ### Weather Intelligence & Outdoor Scheduling
 - **Open-Meteo Integration**: Server-side cached 14-day local weather forecasts powered by the non-commercial Open-Meteo meteorological API.
 - **Dual-Model Forecast Engine**: Intelligent forecast resolution using high-precision DWD ICON-D2 for short-range predictions and ECMWF IFS HRES for long-range outlooks.
-- **Weather Window Recommendations**: Automated calculation of optimal outdoor training windows over the next 5 days based on temperature, precipitation, and wind speeds.
+- **Air Quality & Pollen**: Open-Meteo/CAMS European AQI, particulate matter, ozone, nitrogen dioxide, and UV index for about 5 days. For German locations the official DWD pollen-flight hazard index (0–3, today plus two days) is used for the automatically resolved pollen region; elsewhere Open-Meteo/CAMS pollen concentrations are the fallback.
+- **Weather Window Recommendations**: Automated calculation of optimal outdoor training windows over the next 5 days based on temperature, precipitation, wind speeds, and air quality.
 - **Workday Schedule Awareness**: Outdoor suggestions tailored around athlete working hours (06:00-15:30 Monday-Thursday, until 14:00 Friday, with a 12:00-13:00 lunch window).
 - **Adaptive Weather Alerts**: Proactive notifications and planned calendar warnings when impending heavy rain, extreme heat, or high winds impact scheduled outdoor sessions.
 - **Efficient Server Caching**: 3-hour server-side forecast caching with automatic on-demand cache overrides accessible from the More tab.
@@ -465,7 +466,7 @@ Conversational turns are persisted in `coach_commands`; provider synchronization
 ### Provider Data Handling
 - **Intervals.icu Activity Pull**: Ingests new completed workouts with full telemetry (duration, distance, TSS, HR zones, power curves). Large imports are safely fetched in paginated windows.
 - **Garmin Sleep Gate & Body Battery**: Morning synchronization deliberately halts until Garmin's sleep window completes. Body Battery tracking captures the final pre-sleep value and the wake-up value within 60 minutes of rising, retrying up to 3 times with 15-minute intervals.
-- **Open-Meteo Weather**: Forecasts are fetched for the athlete's coordinates and cached for 3 hours. For locations in Germany, the first two days use the DWD ICON-D2 model; other locations and the remaining days up to 14 use ECMWF IFS HRES.
+- **Open-Meteo Weather**: Forecasts are fetched for the athlete's coordinates and cached for 3 hours. For locations in Germany, the first two days use the DWD ICON-D2 model; other locations and the remaining days up to 14 use ECMWF IFS HRES. Air quality comes from the Open-Meteo Air Quality API; the DWD pollen region is resolved from the coordinates through the DWD GeoServer and its levels are read from the DWD open-data feed. Both sources are optional: a failure is logged and the weather forecast is still cached. Attribution: Open-Meteo.com, Copernicus Atmosphere Monitoring Service, and Deutscher Wetterdienst (CC BY 4.0).
 - **iCalendar (ICS) Life Constraints**: The external feed is parsed up to 8 weeks out. Events containing `[NO_TRAINING]`, `[NO_INTENSITY]`, or `[SHORT_ONLY]` in their description are tagged as training constraints.
 
 ---

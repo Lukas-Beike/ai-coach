@@ -68,6 +68,29 @@ WEATHER_ICONS = {
 }
 WEATHER_FORECAST_DAYS = 14
 _DATE_ONLY_PATTERN = r"\d{4}-\d{2}-\d{2}"
+AIR_QUALITY_KEYS = (
+    "european_aqi",
+    "pm2_5",
+    "pm10",
+    "ozone",
+    "nitrogen_dioxide",
+    "uv_index",
+)
+CAMS_POLLEN_SPECIES = {
+    "alder_pollen": "Erle",
+    "birch_pollen": "Birke",
+    "grass_pollen": "Gräser",
+    "mugwort_pollen": "Beifuß",
+    "olive_pollen": "Olive",
+    "ragweed_pollen": "Ambrosia",
+}
+EUROPEAN_AQI_CATEGORIES = (
+    (20, "gut"),
+    (40, "ordentlich"),
+    (60, "mäßig"),
+    (80, "schlecht"),
+    (100, "sehr schlecht"),
+)
 
 
 def weather_number(value: Any) -> float | None:
@@ -115,13 +138,94 @@ def _weather_daily_sun_time(daily: dict[str, Any], key: str, index: int) -> str 
     )
 
 
+def european_aqi_category(value: float | None) -> str | None:
+    """Return the German label of a European AQI value."""
+    if value is None or value < 0:
+        return None
+    return next(
+        (label for limit, label in EUROPEAN_AQI_CATEGORIES if value <= limit),
+        "extrem schlecht",
+    )
+
+
+def _hourly_daily_max(
+    forecast: dict[str, Any], target_date: str, keys: Any
+) -> dict[str, float]:
+    raw_hourly = forecast.get("hourly")
+    hourly = raw_hourly if isinstance(raw_hourly, dict) else {}
+    raw_times = hourly.get("time")
+    times = raw_times if isinstance(raw_times, list) else []
+    indexes = [
+        index
+        for index, value in enumerate(times)
+        if str(value).startswith(target_date + "T")
+    ]
+    result: dict[str, float] = {}
+    for key in keys:
+        values = [
+            value
+            for index in indexes
+            if (value := _weather_array_value(hourly.get(key), index)) is not None
+            and value >= 0
+        ]
+        if values:
+            result[key] = round(max(values), 1)
+    return result
+
+
+def _daily_air_quality(
+    forecast: dict[str, Any], target_date: str
+) -> dict[str, Any] | None:
+    peaks = _hourly_daily_max(forecast, target_date, AIR_QUALITY_KEYS)
+    if not peaks:
+        return None
+    result: dict[str, Any] = {f"{key}_max": value for key, value in peaks.items()}
+    category = european_aqi_category(peaks.get("european_aqi"))
+    if category:
+        result["european_aqi_category"] = category
+    return result
+
+
+def _daily_pollen(
+    forecast: dict[str, Any], target_date: str, pollen: Any
+) -> dict[str, Any] | None:
+    days = pollen.get("days") if isinstance(pollen, dict) else None
+    levels = days.get(target_date) if isinstance(days, dict) else None
+    if isinstance(levels, dict):
+        return {
+            "source": "DWD",
+            "region": str(pollen.get("region") or "")[:100],
+            "levels": {
+                str(name)[:40]: str(level)[:3]
+                for name, level in levels.items()
+                if str(level) != "0"
+            },
+        }
+    peaks = _hourly_daily_max(forecast, target_date, CAMS_POLLEN_SPECIES)
+    if not peaks:
+        return None
+    return {
+        "source": "Open-Meteo/CAMS",
+        "unit": "Körner/m³",
+        "concentrations": {
+            CAMS_POLLEN_SPECIES[key]: round(value)
+            for key, value in peaks.items()
+            if value >= 1
+        },
+    }
+
+
 def _weather_daily_row(
-    daily: dict[str, Any], forecast: dict[str, Any], raw_date: Any, index: int
+    daily: dict[str, Any],
+    forecast: dict[str, Any],
+    raw_date: Any,
+    index: int,
+    pollen: Any = None,
 ) -> dict[str, Any]:
     target_date = str(raw_date)
     code = _weather_array_value(daily.get("weather_code"), index)
     numeric_code = int(code) if code is not None else None
-    return {
+    row: dict[str, Any] = {
         "date": target_date,
         "weather_code": numeric_code,
         "condition": (
@@ -153,13 +257,26 @@ def _weather_daily_row(
         "sunrise": _weather_daily_sun_time(daily, "sunrise", index),
         "sunset": _weather_daily_sun_time(daily, "sunset", index),
     }
+    air_quality = _daily_air_quality(forecast, target_date)
+    if air_quality:
+        row["air_quality"] = air_quality
+    daily_pollen = _daily_pollen(forecast, target_date, pollen)
+    if daily_pollen:
+        row["pollen"] = daily_pollen
+    return row
 
 
-def daily_summary(forecast: dict[str, Any]) -> list[dict[str, Any]]:
-    daily = forecast.get("daily") if isinstance(forecast.get("daily"), dict) else {}
-    dates = daily.get("time") if isinstance(daily.get("time"), list) else []
+def daily_summary(forecast: dict[str, Any], pollen: Any = None) -> list[dict[str, Any]]:
+    """Project daily weather rows, optional air quality, and pollen levels.
+
+    DWD pollen levels take precedence over the Open-Meteo/CAMS fallback.
+    """
+    raw_daily = forecast.get("daily")
+    daily = raw_daily if isinstance(raw_daily, dict) else {}
+    raw_dates = daily.get("time")
+    dates = raw_dates if isinstance(raw_dates, list) else []
     return [
-        _weather_daily_row(daily, forecast, raw_date, index)
+        _weather_daily_row(daily, forecast, raw_date, index, pollen)
         for index, raw_date in enumerate(dates[:WEATHER_FORECAST_DAYS])
         if re.fullmatch(_DATE_ONLY_PATTERN, str(raw_date))
     ]
@@ -168,8 +285,10 @@ def daily_summary(forecast: dict[str, Any]) -> list[dict[str, Any]]:
 def hourly_rows(
     forecast: dict[str, Any], target_date: str
 ) -> list[dict[str, float | int | str]]:
-    hourly = forecast.get("hourly") if isinstance(forecast.get("hourly"), dict) else {}
-    times = hourly.get("time") if isinstance(hourly.get("time"), list) else []
+    raw_hourly = forecast.get("hourly")
+    hourly = raw_hourly if isinstance(raw_hourly, dict) else {}
+    raw_times = hourly.get("time")
+    times = raw_times if isinstance(raw_times, list) else []
     rows: list[dict[str, float | int | str]] = []
     for index, raw_time in enumerate(times):
         timestamp = str(raw_time)
@@ -190,6 +309,7 @@ def hourly_rows(
             "wind_speed_10m",
             "wind_direction_10m",
             "wind_gusts_10m",
+            *AIR_QUALITY_KEYS,
         ):
             value = _weather_array_value(hourly.get(key), index)
             if value is not None:

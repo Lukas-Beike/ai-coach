@@ -112,6 +112,9 @@ def _weather_interval_summary(
         weather_projection.weather_number(item.get("wind_direction_10m"))
         for item in interval
     ]
+    air_quality = [
+        weather_projection.weather_number(item.get("european_aqi")) for item in interval
+    ]
     known_rain = [value for value in rain if value is not None]
     return {
         "precipitation_average": _known_average(precipitation),
@@ -122,6 +125,9 @@ def _weather_interval_summary(
         ),
         "wind_speed_average": _known_average(wind_speeds),
         "wind_direction_average": _known_average(directions),
+        "air_quality_maximum": max(
+            (value for value in air_quality if value is not None), default=None
+        ),
         "weather_codes": [
             int(item["weather_code"])
             for item in interval
@@ -134,7 +140,8 @@ def _weather_window_score(event: dict[str, Any], summary: dict[str, Any]) -> flo
     """Score one valid window; lower scores are more suitable.
 
     Precipitation probability and apparent temperature are required by the
-    candidate filter. Optional wind and rain terms add no penalty when unknown.
+    candidate filter. Optional wind, rain, and air-quality terms add no penalty
+    when unknown.
     """
     severe_weather = sum(25 for code in summary["weather_codes"] if code >= 95) + sum(
         8 for code in summary["weather_codes"] if 61 <= code <= 86
@@ -143,6 +150,7 @@ def _weather_window_score(event: dict[str, Any], summary: dict[str, Any]) -> flo
     wind_speed = summary["wind_speed_average"] or 0
     gust_maximum = summary["gust_maximum"] or 0
     rain_total = summary["rain_total"] or 0
+    air_quality = summary["air_quality_maximum"] or 0
     return (
         summary["precipitation_average"] * 0.8
         + rain_total * 8
@@ -151,6 +159,7 @@ def _weather_window_score(event: dict[str, Any], summary: dict[str, Any]) -> flo
         * (1.0 if is_outdoor_activity(event) and not running else 0.5)
         + max(0, 4 - summary["temperature_average"]) * 1.5
         + max(0, summary["temperature_average"] - 27) * 1.2
+        + max(0, air_quality - 40) * 0.6
         + severe_weather
     )
 
@@ -243,6 +252,7 @@ def weather_recommendation(
     gust_max = _round_optional(summary["gust_maximum"])
     wind_speed_avg = _round_optional(summary["wind_speed_average"])
     wind_direction = _round_optional(summary["wind_direction_average"])
+    air_quality_max = _round_optional(summary["air_quality_maximum"])
     end_hour = start_hour + duration_hours
     best_code = summary["weather_codes"][0] if summary["weather_codes"] else None
     recommendation = {
@@ -260,12 +270,17 @@ def weather_recommendation(
         "wind_direction": wind_direction,
         "wind_gusts": gust_max,
     }
+    if air_quality_max is not None:
+        recommendation["european_aqi"] = air_quality_max
     reason = f"ca. {temperature_avg} °C gefühlte Temperatur"
     if wind_speed_avg is not None:
         reason += f", {wind_speed_avg} km/h Wind"
     reason += f" und {precipitation_avg} % Regenwahrscheinlichkeit"
     if gust_max is not None:
         reason += f", Böen bis {gust_max} km/h"
+    if air_quality_max is not None and air_quality_max >= 60:
+        category = weather_projection.european_aqi_category(air_quality_max)
+        reason += f", Luftqualität {category} (AQI {air_quality_max})"
     recommendation["reason"] = reason + "."
     return recommendation
 
