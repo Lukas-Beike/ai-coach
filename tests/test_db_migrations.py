@@ -213,6 +213,27 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             db.execute("PRAGMA user_version").fetchone()[0], OLDEST_SUPPORTED_VERSION
         )
 
+    def test_lost_savepoint_does_not_mask_the_original_upgrade_error(self):
+        # The step ends the transaction or drops the savepoint, as an engine
+        # error can, before it fails; cleanup must keep the original error.
+        for statement in ("ROLLBACK", "RELEASE schema_migration"):
+            with self.subTest(statement=statement):
+                db = self.connect()
+                self.populated_v9_database(db)
+                before = list(db.iterdump())
+
+                def failing_step(connection, statement=statement):
+                    execute_ddl(connection, ACTIVITY_DETAIL_DDL)
+                    connection.execute(statement)
+                    raise RuntimeError("injected migration failure")
+
+                steps = {SHAPE_SCHEMA_V9: (SHAPE_CURRENT, failing_step)}
+                with mock.patch.dict(migrations.UPGRADE_STEPS, steps):
+                    with self.assertRaisesRegex(RuntimeError, "injected"):
+                        migrate_schema(db)
+                db.rollback()
+                self.assertEqual(list(db.iterdump()), before)
+
     def test_upgraded_database_restarts_with_the_same_build_unchanged(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "upgrade.db"

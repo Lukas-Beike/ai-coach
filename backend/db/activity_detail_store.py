@@ -97,11 +97,15 @@ def encode_series(values: Sequence[float | None]) -> tuple[bytes, int]:
 
     Gaps are stored as NaN; validated series never contain NaN otherwise.
     """
+    points, valid = _pack_series(values)
+    return zlib.compress(points, 6), valid
+
+
+def _pack_series(values: Sequence[float | None]) -> tuple[bytes, int]:
     points = array("d", (math.nan if value is None else value for value in values))
     if sys.byteorder != "little":
         points.byteswap()
-    valid = sum(value is not None for value in values)
-    return zlib.compress(points.tobytes(), 6), valid
+    return points.tobytes(), sum(value is not None for value in values)
 
 
 def decode_series(blob: bytes, point_count: int) -> tuple[float | None, ...]:
@@ -167,7 +171,7 @@ def replace_detail_set(
         "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
         key,
     ).fetchone()
-    if existing is not None and existing[0] == content_sha256:
+    if existing is not None and existing["content_sha256"] == content_sha256:
         db.execute(
             "UPDATE activity_detail_sets SET summary_sha256 = ?, fetched_at = ? "
             "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
@@ -266,11 +270,11 @@ def save_analysis(
         "WHERE activity_id = ?",
         (activity_id,),
     ).fetchone()
-    if existing is not None and tuple(existing) == (
-        analysis_version,
-        input_sha256,
-        text,
-    ):
+    if existing is not None and (
+        existing["analysis_version"],
+        existing["input_sha256"],
+        existing["payload"],
+    ) == (analysis_version, input_sha256, text):
         return WriteOutcome.UNCHANGED
     if existing is None:
         db.execute(
@@ -303,12 +307,11 @@ def analysis_rows_for(
             f"WHERE s.state <> ? AND a.activity_id IN ({', '.join('?' * len(chunk))})",
             (ActivitySessionState.DELETED.value, *chunk),
         ).fetchall():
-            activity_id, version, input_sha256, payload, computed_at = tuple(row)
-            rows[activity_id] = {
-                "analysis_version": version,
-                "input_sha256": input_sha256,
-                "payload": json.loads(payload),
-                "computed_at": computed_at,
+            rows[row["activity_id"]] = {
+                "analysis_version": row["analysis_version"],
+                "input_sha256": row["input_sha256"],
+                "payload": json.loads(row["payload"]),
+                "computed_at": row["computed_at"],
             }
     return rows
 
@@ -323,17 +326,18 @@ def stream_export_rows(db: Any) -> Iterable[dict[str, Any]]:
         "SELECT provider, provider_activity_id, channel, point_count, valid_count, data "
         "FROM activity_stream_channels ORDER BY provider, provider_activity_id, channel"
     ):
-        provider, activity_id, channel, point_count, valid_count, data = tuple(row)
         try:
-            values: list[float | None] | None = list(decode_series(data, point_count))
+            values: list[float | None] | None = list(
+                decode_series(row["data"], row["point_count"])
+            )
         except ValueError:
             values = None
         yield {
-            "provider": provider,
-            "provider_activity_id": activity_id,
-            "channel": channel,
-            "point_count": point_count,
-            "valid_count": valid_count,
+            "provider": row["provider"],
+            "provider_activity_id": row["provider_activity_id"],
+            "channel": row["channel"],
+            "point_count": row["point_count"],
+            "valid_count": row["valid_count"],
             "values": values,
         }
 
@@ -377,8 +381,9 @@ def _child_rows(detail: ActivityDetailSet) -> list[tuple[object, ...]]:
         rows: list[tuple[object, ...]] = []
         for channel in sorted(detail.channels, key=lambda item: item.value):
             values = detail.channels[channel]
-            blob, valid = encode_series(values)
-            rows.append((channel.value, len(values), valid, blob))
+            # Packed, not compressed: the content hash decides whether to write.
+            points, valid = _pack_series(values)
+            rows.append((channel.value, len(values), valid, points))
         return rows
     if isinstance(detail, ActivityLapSet):
         return [
@@ -409,8 +414,8 @@ def _content_hash(header: Mapping[str, Any], children: list[tuple[object, ...]])
     for row in children:
         for value in row:
             if isinstance(value, bytes):
-                # Hash decoded points, not zlib output, which may vary by library.
-                digest.update(zlib.decompress(value))
+                # Hash the packed points, not zlib output, which may vary by library.
+                digest.update(value)
             else:
                 digest.update(json.dumps(value).encode("utf-8"))
             digest.update(b"\x1f")
@@ -438,7 +443,10 @@ def _insert_children(
             "INSERT INTO activity_stream_channels(provider, provider_activity_id, "
             "detail_kind, channel, point_count, valid_count, data) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [(*key, *row) for row in rows],
+            [
+                (*key, channel, count, valid, zlib.compress(points, 6))
+                for channel, count, valid, points in rows
+            ],
         )
     elif isinstance(detail, ActivityLapSet):
         db.executemany(
@@ -476,10 +484,9 @@ def _read_sets(
             *params,
         ),
     )
-    names = [column[0] for column in cursor.description]
     stored: list[StoredDetailSet] = []
     for raw in cursor.fetchall():
-        row = dict(zip(names, tuple(raw), strict=True))
+        row = dict(raw)
         try:
             detail = _rebuild(db, row)
         except (TypeError, ValueError):
@@ -515,8 +522,10 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
     }
     if kind is ActivityDetailKind.STREAMS:
         channels = {
-            StreamChannel(channel): decode_series(data, point_count)
-            for channel, point_count, data in db.execute(
+            StreamChannel(channel["channel"]): decode_series(
+                channel["data"], channel["point_count"]
+            )
+            for channel in db.execute(
                 "SELECT channel, point_count, data FROM activity_stream_channels "
                 "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
                 key,
@@ -530,12 +539,12 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
     if kind is ActivityDetailKind.LAPS:
         laps = tuple(
             ActivityLap(
-                index=lap[0],
-                kind=LapKind(lap[1]),
-                start_offset_s=lap[2],
-                end_offset_s=lap[3],
-                name=lap[4],
-                **dict(zip(_LAP_METRIC_COLUMNS, lap[5:], strict=True)),
+                index=lap["lap_index"],
+                kind=LapKind(lap["kind"]),
+                start_offset_s=lap["start_offset_s"],
+                end_offset_s=lap["end_offset_s"],
+                name=lap["name"],
+                **{column: lap[column] for column in _LAP_METRIC_COLUMNS},
             )
             for lap in db.execute(
                 f"SELECT {', '.join(_LAP_COLUMNS)} FROM activity_laps "
@@ -548,8 +557,14 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
             **common, lap_source=LapSource(row["lap_source"]), laps=laps
         )
     buckets = tuple(
-        ZoneBucket(index=index, seconds=seconds, lower=lower, upper=upper, label=label)
-        for index, seconds, lower, upper, label in db.execute(
+        ZoneBucket(
+            index=bucket["zone_index"],
+            seconds=bucket["seconds"],
+            lower=bucket["lower_bound"],
+            upper=bucket["upper_bound"],
+            label=bucket["label"],
+        )
+        for bucket in db.execute(
             "SELECT zone_index, seconds, lower_bound, upper_bound, label "
             "FROM activity_zone_times WHERE provider = ? AND provider_activity_id = ? "
             "AND detail_kind = ? ORDER BY zone_index",

@@ -36,8 +36,10 @@ from backend.db.activity_detail_store import (
     encode_series,
     replace_detail_set,
     save_analysis,
+    stream_export_rows,
 )
 from backend.db.canonical_store import WriteOutcome
+from backend.db import row_factory
 from backend.db.schema import initialize_schema
 
 STAMP = "2026-10-18T08:00:00+00:00"
@@ -196,7 +198,7 @@ class StreamCodecTests(unittest.TestCase):
 class ActivityDetailStoreTests(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(":memory:")
-        self.db.row_factory = sqlite3.Row
+        self.db.row_factory = row_factory
         self.addCleanup(self.db.close)
         initialize_schema(self.db)
         self.db.execute("PRAGMA foreign_keys = ON")
@@ -236,7 +238,7 @@ class ActivityDetailStoreTests(unittest.TestCase):
         return replace_detail_set(self.db, detail, **options)
 
     def count(self, table):
-        return self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        return self.db.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
 
     def test_every_kind_round_trips_with_provenance(self):
         details = (stream_set(), lap_set(), zone_set())
@@ -269,7 +271,10 @@ class ActivityDetailStoreTests(unittest.TestCase):
         row = self.db.execute(
             "SELECT summary_sha256, fetched_at, updated_at FROM activity_detail_sets"
         ).fetchone()
-        self.assertEqual(tuple(row), (None, "2026-10-18T09:00:00+00:00", STAMP))
+        self.assertEqual(
+            (row["summary_sha256"], row["fetched_at"], row["updated_at"]),
+            (None, "2026-10-18T09:00:00+00:00", STAMP),
+        )
 
     def test_changed_content_replaces_every_child_row(self):
         self.store(stream_set())
@@ -290,7 +295,7 @@ class ActivityDetailStoreTests(unittest.TestCase):
         row = self.db.execute(
             "SELECT created_at, updated_at FROM activity_detail_sets"
         ).fetchone()
-        self.assertEqual(tuple(row), (STAMP, LATER))
+        self.assertEqual((row["created_at"], row["updated_at"]), (STAMP, LATER))
 
     def test_providers_keep_alternative_sets_for_one_session(self):
         self.add_session("act_2", state="duplicate", merged_into="act_1")
@@ -387,6 +392,19 @@ class ActivityDetailStoreTests(unittest.TestCase):
         self.assertEqual(rows["act_1"]["computed_at"], LATER)
         self.db.execute("UPDATE activity_sessions SET state = 'deleted'")
         self.assertEqual(analysis_rows_for(self.db, ["act_1"]), {})
+
+    def test_stream_export_decodes_points_and_flags_unreadable_channels(self):
+        self.store(stream_set())
+        self.db.execute(
+            "UPDATE activity_stream_channels SET data = ? WHERE channel = 'heart_rate_bpm'",
+            (b"corrupt",),
+        )
+        rows = {row["channel"]: row for row in stream_export_rows(self.db)}
+        self.assertEqual(rows["power_w"]["values"], [100.0, None, 120.0])
+        self.assertEqual(
+            (rows["power_w"]["point_count"], rows["power_w"]["valid_count"]), (3, 2)
+        )
+        self.assertIsNone(rows["heart_rate_bpm"]["values"])
 
     def test_analysis_rejects_invalid_input(self):
         for overrides, error in (

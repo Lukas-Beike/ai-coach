@@ -137,6 +137,8 @@ class PrivacyArchiveExportService:
             timeout_error=lambda: AppError(
                 408, "Der Export überschreitet das Zeitlimit."
             ),
+            max_bytes=self._config.maximum_bytes,
+            size_error=lambda: AppError(413, "Der Export überschreitet das Größenlimit."),
         )
 
     def create_file(self) -> Path:
@@ -588,12 +590,20 @@ def write_jsonl_rows(
     *,
     now: Clock,
     timeout_error: TimeoutErrorFactory,
+    max_bytes: int | None = None,
+    size_error: TimeoutErrorFactory | None = None,
 ) -> None:
-    """Write rows incrementally, preserving the export time limit."""
+    """Write rows incrementally, preserving the export time and size limits.
+
+    The size limit is checked against the archive written so far, so a large
+    table stops the export before it fills the disk rather than at the end.
+    """
     with archive.open(name, "w", force_zip64=True) as output:
         for row in rows:
             if now() > deadline:
                 raise timeout_error()
+            if max_bytes is not None and archive.fp.tell() > max_bytes:
+                raise (size_error or timeout_error)()
             output.write(
                 json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode(
                     "utf-8"

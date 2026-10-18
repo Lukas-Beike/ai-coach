@@ -9,6 +9,7 @@ here, so each supported release still reaches the current schema.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
@@ -60,10 +61,20 @@ def migrate_schema(db: Any) -> None:
         if not database_schema_is_current(db):
             raise RuntimeError("Die Datenbankmigration konnte nicht validiert werden.")
     except Exception:
-        db.execute("ROLLBACK TO schema_migration")
-        db.execute("RELEASE schema_migration")
+        _abandon_migration_savepoint(db)
         raise
     db.execute("RELEASE schema_migration")
+
+
+def _abandon_migration_savepoint(db: Any) -> None:
+    # Errors such as SQLITE_FULL can roll the whole transaction back and drop
+    # the savepoint. Cleanup must never replace the original error; the
+    # caller's rollback still discards whatever this could not undo.
+    if not db.in_transaction:
+        return
+    with contextlib.suppress(Exception):
+        db.execute("ROLLBACK TO schema_migration")
+        db.execute("RELEASE schema_migration")
 
 
 def _upgrade_from_shape(db: Any, shape: str) -> None:

@@ -1183,6 +1183,21 @@ class ServerDatabaseTests(ServerTestCase):
                 now=lambda: 1,
                 timeout_error=lambda: RuntimeError("timeout"),
             )
+        with (
+            self.assertRaisesRegex(OverflowError, "too large"),
+            zipfile.ZipFile(BytesIO(), "w") as archive,
+        ):
+            archive.writestr("profile.json", "x" * 64)
+            write_jsonl_rows(
+                archive,
+                "rows.jsonl",
+                ({"id": index} for index in range(1000)),
+                10,
+                now=lambda: 1,
+                timeout_error=lambda: RuntimeError("timeout"),
+                max_bytes=32,
+                size_error=lambda: OverflowError("too large"),
+            )
 
     def test_maintenance_gate_clears_after_restore_exception(self):
         gate = runtime_maintenance.MaintenanceGate()
