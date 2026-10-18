@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any, Final
 
 from backend.canonical.activity_detail import (
+    LAP_METRIC_FIELDS,
     MAX_STREAM_POINTS,
     ActivityDetailSet,
     ActivityLap,
@@ -54,20 +55,7 @@ MAX_CHANNEL_BLOB_BYTES: Final = 4 * 1024 * 1024
 _POINT_BYTES: Final = 8
 _SHA256_PATTERN: Final = re.compile(r"[0-9a-f]{64}")
 
-_LAP_METRIC_COLUMNS: Final = (
-    "moving_duration_s",
-    "distance_m",
-    "avg_hr",
-    "max_hr",
-    "avg_power",
-    "max_power",
-    "normalized_power",
-    "avg_cadence",
-    "avg_speed_mps",
-    "elevation_gain_m",
-    "load",
-    "intensity_pct",
-)
+_LAP_METRIC_COLUMNS: Final = LAP_METRIC_FIELDS
 _LAP_COLUMNS: Final = (
     "lap_index",
     "kind",

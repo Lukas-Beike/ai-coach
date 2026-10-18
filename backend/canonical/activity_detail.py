@@ -85,16 +85,20 @@ def clean_series(
         if value is None:
             cleaned.append(None)
             continue
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, int | float)
-            or not math.isfinite(value)
-            or not lower <= value <= upper
-        ):
+        try:
+            # float() raises OverflowError for integers beyond the float range.
+            point = (
+                float(value)
+                if isinstance(value, int | float) and not isinstance(value, bool)
+                else math.nan
+            )
+        except OverflowError:
+            point = math.nan
+        if not math.isfinite(point) or not lower <= point <= upper:
             cleaned.append(None)
             rejected += 1
             continue
-        cleaned.append(float(value))
+        cleaned.append(point)
     return tuple(cleaned), rejected
 
 
@@ -225,6 +229,7 @@ _LAP_METRIC_BOUNDS: Final[Mapping[str, tuple[float, float]]] = {
     "load": (0.0, MAX_ACTIVITY_LOAD),
     "intensity_pct": (0.0, MAX_INTENSITY_PCT),
 }
+LAP_METRIC_FIELDS: Final = tuple(_LAP_METRIC_BOUNDS)
 
 
 @dataclass(frozen=True, slots=True)

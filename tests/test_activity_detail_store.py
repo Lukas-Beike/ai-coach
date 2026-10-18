@@ -1,11 +1,13 @@
 """Canonical activity detail: types, stream codec, store and schema guards."""
 
+import dataclasses
 import sqlite3
 import unittest
 import zlib
 from datetime import UTC, datetime
 
 from backend.canonical.activity_detail import (
+    LAP_METRIC_FIELDS,
     MAX_STREAM_POINTS,
     ActivityLap,
     ActivityLapSet,
@@ -107,10 +109,19 @@ def zone_set(activity_id="i1", provider=INTERVALS):
 class ActivityDetailTypeTests(unittest.TestCase):
     def test_clean_series_replaces_unusable_points_with_gaps(self):
         values, rejected = clean_series(
-            StreamChannel.HEART_RATE_BPM, [120, None, True, "x", float("nan"), 9999]
+            StreamChannel.HEART_RATE_BPM, [120, None, True, "x", float("nan"), 9999, 10**400]
         )
-        self.assertEqual(values, (120.0, None, None, None, None, None))
-        self.assertEqual(rejected, 4)
+        self.assertEqual(values, (120.0, None, None, None, None, None, None))
+        self.assertEqual(rejected, 5)
+
+    def test_lap_metric_fields_are_lap_attributes_and_table_columns(self):
+        lap_fields = {field.name for field in dataclasses.fields(ActivityLap)}
+        self.assertLessEqual(set(LAP_METRIC_FIELDS), lap_fields)
+        db = sqlite3.connect(":memory:")
+        self.addCleanup(db.close)
+        initialize_schema(db)
+        columns = {row[1] for row in db.execute("PRAGMA table_info(activity_laps)")}
+        self.assertLessEqual(set(LAP_METRIC_FIELDS), columns)
 
     def test_stream_set_requires_a_strict_complete_time_axis(self):
         invalid = (

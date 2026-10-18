@@ -20,6 +20,7 @@ from backend.activities.detail_projection import (
     detailed_activity,
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
+from backend.canonical.activity_detail import MAX_STREAM_POINTS
 from backend.errors import AppError
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
@@ -30,7 +31,6 @@ from backend.providers.intervals_activity_fields import (
 )
 from backend.runtime.ports import ActivityRowReader
 
-MAX_STREAM_POINTS = 172_800
 MAX_DETAIL_BYTES = 24 * 1024 * 1024
 ACTIVITY_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,200}")
 
