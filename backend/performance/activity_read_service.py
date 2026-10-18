@@ -132,9 +132,10 @@ class ActivityAnalysisReadService(ActivityReadService):
             self._read_equipment(normalized_id), normalized_id
         )
         local_ids = self._references.local_ids([normalized_id])
+        # Current stored details outrank a failure note left by another summary.
         failure = (
             self._detail_store.failures([normalized_id]).get(normalized_id)
-            if self._detail_store
+            if self._detail_store and not (cached and not stale)
             else None
         )
         return {

@@ -87,6 +87,13 @@ class ActivityDetailStore:
                 (self._key(activity_id, _FAILURE), payload, observed_at),
             )
 
+    def clear_failure(self, activity_id: str) -> None:
+        """Forget a recorded failure once the stored details match again."""
+        with self._database_manager.unit_of_work() as db:
+            db.execute(
+                "DELETE FROM kv WHERE key=?", (self._key(activity_id, _FAILURE),)
+            )
+
     def failures(self, activity_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
         """Return the recorded load failure per activity id."""
         keys = {self._key(item, _FAILURE): item for item in set(activity_ids)}

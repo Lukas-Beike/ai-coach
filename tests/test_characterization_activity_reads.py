@@ -592,6 +592,11 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         )
         self._save_analysis()
         self.assertIsNone(self._detail([self.RAW])["detail_data"]["load_error"])
+        # A note left by another summary never outranks current stored details.
+        store.save_failure(
+            "ride-1", "1" * 64, "Detaildaten fehlerhaft.", "2026-05-05T06:00:00Z"
+        )
+        self.assertIsNone(self._detail([self.RAW])["detail_data"]["load_error"])
 
 
 class ActivityEquipmentTests(unittest.TestCase):

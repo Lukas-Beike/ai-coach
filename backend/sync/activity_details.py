@@ -221,10 +221,14 @@ class ActivityDetailRefreshService:
     ) -> bool:
         """Whether details match the summary or already failed for it."""
         stored = self._store.get(activity_id)
+        failure = known_failures.get(activity_id)
         if stored and stored.get("summary_sha256") == fingerprint:
+            # A summary that reverted to the stored version leaves a stale note.
+            if failure:
+                self._store.clear_failure(activity_id)
             return True
         # A recorded failure is retried only for a changed summary or by request.
-        return known_failures.get(activity_id, {}).get("summary_sha256") == fingerprint
+        return bool(failure) and failure.get("summary_sha256") == fingerprint
 
 
 def _activity_specific_failure(error: Exception) -> bool:

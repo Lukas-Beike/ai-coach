@@ -247,6 +247,27 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertEqual(["a11"], self.fetched_ids())
         self.assertEqual({}, self.store.failures(["a11"]))
 
+    def test_summary_reverted_to_stored_details_clears_the_failure(self):
+        self.api.get.side_effect = self.provider
+        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_recent())
+        original = self.rows[-2]
+        self.rows[-2] = {**original, "name": "Renamed in Intervals.icu"}
+
+        def failing(path, params):
+            if "a11" in path:
+                raise AppError(502, "Synthetic invalid streams")
+            return self.provider(path, params)
+
+        self.api.get.side_effect = failing
+        with self.assertLogs("backend.sync.activity_details", "WARNING"):
+            self.service().prefetch_recent()
+        self.assertIn("a11", self.store.failures(["a11"]))
+        self.rows[-2] = original
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
+        self.api.get.assert_not_called()
+        self.assertEqual({}, self.store.failures(["a11"]))
+
     def run_with_failure_on_a11(self, error):
         self.api.get.reset_mock()
         with self.manager.unit_of_work() as db:
