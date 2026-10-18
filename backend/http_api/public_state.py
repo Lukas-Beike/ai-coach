@@ -22,10 +22,11 @@ from backend.http_api.state_prelude import (
     PublicStateWeatherPrelude,
 )
 from backend.planning import season as planning_season
+from backend.provider_credentials import WAHOO_TOKENS_KEY
 from backend.runtime.ports import ProviderStateReader
 from backend.sync import intervals_state
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.wahoo_connection import WAHOO_TOKENS_KEY, connection_status
+from backend.sync.wahoo_connection import connection_status
 
 if TYPE_CHECKING:
     from backend.athlete.profile import ProfileService
@@ -84,6 +85,7 @@ class PublicStateDependencies:
     calendar_future_days: int
     local_now: Callable[[], datetime]
     provider_registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
+    provider_credentials: Callable[[], Any] | None = None
 
 
 class PublicStateService:
@@ -245,6 +247,11 @@ class PublicStateService:
                 },
                 ProviderId.WAHOO.value: connection_status(
                     deps.config, self._get_value(WAHOO_TOKENS_KEY, manager)
+                ),
+                "credentials": (
+                    deps.provider_credentials().status()
+                    if deps.provider_credentials is not None
+                    else None
                 ),
                 "usage": deps.provider_state.summary("openai"),
             }

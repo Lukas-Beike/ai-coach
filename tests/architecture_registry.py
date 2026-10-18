@@ -1335,7 +1335,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "backend.config",
-        ("load_local_env", "security_configuration_error", "save_persistent_settings"),
+        ("load_local_env", "security_configuration_error"),
     ),
     (
         "backend.providers.http",
@@ -2061,6 +2061,7 @@ SERVER_COMPOSITION_CONTROL_FLOW = frozenset(
     {
         "database_manager",
         "sync_job_worker",
+        "apply_runtime_config",
         "initialise_database",
         "main",
     }

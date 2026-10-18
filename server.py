@@ -271,6 +271,7 @@ from backend.privacy import (
     PrivacyPlanningSources,
     PrivacyStateDependencies,
 )
+from backend.provider_credentials import ProviderCredentialService
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
 from backend.providers import http as provider_http
@@ -470,7 +471,11 @@ COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
 
-CONFIG = load_config(ROOT, DATA_DIR)
+ENV_CONFIG = load_config(ROOT, DATA_DIR)
+# Runtime configuration: environment values overlaid with stored credentials.
+CONFIG = ENV_CONFIG
+# Bumped whenever CONFIG is replaced so cached services rebuild with new values.
+CONFIG_GENERATION = 0
 
 
 LOGGER = logging.getLogger("intervals_coach")
@@ -606,7 +611,7 @@ PROVIDER_SYNC = ProviderSyncAssembly(
 def morning_body_battery_service() -> MorningBodyBatteryService:
     """Compose morning recovery orchestration from concrete runtime resources."""
     manager = database_manager()
-    config_id = id(CONFIG)
+    config_id = CONFIG_GENERATION
     return MORNING_BODY_BATTERY_SERVICE_CACHE.get(
         manager,
         config_id,
@@ -811,6 +816,7 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
             openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
             logger=LOGGER,
             diagnostics_suspended=suspend_diagnostic_flushes,
+            refresh_credentials=lambda: refresh_runtime_config(),
         ),
         archive=PrivacyArchiveSettings(
             data_dir=lambda: DATA_DIR,
@@ -875,6 +881,7 @@ def initialise_database() -> None:
             provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
             retention_days=int(getattr(CONFIG, "data_retention_days", -1)),
         )
+    refresh_runtime_config()
 
 
 def key_value_service() -> KeyValueService:
@@ -894,6 +901,31 @@ SETTINGS = SettingsService(
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
 )
+
+
+def apply_runtime_config(config: app_config.Config) -> None:
+    """Swap the runtime configuration; lambda readers see the new value at once."""
+    global CONFIG, CONFIG_GENERATION
+    if config is CONFIG:
+        return
+    CONFIG = config
+    CONFIG_GENERATION += 1
+
+
+PROVIDER_CREDENTIAL_SERVICE = ProviderCredentialService(
+    env_config=ENV_CONFIG,
+    database_manager=database_manager,
+    database_lock=lambda: DB_LOCK,
+    key_values=KEY_VALUE_REPOSITORY,
+    apply_config=apply_runtime_config,
+)
+
+
+def refresh_runtime_config() -> app_config.Config:
+    """Recompute CONFIG from the environment plus stored credentials."""
+    return PROVIDER_CREDENTIAL_SERVICE.refresh()
+
+
 # Each flush rewrites the whole capture, so captures are merged on a timer and
 # written as background work that yields to Coach and athlete writes.
 DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS = 30.0
@@ -1862,6 +1894,7 @@ PUBLIC_STATE = PublicStateAssembly(
         ),
     ),
     provider_runtime=provider_runtime,
+    provider_credentials=lambda: PROVIDER_CREDENTIAL_SERVICE,
 )
 
 CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
@@ -2066,6 +2099,7 @@ HTTP_API = HttpApiAssembly(
             ),
             wahoo=WAHOO_CONNECTION.service,
             metric_export=lambda: METRIC_EXPORT,
+            provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
         ),
     ),
 )

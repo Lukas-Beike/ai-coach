@@ -30,9 +30,9 @@ from backend.planning.competition_service import CompetitionService
 from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.training_plans import TrainingPlanService
+from backend.provider_credentials import CREDENTIAL_KV_KEYS
 from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.maintenance import MaintenanceGate
-from backend.sync.wahoo_connection import WAHOO_SECRET_KEYS
 from backend.weather import cache as weather_cache
 
 
@@ -114,7 +114,7 @@ class PrivacyDataExportService:
             "profile",
             "garmin_snapshot",
             weather_cache.CACHE_KEY,
-            *WAHOO_SECRET_KEYS,
+            *CREDENTIAL_KV_KEYS,
         }
         for row in kv_rows:
             key = str(row["key"])
@@ -201,7 +201,11 @@ PRIVACY_DELETE_SCOPE = (
         ("public_event_sources", "public_event_candidates", "external_calendar_events"),
     ),
     ("sessions", "Anmeldesitzungen", ("sessions",)),
-    ("settings", "Profil, Einstellungen, Syncstatus und lokale Caches", ("kv",)),
+    (
+        "settings",
+        "Profil, Einstellungen, Zugangsdaten, Garmin-Tokens, Syncstatus und lokale Caches",
+        ("kv",),
+    ),
     ("history", "Lokale Änderungshistorie", ("change_history",)),
     (
         "provider_status",
@@ -248,6 +252,8 @@ class PrivacyDeleteDependencies:
     openai_client: OpenAIResponsesClient
     logger: logging.Logger
     diagnostics_suspended: Callable[[], AbstractContextManager[None]]
+    # Re-derives the runtime configuration once stored credentials are wiped.
+    refresh_credentials: Callable[[], Any] | None = None
 
 
 class PrivacyDeleteService:
@@ -340,6 +346,8 @@ class PrivacyDeleteService:
                     db, "profile", json.dumps(DEFAULT_PROFILE)
                 )
                 dependencies.planning_revision_service.mark_reset_pending()
+            if dependencies.refresh_credentials is not None:
+                dependencies.refresh_credentials()
             return {
                 "status": "ok",
                 "local_data_deleted": True,
@@ -386,6 +394,7 @@ class PrivacyStateDependencies:
     openai_client: Callable[[], OpenAIResponsesClient]
     logger: logging.Logger
     diagnostics_suspended: Callable[[], AbstractContextManager[None]]
+    refresh_credentials: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -434,6 +443,7 @@ class PrivacyAssembly:
         self._openai_client = state.openai_client
         self._logger = state.logger
         self._diagnostics_suspended = state.diagnostics_suspended
+        self._refresh_credentials = state.refresh_credentials
         self._data_dir = archive.data_dir
         self._database_path = archive.database_path
         self._maximum_export_bytes = archive.maximum_export_bytes
@@ -469,6 +479,7 @@ class PrivacyAssembly:
                 openai_client=self._openai_client(),
                 logger=self._logger,
                 diagnostics_suspended=self._diagnostics_suspended,
+                refresh_credentials=self._refresh_credentials,
             )
         )
 

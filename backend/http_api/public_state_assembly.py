@@ -119,6 +119,7 @@ class PublicStateAssembly:
         *,
         dependencies: PublicStateAssembly.Inputs,
         provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
+        provider_credentials: Callable[[], Any] | None = None,
     ) -> None:
         core = dependencies.core
         owners = dependencies.owners
@@ -174,6 +175,7 @@ class PublicStateAssembly:
         self._all_sync_days = calendar.all_sync_days
         self._planned_workout_label = calendar.planned_workout_label
         self._provider_runtime = provider_runtime
+        self._provider_credentials = provider_credentials
 
     def performance_state_service(self) -> PublicPerformanceStateService:
         sync = self._sync_persistence()
@@ -305,6 +307,7 @@ class PublicStateAssembly:
                 morning_checkin_state_service=self._morning_checkin_state_service,
                 coach_quick_actions_service=self._coach_quick_actions_service,
                 provider_state_service=self._provider_state_service,
+                provider_credentials=self._provider_credentials,
             )
         )
 
@@ -420,5 +423,6 @@ class PublicStateAssembly:
                     calendar_history_days=self._calendar_history_days(),
                     calendar_future_days=self._calendar_future_days(),
                     local_now=self._local_now(),
+                    provider_credentials=self._provider_credentials,
                 )
             )

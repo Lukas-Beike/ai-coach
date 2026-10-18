@@ -11,9 +11,10 @@ from backend.canonical.public_metrics import neutral_calendar_entries
 from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
+from backend.provider_credentials import WAHOO_TOKENS_KEY
 from backend.sync.intervals_state import latest_library_timestamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.wahoo_connection import WAHOO_TOKENS_KEY, connection_status
+from backend.sync.wahoo_connection import connection_status
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class PublicBootstrapDependencies:
     coach_quick_actions_service: Callable[[], Any]
     provider_state_service: Callable[[], Any]
     provider_registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
+    provider_credentials: Callable[[], Any] | None = None
 
 
 class PublicBootstrapService:
@@ -279,6 +281,11 @@ class PublicBootstrapService:
                 ProviderId.WAHOO.value: connection_status(
                     deps.config,
                     deps.key_values.get_in_transaction(db, WAHOO_TOKENS_KEY),
+                ),
+                "credentials": (
+                    deps.provider_credentials().status()
+                    if deps.provider_credentials is not None
+                    else None
                 ),
                 "usage": deps.provider_state_service().summary("openai"),
             }
