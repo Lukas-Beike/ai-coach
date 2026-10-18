@@ -164,10 +164,7 @@ def _zone_times(value: Any) -> list[Any]:
     return zones
 
 
-def detailed_activity(activity: Any) -> dict[str, Any]:
-    """Project one activity for detailed coaching without raw metadata."""
-    if not isinstance(activity, dict):
-        return {}
+def _detail_scalars(activity: dict[str, Any]) -> dict[str, Any]:
     projected: dict[str, Any] = {}
     for key in COACH_ACTIVITY_DETAIL_FIELDS:
         if key in activity:
@@ -176,15 +173,27 @@ def detailed_activity(activity: Any) -> dict[str, Any]:
             )
             if scalar is not None:
                 projected[key] = scalar
-    streams = activity.get("streams")
-    if isinstance(streams, dict):
-        projected_streams = {
-            key: _downsample_series(streams[key])
-            for key in COACH_ACTIVITY_DETAIL_STREAM_FIELDS
-            if key in streams
-        }
-        if projected_streams:
-            projected["streams"] = projected_streams
+    return projected
+
+
+def _detail_streams(streams: Any) -> dict[str, Any]:
+    if not isinstance(streams, dict):
+        return {}
+    return {
+        key: _downsample_series(streams[key])
+        for key in COACH_ACTIVITY_DETAIL_STREAM_FIELDS
+        if key in streams
+    }
+
+
+def detailed_activity(activity: Any) -> dict[str, Any]:
+    """Project one activity for detailed coaching without raw metadata."""
+    if not isinstance(activity, dict):
+        return {}
+    projected = _detail_scalars(activity)
+    streams = _detail_streams(activity.get("streams"))
+    if streams:
+        projected["streams"] = streams
     for key in (HEART_RATE_ZONE_TIMES, ZONE_TIMES):
         zones = _zone_times(activity.get(key))
         if zones:
