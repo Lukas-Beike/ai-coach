@@ -584,3 +584,248 @@ class CoachContextSelectionTests(unittest.TestCase):
             has_prior_openai_attachments=True,
         )
         self.assertIsNone(json.loads(payload["input"])["pending_request"])
+
+
+class CoachContextRuleTests(unittest.TestCase):
+    def test_weekday_weather_question_adds_weather_and_extends_horizon(self):
+        selection = select_coach_context(
+            "Wie wird das Wetter am Samstag für die lange Ausfahrt?", {}
+        )
+        self.assertIn("weather", selection.sections)
+        self.assertEqual(7, selection.horizon_days)
+
+    def test_plain_weather_question_adds_weather_section(self):
+        selection = select_coach_context("Regnet es Donnerstag?", {})
+        self.assertIn("weather", selection.sections)
+        self.assertEqual(7, selection.horizon_days)
+
+    def test_weekday_without_weather_keeps_short_horizon(self):
+        selection = select_coach_context("Was trainiere ich am Samstag?", {})
+        self.assertNotIn("weather", selection.sections)
+        self.assertEqual(3, selection.horizon_days)
+
+    def test_history_comparison_selects_complete_context_and_keeps_comparisons(self):
+        selection = select_coach_context(
+            "Was hältst du von meinem Lauf heute Morgen im Vergleich zu letzter Woche?",
+            {},
+        )
+        self.assertIsNone(selection.horizon_days)
+        self.assertEqual(CONTEXT_SECTIONS, selection.sections)
+        projected = selection.project(
+            {"current_performance": {"ctl": 40, "comparisons": [{"week": "last"}]}},
+            "2026-10-18",
+        )
+        self.assertEqual(
+            [{"week": "last"}], projected["current_performance"]["comparisons"]
+        )
+
+    def test_long_period_history_selects_complete_context(self):
+        selection = select_coach_context(
+            "Wie sieht meine Belastung über die letzten zwei Monate aus?", {}
+        )
+        self.assertIsNone(selection.horizon_days)
+        self.assertGreaterEqual(selection.activity_limit, 5)
+
+    def test_past_week_without_planning_verb_is_not_weekly_planning(self):
+        selection = select_coach_context("Wie war mein Lauf letzte Woche?", {})
+        self.assertEqual("general_coaching", selection.name)
+        self.assertEqual(3, selection.horizon_days)
+
+    def test_past_week_with_planning_verb_stays_weekly_planning(self):
+        selection = select_coach_context("Plane meine letzte Woche neu", {})
+        self.assertEqual("weekly_planning", selection.name)
+        self.assertEqual(14, selection.horizon_days)
+
+    def test_full_calendar_cues_add_external_calendar(self):
+        for message in (
+            "Habe ich nächste Woche Termine, die mit dem Training kollidieren?",
+            "Was steht in meinem Kalender?",
+        ):
+            with self.subTest(message=message):
+                selection = select_coach_context(message, {})
+                self.assertIn("external_calendar", selection.sections)
+
+    def test_ordinary_message_shapes_are_unchanged(self):
+        planning = BASE_SECTIONS | {"planning", "training_plans"}
+        cases = (
+            (
+                "Wie geht es meiner Erholung?",
+                "general_coaching",
+                BASE_SECTIONS,
+                3,
+                1,
+                False,
+                False,
+            ),
+            (
+                "Was trainiere ich heute?",
+                "today_training",
+                BASE_SECTIONS,
+                3,
+                1,
+                False,
+                False,
+            ),
+            (
+                "Analysiere meine letzte Einheit",
+                "activity_analysis",
+                BASE_SECTIONS,
+                3,
+                5,
+                False,
+                False,
+            ),
+            ("Plane nächste Woche", "weekly_planning", planning, 14, 5, True, False),
+            (
+                "Verschiebe den Lauf auf Freitag",
+                "plan_editing",
+                planning,
+                14,
+                5,
+                True,
+                False,
+            ),
+            (
+                "Speichere meinen Check-in",
+                "profile_or_checkin",
+                BASE_SECTIONS,
+                3,
+                1,
+                False,
+                False,
+            ),
+            (
+                "Synchronisiere den Plan",
+                "provider_refresh_or_sync",
+                CONTEXT_SECTIONS,
+                None,
+                5,
+                True,
+                False,
+            ),
+            (
+                "Wie steht meine Wettkampfvorbereitung?",
+                "competition_preparation",
+                planning,
+                14,
+                5,
+                True,
+                False,
+            ),
+            (
+                "Wie ist mein Befinden?",
+                "profile_or_checkin",
+                BASE_SECTIONS,
+                3,
+                1,
+                False,
+                False,
+            ),
+            (
+                "Was trainiere ich am Samstag?",
+                "general_coaching",
+                BASE_SECTIONS,
+                3,
+                1,
+                False,
+                False,
+            ),
+            (
+                "Kannst du das Training fuer naechste Woche planen?",
+                "weekly_planning",
+                planning,
+                14,
+                5,
+                True,
+                True,
+            ),
+            (
+                "Plane 8 Wochen",
+                "weekly_planning",
+                CONTEXT_SECTIONS,
+                None,
+                5,
+                True,
+                False,
+            ),
+            (
+                "How did I sleep last night?",
+                "general_coaching",
+                BASE_SECTIONS,
+                3,
+                1,
+                False,
+                False,
+            ),
+            (
+                "Was steht heute im Plan?",
+                "weekly_planning",
+                planning,
+                14,
+                5,
+                True,
+                False,
+            ),
+            (
+                "Wie ist meine aktuelle CTL und Form?",
+                "general_coaching",
+                BASE_SECTIONS,
+                3,
+                1,
+                False,
+                False,
+            ),
+            (
+                "Analyse the latest activity",
+                "activity_analysis",
+                BASE_SECTIONS,
+                3,
+                5,
+                False,
+                False,
+            ),
+            (
+                "Wann ist mein nächster Wettkampf?",
+                "competition_preparation",
+                planning,
+                14,
+                5,
+                True,
+                False,
+            ),
+            (
+                "Kann ich Mittwochabend lang laufen oder hab ich da was vor?",
+                "general_coaching",
+                BASE_SECTIONS,
+                3,
+                1,
+                False,
+                False,
+            ),
+        )
+        for message, name, sections, horizon, limit, library, dialogue in cases:
+            with self.subTest(message=message):
+                selection = select_coach_context(message, {})
+                self.assertEqual(name, selection.name)
+                self.assertEqual(sections, selection.sections)
+                self.assertEqual(horizon, selection.horizon_days)
+                self.assertEqual(limit, selection.activity_limit)
+                self.assertEqual(library, selection.include_library)
+                self.assertEqual(dialogue, selection.retain_dialogue)
+
+    def test_dative_long_period_history_selects_complete_context(self):
+        for message in (
+            "Wie war mein Training in den letzten zwei Monaten?",
+            "Wie habe ich in den letzten 10 Tagen geschlafen?",
+            "Wie war mein Training in den vergangenen drei Wochen?",
+        ):
+            with self.subTest(message=message):
+                selection = select_coach_context(message, {})
+                self.assertIsNone(selection.horizon_days)
+
+    def test_vergangene_night_is_not_period_history(self):
+        selection = select_coach_context(
+            "Wie habe ich vergangene Nacht geschlafen?", {}
+        )
+        self.assertEqual(3, selection.horizon_days)
+        self.assertEqual(BASE_SECTIONS, selection.sections)

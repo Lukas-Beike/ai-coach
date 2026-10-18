@@ -60,6 +60,27 @@ def canonical_section(name: str) -> str:
     return SECTION_ALIASES.get(name, name)
 
 
+WEATHER_PATTERN = (
+    r"wetter|weather|\b(?:regen|regnet|regnen|regnerisch|rain\w*)\b|forecast|vorhersage"
+)
+DAY_PATTERN = (
+    r"montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonnabend|sonntag"
+    r"|monday|tuesday|wednesday|thursday|friday|saturday|sunday|wochenende|weekend"
+)
+# "letzte Woche" alone is a past-week reference, not a plan request; it only
+# counts as planning when the message also contains a planning verb.
+PAST_WEEK_PATTERN = r"\b(?:letzte[rsmn]?|vergangene[rsmn]?|last)\s+(?:woche|week)\b"
+PLANNING_VERB_PATTERN = r"\b(?:plan\w*|erstell\w*|schedul\w*|passe\b.*\ban\b)"
+HISTORY_PATTERN = (
+    r"\b(?:letzte[nrs]?|vergangene[nrsm]?|past|last)\s+(?:\d+|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn"
+    r"|two|three|four|five|six|seven|eight|nine|ten)\s+(?:tage(?:n)?|wochen|monate(?:n)?|days|weeks|months)\b"
+    r"|\bletzte[rsmn]?\s+monat\b|\bvergangene[nrsm]?\s+monat\b|\blast\s+month\b"
+    r"|\bverlauf\b|\bvergleich\w*|\bcompared\s+(?:to|with)\b"
+)
+FULL_CALENDAR_PATTERN = (
+    r"\btermine?\b|\bappointments?\b|\bmein(?:e[mnrs]?)?\s+kalender\b"
+    r"|\bkalender\s+komplett\b|\bmy\s+calendar\b"
+)
 PROFILE_KEYWORDS = (
     (
         "provider_refresh_or_sync",
@@ -82,7 +103,7 @@ PROFILE_KEYWORDS = (
         "activity_analysis",
         r"aktivität|aktivitaet|activity|analyse|analy[sz]|einheit|session|workout",
     ),
-    ("today_training", r"heute|morgen|today|tomorrow|wetter|weather"),
+    ("today_training", r"heute|morgen|today|tomorrow|" + WEATHER_PATTERN),
 )
 CONTINUATION_PATTERN = (
     r"^\s*(?:bitte\s+|please\s+)?"
@@ -115,6 +136,13 @@ def _domain_of_profiles(profiles: set[str]) -> str | None:
     return "training"
 
 
+def _matched_profiles(normalized: str) -> list[str]:
+    text = normalized
+    if not re.search(PLANNING_VERB_PATTERN, normalized):
+        text = re.sub(PAST_WEEK_PATTERN, " ", normalized)
+    return [name for name, pattern in PROFILE_KEYWORDS if re.search(pattern, text)]
+
+
 def infer_coach_domain(
     text: str = "",
     *,
@@ -129,10 +157,7 @@ def infer_coach_domain(
                 return "sync"
         return "training"
 
-    normalized = text.casefold()
-    matched = {
-        name for name, pattern in PROFILE_KEYWORDS if re.search(pattern, normalized)
-    }
+    matched = set(_matched_profiles(text.casefold()))
     return _domain_of_profiles(matched)
 
 
@@ -232,9 +257,7 @@ def select_coach_context(
     continuation = bool(re.search(CONTINUATION_PATTERN, normalized))
     retry = bool(re.search(RETRY_PATTERN, normalized))
     pronoun = bool(re.search(PRONOUN_PATTERN, normalized))
-    matched = [
-        name for name, pattern in PROFILE_KEYWORDS if re.search(pattern, normalized)
-    ]
+    matched = _matched_profiles(normalized)
     pending = dialogue.get("pending_request")
     pending_status = pending.get("status") if isinstance(pending, dict) else None
     pending_domain = _pending_domain(pending)
@@ -268,10 +291,18 @@ def select_coach_context(
         return CoachContextSelection(name, retain_pending_request=is_pending_active)
     if attachments:
         name = "attachment_analysis"
+    weather = bool(re.search(WEATHER_PATTERN, normalized))
+    if weather:
+        sections.add("weather")
+    if re.search(FULL_CALENDAR_PATTERN, normalized):
+        sections.add("external_calendar")
+    horizon = 14 if planning else 3
+    if weather and re.search(DAY_PATTERN, normalized):
+        horizon = max(horizon, 7)
     return CoachContextSelection(
         name,
         frozenset(sections),
-        14 if planning else 3,
+        horizon,
         5 if planning or "activity_analysis" in matched else 1,
         planning,
         retain_dialogue=bool(continuation or pronoun or has_receipts),
@@ -288,9 +319,7 @@ def _pending_domain(pending: object) -> str | None:
     pending_text = (
         f"{pending.get('summary', '')} {pending.get('question', '')}".casefold()
     )
-    matched = {
-        name for name, pattern in PROFILE_KEYWORDS if re.search(pattern, pending_text)
-    }
+    matched = set(_matched_profiles(pending_text))
     return _domain_of_profiles(matched)
 
 
@@ -372,6 +401,8 @@ def _needs_fallback_context(
 
 def _requires_full_time_context(planning: bool, normalized: str) -> bool:
     if re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.", normalized):
+        return True
+    if re.search(HISTORY_PATTERN, normalized):
         return True
     return planning and any(
         re.search(pattern, normalized)
