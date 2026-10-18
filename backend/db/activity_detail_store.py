@@ -86,7 +86,11 @@ def encode_series(values: Sequence[float | None]) -> tuple[bytes, int]:
     Gaps are stored as NaN; validated series never contain NaN otherwise.
     """
     points, valid = _pack_series(values)
-    return zlib.compress(points, 6), valid
+    return _compress(points), valid
+
+
+def _compress(points: bytes) -> bytes:
+    return zlib.compress(points, 6)
 
 
 def _pack_series(values: Sequence[float | None]) -> tuple[bytes, int]:
@@ -96,8 +100,10 @@ def _pack_series(values: Sequence[float | None]) -> tuple[bytes, int]:
     return points.tobytes(), sum(value is not None for value in values)
 
 
-def decode_series(blob: bytes, point_count: int) -> tuple[float | None, ...]:
-    """Decode a stored channel; raise ValueError when it does not match its count."""
+def decode_series(
+    blob: bytes, point_count: int, valid_count: int | None = None
+) -> tuple[float | None, ...]:
+    """Decode a stored channel; raise ValueError when it does not match its counts."""
     if not 1 <= point_count <= MAX_STREAM_POINTS:
         raise ValueError("point_count is out of range")
     if not isinstance(blob, bytes | bytearray) or len(blob) > MAX_CHANNEL_BLOB_BYTES:
@@ -119,7 +125,10 @@ def decode_series(blob: bytes, point_count: int) -> tuple[float | None, ...]:
     points.frombytes(raw)
     if sys.byteorder != "little":
         points.byteswap()
-    return tuple(None if math.isnan(value) else value for value in points)
+    values = tuple(None if math.isnan(value) else value for value in points)
+    if valid_count is not None and valid_count != point_count - values.count(None):
+        raise ValueError("stream data does not match its valid count")
+    return values
 
 
 def replace_detail_set(
@@ -316,7 +325,7 @@ def stream_export_rows(db: Any) -> Iterable[dict[str, Any]]:
     ):
         try:
             values: list[float | None] | None = list(
-                decode_series(row["data"], row["point_count"])
+                decode_series(row["data"], row["point_count"], row["valid_count"])
             )
         except ValueError:
             values = None
@@ -432,7 +441,7 @@ def _insert_children(
             "detail_kind, channel, point_count, valid_count, data) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
-                (*key, channel, count, valid, zlib.compress(points, 6))
+                (*key, channel, count, valid, _compress(points))
                 for channel, count, valid, points in rows
             ],
         )
@@ -511,10 +520,10 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
     if kind is ActivityDetailKind.STREAMS:
         channels = {
             StreamChannel(channel["channel"]): decode_series(
-                channel["data"], channel["point_count"]
+                channel["data"], channel["point_count"], channel["valid_count"]
             )
             for channel in db.execute(
-                "SELECT channel, point_count, data FROM activity_stream_channels "
+                "SELECT channel, point_count, valid_count, data FROM activity_stream_channels "
                 "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
                 key,
             ).fetchall()

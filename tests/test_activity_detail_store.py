@@ -210,6 +210,14 @@ class StreamCodecTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     decode_series(data, count)
 
+    def test_decode_rejects_a_valid_count_that_disagrees_with_the_gaps(self):
+        blob, valid = encode_series((1.0, None, 2.0))
+        self.assertEqual(decode_series(blob, 3, valid), (1.0, None, 2.0))
+        for wrong in (valid - 1, valid + 1):
+            with self.subTest(valid_count=wrong):
+                with self.assertRaises(ValueError):
+                    decode_series(blob, 3, wrong)
+
 
 class ActivityDetailStoreTests(unittest.TestCase):
     def setUp(self):
