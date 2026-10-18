@@ -19,7 +19,7 @@ import logging
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from backend.canonical.vocabulary import ProviderId
 from backend.config import Config, validated_openai_base_url
@@ -87,6 +87,11 @@ def stored_credentials(raw: str | None) -> dict[str, str]:
     }
 
 
+def _with_values(config: Config, values: Mapping[str, Any]) -> Config:
+    # dataclasses.replace is typed as returning the generic dataclass protocol.
+    return cast(Config, dataclasses.replace(config, **values))
+
+
 def effective_config(env_config: Config, stored: Mapping[str, str]) -> Config:
     """Return the runtime configuration with stored credentials overlaid.
 
@@ -109,8 +114,7 @@ def effective_config(env_config: Config, stored: Mapping[str, str]) -> Config:
         overrides[field] = value
     if not overrides:
         return env_config
-    updated: Config = dataclasses.replace(env_config, **overrides)
-    return updated
+    return _with_values(env_config, overrides)
 
 
 def credential_status(
@@ -272,12 +276,9 @@ class ProviderCredentialService:
         with self._database_lock():
             stored = self._read_stored()
             current = self._current_config()
-            base = dataclasses.replace(
+            base = _with_values(
                 current,
-                **{
-                    field: getattr(self._env_config, field)
-                    for field in self._overridden
-                },
+                {field: getattr(self._env_config, field) for field in self._overridden},
             )
             effective = effective_config(base, stored)
             self._overridden = frozenset(stored) & CREDENTIAL_FIELDS
