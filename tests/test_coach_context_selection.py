@@ -626,15 +626,52 @@ class CoachContextRuleTests(unittest.TestCase):
         self.assertIsNone(selection.horizon_days)
         self.assertGreaterEqual(selection.activity_limit, 5)
 
-    def test_past_week_without_planning_verb_is_not_weekly_planning(self):
-        selection = select_coach_context("Wie war mein Lauf letzte Woche?", {})
-        self.assertEqual("general_coaching", selection.name)
-        self.assertEqual(3, selection.horizon_days)
+    def test_past_week_without_planning_verb_is_activity_review(self):
+        message = "Wie war mein Lauf letzte Woche?"
+        selection = select_coach_context(message, {})
+        self.assertEqual("activity_analysis", selection.name)
+        self.assertIsNone(selection.horizon_days)
+        self.assertEqual(5, selection.activity_limit)
+        self.assertEqual("training", infer_coach_domain(message))
+
+    def test_retrospective_past_week_phrasings_select_activity_analysis(self):
+        for message in (
+            "Was habe ich letzte Woche trainiert?",
+            "Wie war mein Training in den letzten Wochen?",
+            "Wie lief die vorletzte Woche?",
+            "How was last week?",
+        ):
+            with self.subTest(message=message):
+                selection = select_coach_context(message, {})
+                self.assertEqual("activity_analysis", selection.name)
+                self.assertIsNone(selection.horizon_days)
+                self.assertEqual(5, selection.activity_limit)
+
+    def test_past_week_keeps_other_topic_domains(self):
+        self.assertEqual(
+            "nutrition_or_profile",
+            infer_coach_domain("Was habe ich letzte Woche gegessen?"),
+        )
 
     def test_past_week_with_planning_verb_stays_weekly_planning(self):
         selection = select_coach_context("Plane meine letzte Woche neu", {})
         self.assertEqual("weekly_planning", selection.name)
         self.assertEqual(14, selection.horizon_days)
+
+    def test_planning_request_with_past_week_reference_stays_weekly_planning(self):
+        selection = select_coach_context(
+            "Plane die nächste Woche basierend auf letzter Woche", {}
+        )
+        self.assertEqual("weekly_planning", selection.name)
+        self.assertEqual(14, selection.horizon_days)
+
+    def test_past_week_pattern_stays_narrow(self):
+        selection = select_coach_context("Wie war die letzte Nacht?", {})
+        self.assertEqual("general_coaching", selection.name)
+        self.assertEqual(3, selection.horizon_days)
+        numbered = select_coach_context("Wie war mein Training letzten 2 Wochen?", {})
+        self.assertNotEqual("activity_analysis", numbered.name)
+        self.assertIsNone(numbered.horizon_days)
 
     def test_full_calendar_cues_add_external_calendar(self):
         for message in (

@@ -160,6 +160,12 @@
        {"label": "plans", "sections": ["planning", "training_plans"], "min_horizon_days": null, "min_activities": null},
        {"label": "planned+4d", "sections": ["local_planned_workouts"], "min_horizon_days": 4, "min_activities": null}
      ],
+     "retain_pending_request": null},
+    {"id": "W1", "category": "retrospective", "message": "Was habe ich letzte Woche trainiert?", "dialogue": {}, "attachments": false,
+     "needs": [{"label": "activities>=5 unbounded", "sections": ["activities"], "min_horizon_days": null, "min_activities": 5}],
+     "retain_pending_request": null},
+    {"id": "W2", "category": "retrospective", "message": "Wie war mein Training in den letzten Wochen?", "dialogue": {}, "attachments": false,
+     "needs": [{"label": "activities>=5 unbounded", "sections": ["activities"], "min_horizon_days": null, "min_activities": 5}],
      "retain_pending_request": null}
   ]
 }

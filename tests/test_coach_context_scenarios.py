@@ -9,10 +9,15 @@ FIXTURE = (
     / "fixtures"
     / "coach_context_scenarios.json"
 )
-DATED_SECTIONS = {"calendar", "local_planned_workouts", "daily_planning_context"}
+DATED_SECTIONS = {
+    "calendar",
+    "local_planned_workouts",
+    "daily_planning_context",
+    "weather",
+}
 ANALYSIS_NAMES = {"activity_analysis", "attachment_analysis"}
 COMPARISON_SECTION = "current_performance:comparisons"
-EXPECTED_SCENARIO_COUNT = 37
+EXPECTED_SCENARIO_COUNT = 39
 
 
 def _satisfied(need, selection):

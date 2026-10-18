@@ -69,7 +69,9 @@ DAY_PATTERN = (
 )
 # "letzte Woche" alone is a past-week reference, not a plan request; it only
 # counts as planning when the message also contains a planning verb.
-PAST_WEEK_PATTERN = r"\b(?:letzte[rsmn]?|vergangene[rsmn]?|last)\s+(?:woche|week)\b"
+PAST_WEEK_PATTERN = (
+    r"\b(?:vor)?(?:letzte[rsmn]?|vergangene[rsmn]?)\s+wochen?\b|\blast\s+weeks?\b"
+)
 PLANNING_VERB_PATTERN = r"\b(?:plan\w*|erstell\w*|schedul\w*|passe\b.*\ban\b)"
 HISTORY_PATTERN = (
     r"\b(?:letzte[nrs]?|vergangene[nrsm]?|past|last)\s+(?:\d+|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn"
@@ -138,9 +140,18 @@ def _domain_of_profiles(profiles: set[str]) -> str | None:
 
 def _matched_profiles(normalized: str) -> list[str]:
     text = normalized
-    if not re.search(PLANNING_VERB_PATTERN, normalized):
+    retrospective = False
+    if not re.search(PLANNING_VERB_PATTERN, normalized) and re.search(
+        PAST_WEEK_PATTERN, normalized
+    ):
         text = re.sub(PAST_WEEK_PATTERN, " ", normalized)
-    return [name for name, pattern in PROFILE_KEYWORDS if re.search(pattern, text)]
+        retrospective = True
+    matched = [name for name, pattern in PROFILE_KEYWORDS if re.search(pattern, text)]
+    # A bare past-week question is an activity review unless another topic (food,
+    # weight, sync...) is named; then that topic keeps its own domain.
+    if retrospective and not matched:
+        return ["activity_analysis"]
+    return matched
 
 
 def infer_coach_domain(
@@ -403,6 +414,10 @@ def _requires_full_time_context(planning: bool, normalized: str) -> bool:
     if re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.", normalized):
         return True
     if re.search(HISTORY_PATTERN, normalized):
+        return True
+    if re.search(PAST_WEEK_PATTERN, normalized) and not re.search(
+        PLANNING_VERB_PATTERN, normalized
+    ):
         return True
     return planning and any(
         re.search(pattern, normalized)
