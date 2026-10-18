@@ -21,6 +21,7 @@ function render(data, { reloadRoute = true } = {}) {
   renderPerformance(data.performance);
   renderModel(data.model);
   renderThinkingLevel(data.thinking_level);
+  renderServiceTier(data.service_tier);
   renderDiagnosticCapture(data.diagnostic_capture);
   renderSettings(data);
   updateVoiceButton();

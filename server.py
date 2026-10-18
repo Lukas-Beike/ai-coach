@@ -1223,6 +1223,7 @@ MODEL_TRANSPORT = ModelTransportAssembly(
         providers=ModelProviderOwners(
             config=lambda: CONFIG,
             selected_thinking_level=SETTINGS.selected_thinking_level,
+            service_tier=SETTINGS.service_tier,
             http_client=PROVIDER_TRANSPORT.json_http_client,
             state_service=provider_state_service,
         ),

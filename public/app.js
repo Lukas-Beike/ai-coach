@@ -81,6 +81,7 @@ $("#profileCheckinButton").addEventListener("click", () => openCheckinEditor());
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
 $("#modelSelect").addEventListener("change", saveModel);
+$("#serviceTierSelect").addEventListener("change", saveServiceTier);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);

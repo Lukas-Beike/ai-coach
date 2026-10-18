@@ -254,11 +254,13 @@ All configuration is loaded from container environment variables or a local `.en
 
 ### Environment Variable Reference
 
+Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astra, plus the configured deployment on the official OpenAI endpoint. Compatible endpoints offer only their configured deployment and omit the service-tier parameter. Thinking defaults to Medium. Speed defaults to Fast for these models; Standard is always available, and Ultrafast is available for GPT-6.1 Sol and GPT-6 Astra. Fast/Ultrafast have higher API prices. Unknown configured deployments omit the service-tier parameter. Choices are saved locally; unsupported speed choices fall back to Fast (or Standard for unknown deployments). Account availability depends on the API provider. See [Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) and [Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode).
+
 | Variable | Default Value | Required? | Description |
 | :--- | :--- | :--- | :--- |
 | `APP_PASSWORD` | *None* | **Yes** | Master password (minimum 12 characters). Secures web UI authentication and acts as the encryption key for the SQLCipher database. |
 | `OPENAI_API_KEY` | *None* | **Yes** | Server-side API key for the OpenAI Responses API or compatible endpoint. Can also be set in **Mehr > Anbindungen > Zugangsdaten**. |
-| `OPENAI_MODEL` | `gpt-6-luna` | No | OpenAI model deployment name (GPT-6 Luna). |
+| `OPENAI_MODEL` | `gpt-6-luna` | No | Default OpenAI model deployment; selectable in Coach settings. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | No | Optional Responses-compatible API base URL. HTTPS is required; HTTP is allowed only for loopback addresses. |
 | `INTERVALS_API_KEY` | *None* | **Yes** | Personal API key obtained from Intervals.icu account settings. |
 | `INTERVALS_ATHLETE_ID` | `0` | No | Athlete ID for Intervals.icu (`0` targets the athlete account associated with the API key). |

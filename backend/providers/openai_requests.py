@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlparse, urlunparse
 
@@ -236,6 +237,12 @@ def request_with_conversation_retry(
     raise AssertionError("unreachable")
 
 
+@dataclass(frozen=True)
+class ResponsesClock:
+    monotonic: Callable[[], float] = time.monotonic
+    wait: Callable[[float], Any] = time.sleep
+
+
 class OpenAIResponsesClient:
     """Orchestrate OpenAI Responses calls over the injected provider owners."""
 
@@ -253,8 +260,8 @@ class OpenAIResponsesClient:
         http_client: provider_http.JsonHttpClient,
         provider_state: ProviderStateService,
         logger: Any,
-        monotonic: Callable[[], float] = time.monotonic,
-        wait: Callable[[float], Any] = time.sleep,
+        clock: ResponsesClock | None = None,
+        service_tier: Callable[[str], str | None] = lambda model: None,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url
@@ -264,11 +271,13 @@ class OpenAIResponsesClient:
         self.background_poll_seconds = background_poll_seconds
         self.background_max_seconds = background_max_seconds
         self.thinking_level = thinking_level
+        self.service_tier = service_tier
         self.http_client = http_client
         self.provider_state = provider_state
         self.logger = logger
-        self.monotonic = monotonic
-        self.wait = wait
+        clock = clock or ResponsesClock()
+        self.monotonic = clock.monotonic
+        self.wait = clock.wait
 
     def _require_api_key(self) -> None:
         if not self.api_key:
@@ -290,7 +299,9 @@ class OpenAIResponsesClient:
             request_payload = dict(payload)
         elif path == self.responses_path:
             request_payload = responses_payload(
-                payload, thinking_level=self.thinking_level()
+                payload,
+                thinking_level=self.thinking_level(),
+                service_tier=self.service_tier(str(payload.get("model", ""))),
             )
         else:
             request_payload = dict(payload)
@@ -327,7 +338,9 @@ class OpenAIResponsesClient:
     ) -> dict[str, Any]:
         """Send a Responses request, retrying only transient conversation locks."""
         request_payload = responses_payload(
-            payload, thinking_level=self.thinking_level()
+            payload,
+            thinking_level=self.thinking_level(),
+            service_tier=self.service_tier(str(payload.get("model", ""))),
         )
         return self._responses_prepared(request_payload, cancel_event=cancel_event)
 
@@ -411,6 +424,7 @@ class OpenAIResponsesClient:
             request_payload = responses_payload(
                 payload,
                 thinking_level=self.thinking_level(),
+                service_tier=self.service_tier(str(payload.get("model", ""))),
                 background=True,
             )
             current = self._responses_prepared(
@@ -469,12 +483,15 @@ def responses_payload(
     payload: Mapping[str, Any],
     *,
     thinking_level: str,
+    service_tier: str | None = None,
     stream: bool = False,
     background: bool = False,
 ) -> dict[str, Any]:
     """Build an OpenAI Responses API payload without mutating caller state."""
     request_payload = dict(payload)
     request_payload.setdefault("reasoning", {"effort": thinking_level})
+    if service_tier is not None:
+        request_payload.setdefault("service_tier", service_tier)
     if stream:
         request_payload["stream"] = True
     if background:

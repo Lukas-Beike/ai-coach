@@ -237,6 +237,7 @@ class PublicStateService:
                     "selected": deps.settings.selected_model(),
                     "options": deps.settings.available_model_options(),
                 },
+                "service_tier": deps.settings.service_tier_state(),
                 "thinking_level": {
                     "selected": deps.settings.selected_thinking_level(),
                     "options": deps.settings.available_thinking_level_options(),

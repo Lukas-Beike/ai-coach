@@ -748,6 +748,16 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             (502, "invalid_response"),
         )
 
+    def test_responses_payload_applies_speed_to_stream_and_background(self):
+        for tier in ("default", "fast", "ultrafast"):
+            for flags in ({}, {"stream": True}, {"background": True}):
+                original = {"model": "gpt-6.1-sol"}
+                result = responses_payload(
+                    original, thinking_level="medium", service_tier=tier, **flags
+                )
+                self.assertEqual(result["service_tier"], tier)
+                self.assertNotIn("service_tier", original)
+
     def test_responses_payload_copies_mapping_without_mutating_it(self):
         marker = object()
         payload = MappingProxyType({"model": "gpt-test", "marker": marker})
@@ -1717,8 +1727,12 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             "logger": logger or _ClientLogger(),
         }
         settings.update(overrides)
-        settings.setdefault("wait", lambda _seconds: None)
-        settings.setdefault("monotonic", lambda: 0.0)
+        from backend.providers.openai_requests import ResponsesClock
+
+        settings["clock"] = ResponsesClock(
+            settings.pop("monotonic", lambda: 0.0),
+            settings.pop("wait", lambda _seconds: None),
+        )
         return OpenAIResponsesClient(**settings)
 
     def test_responses_client_request_builds_wire_request_and_records_usage_once(self):
@@ -1737,6 +1751,20 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(kwargs["headers"], {"Authorization": "Bearer sk-test"})
         self.assertEqual(kwargs["timeout"], 17)
         self.assertEqual(state.usage, [("openai", result, "responses")])
+
+    def test_responses_client_applies_selected_speed_for_payload_model(self):
+        for tier in ("default", "fast", "ultrafast"):
+            http = _ClientHTTP({"status": "completed"})
+            models = []
+
+            def speed(model, models=models, tier=tier):
+                models.append(model)
+                return tier
+
+            client = self._client(http, service_tier=speed)
+            client.responses({"model": "gpt-6.1-sol", "input": "synthetic"})
+            self.assertEqual(http.calls[0][0][2]["service_tier"], tier)
+            self.assertEqual(models, ["gpt-6.1-sol"])
 
     def test_responses_client_requires_api_key(self):
         client = self._client(_ClientHTTP({"status": "completed"}), api_key=None)
