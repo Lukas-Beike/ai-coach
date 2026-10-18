@@ -134,6 +134,7 @@ class GarminProjectionServiceTests(unittest.TestCase):
         available=True,
         client_available=False,
         payload=None,
+        metric_export_status=None,
     ):
         config = config or _config()
         redactor = Redactor(lambda: config)
@@ -148,12 +149,25 @@ class GarminProjectionServiceTests(unittest.TestCase):
             garmin_client_factory=_GarminClientFactory(client_available),
             database_manager=_DatabaseManager(),
             key_value_repository=_KeyValueRepository(
-                {"last_garmin_sync_at": last_sync_at}
+                {
+                    "last_garmin_sync_at": last_sync_at,
+                    "last_garmin_metric_export_status": metric_export_status,
+                }
             ),
             redactor=redactor,
             local_now=lambda: datetime(2026, 9, 20, 8, tzinfo=UTC),
         )
         return service, battery
+
+    def test_public_state_includes_the_durable_metric_export_receipt(self):
+        receipt = "Intervals.icu: 2 Messwerte gesendet, 1 Konflikte, 0 fehlgeschlagen."
+        service, _ = self._service(metric_export_status=receipt)
+        with patch.object(
+            performance_garmin_metrics,
+            "garmin_performance_metrics",
+            return_value=_metrics(),
+        ):
+            self.assertEqual(service.public_state()["metric_export_status"], receipt)
 
     def test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors(self):
         duplicate = {

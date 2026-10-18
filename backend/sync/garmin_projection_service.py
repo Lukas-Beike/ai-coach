@@ -128,6 +128,9 @@ class GarminProjectionService:
         parsed_error = self._redactor.sanitize_log_value(parsed_error)
         with self._database_manager.reader() as db:
             last_sync_at = self._key_value_repository.get(db, "last_garmin_sync_at")
+            metric_export_status = self._key_value_repository.get(
+                db, "last_garmin_metric_export_status"
+            )
             tokens_connected = garmin_tokens_connected(
                 lambda key: self._key_value_repository.get(db, key),
                 self._config.garmin_tokenstore,
@@ -144,6 +147,7 @@ class GarminProjectionService:
             "source": snapshot.get("source")
             or ("library" if self._garmin_client_factory.available() else None),
             "last_sync_at": last_sync_at,
+            "metric_export_status": metric_export_status,
             "last_error": parsed_error,
             "pagination": snapshot.get("provider_sync", {}).get("pagination", {}),
             "source_freshness": performance_freshness.garmin_source_freshness(

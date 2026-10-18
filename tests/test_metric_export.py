@@ -293,6 +293,127 @@ class MetricExportServiceTests(unittest.TestCase):
             "intervals",
         )
 
+    def test_a_late_read_failure_preserves_prior_success_and_other_groups(self):
+        self.add(
+            obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN),
+            obs(
+                MetricKind.THRESHOLD_HR, 160, TODAY, ProviderId.GARMIN, sport=Sport.RUN
+            ),
+        )
+        self.client.get_sport_settings.side_effect = [
+            {"ftp": 240},
+            {"lthr": 150},
+            {"ftp": 240},
+            RuntimeError(RAW),
+        ]
+        with self.assertLogs("backend.sync.metric_export", "WARNING"):
+            self.assertEqual(
+                self.service.sync_garmin(), {"exported": 1, "failed": 1, "conflicts": 0}
+            )
+        self.client.update_sport_settings.assert_called_once_with(
+            "Ride", {"ftp": 250}, recalc_hr_zones=False
+        )
+
+    def test_automatic_garmin_export_is_idempotent_and_preserves_zones(self):
+        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
+        self.settings["Ride"] = {"ftp": 240}
+        receipt = self.service.sync_garmin()
+        self.assertEqual(receipt, {"exported": 1, "failed": 0, "conflicts": 0})
+        self.client.update_sport_settings.assert_called_once_with(
+            "Ride", {"ftp": 250}, recalc_hr_zones=False
+        )
+        self.settings["Ride"]["ftp"] = 250
+        self.assertEqual(self.service.sync_garmin()["exported"], 0)
+        self.assertEqual(self.client.update_sport_settings.call_count, 1)
+
+    def test_new_garmin_value_after_restart_preserves_a_manual_target_change(self):
+        self.add(obs(MetricKind.FTP, 250, date(2026, 10, 10), ProviderId.GARMIN))
+        self.service.sync_garmin()
+        self.settings["Ride"] = {"ftp": 260}
+        self.add(obs(MetricKind.FTP, 255, TODAY, ProviderId.GARMIN))
+        restarted = MetricExportService(
+            lambda: self.database,
+            lambda: self.reader,
+            {ProviderId.INTERVALS: lambda: IntervalsMetricExport(self.client_factory)},
+            database_lock=threading.Lock(),
+            today=lambda: TODAY,
+            utc_now=lambda: NOW,
+        )
+        self.assertEqual(
+            restarted.sync_garmin(), {"exported": 0, "failed": 0, "conflicts": 1}
+        )
+        self.assertEqual(self.client.update_sport_settings.call_count, 1)
+        # Restoring the accepted target value resumes this field.
+        self.settings["Ride"]["ftp"] = 250
+        self.assertEqual(restarted.sync_garmin()["exported"], 1)
+        self.assertEqual(
+            self.client.update_sport_settings.call_args.args, ("Ride", {"ftp": 255})
+        )
+
+    def test_matching_initial_value_establishes_a_conflict_baseline(self):
+        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
+        self.settings["Ride"] = {"ftp": 250}
+        self.assertEqual(self.service.sync_garmin()["exported"], 0)
+        self.settings["Ride"]["ftp"] = 260
+        self.assertEqual(self.service.sync_garmin()["conflicts"], 1)
+        self.client.update_sport_settings.assert_not_called()
+
+    def test_automatic_export_uses_only_garmin_provider_measurements(self):
+        self.add(
+            obs(MetricKind.FTP, 250, date(2026, 10, 10), ProviderId.GARMIN),
+            obs(MetricKind.FTP, 270, TODAY, ProviderId.WAHOO),
+            obs(MetricKind.WEIGHT, 70, TODAY, ProviderId.INTERVALS),
+            provider_less(MetricKind.THRESHOLD_PACE, 4, TODAY),
+            obs(MetricKind.RESTING_HR, 50, date(2026, 10, 13), ProviderId.GARMIN),
+            obs(MetricKind.BODY_FAT, 15, date(2026, 1, 1), ProviderId.GARMIN),
+        )
+        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.client.update_sport_settings.assert_called_once_with(
+            "Ride", {"ftp": 250}, recalc_hr_zones=False
+        )
+        self.client.update_wellness.assert_not_called()
+
+    def test_conflict_does_not_block_other_fields(self):
+        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
+        self.service.sync_garmin()
+        self.settings["Ride"] = {"ftp": 260}
+        self.add(
+            obs(
+                MetricKind.THRESHOLD_HR, 160, TODAY, ProviderId.GARMIN, sport=Sport.RIDE
+            )
+        )
+        self.assertEqual(
+            self.service.sync_garmin(), {"exported": 1, "failed": 0, "conflicts": 1}
+        )
+        self.assertEqual(
+            self.client.update_sport_settings.call_args.args, ("Ride", {"lthr": 160})
+        )
+
+    def test_automatic_write_failure_retries_without_persisting_baseline(self):
+        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
+        self.client.update_sport_settings.side_effect = RuntimeError(RAW)
+        with self.assertLogs("backend.sync.metric_export", "WARNING") as logs:
+            self.assertEqual(self.service.sync_garmin()["failed"], 1)
+        self.assertNotIn(RAW, str(logs.output))
+        self.client.update_sport_settings.side_effect = None
+        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+
+    def test_target_change_during_automatic_export_is_not_overwritten(self):
+        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
+        self.client.get_sport_settings.side_effect = [{"ftp": 240}, {"ftp": 260}]
+        self.assertEqual(self.service.sync_garmin()["conflicts"], 1)
+        self.client.update_sport_settings.assert_not_called()
+
+    def test_manual_export_resolves_an_automatic_conflict(self):
+        self.add(obs(MetricKind.FTP, 250, date(2026, 10, 10), ProviderId.GARMIN))
+        self.service.sync_garmin()
+        self.settings["Ride"] = {"ftp": 260}
+        self.add(obs(MetricKind.FTP, 255, TODAY, ProviderId.GARMIN))
+        self.assertEqual(self.service.sync_garmin()["conflicts"], 1)
+        self.confirm(list(self.items().values()))
+        self.settings["Ride"]["ftp"] = 255
+        self.assertEqual(self.service.sync_garmin()["conflicts"], 0)
+
     def test_preview_lists_source_target_and_live_remote_value(self) -> None:
         # The cached target value is stale; the preview shows the live one.
         self.wellness["2026-10-10"] = {"weight": 71.2, "bodyFat": 15.0}

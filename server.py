@@ -377,6 +377,7 @@ from backend.sync.library_assembly import (
     WorkoutLibraryState,
     WorkoutLibrarySyncAssembly,
 )
+from backend.sync.metric_export import MetricExportService
 from backend.sync.metric_export_assembly import build_metric_export_service
 from backend.sync.persistence_assembly import SyncPersistenceAssembly
 from backend.sync.planned_calendar_assembly import (
@@ -1025,6 +1026,11 @@ GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
             operation_observer=PROVIDER_SYNC.operation_observer,
             lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
             morning_body_battery_service=morning_body_battery_service,
+            metric_export=lambda: (
+                METRIC_EXPORT.sync_garmin()
+                if CONFIG.intervals_api_key and CONFIG.intervals_athlete_id
+                else None
+            ),
         ),
         canonical=GarminCanonicalSources(
             activity_rows=lambda: CANONICAL_READ,
@@ -1954,7 +1960,7 @@ CANONICAL_READ = build_canonical_read(
     legacy=CANONICAL_SNAPSHOT_PROJECTION,
     key_values=KEY_VALUE_REPOSITORY,
 )
-METRIC_EXPORT = build_metric_export_service(
+METRIC_EXPORT: MetricExportService = build_metric_export_service(
     database_manager,
     lambda: CANONICAL_READ,
     database_lock=DB_LOCK,

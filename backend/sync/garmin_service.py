@@ -7,7 +7,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
-from datetime import date, timezone
+from datetime import UTC, date
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -287,7 +287,7 @@ class GarminMorningRemoteReader:
             return_on_mfa=True,
         )
         profile_timezone = timezone_name(self._profile_service.get().get("timezone"))
-        fallback_zone = self._athlete_clock.now().tzinfo or timezone.utc
+        fallback_zone = self._athlete_clock.now().tzinfo or UTC
         login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
         try:
             return garmin_morning.fetch_morning_body_battery(
@@ -447,6 +447,9 @@ class GarminSyncLifecycleState:
     def record_sync_finished(self) -> None:
         self._set("sync_operation_finished_at", self._utc_now())
 
+    def record_metric_export_status(self, message: str) -> None:
+        self._set("last_garmin_metric_export_status", f"{self._utc_now()}: {message}")
+
     def log_configuration_skip(self, reason: str) -> None:
         self._logger.warning(
             "External Garmin call skipped",
@@ -488,6 +491,7 @@ class GarminSyncService:
         observer: SyncOperationObserver,
         coordination: GarminSyncCoordination,
         lifecycle_state: GarminSyncLifecycleState,
+        metric_export: Callable[[], dict[str, Any] | None] | None = None,
     ) -> None:
         self._source = source
         self._payload_service = payload_service
@@ -496,6 +500,7 @@ class GarminSyncService:
         self._observer = observer
         self._coordination = coordination
         self._lifecycle_state = lifecycle_state
+        self._metric_export = metric_export
 
     def running(self) -> bool:
         return self._coordination.running()
@@ -626,12 +631,44 @@ class GarminSyncService:
             source=source,
             historical_cursor=historical_cursor,
         )
+        message = "Garmin-Synchronisierung abgeschlossen."
+        if (
+            self._metric_export is not None
+            and source != "fixture"
+            and end_date is None
+            and result.get("status") == "ok"
+            and not (cancel_event is not None and cancel_event.is_set())
+        ):
+            self._set_status(
+                operation_id,
+                "metric-export",
+                90,
+                "Garmin-Messwerte werden mit Intervals.icu abgeglichen…",
+            )
+            try:
+                receipt = self._metric_export()
+                if receipt is not None:
+                    result["metric_export"] = receipt
+                    export_message = (
+                        f"Intervals.icu: {receipt['exported']} Messwerte gesendet, "
+                        f"{receipt['conflicts']} Konflikte, {receipt['failed']} fehlgeschlagen."
+                    )
+                    self._lifecycle_state.record_metric_export_status(export_message)
+                    message += f" {export_message}"
+            except Exception as error:  # noqa: BLE001 - import remains successful; never expose provider errors
+                logging.getLogger(__name__).warning(
+                    "Automatic metric export failed (%s)", type(error).__name__
+                )
+                result["metric_export"] = {"exported": 0, "conflicts": 0, "failed": 1}
+                export_message = "Automatischer Messwert-Abgleich mit Intervals.icu fehlgeschlagen; erneuter Versuch beim nächsten Garmin-Sync."
+                self._lifecycle_state.record_metric_export_status(export_message)
+                message += f" {export_message}"
         self._operation_state_writer.write(
             operation_id,
             "completed",
             "complete",
             100,
-            "Garmin-Synchronisierung abgeschlossen.",
+            message,
         )
         self._lifecycle_state.record_sync_finished()
         return result

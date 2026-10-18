@@ -172,6 +172,7 @@ class GarminSyncServiceTests(unittest.TestCase):
         lock: threading.Lock | None = None,
         wait_seconds: float = 0.1,
         local_today: Callable[[], date] | None = None,
+        metric_export=None,
     ):
         self.database = _Database()
         self.key_values = _KeyValues()
@@ -206,7 +207,45 @@ class GarminSyncServiceTests(unittest.TestCase):
                 wait_seconds=wait_seconds,
             ),
             self.lifecycle_state,
+            metric_export=metric_export,
         )
+
+    def test_successful_current_sync_exports_and_reports_metrics(self):
+        export = Mock(return_value={"exported": 2, "failed": 0, "conflicts": 1})
+        result = self.make_service(metric_export=export).sync()
+        export.assert_called_once_with()
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["metric_export"]["exported"], 2)
+        self.assertIn("2 Messwerte gesendet", self.writer.calls[-1][4])
+        self.assertIn("1 Konflikte", self.writer.calls[-1][4])
+        self.assertFalse(self.lock.locked())
+
+    def test_export_failure_preserves_import_and_does_not_expose_error(self):
+        export = Mock(side_effect=RuntimeError("PRIVATE-PROVIDER-PAYLOAD"))
+        with self.assertLogs("backend.sync.garmin_service", "WARNING") as logs:
+            result = self.make_service(metric_export=export).sync()
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["metric_export"]["failed"], 1)
+        self.assertNotIn(
+            "PRIVATE-PROVIDER-PAYLOAD", str(logs.output) + str(self.writer.calls)
+        )
+        self.assertFalse(self.lock.locked())
+
+    def test_fixture_historical_and_partial_syncs_do_not_export(self):
+        export = Mock()
+        service = self.make_service(metric_export=export)
+        service.sync(end_date=date(2026, 9, 20))
+        export.assert_not_called()
+        service = self.make_service(
+            metric_export=export,
+            fixture=_FixtureLoader(Path("fixture.json"), {"synced_at": "test"}),
+        )
+        service.sync()
+        export.assert_not_called()
+        state = _StateService()
+        state.persist_payload = Mock(return_value={"status": "partial"})
+        self.make_service(metric_export=export, state=state).sync()
+        export.assert_not_called()
 
     def test_fixture_flow_owns_status_persistence_and_cleanup(self):
         fixture_payload = {

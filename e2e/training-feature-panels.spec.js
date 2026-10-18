@@ -1,5 +1,21 @@
 const { test, expect } = require("@playwright/test");
 
+test("@responsive current metrics describe automatic Garmin transfer and show its receipt", async ({ page }) => {
+  await page.goto("/#analysis/performance");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const panel = page.locator("#currentPerformance");
+  const toggle = panel.locator("summary");
+  if (await toggle.count() && !await panel.locator("details").evaluate((node) => node.open)) await toggle.click();
+  await expect(panel.getByText(/automatisch an Intervals\.icu/)).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Werte an Anbieter senden" })).toHaveCount(0);
+  await expect(panel.getByRole("checkbox")).toHaveCount(0);
+  await page.evaluate(() => {
+    state.data.garmin.metric_export_status = "Intervals.icu: 2 Messwerte gesendet, 1 Konflikte, 0 fehlgeschlagen.";
+    renderCurrentPerformance(state.data.performance.metrics, state.data.performance.history);
+  });
+  await expect(panel.getByText("Intervals.icu: 2 Messwerte gesendet, 1 Konflikte, 0 fehlgeschlagen.")).toBeVisible();
+});
+
 test("@responsive chart readings keep their coordinates and legible labels", async ({ page }) => {
   await page.goto("/#analysis/performance");
   await expect(page.locator("#appShell")).toBeVisible();

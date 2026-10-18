@@ -1601,8 +1601,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .current-performance-table th small { display: block; margin-top: 4px; color: var(--muted); font-size: .7rem; font-weight: 400; overflow-wrap: anywhere; }
 .current-performance-table td { text-align: right; padding-left: 12px; font-size: .95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .current-performance-table tbody tr:last-child > * { border-bottom: 0; }
-.metric-export-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
-.metric-export-recalc { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: .8rem; }
 @media (min-width: 768px) { .current-performance-groups { grid-template-columns: 1fr 1fr; gap: 32px; } }
 
 #currentPerformance, #performancePredictions { margin-bottom: 24px; }
