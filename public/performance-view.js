@@ -395,6 +395,7 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
     renderPersonalRecovery(performance?.personal_recovery);
     renderAnalysisHistory(performance?.history);
     void renderCyclingPowerProfile();
+    if (state.route === "analysis/sessions") void ActivityAnalysis.render();
     renderTrainingFocus(performance?.training_focus_periods?.[analysisHistoryPeriod] || performance?.training_focus);
   }
   const root = $("#performancePredictions");

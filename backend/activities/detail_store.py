@@ -8,12 +8,18 @@ from typing import Any
 
 from backend.activities.detail_projection import detailed_activity
 from backend.activities.workout_profile import recorded_profile
+from backend.providers.intervals_performance_fields import (
+    HEART_RATE_ZONE_TIMES,
+    ZONE_TIMES,
+)
 
 
 def summary_fingerprint(activity: dict[str, Any]) -> str:
     summary = detailed_activity(activity)
-    summary.pop("streams", None)
-    summary.pop("laps", None)
+    # Recorded zone times were added to the projection later; excluding them
+    # keeps fingerprints of already stored detail records valid.
+    for key in ("streams", "laps", HEART_RATE_ZONE_TIMES, ZONE_TIMES):
+        summary.pop(key, None)
     return hashlib.sha256(
         json.dumps(summary, sort_keys=True, allow_nan=False).encode()
     ).hexdigest()
