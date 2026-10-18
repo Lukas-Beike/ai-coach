@@ -16,6 +16,7 @@ from backend.canonical.vocabulary import (
     ActivityRecordState,
     ActivitySessionState,
     ProviderRecordState,
+    ZONE_DETAIL_KINDS,
 )
 
 CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
@@ -736,9 +737,7 @@ REMOTE_LINKS_DDL = """
 # The schema-version-10 migration executes this same text.
 _DETAIL_KINDS = _sql_in_list(ActivityDetailKind)
 _DETAIL_ORIGINS = _sql_in_list(ActivityDetailOrigin)
-_ZONE_DETAIL_KINDS = _sql_in_list_of(
-    (ActivityDetailKind.HEART_RATE_ZONES, ActivityDetailKind.POWER_ZONES)
-)
+_ZONE_DETAIL_KINDS = _sql_in_list_of(ZONE_DETAIL_KINDS.values())
 
 ACTIVITY_DETAIL_DDL = f"""
     CREATE TABLE activity_detail_sets (

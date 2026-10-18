@@ -256,9 +256,14 @@ class ZoneMetric(StrEnum):
 
     @property
     def detail_kind(self) -> ActivityDetailKind:
-        if self is ZoneMetric.HEART_RATE:
-            return ActivityDetailKind.HEART_RATE_ZONES
-        return ActivityDetailKind.POWER_ZONES
+        return ZONE_DETAIL_KINDS[self]
+
+
+# Each zone metric is stored as its own detail kind; a new metric needs an entry.
+ZONE_DETAIL_KINDS: Final[Mapping[ZoneMetric, ActivityDetailKind]] = {
+    ZoneMetric.HEART_RATE: ActivityDetailKind.HEART_RATE_ZONES,
+    ZoneMetric.POWER: ActivityDetailKind.POWER_ZONES,
+}
 
 
 class ZoneBoundarySource(StrEnum):

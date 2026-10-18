@@ -28,6 +28,7 @@ from backend.canonical.vocabulary import (
     StreamChannel,
     StreamResolution,
     ZoneBoundarySource,
+    ZONE_DETAIL_KINDS,
     ZoneMetric,
 )
 from backend.db.activity_detail_store import (
@@ -113,6 +114,10 @@ class ActivityDetailTypeTests(unittest.TestCase):
         )
         self.assertEqual(values, (120.0, None, None, None, None, None, None))
         self.assertEqual(rejected, 5)
+
+    def test_every_zone_metric_has_its_own_detail_kind(self):
+        self.assertEqual(set(ZONE_DETAIL_KINDS), set(ZoneMetric))
+        self.assertEqual(len(set(ZONE_DETAIL_KINDS.values())), len(ZoneMetric))
 
     def test_lap_metric_fields_are_lap_attributes_and_table_columns(self):
         lap_fields = {field.name for field in dataclasses.fields(ActivityLap)}
