@@ -696,7 +696,7 @@ class ServerDatabaseTests(ServerTestCase):
                 names = set(archive.namelist())
                 manifest = json.loads(archive.read("manifest.json"))
                 self.assertEqual(manifest["format"], "intervals-coach-privacy-export")
-                self.assertEqual(manifest["format_version"], 5)
+                self.assertEqual(manifest["format_version"], 6)
                 self.assertEqual(manifest["status"], "complete")
                 self.assertIn("snapshots.jsonl", names)
                 self.assertIn("remote_links.jsonl", names)
@@ -1182,6 +1182,21 @@ class ServerDatabaseTests(ServerTestCase):
                 0,
                 now=lambda: 1,
                 timeout_error=lambda: RuntimeError("timeout"),
+            )
+        with (
+            self.assertRaisesRegex(OverflowError, "too large"),
+            zipfile.ZipFile(BytesIO(), "w") as archive,
+        ):
+            archive.writestr("profile.json", "x" * 64)
+            write_jsonl_rows(
+                archive,
+                "rows.jsonl",
+                ({"id": index} for index in range(1000)),
+                10,
+                now=lambda: 1,
+                timeout_error=lambda: RuntimeError("timeout"),
+                max_bytes=32,
+                size_error=lambda: OverflowError("too large"),
             )
 
     def test_maintenance_gate_clears_after_restore_exception(self):

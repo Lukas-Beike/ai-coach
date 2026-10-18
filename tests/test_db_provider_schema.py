@@ -10,12 +10,15 @@ import sqlite3
 import unittest
 
 from backend.canonical.vocabulary import (
+    ActivityDetailKind,
+    ActivityDetailOrigin,
     ActivityLinkKind,
     ActivityRecordState,
     ActivitySessionState,
     ProviderRecordState,
 )
 from backend.db.schema import (
+    ACTIVITY_DETAIL_DDL,
     CURRENT_DATABASE_INDEXES,
     CURRENT_SCHEMA_VERSION,
     PROVIDER_TABLES_DDL,
@@ -132,7 +135,7 @@ class ProviderSchemaTests(unittest.TestCase):
         self.assertEqual(
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
         )
-        self.assertEqual(CURRENT_SCHEMA_VERSION, 9)
+        self.assertEqual(CURRENT_SCHEMA_VERSION, 10)
         self.assertTrue(database_schema_is_current(db))
         for table in PROVIDER_TABLES:
             with self.subTest(table=table):
@@ -172,6 +175,25 @@ class ProviderSchemaTests(unittest.TestCase):
             ),
         }
         self.assertEqual(lists, expected)
+
+    def test_activity_detail_checks_mirror_the_closed_detail_enums(self):
+        self.assertNotIn("'intervals'", ACTIVITY_DETAIL_DDL)
+        self.assertNotIn("'garmin'", ACTIVITY_DETAIL_DDL)
+        lists = {
+            (match.group(1), frozenset(re.findall(r"'([^']*)'", match.group(2))))
+            for match in re.finditer(r"(\w+) IN \(('[^)]*')\)", ACTIVITY_DETAIL_DDL)
+        }
+        zone_kinds = frozenset(
+            (ActivityDetailKind.HEART_RATE_ZONES, ActivityDetailKind.POWER_ZONES)
+        )
+        self.assertEqual(
+            lists,
+            {
+                ("detail_kind", frozenset(member.value for member in ActivityDetailKind)),
+                ("origin", frozenset(member.value for member in ActivityDetailOrigin)),
+                ("detail_kind", frozenset(member.value for member in zone_kinds)),
+            },
+        )
 
     def test_no_open_vocabulary_or_range_checks_remain_in_sql(self):
         for fragment in ("sport IN", "metric IN", "recorded_by IN", "source_kind IN"):

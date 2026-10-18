@@ -7,7 +7,7 @@ import tempfile
 import unittest
 import zipfile
 from contextlib import contextmanager, nullcontext
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -18,6 +18,27 @@ from backend.backup.export import (
     PrivacyArchiveExportConfig,
     PrivacyArchiveExportService,
 )
+from backend.canonical.activity_detail import (
+    ActivityLap,
+    ActivityLapSet,
+    ActivityStreamSet,
+    ZoneBucket,
+    ZoneDistribution,
+)
+from backend.canonical.records import Provenance
+from backend.canonical.vocabulary import (
+    ActivityDetailOrigin,
+    LapKind,
+    LapSource,
+    ProviderId,
+    RecordingOrigin,
+    SourceKind,
+    StreamChannel,
+    StreamResolution,
+    ZoneBoundarySource,
+    ZoneMetric,
+)
+from backend.db.activity_detail_store import replace_detail_set, save_analysis
 from backend.db.schema import initialize_schema
 from backend.observability import REDACTED_VALUE, sanitized_provider_payload
 from backend.privacy import (
@@ -34,6 +55,14 @@ PROVIDER_FILES = (
     "activity_records.jsonl",
     "observations.jsonl",
 )
+DETAIL_FILES = (
+    "activity_detail_sets.jsonl",
+    "activity_stream_channels.jsonl",
+    "activity_laps.jsonl",
+    "activity_zone_times.jsonl",
+    "activity_detail_analysis.jsonl",
+)
+DETAIL_TABLES = tuple(name.removesuffix(".jsonl") for name in DETAIL_FILES)
 SECRET_PAYLOAD = {
     "name": "Synthetic ride",
     "access_token": "synthetic-secret-value",
@@ -152,6 +181,65 @@ def seed_provider_rows(db):
     db.commit()
 
 
+def seed_detail_rows(db):
+    """Add an Intervals.icu record with one set of every detail kind to act_1."""
+    db.execute(
+        "INSERT INTO activity_records(provider, provider_activity_id, activity_id, "
+        "mapper_version, source_kind, recorded_by, sport, environment, started_at, "
+        "load_model, fetched_at, created_at, updated_at) "
+        "VALUES ('intervals', 'i1', 'act_1', 1, 'provider_reported', 'garmin', "
+        "'ride', 'outdoor', ?, 'unknown', ?, ?, ?)",
+        (STAMP, STAMP, STAMP, STAMP),
+    )
+    provenance = Provenance(
+        provider=ProviderId.INTERVALS,
+        source_kind=SourceKind.PROVIDER_REPORTED,
+        source_record_id=None,
+        recorded_by=RecordingOrigin.GARMIN,
+        retrieved_at=datetime(2026, 10, 1, 8, tzinfo=UTC),
+        label=None,
+    )
+    header = {
+        "provider_activity_id": "i1",
+        "provenance": provenance,
+        "origin": ActivityDetailOrigin.FETCH,
+    }
+    details = (
+        ActivityStreamSet(
+            **header,
+            resolution=StreamResolution.FULL,
+            channels={
+                StreamChannel.TIME_S: (0.0, 1.0),
+                StreamChannel.POWER_W: (200.0, None),
+            },
+        ),
+        ActivityLapSet(
+            **header,
+            lap_source=LapSource.DEVICE_LAPS,
+            laps=(ActivityLap(0, LapKind.LAP, 0.0, 1.0, avg_power=200.0),),
+        ),
+        ZoneDistribution(
+            **header,
+            metric=ZoneMetric.POWER,
+            boundary_source=ZoneBoundarySource.UNKNOWN,
+            buckets=(ZoneBucket(1, 1.0),),
+        ),
+    )
+    for detail in details:
+        replace_detail_set(
+            db, detail, mapper_version=1, summary_sha256=None, now=STAMP
+        )
+    save_analysis(
+        db,
+        "act_1",
+        analysis_version=1,
+        input_sha256="b" * 64,
+        payload={"score": 0.5},
+        now=STAMP,
+    )
+    db.commit()
+
+
 def seed_remote_link_rows(db):
     for kind, local_id, remote_id in (
         ("competition", "1", "event-1"),
@@ -217,13 +305,13 @@ class PrivacyExportProviderTests(ProviderDataFixture):
     def lines(archive, name):
         return [json.loads(line) for line in archive.read(name).splitlines() if line]
 
-    def test_format_version_five_lists_the_provider_and_remote_link_files(self):
-        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 5)
-        expected = {*PROVIDER_FILES, "remote_links.jsonl"}
+    def test_format_version_six_lists_the_provider_detail_and_remote_link_files(self):
+        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 6)
+        expected = {*PROVIDER_FILES, *DETAIL_FILES, "remote_links.jsonl"}
         self.assertLessEqual(expected, PRIVACY_EXPORT_JSONL_FILES)
         with self.export() as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(manifest["format_version"], 5)
+            self.assertEqual(manifest["format_version"], 6)
             self.assertLessEqual(expected, set(manifest["jsonl_files"]))
             self.assertLessEqual(expected, set(archive.namelist()))
 
@@ -248,6 +336,27 @@ class PrivacyExportProviderTests(ProviderDataFixture):
     def test_empty_remote_links_export_an_empty_file(self):
         with self.export() as archive:
             self.assertEqual(archive.read("remote_links.jsonl"), b"")
+
+    def test_activity_detail_rows_are_exported_with_decoded_streams(self):
+        seed_provider_rows(self.db)
+        seed_detail_rows(self.db)
+        with self.export() as archive:
+            sets = self.lines(archive, "activity_detail_sets.jsonl")
+            channels = self.lines(archive, "activity_stream_channels.jsonl")
+            laps = self.lines(archive, "activity_laps.jsonl")
+            zones = self.lines(archive, "activity_zone_times.jsonl")
+            analysis = self.lines(archive, "activity_detail_analysis.jsonl")
+        self.assertEqual(
+            [row["detail_kind"] for row in sets], ["laps", "power_zones", "streams"]
+        )
+        self.assertEqual(
+            {row["channel"]: row["values"] for row in channels},
+            {"power_w": [200.0, None], "time_s": [0.0, 1.0]},
+        )
+        self.assertNotIn("data", channels[0])
+        self.assertEqual(laps[0]["avg_power"], 200.0)
+        self.assertEqual(zones[0]["seconds"], 1.0)
+        self.assertEqual(analysis[0]["payload"], {"score": 0.5})
 
     def test_provider_rows_are_exported_with_sanitized_payloads(self):
         seed_provider_rows(self.db)
@@ -403,15 +512,23 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
             set(scope["provider_data"]),
             {
                 "observations",
+                *DETAIL_TABLES,
                 "activity_records",
                 "activity_sessions",
                 "provider_records",
             },
         )
-        self.assertLess(
-            scope["provider_data"].index("activity_records"),
-            scope["provider_data"].index("activity_sessions"),
-        )
+        order = scope["provider_data"].index
+        for child, parent in (
+            ("activity_stream_channels", "activity_detail_sets"),
+            ("activity_laps", "activity_detail_sets"),
+            ("activity_zone_times", "activity_detail_sets"),
+            ("activity_detail_sets", "activity_records"),
+            ("activity_detail_analysis", "activity_sessions"),
+            ("activity_records", "activity_sessions"),
+        ):
+            with self.subTest(child=child):
+                self.assertLess(order(child), order(parent))
 
     def test_preview_counts_provider_rows(self):
         seed_provider_rows(self.db)
@@ -429,6 +546,17 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
             "activity_sessions",
             "provider_records",
         ):
+            with self.subTest(table=table):
+                self.assertEqual(
+                    self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0],
+                    0,
+                )
+
+    def test_delete_removes_activity_detail_rows_before_their_parents(self):
+        seed_provider_rows(self.db)
+        seed_detail_rows(self.db)
+        self.service().delete("LOKALE DATEN LÖSCHEN")
+        for table in (*DETAIL_TABLES, "activity_records", "activity_sessions"):
             with self.subTest(table=table):
                 self.assertEqual(
                     self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0],

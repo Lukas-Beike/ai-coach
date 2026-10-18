@@ -39,6 +39,9 @@ container, and do not replace or reset the data directory to resolve a
 rejected schema. A fresh database is only required when the athlete explicitly
 chooses to start over. Future schema changes add explicit, versioned and
 transactional migrations from version 9 with upgrade regression tests.
+The current schema is version 10, which adds canonical activity detail
+(streams, laps and zone times); a version 9 database or backup is upgraded to
+it in place within one transaction, and a failed upgrade leaves it unchanged.
 
 Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. The HTTP API and coach tools keep accepting the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`), and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types.
 
@@ -552,11 +555,11 @@ When a database restore is initiated:
 2. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 3. Active background sync jobs and Coach turns are allowed to finish gracefully.
 4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`.
-5. The replacement database must match the current schema (version 9); older backups are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
+5. The replacement database must have the current schema (version 10) or a supported released schema from version 9 onward; a version 9 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss.
 
 ### Privacy Export & Data Purge
-- **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history. Export format version 5 also includes the canonical provider tables (provider records, activity sessions and records, observations) as JSON Lines, the owning provider of each activity note, when known, and the remote links that map local workouts, planned units and competitions to their provider counterparts (including the provider of each competition sync tombstone). Stored sports are exported in the canonical vocabulary (`sport`, `environment` and a lossless `sport_detail`); credential-like keys are removed from provider payloads before export, and signed download URLs are replaced with a `[redacted]` marker.
+- **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history. Export format version 6 also includes the canonical provider tables (provider records, activity sessions and records, observations) and the canonical activity detail (detail sets, stream channels as decoded point lists with `null` gaps, laps, zone times and session analyses) as JSON Lines, the owning provider of each activity note, when known, and the remote links that map local workouts, planned units and competitions to their provider counterparts (including the provider of each competition sync tombstone). Stored sports are exported in the canonical vocabulary (`sport`, `environment` and a lossless `sport_detail`); credential-like keys are removed from provider payloads before export, and signed download URLs are replaced with a `[redacted]` marker.
 - **Local Data Purge**: Completely wipes all local athlete records from the database, including canonical provider data. To prevent accidental loss, the action requires entering the exact confirmation phrase `LOKALE DATEN LÖSCHEN`. External accounts (Intervals.icu and Garmin) remain untouched.
 
 ### Operational Logging & Diagnostics
