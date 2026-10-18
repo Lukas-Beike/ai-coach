@@ -284,7 +284,17 @@ async function submitGarminMfa(event) {
       await load();
     });
   } catch (error) {
-    setCredentialError("garmin-mfa-error", error.message);
+    if (error.status === 409) {
+      // The server already discarded the pending login (expired, superseded or too
+      // many wrong codes); return to the login form with the message.
+      garminMfaHint = false;
+      garminLoginRestarted = true;
+      setCredentialError("garmin-mfa-error", "");
+      setCredentialError("garmin-login-error", error.message);
+      renderProviderCredentials(state.data || {});
+    } else {
+      setCredentialError("garmin-mfa-error", error.message);
+    }
   }
 }
 

@@ -261,14 +261,14 @@ class _PendingMfa:
     failures: int = 0
 
 
-def _text_field(body: object, name: str) -> str:
+def _text_field(body: object, name: str, *, strip: bool = True) -> str:
     if not isinstance(body, dict):
         raise AppError(400, INVALID_FIELD_MESSAGE)
     value = body.get(name)
     if not isinstance(value, str):
         raise AppError(400, INVALID_FIELD_MESSAGE)
-    text = value.strip()
-    if not text or len(text) > MAX_FIELD_LENGTH:
+    text = value.strip() if strip else value
+    if not text.strip() or len(text) > MAX_FIELD_LENGTH:
         raise AppError(400, INVALID_FIELD_MESSAGE)
     return text
 
@@ -331,7 +331,8 @@ class GarminLoginService:
 
     def login(self, body: object) -> dict[str, Any]:
         email = _text_field(body, "email")
-        password = _text_field(body, "password")
+        # Passwords are sent verbatim; surrounding spaces may be part of them.
+        password = _text_field(body, "password", strip=False)
         with self._flow_lock:
             with self._lock:
                 self._pending = None
@@ -387,10 +388,14 @@ class GarminLoginService:
             self._store(pending.client, pending.generation)
             return {"status": "connected", **self.status()}
 
-    def disconnect(self) -> dict[str, Any]:
+    def cancel(self) -> None:
+        """Discard a pending or in-flight login so its tokens are never stored."""
         with self._lock:
             self._pending = None
             self._generation += 1
+
+    def disconnect(self) -> dict[str, Any]:
+        self.cancel()
         self._tokens.clear()
         return {"status": "disconnected", **self.status()}
 

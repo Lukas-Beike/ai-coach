@@ -831,6 +831,7 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
             logger=LOGGER,
             diagnostics_suspended=suspend_diagnostic_flushes,
             refresh_credentials=lambda: refresh_runtime_config(),
+            cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
         ),
         archive=PrivacyArchiveSettings(
             data_dir=lambda: DATA_DIR,

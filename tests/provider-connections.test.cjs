@@ -272,6 +272,23 @@ test("an empty MFA code is rejected without a request", async () => {
   assert.equal(harness.element("garmin-mfa-error").hidden, false);
 });
 
+test("a discarded pending login returns from the MFA step to the login form", async () => {
+  const harness = loadProviderConnections();
+  harness.setData({ credentials: { garmin_connection: { connected: false, mfa_pending: true } } });
+  harness.setApi(async () => {
+    const error = new Error("Zu viele falsche Codes.");
+    error.status = 409;
+    throw error;
+  });
+  harness.element("garmin-mfa-code").value = "000000";
+
+  await harness.fn("submitGarminMfa")(event());
+
+  assert.equal(harness.element("garmin-mfa-form").hidden, true);
+  assert.equal(harness.element("garmin-login-form").hidden, false);
+  assert.equal(harness.element("garmin-login-error").textContent, "Zu viele falsche Codes.");
+});
+
 test("cancelling the MFA step returns to the login form", () => {
   const harness = loadProviderConnections();
   harness.setData({ credentials: { garmin_connection: { connected: false, mfa_pending: true } } });

@@ -262,6 +262,8 @@ class PrivacyDeleteDependencies:
     diagnostics_suspended: Callable[[], AbstractContextManager[None]]
     # Re-derives the runtime configuration once stored credentials are wiped.
     refresh_credentials: Callable[[], Any] | None = None
+    # Discards a pending Garmin MFA login so it cannot store tokens afterwards.
+    cancel_garmin_login: Callable[[], None] | None = None
 
 
 class PrivacyDeleteService:
@@ -334,6 +336,8 @@ class PrivacyDeleteService:
                         extra={"event": "privacy_remote_delete_failed"},
                         exc_info=True,
                     )
+            if dependencies.cancel_garmin_login is not None:
+                dependencies.cancel_garmin_login()
             # Flushes stay blocked from before the delete until the cache is dropped,
             # so deleted diagnostics are neither served nor written back.
             with (
@@ -407,6 +411,7 @@ class PrivacyStateDependencies:
     logger: logging.Logger
     diagnostics_suspended: Callable[[], AbstractContextManager[None]]
     refresh_credentials: Callable[[], Any] | None = None
+    cancel_garmin_login: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -456,6 +461,7 @@ class PrivacyAssembly:
         self._logger = state.logger
         self._diagnostics_suspended = state.diagnostics_suspended
         self._refresh_credentials = state.refresh_credentials
+        self._cancel_garmin_login = state.cancel_garmin_login
         self._data_dir = archive.data_dir
         self._database_path = archive.database_path
         self._maximum_export_bytes = archive.maximum_export_bytes
@@ -492,6 +498,7 @@ class PrivacyAssembly:
                 logger=self._logger,
                 diagnostics_suspended=self._diagnostics_suspended,
                 refresh_credentials=self._refresh_credentials,
+                cancel_garmin_login=self._cancel_garmin_login,
             )
         )
 

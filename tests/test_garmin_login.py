@@ -325,6 +325,20 @@ class GarminLoginTests(unittest.TestCase):
         self.tokens.write_back(FakeClient(blob="{}"), BLOB)
         self.assertEqual(self._stored(GARMIN_TOKENS_KEY), BLOB)
 
+    def test_password_is_sent_verbatim(self):
+        self.next_client = FakeClient(blob=BLOB)
+        self.service.login({"email": f"  {EMAIL} ", "password": f" {PASSWORD} "})
+        self.assertEqual(self.factory_calls[0][0], (EMAIL, f" {PASSWORD} "))
+
+    def test_cancel_discards_a_pending_mfa_login(self):
+        self.next_client = FakeClient(needs_mfa=True, mfa_codes=("123456",))
+        self.service.login(self._login_body())
+        self.service.cancel()
+        with self.assertRaises(AppError) as gone:
+            self.service.submit_mfa({"code": "123456"})
+        self.assertEqual(gone.exception.status, 409)
+        self.assertIsNone(self._stored(GARMIN_TOKENS_KEY))
+
     def test_mfa_attempts_are_capped(self):
         self.next_client = FakeClient(needs_mfa=True, mfa_codes=("123456",))
         self.service.login(self._login_body())

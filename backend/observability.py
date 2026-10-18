@@ -154,7 +154,6 @@ def _secret_variants(value: Any) -> set[str]:
     return {item for item in variants if len(item) >= 4}
 
 
-@lru_cache(maxsize=32)
 def config_secret_values(config: Any) -> tuple[str, ...]:
     """Return the secret-bearing values of one configuration for redaction."""
     return tuple(
@@ -172,6 +171,7 @@ def config_secret_values(config: Any) -> tuple[str, ...]:
     )
 
 
+@lru_cache(maxsize=32)
 def _secret_patterns(value: str) -> tuple[re.Pattern[str], ...]:
     """Compile one secret's case-insensitive variant patterns, longest first."""
     return tuple(

@@ -374,7 +374,7 @@ class SanitizedProviderPayloadTests(unittest.TestCase):
 
 
 class PrivacyDeleteProviderTests(ProviderDataFixture):
-    def service(self):
+    def service(self, **extra):
         database = _Manager(self.db)
         return PrivacyDeleteService(
             PrivacyDeleteDependencies(
@@ -386,8 +386,16 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
                 openai_client=_OpenAI(),
                 logger=logging.getLogger("test.privacy.provider"),
                 diagnostics_suspended=nullcontext,
+                **extra,
             )
         )
+
+    def test_delete_cancels_a_pending_garmin_login(self):
+        cancelled: list[bool] = []
+        self.service(cancel_garmin_login=lambda: cancelled.append(True)).delete(
+            "LOKALE DATEN LÖSCHEN"
+        )
+        self.assertEqual(cancelled, [True])
 
     def test_provider_data_is_a_scope_category_with_children_first(self):
         scope = {category: tables for category, _label, tables in PRIVACY_DELETE_SCOPE}

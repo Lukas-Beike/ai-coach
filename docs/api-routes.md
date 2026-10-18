@@ -107,8 +107,9 @@ return a secret: the response is the credential status only.
   `422`, an unreachable Garmin returns `502`.
 - `POST /api/garmin/login/mfa` takes `{"code": "..."}` and completes the pending
   login. The response is `{"status": "connected"}` with the same fields. A wrong
-  code returns `422` and keeps the pending login for another attempt; a missing
-  or expired one returns `409`.
+  code returns `422` and keeps the pending login for another attempt. The fifth
+  wrong code discards it and returns `409`, as does a missing, expired or
+  superseded pending login. A privacy delete also discards it.
 - `POST /api/garmin/disconnect` takes an empty JSON object, deletes the stored
   Garmin tokens and returns `{"status": "disconnected"}` with the same fields. Garmin data already stored
   locally is kept.
