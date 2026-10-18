@@ -18,6 +18,7 @@ from backend.canonical.activity_detail import (
 )
 from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import (
+    ZONE_DETAIL_KINDS,
     ActivityDetailKind,
     ActivityDetailOrigin,
     LapKind,
@@ -28,9 +29,9 @@ from backend.canonical.vocabulary import (
     StreamChannel,
     StreamResolution,
     ZoneBoundarySource,
-    ZONE_DETAIL_KINDS,
     ZoneMetric,
 )
+from backend.db import row_factory
 from backend.db.activity_detail_store import (
     analysis_rows_for,
     decode_series,
@@ -42,7 +43,6 @@ from backend.db.activity_detail_store import (
     stream_export_rows,
 )
 from backend.db.canonical_store import WriteOutcome
-from backend.db import row_factory
 from backend.db.schema import initialize_schema
 
 STAMP = "2026-10-18T08:00:00+00:00"
@@ -138,15 +138,14 @@ class ActivityDetailTypeTests(unittest.TestCase):
             {StreamChannel.TIME_S: (0.0,), StreamChannel.POWER_W: (-5.0,)},
         )
         for channels in invalid:
-            with self.subTest(channels=channels):
-                with self.assertRaises(ValueError):
-                    ActivityStreamSet(
-                        provider_activity_id="i1",
-                        provenance=provenance(),
-                        origin=ActivityDetailOrigin.FETCH,
-                        resolution=StreamResolution.FULL,
-                        channels=channels,
-                    )
+            with self.subTest(channels=channels), self.assertRaises(ValueError):
+                ActivityStreamSet(
+                    provider_activity_id="i1",
+                    provenance=provenance(),
+                    origin=ActivityDetailOrigin.FETCH,
+                    resolution=StreamResolution.FULL,
+                    channels=channels,
+                )
 
     def test_stream_set_channels_are_read_only(self):
         detail = stream_set()
@@ -206,17 +205,15 @@ class StreamCodecTests(unittest.TestCase):
             ("text", 2),
         )
         for data, count in cases:
-            with self.subTest(count=count, size=len(data)):
-                with self.assertRaises(ValueError):
-                    decode_series(data, count)
+            with self.subTest(count=count, size=len(data)), self.assertRaises(ValueError):
+                decode_series(data, count)
 
     def test_decode_rejects_a_valid_count_that_disagrees_with_the_gaps(self):
         blob, valid = encode_series((1.0, None, 2.0))
         self.assertEqual(decode_series(blob, 3, valid), (1.0, None, 2.0))
         for wrong in (valid - 1, valid + 1):
-            with self.subTest(valid_count=wrong):
-                with self.assertRaises(ValueError):
-                    decode_series(blob, 3, wrong)
+            with self.subTest(valid_count=wrong), self.assertRaises(ValueError):
+                decode_series(blob, 3, wrong)
 
 
 class ActivityDetailStoreTests(unittest.TestCase):
@@ -369,9 +366,8 @@ class ActivityDetailStoreTests(unittest.TestCase):
             ({"mapper_version": True}, TypeError),
             ({"summary_sha256": "short"}, ValueError),
         ):
-            with self.subTest(options=options):
-                with self.assertRaises(error):
-                    self.store(stream_set(), **options)
+            with self.subTest(options=options), self.assertRaises(error):
+                self.store(stream_set(), **options)
         self.assertEqual(self.count("activity_detail_sets"), 0)
 
     def test_deleting_a_set_cascades_to_its_children(self):
@@ -398,12 +394,11 @@ class ActivityDetailStoreTests(unittest.TestCase):
             ("power_zones", None, None, None),
             ("unknown", "full", None, None),
         ):
-            with self.subTest(kind=kind):
-                with self.assertRaises(sqlite3.IntegrityError):
-                    self.db.execute(
-                        insert,
-                        (kind, resolution, lap_source, boundary, DIGEST, STAMP, STAMP, STAMP),
-                    )
+            with self.subTest(kind=kind), self.assertRaises(sqlite3.IntegrityError):
+                self.db.execute(
+                    insert,
+                    (kind, resolution, lap_source, boundary, DIGEST, STAMP, STAMP, STAMP),
+                )
 
     def test_analysis_is_stored_once_per_visible_session(self):
         payload = {"target": {"kind": "ftp"}, "score": 0.8}
@@ -445,9 +440,8 @@ class ActivityDetailStoreTests(unittest.TestCase):
         ):
             values = {"analysis_version": 1, "input_sha256": DIGEST, "payload": {}}
             values.update(overrides)
-            with self.subTest(overrides=overrides):
-                with self.assertRaises(error):
-                    save_analysis(self.db, "act_1", now=STAMP, **values)
+            with self.subTest(overrides=overrides), self.assertRaises(error):
+                save_analysis(self.db, "act_1", now=STAMP, **values)
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ from array import array
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from backend.canonical.activity_detail import (
     LAP_METRIC_FIELDS,
@@ -443,7 +443,7 @@ def _insert_children(
             "detail_kind, channel, point_count, valid_count, data) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
-                (*key, channel, count, valid, _compress(points))
+                (*key, channel, count, valid, _compress(cast(bytes, points)))
                 for channel, count, valid, points in rows
             ],
         )

@@ -204,9 +204,11 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             raise RuntimeError("injected migration failure")
 
         steps = {SHAPE_SCHEMA_V9: (SHAPE_CURRENT, failing_step)}
-        with mock.patch.dict(migrations.UPGRADE_STEPS, steps):
-            with self.assertRaisesRegex(RuntimeError, "injected"):
-                migrate_schema(db)
+        with (
+            mock.patch.dict(migrations.UPGRADE_STEPS, steps),
+            self.assertRaisesRegex(RuntimeError, "injected"),
+        ):
+            migrate_schema(db)
         db.rollback()
         self.assertEqual(list(db.iterdump()), before)
         self.assertEqual(
@@ -228,9 +230,11 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                     raise RuntimeError("injected migration failure")
 
                 steps = {SHAPE_SCHEMA_V9: (SHAPE_CURRENT, failing_step)}
-                with mock.patch.dict(migrations.UPGRADE_STEPS, steps):
-                    with self.assertRaisesRegex(RuntimeError, "injected"):
-                        migrate_schema(db)
+                with (
+                    mock.patch.dict(migrations.UPGRADE_STEPS, steps),
+                    self.assertRaisesRegex(RuntimeError, "injected"),
+                ):
+                    migrate_schema(db)
                 db.rollback()
                 self.assertEqual(list(db.iterdump()), before)
 

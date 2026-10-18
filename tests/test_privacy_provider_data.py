@@ -12,6 +12,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from backend.backup.export import (
+    PRIVACY_EXPORT_FORMAT_VERSION,
+    PRIVACY_EXPORT_JSONL_FILES,
+    PrivacyArchiveExportConfig,
+    PrivacyArchiveExportService,
+)
 from backend.canonical.activity_detail import (
     ActivityLap,
     ActivityLapSet,
@@ -31,12 +37,6 @@ from backend.canonical.vocabulary import (
     StreamResolution,
     ZoneBoundarySource,
     ZoneMetric,
-)
-from backend.backup.export import (
-    PRIVACY_EXPORT_FORMAT_VERSION,
-    PRIVACY_EXPORT_JSONL_FILES,
-    PrivacyArchiveExportConfig,
-    PrivacyArchiveExportService,
 )
 from backend.db.activity_detail_store import replace_detail_set, save_analysis
 from backend.db.schema import initialize_schema

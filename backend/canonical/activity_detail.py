@@ -129,7 +129,10 @@ class ActivityStreamSet:
     def __post_init__(self) -> None:
         _require_detail_header(self.provider_activity_id, self.provenance, self.origin)
         require_instance(self.resolution, StreamResolution, "resolution")
-        channels = require_instance(self.channels, Mapping, "channels")
+        # Mapping is abstract, so it is checked here rather than via require_instance.
+        channels = self.channels
+        if not isinstance(channels, Mapping):
+            raise TypeError("channels must be a Mapping")
         frozen: dict[StreamChannel, tuple[float | None, ...]] = {}
         for channel, values in channels.items():
             require_instance(channel, StreamChannel, "channel")

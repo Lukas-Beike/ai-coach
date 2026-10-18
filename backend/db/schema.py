@@ -10,13 +10,13 @@ from functools import lru_cache
 from typing import Any
 
 from backend.canonical.vocabulary import (
+    ZONE_DETAIL_KINDS,
     ActivityDetailKind,
     ActivityDetailOrigin,
     ActivityLinkKind,
     ActivityRecordState,
     ActivitySessionState,
     ProviderRecordState,
-    ZONE_DETAIL_KINDS,
 )
 
 CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
