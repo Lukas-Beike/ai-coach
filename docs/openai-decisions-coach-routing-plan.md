@@ -25,7 +25,7 @@ Status: Plan, nicht implementiert.
 
 | Prüfung | Ergebnis |
 | --- | --- |
-| `python -m unittest discover -s tests -p "test_coach_context_[sr]e*.py"` | 42 Tests OK (das Ideendokument nennt veraltet 29 + 10) |
+| `python -m unittest discover -s tests -p "test_coach_context_[sr]e*.py"` | 42 Tests OK |
 | Vollständige Unit-Suite `python -m unittest discover -s tests` | 6266 Tests OK (19 übersprungen), 715 s |
 | Lokaler CLIProxyAPI, `GET /v1/models` | OK, `gpt-6-luna` gelistet |
 | Lokaler CLIProxyAPI, synthetisches `POST /v1/decisions` | **HTTP 404** nach 106 ms |

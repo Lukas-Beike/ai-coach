@@ -71,7 +71,7 @@ def request_context_selection(
     attachments: list[dict[str, Any]],
     has_prior_openai_attachments: bool,
 ) -> CoachContextSelection:
-    """The turn and the request payload share this argument mapping."""
+    """Select the initial request context for the turn and its payload."""
     return select_coach_context(
         message,
         context,

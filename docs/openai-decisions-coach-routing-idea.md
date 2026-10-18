@@ -109,8 +109,8 @@ Nutzen den zusätzlichen Netzwerkaufruf und Wartungsaufwand rechtfertigen.
 
 Bei der Bewertung wurden die genannten Codepfade und die aktuelle offizielle
 Dokumentation geprüft. Die vorhandenen Tests für Kontextauswahl und
-Kontextbegrenzung bestanden: 29 Tests aus `test_coach_context_selection.py` und
-10 Tests aus `test_coach_context_reduction.py`.
+Kontextbegrenzung (`test_coach_context_selection.py`,
+`test_coach_context_reduction.py`) bestanden.
 
 Es wurden keine Live-Decisions-Aufrufe oder vergleichenden Coach-Benchmarks
 durchgeführt. Verbesserungen bei Qualität, Kosten und Latenz sind Hypothesen.

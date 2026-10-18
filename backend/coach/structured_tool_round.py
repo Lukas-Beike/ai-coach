@@ -176,7 +176,7 @@ class CoachStructuredToolRoundService:
                 if result is None:
                     return name, call_id, dict(_TURN_RELEASED), {"operation": name}
                 if name == "read_coach_context" and result.get("ok"):
-                    # Counts only: the context body and arguments are never logged.
+                    # Counts and validated section names only; never the context body.
                     projection = result.get("projection") or {}
                     logging.getLogger("intervals_coach").info(
                         "Coach context reload",
