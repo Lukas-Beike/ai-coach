@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from backend.config import Config
+from backend.config import DEFAULT_OPENAI_BASE_URL, Config
 from backend.errors import AppError
 
 MODEL_OPTIONS = (
@@ -90,7 +90,11 @@ class SettingsService:
 
     @staticmethod
     def _available_model_options(config: Config) -> list[dict[str, str]]:
-        options = _copy_options(MODEL_OPTIONS)
+        options = (
+            _copy_options(MODEL_OPTIONS)
+            if config.openai_base_url.rstrip("/") == DEFAULT_OPENAI_BASE_URL
+            else []
+        )
         configured_model = config.openai_model
         if configured_model not in {option["id"] for option in options}:
             options.insert(
@@ -154,19 +158,25 @@ class SettingsService:
         self._set_value("selected_thinking_level", level_id)
         return {"thinking_level": level_id}
 
-    def service_tier(self, model: str | None = None) -> str:
-        supported = supported_service_tiers(model or self.selected_model())
+    def _service_tiers(self, model: str) -> set[str]:
+        config = self._config_supplier()
+        if config.openai_base_url.rstrip("/") != DEFAULT_OPENAI_BASE_URL:
+            return {"default"}
+        return supported_service_tiers(model)
+
+    def service_tier(self, model: str | None = None) -> str | None:
+        supported = self._service_tiers(model or self.selected_model())
+        if supported == {"default"}:
+            return None
         stored = self._get_value("selected_service_tier")
-        return (
-            stored
-            if stored in supported
-            else ("fast" if "fast" in supported else "default")
-        )
+        if stored in supported:
+            return stored
+        return "fast" if "fast" in supported else "default"
 
     def service_tier_state(self) -> dict[str, Any]:
-        supported = supported_service_tiers(self.selected_model())
+        supported = self._service_tiers(self.selected_model())
         return {
-            "selected": self.service_tier(),
+            "selected": self.service_tier() or "default",
             "options": [
                 dict(option)
                 for option in SERVICE_TIER_OPTIONS
@@ -176,7 +186,7 @@ class SettingsService:
 
     def save_service_tier(self, tier: Any) -> dict[str, str]:
         tier_id = str(tier or "").strip().lower()
-        if tier_id not in supported_service_tiers(self.selected_model()):
+        if tier_id not in self._service_tiers(self.selected_model()):
             raise AppError(
                 400, "Nicht unterstützter Geschwindigkeitsmodus für dieses Modell."
             )

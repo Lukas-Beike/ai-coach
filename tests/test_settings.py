@@ -16,7 +16,7 @@ def make_config(**changes):
     config = Config(
         port=8090,
         openai_api_key="openai-test-key",
-        openai_base_url="https://openai.example.invalid/v1",
+        openai_base_url="https://api.openai.com/v1",
         openai_model="gpt-6-luna",
         intervals_api_key="intervals-test-key",
         intervals_athlete_id="synthetic-athlete",
@@ -111,7 +111,28 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertEqual(self.service.service_tier(), "fast")
         self.service.save_service_tier("default")
         self.assertEqual(self.service.service_tier(), "default")
-        self.assertEqual(self.service.service_tier("custom-deployment"), "default")
+        self.assertIsNone(self.service.service_tier("custom-deployment"))
+
+    def test_compatible_endpoint_keeps_only_configured_model_and_omits_tier(self):
+        self.current_config[0] = replace(
+            self.current_config[0],
+            openai_base_url="https://provider.example.invalid/v1",
+            openai_model="custom-deployment",
+        )
+        self.values["selected_model_openai"] = "gpt-6.1-sol"
+        self.values["selected_service_tier"] = "ultrafast"
+        self.assertEqual(self.service.selected_model(), "custom-deployment")
+        self.assertEqual(
+            [o["id"] for o in self.service.available_model_options()],
+            ["custom-deployment"],
+        )
+        self.assertIsNone(self.service.service_tier())
+        self.assertIsNone(self.service.service_tier("gpt-6-luna"))
+        self.assertEqual(self.service.service_tier_state()["selected"], "default")
+        with self.assertRaises(AppError):
+            self.service.save_model("gpt-6.1-sol")
+        with self.assertRaises(AppError):
+            self.service.save_service_tier("fast")
 
     def test_calendar_defaults_clamping_and_write_keys(self):
         self.assertEqual(

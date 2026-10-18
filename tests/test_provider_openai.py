@@ -1727,8 +1727,12 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             "logger": logger or _ClientLogger(),
         }
         settings.update(overrides)
-        settings.setdefault("wait", lambda _seconds: None)
-        settings.setdefault("monotonic", lambda: 0.0)
+        from backend.providers.openai_requests import ResponsesClock
+
+        settings["clock"] = ResponsesClock(
+            settings.pop("monotonic", lambda: 0.0),
+            settings.pop("wait", lambda _seconds: None),
+        )
         return OpenAIResponsesClient(**settings)
 
     def test_responses_client_request_builds_wire_request_and_records_usage_once(self):

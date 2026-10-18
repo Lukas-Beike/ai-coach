@@ -12,6 +12,7 @@ from backend.observability import DiagnosticCapture
 from backend.providers import audio as audio_provider
 from backend.providers import openai as openai_provider
 from backend.providers.http import JsonHttpClient
+from backend.providers.openai_requests import ResponsesClock
 from backend.providers.state import ProviderStateService
 
 
@@ -129,8 +130,7 @@ class ModelTransportAssembly:
             http_client=self._provider_http_client(),
             provider_state=self._provider_state_service(),
             logger=self._logger,
-            monotonic=self._wall_time,
-            wait=self._wait,
+            clock=ResponsesClock(self._wall_time, self._wait),
             service_tier=self._service_tier,
         )
 

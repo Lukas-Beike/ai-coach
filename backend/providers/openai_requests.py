@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlparse, urlunparse
 
@@ -236,6 +237,12 @@ def request_with_conversation_retry(
     raise AssertionError("unreachable")
 
 
+@dataclass(frozen=True)
+class ResponsesClock:
+    monotonic: Callable[[], float] = time.monotonic
+    wait: Callable[[float], Any] = time.sleep
+
+
 class OpenAIResponsesClient:
     """Orchestrate OpenAI Responses calls over the injected provider owners."""
 
@@ -253,8 +260,7 @@ class OpenAIResponsesClient:
         http_client: provider_http.JsonHttpClient,
         provider_state: ProviderStateService,
         logger: Any,
-        monotonic: Callable[[], float] = time.monotonic,
-        wait: Callable[[float], Any] = time.sleep,
+        clock: ResponsesClock | None = None,
         service_tier: Callable[[str], str | None] = lambda model: None,
     ) -> None:
         self.api_key = api_key
@@ -269,8 +275,9 @@ class OpenAIResponsesClient:
         self.http_client = http_client
         self.provider_state = provider_state
         self.logger = logger
-        self.monotonic = monotonic
-        self.wait = wait
+        clock = clock or ResponsesClock()
+        self.monotonic = clock.monotonic
+        self.wait = clock.wait
 
     def _require_api_key(self) -> None:
         if not self.api_key:

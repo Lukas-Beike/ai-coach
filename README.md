@@ -254,7 +254,7 @@ All configuration is loaded from container environment variables or a local `.en
 
 ### Environment Variable Reference
 
-Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astra, plus the configured deployment. Thinking defaults to Medium. Speed defaults to Fast for these models; Standard is always available, and Ultrafast is available for GPT-6.1 Sol and GPT-6 Astra. Fast/Ultrafast have higher API prices. Unknown configured deployments use Standard. Choices are saved locally; unsupported speed choices fall back to Fast (or Standard for unknown deployments). Account availability depends on the API provider. See [Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) and [Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode).
+Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astra, plus the configured deployment on the official OpenAI endpoint. Compatible endpoints offer only their configured deployment and omit the service-tier parameter. Thinking defaults to Medium. Speed defaults to Fast for these models; Standard is always available, and Ultrafast is available for GPT-6.1 Sol and GPT-6 Astra. Fast/Ultrafast have higher API prices. Unknown configured deployments omit the service-tier parameter. Choices are saved locally; unsupported speed choices fall back to Fast (or Standard for unknown deployments). Account availability depends on the API provider. See [Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) and [Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode).
 
 | Variable | Default Value | Required? | Description |
 | :--- | :--- | :--- | :--- |
