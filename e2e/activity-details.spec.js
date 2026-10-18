@@ -109,6 +109,8 @@ test("@responsive analysis sessions list expands Garmin-style charts", async ({ 
   const item = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic ride <img src=x>" }).first();
   await item.locator("summary").click();
   await expect(item.locator(".activity-analysis-stats")).toContainText("25,0 km");
+  await expect(item.locator(".activity-analysis-stats div").filter({ hasText: "Intensität" })).toContainText("78 %");
+  await expect(item.locator(".activity-analysis-stats div").filter({ hasText: "Normalized Power" })).toContainText("205 W");
   const power = item.getByRole("img", { name: /^Leistung: Ø 200/ });
   await expect(power).toBeVisible();
   await expect(item.getByRole("img", { name: /^Herzfrequenz: Ø 140/ })).toBeVisible();

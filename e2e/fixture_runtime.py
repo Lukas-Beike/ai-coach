@@ -2076,6 +2076,9 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 "moving_time": 3600,
                 "distance": 25000,
                 "icu_training_load": 50,
+                # Intervals.icu reports a fractional intensity and its own NP key.
+                "icu_intensity": 0.78,
+                "icu_weighted_avg_watts": 205,
                 "icu_hr_zone_times": [600, 1800, 600, 450, 150],
             }
             _merge_snapshot_activities([activity])
