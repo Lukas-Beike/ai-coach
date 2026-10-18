@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=320">
+  <link rel="stylesheet" href="/styles.css?v=322">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -121,17 +121,19 @@
 
       <section id="dataPanel" class="panel" aria-label="Analyse">
         <div class="section-heading">
-          <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Leistung, Belastung und Erholung</span></div>
+          <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Leistung, Belastung, Erholung und Einheiten</span></div>
         </div>
         <nav class="plan-segment-nav" aria-label="Analysebereiche">
           <a href="#analysis/load" data-analysis-segment="load">Belastung</a>
           <a href="#analysis/performance" data-analysis-segment="performance">Leistung</a>
           <a href="#analysis/body" data-analysis-segment="body">Body</a>
           <a href="#analysis/recovery" data-analysis-segment="recovery">Erholung</a>
+          <a href="#analysis/sessions" data-analysis-segment="sessions">Einheiten</a>
         </nav>
         <div id="analysisLoadPeriod" hidden></div>
         <section id="sessionPerformance"class="analysis-chart-card" aria-label="Trainingsfokus"></section>
         <section id="bodyAnalysisCharts" class="analysis-history-charts" aria-label="Body-Analyse" hidden></section>
+        <section id="activityAnalysis" class="activity-analysis" aria-label="Einzelne Einheiten" hidden></section>
         <section id="personalRecovery" class="analysis-history-charts" aria-label="Persönliche Erholung" hidden></section>
         <div id="analysisLoadCharts" class="analysis-history-charts" aria-label="Garmin-Trainingsbelastung" hidden></div>
         <section id="currentPerformance" class="analysis-chart-card" aria-label="Aktuelle Leistungswerte" hidden></section>
@@ -470,21 +472,22 @@
     </div>
   </dialog>
   <script src="/api.js?v=224" defer></script>
-  <script src="/navigation.js?v=233" defer></script>
+  <script src="/navigation.js?v=234" defer></script>
   <script src="/state.js?v=225" defer></script>
   <script src="/views.js?v=227" defer></script>
   <script src="/plan-views.js?v=11" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=33" defer></script>
-  <script src="/shared.js?v=14" defer></script>
+  <script src="/shared.js?v=15" defer></script>
   <script src="/auth.js?v=11" defer></script>
   <script src="/sync-status.js?v=12" defer></script>
   <script src="/notifications.js?v=4" defer></script>
   <script src="/nutrition.js?v=31" defer></script>
-  <script src="/analysis.js?v=119" defer></script>
-  <script src="/activity-details.js?v=13" defer></script>
-  <script src="/performance-view.js?v=18" defer></script>
+  <script src="/analysis.js?v=120" defer></script>
+  <script src="/activity-details.js?v=14" defer></script>
+  <script src="/activity-analysis.js?v=1" defer></script>
+  <script src="/performance-view.js?v=19" defer></script>
   <script src="/diagnostics.js?v=4" defer></script>
   <script src="/state-loader.js?v=14" defer></script>
   <script src="/sync-actions.js?v=5" defer></script>

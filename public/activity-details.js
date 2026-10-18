@@ -250,17 +250,7 @@
       refresh.disabled = true;
       status.textContent = "Ladejob wird gestartet …";
       try {
-        let job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider: providerIds().intervals, type: "activity_details", payload: { activity_id: activityId } }) });
-        const deadline = Date.now() + 120_000;
-        while (!["completed", "failed", "partial"].includes(job.status)) {
-          if (token !== generation) return;
-          if (Date.now() >= deadline) throw new Error("Der Job läuft weiter. Öffne die Aktivität später erneut oder prüfe den Sync-Status unter Mehr.");
-          status.textContent = "Detaildaten werden im Hintergrund geladen …";
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-          if (token !== generation) return;
-          job = await api(`/api/sync/jobs/${encodeURIComponent(job.id)}`);
-        }
-        if (job.status !== "completed") throw new Error("Detaildaten konnten nicht vollständig geladen werden. Der vorherige Stand bleibt erhalten. Details stehen im Sync-Status unter Mehr.");
+        if (!await requestDetails(activityId, { api, isCurrent: () => token === generation, onStatus: (text) => { status.textContent = text; } })) return;
         await load();
       } catch (error) {
         if (token === generation) status.textContent = error.message;
@@ -269,6 +259,22 @@
       }
     });
     try { await load(); } catch (error) { if (token === generation) status.textContent = error.message; }
+  }
+
+  // Runs the explicit Intervals.icu detail job; resolves false when the caller is no longer current.
+  async function requestDetails(activityId, { api, isCurrent = () => true, onStatus = () => {} }) {
+    let job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider: providerIds().intervals, type: "activity_details", payload: { activity_id: activityId } }) });
+    const deadline = Date.now() + 120_000;
+    while (!["completed", "failed", "partial"].includes(job.status)) {
+      if (!isCurrent()) return false;
+      if (Date.now() >= deadline) throw new Error("Der Job läuft weiter. Öffne die Aktivität später erneut oder prüfe den Sync-Status unter Mehr.");
+      onStatus("Detaildaten werden im Hintergrund geladen …");
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      if (!isCurrent()) return false;
+      job = await api(`/api/sync/jobs/${encodeURIComponent(job.id)}`);
+    }
+    if (job.status !== "completed") throw new Error("Detaildaten konnten nicht vollständig geladen werden. Der vorherige Stand bleibt erhalten. Details stehen im Sync-Status unter Mehr.");
+    return isCurrent();
   }
 
   function isIntervalsActivity(activity) {
@@ -290,5 +296,5 @@
 
   globalThis.addEventListener("popstate", () => { if (dialog) close(false); });
 
-  globalThis.ActivityDetails = { open, close };
+  globalThis.ActivityDetails = { open, close, requestDetails, isIntervalsActivity };
 })();

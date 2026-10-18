@@ -1079,7 +1079,7 @@ function renderSeasonEvents(season, generation) {
 }
 
 function renderAnalysisSegments(route = state.route) {
-  const segment = { "analysis/load": "load", "analysis/body": "body", "analysis/recovery": "recovery" }[route] || "performance";
+  const segment = { "analysis/load": "load", "analysis/body": "body", "analysis/recovery": "recovery", "analysis/sessions": "sessions" }[route] || "performance";
   document.getElementById("analysisHistoryCharts").hidden = segment !== "performance";
   document.getElementById("currentPerformance").hidden = segment !== "performance";
   const endurance = document.getElementById("performanceEnduranceCharts");
@@ -1091,6 +1091,7 @@ function renderAnalysisSegments(route = state.route) {
   document.getElementById("trainingZoneCharts").hidden = segment !== "load";
   document.getElementById("analysisLoadCharts").hidden = segment !== "load";
   document.getElementById("personalRecovery").hidden = segment !== "recovery";
+  document.getElementById("activityAnalysis").hidden = segment !== "sessions";
   document.querySelectorAll("[data-analysis-segment]").forEach((link) => {
     const active = link.dataset.analysisSegment === segment;
     link.classList.toggle("active", active);

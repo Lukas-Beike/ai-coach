@@ -118,6 +118,7 @@ function ensureRouteData(route = state.route) {
   if (requested.length) load("/api/bootstrap?local=1", requested);
   if (route === "more/equipment") void renderTrainingRecords();
   if (route === "analysis/performance") void renderCyclingPowerProfile();
+  if (route === "analysis/sessions") void ActivityAnalysis.render();
 }
 
 function renderActiveRoute(mainRoute, panelRoute) {

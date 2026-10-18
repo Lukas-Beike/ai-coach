@@ -51,6 +51,22 @@ class ActivityDetailProjectionTests(unittest.TestCase):
         self.assertEqual(result["streams"]["temperature"], [])
         self.assertNotIn("not_allowed", result["streams"])
 
+    def test_recorded_zone_times_are_bounded(self):
+        activity = {
+            "icu_hr_zone_times": [600, 300.5, True, "x", float("nan")] + [1] * 30,
+            "icu_zone_times": [
+                {"id": "Z1" + "x" * 30, "secs": 300, "color": "#fff"},
+                {"id": "Z2", "secs": "bad"},
+                "malformed",
+            ],
+        }
+
+        result = detailed_activity(activity)
+
+        self.assertEqual(result["icu_hr_zone_times"][:6], [600, 300.5, None, None, None, 1])
+        self.assertEqual(len(result["icu_hr_zone_times"]), 20)
+        self.assertEqual(result["icu_zone_times"], [{"id": "Z1" + "x" * 18, "secs": 300}, None])
+
     def test_laps_allowlist_bounds_and_malformed_values(self):
         laps = (
             [

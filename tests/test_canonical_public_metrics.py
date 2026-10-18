@@ -23,6 +23,22 @@ class NeutralPublicMetricsTests(unittest.TestCase):
             {"name": "Ride", "icu_training_load": 42, "icu_rpe": 3}, record
         )
 
+    def test_renames_recorded_zone_times(self) -> None:
+        record = {
+            "icu_hr_zone_times": [600, 300],
+            "icu_zone_times": [{"id": "Z1", "secs": 300}],
+            "icu_weighted_avg_watts": 205,
+        }
+
+        self.assertEqual(
+            {
+                "heart_rate_zone_times": [600, 300],
+                "power_zone_times": [{"id": "Z1", "secs": 300}],
+                "normalized_power": 205,
+            },
+            neutral_activity_metrics(record),
+        )
+
     def test_records_without_stored_metrics_are_unchanged(self) -> None:
         record = {"name": "Rest", "moving_time": 600}
 

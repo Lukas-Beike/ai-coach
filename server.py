@@ -452,7 +452,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.8"
+APP_VERSION = "1.13.9"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -2085,6 +2085,24 @@ def main() -> None:
             },
         )
         raise SystemExit(configuration_error)
+    storage_warning = app_config.data_dir_env_warning(DATA_DIR)
+    if storage_warning:
+        LOGGER.warning(
+            "APP_PASSWORD stored in the data directory",
+            extra={
+                "event": "app_password_in_data_dir",
+                "context": {"reason": storage_warning},
+            },
+        )
+    proxy_warning = app_config.proxy_list_warning(CONFIG.invalid_trusted_proxies)
+    if proxy_warning:
+        LOGGER.warning(
+            "Invalid trusted proxy entries ignored",
+            extra={
+                "event": "config_invalid_trusted_proxy",
+                "context": {"setting": "TRUSTED_PROXY_IPS", "reason": proxy_warning},
+            },
+        )
     LOGGER.info(
         f"{APP_NAME} starting",
         extra={
