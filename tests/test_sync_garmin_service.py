@@ -592,6 +592,18 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
         reader = self.make_reader(factory=factory)
         self.assertTrue(reader.configured())
 
+        # An explicit disconnect stops credential logins until a new PWA login.
+        tokens = Mock()
+        tokens.connected.return_value = False
+        tokens.disconnected.return_value = True
+        self.assertFalse(
+            self.make_reader(factory=factory, garmin_tokens=tokens).configured()
+        )
+        tokens.disconnected.return_value = False
+        self.assertTrue(
+            self.make_reader(factory=factory, garmin_tokens=tokens).configured()
+        )
+
         with tempfile.TemporaryDirectory() as directory:
             missing_tokenstore = Path(directory) / "missing"
             factory.available.return_value = False

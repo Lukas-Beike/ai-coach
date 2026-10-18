@@ -248,6 +248,25 @@ class GarminLoginTests(unittest.TestCase):
             self.service.login(self._login_body())
         self.assertEqual(network.exception.status, 502)
 
+    def test_unavailable_sdk_returns_the_safe_login_error(self):
+        def missing_sdk(*_args: Any, **_kwargs: Any) -> FakeClient:
+            raise RuntimeError("garminconnect is not installed")
+
+        self.service._client_factory = missing_sdk
+        with self.assertRaises(AppError) as unavailable:
+            self.service.login(self._login_body())
+        self.assertEqual(unavailable.exception.status, 502)
+
+    def test_disconnect_hides_environment_credentials_until_a_new_login(self):
+        self.tokens._env_credentials = lambda: True
+        self.assertEqual(self.tokens.source(), "env")
+        self.tokens.clear()
+        self.assertTrue(self.tokens.disconnected())
+        self.assertEqual(self.tokens.source(), "none")
+        self.next_client = FakeClient()
+        self.service.login(self._login_body())
+        self.assertFalse(self.tokens.disconnected())
+
     def test_disconnect_clears_tokens_and_blocks_legacy_file(self):
         self.tokenstore.write_text(BLOB, encoding="utf-8")
         self.next_client = FakeClient()

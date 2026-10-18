@@ -410,7 +410,7 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). The primary way to co
 1. Open **Mehr > Anbindungen > Zugangsdaten** and enter your Garmin E-Mail and password, then choose "Bei Garmin anmelden". The password is sent once to the server and is never stored; the form is cleared as soon as it is submitted.
 2. If Garmin requests a verification code, the card switches to a code step. Enter the code sent to your email or mobile device. "Abbrechen" returns to the login form; the pending login expires on the server after 10 minutes.
 3. On success the card shows "Verbunden" with the source "In der App gespeichert". The Garmin OAuth tokens are stored in the encrypted database, not in a file.
-4. **Disconnect:** "Garmin trennen" (after a confirmation) deletes the stored Garmin tokens. Already loaded data stays in the local database. A preserved token file is not used again. If `GARMIN_EMAIL` and `GARMIN_PASSWORD` are still set in the environment, syncs may still log in with them, but their tokens are not stored until the next login in the app.
+4. **Disconnect:** "Garmin trennen" (after a confirmation) deletes the stored Garmin tokens. Already loaded data stays in the local database. A preserved token file is not used again. `GARMIN_EMAIL` and `GARMIN_PASSWORD` from the environment are not used either; Garmin syncs stay off until the next login in the app.
 
 An existing token file at `/data/garmin_tokens` is imported once when the database has no Garmin tokens yet. The file is left in place and is not deleted by the import. Because it is plaintext JSON protected only by owner-only file permissions, keep `/data` and every backup of it on encrypted host storage, and treat the file like a password.
 

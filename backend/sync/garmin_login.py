@@ -153,7 +153,8 @@ class GarminTokenStore:
         self._registry.replace_tokens(blob)
         return blob
 
-    def _disconnected(self) -> bool:
+    def disconnected(self) -> bool:
+        """True after an explicit disconnect or privacy delete until a new login."""
         with self._database_manager().reader() as db:
             return (
                 self._key_values.get(db, GARMIN_TOKENSTORE_STATE_KEY)
@@ -164,7 +165,7 @@ class GarminTokenStore:
         return Path(self._tokenstore_path())
 
     def _legacy_readable(self) -> bool:
-        return not self._disconnected() and self._legacy_path().exists()
+        return not self.disconnected() and self._legacy_path().exists()
 
     def source(self) -> str:
         """Return where the active login tokens come from."""
@@ -172,7 +173,7 @@ class GarminTokenStore:
             return GARMIN_SOURCE_DB
         if self._legacy_readable():
             return GARMIN_SOURCE_FILE
-        if self._env_credentials():
+        if self._env_credentials() and not self.disconnected():
             return GARMIN_SOURCE_ENV
         return GARMIN_SOURCE_NONE
 
@@ -339,8 +340,8 @@ class GarminLoginService:
                 self._generation += 1
                 generation = self._generation
             with self._registry.hold(email, password):
-                client = self._client_factory(email, password, return_on_mfa=True)
                 try:
+                    client = self._client_factory(email, password, return_on_mfa=True)
                     needs_mfa, _ = client.login(EMPTY_TOKENSTORE)
                 except Exception as exc:  # noqa: BLE001 - SDK text is not shown
                     raise self._login_error(exc) from None

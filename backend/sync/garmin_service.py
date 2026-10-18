@@ -76,6 +76,19 @@ def _garmin_login_argument(config: Config, garmin_tokens: Any | None) -> str:
     return config.garmin_tokenstore
 
 
+def _garmin_sync_configured(config: Config, garmin_tokens: Any | None) -> bool:
+    """Stored tokens, or credentials not blocked by an explicit disconnect.
+
+    After a disconnect or privacy delete a credential login is never persisted,
+    so falling back to it would run a full SSO login on every sync.
+    """
+    if _garmin_tokenstore_present(config, garmin_tokens):
+        return True
+    if garmin_tokens is not None and garmin_tokens.disconnected():
+        return False
+    return bool(config.garmin_email)
+
+
 def _garmin_tokenstore_present(config: Config, garmin_tokens: Any | None) -> bool:
     if garmin_tokens is not None:
         return garmin_tokens.connected()
@@ -125,9 +138,8 @@ class GarminRemoteReader:
         return self._client_factory.available()
 
     def configured(self) -> bool:
-        return self.available() and bool(
-            self._config.garmin_email
-            or _garmin_tokenstore_present(self._config, self._garmin_tokens)
+        return self.available() and _garmin_sync_configured(
+            self._config, self._garmin_tokens
         )
 
     def fetch(
@@ -264,9 +276,8 @@ class GarminMorningRemoteReader:
         self._garmin_tokens = garmin_tokens
 
     def configured(self) -> bool:
-        return self._client_factory.available() and bool(
-            self._config.garmin_email
-            or _garmin_tokenstore_present(self._config, self._garmin_tokens)
+        return self._client_factory.available() and _garmin_sync_configured(
+            self._config, self._garmin_tokens
         )
 
     def fetch(self, checkin_date: date) -> tuple[Any, Any]:
