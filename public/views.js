@@ -775,3 +775,23 @@ function renderSettings(data) {
   renderProviderFreshness(data);
   renderProviderCredentials(data);
 }
+
+function renderServiceTier(model) {
+  if (!model) return;
+  const select = $("#serviceTierSelect");
+  const currentIds = [...select.options].map((option) => option.value).join(",");
+  const nextIds = (model.options || []).map((option) => option.id).join(",");
+  if (currentIds !== nextIds) {
+    select.replaceChildren();
+    for (const option of model.options || []) {
+      const element = document.createElement("option");
+      element.value = option.id;
+      element.textContent = option.label;
+      element.title = option.description || "";
+      select.append(element);
+    }
+  }
+  select.value = model.selected;
+  const selected = (model.options || []).find((option) => option.id === model.selected);
+  $("#serviceTierDescription").textContent = selected?.description || "Wähle die Balance aus Qualität, Tempo und Kosten.";
+}

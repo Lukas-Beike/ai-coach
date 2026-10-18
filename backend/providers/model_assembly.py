@@ -21,6 +21,7 @@ class ModelProviderOwners:
     selected_thinking_level: Callable[[], str]
     http_client: Callable[[], JsonHttpClient]
     state_service: Callable[[], ProviderStateService]
+    service_tier: Callable[[str], str | None] = lambda model: None
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,7 @@ class ModelTransportAssembly:
         diagnostics = dependencies.diagnostics
         background = dependencies.background
         clock = dependencies.clock
+        self._service_tier = providers.service_tier
         self._config = providers.config
         self._selected_thinking_level = providers.selected_thinking_level
         self._provider_http_client = providers.http_client
@@ -129,6 +131,7 @@ class ModelTransportAssembly:
             logger=self._logger,
             monotonic=self._wall_time,
             wait=self._wait,
+            service_tier=self._service_tier,
         )
 
     def openai_stream_client(self) -> openai_provider.OpenAIStreamClient:
@@ -154,4 +157,5 @@ class ModelTransportAssembly:
             self._selected_thinking_level,
             opener=openai_provider.urlopen,
             wait=self._wait,
+            service_tier=self._service_tier,
         )

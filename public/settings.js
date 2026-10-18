@@ -252,3 +252,16 @@ async function deletePrivacyData() {
     await load();
   } catch (error) { toast(error.message, true); }
 }
+
+async function saveServiceTier(event) {
+  const select = event.currentTarget;
+  select.disabled = true;
+  try {
+    await api("/api/settings/service-tier", { method: "PUT", body: JSON.stringify({ service_tier: select.value }) });
+    toast(`Geschwindigkeit: ${select.options[select.selectedIndex].text}`);
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    await load();
+  } finally { select.disabled = false; }
+}

@@ -747,6 +747,7 @@ class ServerHttpTests(ServerTestCase):
                 "morning_checkin",
                 "coach_quick_actions",
                 "model",
+                "service_tier",
                 "thinking_level",
                 "configured",
                 "wahoo",

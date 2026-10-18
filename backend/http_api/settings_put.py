@@ -16,6 +16,10 @@ class SettingsPutRoutes:
     def handle(self, handler: Any, path: str) -> bool:
         if path == "/api/settings/model":
             result = self._settings.save_model(handler.read_json().get("model"))
+        elif path == "/api/settings/service-tier":
+            result = self._settings.save_service_tier(
+                handler.read_json().get("service_tier")
+            )
         elif path == "/api/settings/thinking-level":
             result = self._settings.save_thinking_level(
                 handler.read_json().get("thinking_level")

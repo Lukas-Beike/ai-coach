@@ -95,6 +95,24 @@ class SettingsServiceTests(unittest.TestCase):
             str(error.exception), "Nicht unterst\u00fctztes Thinking Level."
         )
 
+    def test_speed_defaults_and_model_capabilities(self):
+        self.assertEqual(self.service.service_tier(), "fast")
+        self.assertEqual(self.service.selected_thinking_level(), "medium")
+        self.assertEqual(
+            [o["id"] for o in self.service.service_tier_state()["options"]],
+            ["default", "fast"],
+        )
+        with self.assertRaises(AppError):
+            self.service.save_service_tier("ultrafast")
+        self.service.save_model("gpt-6.1-sol")
+        self.service.save_service_tier("ultrafast")
+        self.assertEqual(self.service.service_tier(), "ultrafast")
+        self.service.save_model("gpt-6-luna")
+        self.assertEqual(self.service.service_tier(), "fast")
+        self.service.save_service_tier("default")
+        self.assertEqual(self.service.service_tier(), "default")
+        self.assertEqual(self.service.service_tier("custom-deployment"), "default")
+
     def test_calendar_defaults_clamping_and_write_keys(self):
         self.assertEqual(
             self.service.calendar_display_settings(), CALENDAR_DISPLAY_DEFAULTS

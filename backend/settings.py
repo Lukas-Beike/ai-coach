@@ -16,9 +16,38 @@ MODEL_OPTIONS = (
     {
         "id": "gpt-6-luna",
         "label": "GPT-6 Luna",
-        "description": "Effizient für kostenbewusste Nutzung",
+        "description": "Für den Alltag",
+    },
+    {"id": "gpt-6-sol", "label": "GPT-6 Sol"},
+    {"id": "gpt-6.1-sol", "label": "GPT-6.1 Sol"},
+    {"id": "gpt-6-astra", "label": "GPT-6 Astra"},
+)
+SERVICE_TIER_OPTIONS = (
+    {
+        "id": "default",
+        "label": "Standard",
+    },
+    {
+        "id": "fast",
+        "label": "Fast",
+        "description": "Mit Aufpreis",
+    },
+    {
+        "id": "ultrafast",
+        "label": "Ultrafast",
+        "description": "Mit Aufpreis",
     },
 )
+
+
+def supported_service_tiers(model: str) -> set[str]:
+    if model in {"gpt-6.1-sol", "gpt-6-astra"}:
+        return {"default", "fast", "ultrafast"}
+    if model in {"gpt-6-luna", "gpt-6-sol"}:
+        return {"default", "fast"}
+    return {"default"}
+
+
 THINKING_LEVEL_OPTIONS = (
     {
         "id": "low",
@@ -124,6 +153,35 @@ class SettingsService:
             raise AppError(400, "Nicht unterstütztes Thinking Level.")
         self._set_value("selected_thinking_level", level_id)
         return {"thinking_level": level_id}
+
+    def service_tier(self, model: str | None = None) -> str:
+        supported = supported_service_tiers(model or self.selected_model())
+        stored = self._get_value("selected_service_tier")
+        return (
+            stored
+            if stored in supported
+            else ("fast" if "fast" in supported else "default")
+        )
+
+    def service_tier_state(self) -> dict[str, Any]:
+        supported = supported_service_tiers(self.selected_model())
+        return {
+            "selected": self.service_tier(),
+            "options": [
+                dict(option)
+                for option in SERVICE_TIER_OPTIONS
+                if option["id"] in supported
+            ],
+        }
+
+    def save_service_tier(self, tier: Any) -> dict[str, str]:
+        tier_id = str(tier or "").strip().lower()
+        if tier_id not in supported_service_tiers(self.selected_model()):
+            raise AppError(
+                400, "Nicht unterstützter Geschwindigkeitsmodus für dieses Modell."
+            )
+        self._set_value("selected_service_tier", tier_id)
+        return {"service_tier": tier_id}
 
     def calendar_display_settings(self) -> dict[str, int]:
         self._config_supplier()
