@@ -145,7 +145,7 @@ class GarminLoginTests(unittest.TestCase):
         self.factory_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self.tokens = GarminTokenStore(
             database_manager=lambda: FakeManager(self.connection),
-            database_lock=nullcontext,
+            database_lock=lambda: nullcontext(),
             key_values=self.key_values,
             tokenstore_path=lambda: str(self.tokenstore),
             registry=self.registry,

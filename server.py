@@ -983,7 +983,7 @@ GARMIN_TOKENS = GarminTokenStore(
     registry=GARMIN_SECRET_REGISTRY,
     env_credentials=lambda: bool(CONFIG.garmin_email and CONFIG.garmin_password),
 )
-GARMIN_LOGIN = GarminLoginService(
+GARMIN_LOGIN: GarminLoginService = GarminLoginService(
     config=lambda: CONFIG,
     client_factory=lambda email, password, **options: (
         GARMIN_ASSEMBLY.client_factory().create(email, password, **options)
@@ -991,7 +991,7 @@ GARMIN_LOGIN = GarminLoginService(
     tokens=GARMIN_TOKENS,
     registry=GARMIN_SECRET_REGISTRY,
 )
-GARMIN_ASSEMBLY = GarminAssembly(
+GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
     dependencies=GarminAssembly.Inputs(
         provider=GarminProviderSettings(
             config=lambda: CONFIG,

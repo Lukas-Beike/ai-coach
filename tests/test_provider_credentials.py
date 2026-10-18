@@ -80,7 +80,7 @@ class ProviderCredentialTests(unittest.TestCase):
         self.service = ProviderCredentialService(
             env_config=self.env_config,
             database_manager=lambda: FakeManager(self.connection),
-            database_lock=nullcontext,
+            database_lock=lambda: nullcontext(),
             key_values=KeyValueRepository(lambda: "2026-10-18T00:00:00Z"),
             apply_config=self._apply,
             current_config=lambda: self.holder["config"],
