@@ -98,6 +98,71 @@ test("@responsive activity stream aliases render once with canonical preference"
   }
 });
 
+test("@responsive running cadence shows step frequency of both legs", async ({ page }) => {
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const headings = await page.evaluate(async () => {
+    const result = {};
+    for (const type of ["Run", "Ride"]) {
+      const data = { activity: { id: `synthetic-${type}`, name: `Synthetic ${type}`, type, streams: { time: [0, 1, 2], cadence: [86, 88, 90] } } };
+      await ActivityDetails.open(data.activity, { api: async () => data, showDialog: (dialog) => dialog.showModal() });
+      result[type] = [...document.querySelectorAll(".activity-series")].map((node) => node.textContent);
+      ActivityDetails.close(false);
+    }
+    return result;
+  });
+  expect(headings.Run.find((text) => text.startsWith("Schrittfrequenz (spm)"))).toContain("180");
+  expect(headings.Ride.find((text) => text.startsWith("Kadenz (rpm)"))).toContain("90");
+});
+
+test("@responsive analysis shows running step frequency and cycling cadence", async ({ page }) => {
+  const summaries = [
+    { id: "synthetic-run", name: "Synthetic run", type: "Run", start_date_local: "2026-10-17T08:00:00", moving_time: 3, average_cadence: 86, max_cadence: 90 },
+    { id: "synthetic-ride", name: "Synthetic ride cadence", type: "Ride", start_date_local: "2026-10-16T08:00:00", moving_time: 3, average_cadence: 86, max_cadence: 90 },
+  ];
+  await page.route(/\/api\/activities(\?|\/)/, (route) => {
+    const id = new URL(route.request().url()).pathname.split("/")[3];
+    const body = id
+      ? { activity: { id, streams: { time: [0, 1, 2], cadence: [84, 86, 90] } }, detail_data: {} }
+      : { activities: summaries, snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null };
+    return route.fulfill({ json: body });
+  });
+  await page.goto("/#analysis/sessions");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const run = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic run" });
+  await run.locator("summary").click();
+  await expect(run.locator(".activity-analysis-stats div").filter({ hasText: "Ø Schrittfrequenz" })).toContainText("172 spm");
+  await expect(run.getByRole("img", { name: /^Schrittfrequenz: Ø 172/ })).toBeVisible();
+  const ride = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic ride cadence" });
+  await ride.locator("summary").click();
+  await expect(ride.locator(".activity-analysis-stats div").filter({ hasText: "Ø Kadenz" })).toContainText("86 rpm");
+  await expect(ride.getByRole("img", { name: /^Kadenz: Ø 86/ })).toBeVisible();
+});
+
+test("@responsive analysis lists sessions whose details failed to load", async ({ page }) => {
+  const message = "Intervals.icu hat für diese Einheit keine Detaildaten geliefert.";
+  const summaries = [
+    { id: "synthetic-failed", name: "Synthetic failed <img src=x>", type: "Ride", start_date_local: "2026-10-17T08:00:00", moving_time: 3, detail_error: message },
+  ];
+  await page.route(/\/api\/activities(\?|\/)/, (route) => {
+    const id = new URL(route.request().url()).pathname.split("/")[3];
+    const body = id
+      ? { activity: { id }, detail_data: { load_error: { message, observed_at: "2026-10-17T09:00:00Z" } } }
+      : { activities: summaries, snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null };
+    return route.fulfill({ json: body });
+  });
+  await page.goto("/#analysis/sessions");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const item = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic failed <img src=x>" });
+  const flag = item.locator("summary > .activity-analysis-error");
+  await expect(flag).toHaveText("Details nicht geladen");
+  await expect(flag).toHaveAttribute("title", message);
+  await item.locator("summary").click();
+  await expect(item.locator(".activity-analysis-panel .activity-analysis-error")).toContainText(message);
+  expect(await item.locator("img").count()).toBe(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
 test("@responsive analysis sessions list expands Garmin-style charts", async ({ page, request }) => {
   const seed = await request.get("/api/fixture/activity");
   expect(seed.ok()).toBeTruthy();

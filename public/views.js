@@ -476,9 +476,9 @@ function renderCheckins(checkins, timeZone) {
   }
   renderCheckinHistory(history, rows, timeZone);
 }
-function renderModel(model) {
+function renderModelChoice(model, selectId, descriptionId) {
   if (!model) return;
-  const select = $("#modelSelect");
+  const select = $(selectId);
   const currentIds = [...select.options].map((option) => option.value).join(",");
   const nextIds = (model.options || []).map((option) => option.id).join(",");
   if (currentIds !== nextIds) {
@@ -493,7 +493,11 @@ function renderModel(model) {
   }
   select.value = model.selected;
   const selected = (model.options || []).find((option) => option.id === model.selected);
-  $("#modelDescription").textContent = selected?.description || "Wähle die Balance aus Qualität, Tempo und Kosten.";
+  $(descriptionId).textContent = selected?.description || "Wähle die Balance aus Qualität, Tempo und Kosten.";
+}
+
+function renderModel(model) {
+  renderModelChoice(model, "#modelSelect", "#modelDescription");
 }
 
 function renderThinkingLevel(thinkingLevel) {
@@ -773,4 +777,9 @@ function renderSettings(data) {
   renderProviderAttention(data);
   renderConnectionsSyncProgress(data);
   renderProviderFreshness(data);
+  renderProviderCredentials(data);
+}
+
+function renderServiceTier(model) {
+  renderModelChoice(model, "#serviceTierSelect", "#serviceTierDescription");
 }

@@ -6,7 +6,6 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from backend.canonical.public_metrics import neutral_activity_records
@@ -22,10 +21,11 @@ from backend.http_api.state_prelude import (
     PublicStateWeatherPrelude,
 )
 from backend.planning import season as planning_season
+from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
 from backend.runtime.ports import ProviderStateReader
 from backend.sync import intervals_state
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.wahoo_connection import WAHOO_TOKENS_KEY, connection_status
+from backend.sync.wahoo_connection import connection_status
 
 if TYPE_CHECKING:
     from backend.athlete.profile import ProfileService
@@ -84,6 +84,7 @@ class PublicStateDependencies:
     calendar_future_days: int
     local_now: Callable[[], datetime]
     provider_registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
+    provider_credentials: Callable[[], Any] | None = None
 
 
 class PublicStateService:
@@ -137,7 +138,10 @@ class PublicStateService:
             freshness = deps.provider_freshness.current(
                 profile=deps.profile.get(),
                 garmin_has_core_error=bool(deps.garmin_sync_state.core_error_entries()),
-                garmin_tokenstore_exists=Path(deps.config.garmin_tokenstore).exists(),
+                garmin_tokenstore_exists=garmin_tokens_connected(
+                    lambda key: self._get_value(key, deps.database_manager()),
+                    deps.config.garmin_tokenstore,
+                ),
                 read_only=True,
             )
             sync = deps.sync_public_state.browser_state(freshness=freshness)
@@ -233,6 +237,7 @@ class PublicStateService:
                     "selected": deps.settings.selected_model(),
                     "options": deps.settings.available_model_options(),
                 },
+                "service_tier": deps.settings.service_tier_state(),
                 "thinking_level": {
                     "selected": deps.settings.selected_thinking_level(),
                     "options": deps.settings.available_thinking_level_options(),
@@ -245,6 +250,11 @@ class PublicStateService:
                 },
                 ProviderId.WAHOO.value: connection_status(
                     deps.config, self._get_value(WAHOO_TOKENS_KEY, manager)
+                ),
+                "credentials": (
+                    deps.provider_credentials().status()
+                    if deps.provider_credentials is not None
+                    else None
                 ),
                 "usage": deps.provider_state.summary("openai"),
             }

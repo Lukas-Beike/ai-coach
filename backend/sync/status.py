@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from pathlib import Path
 from typing import Any, Protocol
 
 from backend.athlete.profile import ProfileService
 from backend.config import Config
 from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.provider_credentials import garmin_tokens_connected
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.freshness import ProviderFreshnessService
 from backend.sync.freshness_sources import default_running_probes
@@ -186,7 +186,9 @@ class SyncPublicStateService:
                 garmin_has_core_error=bool(
                     self._garmin_sync_state_service.core_error_entries()
                 ),
-                garmin_tokenstore_exists=Path(self._config.garmin_tokenstore).exists(),
+                garmin_tokenstore_exists=garmin_tokens_connected(
+                    self._get_value, self._config.garmin_tokenstore
+                ),
                 # A status GET must not prune history; the refresh path does.
                 read_only=True,
             )

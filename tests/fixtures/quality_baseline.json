@@ -134,12 +134,6 @@
     },
     {
       "tool": "ruff",
-      "path": "backend/sync/garmin_service.py",
-      "code": "UP017",
-      "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/sync/job_outcomes.py",
       "code": "UP017",
       "message_sha256": "8598edbcfa3d64007ef6c93d9350eb227c3b08e04238df4b13b646eba88a924b"
@@ -1256,12 +1250,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/weather/projection.py",
-      "code": "arg-type",
-      "message_sha256": "cf194421059c0d638fefbdb2ceb95f8f4552d3d5bf1f6a38d0cf19ee994efcab"
-    },
-    {
-      "tool": "mypy",
       "path": "backend/planning/competitions.py",
       "code": "arg-type",
       "message_sha256": "d59123485b6c5a4fa5b5c286400256fd3f11b7d960c13a09b097918eac088be5"
@@ -1277,12 +1265,6 @@
       "path": "tests/test_planning_change_plan_resolution.py",
       "code": "arg-type",
       "message_sha256": "d79f7d779eba7759a372bfad25fe55d883fef43e790dd50321f1bb14905f1c4c"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/weather/projection.py",
-      "code": "arg-type",
-      "message_sha256": "d8c91f0ee887e46a6b85414422bc0b096bf0fd2fbbcb778385c2938281b6c7b0"
     },
     {
       "tool": "mypy",
@@ -2006,12 +1988,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/weather/projection.py",
-      "code": "index",
-      "message_sha256": "a44adfab2551a879041c39b143eb52c7593f7b55e1f911dee04b38739360615e"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_library_service.py",
       "code": "index",
       "message_sha256": "bf79b3be56bb64bc0cffa14dd72f8eb9da67ae9da1cb8b63ee5a54eab23471dd"
@@ -2463,30 +2439,6 @@
     {
       "tool": "mypy",
       "path": "backend/coach/job_store.py",
-      "code": "union-attr",
-      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/weather/projection.py",
-      "code": "union-attr",
-      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/weather/projection.py",
-      "code": "union-attr",
-      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/weather/projection.py",
-      "code": "union-attr",
-      "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/weather/projection.py",
       "code": "union-attr",
       "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"
     },

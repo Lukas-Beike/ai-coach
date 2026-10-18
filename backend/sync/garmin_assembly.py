@@ -65,6 +65,7 @@ class GarminSyncControl:
     operation_observer: Callable[[], Any]
     lock_wait_seconds: int
     morning_body_battery_service: Callable[[], MorningBodyBatteryService]
+    metric_export: Callable[[], dict[str, Any] | None] | None = None
 
 
 class GarminAssembly:
@@ -77,9 +78,12 @@ class GarminAssembly:
         telemetry: GarminSyncTelemetry
         control: GarminSyncControl
         canonical: GarminCanonicalSources | None = None
+        # Database-backed Garmin token store; None keeps the legacy file rules.
+        tokens: Any | None = None
 
     def __init__(self, *, dependencies: GarminAssembly.Inputs) -> None:
         self._canonical = dependencies.canonical
+        self._garmin_tokens = dependencies.tokens
         provider = dependencies.provider
         persistence = dependencies.persistence
         telemetry = dependencies.telemetry
@@ -105,6 +109,7 @@ class GarminAssembly:
         self._operation_observer = control.operation_observer
         self._lock_wait_seconds = control.lock_wait_seconds
         self._morning_body_battery_service = control.morning_body_battery_service
+        self._metric_export = control.metric_export
 
     def fixture_loader(self) -> garmin.GarminFixtureLoader:
         """Create a fixture reader using the current configuration and clock."""
@@ -164,6 +169,7 @@ class GarminAssembly:
             self._earliest_date,
             self._sync_chunk_days,
             self._all_sync_days,
+            garmin_tokens=self._garmin_tokens,
         )
 
     def sync_service(self) -> GarminSyncService:
@@ -195,6 +201,7 @@ class GarminAssembly:
                 self._utc_now,
                 self._logger,
             ),
+            metric_export=self._metric_export,
         )
 
     def projection_service(self) -> GarminProjectionService:

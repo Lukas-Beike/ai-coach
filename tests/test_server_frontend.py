@@ -44,6 +44,7 @@ def frontend_source():
             "state-loader.js",
             "sync-actions.js",
             "wahoo-connection.js",
+            "provider-connections.js",
             "settings.js",
             "app.js",
         )
@@ -88,6 +89,11 @@ class ServerFrontendTests(ServerTestCase):
                 "connectWahoo",
                 "disconnectWahoo",
                 "renderWahooConnection",
+            ),
+            "provider-connections.js": (
+                "saveProviderCredentials",
+                "submitGarminLogin",
+                "renderProviderCredentials",
             ),
             "settings.js": (
                 "saveProfile",

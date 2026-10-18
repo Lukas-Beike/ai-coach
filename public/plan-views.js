@@ -1,3 +1,29 @@
+  function appendPlannedAirInsight(body, weather) {
+    const air = weather.air_quality && typeof weather.air_quality === "object" ? weather.air_quality : {};
+    const aqi = calendarMetricNumber(air.european_aqi_max);
+    const pollen = plannedPollenLabel(weather.pollen);
+    const category = air.european_aqi_category ? " (" + air.european_aqi_category + ")" : "";
+    const values = [
+      aqi ? `AQI ${aqi}${category}` : "",
+      calendarMetricNumber(air.uv_index_max) ? `UV ${calendarMetricNumber(air.uv_index_max)}` : "",
+      pollen,
+    ].filter(Boolean);
+    if (!values.length) return;
+    const line = document.createElement("p");
+    line.className = "planned-air-quality";
+    line.textContent = values.join(" · ");
+    let pollenTitle = pollen ? "Pollen: Körner/m³ (Open-Meteo/CAMS)" : null;
+    if (weather.pollen?.source === "DWD") {
+      const region = weather.pollen.region ? " · " + weather.pollen.region : "";
+      pollenTitle = `Pollenflug-Gefahrenindex 0–3: Deutscher Wetterdienst${region}`;
+    }
+    line.title = [
+      aqi ? "Luftqualität: Europäischer AQI (Open-Meteo/CAMS)" : null,
+      pollenTitle,
+    ].filter(Boolean).join(" · ");
+    body.append(line);
+  }
+
 globalThis.AppPlanViews = Object.freeze({ create });
 
 const CALENDAR_MARKERS = [
@@ -80,6 +106,17 @@ function calendarMetricNumber(value, suffix = "") {
   const number = Number(value);
   if (!Number.isFinite(number)) return null;
   return `${AppFormat.number(number, { digits: Number.isInteger(number) ? 0 : 1 })}${suffix}`;
+}
+
+// DWD levels (0–3 index) or Open-Meteo/CAMS concentrations become one short pollen line.
+function plannedPollenLabel(pollen) {
+  if (!pollen || typeof pollen !== "object") return "";
+  const source = pollen.source === "DWD" ? pollen.levels : pollen.concentrations;
+  if (!source || typeof source !== "object") return "";
+  const entries = Object.entries(source)
+    .filter(([, value]) => value != null && String(value) !== "0" && String(value) !== "")
+    .map(([name, value]) => `${name} ${value}`);
+  return entries.length ? `Pollen: ${entries.join(", ")}` : "Pollen: keine Belastung";
 }
 
 // Every activity with a positive distance adds to the total; only distance sports without one count as missing.
@@ -456,6 +493,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       metrics.textContent = values.join(" · ");
       body.append(metrics);
     }
+    appendPlannedAirInsight(body, weather);
   }
 
   function plannedDayInsights(weather) {

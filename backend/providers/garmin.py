@@ -48,9 +48,13 @@ class GarminClientFactory:
         return GarminClient is not None
 
     @staticmethod
-    def create(email: str | None, password: str | None) -> Any:
+    def create(
+        email: str | None, password: str | None, *, return_on_mfa: bool = False
+    ) -> Any:
         if GarminClient is None:
             raise RuntimeError("The optional Garmin client library is unavailable.")
+        if return_on_mfa:
+            return GarminClient(email, password, return_on_mfa=True)
         return GarminClient(email, password)
 
 

@@ -78,6 +78,47 @@ provider-keyed.
 | PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile | CSRF |
 | PUT | `/api/athlete-context` | Replace profile and competitions | CSRF |
 | PUT | `/api/nutrition/entry` | Update a nutrition entry | CSRF |
+| PUT | `/api/settings/credentials` | Save or clear provider credentials stored in the encrypted database (see below) | CSRF |
+
+### Provider credentials and Garmin login
+
+These routes are reached from **Mehr > Anbindungen > Zugangsdaten**. They never
+return a secret: the response is the credential status only.
+
+- `PUT /api/settings/credentials` takes a JSON object whose keys are credential
+  fields (`openai_api_key`, `openai_base_url`, `intervals_api_key`,
+  `intervals_athlete_id`, `wahoo_client_id`, `wahoo_client_secret`,
+  `garmin_email`). `garmin_email` has no UI field; it pairs with the
+  environment `GARMIN_PASSWORD` fallback and is reported as configured only,
+  never echoed back. A string
+  stores the value; `null` or a blank string clears the value stored in the app,
+  so the environment value applies again. Each field is validated server-side.
+  Changing the effective `intervals_athlete_id` returns `409` while Intervals.icu
+  records or sync cursors are stored, because they are not scoped by athlete; a
+  privacy delete clears them first.
+  The response is the credential status: per field `source` (`db`, `env` or
+  `none`), `configured`, and `value` only for non-secret fields, plus
+  `garmin_connected`, `openai_configured`, `intervals_configured`,
+  `wahoo_configured` and `garmin_connection` (`connected`, `source`,
+  `mfa_pending`).
+- `POST /api/garmin/login` takes `{"email": "...", "password": "..."}`. The
+  password is used once and never stored. The response is `{"status":
+  "connected"}` or `{"status": "mfa_required"}`, plus the current
+  `connected`, `source` and `mfa_pending` fields. An MFA challenge keeps its pending login on the
+  server for 10 minutes, until a code is submitted or a new login starts;
+  cancelling in the UI does not discard it. Wrong Garmin credentials return
+  `422`, an unreachable Garmin returns `502`.
+- `POST /api/garmin/login/mfa` takes `{"code": "..."}` and completes the pending
+  login. The response is `{"status": "connected"}` with the same fields. A wrong
+  code returns `422` and keeps the pending login for another attempt. The fifth
+  wrong code discards it and returns `409`, as does a missing, expired or
+  superseded pending login. A privacy delete also discards it.
+- `POST /api/garmin/disconnect` takes an empty JSON object, deletes the stored
+  Garmin tokens and returns `{"status": "disconnected"}` with the same fields. Garmin data already stored
+  locally is kept.
+
+Each POST and PUT above requires the session cookie and `X-CSRF-Token`.
+Errors are JSON with a German `error` message and no secret or raw provider text.
 
 The former `/api/logs/clear` and `/api/diagnostics/clear` aliases are not
 registered. Static files and the application shell are served separately from

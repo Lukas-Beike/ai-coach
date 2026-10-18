@@ -109,6 +109,7 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
                 redact=lambda _message: "redacted",
                 diagnostics_suspended=self.diagnostics_suspended,
                 canonical_backfill_start=self.canonical_backfill_start,
+                refresh_credentials=lambda: self.calls.append("credentials-refresh"),
             )
         )
 
@@ -139,6 +140,7 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
                 "checkpoint",
                 "drain",
                 "diagnostics-discard",
+                "credentials-refresh",
                 "sync-resume",
                 "coach-resume",
                 "backfill-start",

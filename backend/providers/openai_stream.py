@@ -383,10 +383,12 @@ class OpenAIStreamClient:
         thinking_level: Callable[[], str],
         opener: Any = urlopen,
         wait: Callable[[float], Any] = time.sleep,
+        service_tier: Callable[[str], str | None] = lambda model: None,
     ) -> None:
         self.config = config
         self.telemetry = telemetry
         self.thinking_level = thinking_level
+        self.service_tier = service_tier
         self.opener = opener
         self.wait = wait
 
@@ -731,6 +733,7 @@ class OpenAIStreamClient:
         request_payload = responses_payload(
             payload,
             thinking_level=self.thinking_level(),
+            service_tier=self.service_tier(str(payload.get("model", ""))),
             stream=True,
         )
         attempt_state: dict[str, Any] = {}

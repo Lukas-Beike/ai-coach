@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Hashable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -390,13 +390,13 @@ class MorningBodyBatteryServiceCache:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._manager: Any = None
-        self._config_id: int | None = None
+        self._config_id: Hashable | None = None
         self._service: MorningBodyBatteryService | None = None
 
     def get(
         self,
         manager: Any,
-        config_id: int,
+        config_id: Hashable,
         store: MorningBatteryStore,
         source: MorningBatterySource,
         execution_gate: MorningBatteryExecutionGate,

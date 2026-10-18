@@ -243,7 +243,9 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "change_history",
             ],
         )
-        self.assertEqual(self.key_values.get.call_count, 8)
+        # Two extra reads: the Garmin configured signal checks the token blob and
+        # the disconnect marker inside the same snapshot (see transactions above).
+        self.assertEqual(self.key_values.get.call_count, 10)
 
     def test_clear_delegates_to_diagnostic_capture(self):
         self.capture.clear.return_value = {"ok": True, "entries": 0}

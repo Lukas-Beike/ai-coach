@@ -18,7 +18,7 @@ async function authenticate(config) {
     const context = await browser.newContext({ baseURL });
     const page = await context.newPage();
     await page.goto("/");
-    await page.getByLabel("Passwort").fill(password);
+    await page.getByLabel("Passwort", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Anmelden" }).click();
     await page.locator("#loginDialog").waitFor({ state: "hidden" });
     await page.locator("#appShell").waitFor({ state: "visible" });

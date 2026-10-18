@@ -56,6 +56,7 @@ SHARED_ROOTS = frozenset(
         "observability",
         "pagination",
         "privacy",
+        "provider_credentials",
         "settings",
     )
 )

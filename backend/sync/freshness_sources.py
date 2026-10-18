@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Any, Protocol
 
+from backend.provider_credentials import WAHOO_TOKENS_KEY
 from backend.providers.descriptors import (
     CALENDAR_ID,
     GARMIN_ID,
@@ -22,7 +23,7 @@ from backend.providers.descriptors import (
     WEATHER_ID,
 )
 from backend.sync.provider_runtime import FreshnessInputs, FreshnessSource
-from backend.sync.wahoo_connection import WAHOO_TOKENS_KEY, connection_status
+from backend.sync.wahoo_connection import connection_status
 from backend.weather import cache as weather_cache
 
 WEATHER_CACHE_KEY = weather_cache.CACHE_KEY

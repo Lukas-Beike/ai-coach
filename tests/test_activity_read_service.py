@@ -79,8 +79,14 @@ class _DatedRows:
         )
 
 
+class _FailedDetails:
+    def failures(self, activity_ids):
+        ids = set(activity_ids)
+        return {"old": {"message": "Detaildaten fehlerhaft."}} if "old" in ids else {}
+
+
 class ActivityReadServiceTests(unittest.TestCase):
-    def service(self):
+    def service(self, detail_store=None):
         snapshot = {
             "synced_at": "2026-09-20T08:00:00+00:00",
             "athlete": {},
@@ -111,6 +117,14 @@ class ActivityReadServiceTests(unittest.TestCase):
             _Snapshots(snapshot),
             CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
             _Feedback(),
+            detail_store,
+        )
+
+    def test_page_keeps_activities_with_failed_details_and_names_the_error(self):
+        page = self.service(_FailedDetails()).page(today=date(2026, 9, 20))
+        self.assertEqual(
+            {"new": None, "old": "Detaildaten fehlerhaft."},
+            {item["id"]: item["detail_error"] for item in page["activities"]},
         )
 
     def test_page_filters_orders_attaches_feedback_and_uses_cursor(self):

@@ -1,9 +1,9 @@
 """Provider-neutral outbound port for explicitly confirmed metric exports.
 
 A port maps canonical body and threshold metrics onto one target's fields,
-reads the fields' current remote values and writes them. It never decides when a remote write happens: ``write`` is only
-reached from ``MetricExportService.export`` after the athlete confirmed a
-preview that names the target and every metric.
+reads the fields' current remote values and writes them. The service owns
+explicit manual confirmations and persisted athlete consent for automatic
+Garmin synchronization; the port never decides when a remote write happens.
 """
 
 from __future__ import annotations
@@ -53,6 +53,9 @@ class MetricExportPort(Protocol):
 
     def remote_record(self, field: MetricExportField, observed_on: date) -> str:
         """Return the remote record that holds the field; writes are grouped by it."""
+
+    def normalize_value(self, field: MetricExportField, value: float) -> float:
+        """Return the numeric value the target will store after a write."""
 
     def read_record(
         self, field: MetricExportField, observed_on: date

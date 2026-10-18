@@ -9,16 +9,45 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from backend.config import Config
+from backend.config import DEFAULT_OPENAI_BASE_URL, Config
 from backend.errors import AppError
 
 MODEL_OPTIONS = (
     {
         "id": "gpt-6-luna",
         "label": "GPT-6 Luna",
-        "description": "Effizient für kostenbewusste Nutzung",
+        "description": "Für den Alltag",
+    },
+    {"id": "gpt-6-sol", "label": "GPT-6 Sol"},
+    {"id": "gpt-6.1-sol", "label": "GPT-6.1 Sol"},
+    {"id": "gpt-6-astra", "label": "GPT-6 Astra"},
+)
+SERVICE_TIER_OPTIONS = (
+    {
+        "id": "default",
+        "label": "Standard",
+    },
+    {
+        "id": "fast",
+        "label": "Fast",
+        "description": "Mit Aufpreis",
+    },
+    {
+        "id": "ultrafast",
+        "label": "Ultrafast",
+        "description": "Mit Aufpreis",
     },
 )
+
+
+def supported_service_tiers(model: str) -> set[str]:
+    if model in {"gpt-6.1-sol", "gpt-6-astra"}:
+        return {"default", "fast", "ultrafast"}
+    if model in {"gpt-6-luna", "gpt-6-sol"}:
+        return {"default", "fast"}
+    return {"default"}
+
+
 THINKING_LEVEL_OPTIONS = (
     {
         "id": "low",
@@ -61,7 +90,11 @@ class SettingsService:
 
     @staticmethod
     def _available_model_options(config: Config) -> list[dict[str, str]]:
-        options = _copy_options(MODEL_OPTIONS)
+        options = (
+            _copy_options(MODEL_OPTIONS)
+            if config.openai_base_url.rstrip("/") == DEFAULT_OPENAI_BASE_URL
+            else []
+        )
         configured_model = config.openai_model
         if configured_model not in {option["id"] for option in options}:
             options.insert(
@@ -124,6 +157,41 @@ class SettingsService:
             raise AppError(400, "Nicht unterstütztes Thinking Level.")
         self._set_value("selected_thinking_level", level_id)
         return {"thinking_level": level_id}
+
+    def _service_tiers(self, model: str) -> set[str]:
+        config = self._config_supplier()
+        if config.openai_base_url.rstrip("/") != DEFAULT_OPENAI_BASE_URL:
+            return {"default"}
+        return supported_service_tiers(model)
+
+    def service_tier(self, model: str | None = None) -> str | None:
+        supported = self._service_tiers(model or self.selected_model())
+        if supported == {"default"}:
+            return None
+        stored = self._get_value("selected_service_tier")
+        if stored in supported:
+            return stored
+        return "fast" if "fast" in supported else "default"
+
+    def service_tier_state(self) -> dict[str, Any]:
+        supported = self._service_tiers(self.selected_model())
+        return {
+            "selected": self.service_tier() or "default",
+            "options": [
+                dict(option)
+                for option in SERVICE_TIER_OPTIONS
+                if option["id"] in supported
+            ],
+        }
+
+    def save_service_tier(self, tier: Any) -> dict[str, str]:
+        tier_id = str(tier or "").strip().lower()
+        if tier_id not in self._service_tiers(self.selected_model()):
+            raise AppError(
+                400, "Nicht unterstützter Geschwindigkeitsmodus für dieses Modell."
+            )
+        self._set_value("selected_service_tier", tier_id)
+        return {"service_tier": tier_id}
 
     def calendar_display_settings(self) -> dict[str, int]:
         self._config_supplier()

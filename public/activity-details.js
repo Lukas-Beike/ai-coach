@@ -110,20 +110,29 @@
     }
     content.append(node("p", description, "muted"));
     if (metadata.stale) content.append(node("p", "Die Zusammenfassung hat sich seit dem Laden geändert. Aktualisiere die Detaildaten vor einer neuen Bewertung.", "muted"));
+    if (metadata.load_error?.message) content.append(node("p", `${metadata.load_error.message} Automatischer Ladeversuch: ${new Date(metadata.load_error.observed_at).toLocaleString("de-DE")}`, "activity-analysis-error"));
     const channels = Object.entries(metadata.coverage || {}).map(([name, coverage]) => `${name}: ${coverage.valid_points}/${coverage.points} Messwerte`);
     if (channels.length) content.append(node("p", `Datenabdeckung · ${channels.join(" · ")}`, "muted"));
   }
 
 
+  // Intervals.icu stores running cadence per leg; foot sports show steps per minute of both legs.
+  function cadenceDisplay(activity) {
+    if (/run|walk|hike/i.test(String(activity?.type || ""))) return { label: "Schrittfrequenz", unit: "spm", factor: 2 };
+    return { label: "Kadenz", unit: "rpm", factor: 1 };
+  }
+
   function renderSeries(activity, content) {
     let charts = 0;
-    const labels = { watts: ["Leistung", "W"], power: ["Leistung", "W"], heartrate: ["Herzfrequenz", "bpm"], velocity_smooth: ["Geschwindigkeit", "m/s"], velocity: ["Geschwindigkeit", "m/s"], speed: ["Geschwindigkeit", "m/s"], altitude: ["Höhe", "m"], distance: ["Distanz", "m"], grade: ["Steigung", "%"], grade_smooth: ["Steigung geglättet", "%"], pace: ["Pace", "s/km"], cadence: ["Kadenz", "rpm"], temperature: ["Temperatur", "°C"] };
-    const streams = activity.streams || {};
+    const cadence = cadenceDisplay(activity);
+    const labels = { watts: ["Leistung", "W"], power: ["Leistung", "W"], heartrate: ["Herzfrequenz", "bpm"], velocity_smooth: ["Geschwindigkeit", "m/s"], velocity: ["Geschwindigkeit", "m/s"], speed: ["Geschwindigkeit", "m/s"], altitude: ["Höhe", "m"], distance: ["Distanz", "m"], grade: ["Steigung", "%"], grade_smooth: ["Steigung geglättet", "%"], pace: ["Pace", "s/km"], cadence: [cadence.label, cadence.unit], temperature: ["Temperatur", "°C"] };
+    const streams = { ...activity.streams };
+    if (cadence.factor !== 1 && Array.isArray(streams.cadence)) streams.cadence = streams.cadence.map((value) => (typeof value === "number" ? value * cadence.factor : value));
     const preferred = new Set(["watts", "power", "heartrate", "velocity_smooth", "velocity", "speed", "altitude", "distance", "grade_smooth", "grade", "pace", "cadence", "temperature"]);
     const channels = Object.keys(labels).filter((key) => preferred.has(key) && Array.isArray(streams[key]) && !(key === "speed" && (streams.velocity_smooth || streams.velocity)) && !(key === "velocity" && streams.velocity_smooth) && !(key === "grade" && streams.grade_smooth) && !(key === "power" && streams.watts));
     for (const key of channels) {
       const [label, unit] = labels[key];
-      const series = chart(activity.streams || {}, key, label, unit);
+      const series = chart(streams, key, label, unit);
       if (series) { content.append(series); charts += 1; }
     }
     if (!charts) content.append(node("p", "Keine darstellbaren Messreihen vorhanden. Fehlende Sensorwerte werden nicht als Null interpretiert."));
@@ -296,5 +305,5 @@
 
   globalThis.addEventListener("popstate", () => { if (dialog) close(false); });
 
-  globalThis.ActivityDetails = { open, close, requestDetails, isIntervalsActivity };
+  globalThis.ActivityDetails = { open, close, requestDetails, isIntervalsActivity, cadenceDisplay };
 })();

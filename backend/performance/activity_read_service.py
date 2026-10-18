@@ -38,6 +38,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         read_equipment: Callable[[str], dict[str, Any]] = lambda _: {},
         references: ActivityReferenceResolver | None = None,
         canonical: CanonicalPerformanceSource | None = None,
+        summary_rows: ActivityRowReader | None = None,
     ) -> None:
         super().__init__(
             database_manager,
@@ -47,6 +48,7 @@ class ActivityAnalysisReadService(ActivityReadService):
             detail_store,
             read_equipment=read_equipment,
             references=references,
+            summary_rows=summary_rows,
         )
         self._canonical = canonical
 
@@ -99,11 +101,12 @@ class ActivityAnalysisReadService(ActivityReadService):
         normalized_id = str(self._references.resolve(normalized_id))
         snapshot, canonical, rows = self._performance_inputs(today, normalized_id)
         activity = _raw_activity(snapshot, normalized_id, rows)
+        fingerprint = summary_fingerprint(activity)
         cached = self._detail_store.get(normalized_id) if self._detail_store else None
         stale = bool(
             cached
             and cached.get("summary_sha256")
-            and cached["summary_sha256"] != summary_fingerprint(activity)
+            and cached["summary_sha256"] != fingerprint
         )
         if cached:
             # Zone times are outside the fingerprint, so the live row stays authoritative.
@@ -132,6 +135,14 @@ class ActivityAnalysisReadService(ActivityReadService):
             self._read_equipment(normalized_id), normalized_id
         )
         local_ids = self._references.local_ids([normalized_id])
+        failure = (
+            self._detail_store.failures([normalized_id]).get(normalized_id)
+            if self._detail_store
+            else None
+        )
+        # A note left by another summary version no longer describes this one.
+        if failure and failure.get("summary_sha256") != fingerprint:
+            failure = None
         return {
             "ok": True,
             "snapshot_synced_at": snapshot.get("synced_at"),
@@ -148,7 +159,7 @@ class ActivityAnalysisReadService(ActivityReadService):
             else {},
             "activity_id": normalized_id,
             "local_activity_id": local_ids.get(normalized_id),
-            "detail_data": _detail_metadata(cached, stale, activity),
+            "detail_data": _detail_metadata(cached, stale, activity, failure),
             "data_scope": "bounded sanitized detail projection of exactly one Intervals.icu activity",
         }
 
@@ -191,9 +202,15 @@ def _raw_activity(
 
 
 def _detail_metadata(
-    cached: dict | None, stale: bool, activity: dict
+    cached: dict | None, stale: bool, activity: dict, failure: dict | None = None
 ) -> dict[str, Any]:
     return {
+        "load_error": {
+            "message": failure.get("message"),
+            "observed_at": failure.get("observed_at"),
+        }
+        if failure
+        else None,
         "source": provider_label(ProviderId.INTERVALS, SourceView.ACTIVITY_DETAIL),
         "observed_at": cached.get("observed_at") if cached else None,
         "full_resolution": bool(cached and cached.get("full_resolution")),

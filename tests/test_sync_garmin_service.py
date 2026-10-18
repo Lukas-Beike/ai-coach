@@ -172,6 +172,7 @@ class GarminSyncServiceTests(unittest.TestCase):
         lock: threading.Lock | None = None,
         wait_seconds: float = 0.1,
         local_today: Callable[[], date] | None = None,
+        metric_export=None,
     ):
         self.database = _Database()
         self.key_values = _KeyValues()
@@ -206,7 +207,45 @@ class GarminSyncServiceTests(unittest.TestCase):
                 wait_seconds=wait_seconds,
             ),
             self.lifecycle_state,
+            metric_export=metric_export,
         )
+
+    def test_successful_current_sync_exports_and_reports_metrics(self):
+        export = Mock(return_value={"exported": 2, "failed": 0, "conflicts": 1})
+        result = self.make_service(metric_export=export).sync()
+        export.assert_called_once_with()
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["metric_export"]["exported"], 2)
+        self.assertIn("2 Messwerte gesendet", self.writer.calls[-1][4])
+        self.assertIn("1 Konflikte", self.writer.calls[-1][4])
+        self.assertFalse(self.lock.locked())
+
+    def test_export_failure_preserves_import_and_does_not_expose_error(self):
+        export = Mock(side_effect=RuntimeError("PRIVATE-PROVIDER-PAYLOAD"))
+        with self.assertLogs("backend.sync.garmin_service", "WARNING") as logs:
+            result = self.make_service(metric_export=export).sync()
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["metric_export"]["failed"], 1)
+        self.assertNotIn(
+            "PRIVATE-PROVIDER-PAYLOAD", str(logs.output) + str(self.writer.calls)
+        )
+        self.assertFalse(self.lock.locked())
+
+    def test_fixture_historical_and_partial_syncs_do_not_export(self):
+        export = Mock()
+        service = self.make_service(metric_export=export)
+        service.sync(end_date=date(2026, 9, 20))
+        export.assert_not_called()
+        service = self.make_service(
+            metric_export=export,
+            fixture=_FixtureLoader(Path("fixture.json"), {"synced_at": "test"}),
+        )
+        service.sync()
+        export.assert_not_called()
+        state = _StateService()
+        state.persist_payload = Mock(return_value={"status": "partial"})
+        self.make_service(metric_export=export, state=state).sync()
+        export.assert_not_called()
 
     def test_fixture_flow_owns_status_persistence_and_cleanup(self):
         fixture_payload = {
@@ -383,7 +422,7 @@ class GarminSyncServiceTests(unittest.TestCase):
 
 
 class GarminRemoteReaderTests(unittest.TestCase):
-    def make_reader(self, client_factory, state=None):
+    def make_reader(self, client_factory, state=None, garmin_tokens=None):
         self.state = state or Mock()
         return GarminRemoteReader(
             _config(),
@@ -397,7 +436,34 @@ class GarminRemoteReaderTests(unittest.TestCase):
             date(2000, 1, 1),
             90,
             -1,
+            garmin_tokens=garmin_tokens,
         )
+
+    def test_tokens_are_persisted_with_the_login_argument_even_on_failure(self):
+        client = Mock()
+        client.login.return_value = (False, None)
+        factory = Mock()
+        factory.available.return_value = True
+        factory.create.return_value = client
+        tokens = Mock()
+        tokens.login_argument.return_value = '{"di_token": "synthetic"}'
+        reader = self.make_reader(factory, garmin_tokens=tokens)
+        with (
+            patch(
+                "backend.sync.garmin_service.provider_http.external_call",
+                side_effect=lambda _service, _operation, call, _details, **_kwargs: (
+                    call()
+                ),
+            ),
+            patch(
+                "backend.sync.garmin_service.collect_garmin_data",
+                side_effect=RuntimeError("collection failed"),
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            reader.fetch(1, None, status=Mock())
+        client.login.assert_called_once_with('{"di_token": "synthetic"}')
+        tokens.write_back.assert_called_once_with(client, '{"di_token": "synthetic"}')
 
     def test_reader_logs_in_and_collects_with_historical_options(self):
         client = Mock()
@@ -519,7 +585,7 @@ class GarminSyncJobOwnerTests(unittest.TestCase):
 
 
 class GarminMorningRemoteReaderTests(unittest.TestCase):
-    def make_reader(self, config=None, factory=None):
+    def make_reader(self, config=None, factory=None, garmin_tokens=None):
         self.config = config or _config()
         self.factory = factory or Mock()
         self.client = Mock()
@@ -537,6 +603,26 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
             self.clock,
             self.diagnostic_capture,
             self.logger,
+            garmin_tokens=garmin_tokens,
+        )
+
+    def test_fetch_persists_tokens_even_when_the_read_fails(self):
+        tokens = Mock()
+        tokens.login_argument.return_value = '{"di_token": "synthetic"}'
+        reader = self.make_reader(garmin_tokens=tokens)
+        with (
+            patch(
+                "backend.sync.garmin_service.garmin_morning.fetch_morning_body_battery",
+                side_effect=RuntimeError("read failed"),
+            ) as fetch,
+            self.assertRaises(RuntimeError),
+        ):
+            reader.fetch(date(2026, 9, 4))
+        self.assertEqual(
+            fetch.call_args.kwargs["tokenstore"], '{"di_token": "synthetic"}'
+        )
+        tokens.write_back.assert_called_once_with(
+            self.client, '{"di_token": "synthetic"}'
         )
 
     def test_configuration_requires_available_client_and_email_or_tokenstore(self):
@@ -544,6 +630,18 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
         factory.available.return_value = True
         reader = self.make_reader(factory=factory)
         self.assertTrue(reader.configured())
+
+        # An explicit disconnect stops credential logins until a new PWA login.
+        tokens = Mock()
+        tokens.connected.return_value = False
+        tokens.disconnected.return_value = True
+        self.assertFalse(
+            self.make_reader(factory=factory, garmin_tokens=tokens).configured()
+        )
+        tokens.disconnected.return_value = False
+        self.assertTrue(
+            self.make_reader(factory=factory, garmin_tokens=tokens).configured()
+        )
 
         with tempfile.TemporaryDirectory() as directory:
             missing_tokenstore = Path(directory) / "missing"
@@ -604,7 +702,9 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
                 "safe-result",
             )
 
-        self.factory.create.assert_called_once_with("athlete@example.invalid", "secret")
+        self.factory.create.assert_called_once_with(
+            "athlete@example.invalid", "secret", return_on_mfa=True
+        )
         self.profile.get.assert_called_once_with()
         external_call.assert_called_once()
         self.assertIs(

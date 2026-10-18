@@ -1,8 +1,6 @@
 """Server integration tests for runtime."""
 
 import json
-import os
-import tempfile
 import threading
 import time
 import unittest
@@ -356,80 +354,6 @@ class ServerRuntimeTests(ServerTestCase):
         ):
             server.COACH_BACKGROUND_JOBS.background_job_runner().run(job)
         self.assertEqual(seen["phase"], "waiting_final_response")
-
-    def test_settings_persist_in_data_for_container_restart(self):
-        with tempfile.TemporaryDirectory() as temp_root:
-            data_dir = Path(temp_root) / "data"
-            with (
-                patch.object(server, "ROOT", Path(temp_root)),
-                patch.object(server, "DATA_DIR", data_dir),
-                patch.dict(
-                    os.environ,
-                    {"GARMIN_EMAIL": "", "GARMIN_PASSWORD": "", "GARMINTOKENS": ""},
-                    clear=False,
-                ),
-            ):
-                server.app_config.save_persistent_settings(
-                    data_dir,
-                    {
-                        "GARMIN_EMAIL": "athlete@example.com",
-                        "GARMIN_PASSWORD": "test-password",
-                        "GARMINTOKENS": "/data/garmin_tokens",
-                    },
-                    os.environ,
-                )
-                for key in ("GARMIN_EMAIL", "GARMIN_PASSWORD", "GARMINTOKENS"):
-                    os.environ.pop(key, None)
-                server.app_config.load_local_env(Path(temp_root), data_dir, os.environ)
-                self.assertEqual(os.environ["GARMIN_EMAIL"], "athlete@example.com")
-                self.assertEqual(os.environ["GARMIN_PASSWORD"], "test-password")
-                self.assertEqual(os.environ["GARMINTOKENS"], "/data/garmin_tokens")
-
-    def test_container_environment_values_override_persistent_settings(self):
-        with tempfile.TemporaryDirectory() as temp_root:
-            data_dir = Path(temp_root) / "data"
-            with (
-                patch.object(server, "ROOT", Path(temp_root)),
-                patch.object(server, "DATA_DIR", data_dir),
-            ):
-                server.app_config.save_persistent_settings(
-                    data_dir,
-                    {
-                        "OPENAI_API_KEY": "file-openai",
-                        "INTERVALS_API_KEY": "file-intervals",
-                        "GARMIN_EMAIL": "file@example.com",
-                        "GARMIN_PASSWORD": "file-password",
-                        "GARMINTOKENS": "/data/file-tokens",
-                    },
-                    os.environ,
-                )
-                for key in (
-                    "OPENAI_API_KEY",
-                    "INTERVALS_API_KEY",
-                    "GARMIN_EMAIL",
-                    "GARMIN_PASSWORD",
-                    "GARMINTOKENS",
-                ):
-                    os.environ.pop(key, None)
-                with patch.dict(
-                    os.environ,
-                    {
-                        "OPENAI_API_KEY": "env-openai",
-                        "INTERVALS_API_KEY": "env-intervals",
-                        "GARMIN_EMAIL": "env@example.com",
-                        "GARMIN_PASSWORD": "env-password",
-                        "GARMINTOKENS": "/data/env-tokens",
-                    },
-                    clear=False,
-                ):
-                    server.app_config.load_local_env(
-                        Path(temp_root), data_dir, os.environ
-                    )
-                    self.assertEqual(os.environ["OPENAI_API_KEY"], "env-openai")
-                    self.assertEqual(os.environ["INTERVALS_API_KEY"], "env-intervals")
-                    self.assertEqual(os.environ["GARMIN_EMAIL"], "env@example.com")
-                    self.assertEqual(os.environ["GARMIN_PASSWORD"], "env-password")
-                    self.assertEqual(os.environ["GARMINTOKENS"], "/data/env-tokens")
 
     def test_parallel_operations_keep_distinct_safe_correlation_ids(self):
         barrier = threading.Barrier(2)

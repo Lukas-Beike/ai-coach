@@ -7,7 +7,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
-from datetime import date, timezone
+from datetime import UTC, date
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -64,6 +64,45 @@ def refresh_morning_battery_after_sync(
     return morning_battery.refresh(cancel_event=cancel_event)
 
 
+GARMIN_MFA_REQUIRED_MESSAGE = (
+    "Garmin verlangt MFA. Bitte Garmin in den Zugangsdaten neu verbinden."
+)
+
+
+def _garmin_login_argument(config: Config, garmin_tokens: Any | None) -> str:
+    """Tokens from the database when stored, else the legacy file rules."""
+    if garmin_tokens is not None:
+        return garmin_tokens.login_argument()
+    return config.garmin_tokenstore
+
+
+def _garmin_sync_configured(config: Config, garmin_tokens: Any | None) -> bool:
+    """Stored tokens, or credentials not blocked by an explicit disconnect.
+
+    After a disconnect or privacy delete a credential login is never persisted,
+    so falling back to it would run a full SSO login on every sync.
+    """
+    if _garmin_tokenstore_present(config, garmin_tokens):
+        return True
+    if garmin_tokens is not None and garmin_tokens.disconnected():
+        return False
+    return bool(config.garmin_email)
+
+
+def _garmin_tokenstore_present(config: Config, garmin_tokens: Any | None) -> bool:
+    if garmin_tokens is not None:
+        return garmin_tokens.connected()
+    return Path(config.garmin_tokenstore).exists()
+
+
+def _persist_garmin_tokens(
+    garmin_tokens: Any | None, client: Any, login_argument: str
+) -> None:
+    """Store refreshed or first-imported tokens, even when collection failed."""
+    if garmin_tokens is not None:
+        garmin_tokens.write_back(client, login_argument)
+
+
 class GarminRemoteReader:
     """Authenticate and collect one bounded Garmin SDK snapshot."""
 
@@ -80,6 +119,7 @@ class GarminRemoteReader:
         earliest_date: date,
         chunk_days: int,
         all_sync_days: int,
+        garmin_tokens: Any | None = None,
     ) -> None:
         self._config = config
         self._client_factory = client_factory
@@ -92,13 +132,14 @@ class GarminRemoteReader:
         self._earliest_date = earliest_date
         self._chunk_days = chunk_days
         self._all_sync_days = all_sync_days
+        self._garmin_tokens = garmin_tokens
 
     def available(self) -> bool:
         return self._client_factory.available()
 
     def configured(self) -> bool:
-        return self.available() and bool(
-            self._config.garmin_email or Path(self._config.garmin_tokenstore).exists()
+        return self.available() and _garmin_sync_configured(
+            self._config, self._garmin_tokens
         )
 
     def fetch(
@@ -121,7 +162,9 @@ class GarminRemoteReader:
         client = self._client_factory.create(
             self._config.garmin_email or None,
             self._config.garmin_password or None,
+            return_on_mfa=True,
         )
+        login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
 
         def call_external(
             service: str,
@@ -145,10 +188,12 @@ class GarminRemoteReader:
         mfa_status, _ = call_external(
             GARMIN_ID,
             "login",
-            lambda: client.login(self._config.garmin_tokenstore),
+            lambda: client.login(login_argument),
             {
                 "email_configured": bool(self._config.garmin_email),
-                "tokenstore_exists": Path(self._config.garmin_tokenstore).exists(),
+                "tokenstore_exists": _garmin_tokenstore_present(
+                    self._config, self._garmin_tokens
+                ),
             },
         )
         if mfa_status:
@@ -159,36 +204,37 @@ class GarminRemoteReader:
                     "context": {"service": GARMIN_ID, "operation": "login"},
                 },
             )
-            raise AppError(
-                401,
-                "Garmin verlangt MFA. Ein Tokenstore muss einmalig außerhalb "
-                "des Servers eingerichtet werden.",
-            )
+            raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
 
-        payload = collect_garmin_data(
-            client,
-            windows,
-            start=windows[0][0],
-            today=today,
-            synced_at=self._utc_now(),
-            external_call=call_external,
-            redact=self._redactor,
-            warn=self._warn,
-            status=status,
-            capability_allowed=self._state_service.capability_allowed,
-            capability_failure=self._state_service.record_capability_failure,
-            capability_success=self._state_service.record_capability_success,
-            options=GarminCollectionOptions(
-                include_recovery=(
-                    end_date is None and days != self._all_sync_days
-                    if include_recovery is None
-                    else include_recovery
+        try:
+            payload = collect_garmin_data(
+                client,
+                windows,
+                start=windows[0][0],
+                today=today,
+                synced_at=self._utc_now(),
+                external_call=call_external,
+                redact=self._redactor,
+                warn=self._warn,
+                status=status,
+                capability_allowed=self._state_service.capability_allowed,
+                capability_failure=self._state_service.record_capability_failure,
+                capability_success=self._state_service.record_capability_success,
+                options=GarminCollectionOptions(
+                    include_recovery=(
+                        end_date is None and days != self._all_sync_days
+                        if include_recovery is None
+                        else include_recovery
+                    ),
+                    include_current_metrics=(
+                        end_date is None and days != self._all_sync_days
+                    ),
                 ),
-                include_current_metrics=(
-                    end_date is None and days != self._all_sync_days
-                ),
-            ),
-        )
+            )
+        finally:
+            # The login may already have refreshed the tokens; keep them even
+            # when a later request fails.
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
         self._raise_if_cancelled(cancel_event)
         return payload, windows
 
@@ -219,6 +265,7 @@ class GarminMorningRemoteReader:
         athlete_clock: Any,
         diagnostic_capture: Any,
         logger: logging.Logger,
+        garmin_tokens: Any | None = None,
     ) -> None:
         self._config = config
         self._client_factory = client_factory
@@ -226,30 +273,38 @@ class GarminMorningRemoteReader:
         self._athlete_clock = athlete_clock
         self._diagnostic_capture = diagnostic_capture
         self._logger = logger
+        self._garmin_tokens = garmin_tokens
 
     def configured(self) -> bool:
-        return self._client_factory.available() and bool(
-            self._config.garmin_email or Path(self._config.garmin_tokenstore).exists()
+        return self._client_factory.available() and _garmin_sync_configured(
+            self._config, self._garmin_tokens
         )
 
     def fetch(self, checkin_date: date) -> tuple[Any, Any]:
         client = self._client_factory.create(
             self._config.garmin_email or None,
             self._config.garmin_password or None,
+            return_on_mfa=True,
         )
         profile_timezone = timezone_name(self._profile_service.get().get("timezone"))
-        fallback_zone = self._athlete_clock.now().tzinfo or timezone.utc
-        return garmin_morning.fetch_morning_body_battery(
-            client,
-            checkin_date,
-            tokenstore=self._config.garmin_tokenstore,
-            email_configured=bool(self._config.garmin_email),
-            tokenstore_exists=Path(self._config.garmin_tokenstore).exists(),
-            profile_timezone=profile_timezone,
-            fallback_zone=fallback_zone,
-            external_call=self._external_call,
-            sleep_bounds=performance_morning_battery.sleep_bounds,
-        )
+        fallback_zone = self._athlete_clock.now().tzinfo or UTC
+        login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
+        try:
+            return garmin_morning.fetch_morning_body_battery(
+                client,
+                checkin_date,
+                tokenstore=login_argument,
+                email_configured=bool(self._config.garmin_email),
+                tokenstore_exists=_garmin_tokenstore_present(
+                    self._config, self._garmin_tokens
+                ),
+                profile_timezone=profile_timezone,
+                fallback_zone=fallback_zone,
+                external_call=self._external_call,
+                sleep_bounds=performance_morning_battery.sleep_bounds,
+            )
+        finally:
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 
     def _external_call(
         self,
@@ -392,6 +447,9 @@ class GarminSyncLifecycleState:
     def record_sync_finished(self) -> None:
         self._set("sync_operation_finished_at", self._utc_now())
 
+    def record_metric_export_status(self, message: str) -> None:
+        self._set("last_garmin_metric_export_status", f"{self._utc_now()}: {message}")
+
     def log_configuration_skip(self, reason: str) -> None:
         self._logger.warning(
             "External Garmin call skipped",
@@ -433,6 +491,7 @@ class GarminSyncService:
         observer: SyncOperationObserver,
         coordination: GarminSyncCoordination,
         lifecycle_state: GarminSyncLifecycleState,
+        metric_export: Callable[[], dict[str, Any] | None] | None = None,
     ) -> None:
         self._source = source
         self._payload_service = payload_service
@@ -441,6 +500,7 @@ class GarminSyncService:
         self._observer = observer
         self._coordination = coordination
         self._lifecycle_state = lifecycle_state
+        self._metric_export = metric_export
 
     def running(self) -> bool:
         return self._coordination.running()
@@ -571,12 +631,44 @@ class GarminSyncService:
             source=source,
             historical_cursor=historical_cursor,
         )
+        message = "Garmin-Synchronisierung abgeschlossen."
+        if (
+            self._metric_export is not None
+            and source != "fixture"
+            and end_date is None
+            and result.get("status") == "ok"
+            and not (cancel_event is not None and cancel_event.is_set())
+        ):
+            self._set_status(
+                operation_id,
+                "metric-export",
+                90,
+                "Garmin-Messwerte werden mit Intervals.icu abgeglichen…",
+            )
+            try:
+                receipt = self._metric_export()
+                if receipt is not None:
+                    result["metric_export"] = receipt
+                    export_message = (
+                        f"Intervals.icu: {receipt['exported']} Messwerte gesendet, "
+                        f"{receipt['conflicts']} Konflikte, {receipt['failed']} fehlgeschlagen."
+                    )
+                    self._lifecycle_state.record_metric_export_status(export_message)
+                    message += f" {export_message}"
+            except Exception as error:  # noqa: BLE001 - import remains successful; never expose provider errors
+                logging.getLogger(__name__).warning(
+                    "Automatic metric export failed (%s)", type(error).__name__
+                )
+                result["metric_export"] = {"exported": 0, "conflicts": 0, "failed": 1}
+                export_message = "Automatischer Messwert-Abgleich mit Intervals.icu fehlgeschlagen; erneuter Versuch beim nächsten Garmin-Sync."
+                self._lifecycle_state.record_metric_export_status(export_message)
+                message += f" {export_message}"
         self._operation_state_writer.write(
             operation_id,
             "completed",
             "complete",
             100,
-            "Garmin-Synchronisierung abgeschlossen.",
+            message,
         )
         self._lifecycle_state.record_sync_finished()
         return result

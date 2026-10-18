@@ -16,10 +16,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from backend import change_history
+from backend.db.activity_detail_store import analysis_export_rows, stream_export_rows
 from backend.errors import AppError
 from backend.observability import sanitized_provider_payload
 from backend.planning import season as planning_season
-from backend.sync.wahoo_connection import WAHOO_SECRET_KEYS
+from backend.provider_credentials import CREDENTIAL_KV_KEYS
 from backend.weather import cache as weather_cache
 
 if TYPE_CHECKING:
@@ -40,12 +41,19 @@ TimeoutErrorFactory = Callable[[], Exception]
 # Version 5 exports stored sports in the canonical vocabulary: competitions gain
 # environment and sport_detail, workouts and planned units carry sport,
 # environment and sport_detail instead of type (schema v9).
-PRIVACY_EXPORT_FORMAT_VERSION = 5
+# Version 6 adds the canonical activity detail files (schema v10); stream
+# channels carry decoded point lists with null for gaps.
+PRIVACY_EXPORT_FORMAT_VERSION = 6
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
     "activity_records.jsonl",
     "observations.jsonl",
+    "activity_detail_sets.jsonl",
+    "activity_stream_channels.jsonl",
+    "activity_laps.jsonl",
+    "activity_zone_times.jsonl",
+    "activity_detail_analysis.jsonl",
     "athlete_checkins.jsonl",
     "activity_feedback.jsonl",
     "external_calendar_events.jsonl",
@@ -109,7 +117,7 @@ class PrivacyArchiveExportService:
                 "profile",
                 "garmin_snapshot",
                 weather_cache.CACHE_KEY,
-                *WAHOO_SECRET_KEYS,
+                *CREDENTIAL_KV_KEYS,
             },
         )
 
@@ -129,6 +137,8 @@ class PrivacyArchiveExportService:
             timeout_error=lambda: AppError(
                 408, "Der Export überschreitet das Zeitlimit."
             ),
+            max_bytes=self._config.maximum_bytes,
+            size_error=lambda: AppError(413, "Der Export überschreitet das Größenlimit."),
         )
 
     def create_file(self) -> Path:
@@ -414,6 +424,35 @@ class PrivacyArchiveExportService:
                     ),
                     deadline,
                 )
+                for table, order in (
+                    ("activity_detail_sets", "provider, provider_activity_id, detail_kind"),
+                    ("activity_laps", "provider, provider_activity_id, lap_index"),
+                    (
+                        "activity_zone_times",
+                        "provider, provider_activity_id, detail_kind, zone_index",
+                    ),
+                ):
+                    self._write_jsonl(
+                        archive,
+                        table + ".jsonl",
+                        (
+                            dict(row)
+                            for row in db.execute(f"SELECT * FROM {table} ORDER BY {order}")
+                        ),
+                        deadline,
+                    )
+                self._write_jsonl(
+                    archive,
+                    "activity_stream_channels.jsonl",
+                    stream_export_rows(db),
+                    deadline,
+                )
+                self._write_jsonl(
+                    archive,
+                    "activity_detail_analysis.jsonl",
+                    analysis_export_rows(db),
+                    deadline,
+                )
                 archive.writestr(
                     "planning.json",
                     json.dumps(
@@ -551,12 +590,20 @@ def write_jsonl_rows(
     *,
     now: Clock,
     timeout_error: TimeoutErrorFactory,
+    max_bytes: int | None = None,
+    size_error: TimeoutErrorFactory | None = None,
 ) -> None:
-    """Write rows incrementally, preserving the export time limit."""
+    """Write rows incrementally, preserving the export time and size limits.
+
+    The size limit is checked against the archive written so far, so a large
+    table stops the export before it fills the disk rather than at the end.
+    """
     with archive.open(name, "w", force_zip64=True) as output:
         for row in rows:
             if now() > deadline:
                 raise timeout_error()
+            if max_bytes is not None and archive.fp.tell() > max_bytes:
+                raise (size_error or timeout_error)()
             output.write(
                 json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode(
                     "utf-8"

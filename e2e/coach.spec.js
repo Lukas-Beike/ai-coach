@@ -189,7 +189,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await page.goto("/#more/profile");
     await expect(page.locator("#loginDialog")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Anmelden" })).toBeVisible();
-    await expect(page.getByLabel("Passwort")).toBeEditable();
+    await expect(page.getByLabel("Passwort", { exact: true })).toBeEditable();
     await expect(page.getByRole("button", { name: "Anmelden" })).toBeEnabled();
     await page.context().addCookies(authenticatedState.cookies);
     await page.reload();

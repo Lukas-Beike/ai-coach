@@ -525,7 +525,9 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
     const date = timezoneDateKey(state.data?.profile?.timezone, new Date());
     state.data.calendar_display = { past_weeks: 1, future_weeks: 1 };
     state.data.daily_planning_context = [{ date,
-      weather: { weather_code: 2, condition: "Leicht bewölkt", temperature_min: 12, temperature_max: 21, precipitation_probability_max: 0, wind_speed_max: 14, wind_gusts_max: 25, wind_direction_dominant: 225, forecast_location: "Emsdetten" },
+      weather: { weather_code: 2, condition: "Leicht bewölkt", temperature_min: 12, temperature_max: 21, precipitation_probability_max: 0, wind_speed_max: 14, wind_gusts_max: 25, wind_direction_dominant: 225, forecast_location: "Emsdetten",
+        air_quality: { european_aqi_max: 64, european_aqi_category: "schlecht", uv_index_max: 5.2 },
+        pollen: { source: "DWD", region: "Westfälische Tieflandsbucht", levels: { Birke: "1-2" } } },
       appointments: [{ name: "Zeit für Training ab 18 Uhr", all_day: true }],
       checkin: { pain: "Leichte Beschwerden im Knie", day_form: "Gut erholt", soreness: 0, stress: 2, motivation: 8, available_minutes: 60, notes: "<img src=x onerror=alert(1)>" },
       recovery: { sleep_hours: 8, hrv: 54, resting_hr: 48, readiness: 80, body_battery: 85, sources: { sleep_hours: "Garmin Connect", hrv: "Intervals.icu Wellness" } },
@@ -562,6 +564,8 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(day.locator(".planned-day-metrics")).toHaveCount(0);
   await expect(day.locator(".planned-weather-detail")).toHaveText("Leicht bewölkt · ⛅ 12° / 21°");
   await expect(day.locator(".planned-weather-metrics")).toHaveText("0 % Regen · 14 km/h Wind SW · 25 km/h Böen");
+  await expect(day.locator(".planned-air-quality")).toHaveText("AQI 64 (schlecht) · UV 5,2 · Pollen: Birke 1-2");
+  await expect(day.locator(".planned-air-quality")).toHaveAttribute("title", /Deutscher Wetterdienst · Westfälische Tieflandsbucht/);
   await expect(day).not.toContainText("Emsdetten");
   await expect(day).not.toContainText("Open-Meteo");
   await expect(day.locator(".planned-day-insights")).not.toContainText("Quellen:");

@@ -51,6 +51,7 @@ class ActivityReadAssembly:
             read_equipment=self._read_equipment,
             references=ActivityReferences(manager),
             canonical=self._canonical_source(),
+            summary_rows=self._row_reader(),
         )
 
     def _canonical_source(self) -> CanonicalPerformanceSource | None:
