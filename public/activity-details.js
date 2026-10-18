@@ -125,7 +125,7 @@
     let charts = 0;
     const cadence = cadenceDisplay(activity);
     const labels = { watts: ["Leistung", "W"], power: ["Leistung", "W"], heartrate: ["Herzfrequenz", "bpm"], velocity_smooth: ["Geschwindigkeit", "m/s"], velocity: ["Geschwindigkeit", "m/s"], speed: ["Geschwindigkeit", "m/s"], altitude: ["Höhe", "m"], distance: ["Distanz", "m"], grade: ["Steigung", "%"], grade_smooth: ["Steigung geglättet", "%"], pace: ["Pace", "s/km"], cadence: [cadence.label, cadence.unit], temperature: ["Temperatur", "°C"] };
-    const streams = { ...(activity.streams || {}) };
+    const streams = { ...activity.streams };
     if (cadence.factor !== 1 && Array.isArray(streams.cadence)) streams.cadence = streams.cadence.map((value) => (typeof value === "number" ? value * cadence.factor : value));
     const preferred = new Set(["watts", "power", "heartrate", "velocity_smooth", "velocity", "speed", "altitude", "distance", "grade_smooth", "grade", "pace", "cadence", "temperature"]);
     const channels = Object.keys(labels).filter((key) => preferred.has(key) && Array.isArray(streams[key]) && !(key === "speed" && (streams.velocity_smooth || streams.velocity)) && !(key === "velocity" && streams.velocity_smooth) && !(key === "grade" && streams.grade_smooth) && !(key === "power" && streams.watts));
