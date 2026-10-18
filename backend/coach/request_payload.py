@@ -151,15 +151,17 @@ class CoachRequestPayloadService:
             "Coach request sizes",
             extra={
                 "event": "coach_request_sizes",
-                "context_profile": selection.name,
-                "instruction_characters": len(payload["instructions"]),
-                "input_characters": len(
-                    json.dumps(payload["input"], ensure_ascii=False)
-                ),
-                "tool_schema_characters": len(
-                    json.dumps(payload["tools"], ensure_ascii=False)
-                ),
-                "tool_count": len(payload["tools"]),
+                "context": {
+                    "context_profile": selection.name,
+                    "instruction_characters": len(payload["instructions"]),
+                    "input_characters": len(
+                        json.dumps(payload["input"], ensure_ascii=False)
+                    ),
+                    "tool_schema_characters": len(
+                        json.dumps(payload["tools"], ensure_ascii=False)
+                    ),
+                    "tool_count": len(payload["tools"]),
+                },
             },
         )
         return model_instructions, payload

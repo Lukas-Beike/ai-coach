@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -65,6 +66,7 @@ class StructuredCoachRoundState:
     recovery_state: dict[str, bool]
     # Opened once per turn by CoachStructuredToolRoundService.
     write_gate: CoachTurnWriteGate | None = None
+    context_profile: str = ""
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,7 @@ class CoachStructuredToolRoundService:
         question: str,
         cancelled: bool,
         paused: bool = False,
+        round_number: int = 0,
     ) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
         name = str(item.get("name") or "")
         call_id = str(item.get("call_id") or "")
@@ -171,6 +174,24 @@ class CoachStructuredToolRoundService:
                 result = self._execute_and_record(metadata, action, state)
                 if result is None:
                     return name, call_id, dict(_TURN_RELEASED), {"operation": name}
+                if name == "read_coach_context" and result.get("ok"):
+                    # Counts only: the context body and arguments are never logged.
+                    projection = result.get("projection") or {}
+                    logging.getLogger("intervals_coach").info(
+                        "Coach context reload",
+                        extra={
+                            "event": "coach_context_reload",
+                            "context": {
+                                "context_profile": state.context_profile,
+                                "requested_sections": list(
+                                    projection.get("requested_sections") or []
+                                ),
+                                "characters": projection.get("characters"),
+                                "complete": projection.get("complete"),
+                                "round": round_number,
+                            },
+                        },
+                    )
             if result.get("synchronous_refresh") or (
                 name == "get_sync_job" and result.get("ok")
             ):
@@ -354,6 +375,7 @@ class CoachStructuredToolRoundService:
                     question=question,
                     cancelled=cancelled,
                     paused=paused,
+                    round_number=rounds + 1,
                 )
                 question, cancelled, pending = self._journal.record_output(
                     client_turn_id=state.client_turn_id,

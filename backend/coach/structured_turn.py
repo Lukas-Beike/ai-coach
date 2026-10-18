@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from backend.coach.context_selection import select_coach_context
 from backend.coach.conversation import CoachAttachmentContextService
 from backend.coach.dialogue import CoachDialogueReadService
 from backend.coach.final_receipt import CoachFinalReceiptService
@@ -115,6 +116,14 @@ class CoachStructuredTurnService:
                 if tool["name"] in self._deps.read_only_tools
             ]
         )
+        # Same arguments as CoachRequestPayloadService.build, so this matches
+        # the context_profile of the coach_request_sizes event.
+        context_profile = select_coach_context(
+            message,
+            context,
+            attachments=bool(attachments or has_prior_openai_attachments),
+            has_receipts=bool(command_receipts),
+        ).name
         model_instructions, request_payload = self._deps.payload.build(
             message=message,
             context=context,
@@ -161,6 +170,7 @@ class CoachStructuredTurnService:
             "attachments": attachments,
             "background_owned": background_owned,
             "response": response,
+            "context_profile": context_profile,
         }
 
     def _run_turn(
@@ -211,6 +221,7 @@ class CoachStructuredTurnService:
             background_owned=state["background_owned"],
             on_text_delta=on_text_delta,
             recovery_state=state["recovery_state"],
+            context_profile=state["context_profile"],
         )
         response, rounds, question, cancelled, _ = self._deps.rounds.run(
             state["response"],
