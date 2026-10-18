@@ -128,7 +128,7 @@ class CoachStructuredResponseService:
                     continue
                 self._wait_before_retry(exc, state, cancel_event, attempt)
                 continue
-            if not self._spent_on_reasoning(response, payload, state):
+            if attempt == 2 or not self._spent_on_reasoning(response, payload, state):
                 return response
             # Reasoning used the whole budget before any text or tool call, so
             # nothing was streamed or executed and the request can be repeated.
@@ -168,6 +168,8 @@ class CoachStructuredResponseService:
             and isinstance(details, dict)
             and details.get("reason") == "max_output_tokens"
             and not state.request_delta_emitted
+            # A server-side conversation already stored this input and output.
+            and not payload.get("conversation")
             and not response_text(response)
             and not any(
                 isinstance(item, dict) and item.get("type") == "function_call"

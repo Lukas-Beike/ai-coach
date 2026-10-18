@@ -246,6 +246,34 @@ class CoachStructuredResponseTests(unittest.TestCase):
                 )
                 self.transport.request.assert_called_once()
 
+    def test_token_exhaustion_is_not_repeated_in_a_server_side_conversation(
+        self,
+    ) -> None:
+        self.payload["max_output_tokens"] = 16_000
+        self.payload["conversation"] = "conv-synthetic"
+        response = self._incomplete({"type": "reasoning"})
+        self.transport.request.return_value = response
+
+        self.assertIs(self.service.respond(self.payload, **self.options), response)
+
+        self.transport.request.assert_called_once()
+
+    def test_token_exhaustion_on_the_last_attempt_returns_the_incomplete_response(
+        self,
+    ) -> None:
+        self.payload["max_output_tokens"] = 16_000
+        self.retry.retry_delay.return_value = 0.01
+        response = self._incomplete({"type": "reasoning"})
+        self.transport.request.side_effect = [
+            AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded"),
+            AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded"),
+            response,
+        ]
+
+        self.assertIs(self.service.respond(self.payload, **self.options), response)
+
+        self.assertEqual(self.transport.request.call_count, 3)
+
     def test_token_exhaustion_is_not_repeated_at_the_larger_budget(self) -> None:
         self.payload["max_output_tokens"] = 32_000
         response = self._incomplete({"type": "reasoning"})
