@@ -1,12 +1,18 @@
-"""Explicit read-only loading of full-resolution Intervals activity data."""
+"""Read-only loading of full-resolution Intervals activity data.
+
+The newest activities are prefetched after each Intervals refresh; older ones
+load on the athlete's explicit request.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from itertools import pairwise
 from typing import Any
 from urllib.parse import quote
@@ -21,7 +27,7 @@ from backend.activities.detail_projection import (
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.canonical.activity_detail import MAX_STREAM_POINTS
-from backend.errors import AppError
+from backend.errors import AppError, public_error_contract
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 from backend.planning.target_snapshot import freeze_targets
@@ -31,6 +37,10 @@ from backend.providers.intervals_activity_fields import (
 )
 from backend.runtime.ports import ActivityRowReader
 
+_LOGGER = logging.getLogger(__name__)
+
+# The analysis tab opens these without a click; older activities load on request.
+PREFETCH_RECENT_ACTIVITIES = 10
 MAX_DETAIL_BYTES = 24 * 1024 * 1024
 ACTIVITY_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,200}")
 
@@ -147,6 +157,68 @@ class ActivityDetailRefreshService:
             raise AppError(502, "Die Detaildaten überschreiten die unterstützte Größe.")
         self._store.save(activity_id, record)
         return {"status": "completed", "activity_id": activity_id}
+
+    def prefetch_recent(
+        self,
+        guard: Callable[[], AbstractContextManager[Any]] = nullcontext,
+        limit: int = PREFETCH_RECENT_ACTIVITIES,
+    ) -> dict[str, int]:
+        """Load missing or outdated details of the newest local activities.
+
+        ``guard`` wraps each provider refresh, so a full resync waits for one
+        activity rather than the whole run. Invalid or missing data of one
+        activity is skipped; a rate limit, outage or authentication failure ends
+        the run, so it is not retried per activity and the next refresh tries
+        again.
+        """
+        if not self._configured:
+            return {"fetched": 0, "failed": 0}
+        with self._database_manager.unit_of_work() as db:
+            rows = self._row_reader.activity_rows(db)
+        recent = sorted(
+            (row for row in rows if row.get("id")),
+            key=lambda row: str(row.get("start_date_local") or ""),
+            reverse=True,
+        )[:limit]
+        fetched = failed = 0
+        for row in recent:
+            activity_id = str(row["id"])
+            stored = self._store.get(activity_id)
+            if stored and stored.get("summary_sha256") == summary_fingerprint(row):
+                continue
+            try:
+                with guard():
+                    self.refresh(activity_id)
+            except Exception as error:  # noqa: BLE001 - prefetch never fails the refresh
+                failed += 1
+                stops = not _activity_specific_failure(error)
+                _LOGGER.warning(
+                    "activity detail prefetch stopped"
+                    if stops
+                    else "activity detail prefetch skipped an activity",
+                    extra={
+                        "event": "activity_detail_prefetch_failed",
+                        "error_class": type(error).__name__,
+                        "stopped": stops,
+                    },
+                )
+                if stops:
+                    break
+                continue
+            fetched += 1
+        return {"fetched": fetched, "failed": failed}
+
+
+def _activity_specific_failure(error: Exception) -> bool:
+    """Whether a refresh failed for this activity alone, not the provider."""
+    if isinstance(error, ValueError):
+        return True
+    if not isinstance(error, AppError):
+        return False
+    status, reason = public_error_contract(error)
+    if error.upstream_status is not None:
+        return reason in {"upstream_not_found", "upstream_rejected"}
+    return status == 502 and reason != "provider_network_error"
 
 
 def _validate_time_axis(streams: dict[str, list[Any]]) -> None:
