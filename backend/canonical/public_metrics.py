@@ -15,6 +15,7 @@ _NEUTRAL_METRIC_KEYS = (
     ("icu_training_load", "training_load"),
     ("icu_intensity", "intensity"),
     ("icu_rpe", "rpe"),
+    ("icu_weighted_avg_watts", "normalized_power"),
     ("icu_hr_zone_times", "heart_rate_zone_times"),
     ("icu_zone_times", "power_zone_times"),
 )

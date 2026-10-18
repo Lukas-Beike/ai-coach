@@ -27,12 +27,14 @@ class NeutralPublicMetricsTests(unittest.TestCase):
         record = {
             "icu_hr_zone_times": [600, 300],
             "icu_zone_times": [{"id": "Z1", "secs": 300}],
+            "icu_weighted_avg_watts": 205,
         }
 
         self.assertEqual(
             {
                 "heart_rate_zone_times": [600, 300],
                 "power_zone_times": [{"id": "Z1", "secs": 300}],
+                "normalized_power": 205,
             },
             neutral_activity_metrics(record),
         )

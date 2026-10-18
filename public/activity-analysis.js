@@ -222,7 +222,7 @@
       ["Ø Herzfrequenz", measure(activity.average_heartrate, "bpm")],
       ["Max. Herzfrequenz", measure(activity.max_heartrate, "bpm")],
       ["Ø Leistung", measure(activity.average_watts, "W")],
-      ["Normalized Power", [activity.weighted_average_watts, activity.icu_weighted_avg_watts, activity.normalized_power].map((value) => measure(value, "W")).find(Boolean)],
+      ["Normalized Power", [activity.weighted_average_watts, activity.normalized_power].map((value) => measure(value, "W")).find(Boolean)],
       ["Max. Leistung", measure(activity.max_watts, "W")],
       ["Ø Kadenz", measure(activity.average_cadence, "/min")],
       ["Anstieg", measure(activity.total_elevation_gain, "m")],
