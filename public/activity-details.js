@@ -110,6 +110,7 @@
     }
     content.append(node("p", description, "muted"));
     if (metadata.stale) content.append(node("p", "Die Zusammenfassung hat sich seit dem Laden geändert. Aktualisiere die Detaildaten vor einer neuen Bewertung.", "muted"));
+    if (metadata.load_error?.message) content.append(node("p", `${metadata.load_error.message} Automatischer Ladeversuch: ${new Date(metadata.load_error.observed_at).toLocaleString("de-DE")}`, "activity-analysis-error"));
     const channels = Object.entries(metadata.coverage || {}).map(([name, coverage]) => `${name}: ${coverage.valid_points}/${coverage.points} Messwerte`);
     if (channels.length) content.append(node("p", `Datenabdeckung · ${channels.join(" · ")}`, "muted"));
   }

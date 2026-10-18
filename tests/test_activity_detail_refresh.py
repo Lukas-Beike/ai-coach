@@ -219,6 +219,54 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertIsNone(self.store.get("a11"))
         self.assertIsNotNone(self.store.get("a03"))
         self.assertNotIn("Synthetic invalid streams", "\n".join(logs.output))
+        failure = self.store.failures(["a11", "a12"])
+        self.assertEqual(["a11"], list(failure))
+        self.assertEqual("2026-10-18T08:00:00Z", failure["a11"]["observed_at"])
+        self.assertIn("fehlerhaft", failure["a11"]["message"])
+        self.assertNotIn("Synthetic", failure["a11"]["message"])
+        # Detail scans for calendar and analysis ignore failure records.
+        self.assertNotIn("a11", self.store.calendar_profiles())
+
+    def test_recorded_failure_waits_for_changed_summary_or_manual_reload(self):
+        self.test_activity_specific_failure_skips_only_that_activity()
+        self.api.get.side_effect = self.provider
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
+        self.api.get.assert_not_called()
+
+        self.service().refresh("a11")
+        self.assertIsNotNone(self.store.get("a11"))
+        self.assertEqual({}, self.store.failures(["a11"]))
+
+    def test_recorded_failure_is_retried_after_summary_change(self):
+        self.test_activity_specific_failure_skips_only_that_activity()
+        self.api.get.side_effect = self.provider
+        self.api.get.reset_mock()
+        self.rows[-2] = {**self.rows[-2], "name": "Renamed in Intervals.icu"}
+        self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_recent())
+        self.assertEqual(["a11"], self.fetched_ids())
+        self.assertEqual({}, self.store.failures(["a11"]))
+
+    def test_summary_reverted_to_stored_details_clears_the_failure(self):
+        self.api.get.side_effect = self.provider
+        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_recent())
+        original = self.rows[-2]
+        self.rows[-2] = {**original, "name": "Renamed in Intervals.icu"}
+
+        def failing(path, params):
+            if "a11" in path:
+                raise AppError(502, "Synthetic invalid streams")
+            return self.provider(path, params)
+
+        self.api.get.side_effect = failing
+        with self.assertLogs("backend.sync.activity_details", "WARNING"):
+            self.service().prefetch_recent()
+        self.assertIn("a11", self.store.failures(["a11"]))
+        self.rows[-2] = original
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
+        self.api.get.assert_not_called()
+        self.assertEqual({}, self.store.failures(["a11"]))
 
     def run_with_failure_on_a11(self, error):
         self.api.get.reset_mock()
@@ -241,6 +289,9 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertEqual(
             {"fetched": 9, "failed": 1}, self.run_with_failure_on_a11(error)
         )
+        self.assertIn(
+            "keine Detaildaten", self.store.failures(["a11"])["a11"]["message"]
+        )
 
     def test_provider_wide_failures_stop_the_run(self):
         for upstream_status in (401, 403, 503):
@@ -254,6 +305,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
                     {"fetched": 1, "failed": 1}, self.run_with_failure_on_a11(error)
                 )
                 self.assertEqual(["a12", "a11"], self.fetched_ids())
+                self.assertEqual({}, self.store.failures(["a11"]))
         with self.subTest("network"):
             self.assertEqual(
                 {"fetched": 1, "failed": 1},
