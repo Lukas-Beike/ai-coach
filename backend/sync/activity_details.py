@@ -228,7 +228,7 @@ class ActivityDetailRefreshService:
                 self._store.clear_failure(activity_id)
             return True
         # A recorded failure is retried only for a changed summary or by request.
-        return bool(failure) and failure.get("summary_sha256") == fingerprint
+        return failure is not None and failure.get("summary_sha256") == fingerprint
 
 
 def _activity_specific_failure(error: Exception) -> bool:

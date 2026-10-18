@@ -12,7 +12,7 @@ from backend.activities.activity_reference import (
     ActivityReferenceResolver,
     NoActivityReferences,
 )
-from backend.activities.detail_store import ActivityDetailStore
+from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.matching import record_date
 from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
 
@@ -94,6 +94,7 @@ class ActivityReadService:
         *,
         read_equipment: Callable[[str], dict[str, Any]] = lambda _: {},
         references: ActivityReferenceResolver | None = None,
+        summary_rows: ActivityRowReader | None = None,
     ):
         self._database_manager = database_manager
         self._snapshot_reader = snapshot_reader
@@ -102,6 +103,8 @@ class ActivityReadService:
         self._detail_store = detail_store
         self._read_equipment = read_equipment
         self._references = NoActivityReferences() if references is None else references
+        # Full rows, as fingerprinted by detail prefetch; the listed rows may be compact.
+        self._summary_rows = summary_rows
 
     def _snapshot(self) -> dict[str, Any]:
         with self._database_manager.reader() as db:
@@ -121,6 +124,27 @@ class ActivityReadService:
         for item in items:
             item["local_activity_id"] = local_ids.get(_page_key(item)[1])
         return items
+
+    def _detail_errors(self, page: list[dict[str, Any]]) -> dict[str, str]:
+        """Name the detail failure recorded for each listed activity's summary."""
+        if self._detail_store is None:
+            return {}
+        failures = self._detail_store.failures(_page_key(item)[1] for item in page)
+        if not failures or self._summary_rows is None:
+            return {key: failure["message"] for key, failure in failures.items()}
+        with self._database_manager.read_snapshot() as db:
+            rows = self._summary_rows.activity_rows(db)
+        fingerprints = {
+            str(row.get("id")): summary_fingerprint(row)
+            for row in rows
+            if str(row.get("id")) in failures
+        }
+        # A note left by another summary version no longer describes this one.
+        return {
+            key: failure["message"]
+            for key, failure in failures.items()
+            if failure.get("summary_sha256") == fingerprints.get(key)
+        }
 
     def page(
         self,
@@ -148,17 +172,12 @@ class ActivityReadService:
             activities = [item for item in activities if _page_key(item) < after]
         page_size = _page_limit(limit)
         page = activities[:page_size]
+        failures = self._detail_errors(page)
         attached = self._with_local_ids(
             self._feedback_service.attach_to_activities(page)
         )
-        failures = (
-            self._detail_store.failures(_page_key(item)[1] for item in attached)
-            if self._detail_store
-            else {}
-        )
         for item in attached:
-            failure = failures.get(_page_key(item)[1])
-            item["detail_error"] = failure["message"] if failure else None
+            item["detail_error"] = failures.get(_page_key(item)[1])
         return {
             "snapshot_synced_at": synced_at,
             "activities": attached,

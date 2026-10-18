@@ -152,6 +152,31 @@ class ActivityPageCharacterizationTests(_StorageCase):
         )
         return service.page(today=TODAY, **kwargs)
 
+    def test_detail_errors_follow_the_full_row_summary_version(self) -> None:
+        # Calories are fingerprinted but dropped from the compact listed rows.
+        row = _activity("ride-1", DAY, calories=700)
+        snapshots = _Snapshots(_snapshot([row]))
+        full_rows = SnapshotActivityRows(snapshots)
+        store = ActivityDetailStore(self.database)
+        service = ActivityReadService(
+            self.database,
+            snapshots,
+            CompactActivityRows(full_rows),
+            _Feedback(),
+            store,
+            summary_rows=full_rows,
+        )
+        store.save_failure(
+            "ride-1", summary_fingerprint(row), "Detaildaten fehlerhaft.", "t"
+        )
+        page = service.page(today=TODAY)
+        self.assertEqual(
+            "Detaildaten fehlerhaft.", page["activities"][0]["detail_error"]
+        )
+        # A note recorded for another summary version is not shown.
+        store.save_failure("ride-1", "1" * 64, "Detaildaten fehlerhaft.", "t")
+        self.assertIsNone(service.page(today=TODAY)["activities"][0]["detail_error"])
+
     def test_cursor_is_unpadded_urlsafe_versioned_json_of_last_page_key(self) -> None:
         # The 44-byte payload needs one base64 padding character, so the unpadded
         # form is pinned.
@@ -581,7 +606,10 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
     def test_recorded_load_failure_is_reported_until_details_are_saved(self) -> None:
         store = ActivityDetailStore(self.database)
         store.save_failure(
-            "ride-1", "0" * 64, "Detaildaten fehlerhaft.", "2026-05-04T06:00:00Z"
+            "ride-1",
+            summary_fingerprint(self.RAW),
+            "Detaildaten fehlerhaft.",
+            "2026-05-04T06:00:00Z",
         )
         self.assertEqual(
             {
@@ -592,10 +620,13 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         )
         self._save_analysis()
         self.assertIsNone(self._detail([self.RAW])["detail_data"]["load_error"])
-        # A note left by another summary never outranks current stored details.
-        store.save_failure(
+
+    def test_failure_note_for_another_summary_version_is_ignored(self) -> None:
+        ActivityDetailStore(self.database).save_failure(
             "ride-1", "1" * 64, "Detaildaten fehlerhaft.", "2026-05-05T06:00:00Z"
         )
+        self.assertIsNone(self._detail([self.RAW])["detail_data"]["load_error"])
+        self._save_analysis()
         self.assertIsNone(self._detail([self.RAW])["detail_data"]["load_error"])
 
 
