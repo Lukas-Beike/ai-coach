@@ -186,11 +186,7 @@ class ActivityDetailRefreshService:
         for row in recent:
             activity_id = str(row["id"])
             fingerprint = summary_fingerprint(row)
-            stored = self._store.get(activity_id)
-            if stored and stored.get("summary_sha256") == fingerprint:
-                continue
-            # A recorded failure is retried only for a changed summary or by request.
-            if known_failures.get(activity_id, {}).get("summary_sha256") == fingerprint:
+            if self._prefetch_settled(activity_id, fingerprint, known_failures):
                 continue
             try:
                 with guard():
@@ -216,6 +212,19 @@ class ActivityDetailRefreshService:
                 continue
             fetched += 1
         return {"fetched": fetched, "failed": failed}
+
+    def _prefetch_settled(
+        self,
+        activity_id: str,
+        fingerprint: str,
+        known_failures: dict[str, dict[str, Any]],
+    ) -> bool:
+        """Whether details match the summary or already failed for it."""
+        stored = self._store.get(activity_id)
+        if stored and stored.get("summary_sha256") == fingerprint:
+            return True
+        # A recorded failure is retried only for a changed summary or by request.
+        return known_failures.get(activity_id, {}).get("summary_sha256") == fingerprint
 
 
 def _activity_specific_failure(error: Exception) -> bool:
