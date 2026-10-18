@@ -126,15 +126,7 @@ class CoachStructuredResponseService:
                 ):
                     state.resume_id = ""
                     continue
-                delay = self._retry_policy.retry_delay(
-                    exc,
-                    attempt=attempt,
-                    request_delta_emitted=state.request_delta_emitted,
-                )
-                if delay is None:
-                    raise
-                state.resume_id = ""
-                self._retry_policy.wait(delay, cancel_event, attempt)
+                self._wait_before_retry(exc, state, cancel_event, attempt)
                 continue
             if not self._spent_on_reasoning(response, payload, state):
                 return response
@@ -149,6 +141,23 @@ class CoachStructuredResponseService:
             "Der KI-Dienst konnte die Antwort nicht fertigstellen.",
             reason="response_failed",
         )
+
+    def _wait_before_retry(
+        self,
+        exc: AppError,
+        state: _ResponseState,
+        cancel_event: threading.Event | None,
+        attempt: int,
+    ) -> None:
+        delay = self._retry_policy.retry_delay(
+            exc,
+            attempt=attempt,
+            request_delta_emitted=state.request_delta_emitted,
+        )
+        if delay is None:
+            raise exc
+        state.resume_id = ""
+        self._retry_policy.wait(delay, cancel_event, attempt)
 
     def _spent_on_reasoning(
         self, response: dict[str, Any], payload: dict[str, Any], state: _ResponseState

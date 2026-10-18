@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
+from typing import Any
 from unittest.mock import Mock
 
 from backend.coach.structured_response import CoachStructuredResponseService
@@ -19,11 +20,11 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self.service = CoachStructuredResponseService(
             self.transport, self.recovery, self.retry, self.jobs
         )
-        self.payload = {
+        self.payload: dict[str, Any] = {
             "input": [{"role": "user", "content": "synthetic"}],
             "model": "synthetic",
         }
-        self.options = {
+        self.options: dict[str, Any] = {
             "request_payload": self.payload,
             "context": {"synthetic": True},
             "message": "Synthetic question",
