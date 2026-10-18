@@ -166,9 +166,10 @@ class ActivityDetailRefreshService:
         """Load missing or outdated details of the newest local activities.
 
         ``guard`` wraps each provider refresh, so a full resync waits for one
-        activity rather than the whole run. The first failure ends the run, so
-        an outage or rate limit is not retried per activity; the next refresh
-        tries again.
+        activity rather than the whole run. Invalid or missing data of one
+        activity is skipped; a rate limit, outage or authentication failure ends
+        the run, so it is not retried per activity and the next refresh tries
+        again.
         """
         if not self._configured:
             return {"fetched": 0, "failed": 0}
@@ -179,7 +180,7 @@ class ActivityDetailRefreshService:
             key=lambda row: str(row.get("start_date_local") or ""),
             reverse=True,
         )[:limit]
-        fetched = 0
+        fetched = failed = 0
         for row in recent:
             activity_id = str(row["id"])
             stored = self._store.get(activity_id)
@@ -189,16 +190,34 @@ class ActivityDetailRefreshService:
                 with guard():
                     self.refresh(activity_id)
             except Exception as error:  # noqa: BLE001 - prefetch never fails the refresh
+                failed += 1
+                stops = not _activity_specific_failure(error)
                 _LOGGER.warning(
-                    "activity detail prefetch stopped",
+                    "activity detail prefetch stopped"
+                    if stops
+                    else "activity detail prefetch skipped an activity",
                     extra={
                         "event": "activity_detail_prefetch_failed",
                         "error_class": type(error).__name__,
+                        "stopped": stops,
                     },
                 )
-                return {"fetched": fetched, "failed": 1}
+                if stops:
+                    break
+                continue
             fetched += 1
-        return {"fetched": fetched, "failed": 0}
+        return {"fetched": fetched, "failed": failed}
+
+
+def _activity_specific_failure(error: Exception) -> bool:
+    """Whether a refresh failed for this activity alone, not the provider."""
+    if isinstance(error, ValueError):
+        return True
+    return (
+        isinstance(error, AppError)
+        and error.status == 502
+        and error.reason != "upstream_auth"
+    )
 
 
 def _validate_time_axis(streams: dict[str, list[Any]]) -> None:

@@ -187,10 +187,10 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         ]
 
     def test_loads_only_the_ten_newest_activities_once(self):
+        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_recent())
         self.assertEqual(
-            {"fetched": 10, "failed": 0}, self.service().prefetch_recent()
+            [f"a{day:02d}" for day in range(12, 2, -1)], self.fetched_ids()
         )
-        self.assertEqual([f"a{day:02d}" for day in range(12, 2, -1)], self.fetched_ids())
         self.assertIsNone(self.store.get("a02"))
         self.api.get.reset_mock()
         self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
@@ -203,7 +203,36 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_recent())
         self.assertEqual(["a12"], self.fetched_ids())
 
-    def test_first_failure_stops_without_raising(self):
+    def test_activity_specific_failure_skips_only_that_activity(self):
+        def failing(path, params):
+            if "a11" in path:
+                raise AppError(502, "Synthetic invalid streams")
+            return self.provider(path, params)
+
+        self.api.get.side_effect = failing
+        with self.assertLogs("backend.sync.activity_details", "WARNING") as logs:
+            result = self.service().prefetch_recent()
+        self.assertEqual({"fetched": 9, "failed": 1}, result)
+        self.assertEqual(
+            [f"a{day:02d}" for day in range(12, 2, -1)], self.fetched_ids()
+        )
+        self.assertIsNone(self.store.get("a11"))
+        self.assertIsNotNone(self.store.get("a03"))
+        self.assertNotIn("Synthetic invalid streams", "\n".join(logs.output))
+
+    def test_authentication_failure_stops_the_run(self):
+        def failing(path, params):
+            if "a11" in path:
+                raise AppError(502, "Synthetic auth", reason="upstream_auth")
+            return self.provider(path, params)
+
+        self.api.get.side_effect = failing
+        with self.assertLogs("backend.sync.activity_details", "WARNING"):
+            result = self.service().prefetch_recent()
+        self.assertEqual({"fetched": 1, "failed": 1}, result)
+        self.assertEqual(["a12", "a11"], self.fetched_ids())
+
+    def test_rate_limit_stops_without_raising(self):
         def failing(path, params):
             if "a11" in path:
                 raise AppError(429, "Synthetic rate limit")
@@ -231,6 +260,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
 
     def test_unconfigured_provider_is_not_called(self):
         self.assertEqual(
-            {"fetched": 0, "failed": 0}, self.service(configured=False).prefetch_recent()
+            {"fetched": 0, "failed": 0},
+            self.service(configured=False).prefetch_recent(),
         )
         self.api.get.assert_not_called()
