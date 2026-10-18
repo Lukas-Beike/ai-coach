@@ -9,11 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from backend.coach.context_selection import select_coach_context
 from backend.coach.conversation import CoachAttachmentContextService
 from backend.coach.dialogue import CoachDialogueReadService
 from backend.coach.final_receipt import CoachFinalReceiptService
-from backend.coach.request_payload import CoachRequestPayloadService
+from backend.coach.request_payload import (
+    CoachRequestPayloadService,
+    request_context_selection,
+)
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundService,
@@ -116,13 +118,12 @@ class CoachStructuredTurnService:
                 if tool["name"] in self._deps.read_only_tools
             ]
         )
-        # Same arguments as CoachRequestPayloadService.build, so this matches
-        # the context_profile of the coach_request_sizes event.
-        context_profile = select_coach_context(
+        context_profile = request_context_selection(
             message,
             context,
-            attachments=bool(attachments or has_prior_openai_attachments),
-            has_receipts=bool(command_receipts),
+            command_receipts=command_receipts,
+            attachments=attachments,
+            has_prior_openai_attachments=has_prior_openai_attachments,
         ).name
         model_instructions, request_payload = self._deps.payload.build(
             message=message,

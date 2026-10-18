@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from backend.coach.context_selection import select_coach_context
+from backend.coach.request_payload import request_context_selection
 from backend.coach.structured_turn import (
     CoachStructuredTurnDependencies,
     CoachStructuredTurnService,
@@ -128,8 +128,12 @@ class StructuredTurnTests(unittest.TestCase):
     def test_round_state_carries_deterministic_context_profile(self) -> None:
         message = "Plane die nächsten zwei Wochen neu"
         context = {"synthetic": True}
-        expected = select_coach_context(
-            message, context, attachments=False, has_receipts=False
+        expected = request_context_selection(
+            message,
+            context,
+            command_receipts=[],
+            attachments=[],
+            has_prior_openai_attachments=False,
         ).name
 
         self.service.run(

@@ -10,6 +10,7 @@ from backend.coach import attachments as coach_attachments
 from backend.coach import dialogue
 from backend.coach.context import CoachTrainingContextService
 from backend.coach.context_selection import (
+    CoachContextSelection,
     compact_coach_dialogue,
     select_coach_context,
 )
@@ -62,6 +63,23 @@ def compose_model_instructions(
     return instructions
 
 
+def request_context_selection(
+    message: str,
+    context: dict[str, Any],
+    *,
+    command_receipts: list[dict[str, Any]],
+    attachments: list[dict[str, Any]],
+    has_prior_openai_attachments: bool,
+) -> CoachContextSelection:
+    """The turn and the request payload share this argument mapping."""
+    return select_coach_context(
+        message,
+        context,
+        attachments=bool(attachments or has_prior_openai_attachments),
+        has_receipts=bool(command_receipts),
+    )
+
+
 class CoachRequestPayloadService:
     """Build a structured Coach request from explicit inputs and owner services."""
 
@@ -90,11 +108,12 @@ class CoachRequestPayloadService:
         retain_openai_attachment_context: bool,
         has_prior_openai_attachments: bool,
     ) -> tuple[str, dict[str, Any]]:
-        selection = select_coach_context(
+        selection = request_context_selection(
             message,
             context,
-            attachments=bool(attachments or has_prior_openai_attachments),
-            has_receipts=bool(command_receipts),
+            command_receipts=command_receipts,
+            attachments=attachments,
+            has_prior_openai_attachments=has_prior_openai_attachments,
         )
         training_context = self._training_context.build(
             selection=selection, local_date=context.get("local_date", "")

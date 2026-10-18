@@ -66,6 +66,7 @@ class StructuredCoachRoundState:
     recovery_state: dict[str, bool]
     # Opened once per turn by CoachStructuredToolRoundService.
     write_gate: CoachTurnWriteGate | None = None
+    # Turn's initial request profile (as coach_request_sizes); reload telemetry only.
     context_profile: str = ""
 
 
