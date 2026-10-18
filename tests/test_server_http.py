@@ -750,6 +750,7 @@ class ServerHttpTests(ServerTestCase):
                 "thinking_level",
                 "configured",
                 "wahoo",
+                "credentials",
                 "usage",
             ],
         )

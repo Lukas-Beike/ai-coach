@@ -550,7 +550,7 @@ class ServerPerformanceTests(ServerTestCase):
             sleep_calls: ClassVar = []
             body_battery_calls: ClassVar = []
 
-            def __init__(self, *_args):
+            def __init__(self, *_args, **_kwargs):
                 pass
 
             def login(self, _tokenstore):

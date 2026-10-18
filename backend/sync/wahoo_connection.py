@@ -20,17 +20,16 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
-from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
+from backend.provider_credentials import (  # noqa: F401 - keys re-exported for callers
+    WAHOO_SECRET_KEYS,
+    WAHOO_STATE_KEY,
+    WAHOO_TOKENS_KEY,
+)
 from backend.providers.wahoo_oauth import WahooOAuthClient, WahooTokenGrant
-
-WAHOO_TOKENS_KEY = f"{ProviderId.WAHOO.value}_oauth_tokens"
-WAHOO_STATE_KEY = f"{ProviderId.WAHOO.value}_oauth_state"
-# Keys that must never leave the database through export, diagnostics or context.
-WAHOO_SECRET_KEYS = frozenset({WAHOO_TOKENS_KEY, WAHOO_STATE_KEY})
 
 STATE_TTL = timedelta(minutes=10)
 REFRESH_MARGIN = timedelta(minutes=5)

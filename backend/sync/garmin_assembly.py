@@ -77,9 +77,12 @@ class GarminAssembly:
         telemetry: GarminSyncTelemetry
         control: GarminSyncControl
         canonical: GarminCanonicalSources | None = None
+        # Database-backed Garmin token store; None keeps the legacy file rules.
+        tokens: Any | None = None
 
     def __init__(self, *, dependencies: GarminAssembly.Inputs) -> None:
         self._canonical = dependencies.canonical
+        self._garmin_tokens = dependencies.tokens
         provider = dependencies.provider
         persistence = dependencies.persistence
         telemetry = dependencies.telemetry
@@ -164,6 +167,7 @@ class GarminAssembly:
             self._earliest_date,
             self._sync_chunk_days,
             self._all_sync_days,
+            garmin_tokens=self._garmin_tokens,
         )
 
     def sync_service(self) -> GarminSyncService:

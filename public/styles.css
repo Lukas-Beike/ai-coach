@@ -1110,6 +1110,34 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .provider-setup-hint[hidden] { display: none; }
 .provider-setup-hint a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent-bright); font-weight: 700; }
 .provider-setup-hint code { font: .95em ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+.provider-credentials { display: grid; gap: 10px; margin-top: 12px; }
+.provider-credentials > .settings-section-heading { margin-bottom: 0; }
+.credential-form { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--translucent-surface); }
+.credential-form h4 { margin: 0; color: var(--ink); font-size: .8rem; }
+.credential-form .credential-row-head h4 { flex: 1 1 auto; }
+.credential-row { display: grid; gap: 6px; }
+.credential-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--subtle); font-size: .73rem; font-weight: 500; }
+.credential-row-head label { min-width: 0; }
+.credential-row input { width: 100%; padding: 9px 10px; font-size: .8rem; }
+.credential-source { flex: 0 0 auto; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--subtle); font-size: .64rem; font-weight: 600; white-space: nowrap; }
+.credential-source.is-db { border-color: var(--accent-bright); color: var(--accent-bright); }
+.credential-source.is-env { color: var(--ink); }
+.credential-source.is-none { color: var(--orange); }
+.credential-current { color: var(--subtle); font-size: .64rem; overflow-wrap: anywhere; }
+.credential-current:empty { display: none; }
+.credential-clear { justify-self: start; }
+.credential-clear[hidden] { display: none; }
+.credential-error { margin: 0; color: var(--form-error-ink); font-size: .68rem; }
+.credential-error[hidden] { display: none; }
+.credential-form > .secondary-button, .credential-step > .secondary-button { justify-self: start; }
+.credential-step { display: grid; gap: 8px; }
+.credential-step[hidden], .credential-form[hidden] { display: none; }
+.credential-step label { color: var(--subtle); font-size: .73rem; font-weight: 500; }
+.credential-step input { width: 100%; padding: 9px 10px; font-size: .8rem; }
+.credential-actions { display: grid; gap: 8px; }
+.garmin-credential-form > .credential-row-head { align-items: center; }
+.garmin-credential-form > .credential-row-head h4 { margin: 0; }
+.credential-form .secondary-button:disabled { cursor: wait; }
 .setup-banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .setup-banner-actions a { min-height: 44px; display: inline-flex; align-items: center; }
 .setup-banner-actions .secondary-button { min-height: 44px; }

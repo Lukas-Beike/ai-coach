@@ -151,13 +151,13 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 - **Accessible Keyboard Shortcuts**: Desktop navigation supporting Enter-to-send, Shift+Enter for line breaks, Esc for modal dismissal, and ARIA live announcements. On touch devices, Enter inserts a line break; the send button or Ctrl/Cmd+Enter sends.
 
 ### Privacy, Security & Data Management
-- **SQLCipher AES-256 Encryption**: Complete encryption of all athlete data, metrics, database-stored provider tokens (Wahoo), chat history, and attachments at rest using `APP_PASSWORD`. The Garmin token store is a separate plaintext file and is not covered; see Garmin setup.
+- **SQLCipher AES-256 Encryption**: Complete encryption of all athlete data, metrics, database-stored provider credentials (API keys and secrets entered in the UI), provider tokens (Wahoo and Garmin), chat history, and attachments at rest using `APP_PASSWORD`. Only a legacy Garmin token file, if one still exists, is plaintext and not covered; see Garmin setup.
 - **Database Key Placement**: Keep `APP_PASSWORD` in the container environment or the project-root `.env`. If it is found in `DATA_DIR/.env`, beside the encrypted database, startup logs a warning (never the value), because a copy of the data directory would then include its key.
 - **Strict Session Security**: High-security session cookies hardened with `HttpOnly`, `SameSite=Strict`, and optional `Secure` flags.
 - **Bounded HTTP Input**: At most 32 active handlers, with separate 20-second absolute limits for request headers and bodies. Login admission is checked before reading its body; these input limits do not shorten Coach responses or SSE streams.
 - **Zero Third-Party Trackers**: Self-hosted architecture containing zero tracking scripts, third-party analytics, external CDNs, or telemetry reporting.
 - **Comprehensive Privacy Export**: Single-click export producing a complete, unencrypted JSON archive of all profile records, workouts, metrics, and chat history.
-- **Confirmed Local Data Purge**: Irreversible deletion of all local athlete data guarded by an explicit typed confirmation phrase (`LOKALE DATEN LÖSCHEN`).
+- **Confirmed Local Data Purge**: Irreversible deletion of all local athlete data, including stored provider credentials and Garmin tokens, guarded by an explicit typed confirmation phrase (`LOKALE DATEN LÖSCHEN`). The Garmin account and Intervals.icu/Wahoo accounts themselves are not changed.
 - **Zero-Downtime Maintenance Mode**: Process-level maintenance gate that prevents concurrent writes and ensures transaction safety during database restoration.
 - **Pre-Restore Rollback Copies**: Automated creation of a safety copy of the existing database before executing any database restore or replacement.
 - **Redacted Operational Logging**: Structured server logs that correlate technical operation IDs while stripping authentication headers, tokens, and athlete text.
@@ -212,7 +212,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 |  +-------------------------------------------------------------------------------------+  |
 |  | Persistent Storage Mount (/data)                                                    |  |
 |  |   - intervals-coach.db (SQLCipher encrypted database)                               |  |
-|  |   - garmin_tokens (Garmin OAuth token store)                                        |  |
+|  |   - garmin_tokens (legacy plaintext token file, imported once, left in place)       |  |
 |  |   - intervals-coach.db.pre-restore-<timestamp>-<id> (restore safety copies)          |  |
 |  +-------------------------------------------------------------------------------------+  |
 +-------------------------------------------------------------------------------------------+
@@ -253,14 +253,14 @@ All configuration is loaded from container environment variables or a local `.en
 | Variable | Default Value | Required? | Description |
 | :--- | :--- | :--- | :--- |
 | `APP_PASSWORD` | *None* | **Yes** | Master password (minimum 12 characters). Secures web UI authentication and acts as the encryption key for the SQLCipher database. |
-| `OPENAI_API_KEY` | *None* | **Yes** | Server-side API key for the OpenAI Responses API or compatible endpoint. |
+| `OPENAI_API_KEY` | *None* | **Yes** | Server-side API key for the OpenAI Responses API or compatible endpoint. Can also be set in **Mehr > Anbindungen > Zugangsdaten**. |
 | `OPENAI_MODEL` | `gpt-6-luna` | No | OpenAI model deployment name (GPT-6 Luna). |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | No | Optional Responses-compatible API base URL. HTTPS is required; HTTP is allowed only for loopback addresses. |
 | `INTERVALS_API_KEY` | *None* | **Yes** | Personal API key obtained from Intervals.icu account settings. |
 | `INTERVALS_ATHLETE_ID` | `0` | No | Athlete ID for Intervals.icu (`0` targets the athlete account associated with the API key). |
-| `GARMIN_EMAIL` | *None* | No | Garmin Connect account email. Used only during initial interactive login. |
-| `GARMIN_PASSWORD` | *None* | No | Garmin Connect account password. Used only during initial interactive login. |
-| `GARMINTOKENS` | `/data/garmin_tokens` | No | File path to the persisted Garmin OAuth token store. |
+| `GARMIN_EMAIL` | *None* | No | Garmin Connect account email. Read-only fallback used when no Garmin login is stored in the app. The UI login does not need it. |
+| `GARMIN_PASSWORD` | *None* | No | Garmin Connect account password. Read-only fallback for login; the UI never stores the password. Remove it once tokens are stored. |
+| `GARMINTOKENS` | `/data/garmin_tokens` | No | Path of the legacy Garmin token file. It is imported once when the database has no Garmin tokens and is left in place. |
 | `GARMIN_FIXTURE_PATH` | *None* | No | Local mock JSON fixture path for development and testing without live Garmin credentials. |
 | `WAHOO_CLIENT_ID` | *None* | No | Wahoo Cloud API application client ID. Wahoo counts as configured only when all three `WAHOO_*` values are set. |
 | `WAHOO_CLIENT_SECRET` | *None* | No | Wahoo Cloud API application client secret. Stored server-side only and redacted from logs. |
@@ -271,7 +271,7 @@ All configuration is loaded from container environment variables or a local `.en
 | `DATA_RETENTION_DAYS` | `-1` | No | `-1` (or any value ≤ 0) retains data indefinitely; positive values are clamped to 30–3650 days and remove older chat messages and snapshots at startup. |
 | `SYNC_HISTORY_EARLIEST_DATE` | `2000-01-01` | No | ISO date (`YYYY-MM-DD`) that bounds the historical Intervals.icu/Garmin backfill. The backfill walks back in 90-day chunks, never beyond this date, and stops after 180 consecutive days without records. An invalid value is ignored with a logged warning. |
 | `PORT` | `8090` | No | Internal HTTP port the application listens on. |
-| `DATA_DIR` | `/data` | No | Path to the directory where the encrypted database and the plaintext Garmin token store are stored. |
+| `DATA_DIR` | `/data` | No | Path to the directory where the encrypted database and any legacy Garmin token file are stored. |
 | `TZ` | `Europe/Berlin` | No | IANA timezone (e.g., `Europe/Berlin`) used as the default athlete timezone when none is saved and as the container's local timezone. Crucial for accurate daily scheduling and sleep windows. |
 
 ---
@@ -298,7 +298,7 @@ docker run -d \
   ghcr.io/lukas-beike/ai-coach:latest
 ```
 
-*Note: Never run `docker rm -v`, as the `/data` volume contains your encrypted database and the plaintext Garmin token store.*
+*Note: Never run `docker rm -v`, as the `/data` volume contains your encrypted database and any legacy plaintext Garmin token file.*
 
 The image runs as the non-root `app` user. Application code under `/app` is owned by root and is not writable by that user; only `/data` is writable.
 
@@ -393,29 +393,45 @@ server {
 ```
 *When deploying behind HTTPS, remember to set `COOKIE_SECURE=true` in your `.env`. Set `TRUSTED_PROXY_IPS` to the address the app sees as the proxy's connection peer so rate limits apply per real client instead of to the proxy; without it, every request is attributed to the proxy. That is the proxy host's LAN address for a separate proxy (for example `TRUSTED_PROXY_IPS=192.168.1.6`), the proxy container's address for a proxy on the same Docker network, or `127.0.0.1` or the Docker bridge gateway for a same-host proxy like the nginx example above.*
 
+### Provider credentials in the app
+
+Intervals.icu, OpenAI and Wahoo credentials can be entered under **Mehr > Anbindungen > Zugangsdaten** instead of in `.env`:
+
+- **Where values live:** a value saved in the app is stored in the encrypted database and takes precedence. The matching environment variable is a read-only fallback that applies again after the stored value is removed.
+- **Badges:** each field shows "In der App gespeichert", "Aus Umgebung" or "Nicht gesetzt". "Entfernen" deletes only the value stored in the app and asks for confirmation.
+- **Secrets:** API keys and client secrets are never shown again after saving, and the form is cleared on submit. Non-secret values (OpenAI base URL, Intervals.icu athlete ID, Wahoo client ID) are shown as the current value.
+- **Timing:** changes apply without a container restart.
+- **Privacy delete:** the local data purge removes stored credentials and Garmin tokens. A legacy token file at `/data/garmin_tokens` stays on disk, as every token store is preserved, but it is no longer used; delete it on the host if it should go too. It does not change the external Garmin, Intervals.icu or Wahoo accounts.
+
 ### Garmin Authentication & MFA Setup
 
-Garmin Connect enforces Multi-Factor Authentication (MFA). Complete the initial authentication interactively using the bundled `garmin-login.py` script:
+Garmin Connect enforces Multi-Factor Authentication (MFA). The primary way to connect is the UI:
 
-1. Ensure `GARMIN_EMAIL` and `GARMIN_PASSWORD` are defined in your `.env` file.
-2. Run the interactive login helper inside a temporary container attached to your persistent data directory:
-   ```sh
-   docker run --rm -it \
-     --env-file /mnt/user/appdata/ai-coach/.env \
-     -v /mnt/user/appdata/ai-coach/data:/data \
-     ghcr.io/lukas-beike/ai-coach:latest \
-     python /app/garmin-login.py
-   ```
-3. Enter the MFA code sent to your email or mobile device when prompted.
-4. The helper saves the OAuth token store to `/data/garmin_tokens`. It is a plaintext JSON file containing OAuth access and refresh tokens, protected only by owner-only file permissions; it is **not** encrypted. Keep `/data` and every backup of it on encrypted host storage, and treat the token store like a password.
-5. Once complete, you may safely remove `GARMIN_PASSWORD` from your `.env`. Restart the `ai-coach` container, and it will authenticate automatically using the persisted tokens.
+1. Open **Mehr > Anbindungen > Zugangsdaten** and enter your Garmin E-Mail and password, then choose "Bei Garmin anmelden". The password is sent once to the server and is never stored; the form is cleared as soon as it is submitted.
+2. If Garmin requests a verification code, the card switches to a code step. Enter the code sent to your email or mobile device. "Abbrechen" returns to the login form; the pending login expires on the server after 10 minutes.
+3. On success the card shows "Verbunden" with the source "In der App gespeichert". The Garmin OAuth tokens are stored in the encrypted database, not in a file.
+4. **Disconnect:** "Garmin trennen" (after a confirmation) deletes the stored Garmin tokens. Already loaded data stays in the local database. A preserved token file is not used again. `GARMIN_EMAIL` and `GARMIN_PASSWORD` from the environment are not used either; Garmin syncs stay off until the next login in the app.
+
+An existing token file at `/data/garmin_tokens` is imported once when the database has no Garmin tokens yet. The file is left in place and is not deleted by the import. Because it is plaintext JSON protected only by owner-only file permissions, keep `/data` and every backup of it on encrypted host storage, and treat the file like a password.
+
+The bundled `garmin-login.py` helper is still available as an alternative for headless setups. It runs inside a temporary container attached to your data directory:
+
+```sh
+docker run --rm -it \
+  --env-file /mnt/user/appdata/ai-coach/.env \
+  -v /mnt/user/appdata/ai-coach/data:/data \
+  ghcr.io/lukas-beike/ai-coach:latest \
+  python /app/garmin-login.py
+```
+
+`GARMIN_EMAIL` and `GARMIN_PASSWORD` from `.env` remain a read-only fallback for the app's own Garmin login and for this helper. If you connect through the UI, you can remove `GARMIN_PASSWORD` from `.env`; the stored tokens are then used.
 
 ### Wahoo connection
 
 The app can connect to Wahoo through OAuth and reads its workouts. Library workouts are written to Wahoo only when you explicitly start a Wahoo library sync (see step 6).
 
 1. Register an application in the Wahoo developer portal and set its redirect URI to `https://<app-host>/api/wahoo/callback`. This must be the HTTPS URL at which you reach the app, and it must match `WAHOO_REDIRECT_URI` exactly.
-2. Set `WAHOO_CLIENT_ID`, `WAHOO_CLIENT_SECRET` and `WAHOO_REDIRECT_URI` and restart the container. Without all three values, the Wahoo card under **Mehr > Anbindungen** shows "Nicht konfiguriert" and explains which server variables are missing; no secret is ever shown in the browser.
+2. Set the client ID and secret under **Mehr > Anbindungen > Zugangsdaten**, or as `WAHOO_CLIENT_ID` and `WAHOO_CLIENT_SECRET` in the environment, and set `WAHOO_REDIRECT_URI` in the environment and restart the container. The redirect URI is not editable in the UI. Without all three values, the Wahoo card under **Mehr > Anbindungen** shows "Nicht konfiguriert" and explains which server variables are missing; no secret is ever shown in the browser.
 3. **Connect:** in **Mehr > Anbindungen**, choose "Wahoo verbinden". The app calls `POST /api/wahoo/connect` (session and CSRF protected), which returns the Wahoo authorize URL, and the browser follows it. The callback `GET /api/wahoo/callback` needs no session (session cookies are SameSite=Strict); it is accepted only with the server-stored, single-use state that expires after 10 minutes, and always redirects to `/?wahoo=connected` or `/?wahoo=error`. The PWA reads only that outcome word, shows a confirmation or error message and removes it from the address bar.
 4. **Status:** the card shows "Nicht verbunden", "Verbunden" or, after Wahoo rejected the stored refresh token, "Erneute Verbindung erforderlich" with a "Wahoo erneut verbinden" action. Wahoo also appears with its registry label in the connection summary, the data-freshness list, running-sync progress and the manual-attention banner.
 5. **Disconnect:** "Wahoo trennen" (after a confirmation) calls `POST /api/wahoo/disconnect`, which revokes access at Wahoo (best effort) and deletes the local tokens, also after the server variables were removed. Workouts that were already imported stay in the local database.

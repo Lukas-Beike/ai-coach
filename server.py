@@ -271,6 +271,7 @@ from backend.privacy import (
     PrivacyPlanningSources,
     PrivacyStateDependencies,
 )
+from backend.provider_credentials import ProviderCredentialService
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
 from backend.providers import http as provider_http
@@ -340,6 +341,11 @@ from backend.sync.garmin_assembly import (
     GarminProviderSettings,
     GarminSyncControl,
     GarminSyncTelemetry,
+)
+from backend.sync.garmin_login import (
+    GarminLoginService,
+    GarminSecretRegistry,
+    GarminTokenStore,
 )
 from backend.sync.garmin_projection_service import GarminCanonicalSources
 from backend.sync.garmin_service import (
@@ -470,11 +476,23 @@ COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
 
-CONFIG = load_config(ROOT, DATA_DIR)
+ENV_CONFIG = load_config(ROOT, DATA_DIR)
+# Runtime configuration: environment values overlaid with stored credentials.
+CONFIG = ENV_CONFIG
+# Bumped whenever CONFIG is replaced so cached services rebuild with new values.
+CONFIG_GENERATION = 0
 
 
 LOGGER = logging.getLogger("intervals_coach")
-REDACTOR = observability.Redactor(lambda: CONFIG)
+GARMIN_SECRET_REGISTRY = GarminSecretRegistry()
+# Environment secrets stay redacted while a stored credential overrides them.
+REDACTOR = observability.Redactor(
+    lambda: CONFIG,
+    extra_secrets=lambda: (
+        *GARMIN_SECRET_REGISTRY.values(),
+        *observability.config_secret_values(ENV_CONFIG),
+    ),
+)
 
 
 KEY_VALUE_REPOSITORY = KeyValueRepository(runtime_clock.utc_now)
@@ -606,7 +624,8 @@ PROVIDER_SYNC = ProviderSyncAssembly(
 def morning_body_battery_service() -> MorningBodyBatteryService:
     """Compose morning recovery orchestration from concrete runtime resources."""
     manager = database_manager()
-    config_id = id(CONFIG)
+    # The generation guards against a reused id after CONFIG is replaced.
+    config_id = (id(CONFIG), CONFIG_GENERATION)
     return MORNING_BODY_BATTERY_SERVICE_CACHE.get(
         manager,
         config_id,
@@ -626,6 +645,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
                 ATHLETE_CLOCK,
                 DIAGNOSTIC_CAPTURE,
                 LOGGER,
+                garmin_tokens=GARMIN_TOKENS,
             ),
             observability.safe_diagnostic_error,
         ),
@@ -811,6 +831,8 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
             openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
             logger=LOGGER,
             diagnostics_suspended=suspend_diagnostic_flushes,
+            refresh_credentials=lambda: refresh_runtime_config(),
+            cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
         ),
         archive=PrivacyArchiveSettings(
             data_dir=lambda: DATA_DIR,
@@ -851,6 +873,7 @@ BACKUP_ASSEMBLY = BackupAssembly(
             redact=REDACTOR.redact_text,
             diagnostics_suspended=suspend_diagnostic_flushes,
             canonical_backfill_start=start_canonical_backfill,
+            refresh_credentials=lambda: refresh_runtime_config(),
         ),
     )
 )
@@ -875,6 +898,7 @@ def initialise_database() -> None:
             provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
             retention_days=int(getattr(CONFIG, "data_retention_days", -1)),
         )
+    refresh_runtime_config()
 
 
 def key_value_service() -> KeyValueService:
@@ -894,6 +918,33 @@ SETTINGS = SettingsService(
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
 )
+
+
+def apply_runtime_config(config: app_config.Config) -> None:
+    """Swap the runtime configuration; lambda readers see the new value at once."""
+    global CONFIG, CONFIG_GENERATION
+    if config is CONFIG:
+        return
+    CONFIG = config
+    CONFIG_GENERATION += 1
+
+
+PROVIDER_CREDENTIAL_SERVICE = ProviderCredentialService(
+    env_config=ENV_CONFIG,
+    database_manager=database_manager,
+    database_lock=lambda: DB_LOCK,
+    key_values=KEY_VALUE_REPOSITORY,
+    apply_config=apply_runtime_config,
+    garmin_connection=lambda: GARMIN_LOGIN.status(),
+    current_config=lambda: CONFIG,
+)
+
+
+def refresh_runtime_config() -> app_config.Config:
+    """Recompute CONFIG from the environment plus stored credentials."""
+    return PROVIDER_CREDENTIAL_SERVICE.refresh()
+
+
 # Each flush rewrites the whole capture, so captures are merged on a timer and
 # written as background work that yields to Coach and athlete writes.
 DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS = 30.0
@@ -924,7 +975,23 @@ def sync_daily_markers() -> DailySyncMarkerService:
     return SYNC_PERSISTENCE.daily_markers(registry=provider_runtime().static)
 
 
-GARMIN_ASSEMBLY = GarminAssembly(
+GARMIN_TOKENS = GarminTokenStore(
+    database_manager=database_manager,
+    database_lock=lambda: DB_LOCK,
+    key_values=KEY_VALUE_REPOSITORY,
+    tokenstore_path=lambda: CONFIG.garmin_tokenstore,
+    registry=GARMIN_SECRET_REGISTRY,
+    env_credentials=lambda: bool(CONFIG.garmin_email and CONFIG.garmin_password),
+)
+GARMIN_LOGIN: GarminLoginService = GarminLoginService(
+    config=lambda: CONFIG,
+    client_factory=lambda email, password, **options: (
+        GARMIN_ASSEMBLY.client_factory().create(email, password, **options)
+    ),
+    tokens=GARMIN_TOKENS,
+    registry=GARMIN_SECRET_REGISTRY,
+)
+GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
     dependencies=GarminAssembly.Inputs(
         provider=GarminProviderSettings(
             config=lambda: CONFIG,
@@ -961,6 +1028,7 @@ GARMIN_ASSEMBLY = GarminAssembly(
             activity_rows=lambda: CANONICAL_READ,
             observations=lambda: CANONICAL_READ,
         ),
+        tokens=GARMIN_TOKENS,
     )
 )
 
@@ -1862,6 +1930,7 @@ PUBLIC_STATE = PublicStateAssembly(
         ),
     ),
     provider_runtime=provider_runtime,
+    provider_credentials=lambda: PROVIDER_CREDENTIAL_SERVICE,
 )
 
 CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
@@ -2066,6 +2135,8 @@ HTTP_API = HttpApiAssembly(
             ),
             wahoo=WAHOO_CONNECTION.service,
             metric_export=lambda: METRIC_EXPORT,
+            provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
+            garmin_login=lambda: GARMIN_LOGIN,
         ),
     ),
 )

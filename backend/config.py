@@ -13,7 +13,6 @@ from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from backend.errors import AppError
@@ -21,20 +20,6 @@ from backend.errors import AppError
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_SYNC_HISTORY_EARLIEST_DATE = date(2000, 1, 1)
 _LOGGER = logging.getLogger(__name__)
-SETTINGS_SECRET_KEYS = (
-    "OPENAI_API_KEY",
-    "INTERVALS_API_KEY",
-    "GARMIN_PASSWORD",
-    "WAHOO_CLIENT_SECRET",
-)
-SETTINGS_VALUE_KEYS = (
-    "GARMIN_EMAIL",
-    "GARMINTOKENS",
-    "GARMIN_FIXTURE_PATH",
-    "WAHOO_CLIENT_ID",
-    "WAHOO_REDIRECT_URI",
-)
-SETTINGS_KEYS = SETTINGS_SECRET_KEYS + SETTINGS_VALUE_KEYS
 
 
 def validated_openai_base_url(value: str) -> str:
@@ -231,77 +216,6 @@ def proxy_list_warning(invalid_entries: int) -> str | None:
         "wurden ignoriert. Erlaubt sind IP-Adressen oder Netze ohne Hostanteil, "
         "z. B. 192.168.1.6. Trage nur die Proxys selbst ein."
     )
-
-
-def _submitted_settings(values: Any) -> dict[str, str]:
-    if not isinstance(values, dict):
-        raise AppError(400, "Die Einstellungen müssen als Objekt gesendet werden.")
-    updates: dict[str, str] = {}
-    for key in SETTINGS_KEYS:
-        if key not in values:
-            continue
-        raw = str(values.get(key) or "").replace("\r", "").replace("\n", "").strip()
-        if raw:
-            updates[key] = raw
-    if not updates:
-        raise AppError(400, "Keine neuen Zugangsdaten oder Einstellungen eingegeben.")
-    return updates
-
-
-def _read_settings_file(env_path: Path) -> list[str]:
-    try:
-        return (
-            env_path.read_text(encoding="utf-8").splitlines()
-            if env_path.exists()
-            else []
-        )
-    except OSError as exc:
-        raise AppError(500, f".env konnte nicht gelesen werden: {exc}") from exc
-
-
-def _rewrite_settings_lines(
-    lines: list[str],
-    updates: dict[str, str],
-    environ: MutableMapping[str, str] | None = None,
-) -> list[str]:
-    seen: set[str] = set()
-    rewritten: list[str] = []
-    for line in lines:
-        match = re.match(r"^(\s*(?:export\s+)?)(?a:((?!\d)\w+))(\s*=).*$", line)
-        key = match.group(2) if match else None
-        if key in updates and match:
-            rewritten.append(f"{match.group(1)}{key}={updates[key]}")
-            seen.add(key)
-        else:
-            rewritten.append(line)
-    for key, value in updates.items():
-        if key not in seen:
-            rewritten.append(f"{key}={value}")
-        target = environ if environ is not None else os.environ
-        target[key] = value
-    return rewritten
-
-
-def save_persistent_settings(
-    data_dir: Path,
-    values: Any,
-    environ: MutableMapping[str, str] | None = None,
-) -> dict[str, Any]:
-    """Persist explicitly submitted settings without returning their values."""
-    updates = _submitted_settings(values)
-    env_path = data_dir / ".env"
-    target = environ if environ is not None else os.environ
-    try:
-        data_dir.mkdir(parents=True, exist_ok=True)
-        rewritten = _rewrite_settings_lines(
-            _read_settings_file(env_path), updates, target
-        )
-        env_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
-    except AppError:
-        raise
-    except OSError as exc:
-        raise AppError(500, f".env konnte nicht gespeichert werden: {exc}") from exc
-    return {"status": "ok", "updated": sorted(updates), "restart_required": True}
 
 
 def load_config(

@@ -773,4 +773,5 @@ function renderSettings(data) {
   renderProviderAttention(data);
   renderConnectionsSyncProgress(data);
   renderProviderFreshness(data);
+  renderProviderCredentials(data);
 }

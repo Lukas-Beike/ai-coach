@@ -13,7 +13,7 @@ import logging
 import re
 import sys
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -152,6 +152,23 @@ def _secret_variants(value: Any) -> set[str]:
             variants.add(unquote(item))
             variants.add(quote(item, safe=""))
     return {item for item in variants if len(item) >= 4}
+
+
+def config_secret_values(config: Any) -> tuple[str, ...]:
+    """Return the secret-bearing values of one configuration for redaction."""
+    return tuple(
+        str(getattr(config, name, "") or "")
+        for name in (
+            "openai_api_key",
+            "intervals_api_key",
+            "garmin_email",
+            "garmin_password",
+            "garmin_tokenstore",
+            "garmin_fixture_path",
+            "app_password",
+            "wahoo_client_secret",
+        )
+    )
 
 
 @lru_cache(maxsize=32)
@@ -373,8 +390,15 @@ def sanitized_provider_payload(value: Any) -> Any:
 class Redactor:
     """Redact secrets and sensitive provider metadata from values and errors."""
 
-    def __init__(self, config_supplier: Callable[[], Config]) -> None:
+    def __init__(
+        self,
+        config_supplier: Callable[[], Config],
+        extra_secrets: Callable[[], Iterable[str]] | None = None,
+    ) -> None:
         self._config_supplier = config_supplier
+        # Runtime-only secrets (for example Garmin OAuth tokens held in the
+        # database) that are not part of the Config object.
+        self._extra_secrets = extra_secrets
 
     def safe_calendar_url(self) -> str:
         config = self._config_supplier()
@@ -408,17 +432,9 @@ class Redactor:
         for pattern in _secret_patterns(calendar_url):
             redacted = pattern.sub(calendar_safe_url, redacted)
         redacted = URL_VALUE_RE.sub(_redact_url, redacted)
-        secret_values = (
-            getattr(config, "openai_api_key", ""),
-            getattr(config, "intervals_api_key", ""),
-            getattr(config, "garmin_email", ""),
-            getattr(config, "garmin_password", ""),
-            getattr(config, "garmin_tokenstore", ""),
-            getattr(config, "garmin_fixture_path", ""),
-            getattr(config, "app_password", ""),
-            getattr(config, "wahoo_client_secret", ""),
-        )
-        for secret_value in secret_values:
+        secret_values = config_secret_values(config)
+        extra_values = tuple(self._extra_secrets()) if self._extra_secrets else ()
+        for secret_value in (*secret_values, *extra_values):
             for pattern in _secret_patterns(str(secret_value or "")):
                 redacted = pattern.sub(_REDACTED, redacted)
         redacted = re.sub(

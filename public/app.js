@@ -63,6 +63,16 @@ $("#wahooConnectButton").addEventListener("click", connectWahoo);
 $("#wahooDisconnectButton").addEventListener("click", disconnectWahoo);
 $("#wahooSyncButton").addEventListener("click", syncWahoo);
 $("#wahooFullResyncButton").addEventListener("click", () => fullResync(providerIds().wahoo));
+for (const provider of Object.keys(CREDENTIAL_FORMS)) {
+  $("#" + credentialFormIds(provider).form).addEventListener("submit", (event) => saveProviderCredentials(event, provider));
+  for (const field of CREDENTIAL_FORMS[provider]) {
+    $("#" + credentialFieldIds(field).clear).addEventListener("click", () => clearProviderCredential(field, provider));
+  }
+}
+$("#garmin-login-form").addEventListener("submit", submitGarminLogin);
+$("#garmin-mfa-form").addEventListener("submit", submitGarminMfa);
+$("#garmin-mfa-cancel").addEventListener("click", cancelGarminMfa);
+$("#garmin-disconnect").addEventListener("click", disconnectGarmin);
 $("#garminFullResyncButton").addEventListener("click", () => fullResync(providerIds().garmin));
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#checkinForm").addEventListener("submit", saveCheckin);

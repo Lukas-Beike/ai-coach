@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, Mock
 from urllib.parse import parse_qs, urlsplit
 
 from backend.canonical.vocabulary import ProviderId
-from backend.config import SETTINGS_SECRET_KEYS, SETTINGS_VALUE_KEYS, load_config
+from backend.config import load_config
 from backend.errors import AppError
 from backend.http_api.wahoo import WahooGetRoutes, WahooPostRoutes
 from backend.observability import REDACTED_URL_QUERY_KEYS, redact_request_query
@@ -92,12 +92,6 @@ class WahooConfigTests(unittest.TestCase):
         for key in ("WAHOO_CLIENT_ID", "WAHOO_CLIENT_SECRET", "WAHOO_REDIRECT_URI"):
             with self.subTest(missing=key):
                 self.assertFalse(make_config(**{key: "  "}).wahoo_configured)
-
-    def test_secret_and_value_settings_are_classified(self):
-        self.assertIn("WAHOO_CLIENT_SECRET", SETTINGS_SECRET_KEYS)
-        self.assertIn("WAHOO_CLIENT_ID", SETTINGS_VALUE_KEYS)
-        self.assertIn("WAHOO_REDIRECT_URI", SETTINGS_VALUE_KEYS)
-        self.assertNotIn("WAHOO_CLIENT_SECRET", SETTINGS_VALUE_KEYS)
 
     def test_provider_id_is_registered_as_a_read_only_provider(self):
         from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY

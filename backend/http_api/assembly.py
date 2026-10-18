@@ -18,11 +18,13 @@ from backend.http_api.chat_post import ChatPostRoutes
 from backend.http_api.chat_stream import CoachChatStreamTransport
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 from backend.http_api.coach_get import CoachGetRoutes
+from backend.http_api.credentials_put import CredentialsPutRoutes
 from backend.http_api.diagnostics_delete_post import DiagnosticsDeletePostRoutes
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.equipment_post import EquipmentPostRoutes
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.feedback_post import FeedbackPostRoutes
+from backend.http_api.garmin_post import GarminPostRoutes
 from backend.http_api.handler import (
     HttpRequestHandlerDependencies,
     create_request_handler,
@@ -264,6 +266,8 @@ class HttpDomainRouteServices:
     nutrition: HttpNutritionServices
     wahoo: Callable[[], Any] | None = None
     metric_export: Callable[[], Any] | None = None
+    provider_credentials: Any | None = None
+    garmin_login: Callable[[], Any] | None = None
 
 
 class HttpApiAssembly:
@@ -525,6 +529,10 @@ class HttpApiAssembly:
             StateEventTransport(state_event_buffer),
         )
         self.settings_put_routes = SettingsPutRoutes(settings)
+        provider_credentials = dependencies.domains.provider_credentials
+        self.credentials_put_routes = (
+            CredentialsPutRoutes(provider_credentials) if provider_credentials else None
+        )
         self.athlete_put_routes = AthletePutRoutes(
             athlete_context_service, profile_service, database_lock()
         )
@@ -571,6 +579,10 @@ class HttpApiAssembly:
             if wahoo_connection_service
             else None
         )
+        garmin_login_service = dependencies.domains.garmin_login
+        self.garmin_post_routes = (
+            GarminPostRoutes(garmin_login_service) if garmin_login_service else None
+        )
         self.metric_export_post_routes = (
             MetricExportPostRoutes(metric_export_service)
             if metric_export_service
@@ -595,6 +607,11 @@ class HttpApiAssembly:
                 self.settings_put_routes,
                 self.athlete_put_routes,
                 self.nutrition_put_routes,
+                *(
+                    (self.credentials_put_routes,)
+                    if self.credentials_put_routes
+                    else ()
+                ),
             ),
         )
         self.sync_command_post_route = SyncCommandPostRoute(
@@ -616,6 +633,7 @@ class HttpApiAssembly:
             self.equipment_post_routes,
             self.wahoo_post_routes,
             self.metric_export_post_routes,
+            self.garmin_post_routes,
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,

@@ -30,9 +30,13 @@ from backend.planning.competition_service import CompetitionService
 from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.training_plans import TrainingPlanService
+from backend.provider_credentials import (
+    CREDENTIAL_KV_KEYS,
+    GARMIN_TOKENSTORE_DISCONNECTED,
+    GARMIN_TOKENSTORE_STATE_KEY,
+)
 from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.maintenance import MaintenanceGate
-from backend.sync.wahoo_connection import WAHOO_SECRET_KEYS
 from backend.weather import cache as weather_cache
 
 
@@ -114,7 +118,7 @@ class PrivacyDataExportService:
             "profile",
             "garmin_snapshot",
             weather_cache.CACHE_KEY,
-            *WAHOO_SECRET_KEYS,
+            *CREDENTIAL_KV_KEYS,
         }
         for row in kv_rows:
             key = str(row["key"])
@@ -201,7 +205,11 @@ PRIVACY_DELETE_SCOPE = (
         ("public_event_sources", "public_event_candidates", "external_calendar_events"),
     ),
     ("sessions", "Anmeldesitzungen", ("sessions",)),
-    ("settings", "Profil, Einstellungen, Syncstatus und lokale Caches", ("kv",)),
+    (
+        "settings",
+        "Profil, Einstellungen, Zugangsdaten, Garmin-Verbindung und Garmin-Tokens, Syncstatus und lokale Caches",
+        ("kv",),
+    ),
     ("history", "Lokale Änderungshistorie", ("change_history",)),
     (
         "provider_status",
@@ -233,7 +241,11 @@ _REMOTE_LINK_KINDS_BY_CATEGORY = {
 }
 PRIVACY_REMOTE_SCOPE = (
     "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
-    "Garmin-Konto und Garmin-Daten bleiben unverändert.",
+    (
+        "Garmin-Konto und Garmin-Daten bleiben unverändert. Eine ältere "
+        "Garmin-Token-Datei im Datenverzeichnis bleibt erhalten, wird aber nicht "
+        "mehr verwendet."
+    ),
     "Externe Kalenderquelle und deren Anbieter bleiben unverändert.",
 )
 
@@ -248,6 +260,10 @@ class PrivacyDeleteDependencies:
     openai_client: OpenAIResponsesClient
     logger: logging.Logger
     diagnostics_suspended: Callable[[], AbstractContextManager[None]]
+    # Re-derives the runtime configuration once stored credentials are wiped.
+    refresh_credentials: Callable[[], Any] | None = None
+    # Discards a pending Garmin MFA login so it cannot store tokens afterwards.
+    cancel_garmin_login: Callable[[], None] | None = None
 
 
 class PrivacyDeleteService:
@@ -320,6 +336,8 @@ class PrivacyDeleteService:
                         extra={"event": "privacy_remote_delete_failed"},
                         exc_info=True,
                     )
+            if dependencies.cancel_garmin_login is not None:
+                dependencies.cancel_garmin_login()
             # Flushes stay blocked from before the delete until the cache is dropped,
             # so deleted diagnostics are neither served nor written back.
             with (
@@ -336,10 +354,16 @@ class PrivacyDeleteService:
                 for table in deleted_tables:
                     db.execute(f"DELETE FROM {table}")
                 db.execute("DELETE FROM kv")
+                # Keep a preserved legacy Garmin token file from being re-imported.
+                dependencies.key_value_repository.set(
+                    db, GARMIN_TOKENSTORE_STATE_KEY, GARMIN_TOKENSTORE_DISCONNECTED
+                )
                 dependencies.key_value_repository.set(
                     db, "profile", json.dumps(DEFAULT_PROFILE)
                 )
                 dependencies.planning_revision_service.mark_reset_pending()
+            if dependencies.refresh_credentials is not None:
+                dependencies.refresh_credentials()
             return {
                 "status": "ok",
                 "local_data_deleted": True,
@@ -386,6 +410,8 @@ class PrivacyStateDependencies:
     openai_client: Callable[[], OpenAIResponsesClient]
     logger: logging.Logger
     diagnostics_suspended: Callable[[], AbstractContextManager[None]]
+    refresh_credentials: Callable[[], Any] | None = None
+    cancel_garmin_login: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -434,6 +460,8 @@ class PrivacyAssembly:
         self._openai_client = state.openai_client
         self._logger = state.logger
         self._diagnostics_suspended = state.diagnostics_suspended
+        self._refresh_credentials = state.refresh_credentials
+        self._cancel_garmin_login = state.cancel_garmin_login
         self._data_dir = archive.data_dir
         self._database_path = archive.database_path
         self._maximum_export_bytes = archive.maximum_export_bytes
@@ -469,6 +497,8 @@ class PrivacyAssembly:
                 openai_client=self._openai_client(),
                 logger=self._logger,
                 diagnostics_suspended=self._diagnostics_suspended,
+                refresh_credentials=self._refresh_credentials,
+                cancel_garmin_login=self._cancel_garmin_login,
             )
         )
 

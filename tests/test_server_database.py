@@ -468,6 +468,7 @@ class ServerDatabaseTests(ServerTestCase):
             workout_library_sync_state=owner(summary={}),
             garmin_sync=owner(running=False),
             provider_resync=owner(state={}),
+            provider_credentials=None,
             planning_preview=owner(latest_preview={}, status={}),
             morning_checkin=owner(state={}),
             coach_quick_actions=owner(state={}),
