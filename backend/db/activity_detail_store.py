@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 import sys
@@ -65,6 +66,7 @@ _LAP_COLUMNS: Final = (
     *_LAP_METRIC_COLUMNS,
 )
 _ZONE_METRIC_BY_KIND: Final = {metric.detail_kind: metric for metric in ZoneMetric}
+LOGGER = logging.getLogger("intervals_coach")
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,7 +488,20 @@ def _read_sets(
         row = dict(raw)
         try:
             detail = _rebuild(db, row)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as error:
+            # One unreadable set must not hide the others; report it without
+            # stored values or error text so the corruption stays visible.
+            LOGGER.warning(
+                "Stored activity detail set is unreadable",
+                extra={
+                    "event": "activity_detail_unreadable",
+                    "context": {
+                        "provider": row["provider"],
+                        "detail_kind": row["detail_kind"],
+                        "error": type(error).__name__,
+                    },
+                },
+            )
             continue
         stored.append(
             StoredDetailSet(

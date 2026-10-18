@@ -349,8 +349,15 @@ class ActivityDetailStoreTests(unittest.TestCase):
             "UPDATE activity_stream_channels SET data = ? WHERE channel = 'power_w'",
             (b"corrupt",),
         )
-        stored = detail_sets_for(self.db, "intervals", "i1")
+        with self.assertLogs("intervals_coach", "WARNING") as logs:
+            stored = detail_sets_for(self.db, "intervals", "i1")
         self.assertEqual([item.detail.kind for item in stored], [ActivityDetailKind.LAPS])
+        (record,) = logs.records
+        self.assertEqual(record.event, "activity_detail_unreadable")
+        self.assertEqual(
+            record.context,
+            {"provider": "intervals", "detail_kind": "streams", "error": "ValueError"},
+        )
 
     def test_detail_requires_an_existing_activity_record(self):
         with self.assertRaises(sqlite3.IntegrityError):
