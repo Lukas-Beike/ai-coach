@@ -75,9 +75,13 @@ class ActivityDetailProjectionTests(unittest.TestCase):
 
         result = detailed_activity(activity)
 
-        self.assertEqual(result["icu_hr_zone_times"][:6], [600, 300.5, None, None, None, 1])
+        self.assertEqual(
+            result["icu_hr_zone_times"][:6], [600, 300.5, None, None, None, 1]
+        )
         self.assertEqual(len(result["icu_hr_zone_times"]), 20)
-        self.assertEqual(result["icu_zone_times"], [{"id": "Z1" + "x" * 18, "secs": 300}, None])
+        self.assertEqual(
+            result["icu_zone_times"], [{"id": "Z1" + "x" * 18, "secs": 300}, None]
+        )
 
     def test_laps_allowlist_bounds_and_malformed_values(self):
         laps = (

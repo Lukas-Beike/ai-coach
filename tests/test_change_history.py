@@ -1,7 +1,7 @@
 import json
 import sqlite3
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from backend import change_history
 from backend.athlete.profile import DEFAULT_PROFILE
@@ -68,7 +68,7 @@ class ChangeHistoryTests(unittest.TestCase):
         )
 
     def test_cleanup_and_capacity_preserve_bounds(self):
-        old = (datetime.now(timezone.utc) - timedelta(days=181)).isoformat()
+        old = (datetime.now(UTC) - timedelta(days=181)).isoformat()
         self.db.execute(
             "INSERT INTO change_history VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             ("old", "profile", "profile", "update", "local", old, "a", "b", "{}"),

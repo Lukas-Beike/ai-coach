@@ -1,6 +1,6 @@
 import copy
 import unittest
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from backend.performance.garmin_observations import (
     garmin_record_observation_date,
@@ -27,8 +27,7 @@ class GarminObservationTests(unittest.TestCase):
                 value = "2026-09-04T05:45:00.123Z"
                 if field == "timestamp":
                     value = int(
-                        datetime(2026, 9, 4, 5, 45, tzinfo=timezone.utc).timestamp()
-                        * 1000
+                        datetime(2026, 9, 4, 5, 45, tzinfo=UTC).timestamp() * 1000
                     )
                 self.assertEqual(
                     garmin_record_observation_date({field: value}), "2026-09-04"
@@ -40,11 +39,7 @@ class GarminObservationTests(unittest.TestCase):
             "nested": [
                 {"summaryDate": "2026-09-03"},
                 {"startTimeGMT": "2026-09-05T06:00:00+00:00"},
-                {
-                    "timestamp": int(
-                        datetime(2026, 9, 6, tzinfo=timezone.utc).timestamp() * 1000
-                    )
-                },
+                {"timestamp": int(datetime(2026, 9, 6, tzinfo=UTC).timestamp() * 1000)},
             ],
         }
         original = copy.deepcopy(source)

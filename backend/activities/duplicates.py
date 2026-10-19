@@ -316,13 +316,13 @@ def intervals_cycling_activities_match(left: Any, right: Any) -> bool:
     right_duration = _number(_first_present(right, ("moving_time", "elapsed_time")))
     left_distance = _number(left.get("distance"))
     right_distance = _number(right.get("distance"))
-    if None in (
-        left_start,
-        right_start,
-        left_duration,
-        right_duration,
-        left_distance,
-        right_distance,
+    if (
+        left_start is None
+        or right_start is None
+        or left_duration is None
+        or right_duration is None
+        or left_distance is None
+        or right_distance is None
     ):
         return False
     if (

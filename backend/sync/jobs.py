@@ -15,7 +15,7 @@ import json
 import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
@@ -201,8 +201,8 @@ def utc_timestamp(now: datetime | None = None) -> str:
     """Return a stable UTC timestamp for durable job records."""
     value = now or datetime.fromisoformat(system_utc_now())
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).isoformat()
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
 
 
 def validate_job_request(
@@ -1126,11 +1126,7 @@ class SyncJobStore:
         if value is None:
             return now
         try:
-            return (
-                datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-                .astimezone(timezone.utc)
-                .isoformat()
-            )
+            return datetime.fromisoformat(str(value)).astimezone(UTC).isoformat()
         except (TypeError, ValueError) as exc:
             raise SyncJobInvalidOperationError("Invalid sync job start time.") from exc
 

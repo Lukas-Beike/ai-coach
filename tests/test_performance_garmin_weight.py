@@ -1,6 +1,6 @@
 import copy
 import unittest
-from datetime import UTC, date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from backend.performance.garmin_weight import (
     garmin_weight_average,
@@ -60,9 +60,7 @@ class GarminWeightTests(unittest.TestCase):
         )
 
     def test_millisecond_timestamp_is_normalized_to_utc_date(self):
-        timestamp = (
-            datetime(2026, 8, 30, 23, 30, tzinfo=timezone.utc).timestamp() * 1000
-        )
+        timestamp = datetime(2026, 8, 30, 23, 30, tzinfo=UTC).timestamp() * 1000
         self.assertEqual(
             garmin_weight_records(
                 {"weight": [{"timestamp": timestamp, "weightKg": 72}]}

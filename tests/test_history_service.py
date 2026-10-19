@@ -7,7 +7,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -102,7 +102,7 @@ class ChangeHistoryServiceTests(unittest.TestCase):
         self.assertEqual(full[1]["remote_sync"], "local_only")
 
     def test_list_hides_expired_and_caps_rows_without_deleting(self):
-        base = datetime(2026, 9, 20, tzinfo=timezone.utc)
+        base = datetime(2026, 9, 20, tzinfo=UTC)
         with self.database_manager.unit_of_work() as db:
             rows = [
                 (
@@ -152,7 +152,7 @@ class ChangeHistoryServiceTests(unittest.TestCase):
             )
 
     def test_list_clamps_large_requested_limit_to_max_rows(self):
-        base = datetime(2026, 9, 20, tzinfo=timezone.utc)
+        base = datetime(2026, 9, 20, tzinfo=UTC)
         with self.database_manager.unit_of_work() as db:
             db.executemany(
                 "INSERT INTO change_history "
@@ -182,7 +182,7 @@ class ChangeHistoryServiceTests(unittest.TestCase):
         self.assertNotIn("row-0000", {row["id"] for row in listed})
 
     def test_list_leaves_expired_rows_when_the_read_fails(self):
-        expired_at = (datetime.now(timezone.utc) - timedelta(days=181)).isoformat()
+        expired_at = (datetime.now(UTC) - timedelta(days=181)).isoformat()
         self._insert_history("expired", expired_at)
         service = ChangeHistoryService(
             _FailingReadManager(self.database_manager), self.profile_repository

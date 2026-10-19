@@ -9,7 +9,7 @@ keyed by provider id and area name; the built-in sources live in
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from backend.config import Config
@@ -47,7 +47,7 @@ def _parse_utc(value: Any) -> datetime | None:
         return None
     if parsed.tzinfo is None:
         return None
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def _scheduled_provider_retry_at(
@@ -222,9 +222,7 @@ def provider_freshness_state(
     and may roll back the diagnostic cleanup together with its work.
     """
     current_time = (
-        now.astimezone(timezone.utc)
-        if now.tzinfo is not None
-        else now.replace(tzinfo=timezone.utc)
+        now.astimezone(UTC) if now.tzinfo is not None else now.replace(tzinfo=UTC)
     )
     sources = (
         DEFAULT_FRESHNESS_SOURCES if freshness_sources is None else freshness_sources

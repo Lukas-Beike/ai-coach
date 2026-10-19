@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import date, timezone, tzinfo
+from datetime import UTC, date, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -47,7 +47,7 @@ def fetch_morning_body_battery(
     try:
         local_zone = ZoneInfo(profile_timezone)
     except ZoneInfoNotFoundError, ValueError:
-        local_zone = fallback_zone or timezone.utc
+        local_zone = fallback_zone or UTC
     range_start = sleep_start.astimezone(local_zone).date()
     records = external_call(
         "garmin",

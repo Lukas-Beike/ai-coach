@@ -7,7 +7,7 @@ import tempfile
 import threading
 import unittest
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -63,7 +63,7 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
             self.lock,
             self.key_values,
             lambda: SimpleNamespace(state=lambda: quick_actions),
-            lambda: datetime(2026, 9, 24, 7, 30, tzinfo=timezone.utc),
+            lambda: datetime(2026, 9, 24, 7, 30, tzinfo=UTC),
             lambda: "utc-updated",
         )
 
@@ -95,7 +95,7 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
             self.lock,
             self.key_values,
             quick_actions_factory,
-            lambda: datetime(2026, 9, 24, 7, 30, tzinfo=timezone.utc),
+            lambda: datetime(2026, 9, 24, 7, 30, tzinfo=UTC),
             lambda: "utc-updated",
         )
 
@@ -174,7 +174,7 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
             self.lock,
             self.key_values,
             failed_quick_actions,
-            lambda: datetime(2026, 9, 24, 7, 30, tzinfo=timezone.utc),
+            lambda: datetime(2026, 9, 24, 7, 30, tzinfo=UTC),
             lambda: "utc-updated",
         )
         with self.assertRaisesRegex(RuntimeError, "synthetic quick-actions failure"):

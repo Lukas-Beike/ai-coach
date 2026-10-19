@@ -1,7 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 from unittest.mock import Mock
@@ -44,7 +44,7 @@ class SyncJobOutcomeServiceTests(unittest.TestCase):
                 );
                 """
             )
-        self.current_time = datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
+        self.current_time = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
         self.identifiers = iter(f"job-{index}" for index in range(1, 100))
         self.store = SyncJobStore(
             self.manager,

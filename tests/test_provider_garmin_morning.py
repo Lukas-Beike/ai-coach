@@ -1,5 +1,5 @@
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 
 from backend.providers.garmin_morning import fetch_morning_body_battery
 
@@ -39,7 +39,7 @@ class GarminMorningBodyBatteryTests(unittest.TestCase):
             "email_configured": True,
             "tokenstore_exists": False,
             "profile_timezone": "Europe/Berlin",
-            "fallback_zone": timezone.utc,
+            "fallback_zone": UTC,
             "external_call": self.external_call,
             "sleep_bounds": lambda _payload: (sleep_start, None),
         }
@@ -61,7 +61,7 @@ class GarminMorningBodyBatteryTests(unittest.TestCase):
         )
 
     def test_sleep_local_date_bounds_the_body_battery_request(self):
-        sleep_start = datetime(2026, 9, 3, 23, 30, tzinfo=timezone.utc)
+        sleep_start = datetime(2026, 9, 3, 23, 30, tzinfo=UTC)
 
         sleep, records = self.fetch(sleep_start)
 
@@ -90,7 +90,7 @@ class GarminMorningBodyBatteryTests(unittest.TestCase):
 
         self.client.calls.clear()
         self.client.records = {"unexpected": True}
-        sleep_start = datetime(2026, 9, 4, 1, 0, tzinfo=timezone.utc)
+        sleep_start = datetime(2026, 9, 4, 1, 0, tzinfo=UTC)
         sleep, records = self.fetch(
             sleep_start,
             profile_timezone="invalid/timezone",
