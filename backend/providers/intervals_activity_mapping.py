@@ -216,10 +216,23 @@ _RECORDING_ORIGIN_TERMS: Final[tuple[tuple[tuple[str, ...], RecordingOrigin], ..
     (("upload",), RecordingOrigin.UPLOAD),
 )
 # Whole-word terms matched against the casefolded device_name. Bike computer terms
-# are checked first, so a name that names both kinds is a bike computer.
+# are checked first, so a name that names both kinds is a bike computer. Terms are
+# product lines, never bare brands: COROS, Polar and Suunto also sell bike
+# computers or sensors, so a brand-only name stays unclassified.
 _DEVICE_TYPE_TERMS: Final[tuple[tuple[tuple[str, ...], DeviceType], ...]] = (
     (
-        ("edge", "elemnt", "bolt", "roam", "karoo"),
+        (
+            "edge",
+            "elemnt",
+            "bolt",
+            "roam",
+            "karoo",
+            "dura",
+            "v650",
+            "m450",
+            "m460",
+            "bryton rider",
+        ),
         DeviceType.BIKE_COMPUTER,
     ),
     (
@@ -233,9 +246,17 @@ _DEVICE_TYPE_TERMS: Final[tuple[tuple[tuple[str, ...], DeviceType], ...]] = (
             "instinct",
             "vivoactive",
             "apple watch",
-            "coros",
-            "polar",
-            "suunto",
+            "pace",
+            "apex",
+            "vertix",
+            "vantage",
+            "grit",
+            "pacer",
+            "ignite",
+            "suunto 5",
+            "suunto 9",
+            "suunto race",
+            "suunto vertical",
         ),
         DeviceType.WATCH,
     ),
