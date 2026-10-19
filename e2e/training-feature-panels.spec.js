@@ -50,6 +50,28 @@ test("@responsive chart readings keep their coordinates and legible labels", asy
   expect(result).toEqual({ currentLines: 0, dotsOnPath: true, labelCentered: true, labelAboveBar: 10, halo: "stroke" });
 });
 
+test("@responsive training focus legend labels never overlap for lopsided shares", async ({ page }) => {
+  await page.goto("/#analysis/performance");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const overlaps = await page.evaluate(() => {
+    const measure = (loads) => {
+      const categories = [["low_aerobic", "Leicht aerob"], ["high_aerobic", "Hoch aerob"], ["anaerobic", "Anaerob"]];
+      const report = { classified_sessions: 3, categories: Object.fromEntries(categories.map(([key], index) => [key, { load: loads[index] }])) };
+      const root = document.createElement("div");
+      document.querySelector("#analysisHistoryCharts").replaceChildren(root);
+      appendTrainingFocusShare(report, categories, root);
+      const legend = root.querySelector(".training-focus-legend");
+      const boxes = [...legend.querySelectorAll("li")].map((item) => item.getBoundingClientRect());
+      const collisions = boxes.slice(1).filter((box, index) => box.left < boxes[index].right - 0.5).length;
+      return { collisions, proportional: legend.style.gridTemplateColumns !== "" };
+    };
+    return { lopsided: measure([95, 0, 5]), tiny: measure([99, 0.5, 0.5]), balanced: measure([40, 35, 25]) };
+  });
+  expect(overlaps.lopsided).toEqual({ collisions: 0, proportional: false });
+  expect(overlaps.tiny).toEqual({ collisions: 0, proportional: false });
+  expect(overlaps.balanced).toEqual({ collisions: 0, proportional: true });
+});
+
 test("@responsive recovery, power, training focus, season and calendar profiles show local facts", async ({ page, request }) => {
   test.setTimeout(120000);
   const seed = await request.get("/api/fixture/features");
