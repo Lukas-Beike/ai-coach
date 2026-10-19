@@ -526,6 +526,11 @@ function makeAnalysisSectionCollapsible(section, key) {
   return section;
 }
 
+function rememberAnalysisSectionState(...roots) {
+  // The toggle event fires asynchronously, so a render right after a click must read the live state.
+  for (const root of roots) root.querySelectorAll("details[data-analysis-section]").forEach((details) => analysisSectionState.set(details.dataset.analysisSection, details.open));
+}
+
 function analysisChartGroup(title, charts, series, note) {
   const group = reportNode("section", null, "analysis-chart-card analysis-chart-stack");
   const heading = reportNode("h3");
@@ -669,6 +674,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   renderBodyAnalysis(history?.body);
   const openDetails = new Set([...root.querySelectorAll("details[open]"), ...loadRoot.querySelectorAll("details[open]"), ...enduranceRoot.querySelectorAll("details[open]")].map((details) => `${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`));
   const periodRoot = document.getElementById("analysisLoadPeriod");
+  rememberAnalysisSectionState(root, loadRoot, enduranceRoot);
   root.replaceChildren(); loadRoot.replaceChildren(); enduranceRoot.replaceChildren(); periodRoot.replaceChildren();
   if (!history?.start || !history?.end) {
     // Without a history window there are no charts, so no empty sport groups; the async tables stay attached.

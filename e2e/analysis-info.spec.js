@@ -64,6 +64,17 @@ test("@responsive standard demo shows one compact race table and sport-specific 
   await page.evaluate(() => renderAnalysisHistory(state.data.performance.history));
   await expect(cycling.locator("svg").first()).toBeHidden();
   await cycling.locator(":scope > summary").click();
+  // A render in the same task as the click runs before the asynchronous toggle event.
+  for (const key of ["development-Rad", "current-performance"]) {
+    await page.evaluate((key) => {
+      document.querySelector(`[data-analysis-section='${key}'] > summary`).click();
+      if (key === "current-performance") renderCurrentPerformance(state.data.performance?.metrics || {}, state.data.performance?.history);
+      else renderAnalysisHistory(state.data.performance.history);
+    }, key);
+    await expect(page.locator(`[data-analysis-section='${key}']`)).not.toHaveAttribute("open", "");
+    await page.locator(`[data-analysis-section='${key}'] > summary`).click();
+    await expect(page.locator(`[data-analysis-section='${key}']`)).toHaveAttribute("open", "");
+  }
   expect((await new AxeBuilder({ page }).include("#dataPanel").analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
