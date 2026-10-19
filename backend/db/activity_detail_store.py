@@ -41,6 +41,7 @@ from backend.canonical.vocabulary import (
     LapKind,
     LapSource,
     ProviderId,
+    ProviderRecordState,
     RecordingOrigin,
     SourceKind,
     StreamChannel,
@@ -245,6 +246,75 @@ def detail_sets_for_session(db: Any, activity_id: str) -> list[StoredDetailSet]:
     )
 
 
+def activity_detail_backfill_universe(
+    db: Any, provider: str, *, since: datetime
+) -> list[str]:
+    """Return ids of active records of ``provider`` recorded since ``since``.
+
+    The backfill uses this window universe to prune its empty-marker map.
+    """
+    return [
+        row["provider_activity_id"]
+        for row in db.execute(
+            "SELECT DISTINCT provider_activity_id FROM activity_records "
+            "WHERE provider = ? AND state = ? AND julianday(started_at) >= julianday(?)",
+            (provider, ActivityRecordState.ACTIVE.value, since.isoformat()),
+        ).fetchall()
+    ]
+
+
+def activity_detail_backfill_candidates(
+    db: Any,
+    provider: str,
+    record_kind: str,
+    *,
+    since: datetime,
+    limit: int,
+) -> list[dict[str, str]]:
+    """Return recent records whose details are missing or outdated, newest first.
+
+    A record qualifies when it is an active, non-manual record of a live session
+    and either has no detail set or only sets whose known summary hash differs
+    from the current active raw record. Once one kind was fetched for the current
+    summary, kinds Garmin no longer returns do not make the record a candidate
+    again, so the backfill does not refetch it on every sync. A set without a
+    known hash counts as current. ``started_at`` and ``since`` are compared
+    as instants (julianday), so stored UTC offsets order correctly. Each row
+    carries the current summary hash, which is stored with any fetched details.
+    """
+    rows = db.execute(
+        "SELECT r.provider_activity_id, r.recorded_by, p.payload_hash AS summary_sha256 "
+        "FROM activity_records AS r "
+        "JOIN provider_records AS p ON p.provider = r.provider "
+        "AND p.record_kind = ? AND p.source_record_id = r.provider_activity_id AND p.state = ? "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id AND s.state <> ? "
+        "WHERE r.provider = ? AND r.state = ? AND r.recorded_by <> ? "
+        "AND julianday(r.started_at) >= julianday(?) "
+        "AND NOT EXISTS (SELECT 1 FROM activity_detail_sets AS d "
+        "WHERE d.provider = r.provider AND d.provider_activity_id = r.provider_activity_id "
+        "AND (d.summary_sha256 IS NULL OR d.summary_sha256 = p.payload_hash)) "
+        "ORDER BY julianday(r.started_at) DESC, r.provider_activity_id LIMIT ?",
+        (
+            record_kind,
+            ProviderRecordState.ACTIVE.value,
+            ActivitySessionState.DELETED.value,
+            provider,
+            ActivityRecordState.ACTIVE.value,
+            RecordingOrigin.MANUAL.value,
+            since.isoformat(),
+            limit,
+        ),
+    ).fetchall()
+    return [
+        {
+            "provider_activity_id": row["provider_activity_id"],
+            "recorded_by": row["recorded_by"],
+            "summary_sha256": row["summary_sha256"],
+        }
+        for row in rows
+    ]
+
+
 def remove_detail_sets(
     db: Any,
     provider: str,
@@ -339,7 +409,9 @@ def analysis_rows_for(
     db: Any, activity_ids: Iterable[str]
 ) -> dict[str, dict[str, Any]]:
     """Return stored analyses of sessions that are not deleted, keyed by session id."""
-    ids = list(dict.fromkeys(activity_id for activity_id in activity_ids if activity_id))
+    ids = list(
+        dict.fromkeys(activity_id for activity_id in activity_ids if activity_id)
+    )
     rows: dict[str, dict[str, Any]] = {}
     for start in range(0, len(ids), 500):
         chunk = ids[start : start + 500]

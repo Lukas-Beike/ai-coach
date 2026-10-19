@@ -217,6 +217,7 @@ class GarminAssembly:
                 self._logger,
             ),
             metric_export=self._metric_export,
+            activity_detail_backfill=self.activity_detail_service().backfill,
         )
 
     def activity_detail_service(self) -> GarminActivityDetailService:
@@ -236,6 +237,8 @@ class GarminAssembly:
             configured=lambda: fixture_loader.path() is None and reader.configured(),
             guard=lambda: _non_blocking_garmin_guard(coordination),
             utc_now=self._utc_now,
+            key_values=self._key_values,
+            capability_allowed=self.sync_state_service().capability_allowed,
         )
 
     def _sync_coordination(self) -> GarminSyncCoordination:
