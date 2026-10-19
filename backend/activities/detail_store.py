@@ -16,6 +16,14 @@ from backend.providers.intervals_performance_fields import (
 
 # A separate key keeps failures out of the `activity_detail:%` detail scans.
 _FAILURE = "activity_detail_failure"
+_RECORD_PREFIX = "activity_detail:"
+
+
+def _json_or_none(raw: str) -> Any:
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
 
 
 def summary_fingerprint(activity: dict[str, Any]) -> str:
@@ -51,21 +59,23 @@ class ActivityDetailStore:
         return value if isinstance(value, dict) else None
 
     def save(self, activity_id: str, value: dict[str, Any]) -> None:
+        with self._database_manager.unit_of_work() as db:
+            self.save_in(db, activity_id, value)
+
+    def save_in(self, db: Any, activity_id: str, value: dict[str, Any]) -> None:
+        """Write the record inside the caller's unit of work."""
         value = {
             **value,
             "calendar_profile": recorded_profile(value.get("activity") or {}),
         }
         payload = json.dumps(value, ensure_ascii=False, allow_nan=False)
-        with self._database_manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
-                "updated_at=excluded.updated_at",
-                (self._key(activity_id), payload, value["observed_at"]),
-            )
-            db.execute(
-                "DELETE FROM kv WHERE key=?", (self._key(activity_id, _FAILURE),)
-            )
+        db.execute(
+            "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+            "updated_at=excluded.updated_at",
+            (self._key(activity_id), payload, value["observed_at"]),
+        )
+        db.execute("DELETE FROM kv WHERE key=?", (self._key(activity_id, _FAILURE),))
 
     def save_failure(
         self, activity_id: str, summary_sha256: str, message: str, observed_at: str
@@ -110,6 +120,21 @@ class ActivityDetailStore:
             if isinstance(value, dict):
                 result[keys[row["key"]]] = value
         return result
+
+    @staticmethod
+    def records_after(db: Any, after_key: str, limit: int) -> list[tuple[str, Any]]:
+        """Return up to ``limit`` stored detail records after a kv key, in key order.
+
+        Only ``activity_detail:`` keys are read, never the failure notes. The prefix
+        is compared exactly: LIKE would treat ``_`` as a wildcard. A value that is
+        not JSON comes back as None, so the caller counts it and moves on.
+        """
+        rows = db.execute(
+            "SELECT key, value FROM kv WHERE substr(key, 1, ?) = ? "
+            "AND key > ? ORDER BY key LIMIT ?",
+            (len(_RECORD_PREFIX), _RECORD_PREFIX, after_key, limit),
+        ).fetchall()
+        return [(row["key"], _json_or_none(row["value"])) for row in rows]
 
     def calendar_profiles(self) -> dict[str, dict[str, Any]]:
         with self._database_manager.reader() as db:
