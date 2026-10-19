@@ -5,6 +5,7 @@ no binary fixtures are read.
 """
 
 import random
+import struct
 import unittest
 from datetime import UTC, datetime
 from unittest import mock
@@ -316,6 +317,20 @@ class FitActivityDetailMappingTests(unittest.TestCase):
         result = _map(_fit(records=[_record(1000, hr=120, power=200)]))
         self.assertEqual(result.records, ())
         self.assertEqual(result.issues, ())
+
+    def test_field_with_mismatched_width_does_not_discard_the_records(self):
+        # Field 200 is a uint16 declared three bytes wide, kept as bytes.
+        definition = bytes(
+            [0x40, 0, 0, 20, 0, 3, 253, 4, 0x86, 3, 1, 0x02, 200, 3, 0x84]
+        )
+        records = b"".join(
+            bytes([0]) + struct.pack("<I", stamp) + bytes([hr, 1, 2, 3])
+            for stamp, hr in ((1000, 100), (1001, 101))
+        )
+        builder = fit_builder.FitBuilder().raw(definition + records)
+        result = _map(builder.build())
+        self.assertEqual(result.issues, ())
+        self.assertIn(StreamChannel.HEART_RATE_BPM, _channels(result))
 
     def test_record_only_file_gives_streams_and_no_laps(self):
         result = _map(_fit(records=[_record(1000, hr=100), _record(1001, hr=101)]))

@@ -194,6 +194,18 @@ class FitFileFramingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported FIT base type"):
             fit_messages(builder.build())
 
+    def test_field_width_not_matching_its_base_type_is_kept_as_bytes(self):
+        # Field 200 is a uint16 declared three bytes wide.
+        definition = bytes(
+            [0x40, 0, 0, 20, 0, 3, 253, 4, 0x86, 3, 1, 0x02, 200, 3, 0x84]
+        )
+        record = bytes([0]) + struct.pack("<I", 1000) + bytes([120, 1, 2, 3])
+        builder = FitBuilder().raw(definition + record)
+        self.assertEqual(
+            fit_messages(builder.build()),
+            [(20, {253: 1000, 3: 120, 200: b"\x01\x02\x03"})],
+        )
+
     def test_message_count_is_bounded(self):
         builder = FitBuilder().define(0, 20, [(3, UINT8)])
         for value in range(3):

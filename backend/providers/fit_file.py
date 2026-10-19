@@ -198,7 +198,10 @@ def _fit_decode_values(
     raw: bytes, base_type: int, architecture: int, size: int
 ) -> object:
     if len(raw) % size:
-        raise ValueError("Invalid FIT field size")
+        # A width that does not fit the base type (for example a newer profile
+        # extension) is kept as bytes, as in the FIT SDK, so the rest of the file
+        # still decodes.
+        return raw
     fmt = _FIT_BASE_TYPE_FORMATS.get(base_type)
     if not fmt:
         raise ValueError(_UNSUPPORTED_FIT_BASE_TYPE)
