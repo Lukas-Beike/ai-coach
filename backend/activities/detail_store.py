@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.activities.detail_projection import detailed_activity
 from backend.activities.workout_profile import recorded_profile
+from backend.providers.intervals_activity_keys import LACTATE_THRESHOLD_HR
 from backend.providers.intervals_performance_fields import (
     HEART_RATE_ZONE_TIMES,
     ZONE_TIMES,
@@ -28,9 +29,16 @@ def _json_or_none(raw: str) -> Any:
 
 def summary_fingerprint(activity: dict[str, Any]) -> str:
     summary = detailed_activity(activity)
-    # Recorded zone times were added to the projection later; excluding them
-    # keeps fingerprints of already stored detail records valid.
-    for key in ("streams", "laps", HEART_RATE_ZONE_TIMES, ZONE_TIMES):
+    # Recorded zone times and the threshold heart rate were added to the
+    # projection later; excluding them keeps fingerprints of already stored
+    # detail records valid.
+    for key in (
+        "streams",
+        "laps",
+        HEART_RATE_ZONE_TIMES,
+        ZONE_TIMES,
+        LACTATE_THRESHOLD_HR,
+    ):
         summary.pop(key, None)
     return hashlib.sha256(
         json.dumps(summary, sort_keys=True, allow_nan=False).encode()

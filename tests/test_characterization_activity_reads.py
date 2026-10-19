@@ -445,6 +445,13 @@ class ActivitySummaryFingerprintTests(unittest.TestCase):
             summary_fingerprint(BASE_SUMMARY), summary_fingerprint(with_zones)
         )
 
+    def test_fingerprint_ignores_threshold_heart_rate(self) -> None:
+        # The compact calendar rows carry no threshold, so it must not count.
+        self.assertEqual(
+            summary_fingerprint(BASE_SUMMARY),
+            summary_fingerprint({**BASE_SUMMARY, "lthr": 168}),
+        )
+
     def test_fingerprint_ignores_streams_and_laps(self) -> None:
         with_detail = {
             **BASE_SUMMARY,
