@@ -905,7 +905,7 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .planned-day-heading time span { display: block; margin-top: 3px; }
 .planned-today-label { color: var(--accent-bright); font-size: .7rem; font-weight: 750; }
 .planned-day-weather { margin-top: 5px; color: var(--muted); font-size: .68rem; line-height: 1.5; }
-.planned-day-flag { color: var(--muted); font-size: .68rem; line-height: 1.5; white-space: nowrap; }
+.planned-day-flag { max-width: 100%; color: var(--muted); font-size: .68rem; line-height: 1.5; overflow-wrap: anywhere; }
 .planned-day-content { min-width: 0; grid-column: 2; }
 .planned-weather-hint { margin: 0 0 12px; padding: 8px 12px; border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--subtle); font-size: .7rem; line-height: 1.5; text-align: center; }
 .planned-day-form { margin: 0 0 4px; color: var(--muted); font-size: .68rem; line-height: 1.5; overflow-wrap: anywhere; }
