@@ -369,7 +369,8 @@ async function api(path, options = {}) {
     if (generation === state.sessionGeneration) showLogin();
   });
   if (generation !== state.sessionGeneration) throw new DOMException("Session ended", "AbortError");
-  renderConnectivityStatus(true);
+  // A response clears a server-unreachable notice; while the browser reports offline the notice stays.
+  renderConnectivityStatus();
   return result;
 }
 
