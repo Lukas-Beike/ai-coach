@@ -80,8 +80,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_four(self) -> None:
-        self.assertEqual(4, MAPPER_VERSION)
+    def test_mapper_version_is_five(self) -> None:
+        self.assertEqual(5, MAPPER_VERSION)
 
     def test_fixture_maps_every_record_without_issues(self) -> None:
         result = _map(*_fixture_rows())
@@ -702,6 +702,52 @@ class TrainingLoadAndPowerTests(unittest.TestCase):
                     (MappingIssue("910009", "avgPower", IssueReason.OUT_OF_RANGE),),
                     issues,
                 )
+
+
+class ExtremesTests(unittest.TestCase):
+    def test_maximum_speed_power_and_steps_are_mapped(self) -> None:
+        record, issues = _one(maxSpeed=7.5, maxPower=1100, steps=12000)
+
+        assert record is not None
+        self.assertEqual((), issues)
+        self.assertEqual(7.5, record.max_speed_mps)
+        self.assertEqual(1100.0, record.max_power_w)
+        self.assertEqual(12000.0, record.steps)
+        self.assertIsNone(record.device_type)
+
+    def test_absent_extremes_are_none_without_issues(self) -> None:
+        record, issues = _one()
+
+        assert record is not None
+        self.assertIsNone(record.max_speed_mps)
+        self.assertIsNone(record.max_power_w)
+        self.assertIsNone(record.steps)
+        self.assertEqual((), issues)
+
+    def test_bounds_are_inclusive(self) -> None:
+        record, issues = _one(maxSpeed=100.0, maxPower=5000, steps=1_000_000)
+
+        assert record is not None
+        self.assertEqual((), issues)
+        self.assertEqual(100.0, record.max_speed_mps)
+        self.assertEqual(5000.0, record.max_power_w)
+        self.assertEqual(1_000_000.0, record.steps)
+
+    def test_out_of_range_or_invalid_extremes_become_none_with_issue(self) -> None:
+        cases = (
+            ("maxSpeed", "max_speed_mps", 100.5, IssueReason.OUT_OF_RANGE),
+            ("maxSpeed", "max_speed_mps", "fast", IssueReason.INVALID_NUMBER),
+            ("maxPower", "max_power_w", 5001, IssueReason.OUT_OF_RANGE),
+            ("steps", "steps", -1, IssueReason.OUT_OF_RANGE),
+            ("steps", "steps", 1_000_001, IssueReason.OUT_OF_RANGE),
+        )
+        for field, attribute, value, reason in cases:
+            with self.subTest(field=field, value=value):
+                record, issues = _one(**{field: value})
+
+                assert record is not None
+                self.assertIsNone(getattr(record, attribute))
+                self.assertEqual((MappingIssue("910009", field, reason),), issues)
 
 
 class NameTests(unittest.TestCase):

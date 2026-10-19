@@ -7,6 +7,7 @@ account, network, real data directory or encryption key is involved.
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -22,6 +23,7 @@ from backend.canonical.records import (
     Provenance,
 )
 from backend.canonical.vocabulary import (
+    DeviceType,
     Environment,
     LoadModel,
     MetricKind,
@@ -764,6 +766,72 @@ class ActivityMetricStoreTests(StoreFixture):
         self.assertEqual(
             61.0, canonical_store.activity_elapsed_duration('{"elapsed_duration_s":61}')
         )
+
+    def test_extremes_and_device_type_round_trip_through_the_details(self) -> None:
+        def write(record: ActivityRecord) -> WriteOutcome:
+            return canonical_store.upsert_activity_record(
+                self.db,
+                record,
+                local_date=date(2026, 6, 1),
+                mapper_version=5,
+                fetched_at=STAMP,
+                now=STAMP,
+            )
+
+        record = replace(
+            activity("walk-1"),
+            max_speed_mps=7.5,
+            max_power_w=1100.0,
+            min_hr=52.0,
+            elevation_high_m=812.0,
+            elevation_low_m=-3.0,
+            steps=12000.0,
+            device_type=DeviceType.WATCH,
+        )
+        self.assertIs(WriteOutcome.WRITTEN, write(record))
+        self.assertIs(WriteOutcome.UNCHANGED, write(record))
+        details = self.one("SELECT details FROM activity_records")[0]
+        self.assertEqual(
+            {
+                "device_type",
+                "elevation_high_m",
+                "elevation_low_m",
+                "max_power_w",
+                "max_speed_mps",
+                "min_hr",
+                "steps",
+            },
+            set(json.loads(details)),
+        )
+        row = canonical_store.active_activity_rows(self.db)[0]
+        details = row["details"]
+        self.assertEqual(7.5, canonical_store.activity_max_speed(details))
+        self.assertEqual(1100.0, canonical_store.activity_max_power(details))
+        self.assertEqual(52.0, canonical_store.activity_min_hr(details))
+        self.assertEqual(812.0, canonical_store.activity_elevation_high(details))
+        self.assertEqual(-3.0, canonical_store.activity_elevation_low(details))
+        self.assertEqual(12000.0, canonical_store.activity_steps(details))
+        self.assertIs(DeviceType.WATCH, canonical_store.activity_device_type(details))
+
+        self.assertIs(WriteOutcome.UPDATED, write(activity("walk-1")))
+        self.assertEqual(
+            canonical_store.ACTIVITY_DETAILS,
+            self.one("SELECT details FROM activity_records")[0],
+        )
+
+    def test_unreadable_extremes_and_device_type_are_none(self) -> None:
+        for details in (
+            None,
+            "{",
+            '{"device_type":"tablet"}',
+            '{"device_type":5}',
+            '{"max_speed_mps":"7"}',
+            '{"steps":true}',
+        ):
+            with self.subTest(details=details):
+                self.assertIsNone(canonical_store.activity_device_type(details))
+                self.assertIsNone(canonical_store.activity_max_speed(details))
+                self.assertIsNone(canonical_store.activity_steps(details))
 
 
 if __name__ == "__main__":

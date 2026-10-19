@@ -34,6 +34,15 @@ class RecordingOrigin(StrEnum):
     UNKNOWN = "unknown"
 
 
+class DeviceType(StrEnum):
+    """The device class that recorded the activity."""
+
+    WATCH = "watch"
+    BIKE_COMPUTER = "bike_computer"
+    CHEST_STRAP = "chest_strap"
+    POWER_METER = "power_meter"
+
+
 class Sport(StrEnum):
     RIDE = "ride"
     RUN = "run"

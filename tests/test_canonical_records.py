@@ -27,6 +27,7 @@ from backend.canonical.validation import (
     validate_metric_value,
 )
 from backend.canonical.vocabulary import (
+    DeviceType,
     Environment,
     LoadModel,
     MetricKind,
@@ -325,6 +326,58 @@ class ActivityRecordTests(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, "max_hr must be between 20 and 250"),
             ):
                 activity(max_hr=max_hr)
+
+    def test_extremes_are_optional_and_bounded(self) -> None:
+        record = activity()
+        self.assertIsNone(record.max_speed_mps)
+        self.assertIsNone(record.steps)
+        self.assertIsNone(record.device_type)
+
+        full = activity(
+            max_speed_mps=100.0,
+            max_power_w=5000.0,
+            min_hr=20.0,
+            elevation_high_m=9000.0,
+            elevation_low_m=-500.0,
+            steps=1_000_000.0,
+        )
+        self.assertEqual(100.0, full.max_speed_mps)
+        self.assertEqual(5000.0, full.max_power_w)
+        self.assertEqual(20.0, full.min_hr)
+        self.assertEqual(9000.0, full.elevation_high_m)
+        self.assertEqual(-500.0, full.elevation_low_m)
+        self.assertEqual(1_000_000.0, full.steps)
+
+        cases = (
+            ("max_speed_mps", 100.5),
+            ("max_speed_mps", -1.0),
+            ("max_power_w", 5001.0),
+            ("min_hr", 19.0),
+            ("elevation_high_m", 9001.0),
+            ("elevation_low_m", -501.0),
+            ("steps", -1.0),
+            ("steps", 1_000_001.0),
+        )
+        for field, value in cases:
+            with (
+                self.subTest(field=field, value=value),
+                self.assertRaisesRegex(ValueError, f"{field} must be between"),
+            ):
+                activity(**{field: value})
+
+    def test_elevation_low_must_not_exceed_high(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError, "elevation_low_m must not exceed elevation_high_m"
+        ):
+            activity(elevation_high_m=100.0, elevation_low_m=101.0)
+        same = activity(elevation_high_m=100.0, elevation_low_m=100.0)
+        self.assertEqual(100.0, same.elevation_low_m)
+
+    def test_device_type_must_be_a_device_type(self) -> None:
+        record = activity(device_type=DeviceType.BIKE_COMPUTER)
+        self.assertIs(DeviceType.BIKE_COMPUTER, record.device_type)
+        with self.assertRaisesRegex(TypeError, "device_type"):
+            activity(device_type="watch")
 
     def test_requires_timezone_aware_start(self) -> None:
         with self.assertRaisesRegex(ValueError, "started_at must be"):
