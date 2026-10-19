@@ -191,9 +191,10 @@ class _Base(unittest.TestCase):
             capability_allowed=allowed or (lambda _capability: True),
         )
 
-    def state(self) -> dict[str, Any]:
-        raw = self.key_values.values.get(BACKFILL_STATE_KEY)
-        return json.loads(raw) if raw else {}
+
+def _stored_state(key_values: Any) -> dict[str, Any]:
+    raw = key_values.values.get(BACKFILL_STATE_KEY)
+    return json.loads(raw) if raw else {}
 
 
 class BackfillCandidateTests(_Base):
@@ -328,7 +329,8 @@ class BackfillBatchTests(_Base):
         self.assertEqual(first["empty"], 1)
         self.assertEqual(first["status"], "completed")
         self.assertEqual(
-            self.state()["empty"], {"1001": _summary_hash(self.manager, "1001")}
+            _stored_state(self.key_values)["empty"],
+            {"1001": _summary_hash(self.manager, "1001")},
         )
         self.assertEqual(second["status"], "completed")
         self.assertEqual(second_reader.calls, [])
@@ -386,7 +388,7 @@ class BackfillBatchTests(_Base):
         self.assertTrue(reader.closed)
         self.assertEqual(_stored_kinds(self.manager, "1001")[0], "heart_rate_zones")
         self.assertEqual(_stored_kinds(self.manager, "1002"), [])
-        paused = datetime.fromisoformat(self.state()["paused_until"])
+        paused = datetime.fromisoformat(_stored_state(self.key_values)["paused_until"])
         self.assertEqual(paused, NOW_AT + BACKFILL_RATE_LIMIT_PAUSE)
 
     def test_rate_limit_exception_pauses_without_failing(self) -> None:
@@ -399,7 +401,7 @@ class BackfillBatchTests(_Base):
         self.assertEqual(result["fetched"], 0)
         self.assertTrue(reader.closed)
         self.assertEqual(
-            datetime.fromisoformat(self.state()["paused_until"]),
+            datetime.fromisoformat(_stored_state(self.key_values)["paused_until"]),
             NOW_AT + BACKFILL_RATE_LIMIT_PAUSE,
         )
 
@@ -417,7 +419,8 @@ class BackfillBatchTests(_Base):
         self.assertEqual(paused["remaining"], 1)
         self.assertEqual(reader.calls, [])
         self.assertEqual(
-            datetime.fromisoformat(self.state()["paused_until"]), paused_until
+            datetime.fromisoformat(_stored_state(self.key_values)["paused_until"]),
+            paused_until,
         )
 
         self.now = (NOW_AT + timedelta(hours=2)).isoformat()
@@ -425,7 +428,7 @@ class BackfillBatchTests(_Base):
 
         self.assertEqual(resumed["status"], "completed")
         self.assertEqual(resumed["fetched"], 1)
-        self.assertNotIn("paused_until", self.state())
+        self.assertNotIn("paused_until", _stored_state(self.key_values))
 
     def test_unavailable_detail_capability_gives_no_remote_call(self) -> None:
         _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
@@ -458,7 +461,7 @@ class BackfillBatchTests(_Base):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["empty"], 0)
         self.assertEqual(reader.fetched, ["1001"])
-        self.assertEqual(self.state().get("empty", {}), {})
+        self.assertEqual(_stored_state(self.key_values).get("empty", {}), {})
         self.assertEqual(_stored_kinds(self.manager, "1001"), [])
 
     def test_unexpected_error_is_logged_by_type_only(self) -> None:
@@ -654,7 +657,7 @@ class BackfillReaderLifecycleTests(_Base):
         self.assertEqual(result["status"], "rate_limited")
         self.assertEqual(collector.call_count, 1)
         self.assertEqual(
-            datetime.fromisoformat(self.state()["paused_until"]),
+            datetime.fromisoformat(_stored_state(self.key_values)["paused_until"]),
             NOW_AT + BACKFILL_RATE_LIMIT_PAUSE,
         )
         self.tokens.write_back.assert_called_once()

@@ -64,6 +64,15 @@ class _BackfillState:
     empty: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass
+class _BatchOutcome:
+    status: str = "completed"
+    fetched: int = 0
+    marked: int = 0
+    skipped: int = 0
+    paused_until: datetime | None = None
+
+
 class GarminActivityDetailService:
     """Fetch Garmin activity detail sets on demand or in small batches; never remove sets."""
 
@@ -156,8 +165,34 @@ class GarminActivityDetailService:
         if self._key_values is None or self._capability_allowed is None:
             raise RuntimeError("Garmin activity detail backfill is not composed.")
         now = _aware(self._utc_now())
-        since = now - BACKFILL_WINDOW
         state = self._load_backfill_state()
+        pending, empty = self._pending_candidates(state, since=now - BACKFILL_WINDOW)
+        paused_until = state.paused_until
+        if paused_until is not None and paused_until <= now:
+            paused_until = None
+        if paused_until is not None or not self._detail_capabilities_allowed():
+            self._save_backfill_state(paused_until=paused_until, empty=empty)
+            return _backfill_result("paused", remaining=len(pending))
+        batch = pending[:BACKFILL_BATCH_SIZE]
+        if not batch:
+            self._save_backfill_state(paused_until=None, empty=empty)
+            return _backfill_result("completed")
+
+        outcome = self._fetch_batch(batch, empty, cancel_event)
+        if outcome.status == "completed" and _is_set(cancel_event):
+            outcome.status = "cancelled"
+        self._save_backfill_state(paused_until=outcome.paused_until, empty=empty)
+        return _backfill_result(
+            outcome.status,
+            fetched=outcome.fetched,
+            empty=outcome.marked,
+            remaining=len(pending) - outcome.fetched - outcome.marked - outcome.skipped,
+        )
+
+    def _pending_candidates(
+        self, state: _BackfillState, *, since: datetime
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        """Return window candidates without a matching empty mark, and the window's marks."""
         with self._database_manager.reader() as db:
             universe = activity_detail_backfill_universe(db, GARMIN_ID, since=since)
             # The limit covers every window record, so marks for empty activities
@@ -180,65 +215,44 @@ class GarminActivityDetailService:
             for item in candidates
             if empty.get(item["provider_activity_id"]) != item["summary_sha256"]
         ]
-        paused_until = state.paused_until
-        if paused_until is not None and paused_until <= now:
-            paused_until = None
-        if paused_until is not None or not self._detail_capabilities_allowed():
-            self._save_backfill_state(paused_until=paused_until, empty=empty)
-            return _backfill_result("paused", remaining=len(pending))
-        batch = pending[:BACKFILL_BATCH_SIZE]
-        if not batch:
-            self._save_backfill_state(paused_until=None, empty=empty)
-            return _backfill_result("completed")
+        return pending, empty
 
+    def _fetch_batch(
+        self,
+        batch: list[dict[str, Any]],
+        empty: dict[str, str],
+        cancel_event: threading.Event | None,
+    ) -> _BatchOutcome:
+        """Fetch and store one batch; ``empty`` gains marks for activities without details."""
         by_id = {item["provider_activity_id"]: item for item in batch}
-        fetched = marked = skipped = 0
-        status = "completed"
+        outcome = _BatchOutcome()
         details = self._reader.fetch_activity_details(
             list(by_id), cancel_event=cancel_event
         )
         try:
             for provider_activity_id, collected in details:
-                candidate = by_id[provider_activity_id]
-                observed = self._utc_now()
-                mapped = _map_collected(
+                if not self._store_collected(
+                    provider_activity_id,
                     collected,
-                    recorded_by=_recorded_by(candidate["recorded_by"]),
-                    now=observed,
-                )
-                if collected.get("rate_limited"):
-                    # Keep the parts that arrived, then stop until the pause ends.
-                    if mapped.records and self._store_records(
-                        provider_activity_id, mapped, now=observed
-                    ):
-                        fetched += 1
-                    paused_until = _aware(observed) + BACKFILL_RATE_LIMIT_PAUSE
-                    status = "rate_limited"
+                    by_id[provider_activity_id],
+                    empty,
+                    outcome,
+                ):
                     break
-                if mapped.records:
-                    if self._store_records(provider_activity_id, mapped, now=observed):
-                        fetched += 1
-                    else:
-                        skipped += 1
-                elif collected.get("errors"):
-                    # Nothing is marked, so a later sync retries this activity.
-                    status = "failed"
-                    break
-                else:
-                    empty[provider_activity_id] = candidate["summary_sha256"]
-                    marked += 1
                 if not self._detail_capabilities_allowed():
-                    status = "paused"
+                    outcome.status = "paused"
                     break
                 if _is_set(cancel_event):
-                    status = "cancelled"
+                    outcome.status = "cancelled"
                     break
         except Exception as error:  # noqa: BLE001 - backfill errors are logged by type and never stop the sync
             if sync_job_error_class(error) == "rate_limited":
-                paused_until = _aware(self._utc_now()) + BACKFILL_RATE_LIMIT_PAUSE
-                status = "rate_limited"
+                outcome.paused_until = (
+                    _aware(self._utc_now()) + BACKFILL_RATE_LIMIT_PAUSE
+                )
+                outcome.status = "rate_limited"
             else:
-                status = "failed"
+                outcome.status = "failed"
                 _LOGGER.warning(
                     "garmin activity detail backfill stopped after an error",
                     extra={
@@ -249,15 +263,45 @@ class GarminActivityDetailService:
         finally:
             # Closing the generator persists the Garmin tokens on early stop.
             details.close()
-        if status == "completed" and _is_set(cancel_event):
-            status = "cancelled"
-        self._save_backfill_state(paused_until=paused_until, empty=empty)
-        return _backfill_result(
-            status,
-            fetched=fetched,
-            empty=marked,
-            remaining=len(pending) - fetched - marked - skipped,
+        return outcome
+
+    def _store_collected(
+        self,
+        provider_activity_id: str,
+        collected: dict[str, Any],
+        candidate: dict[str, Any],
+        empty: dict[str, str],
+        outcome: _BatchOutcome,
+    ) -> bool:
+        """Store one fetched activity; False when the batch must stop."""
+        observed = self._utc_now()
+        mapped = _map_collected(
+            collected,
+            recorded_by=_recorded_by(candidate["recorded_by"]),
+            now=observed,
         )
+        if collected.get("rate_limited"):
+            # Keep the parts that arrived, then stop until the pause ends.
+            if mapped.records and self._store_records(
+                provider_activity_id, mapped, now=observed
+            ):
+                outcome.fetched += 1
+            outcome.paused_until = _aware(observed) + BACKFILL_RATE_LIMIT_PAUSE
+            outcome.status = "rate_limited"
+            return False
+        if mapped.records:
+            if self._store_records(provider_activity_id, mapped, now=observed):
+                outcome.fetched += 1
+            else:
+                outcome.skipped += 1
+        elif collected.get("errors"):
+            # Nothing is marked, so a later sync retries this activity.
+            outcome.status = "failed"
+            return False
+        else:
+            empty[provider_activity_id] = candidate["summary_sha256"]
+            outcome.marked += 1
+        return True
 
     def _store_records(
         self, provider_activity_id: str, mapped: MappingResult[Any], *, now: str
