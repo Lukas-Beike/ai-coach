@@ -468,6 +468,45 @@ class BackfillBatchTests(_Base):
         self.assertEqual(_stored_state(self.key_values)["empty"], {})
         self.assertEqual(_candidate_ids(self.manager), ["1001"])
 
+    def test_failing_activity_stops_holding_back_older_ones(self) -> None:
+        _seed(
+            self.manager,
+            [("1002", "2026-10-02 07:00:00"), ("1001", "2026-10-01 07:00:00")],
+        )
+        summary = _summary_hash(self.manager, "1002")
+        failed = {
+            "activity_id": "1002",
+            "errors": [{"source": "activity_details", "message": "synthetic"}],
+        }
+        for _attempt in range(BACKFILL_RETRY_ATTEMPTS):
+            reader = _Details({"1002": failed, "1001": _payload("1001")})
+            result = self.service(reader).backfill()
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(reader.fetched, ["1002"])
+
+        reader = _Details({"1002": failed, "1001": _payload("1001")})
+        result = self.service(reader).backfill()
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(reader.fetched, ["1001"])
+        self.assertEqual(
+            _stored_state(self.key_values)["retry"],
+            {"1002": [summary, BACKFILL_RETRY_ATTEMPTS]},
+        )
+
+    def test_rate_limit_without_stored_parts_is_not_an_attempt(self) -> None:
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+        limited = {
+            "activity_id": "1001",
+            "errors": [{"source": "activity_details", "message": "synthetic"}],
+            "rate_limited": True,
+        }
+
+        result = self.service(_Details({"1001": limited})).backfill()
+
+        self.assertEqual(result["status"], "rate_limited")
+        self.assertNotIn("retry", _stored_state(self.key_values))
+
     def test_partial_fetch_retries_are_bounded_per_summary(self) -> None:
         _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
         summary = _summary_hash(self.manager, "1001")

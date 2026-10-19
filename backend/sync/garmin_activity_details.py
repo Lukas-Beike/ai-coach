@@ -5,9 +5,11 @@ detail sets of one Garmin activity on demand. ``backfill`` runs after a
 successful Garmin sync, under the sync lock, and fetches a small batch of recent
 activities, newest first, so the last 90 days fill up over several syncs. It
 pauses after a Garmin rate limit and skips manual activities. An activity whose
-fetch stored some parts while others failed is fetched again on later syncs, at
-most ``BACKFILL_RETRY_ATTEMPTS`` times per activity summary. Kinds a payload
-does not return keep their stored sets. Nothing is written back to Garmin.
+fetch failed or stored only some parts is fetched again on later syncs, at most
+``BACKFILL_RETRY_ATTEMPTS`` times per activity summary; after that it is passed
+over, so it cannot hold back older activities. A rate limit that stored nothing
+does not count as an attempt. Kinds a payload does not return keep their stored
+sets. Nothing is written back to Garmin.
 """
 
 from __future__ import annotations
@@ -238,6 +240,9 @@ class GarminActivityDetailService:
             item
             for item in candidates
             if empty.get(item["provider_activity_id"]) != item["summary_sha256"]
+            and not _retries_exhausted(
+                retry.get(item["provider_activity_id"]), item["summary_sha256"]
+            )
         ]
         return pending, empty, retry
 
@@ -305,7 +310,8 @@ class GarminActivityDetailService:
         )
         if stored:
             outcome.fetched += 1
-        if stored or provider_activity_id in outcome.retry:
+        # A rate limit that stored nothing says nothing about this activity.
+        if stored or not collected.get("rate_limited"):
             _note_attempt(
                 outcome.retry,
                 provider_activity_id,
@@ -517,6 +523,15 @@ def _incomplete(collected: Mapping[str, Any]) -> bool:
         collected.get("errors")
         or collected.get("rate_limited")
         or collected.get("skipped")
+    )
+
+
+def _retries_exhausted(entry: tuple[str, int] | None, summary_sha256: str) -> bool:
+    """True when the current summary already used up its incomplete-fetch attempts."""
+    return (
+        entry is not None
+        and entry[0] == summary_sha256
+        and entry[1] >= BACKFILL_RETRY_ATTEMPTS
     )
 
 
