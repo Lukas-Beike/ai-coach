@@ -619,6 +619,67 @@ def _collect_optional_metric(
         _add_error(payload, key, exc, redact, warn)
 
 
+ACTIVITY_DETAIL_MAX_CHART_POINTS = 2000
+
+
+def collect_garmin_activity_detail(
+    client: Any,
+    activity_id: str,
+    *,
+    external_call: ExternalCall,
+    redact: Redact,
+    warn: WarningLogger | None = None,
+    capability_allowed: CapabilityAllowed | None = None,
+    capability_failure: CapabilityFailure | None = None,
+    capability_success: CapabilitySuccess | None = None,
+) -> dict[str, Any]:
+    """Collect one Garmin activity's detail parts, keeping each part that succeeds.
+
+    Every part is a separate call. A paused part is skipped without a call, and a
+    failed part is omitted from the result and recorded in ``errors`` after
+    redaction. ``errors`` is present only when at least one part failed.
+    """
+    payload: dict[str, Any] = {"activity_id": activity_id, "errors": []}
+    # (capability key, payload key, fetch). The capability key also names the
+    # external call, matching ``_fetch_range``.
+    parts: tuple[tuple[str, str, Callable[[], Any]], ...] = (
+        (
+            "activity_details",
+            "details",
+            lambda: client.get_activity_details(
+                activity_id, maxchart=ACTIVITY_DETAIL_MAX_CHART_POINTS
+            ),
+        ),
+        ("activity_splits", "splits", lambda: client.get_activity_splits(activity_id)),
+        (
+            "activity_hr_zones",
+            "hr_zones",
+            lambda: client.get_activity_hr_in_timezones(activity_id),
+        ),
+        (
+            "activity_power_zones",
+            "power_zones",
+            lambda: client.get_activity_power_in_timezones(activity_id),
+        ),
+    )
+    for capability, key, fetch in parts:
+        if capability_allowed is not None and not capability_allowed(capability):
+            continue
+        try:
+            payload[key] = external_call(
+                "garmin", capability, fetch, {"activity_id": activity_id}
+            )
+            if capability_success is not None:
+                capability_success(capability)
+        except Exception as exc:  # noqa: BLE001 - SDK errors vary; keep other parts and redact.
+            if capability_failure is not None:
+                capability_failure(capability, exc)
+            _add_error(payload, capability, exc, redact, warn)
+    if not payload["errors"]:
+        del payload["errors"]
+    return payload
+
+
 def _validate_current_metrics(
     payload: dict[str, Any], redact: Redact, warn: WarningLogger | None
 ) -> None:
