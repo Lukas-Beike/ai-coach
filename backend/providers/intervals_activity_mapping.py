@@ -30,6 +30,12 @@ produces an issue, and the next alias is tried:
 * load: ``icu_training_load`` only. Its model is INTERVALS_TRAINING_LOAD, and
   UNKNOWN when there is no load.
 * distance: ``distance`` in metres.
+* maximum speed and power: ``max_speed`` (m/s) -> ``max_speed_mps``, and
+  ``max_watts`` -> ``max_power_w``. No other extreme is mapped.
+* recording device type: whole-word terms in ``device_name`` (see
+  ``_DEVICE_TYPE_TERMS``). Bike computer terms win over watch terms. Absent or
+  unmatched text is None. A non-text ``device_name`` is reported once, as the
+  other provenance text is.
 
 Sport and environment come from ``INTERVALS_ACTIVITY_TYPES`` for known Intervals
 type names. Any other type name falls back to the legacy text rules applied to
@@ -69,8 +75,10 @@ from backend.canonical.validation import (
     MAX_ACTIVITY_DURATION_S,
     MAX_ACTIVITY_LOAD,
     MAX_ACTIVITY_POWER_W,
+    MAX_ACTIVITY_SPEED_MPS,
 )
 from backend.canonical.vocabulary import (
+    DeviceType,
     Environment,
     LoadModel,
     ProviderId,
@@ -79,9 +87,10 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
+# Version 5: maps the maximum speed, maximum power and recording device type.
 # Version 4: a source of exactly "manual" is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
-MAPPER_VERSION: Final = 4
+MAPPER_VERSION: Final = 5
 INTERVALS_LABEL: Final = "Intervals.icu"
 MAX_ACTIVITY_ID_LENGTH: Final = 200
 MAX_NAME_LENGTH: Final = 200
@@ -93,6 +102,8 @@ _DISTANCE_KEYS: Final = ("distance",)
 _LOAD_KEYS: Final = ("icu_training_load",)
 _AVERAGE_HR_KEYS: Final = ("average_heartrate", "averageHR")
 _MAX_HR_KEYS: Final = ("max_heartrate", "maxHR")
+_MAX_SPEED_KEYS: Final = ("max_speed",)
+_MAX_POWER_KEYS: Final = ("max_watts",)
 _AVERAGE_POWER_KEYS: Final = ("average_watts", "average_power")
 _IDENTITY_KEYS: Final = (
     "type",
@@ -204,6 +215,53 @@ _RECORDING_ORIGIN_TERMS: Final[tuple[tuple[tuple[str, ...], RecordingOrigin], ..
     (("manual",), RecordingOrigin.MANUAL),
     (("upload",), RecordingOrigin.UPLOAD),
 )
+# Whole-word terms matched against the casefolded device_name. Bike computer terms
+# are checked first, so a name that names both kinds is a bike computer. Terms are
+# product lines, never bare brands: COROS, Polar and Suunto also sell bike
+# computers or sensors, so a brand-only name stays unclassified.
+_DEVICE_TYPE_TERMS: Final[tuple[tuple[tuple[str, ...], DeviceType], ...]] = (
+    (
+        (
+            "edge",
+            "elemnt",
+            "bolt",
+            "roam",
+            "karoo",
+            "dura",
+            "v650",
+            "m450",
+            "m460",
+            "bryton rider",
+        ),
+        DeviceType.BIKE_COMPUTER,
+    ),
+    (
+        (
+            "forerunner",
+            "fenix",
+            "fēnix",
+            "epix",
+            "venu",
+            "enduro",
+            "instinct",
+            "vivoactive",
+            "apple watch",
+            "pace",
+            "apex",
+            "vertix",
+            "vantage",
+            "grit",
+            "pacer",
+            "ignite",
+            "suunto 5",
+            "suunto 9",
+            "suunto race",
+            "suunto vertical",
+        ),
+        DeviceType.WATCH,
+    ),
+)
+_WORD: Final = re.compile(r"\w+")
 
 
 class _ActivityRow:
@@ -334,6 +392,17 @@ def _recording_origin(source: str | None, provenance_text: str) -> RecordingOrig
     return RecordingOrigin.UNKNOWN
 
 
+def _device_type(device_name: str | None) -> DeviceType | None:
+    if device_name is None:
+        return None
+    # Padded words, so a term matches only as a whole word ("edge", not "hedgehog").
+    words = f" {' '.join(_WORD.findall(device_name.casefold()))} "
+    for terms, device_type in _DEVICE_TYPE_TERMS:
+        if any(f" {term} " in words for term in terms):
+            return device_type
+    return None
+
+
 def _map_row(
     row: object,
     *,
@@ -385,6 +454,9 @@ def _map_row(
         name=reader.name(),
         elapsed_duration_s=elapsed_time,
         max_hr=reader.number(_MAX_HR_KEYS, *HEART_RATE_BOUNDS),
+        max_speed_mps=reader.number(_MAX_SPEED_KEYS, 0.0, MAX_ACTIVITY_SPEED_MPS),
+        max_power_w=reader.number(_MAX_POWER_KEYS, 0.0, MAX_ACTIVITY_POWER_W),
+        device_type=_device_type(provenance["device_name"]),
     )
 
 

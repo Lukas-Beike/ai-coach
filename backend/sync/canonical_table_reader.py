@@ -185,6 +185,13 @@ def _activity(row: Mapping[str, Any]) -> ActivityRecord:
         energy_kj=row["energy_kj"],
         elapsed_duration_s=canonical_store.activity_elapsed_duration(row["details"]),
         max_hr=canonical_store.activity_max_hr(row["details"]),
+        max_speed_mps=canonical_store.activity_max_speed(row["details"]),
+        max_power_w=canonical_store.activity_max_power(row["details"]),
+        min_hr=canonical_store.activity_min_hr(row["details"]),
+        elevation_high_m=canonical_store.activity_elevation_high(row["details"]),
+        elevation_low_m=canonical_store.activity_elevation_low(row["details"]),
+        steps=canonical_store.activity_steps(row["details"]),
+        device_type=canonical_store.activity_device_type(row["details"]),
     )
 
 

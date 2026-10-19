@@ -29,6 +29,8 @@ the same moment.
   ``averageHR`` (bpm), ``avgPower``, then ``averagePower`` (watts).
 * ``maxHR``, then ``maxHeartRate`` (bpm) -> ``max_hr``, the aliases that
   ``performance.max_hr`` reads first.
+* ``maxSpeed`` (m/s) -> ``max_speed_mps``, and ``maxPower`` (watts) -> ``max_power_w``.
+* ``steps`` (count) -> ``steps``.
 * ``activityName`` (text, stripped and truncated to 200 characters).
 
 Sport and environment. A known ``typeKey`` uses ``GARMIN_ACTIVITY_TYPES``. An
@@ -60,6 +62,8 @@ from backend.canonical.validation import (
     MAX_ACTIVITY_DURATION_S,
     MAX_ACTIVITY_LOAD,
     MAX_ACTIVITY_POWER_W,
+    MAX_ACTIVITY_SPEED_MPS,
+    MAX_ACTIVITY_STEPS,
     require_aware_datetime,
 )
 from backend.canonical.vocabulary import (
@@ -71,9 +75,10 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
+# Version 5: maps the maximum speed, maximum power and step count.
 # Version 4: a row with manualActivity exactly True is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
-MAPPER_VERSION: Final = 4
+MAPPER_VERSION: Final = 5
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -83,6 +88,9 @@ _DURATION_KEYS: Final = ("duration", "movingTime")
 _MOVING_DURATION_KEYS: Final = ("movingDuration",)
 _POWER_KEYS: Final = ("avgPower", "averagePower")
 _MAX_HR_KEYS: Final = ("maxHR", "maxHeartRate")
+_MAX_SPEED_KEYS: Final = ("maxSpeed",)
+_MAX_POWER_KEYS: Final = ("maxPower",)
+_STEPS_KEYS: Final = ("steps",)
 
 # Exact Garmin activityType.typeKey values. The environment is set only where the
 # key names it; otherwise UNKNOWN, which the activity name may still refine.
@@ -172,6 +180,13 @@ def _map_row(
     )
     avg_hr = _optional_number(row, ("averageHR",), HEART_RATE_BOUNDS, ref, issues)
     max_hr = _optional_number(row, _MAX_HR_KEYS, HEART_RATE_BOUNDS, ref, issues)
+    max_speed = _optional_number(
+        row, _MAX_SPEED_KEYS, (0.0, MAX_ACTIVITY_SPEED_MPS), ref, issues
+    )
+    max_power = _optional_number(
+        row, _MAX_POWER_KEYS, (0.0, MAX_ACTIVITY_POWER_W), ref, issues
+    )
+    steps = _optional_number(row, _STEPS_KEYS, (0.0, MAX_ACTIVITY_STEPS), ref, issues)
     avg_power = _optional_number(
         row, _POWER_KEYS, (0.0, MAX_ACTIVITY_POWER_W), ref, issues
     )
@@ -194,6 +209,9 @@ def _map_row(
         avg_power=avg_power,
         name=name,
         max_hr=max_hr,
+        max_speed_mps=max_speed,
+        max_power_w=max_power,
+        steps=steps,
     )
 
 

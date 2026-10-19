@@ -8,6 +8,7 @@ from typing import Final
 
 from backend.canonical.validation import (
     HEART_RATE_BOUNDS,
+    MAX_ACTIVITY_ALTITUDE_M,
     MAX_ACTIVITY_CADENCE_RPM,
     MAX_ACTIVITY_DISTANCE_M,
     MAX_ACTIVITY_DURATION_S,
@@ -15,6 +16,9 @@ from backend.canonical.validation import (
     MAX_ACTIVITY_ENERGY_KJ,
     MAX_ACTIVITY_LOAD,
     MAX_ACTIVITY_POWER_W,
+    MAX_ACTIVITY_SPEED_MPS,
+    MAX_ACTIVITY_STEPS,
+    MIN_ACTIVITY_ALTITUDE_M,
     finite_number,
     optional_aware_datetime,
     optional_bounded_number,
@@ -26,6 +30,7 @@ from backend.canonical.validation import (
     validate_metric_value,
 )
 from backend.canonical.vocabulary import (
+    DeviceType,
     Environment,
     LoadModel,
     MetricKind,
@@ -129,6 +134,13 @@ class ActivityRecord:
     # Elapsed time when ``duration_s`` is moving time (Intervals.icu); otherwise None.
     elapsed_duration_s: float | None = None
     max_hr: float | None = None
+    max_speed_mps: float | None = None
+    max_power_w: float | None = None
+    min_hr: float | None = None
+    elevation_high_m: float | None = None
+    elevation_low_m: float | None = None
+    steps: float | None = None
+    device_type: DeviceType | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
@@ -221,4 +233,56 @@ class ActivityRecord:
             "max_hr",
             optional_bounded_number(self.max_hr, "max_hr", *HEART_RATE_BOUNDS),
         )
+        object.__setattr__(
+            self,
+            "max_speed_mps",
+            optional_bounded_number(
+                self.max_speed_mps, "max_speed_mps", 0.0, MAX_ACTIVITY_SPEED_MPS
+            ),
+        )
+        object.__setattr__(
+            self,
+            "max_power_w",
+            optional_bounded_number(
+                self.max_power_w, "max_power_w", 0.0, MAX_ACTIVITY_POWER_W
+            ),
+        )
+        object.__setattr__(
+            self,
+            "min_hr",
+            optional_bounded_number(self.min_hr, "min_hr", *HEART_RATE_BOUNDS),
+        )
+        object.__setattr__(
+            self,
+            "elevation_high_m",
+            optional_bounded_number(
+                self.elevation_high_m,
+                "elevation_high_m",
+                MIN_ACTIVITY_ALTITUDE_M,
+                MAX_ACTIVITY_ALTITUDE_M,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "elevation_low_m",
+            optional_bounded_number(
+                self.elevation_low_m,
+                "elevation_low_m",
+                MIN_ACTIVITY_ALTITUDE_M,
+                MAX_ACTIVITY_ALTITUDE_M,
+            ),
+        )
+        if (
+            self.elevation_low_m is not None
+            and self.elevation_high_m is not None
+            and self.elevation_low_m > self.elevation_high_m
+        ):
+            raise ValueError("elevation_low_m must not exceed elevation_high_m")
+        object.__setattr__(
+            self,
+            "steps",
+            optional_bounded_number(self.steps, "steps", 0.0, MAX_ACTIVITY_STEPS),
+        )
+        if self.device_type is not None:
+            require_instance(self.device_type, DeviceType, "device_type")
         optional_text(self.name, "name", max_length=200)

@@ -20,6 +20,7 @@ from backend.canonical.vocabulary import (
     ActivityLinkKind,
     ActivityRecordState,
     ActivitySessionState,
+    DeviceType,
     MetricKind,
     ProviderId,
     ProviderRecordState,
@@ -32,6 +33,13 @@ OBSERVATION_DETAILS: Final = "{}"
 ACTIVITY_DETAILS: Final = "{}"
 _ELAPSED_DURATION_KEY: Final = "elapsed_duration_s"
 _MAX_HR_KEY: Final = "max_hr"
+_MAX_SPEED_KEY: Final = "max_speed_mps"
+_MAX_POWER_KEY: Final = "max_power_w"
+_MIN_HR_KEY: Final = "min_hr"
+_ELEVATION_HIGH_KEY: Final = "elevation_high_m"
+_ELEVATION_LOW_KEY: Final = "elevation_low_m"
+_STEPS_KEY: Final = "steps"
+_DEVICE_TYPE_KEY: Final = "device_type"
 _PROVIDER_RECORD_EXISTS: Final = (
     "SELECT 1 AS present FROM provider_records "
     "WHERE provider = ? AND record_kind = ? AND source_record_id = ?"
@@ -1016,6 +1024,16 @@ def _activity_details(record: ActivityRecord) -> str:
         for key, value in (
             (_ELAPSED_DURATION_KEY, record.elapsed_duration_s),
             (_MAX_HR_KEY, record.max_hr),
+            (_MAX_SPEED_KEY, record.max_speed_mps),
+            (_MAX_POWER_KEY, record.max_power_w),
+            (_MIN_HR_KEY, record.min_hr),
+            (_ELEVATION_HIGH_KEY, record.elevation_high_m),
+            (_ELEVATION_LOW_KEY, record.elevation_low_m),
+            (_STEPS_KEY, record.steps),
+            (
+                _DEVICE_TYPE_KEY,
+                None if record.device_type is None else record.device_type.value,
+            ),
         )
         if value is not None
     }
@@ -1034,17 +1052,65 @@ def activity_max_hr(details: object) -> float | None:
     return _activity_detail_number(details, _MAX_HR_KEY)
 
 
+def activity_max_speed(details: object) -> float | None:
+    """Return the maximum speed in metres per second stored in the details, if any."""
+    return _activity_detail_number(details, _MAX_SPEED_KEY)
+
+
+def activity_max_power(details: object) -> float | None:
+    """Return the maximum power in watts stored in an activity's details, if any."""
+    return _activity_detail_number(details, _MAX_POWER_KEY)
+
+
+def activity_min_hr(details: object) -> float | None:
+    """Return the minimum heart rate stored in an activity's details, if any."""
+    return _activity_detail_number(details, _MIN_HR_KEY)
+
+
+def activity_elevation_high(details: object) -> float | None:
+    """Return the highest elevation in metres stored in the details, if any."""
+    return _activity_detail_number(details, _ELEVATION_HIGH_KEY)
+
+
+def activity_elevation_low(details: object) -> float | None:
+    """Return the lowest elevation in metres stored in an activity's details, if any."""
+    return _activity_detail_number(details, _ELEVATION_LOW_KEY)
+
+
+def activity_steps(details: object) -> float | None:
+    """Return the step count stored in an activity's details, if any."""
+    return _activity_detail_number(details, _STEPS_KEY)
+
+
+def activity_device_type(details: object) -> DeviceType | None:
+    """Return the recording device type stored in an activity's details, if any.
+
+    A missing, non-text or unknown value is None; it never raises.
+    """
+    value = _activity_detail_value(details, _DEVICE_TYPE_KEY)
+    if not isinstance(value, str):
+        return None
+    try:
+        return DeviceType(value)
+    except ValueError:
+        return None
+
+
 def _activity_detail_number(details: object, key: str) -> float | None:
+    value = _activity_detail_value(details, key)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _activity_detail_value(details: object, key: str) -> object:
     if not isinstance(details, str):
         return None
     try:
         loaded = json.loads(details)
     except ValueError, RecursionError:
         return None
-    value = loaded.get(key) if isinstance(loaded, dict) else None
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    return float(value)
+    return loaded.get(key) if isinstance(loaded, dict) else None
 
 
 def _observation_values(
