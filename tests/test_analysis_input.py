@@ -3,7 +3,7 @@
 import copy
 import unittest
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from backend.activities.detail_merge import (
@@ -181,6 +181,37 @@ def merged(
     )
 
 
+def lap_choice(provider: ProviderId, started_at: datetime | None) -> SetChoice:
+    """One 0-60 s lap of ``provider`` whose recording started at ``started_at``."""
+    lap_set = ActivityLapSet(
+        provider_activity_id=f"{provider.value}-1",
+        provenance=provenance(provider, "Garmin"),
+        origin=ActivityDetailOrigin.FETCH,
+        lap_source=LapSource.DEVICE_LAPS,
+        laps=(
+            ActivityLap(
+                index=0, kind=LapKind.LAP, start_offset_s=0.0, end_offset_s=60.0
+            ),
+        ),
+    )
+    return SetChoice(
+        chosen=DetailCandidate(
+            stored=StoredDetailSet(
+                provider=provider.value,
+                provider_activity_id=lap_set.provider_activity_id,
+                activity_id="act-1",
+                mapper_version=1,
+                summary_sha256=None,
+                fetched_at=FETCHED,
+                detail=lap_set,
+            ),
+            started_at=started_at,
+            device_type=None,
+        ),
+        alternatives=(),
+    )
+
+
 def from_intervals(
     payload: dict[str, Any], stream_list: list[dict[str, Any]]
 ) -> tuple[dict[str, Any], Any]:
@@ -354,6 +385,39 @@ class AnalysisInputMappingTests(unittest.TestCase):
         )
         self.assertEqual("Intervals.icu", adapted.label_for("laps"))
         self.assertEqual("Record", adapted.source_label)
+
+    def test_laps_of_another_recording_move_to_the_primary_clock(self) -> None:
+        primary = candidate(
+            ProviderId.INTERVALS, "Intervals.icu", {POWER: (200.0,) * len(TIME)}
+        )
+        stream = merged(primary, {})
+        later = lap_choice(ProviderId.GARMIN, STARTED + timedelta(seconds=30))
+        adapted = analysis_input(record(Sport.RIDE), stream, later)
+        self.assertEqual(
+            [{"start_time": 30.0, "end_time": 90.0}], adapted.activity["laps"]
+        )
+        self.assertEqual("Garmin", adapted.label_for("laps"))
+
+    def test_laps_without_a_start_time_are_dropped_when_unalignable(self) -> None:
+        primary = candidate(
+            ProviderId.INTERVALS, "Intervals.icu", {POWER: (200.0,) * len(TIME)}
+        )
+        stream = merged(primary, {})
+        adapted = analysis_input(
+            record(Sport.RIDE), stream, lap_choice(ProviderId.GARMIN, None)
+        )
+        self.assertEqual([], adapted.activity["laps"])
+        self.assertNotIn("laps", adapted.channel_labels)
+
+    def test_laps_of_the_primary_recording_keep_their_offsets(self) -> None:
+        primary = candidate(ProviderId.GARMIN, "Garmin", {POWER: (200.0,) * len(TIME)})
+        stream = merged(primary, {})
+        adapted = analysis_input(
+            record(Sport.RIDE), stream, lap_choice(ProviderId.GARMIN, None)
+        )
+        self.assertEqual(
+            [{"start_time": 0.0, "end_time": 60.0}], adapted.activity["laps"]
+        )
 
     def test_decoupling_is_passed_through(self) -> None:
         adapted = analysis_input(record(Sport.RIDE), None, None, decoupling=4.5)

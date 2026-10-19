@@ -11,7 +11,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from backend.activities.detail_merge import MergedStreams, SetChoice
+from backend.activities.detail_merge import (
+    DetailCandidate,
+    MergedStreams,
+    SetChoice,
+)
 from backend.canonical.activity_detail import ActivityLapSet
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import Environment, Sport, StreamChannel
@@ -59,7 +63,8 @@ def analysis_input(
 ) -> AnalysisInput:
     """Build the analysis input of one activity from its merged detail."""
     stream_fields, channel_labels = _streams(streams)
-    if laps is not None:
+    lap_fields = _laps(laps, streams)
+    if laps is not None and lap_fields:
         lap_label = _label(laps.chosen.stored.detail.provenance)
         if lap_label:
             channel_labels["laps"] = lap_label
@@ -70,7 +75,7 @@ def analysis_input(
         "type": _activity_type(record),
         "decoupling": decoupling,
         "streams": stream_fields,
-        "laps": _laps(laps),
+        "laps": lap_fields,
     }
     return AnalysisInput(
         activity=activity,
@@ -116,16 +121,41 @@ def _moving(value: float | None) -> bool | float | None:
     return _MOVING_FLAGS.get(value, value)
 
 
-def _laps(laps: SetChoice | None) -> list[dict[str, float]]:
+def _laps(
+    laps: SetChoice | None, streams: MergedStreams | None
+) -> list[dict[str, float]]:
+    """Lap windows on the clock of the primary streams, or none when unalignable."""
     if laps is None:
         return []
     detail = laps.chosen.stored.detail
     if not isinstance(detail, ActivityLapSet):
         raise TypeError("analysis laps must come from a lap set")
+    offset = 0.0 if streams is None else _clock_offset(laps.chosen, streams.primary)
+    if offset is None:
+        return []
     return [
-        {"start_time": lap.start_offset_s, "end_time": lap.end_offset_s}
+        {
+            "start_time": lap.start_offset_s + offset,
+            "end_time": lap.end_offset_s + offset,
+        }
         for lap in detail.laps
     ]
+
+
+def _clock_offset(candidate: DetailCandidate, primary: DetailCandidate) -> float | None:
+    """Seconds from the primary recording start to the candidate's start."""
+    if _same_recording(candidate, primary):
+        return 0.0
+    if candidate.started_at is None or primary.started_at is None:
+        return None
+    return (candidate.started_at - primary.started_at).total_seconds()
+
+
+def _same_recording(candidate: DetailCandidate, primary: DetailCandidate) -> bool:
+    return (candidate.stored.provider, candidate.stored.provider_activity_id) == (
+        primary.stored.provider,
+        primary.stored.provider_activity_id,
+    )
 
 
 def _label(provenance: Provenance) -> str:
