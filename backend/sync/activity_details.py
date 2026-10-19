@@ -33,6 +33,8 @@ from backend.performance.session_analysis import aerobic_analysis, interval_qual
 from backend.planning.target_snapshot import freeze_targets
 from backend.providers.intervals_activity_fields import (
     ACTIVITY_DETAIL_PARAMS,
+    ACTIVITY_DETAIL_STREAM_ALIASES,
+    ACTIVITY_DETAIL_STREAM_TYPES,
     activity_detail_laps,
 )
 from backend.runtime.ports import ActivityRowReader
@@ -116,8 +118,8 @@ class ActivityDetailRefreshService:
             raise AppError(502, "Der Anbieter hat eine andere Aktivität zurückgegeben.")
         streams = normalize_streams(
             self._api_client.get(
-                f"{path}/streams",
-                {"types": ",".join(COACH_ACTIVITY_DETAIL_STREAM_FIELDS)},
+                f"{path}/streams.json",
+                {"types": ",".join(ACTIVITY_DETAIL_STREAM_TYPES)},
             )
         )
         projected = detailed_activity({**detail, "laps": activity_detail_laps(detail)})
@@ -270,6 +272,8 @@ def _normalize_stream(stream: Any) -> tuple[str, list[Any]] | None:
     if not isinstance(stream, dict):
         raise AppError(502, "Ungültige Messreihe vom Anbieter.")
     name = stream.get("type")
+    if isinstance(name, str):
+        name = ACTIVITY_DETAIL_STREAM_ALIASES.get(name, name)
     if not isinstance(name, str) or name not in COACH_ACTIVITY_DETAIL_STREAM_FIELDS:
         return None
     data = stream.get("data")

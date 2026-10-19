@@ -83,6 +83,30 @@ class ActivityDetailRefreshTests(unittest.TestCase):
         self.api.post.assert_not_called()
         self.api.put.assert_not_called()
 
+    def test_streams_request_uses_extension_and_documented_stream_types(self):
+        self.api.get.side_effect = self.responses()
+        self.service.refresh("CaseSensitive-1")
+        path, params = self.api.get.call_args_list[1].args
+        self.assertEqual("/activity/CaseSensitive-1/streams.json", path)
+        self.assertEqual(
+            "time,distance,altitude,grade_smooth,velocity_smooth,"
+            "watts,heartrate,cadence,temp,moving",
+            params["types"],
+        )
+
+    def test_provider_temp_stream_is_stored_as_temperature(self):
+        self.api.get.side_effect = [
+            {"id": "CaseSensitive-1"},
+            [
+                {"type": "time", "data": [0, 1]},
+                {"type": "temp", "data": [14, 15]},
+            ],
+        ]
+        self.service.refresh("CaseSensitive-1")
+        streams = self.store.get("CaseSensitive-1")["activity"]["streams"]
+        self.assertEqual([14, 15], streams["temperature"])
+        self.assertNotIn("temp", streams)
+
     def test_failed_second_fetch_preserves_previous_record(self):
         self.api.get.side_effect = self.responses()
         self.service.refresh("CaseSensitive-1")
@@ -165,7 +189,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
 
     def provider(self, path, params):
         activity_id = path.split("/")[2]
-        if path.endswith("/streams"):
+        if path.endswith("/streams.json"):
             return [{"type": "time", "data": [0, 1]}]
         return {"id": activity_id}
 
@@ -183,7 +207,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         return [
             call.args[0].split("/")[2]
             for call in self.api.get.call_args_list
-            if not call.args[0].endswith("/streams")
+            if not call.args[0].endswith("/streams.json")
         ]
 
     def test_loads_only_the_ten_newest_activities_once(self):
