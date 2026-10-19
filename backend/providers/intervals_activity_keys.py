@@ -19,6 +19,7 @@ from backend.providers.intervals_performance_fields import (  # noqa: F401
 )
 
 ROLLING_FTP: Final = "icu_rolling_ftp"
+LACTATE_THRESHOLD_HR: Final = "lthr"
 
 TRAINING_LOAD_LOOKUP: Final = (TRAINING_LOAD, "training_load", "tss")
 
@@ -26,6 +27,11 @@ TRAINING_LOAD_LOOKUP: Final = (TRAINING_LOAD, "training_load", "tss")
 def activity_ftp(activity: Mapping[str, Any]) -> Any:
     """Return the functional threshold power the provider stored on an activity."""
     return activity.get(CONFIGURED_FTP)
+
+
+def activity_lthr(activity: Mapping[str, Any]) -> Any:
+    """Return the lactate threshold heart rate the provider stored on an activity."""
+    return activity.get(LACTATE_THRESHOLD_HR)
 
 
 def activity_training_load(activity: Mapping[str, Any]) -> Any:

@@ -18,11 +18,67 @@ class WorkoutProfileTests(unittest.TestCase):
         )
         self.assertEqual("planned", profile["source"])
 
-    def test_unknown_structure_and_distance_do_not_invent_a_time_profile(self):
-        for description in ("Run easily", "- 5km Z2 Pace", "- 10m 50%\n- 10m Z2 HR"):
+    def test_unknown_structure_and_mixed_axes_do_not_invent_a_profile(self):
+        for description in (
+            "Run easily",
+            "- 10m 50%\n- 10m Z2 HR",
+            "- 10m Z2 Pace\n- 5km Z3 Pace",
+        ):
             self.assertIsNone(planned_profile({"description": description}))
         profile = planned_profile({"description": "- 30m 200w"})
         self.assertIsNone(profile["segments"][0]["zone"])
+        self.assertEqual("duration", profile["axis"])
+
+    def test_distance_steps_use_a_distance_axis_with_zones(self):
+        profile = planned_profile(
+            {"description": "- 2km Z1 Pace\n- 5km Z2 Pace\n- 1km 100% Pace"}
+        )
+        self.assertEqual("distance", profile["axis"])
+        self.assertEqual(
+            [2000, 5000, 1000], [row["distance"] for row in profile["segments"]]
+        )
+        self.assertTrue(all("duration" not in row for row in profile["segments"]))
+        self.assertEqual("zone", profile["unit"])
+        self.assertEqual([1, 2, 4], [row["zone"] for row in profile["segments"]])
+
+    def test_run_steps_mixing_zone_and_heart_rate_percent_share_the_zone_axis(self):
+        profile = planned_profile(
+            {
+                "description": (
+                    "- 10m Z1-Z2 HR\n- 8m 86-89% HR\n- 3m Z1 HR\n"
+                    "- 8m 86-89% HR\n- 10m Z1 HR"
+                )
+            }
+        )
+        self.assertEqual("zone", profile["unit"])
+        self.assertEqual(
+            [600, 480, 180, 480, 600], [row["duration"] for row in profile["segments"]]
+        )
+        self.assertEqual([2, 4, 1, 4, 1], [row["zone"] for row in profile["segments"]])
+        self.assertEqual([2, 4, 1, 4, 1], [row["value"] for row in profile["segments"]])
+
+    def test_heart_rate_and_pace_percent_targets_get_zones(self):
+        lthr = planned_profile({"description": "- 5m 60% LTHR\n- 5m 100% LTHR"})
+        self.assertEqual([1, 4], [row["zone"] for row in lthr["segments"]])
+        pace = planned_profile({"description": "- 5m 80% Pace\n- 5m 97% Pace"})
+        self.assertEqual("%PACE", pace["unit"])
+        self.assertEqual([2, 4], [row["zone"] for row in pace["segments"]])
+
+    def test_absolute_targets_without_thresholds_stay_uncolored(self):
+        profile = planned_profile({"description": "- 5m 150-160bpm\n- 5m Z2 HR"})
+        self.assertIsNone(profile)
+        profile = planned_profile({"description": "- 5m 150-160bpm"})
+        self.assertIsNone(profile["segments"][0]["zone"])
+        self.assertEqual("bpm", profile["unit"])
+
+    def test_recorded_heart_rate_profile_uses_the_activity_threshold(self):
+        activity = {
+            "streams": {"time": list(range(61)), "heartrate": [140] * 61},
+            "lthr": 170,
+        }
+        self.assertEqual(2, recorded_profile(activity)["segments"][0]["zone"])
+        activity.pop("lthr")
+        self.assertIsNone(recorded_profile(activity)["segments"][0]["zone"])
 
     def test_recorded_profile_keeps_gaps_and_uses_only_historical_ftp(self):
         samples = [100] * 61

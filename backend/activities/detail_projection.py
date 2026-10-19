@@ -8,6 +8,7 @@ from typing import Any
 from backend.providers.intervals_activity_detail_mapping import zone_times
 from backend.providers.intervals_activity_keys import (
     INTENSITY,
+    LACTATE_THRESHOLD_HR,
     PACE,
     ROLLING_FTP,
     RPE,
@@ -52,6 +53,7 @@ COACH_ACTIVITY_DETAIL_FIELDS = (
     INTENSITY,
     ROLLING_FTP,
     CONFIGURED_FTP,
+    LACTATE_THRESHOLD_HR,
     WEIGHTED_AVG_SPEED,
     PACE,
     RPE,
