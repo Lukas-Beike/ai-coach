@@ -131,7 +131,7 @@ class GarminActivityDetailMappingTests(unittest.TestCase):
 
     def test_bike_cadence_wins_over_run_cadence(self):
         details = _fixture("details")
-        _set_rows(details, 7, [170.0, 176.0, 180.0, 184.0])
+        _set_rows(details, 7, [85.0, 88.0, 90.0, 92.0])
 
         stream = _only(_map(_collected(details=details)), ActivityStreamSet)
 
@@ -139,10 +139,10 @@ class GarminActivityDetailMappingTests(unittest.TestCase):
             stream.channels[StreamChannel.CADENCE_RPM], (84.0, 86.0, 88.0, 90.0)
         )
 
-    def test_run_cadence_is_halved_when_bike_has_no_points(self):
+    def test_one_leg_run_cadence_is_kept_when_bike_has_no_points(self):
         details = _fixture("details")
         _set_rows(details, 3, [None, None, None, None])
-        _set_rows(details, 7, [170.0, 176.0, 180.0, 184.0])
+        _set_rows(details, 7, [85.0, 88.0, 90.0, 92.0])
 
         stream = _only(_map(_collected(details=details)), ActivityStreamSet)
 
@@ -238,14 +238,16 @@ class GarminActivityDetailMappingTests(unittest.TestCase):
             _issue("activityDetailMetrics", IssueReason.INVALID_TYPE), result.issues
         )
 
-    def test_run_cadence_halving_applies_to_laps(self):
+    def test_lap_run_cadence_is_not_mapped(self):
         splits = _fixture("splits")
         del splits["lapDTOs"][0]["averageBikeCadence"]
         splits["lapDTOs"][0]["averageRunCadence"] = 176.0
 
-        laps = _only(_map(_collected(splits=splits)), ActivityLapSet)
+        result = _map(_collected(splits=splits))
+        laps = _only(result, ActivityLapSet)
 
-        self.assertEqual(laps.laps[1].avg_cadence, 88.0)
+        self.assertIsNone(laps.laps[1].avg_cadence)
+        self.assertEqual(result.issues, ())
 
     def test_laps_are_ordered_by_lap_index_with_cumulative_offsets(self):
         result = _map(_collected())

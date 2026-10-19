@@ -11,9 +11,10 @@ malformed provider input. Issues name the activity, the provider field and a
 reason only. Caller arguments (``recorded_by``, ``retrieved_at``) are checked
 and may raise, as in the Intervals mapper.
 
-Garmin reports run cadence in steps per minute (both feet). The canonical cadence
-channel and the Intervals/FIT convention count one leg in rpm, so run values are
-halved. This is an assumption to verify against a real Garmin export.
+The canonical cadence counts one leg in rpm, like Intervals and FIT. Garmin's
+``directRunCadence`` stream already counts one leg (``directDoubleCadence`` is the
+two-leg value), so it is kept as reported. The unit of the lap
+``averageRunCadence`` is not verified, so lap run cadence is not mapped.
 
 Offsets use elapsed time (``sumElapsedDuration``, lap ``elapsedDuration``) so
 they line up with the activity start like the Intervals streams; the timer
@@ -104,7 +105,7 @@ _LAP_METRIC_KEYS: Final[tuple[tuple[str, str], ...]] = (
     ("averageSpeed", "avg_speed_mps"),
     ("elevationGain", "elevation_gain_m"),
 )
-_LAP_CADENCE_KEYS: Final = ("averageBikeCadence", "averageRunCadence")
+_LAP_CADENCE_KEY: Final = "averageBikeCadence"
 _ZONE_KEYS: Final = (
     ("hr_zones", ZoneMetric.HEART_RATE),
     ("power_zones", ZoneMetric.POWER),
@@ -349,13 +350,9 @@ def _cadence_points(
     run = columns.get(_RUN_CADENCE_KEY)
     if run is None:
         return None
-    points = _channel_points(
+    return _channel_points(
         ref, _RUN_CADENCE_KEY, StreamChannel.CADENCE_RPM, run, issues
     )
-    if points is None:
-        return None
-    # Steps per minute to rpm for one leg; see the module docstring.
-    return tuple(None if point is None else point / 2 for point in points)
 
 
 def _lap_set(
@@ -487,21 +484,18 @@ def _lap_metrics(
 def _lap_cadence(
     row: Mapping[str, object], ref: str, issues: list[MappingIssue]
 ) -> float | None:
-    """Bike cadence first, then run cadence converted from steps per minute."""
-    for key in _LAP_CADENCE_KEYS:
-        value = row.get(key)
-        if value is None:
-            continue
-        number = coerce_number(value)
-        if number is None:
-            issues.append(MappingIssue(ref, key, IssueReason.INVALID_NUMBER))
-            continue
-        rpm = number / 2 if key == "averageRunCadence" else number
-        if not _lap_accepts("avg_cadence", rpm):
-            issues.append(MappingIssue(ref, key, IssueReason.OUT_OF_RANGE))
-            continue
-        return rpm
-    return None
+    """Bike lap cadence in rpm; lap run cadence is not mapped (see module docstring)."""
+    value = row.get(_LAP_CADENCE_KEY)
+    if value is None:
+        return None
+    number = coerce_number(value)
+    if number is None:
+        issues.append(MappingIssue(ref, _LAP_CADENCE_KEY, IssueReason.INVALID_NUMBER))
+        return None
+    if not _lap_accepts("avg_cadence", number):
+        issues.append(MappingIssue(ref, _LAP_CADENCE_KEY, IssueReason.OUT_OF_RANGE))
+        return None
+    return number
 
 
 def _lap_accepts(name: str, value: float) -> bool:
