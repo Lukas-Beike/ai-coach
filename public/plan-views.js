@@ -1,27 +1,12 @@
-  function appendPlannedAirInsight(body, weather) {
+  function plannedAirValues(weather) {
     const air = weather.air_quality && typeof weather.air_quality === "object" ? weather.air_quality : {};
     const aqi = calendarMetricNumber(air.european_aqi_max);
-    const pollen = plannedPollenLabel(weather.pollen);
     const category = air.european_aqi_category ? " (" + air.european_aqi_category + ")" : "";
-    const values = [
+    return [
       aqi ? `AQI ${aqi}${category}` : "",
       calendarMetricNumber(air.uv_index_max) ? `UV ${calendarMetricNumber(air.uv_index_max)}` : "",
-      pollen,
+      plannedPollenLabel(weather.pollen),
     ].filter(Boolean);
-    if (!values.length) return;
-    const line = document.createElement("p");
-    line.className = "planned-air-quality";
-    line.textContent = values.join(" · ");
-    let pollenTitle = pollen ? "Pollen: Körner/m³ (Open-Meteo/CAMS)" : null;
-    if (weather.pollen?.source === "DWD") {
-      const region = weather.pollen.region ? " · " + weather.pollen.region : "";
-      pollenTitle = `Pollenflug-Gefahrenindex 0–3: Deutscher Wetterdienst${region}`;
-    }
-    line.title = [
-      aqi ? "Luftqualität: Europäischer AQI (Open-Meteo/CAMS)" : null,
-      pollenTitle,
-    ].filter(Boolean).join(" · ");
-    body.append(line);
   }
 
 globalThis.AppPlanViews = Object.freeze({ create });
@@ -39,6 +24,11 @@ const CALENDAR_MARKER_PATTERN = new RegExp(
   CALENDAR_MARKERS.map(({ name }) => calendarMarkerSource(name)).join("|"),
   "gi",
 );
+// The day heading flags rain, UV, air and pollen only when notable; all figures stay in the weather symbol's tooltip.
+const PLANNED_RAIN_FLAG_MIN_PERCENT = 50;
+const PLANNED_UV_FLAG_MIN = 6;
+const PLANNED_AQI_FLAG_MIN = 60; // European AQI "schlecht" and worse
+const PLANNED_CAMS_POLLEN_FLAG_MIN = 10; // grains/m³; DWD levels count from 1
 const PLANNED_DAY_STATUS_LABELS = new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]]);
 
 function stripCalendarMarkers(text) {
@@ -117,6 +107,37 @@ function plannedPollenLabel(pollen) {
     .filter(([, value]) => value != null && String(value) !== "0" && String(value) !== "")
     .map(([name, value]) => `${name} ${value}`);
   return entries.length ? `Pollen: ${entries.join(", ")}` : "Pollen: keine Belastung";
+}
+
+// Highest pollen entry: DWD hazard levels such as "1-2" rank by their upper bound, CAMS concentrations by value.
+function plannedPollenPeak(pollen) {
+  if (!pollen || typeof pollen !== "object") return null;
+  const dwd = pollen.source === "DWD";
+  const source = dwd ? pollen.levels : pollen.concentrations;
+  if (!source || typeof source !== "object") return null;
+  let peak = null;
+  for (const [name, value] of Object.entries(source)) {
+    const rank = dwd ? Number(String(value).split(/[-–]/).pop()) : Number(value);
+    if (Number.isFinite(rank) && (!peak || rank > peak.rank)) peak = { name, value, rank };
+  }
+  return peak && peak.rank >= (dwd ? 1 : PLANNED_CAMS_POLLEN_FLAG_MIN) ? peak : null;
+}
+
+// Compact day-heading flags; an ordinary day yields none.
+function plannedWeatherFlags(weather) {
+  if (!weather || typeof weather !== "object") return [];
+  const flags = [];
+  const number = (value) => (value == null || value === "" ? NaN : Number(value));
+  const rain = number(weather.precipitation_probability_max);
+  if (rain >= PLANNED_RAIN_FLAG_MIN_PERCENT) flags.push({ text: `💧 ${calendarMetricNumber(rain, " %")}`, label: `${calendarMetricNumber(rain)} Prozent Regenwahrscheinlichkeit` });
+  const air = weather.air_quality && typeof weather.air_quality === "object" ? weather.air_quality : {};
+  const uv = number(air.uv_index_max);
+  if (uv >= PLANNED_UV_FLAG_MIN) flags.push({ text: `☀ UV ${calendarMetricNumber(uv)}`, label: `UV-Index ${calendarMetricNumber(uv)}` });
+  const aqi = number(air.european_aqi_max);
+  if (aqi >= PLANNED_AQI_FLAG_MIN) flags.push({ text: `AQI ${calendarMetricNumber(aqi)}`, label: `Luftqualität, Europäischer AQI ${calendarMetricNumber(aqi)}${air.european_aqi_category ? " (" + air.european_aqi_category + ")" : ""}` });
+  const pollen = plannedPollenPeak(weather.pollen);
+  if (pollen) flags.push({ text: `🌿 ${pollen.value}`, label: `Pollen: ${pollen.name} ${pollen.value}` });
+  return flags;
 }
 
 // Every activity with a positive distance adds to the total; only distance sports without one count as missing.
@@ -465,18 +486,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return [weatherIconFor(weather), temperatures.join(" / ")].filter(Boolean).join(" ");
   }
 
-  function appendPlannedWeatherInsight(body, weather) {
-    const weatherLabel = plannedWeatherLabel(weather);
-    if (!weather || !weatherLabel) return;
-    const condition = document.createElement("p");
-    condition.className = "planned-weather-detail";
-    condition.textContent = [weather.condition, weatherLabel].filter(Boolean).join(" · ");
-    condition.title = [
-      weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage",
-      "Open-Meteo", weather.forecast_location || state.data?.weather?.location?.name,
-      weather.forecast_saved_at ? `Stand: ${formatTime(weather.forecast_saved_at)}` : null,
-    ].filter(Boolean).join(" · ");
-    body.append(condition);
+  // Rain, wind and air details stay out of the day card; they are the tooltip/accessible name of the small weather symbol.
+  function plannedWeatherDetails(weather) {
     const directionValue = calendarMetricNumber(weather.wind_direction_dominant);
     const direction = directionValue != null && Number(weather.wind_direction_dominant) >= 0 && Number(weather.wind_direction_dominant) <= 360
       ? weatherDirection(weather.wind_direction_dominant) : "";
@@ -487,27 +498,12 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       calendarMetricNumber(weather.wind_gusts_max, " km/h Böen"),
     ].filter(Boolean);
     if (peakTime && weather.precipitation_probability_max == null) values.unshift(`Regen am ehesten ${peakTime} Uhr`);
-    if (values.length) {
-      const metrics = document.createElement("p");
-      metrics.className = "planned-weather-metrics";
-      metrics.textContent = values.join(" · ");
-      body.append(metrics);
-    }
-    appendPlannedAirInsight(body, weather);
-  }
-
-  function plannedDayInsights(weather) {
-    const content = document.createElement("div");
-    content.className = "planned-insights-content";
-    appendPlannedWeatherInsight(content, weather);
-    if (!content.childElementCount) return null;
-    const section = document.createElement("div");
-    section.className = "planned-day-insights";
-    const title = document.createElement("p");
-    title.className = "planned-insights-title";
-    title.textContent = "Wetter";
-    section.append(title, content);
-    return section;
+    return [
+      weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage",
+      weather.condition,
+      values.join(" · "),
+      plannedAirValues(weather).join(" · "),
+    ].filter(Boolean);
   }
 
   function plannedWeatherHint() {
@@ -748,9 +744,16 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       const weatherText = document.createElement("span");
       weatherText.className = "planned-day-weather";
       weatherText.textContent = weatherLabel;
-      weatherText.title = [weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage", weather.condition, weatherLabel].filter(Boolean).join(": ");
-      weatherText.setAttribute("aria-label", weatherText.title);
+      weatherText.title = [...plannedWeatherDetails(weather), weatherLabel].join("\n");
+      weatherText.setAttribute("aria-label", weatherText.title.replaceAll("\n", ". "));
       heading.append(weatherText);
+      for (const flag of plannedWeatherFlags(weather)) {
+        const flagText = document.createElement("span");
+        flagText.className = "planned-day-flag";
+        flagText.textContent = flag.text;
+        flagText.setAttribute("aria-label", flag.label);
+        heading.append(flagText);
+      }
     }
     day.append(heading);
   }
@@ -777,8 +780,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       content.append(empty);
     }
     dayEntries.forEach((entry) => content.append(renderPlannedEntry(entry, dateKey, todayKey, dayContext)));
-    const insights = plannedDayInsights(weather);
-    if (insights) day.append(insights);
     day.append(content);
     return day;
   }
