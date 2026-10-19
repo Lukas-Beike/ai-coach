@@ -80,8 +80,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_three(self) -> None:
-        self.assertEqual(3, MAPPER_VERSION)
+    def test_mapper_version_is_four(self) -> None:
+        self.assertEqual(4, MAPPER_VERSION)
 
     def test_fixture_maps_every_record_without_issues(self) -> None:
         result = _map(*_fixture_rows())
@@ -126,6 +126,31 @@ class VersionAndFixtureTests(unittest.TestCase):
         self.assertIs(RecordingOrigin.GARMIN, provenance.recorded_by)
         self.assertEqual(RETRIEVED, provenance.retrieved_at)
         self.assertEqual("Garmin Connect", provenance.label)
+
+
+class RecordingOriginTests(unittest.TestCase):
+    def test_manual_activity_true_is_recorded_as_manual(self) -> None:
+        record, issues = _one(manualActivity=True)
+
+        assert record is not None
+        self.assertIs(RecordingOrigin.MANUAL, record.provenance.recorded_by)
+        self.assertEqual((), issues)
+
+    def test_only_boolean_true_marks_a_manual_entry(self) -> None:
+        for value in (False, None, "true", 1):
+            with self.subTest(value=value):
+                record, issues = _one(manualActivity=value)
+
+                assert record is not None
+                self.assertIs(RecordingOrigin.GARMIN, record.provenance.recorded_by)
+                self.assertEqual((), issues)
+
+    def test_absent_manual_flag_is_recorded_as_garmin(self) -> None:
+        record, issues = _one()
+
+        assert record is not None
+        self.assertIs(RecordingOrigin.GARMIN, record.provenance.recorded_by)
+        self.assertEqual((), issues)
 
 
 class StartTimeTests(unittest.TestCase):
