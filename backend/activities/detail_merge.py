@@ -148,7 +148,8 @@ def stream_average(streams: MergedStreams, channel: StreamChannel) -> float | No
     points = [
         value
         for index, value in enumerate(choice.values)
-        if value is not None and (moving_values is None or moving_values[index] == 1.0)
+        if value is not None
+        and (moving_values is None or (moving_values[index] or 0.0) >= 1.0)
     ]
     if not points:
         return None
@@ -165,11 +166,7 @@ def _merge_streams(candidates: list[DetailCandidate]) -> MergedStreams | None:
     for channel in StreamChannel:
         if channel is StreamChannel.TIME_S or not _has_values(candidates, channel):
             continue
-        ordered = sorted(
-            (c for c in ranked if channel in _streams_of(c).channels),
-            key=lambda c: _channel_key(channel, c, primary),
-        )
-        for candidate in ordered:
+        for candidate in _channel_order(channel, ranked, primary):
             values = _streams_of(candidate).channels[channel]
             placed = _place(candidate, primary, primary_axis, values)
             if placed is not None and any(value is not None for value in placed):
@@ -184,6 +181,16 @@ def _merge_streams(candidates: list[DetailCandidate]) -> MergedStreams | None:
         time_s=primary_axis,
         channels=MappingProxyType(channels),
         alternatives=tuple(ranked[1:]),
+    )
+
+
+def _channel_order(
+    channel: StreamChannel, ranked: list[DetailCandidate], primary: DetailCandidate
+) -> list[DetailCandidate]:
+    """The stream candidates carrying the channel, best source first."""
+    return sorted(
+        (c for c in ranked if channel in _streams_of(c).channels),
+        key=lambda c: _channel_key(channel, c, primary),
     )
 
 
