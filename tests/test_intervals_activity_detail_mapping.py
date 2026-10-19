@@ -304,6 +304,18 @@ class IntervalsActivityDetailLapTests(unittest.TestCase):
             result.issues, (_issue("average_watts", IssueReason.OUT_OF_RANGE),)
         )
 
+    def test_fractional_lap_intensity_is_stored_as_percent(self):
+        rows = [
+            {"start_time": 0, "end_time": 60, "icu_intensity": 0.78},
+            {"start_time": 60, "end_time": 120, "icu_intensity": 85.5},
+        ]
+
+        result = _fresh({"id": ID, "icu_intervals": rows})
+
+        laps = _only(result, ActivityLapSet).laps
+        self.assertEqual([lap.intensity_pct for lap in laps], [78.0, 85.5])
+        self.assertEqual(result.issues, ())
+
     def test_laps_beyond_the_maximum_are_capped_with_one_issue(self):
         rows = [
             {"start_time": index * 10, "end_time": index * 10 + 5}
@@ -361,6 +373,30 @@ class IntervalsActivityDetailZoneTests(unittest.TestCase):
         self.assertEqual(_records_of(result, ZoneDistribution), [])
         self.assertEqual(
             result.issues, (_issue("icu_hr_zone_times", IssueReason.INVALID_NUMBER),)
+        )
+
+    def test_non_list_zone_payload_is_reported(self):
+        result = _fresh({"id": ID, "icu_zone_times": {"Z1": 100}})
+
+        self.assertEqual(_records_of(result, ZoneDistribution), [])
+        self.assertEqual(
+            result.issues, (_issue("icu_zone_times", IssueReason.INVALID_TYPE),)
+        )
+
+    def test_id_zone_with_invalid_seconds_drops_the_distribution(self):
+        result = _fresh(
+            {
+                "id": ID,
+                "icu_zone_times": [
+                    {"id": "Z1", "secs": "bad"},
+                    {"id": "Z2", "secs": 50},
+                ],
+            }
+        )
+
+        self.assertEqual(_records_of(result, ZoneDistribution), [])
+        self.assertEqual(
+            result.issues, (_issue("icu_zone_times", IssueReason.INVALID_NUMBER),)
         )
 
     def test_zone_times_keeps_bounded_numbers_and_ids(self):

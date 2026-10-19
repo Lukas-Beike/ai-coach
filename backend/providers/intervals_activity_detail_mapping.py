@@ -541,6 +541,8 @@ def _lap_metrics(
             if value is None:
                 continue
             number = coerce_number(value)
+            if number is not None and name == "intensity_pct":
+                number = _intensity_pct(number)
             if number is not None and _lap_accepts(name, number):
                 metrics[name] = number
                 break
@@ -551,6 +553,14 @@ def _lap_metrics(
             )
             issues.append(MappingIssue(ref, key, reason))
     return metrics
+
+
+def _intensity_pct(value: float) -> float:
+    """Intervals reports intensity as a fraction or a percentage; keep percent."""
+    # Same rule as performance.activity_validation.activity_intensity.
+    if 0 < value <= 2:
+        return round(value * 100, 1)
+    return value
 
 
 def _lap_accepts(name: str, value: float) -> bool:
@@ -578,6 +588,8 @@ def _zone_distribution(
     ref = header.provider_activity_id
     buckets: list[ZoneBucket] = []
     unsupported = False
+    if not _zone_payload_valid(activity.get(key), ref, key, issues):
+        return None
     for item in zone_times(activity.get(key)):
         if item is None:
             # A gap would shift the positions of the zones after it.
@@ -614,3 +626,20 @@ def _zone_distribution(
     except TypeError, ValueError:
         issues.append(MappingIssue(ref, key, IssueReason.OUT_OF_RANGE))
         return None
+
+
+def _zone_payload_valid(
+    value: object, ref: str, key: str, issues: list[MappingIssue]
+) -> bool:
+    """Report what ``zone_times`` would drop silently: a non-list or a bad bucket."""
+    if value is None:
+        return True
+    if not isinstance(value, list):
+        issues.append(MappingIssue(ref, key, IssueReason.INVALID_TYPE))
+        return False
+    for item in value[:MAX_ZONES]:
+        if isinstance(item, dict) and _zone_number(item.get("secs")) is None:
+            # Dropping one bucket would renumber the zones after it.
+            issues.append(MappingIssue(ref, key, IssueReason.INVALID_NUMBER))
+            return False
+    return True
