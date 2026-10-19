@@ -1,8 +1,9 @@
 // A load renders once per arriving area; only its first render reloads the open nutrition view.
+// The reload follows the state update because the diary keys "today" by the profile's zone.
 function render(data, { reloadRoute = true } = {}) {
-  if (reloadRoute && AppRouter.baseRoute() === "nutrition") { if (state.route === "nutrition/products") void loadNutritionProducts("", { background: true }); else void loadNutrition(); }
   const firstRender = !state.data;
   state.data = data;
+  if (reloadRoute && AppRouter.baseRoute() === "nutrition") { if (state.route === "nutrition/products") void loadNutritionProducts("", { background: true }); else void loadNutrition(); }
   renderAppVersion(data.app);
   renderCoachOverview(data);
   renderCoachReceipts();
