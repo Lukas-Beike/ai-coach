@@ -10,14 +10,13 @@ from backend.coach import attachments as coach_attachments
 from backend.coach.attachments import (
     _FIT_SPORTS,
     AttachmentRequestTooLarge,
-    _fit_crc16,
-    _fit_data_record,
     _fit_session_summary,
     fit_summary,
     gpx_summary,
     model_input,
     validate_attachments,
 )
+from backend.providers.fit_file import _fit_crc16, _fit_data_record
 
 GPX = b'<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><ele>10</ele></trkpt><trkpt lat="0" lon="0.01"><ele>20</ele></trkpt></trkseg></trk></gpx>'
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAASUVORK5CYII="
