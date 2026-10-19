@@ -4,24 +4,6 @@ const { chromium } = require("@playwright/test");
 
 const AUTH_STATE_PATH = path.join(__dirname, "..", "playwright", ".auth", "user.json");
 
-const LOGIN_ATTEMPTS = 3;
-const LOGIN_ATTEMPT_TIMEOUT_MS = 15_000;
-
-// One failed or stalled script request leaves the page without the login form, and Chromium does not refetch it.
-// Setup is not under test, so a fresh load is retried instead of failing every spec in the project.
-async function openLogin(page) {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await page.goto("/", { timeout: LOGIN_ATTEMPT_TIMEOUT_MS });
-      await page.getByLabel("Passwort", { exact: true }).waitFor({ state: "visible", timeout: LOGIN_ATTEMPT_TIMEOUT_MS });
-      return;
-    } catch (error) {
-      if (attempt >= LOGIN_ATTEMPTS) throw error;
-      console.warn(`The login form did not appear (attempt ${attempt} of ${LOGIN_ATTEMPTS}); reloading.`);
-    }
-  }
-}
-
 async function authenticate(config) {
   const password = process.env.E2E_APP_PASSWORD;
   if (!password || password.length < 12) {
@@ -35,7 +17,7 @@ async function authenticate(config) {
   try {
     const context = await browser.newContext({ baseURL });
     const page = await context.newPage();
-    await openLogin(page);
+    await page.goto("/");
     await page.getByLabel("Passwort", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Anmelden" }).click();
     await page.locator("#loginDialog").waitFor({ state: "hidden" });

@@ -244,6 +244,22 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn('--list --project "$project" --reporter=json', e2e)
         self.assertIn("mapfile -t specs", e2e)
 
+    def test_e2e_fixtures_reuse_slot_networks_created_before_the_browser(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
+        e2e = workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0]
+        start_fixture = e2e.split("start_fixture() {", 1)[1].split("\n          }", 1)[0]
+        # A fixture that brings its own network adds a host veth mid-spec, and Chromium
+        # then fails in-flight requests with ERR_NETWORK_CHANGED.
+        self.assertIn('--network "container:$(network_name "$index")"', start_fixture)
+        self.assertNotIn("--publish", start_fixture)
+        loop = e2e.split('for i in "${!specs[@]}"; do', 1)
+        self.assertIn("start_network 0\n", loop[0])
+        self.assertIn("start_network 1\n", loop[0])
+        self.assertNotIn("start_network", loop[1])
+
     def test_ci_failure_artifacts_exclude_traces_and_auth_state(self):
         root = Path(__file__).resolve().parents[1]
         config = (root / "playwright.config.cjs").read_text(encoding="utf-8")
