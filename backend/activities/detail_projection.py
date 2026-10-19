@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from backend.providers.intervals_activity_detail_mapping import zone_times
 from backend.providers.intervals_activity_keys import (
     INTENSITY,
     PACE,
@@ -101,7 +102,6 @@ COACH_ACTIVITY_DETAIL_LAP_FIELDS = (
 )
 COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS = 2000
 COACH_ACTIVITY_DETAIL_MAX_LAPS = 200
-COACH_ACTIVITY_DETAIL_MAX_ZONES = 20
 
 
 def _analysis_scalar(value: Any, *, limit: int = 200) -> Any:
@@ -147,23 +147,6 @@ def _analysis_laps(value: Any) -> list[dict[str, Any]]:
     return laps
 
 
-def _zone_times(value: Any) -> list[Any]:
-    """Keep recorded zone durations as numbers or bounded ``{id, secs}`` items."""
-    if not isinstance(value, list):
-        return []
-    zones: list[Any] = []
-    for item in value[:COACH_ACTIVITY_DETAIL_MAX_ZONES]:
-        if isinstance(item, dict):
-            secs = _analysis_scalar(item.get("secs"))
-            if isinstance(secs, (int, float)) and not isinstance(secs, bool):
-                zones.append({"id": str(item.get("id") or "")[:20], "secs": secs})
-        else:
-            # Plain lists are positional (Z1, Z2, ...), so invalid entries stay as gaps.
-            number = isinstance(item, (int, float)) and not isinstance(item, bool)
-            zones.append(_analysis_scalar(item) if number else None)
-    return zones
-
-
 def _detail_scalars(activity: dict[str, Any]) -> dict[str, Any]:
     projected: dict[str, Any] = {}
     for key in COACH_ACTIVITY_DETAIL_FIELDS:
@@ -195,7 +178,7 @@ def detailed_activity(activity: Any) -> dict[str, Any]:
     if streams:
         projected["streams"] = streams
     for key in (HEART_RATE_ZONE_TIMES, ZONE_TIMES):
-        zones = _zone_times(activity.get(key))
+        zones = zone_times(activity.get(key))
         if zones:
             projected[key] = zones
     laps = _analysis_laps(activity.get("laps"))
