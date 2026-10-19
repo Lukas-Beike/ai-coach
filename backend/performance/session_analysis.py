@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from backend.providers import intervals_performance_fields as intervals_perf_fields
+from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 
 METHOD = "time-weighted-session-analysis-v1"
 
@@ -58,11 +59,14 @@ def _target(
 
 
 def interval_quality(
-    activity: dict[str, Any], targets: dict[str, Any] | None
+    activity: dict[str, Any],
+    targets: dict[str, Any] | None,
+    *,
+    source_label: str = INTERVALS_LABEL,
 ) -> dict[str, Any]:
     base = {
         "method": METHOD,
-        "source": "derived from Intervals.icu original streams and frozen local targets",
+        "source": f"derived from {source_label} original streams and frozen local targets",
         "tolerance": "Authored ranges; single point targets use an explicit +/-5% measurement band. Missing samples, stopped timer and gaps over 5 seconds are excluded.",
     }
     if not targets or not targets.get("steps"):
@@ -104,7 +108,9 @@ def interval_quality(
     }
 
 
-def aerobic_analysis(activity: dict[str, Any]) -> dict[str, Any]:
+def aerobic_analysis(
+    activity: dict[str, Any], *, source_label: str = INTERVALS_LABEL
+) -> dict[str, Any]:
     provider = _number(activity.get("decoupling"))
     base = {
         "method": METHOD,
@@ -113,7 +119,7 @@ def aerobic_analysis(activity: dict[str, Any]) -> dict[str, Any]:
             "unit": "%",
             "source": "Intervals.icu",
         },
-        "source": "derived from Intervals.icu original streams",
+        "source": f"derived from {source_label} original streams",
         "warmup_excluded_seconds": 600,
         "eligibility": "At least 20 minutes after a 10-minute warm-up; >=85% paired data coverage; output variation <=15%; gaps >5 seconds, stops and non-positive output excluded. No universal fitness cutoff.",
     }
