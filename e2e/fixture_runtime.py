@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
 FIXTURE_DEMO_SEED_VERSION = "8"
+FIXTURE_RATIONALE = "Synthetische Vorschau"
 FIXTURE_TRAINING_FEATURES_SEED_VERSION = "1"
 # canned keeps the canned Coach replies; offline simulates an unreachable OpenAI.
 FIXTURE_OPENAI_MODES = ("canned", "offline")
@@ -1763,7 +1764,7 @@ def _fixture_v6_units(today):
                 "description": description,
                 "icu_training_load": load,
                 "target": "AUTO",
-                "rationale": "Synthetische Vorschau",
+                "rationale": FIXTURE_RATIONALE,
             },
         )
         for name, offset, title, sport, duration, description, load in specs
@@ -1859,7 +1860,7 @@ def _fixture_seed_distance_run(today):
             "duration_minutes": 45,
             "description": "- 2km Z1 Pace\n- 5km Z2 Pace\n- 1km 100% Pace",
             "target": "AUTO",
-            "rationale": "Synthetische Vorschau",
+            "rationale": FIXTURE_RATIONALE,
         }
         try:
             server.PLANNING_WORKFLOWS.local_plan_creation_service().save([workout])
@@ -2025,7 +2026,7 @@ def seed_preview_demo():
             "duration_minutes": duration,
             "description": description,
             "target": "AUTO",
-            "rationale": "Synthetische Vorschau",
+            "rationale": FIXTURE_RATIONALE,
         }
         for offset, name, sport, duration, description in [
             (2, "Lockerer Dauerlauf", "Run", 40, "- 40m Z1 HR"),
