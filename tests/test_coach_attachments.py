@@ -196,6 +196,49 @@ class FitEnhancedFieldTests(unittest.TestCase):
                 self.assertAlmostEqual(summary["avg_speed_kmh"], avg, places=3)
                 self.assertAlmostEqual(summary["max_speed_kmh"], max_speed, places=3)
 
+    def test_record_max_speed_uses_enhanced_speed_only(self):
+        enhanced_only = fit_file(
+            (
+                20,
+                [(73, 4, 6)],
+                [struct.pack("<I", speed) for speed in (8000, 10000, 9000)],
+            )
+        )
+        self.assertAlmostEqual(
+            fit_summary(enhanced_only)["max_speed_kmh"], 36.0, places=3
+        )
+
+    def test_record_max_speed_uses_speed_field_without_enhanced_speed(self):
+        base_only = fit_file(
+            (
+                20,
+                [(6, 2, 4)],
+                [struct.pack("<H", speed) for speed in (8000, 12000, 9000)],
+            )
+        )
+        self.assertAlmostEqual(fit_summary(base_only)["max_speed_kmh"], 43.2, places=3)
+
+    def test_record_max_speed_prefers_enhanced_speed_per_row(self):
+        both = fit_file(
+            (
+                20,
+                [(6, 2, 4), (73, 4, 6)],
+                [struct.pack("<HI", 12000, 10000), struct.pack("<HI", 11000, 8000)],
+            )
+        )
+        summary = fit_summary(both)
+        self.assertAlmostEqual(summary["max_speed_kmh"], 36.0, places=3)
+        self.assertNotIn("avg_speed_kmh", summary)
+
+    def test_session_max_speed_wins_over_record_speeds(self):
+        session_wins = fit_file(
+            (18, [(15, 2, 4)], [struct.pack("<H", 8000)]),
+            (20, [(73, 4, 6)], [struct.pack("<I", 10000)]),
+        )
+        summary = fit_summary(session_wins)
+        self.assertAlmostEqual(summary["max_speed_kmh"], 28.8, places=3)
+        self.assertNotIn("avg_speed_kmh", summary)
+
 
 class AttachmentTests(DialogueHarness, unittest.TestCase):
     def upload(self, data=GPX, name="route.gpx"):

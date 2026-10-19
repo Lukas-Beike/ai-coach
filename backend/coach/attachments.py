@@ -72,6 +72,7 @@ _FIT_FIELD_SCALES = {
     (20, 5): ("distance_m", 100, 0),
     (20, 6): ("speed_m_s", 1000, 0),
     (20, 13): ("temperature_c", 1, 0),
+    (20, 73): ("enhanced_speed_m_s", 1000, 0),
     (20, 78): ("enhanced_altitude_m", 5, -500),
     # session message
     (18, 2): ("timestamp", 1, 0),
@@ -98,6 +99,7 @@ _FIT_FIELD_SCALES = {
 # message; invalid sentinels decode to None and fall through to the base field.
 _FIT_FIELD_PREFERENCES = {
     (20, 2): (78, 2),
+    (20, 6): (73, 6),
     (18, 14): (124, 14),
     (18, 15): (125, 15),
 }
@@ -544,6 +546,15 @@ def _fit_add_record_extrema(messages, summary):
             summary[key] = max(values)
 
 
+def _fit_add_record_max_speed(messages, summary):
+    # Only the maximum is taken from records; average speed needs even sampling.
+    if "max_speed_kmh" in summary:
+        return
+    speeds = _fit_scaled(messages, 20, 6)
+    if speeds:
+        summary["max_speed_kmh"] = round(max(speeds) * 3.6, 3)
+
+
 def _fit_add_record_elevation(messages, summary):
     if "ascent_m" in summary and "descent_m" in summary:
         return
@@ -573,6 +584,7 @@ def fit_summary(data):
     _fit_add_record_timing(messages, summary)
     _fit_add_record_distance(messages, summary)
     _fit_add_record_extrema(messages, summary)
+    _fit_add_record_max_speed(messages, summary)
     _fit_add_record_elevation(messages, summary)
     summary["note"] = (
         "FIT-Werte stammen aus der hochgeladenen Aktivitätsdatei; fehlende Messwerte sind nicht verfügbar."
