@@ -731,7 +731,17 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     ].join("\n");
     await page.getByRole("link", { name: "Kalender", exact: true }).click();
     await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
-    const inactiveScrollY = await page.evaluate(() => window.scrollY);
+    // The calendar route scrolls to today across several frames; compare against the settled offset.
+    const inactiveScrollY = await page.evaluate(async () => {
+      const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+      let last = window.scrollY;
+      for (let stableFrames = 0; stableFrames < 4;) {
+        await nextFrame();
+        stableFrames = window.scrollY === last ? stableFrames + 1 : 0;
+        last = window.scrollY;
+      }
+      return last;
+    });
     await page.evaluate((content) => {
       const message = { id: 2, role: "assistant", content, created_at: "2026-09-04T10:00:00Z" };
       window.__chatTest.historyMessages = [
