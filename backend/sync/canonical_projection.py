@@ -22,7 +22,11 @@ from datetime import date, datetime, tzinfo
 from itertools import chain
 from typing import Any
 
-from backend.canonical.coverage import ProviderCoverage, summarize_provider
+from backend.canonical.coverage import (
+    MetricWindow,
+    ProviderCoverage,
+    summarize_provider,
+)
 from backend.canonical.local_time import local_date
 from backend.canonical.mapping import MappingResult
 from backend.canonical.ordering import activity_order, observation_order
@@ -168,6 +172,14 @@ class CanonicalSnapshotProjection(
     def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]:
         projection, _zone = self._current(db)
         return projection.coverage
+
+    def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
+        """Return no per-metric windows: the legacy projection keeps none.
+
+        Per-metric counts exist only in the canonical tables, so before the first
+        completed backfill the diagnostics report no metrics.
+        """
+        return ()
 
     def zone(self, db: Any) -> tzinfo:
         """Return the athlete's time zone, the one the projection's dates use."""

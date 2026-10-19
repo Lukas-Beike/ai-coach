@@ -557,6 +557,25 @@ def active_activity_payload_texts(
     return [str(row["payload"]) for row in rows]
 
 
+def _current_version_clause(
+    versions: Mapping[str, int], oldest_versions: Mapping[str, int] | None
+) -> tuple[str, list[object]]:
+    """Return the parenthesised provider and version-window clause with its parameters.
+
+    A provider's rows count from the lower of its oldest pending version and its
+    current version up to the current one. Without ``oldest_versions`` the window
+    is the current version alone.
+    """
+    lowest = oldest_versions or {}
+    provider_clause = " OR ".join(
+        "(provider = ? AND mapper_version BETWEEN ? AND ?)" for _ in versions
+    )
+    params: list[object] = []
+    for provider, version in versions.items():
+        params.extend((provider, min(lowest.get(provider, version), version), version))
+    return f"({provider_clause})", params
+
+
 def current_observation_rows(
     db: Any,
     metric: str,
@@ -578,14 +597,9 @@ def current_observation_rows(
     is pending. Rows below the oldest version were retired by an earlier mapper
     and stay hidden.
     """
-    lowest = oldest_versions or {}
-    provider_clause = " OR ".join(
-        "(provider = ? AND mapper_version BETWEEN ? AND ?)" for _ in versions
-    )
-    params: list[object] = [metric]
-    for provider, version in versions.items():
-        params.extend((provider, min(lowest.get(provider, version), version), version))
-    clauses = ["metric = ?", f"({provider_clause})"]
+    version_clause, version_params = _current_version_clause(versions, oldest_versions)
+    params: list[object] = [metric, *version_params]
+    clauses = ["metric = ?", version_clause]
     if start is not None:
         clauses.append("observed_on >= ?")
         params.append(start)
@@ -599,6 +613,31 @@ def current_observation_rows(
         db,
         f"SELECT {', '.join(_OBSERVATION_READ_COLUMNS)} FROM observations "
         f"WHERE {' AND '.join(clauses)} ORDER BY observed_on, id",
+        tuple(params),
+    )
+
+
+def observation_metric_windows(
+    db: Any,
+    versions: Mapping[str, int],
+    *,
+    oldest_versions: Mapping[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    """Return the count and newest observed day of each provider metric, without values.
+
+    The rows are the ones ``current_observation_rows`` serves for the same
+    ``versions`` and ``oldest_versions``, so the counts match what the tables serve.
+    Each dict holds ``provider``, ``metric``, ``observations`` and ``newest`` (the
+    latest ``observed_on`` as ISO text) and no other column.
+    """
+    if not versions:
+        return []
+    version_clause, params = _current_version_clause(versions, oldest_versions)
+    return _fetch_all(
+        db,
+        "SELECT provider, metric, COUNT(*) AS observations, "
+        "MAX(observed_on) AS newest FROM observations "
+        f"WHERE {version_clause} GROUP BY provider, metric",
         tuple(params),
     )
 

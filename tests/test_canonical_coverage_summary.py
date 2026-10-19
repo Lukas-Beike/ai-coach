@@ -5,20 +5,23 @@ The projection is built from in-memory fakes over the read-only wire fixtures.
 
 from __future__ import annotations
 
+import json
+import re
 import unittest
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from support import garmin_payload_fixture, intervals_snapshot_fixture
 
-from backend.canonical.coverage import ProviderCoverage
+from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.mapping import IssueReason
 from backend.canonical.vocabulary import ProviderId
 from backend.diagnostics.canonical_coverage import summarize_canonical_coverage
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
 
 CLOCK_AT = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)
+NEWEST = date(2026, 10, 11)
 FAKE_DB: Any = object()
 SUMMARY_VOCABULARY = {
     "status",
@@ -69,6 +72,9 @@ class FailingCoverage:
     def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]:
         raise RuntimeError("private athlete text in the error message")
 
+    def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
+        return ()
+
 
 class CanonicalCoverageSummaryTests(unittest.TestCase):
     def test_summary_reports_counts_and_flags_per_provider(self) -> None:
@@ -102,6 +108,9 @@ class CanonicalCoverageSummaryTests(unittest.TestCase):
             def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]:
                 return (coverage,)
 
+            def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
+                return ()
+
         summary = summarize_canonical_coverage(Reader(), FAKE_DB)
 
         self.assertEqual(
@@ -118,6 +127,8 @@ class CanonicalCoverageSummaryTests(unittest.TestCase):
                             str(reason): 2 if reason is IssueReason.MISSING else 0
                             for reason in IssueReason
                         },
+                        "metrics": [],
+                        "stalled_metrics": 0,
                     }
                 ],
             },
@@ -157,6 +168,130 @@ class CanonicalCoverageSummaryTests(unittest.TestCase):
 
         self.assertEqual(summary, {"status": "unavailable"})
         self.assertNotIn("private athlete", repr(summary))
+
+
+class FixedCoverage:
+    def __init__(
+        self, *providers: ProviderId, windows: tuple[MetricWindow, ...] = ()
+    ) -> None:
+        self._providers = providers
+        self._windows = windows
+
+    def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]:
+        return tuple(
+            ProviderCoverage(
+                provider=provider,
+                retrieved_at=None,
+                activity_count=0,
+                observation_count=0,
+                issue_counts={},
+                first_observed_on=None,
+                last_observed_on=None,
+            )
+            for provider in self._providers
+        )
+
+    def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
+        return self._windows
+
+
+def window(
+    provider: ProviderId,
+    metric: str,
+    observations: int,
+    newest: date,
+) -> MetricWindow:
+    return MetricWindow(
+        provider=provider,
+        metric=metric,
+        observations=observations,
+        newest_observed_on=newest,
+    )
+
+
+class MetricWindowTests(unittest.TestCase):
+    """Per-metric lag and stall flags, fed from fake metric windows."""
+
+    def summary(
+        self,
+        *windows: MetricWindow,
+        providers: tuple[ProviderId, ...] = (ProviderId.INTERVALS,),
+    ) -> dict[str, Any]:
+        return summarize_canonical_coverage(
+            FixedCoverage(*providers, windows=windows), FAKE_DB
+        )
+
+    def intervals_metrics(self, *windows: MetricWindow) -> dict[str, dict[str, Any]]:
+        entry = providers_by_name(self.summary(*windows))[str(ProviderId.INTERVALS)]
+        return {metric["metric"]: metric for metric in entry["metrics"]}
+
+    def test_metric_stopped_ten_days_before_the_provider_is_stalled(self) -> None:
+        windows = (
+            window(ProviderId.INTERVALS, "ctl", 10, NEWEST - timedelta(days=10)),
+            window(ProviderId.INTERVALS, "weight", 10, NEWEST),
+        )
+
+        metrics = self.intervals_metrics(*windows)
+
+        self.assertEqual(
+            metrics["ctl"],
+            {"metric": "ctl", "observations": 10, "lag_days": 10, "stalled": True},
+        )
+        self.assertEqual(
+            metrics["weight"],
+            {"metric": "weight", "observations": 10, "lag_days": 0, "stalled": False},
+        )
+        self.assertEqual(
+            providers_by_name(self.summary(*windows))[str(ProviderId.INTERVALS)][
+                "stalled_metrics"
+            ],
+            1,
+        )
+
+    def test_metric_with_too_few_observations_is_not_stalled(self) -> None:
+        metrics = self.intervals_metrics(
+            window(ProviderId.INTERVALS, "ctl", 3, NEWEST - timedelta(days=10)),
+            window(ProviderId.INTERVALS, "weight", 1, NEWEST),
+        )
+
+        self.assertEqual(metrics["ctl"]["lag_days"], 10)
+        self.assertFalse(metrics["ctl"]["stalled"])
+
+    def test_lag_below_a_week_is_not_stalled(self) -> None:
+        metrics = self.intervals_metrics(
+            window(ProviderId.INTERVALS, "ctl", 10, NEWEST - timedelta(days=6)),
+            window(ProviderId.INTERVALS, "weight", 1, NEWEST),
+        )
+
+        self.assertEqual(metrics["ctl"]["lag_days"], 6)
+        self.assertFalse(metrics["ctl"]["stalled"])
+
+    def test_empty_metric_windows_report_no_metrics(self) -> None:
+        entry = providers_by_name(self.summary())[str(ProviderId.INTERVALS)]
+
+        self.assertEqual(entry["metrics"], [])
+        self.assertEqual(entry["stalled_metrics"], 0)
+
+    def test_metrics_of_providers_outside_the_coverage_are_not_added(self) -> None:
+        summary = self.summary(
+            window(ProviderId.INTERVALS, "ctl", 10, NEWEST - timedelta(days=10)),
+            providers=(ProviderId.GARMIN,),
+        )
+
+        self.assertEqual(
+            [entry["provider"] for entry in summary["providers"]], ["garmin"]
+        )
+        self.assertEqual(summary["providers"][0]["metrics"], [])
+
+    def test_metric_summary_carries_no_dates(self) -> None:
+        serialized = json.dumps(
+            self.summary(
+                window(ProviderId.INTERVALS, "ctl", 10, NEWEST - timedelta(days=10)),
+                window(ProviderId.INTERVALS, "weight", 10, NEWEST),
+            )
+        )
+
+        self.assertIsNone(re.search(r"\d{4}-\d{2}-\d{2}", serialized))
 
 
 if __name__ == "__main__":

@@ -24,8 +24,9 @@ Results use the same inclusive bounds and the same total order as
 date, which the ingest computed with the athlete's zone at write time.
 
 Mapping issue counts are not stored in the tables, so this reader does not
-implement ``ProviderCoverageReader``. ``CanonicalReadSelector`` serves coverage
-from the summaries persisted at ingest.
+implement ``coverage``. It serves ``metric_windows`` from the same rows as
+``observations``, as counts and newest days only. ``CanonicalReadSelector`` serves
+coverage from the summaries persisted at ingest.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from typing import Any, Final
 
+from backend.canonical.coverage import MetricWindow
 from backend.canonical.ordering import activity_order, observation_order
 from backend.canonical.records import (
     ActivityRecord,
@@ -138,6 +140,23 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
         )
         return tuple(sorted((_observation(row) for row in rows), key=observation_order))
 
+    def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
+        """Return the count and newest day of each provider metric.
+
+        The same version window as ``observations`` applies, so a pending
+        re-projection counts the rows it still serves. Rows whose provider is not
+        a known ``ProviderId`` are skipped.
+        """
+        rows = canonical_store.observation_metric_windows(
+            db,
+            current_observation_mapper_versions(),
+            oldest_versions=(
+                None if self._oldest_versions is None else self._oldest_versions(db)
+            ),
+        )
+        windows = (_metric_window(row) for row in rows)
+        return tuple(window for window in windows if window is not None)
+
 
 def _payload_object(text: str) -> dict[str, Any] | None:
     try:
@@ -212,3 +231,22 @@ def _observation(row: Mapping[str, Any]) -> Observation:
         ),
         sport=None if row["sport"] is None else Sport(row["sport"]),
     )
+
+
+def _metric_window(row: Mapping[str, Any]) -> MetricWindow | None:
+    provider = _provider_or_none(row["provider"])
+    if provider is None:
+        return None
+    return MetricWindow(
+        provider=provider,
+        metric=str(row["metric"]),
+        observations=int(row["observations"]),
+        newest_observed_on=date.fromisoformat(str(row["newest"])),
+    )
+
+
+def _provider_or_none(value: object) -> ProviderId | None:
+    try:
+        return ProviderId(value)
+    except ValueError:
+        return None

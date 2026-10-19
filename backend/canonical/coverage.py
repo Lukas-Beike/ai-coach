@@ -76,6 +76,26 @@ class ProviderCoverage:
         _validate_observed_range(self.first_observed_on, self.last_observed_on)
 
 
+@dataclass(frozen=True, slots=True)
+class MetricWindow:
+    """The stored count and newest observed day of one provider metric.
+
+    Counts and a day only, never values. Lags and stalls are derived by the
+    diagnostics owner from the newest days of a provider's metrics.
+    """
+
+    provider: ProviderId
+    metric: str
+    observations: int
+    newest_observed_on: date
+
+    def __post_init__(self) -> None:
+        require_instance(self.provider, ProviderId, "provider")
+        require_instance(self.metric, str, "metric")
+        _require_count(self.observations, "observations")
+        require_date(self.newest_observed_on, "newest_observed_on")
+
+
 def summarize_provider(
     provider: ProviderId,
     stored_at: datetime | None,

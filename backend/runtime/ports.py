@@ -5,7 +5,7 @@ from contextlib import AbstractContextManager
 from datetime import date
 from typing import Any, Protocol, runtime_checkable
 
-from backend.canonical.coverage import ProviderCoverage
+from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, Sport
 
@@ -83,7 +83,13 @@ class ObservationReader(Protocol):
 
 
 class CanonicalReader(ActivityReader, ActivityRowReader, ObservationReader, Protocol):
-    """The reads a canonical source serves: activities, raw rows and observations."""
+    """The reads a canonical source serves: activities, raw rows and observations.
+
+    Every source also reports its per-metric windows, so the selector can delegate
+    ``metric_windows`` to whichever source serves the current read.
+    """
+
+    def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]: ...
 
 
 @runtime_checkable
@@ -101,6 +107,14 @@ class ProviderCoverageReader(Protocol):
     """Reports per-provider coverage counts, including mapping issue counts only."""
 
     def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]: ...
+
+    def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
+        """Return the count and newest observed day of each provider metric.
+
+        Counts and days only, never values. A source that keeps no per-metric data
+        returns an empty tuple.
+        """
+        ...
 
 
 class CanonicalTableServing(Protocol):
