@@ -73,7 +73,10 @@ class GarminActivityDetailService:
             }
         with self._database_manager.reader() as db:
             stored = detail_sets_for(db, GARMIN_ID, provider_activity_id)
-        if _within_cooldown(stored, _aware(self._utc_now())):
+            current_summary = active_provider_record_hash(
+                db, GARMIN_ID, ACTIVITY_RECORD_KIND, provider_activity_id
+            )
+        if _within_cooldown(stored, current_summary, _aware(self._utc_now())):
             return {
                 "status": "unchanged",
                 "activity_id": provider_activity_id,
@@ -96,8 +99,10 @@ class GarminActivityDetailService:
                     "issues": len(mapped.issues),
                 },
             )
+        # Malformed parts are dropped by the mapper, so they count like failures.
+        incomplete = bool(collected.get("errors") or mapped.issues)
         if not mapped.records:
-            if collected.get("errors"):
+            if incomplete:
                 # Every requested part failed: report the job as failed.
                 raise AppError(
                     502,
@@ -128,7 +133,7 @@ class GarminActivityDetailService:
                     now=now,
                 )
         return {
-            "status": "partial" if collected.get("errors") else "completed",
+            "status": "partial" if incomplete else "completed",
             "activity_id": provider_activity_id,
             "kinds": sorted({item.kind.value for item in mapped.records}),
         }
@@ -171,8 +176,16 @@ def _aware(value: str) -> datetime:
     return parsed
 
 
-def _within_cooldown(stored: list[Any], now: datetime) -> bool:
-    """True when the newest stored fetch of this activity is under the cooldown."""
+def _within_cooldown(
+    stored: list[Any], current_summary: str | None, now: datetime
+) -> bool:
+    """True when the stored sets match the current summary and are recent.
+
+    A changed activity summary makes the stored sets stale, so it bypasses the
+    cooldown.
+    """
+    if any(item.summary_sha256 != current_summary for item in stored):
+        return False
     newest = max(
         (parsed for parsed in map(_stored_fetch_time, stored) if parsed is not None),
         default=None,

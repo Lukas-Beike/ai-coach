@@ -224,13 +224,16 @@ class GarminAssembly:
 
         The guard shares Garmin's resync gate and lock with the sync service but
         never waits: a busy provider answers 503 instead of queueing a second read.
+        While the Garmin fixture is active the detail fetch counts as not
+        configured, so fixture mode never reaches the real Garmin SDK.
         """
+        fixture_loader = self.fixture_loader()
         reader = self.remote_reader()
         coordination = self._sync_coordination()
         return GarminActivityDetailService(
             database_manager=self._database_manager(),
             reader=reader,
-            configured=reader.configured,
+            configured=lambda: fixture_loader.path() is None and reader.configured(),
             guard=lambda: _non_blocking_garmin_guard(coordination),
             utc_now=self._utc_now,
         )

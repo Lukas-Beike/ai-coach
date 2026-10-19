@@ -29,7 +29,7 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.executor import GarminSyncJobOwner
 from backend.sync.garmin_activity_details import COOLDOWN, GarminActivityDetailService
-from backend.sync.garmin_assembly import _non_blocking_garmin_guard
+from backend.sync.garmin_assembly import GarminAssembly, _non_blocking_garmin_guard
 from backend.sync.garmin_service import GarminRemoteReader, GarminSyncCoordination
 from backend.sync.jobs import normalize_sync_job_request
 from backend.sync.queue import SyncJobQueueService
@@ -50,7 +50,9 @@ def _collected() -> dict[str, Any]:
     return collected
 
 
-def _seed_garmin_activity(manager: Any, activity_id: str) -> None:
+def _seed_garmin_activity(
+    manager: Any, activity_id: str, *, distance: float = 20000.0
+) -> None:
     payload = {
         "synced_at": NOW,
         "activities": [
@@ -59,7 +61,7 @@ def _seed_garmin_activity(manager: Any, activity_id: str) -> None:
                 "activityName": "Synthetic ride",
                 "activityType": {"typeKey": "cycling"},
                 "startTimeLocal": "2026-10-08 07:15:00",
-                "distance": 20000.0,
+                "distance": distance,
                 "duration": 3600.0,
                 "averageHR": 140,
                 "activityTrainingLoad": 50.0,
@@ -257,6 +259,41 @@ class GarminActivityDetailJobTests(unittest.TestCase):
         refreshed = self.service(now=after.isoformat()).refresh(ACTIVITY)
         self.assertEqual(refreshed["status"], "completed")
         self.assertEqual(self.reader.fetch_activity_detail.call_count, 2)
+
+    def test_changed_summary_bypasses_the_cooldown(self) -> None:
+        self.service().refresh(ACTIVITY)
+        _seed_garmin_activity(self.manager, ACTIVITY, distance=21000.0)
+        # The sets stay stored; only their summary hash is now stale.
+        self.assertEqual(sorted(_stored(self.manager)), KINDS)
+
+        within = NOW_AT + timedelta(minutes=5)
+        result = self.service(now=within.isoformat()).refresh(ACTIVITY)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(self.reader.fetch_activity_detail.call_count, 2)
+
+    def test_malformed_part_reports_partial(self) -> None:
+        collected = _collected()
+        collected["hr_zones"] = "synthetic malformed"
+        self.reader.fetch_activity_detail.return_value = collected
+
+        result = self.service().refresh(ACTIVITY)
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["kinds"], ["laps", "power_zones", "streams"])
+
+    def test_only_malformed_parts_give_502_without_writes(self) -> None:
+        self.reader.fetch_activity_detail.return_value = {
+            "activity_id": ACTIVITY,
+            "hr_zones": "synthetic malformed",
+        }
+
+        with self.assertRaises(AppError) as ctx:
+            self.service().refresh(ACTIVITY)
+
+        self.assertEqual(ctx.exception.status, 502)
+        self.assertEqual(ctx.exception.reason, "activity_details_unavailable")
+        self.assertEqual(_stored(self.manager), {})
 
     def test_unknown_activity_gives_404_without_reader_call(self) -> None:
         for requested in ("999999999", "act_missing"):
@@ -457,6 +494,39 @@ class GarminActivityDetailReaderTests(unittest.TestCase):
 
         client.login.assert_called_once_with('{"di_token": "synthetic"}')
         tokens.write_back.assert_called_once_with(client, '{"di_token": "synthetic"}')
+
+
+class GarminActivityDetailAssemblyTests(unittest.TestCase):
+    def _configured(self, *, fixture_path: Any, remote_configured: bool) -> bool:
+        control: Any = Mock(name="control")
+        control.resync_gate = None
+        assembly = GarminAssembly(
+            dependencies=GarminAssembly.Inputs(
+                provider=Mock(name="provider"),
+                persistence=Mock(name="persistence"),
+                telemetry=Mock(name="telemetry"),
+                control=control,
+            )
+        )
+        fixture_loader = Mock()
+        fixture_loader.path.return_value = fixture_path
+        reader = Mock()
+        reader.configured.return_value = remote_configured
+        with (
+            patch.object(assembly, "fixture_loader", return_value=fixture_loader),
+            patch.object(assembly, "remote_reader", return_value=reader),
+        ):
+            service = assembly.activity_detail_service()
+        return service._configured()
+
+    def test_fixture_mode_counts_as_not_configured(self) -> None:
+        self.assertFalse(
+            self._configured(fixture_path=Path("fixture.json"), remote_configured=True)
+        )
+
+    def test_remote_garmin_without_fixture_is_configured(self) -> None:
+        self.assertTrue(self._configured(fixture_path=None, remote_configured=True))
+        self.assertFalse(self._configured(fixture_path=None, remote_configured=False))
 
 
 if __name__ == "__main__":
