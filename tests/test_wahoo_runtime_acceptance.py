@@ -41,7 +41,11 @@ from backend.sync.scheduler import (
 )
 from backend.sync.status import SyncPublicStateService
 from backend.sync.wahoo_connection import WAHOO_TOKENS_KEY, WahooConnectionService
-from backend.sync.wahoo_sync import WahooSyncClock, WahooSyncService
+from backend.sync.wahoo_sync import (
+    WahooSyncClock,
+    WahooSyncService,
+    WahooSyncStorage,
+)
 from tests.wahoo_sync_fixture import (
     EARLIER_UTC,
     LATE_EVENING_UTC,
@@ -92,9 +96,11 @@ class WahooOrchestrationCase(WahooSyncCase):
                 access_token=self.connection_service.access_token,
                 refresh_access_token=self.connection_service.refresh_access_token,
             ),
-            database_manager=lambda: self.database,
-            database_lock=threading.RLock(),
-            key_values=self.key_values,
+            storage=WahooSyncStorage(
+                database_manager=lambda: self.database,
+                database_lock=threading.RLock(),
+                key_values=self.key_values,
+            ),
             daily_markers=lambda: self.markers,
             observer=lambda: self.observer,
             registry=REGISTRY,
