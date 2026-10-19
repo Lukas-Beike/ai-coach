@@ -192,18 +192,7 @@ def _stream_set(
     if any(right <= left for left, right in pairwise(axis)):
         issues.append(MappingIssue(ref, time_key, IssueReason.OUT_OF_RANGE))
         return None
-    channels: dict[StreamChannel, tuple[float | None, ...]] = {
-        StreamChannel.TIME_S: time_points
-    }
-    for key, channel in _STREAM_KEYS.items():
-        if channel is StreamChannel.TIME_S or key not in columns:
-            continue
-        points = _channel_points(ref, key, channel, columns[key], issues)
-        if points is not None:
-            channels[channel] = points
-    cadence = _cadence_points(ref, columns, issues)
-    if cadence is not None:
-        channels[StreamChannel.CADENCE_RPM] = cadence
+    channels = _stream_channels(ref, time_points, columns, issues)
     # A time axis without any other channel is not a stream set.
     if len(channels) < 2:
         return None
@@ -218,6 +207,27 @@ def _stream_set(
     except TypeError, ValueError:
         issues.append(MappingIssue(ref, time_key, IssueReason.OUT_OF_RANGE))
         return None
+
+
+def _stream_channels(
+    ref: str,
+    time_points: tuple[float | None, ...],
+    columns: Mapping[str, list[object]],
+    issues: list[MappingIssue],
+) -> dict[StreamChannel, tuple[float | None, ...]]:
+    channels: dict[StreamChannel, tuple[float | None, ...]] = {
+        StreamChannel.TIME_S: time_points
+    }
+    for key, channel in _STREAM_KEYS.items():
+        if channel is StreamChannel.TIME_S or key not in columns:
+            continue
+        points = _channel_points(ref, key, channel, columns[key], issues)
+        if points is not None:
+            channels[channel] = points
+    cadence = _cadence_points(ref, columns, issues)
+    if cadence is not None:
+        channels[StreamChannel.CADENCE_RPM] = cadence
+    return channels
 
 
 def _metric_columns(
@@ -238,18 +248,10 @@ def _metric_columns(
     if not isinstance(rows, list):
         issues.append(MappingIssue(ref, "activityDetailMetrics", _shape_reason(rows)))
         return None
-    positions: dict[str, int] = {}
-    for descriptor in descriptors:
-        parsed = _descriptor(descriptor)
-        if parsed is None:
-            issues.append(
-                MappingIssue(ref, "metricDescriptors", IssueReason.INVALID_TYPE)
-            )
-            return None
-        key, index = parsed
-        if key in _KNOWN_KEYS and key not in positions:
-            positions[key] = index
-    if not any(key in positions for key in (*_STREAM_KEYS, _ELAPSED_TIME_KEY)):
+    positions = _known_positions(ref, descriptors, issues)
+    if positions is None or not any(
+        key in positions for key in (*_STREAM_KEYS, _ELAPSED_TIME_KEY)
+    ):
         return None
     # Only the known columns must be present; unknown trailing metrics may be short.
     width = max(positions.values()) + 1
@@ -264,6 +266,24 @@ def _metric_columns(
         for key, index in positions.items():
             columns[key].append(metrics[index])
     return columns
+
+
+def _known_positions(
+    ref: str, descriptors: list[object], issues: list[MappingIssue]
+) -> dict[str, int] | None:
+    """Map each known key to its first metrics index; None on a malformed descriptor."""
+    positions: dict[str, int] = {}
+    for descriptor in descriptors:
+        parsed = _descriptor(descriptor)
+        if parsed is None:
+            issues.append(
+                MappingIssue(ref, "metricDescriptors", IssueReason.INVALID_TYPE)
+            )
+            return None
+        key, index = parsed
+        if key in _KNOWN_KEYS and key not in positions:
+            positions[key] = index
+    return positions
 
 
 def _descriptor(value: object) -> tuple[str, int] | None:
@@ -513,20 +533,8 @@ def _zone_distribution(
     if not isinstance(rows, list):
         issues.append(MappingIssue(ref, key, IssueReason.INVALID_TYPE))
         return None
-    entries: list[tuple[int, float, float | None]] = []
-    for row in rows:
-        entry = _zone_entry(row)
-        if isinstance(entry, IssueReason):
-            # One bad zone drops the whole distribution; a gap would renumber the rest.
-            issues.append(MappingIssue(ref, key, entry))
-            return None
-        entries.append(entry)
+    entries = _zone_entries(ref, rows, key, issues)
     if not entries:
-        return None
-    entries.sort(key=lambda entry: entry[0])
-    numbers = [number for number, _, _ in entries]
-    if len(entries) > MAX_ZONES or numbers != list(range(1, len(entries) + 1)):
-        issues.append(MappingIssue(ref, key, IssueReason.OUT_OF_RANGE))
         return None
     lows = [low for _, _, low in entries]
     # Provider boundaries apply only when every zone reports a low boundary and
@@ -535,24 +543,6 @@ def _zone_distribution(
         left is not None and right is not None and left < right
         for left, right in pairwise(lows)
     )
-    buckets: list[ZoneBucket] = []
-    for position, (_, seconds, low) in enumerate(entries):
-        lower = low if provider_bounds else None
-        upper = None
-        if provider_bounds and position + 1 < len(lows):
-            upper = lows[position + 1]
-        try:
-            buckets.append(
-                ZoneBucket(
-                    index=position + 1,
-                    seconds=seconds,
-                    lower=lower,
-                    upper=upper,
-                )
-            )
-        except TypeError, ValueError:
-            issues.append(MappingIssue(ref, key, IssueReason.OUT_OF_RANGE))
-            return None
     try:
         return ZoneDistribution(
             provider_activity_id=ref,
@@ -564,11 +554,45 @@ def _zone_distribution(
                 if provider_bounds
                 else ZoneBoundarySource.UNKNOWN
             ),
-            buckets=tuple(buckets),
+            buckets=_zone_buckets(entries, provider_bounds),
         )
     except TypeError, ValueError:
         issues.append(MappingIssue(ref, key, IssueReason.OUT_OF_RANGE))
         return None
+
+
+def _zone_entries(
+    ref: str, rows: list[object], key: str, issues: list[MappingIssue]
+) -> list[tuple[int, float, float | None]] | None:
+    """Return the zones numbered 1..n in order, or None with the one issue to report."""
+    entries: list[tuple[int, float, float | None]] = []
+    for row in rows:
+        entry = _zone_entry(row)
+        if isinstance(entry, IssueReason):
+            # One bad zone drops the whole distribution; a gap would renumber the rest.
+            issues.append(MappingIssue(ref, key, entry))
+            return None
+        entries.append(entry)
+    entries.sort(key=lambda entry: entry[0])
+    numbers = [number for number, _, _ in entries]
+    if len(entries) > MAX_ZONES or numbers != list(range(1, len(entries) + 1)):
+        issues.append(MappingIssue(ref, key, IssueReason.OUT_OF_RANGE))
+        return None
+    return entries
+
+
+def _zone_buckets(
+    entries: list[tuple[int, float, float | None]], provider_bounds: bool
+) -> tuple[ZoneBucket, ...]:
+    """Build the buckets; ZoneBucket raises on a value it does not accept."""
+    lows = [low for _, _, low in entries] if provider_bounds else [None] * len(entries)
+    uppers = [*lows[1:], None]
+    return tuple(
+        ZoneBucket(index=position + 1, seconds=seconds, lower=lower, upper=upper)
+        for position, ((_, seconds, _), lower, upper) in enumerate(
+            zip(entries, lows, uppers, strict=True)
+        )
+    )
 
 
 def _zone_entry(row: object) -> tuple[int, float, float | None] | IssueReason:
