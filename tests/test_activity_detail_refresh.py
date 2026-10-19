@@ -90,9 +90,22 @@ class ActivityDetailRefreshTests(unittest.TestCase):
         self.assertEqual("/activity/CaseSensitive-1/streams.json", path)
         self.assertEqual(
             "time,distance,altitude,grade_smooth,velocity_smooth,"
-            "watts,heartrate,cadence,moving",
+            "watts,heartrate,cadence,temp,moving",
             params["types"],
         )
+
+    def test_provider_temp_stream_is_stored_as_temperature(self):
+        self.api.get.side_effect = [
+            {"id": "CaseSensitive-1"},
+            [
+                {"type": "time", "data": [0, 1]},
+                {"type": "temp", "data": [14, 15]},
+            ],
+        ]
+        self.service.refresh("CaseSensitive-1")
+        streams = self.store.get("CaseSensitive-1")["activity"]["streams"]
+        self.assertEqual([14, 15], streams["temperature"])
+        self.assertNotIn("temp", streams)
 
     def test_failed_second_fetch_preserves_previous_record(self):
         self.api.get.side_effect = self.responses()

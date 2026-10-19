@@ -71,8 +71,11 @@ ACTIVITY_DETAIL_STREAM_TYPES = (
     "watts",
     "heartrate",
     "cadence",
+    "temp",
     "moving",
 )
+# Provider stream names the app stores under its own name.
+ACTIVITY_DETAIL_STREAM_ALIASES = {"temp": "temperature"}
 
 
 def activity_detail_laps(detail: dict[str, Any]) -> Any:
