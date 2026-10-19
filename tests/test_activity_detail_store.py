@@ -35,9 +35,11 @@ from backend.db import row_factory
 from backend.db.activity_detail_store import (
     analysis_rows_for,
     decode_series,
+    detail_origins,
     detail_sets_for,
     detail_sets_for_session,
     encode_series,
+    remove_detail_sets,
     replace_detail_set,
     save_analysis,
     stream_export_rows,
@@ -378,6 +380,41 @@ class ActivityDetailStoreTests(unittest.TestCase):
         for table in ("activity_stream_channels", "activity_laps", "activity_zone_times"):
             with self.subTest(table=table):
                 self.assertEqual(self.count(table), 0)
+
+    def test_remove_detail_sets_keeps_only_the_requested_kinds(self):
+        self.store(stream_set())
+        self.store(lap_set())
+        self.store(zone_set())
+        removed = remove_detail_sets(
+            self.db, "intervals", "i1", keep={ActivityDetailKind.LAPS}
+        )
+        self.assertEqual(removed, 2)
+        (stored,) = detail_sets_for(self.db, "intervals", "i1")
+        self.assertIs(stored.detail.kind, ActivityDetailKind.LAPS)
+        self.assertEqual(self.count("activity_stream_channels"), 0)
+        self.assertEqual(self.count("activity_zone_times"), 0)
+        self.assertEqual(self.count("activity_laps"), 2)
+
+    def test_remove_detail_sets_leaves_other_provider_activities_alone(self):
+        self.add_record(GARMIN, "g1", "act_1")
+        self.store(stream_set())
+        self.store(stream_set("g1", GARMIN))
+        self.assertEqual(remove_detail_sets(self.db, "intervals", "i1", keep=()), 1)
+        (stored,) = detail_sets_for_session(self.db, "act_1")
+        self.assertEqual(
+            (stored.provider, stored.provider_activity_id), ("garmin", "g1")
+        )
+        self.assertEqual(self.count("activity_stream_channels"), 3)
+
+    def test_detail_origins_lists_the_origins_of_stored_sets(self):
+        self.assertEqual(detail_origins(self.db, "intervals", "i1"), set())
+        self.store(stream_set())
+        self.store(
+            dataclasses.replace(lap_set(), origin=ActivityDetailOrigin.LEGACY_BACKFILL)
+        )
+        self.assertEqual(
+            detail_origins(self.db, "intervals", "i1"), {"fetch", "legacy_backfill"}
+        )
 
     def test_set_columns_must_match_their_detail_kind(self):
         insert = (

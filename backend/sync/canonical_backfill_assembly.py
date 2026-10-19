@@ -9,6 +9,8 @@ from typing import Any
 
 from backend.db.repositories import KeyValueRepository
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.activity_detail_backfill import ActivityDetailBackfill
+from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.canonical_backfill import DEFAULT_BATCH_SIZE, CanonicalBackfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 
@@ -17,6 +19,7 @@ from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 class CanonicalBackfillAssembly:
     worker: CanonicalBackfillWorker
     status_reader: CanonicalBackfill
+    detail_backfill: ActivityDetailBackfill
 
 
 def build_canonical_backfill(
@@ -34,9 +37,18 @@ def build_canonical_backfill(
         clock=clock,
         batch_size=batch_size,
     )
+    # Runs after the canonical backfill completes, with its own state key.
+    detail_backfill = ActivityDetailBackfill(
+        key_values=key_values,
+        writer=CanonicalDetailWriter(),
+        clock=clock,
+    )
     worker = CanonicalBackfillWorker(
         backfill=backfill,
         database=database,
         maintenance_gate=maintenance_gate,
+        followups=(detail_backfill,),
     )
-    return CanonicalBackfillAssembly(worker=worker, status_reader=backfill)
+    return CanonicalBackfillAssembly(
+        worker=worker, status_reader=backfill, detail_backfill=detail_backfill
+    )

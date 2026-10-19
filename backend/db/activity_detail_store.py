@@ -17,7 +17,7 @@ import re
 import sys
 import zlib
 from array import array
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final, cast
@@ -243,6 +243,50 @@ def detail_sets_for_session(db: Any, activity_id: str) -> list[StoredDetailSet]:
             ActivitySessionState.DELETED.value,
         ),
     )
+
+
+def remove_detail_sets(
+    db: Any,
+    provider: str,
+    provider_activity_id: str,
+    *,
+    keep: Collection[ActivityDetailKind],
+) -> int:
+    """Delete the sets of one provider activity whose kind is not in ``keep``.
+
+    Child rows are deleted before each set header. Returns the number of sets
+    removed; sets of a kind in ``keep`` are left untouched.
+    """
+    kept = {kind.value for kind in keep}
+    removed = 0
+    for row in db.execute(
+        "SELECT detail_kind FROM activity_detail_sets "
+        "WHERE provider = ? AND provider_activity_id = ?",
+        (provider, provider_activity_id),
+    ).fetchall():
+        if row["detail_kind"] in kept:
+            continue
+        key = (provider, provider_activity_id, row["detail_kind"])
+        _delete_children(db, key)
+        db.execute(
+            "DELETE FROM activity_detail_sets "
+            "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
+            key,
+        )
+        removed += 1
+    return removed
+
+
+def detail_origins(db: Any, provider: str, provider_activity_id: str) -> set[str]:
+    """Return the origin values of the stored sets of one provider activity."""
+    return {
+        row["origin"]
+        for row in db.execute(
+            "SELECT origin FROM activity_detail_sets "
+            "WHERE provider = ? AND provider_activity_id = ?",
+            (provider, provider_activity_id),
+        ).fetchall()
+    }
 
 
 def save_analysis(

@@ -1329,6 +1329,18 @@ def activity_local_ids(
     return local_ids
 
 
+def activity_record_link(
+    db: Any, provider: str, provider_activity_id: str
+) -> dict[str, Any] | None:
+    """Return the local session id, origin and state of one provider activity record."""
+    return _fetch_row(
+        db,
+        "SELECT activity_id, recorded_by, state FROM activity_records "
+        "WHERE provider = ? AND provider_activity_id = ?",
+        (provider, provider_activity_id),
+    )
+
+
 def _chunked(values: Sequence[str]) -> list[list[str]]:
     unique = list(dict.fromkeys(value for value in values if value))
     return [
