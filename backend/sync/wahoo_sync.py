@@ -4,7 +4,8 @@ One run fetches the workouts of a bounded window, plans the canonical rows and
 writes them in a single unit of work together with the coverage summary, the
 daily refresh marker and the freshness state. A failure at any step rolls the
 whole write back, so stored canonical rows, coverage and freshness never
-disagree. Nothing is ever written to Wahoo.
+disagree. Nothing is ever written to Wahoo. After that commit an optional detail
+hook imports workout FIT files; its failures never change the sync outcome.
 
 A run without a Wahoo client configuration or without a connected athlete skips
 with the descriptor's not-configured message. Errors that reach the stored
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
@@ -47,6 +48,7 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import ProviderRegistry
+from backend.sync.wahoo_activity_details import WahooActivityDetailImport
 
 FRESHNESS_AREA: Final = "activities"
 LAST_SYNC_KEY: Final = "last_wahoo_sync_at"
@@ -125,6 +127,7 @@ class WahooSyncService:
         logger: logging.Logger,
         lock: Any | None = None,
         gate: ProviderResyncGate | None = None,
+        details: Callable[[], WahooActivityDetailImport] | None = None,
     ) -> None:
         self._config = config
         self._connection = connection
@@ -140,6 +143,7 @@ class WahooSyncService:
         self._logger = logger
         self._lock = lock if lock is not None else WAHOO_SYNC_LOCK
         self._gate = gate
+        self._details = details
 
     def running(self) -> bool:
         return self._lock.locked()
@@ -223,7 +227,33 @@ class WahooSyncService:
         }
         if skipped_sources:
             result["skipped_sources"] = skipped_sources
+        if self._details is not None:
+            result["details"] = self._import_details(
+                self._details, fetch.workouts, synced_at
+            )
         return result
+
+    def _import_details(
+        self,
+        details: Callable[[], WahooActivityDetailImport],
+        workouts: Sequence[object],
+        synced_at: datetime,
+    ) -> dict[str, Any]:
+        """Run the committed detail import; its failure is reported, never raised."""
+        try:
+            return details().import_details(workouts, retrieved_at=synced_at)
+        except Exception as error:  # noqa: BLE001 - the detail import never fails the sync
+            self._logger.warning(
+                "Wahoo activity details could not be imported",
+                extra={
+                    "event": "wahoo_activity_detail_failed",
+                    "context": {
+                        "reason": "import_failed",
+                        "error_type": type(error).__name__,
+                    },
+                },
+            )
+            return {"status": "failed"}
 
     def _threshold_fetch(
         self, source: WahooWorkoutSource

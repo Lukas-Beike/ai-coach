@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import unittest
+from typing import Any
 from unittest.mock import Mock, patch
 
 from backend.canonical.vocabulary import MetricKind, ProviderId
@@ -348,6 +349,58 @@ class WindowAndResetGateTests(WahooSyncCase):
         self.assertTrue(policy.blocked())
         gate.end_reset()
         self.assertFalse(policy.blocked())
+
+
+class DetailHookTests(WahooSyncCase):
+    """The optional detail hook runs after the commit and never changes its outcome."""
+
+    def hook_service(self, details: Any) -> WahooSyncService:
+        return WahooSyncService(
+            config=lambda: self.config,
+            connection=lambda: self.connection,
+            source=lambda: self.source,
+            database_manager=lambda: self.database,
+            database_lock=threading.RLock(),
+            key_values=self.key_values,
+            daily_markers=lambda: self.markers,
+            observer=lambda: self.observer,
+            registry=DEFAULT_PROVIDER_REGISTRY,
+            clock=WahooSyncClock(lambda: self.now, lambda: ZONE),
+            logger=self.logger,
+            lock=self.lock,
+            details=details,
+        )
+
+    def test_details_result_is_attached_to_the_sync_result(self) -> None:
+        detail = Mock()
+        detail.import_details.return_value = {"status": "ok", "stored": 1}
+        self.source.fetch = WahooWorkoutFetch((workout(1, LATE_EVENING_UTC),))
+
+        result = self.hook_service(lambda: detail).sync()
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual({"status": "ok", "stored": 1}, result["details"])
+        detail.import_details.assert_called_once()
+        self.assertEqual(
+            self.now, detail.import_details.call_args.kwargs["retrieved_at"]
+        )
+
+    def test_a_failing_detail_import_keeps_the_sync_ok(self) -> None:
+        detail = Mock()
+        detail.import_details.side_effect = RuntimeError("detail-failure-probe")
+        self.source.fetch = WahooWorkoutFetch((workout(1, LATE_EVENING_UTC),))
+
+        result = self.hook_service(lambda: detail).sync()
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual({"status": "failed"}, result["details"])
+        self.assertEqual("", self._value(LAST_ERROR_KEY))
+        self.assertIsNotNone(self._value(LAST_SYNC_KEY))
+        warning = self.logger.warning.call_args
+        self.assertEqual(
+            "wahoo_activity_detail_failed", warning.kwargs["extra"]["event"]
+        )
+        self.assertNotIn("detail-failure-probe", repr(self.logger.mock_calls))
 
 
 if __name__ == "__main__":
