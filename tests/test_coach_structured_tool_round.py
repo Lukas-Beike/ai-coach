@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import unittest
 from unittest.mock import MagicMock, Mock, patch
@@ -15,6 +16,8 @@ from backend.coach.structured_tool_round import (
 )
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.errors import AppError
+from backend.observability import JsonLogFormatter, Redactor
+from tests import test_observability as observability_tests
 
 
 class StructuredToolRoundTests(unittest.TestCase):
@@ -336,6 +339,134 @@ class StructuredToolRoundTests(unittest.TestCase):
         )
         selection = self.service._training_context.build.call_args.kwargs["selection"]
         self.assertEqual(selection.name, "attachment_analysis")
+
+    @staticmethod
+    def reload_call() -> dict[str, str]:
+        return {
+            "type": "function_call",
+            "name": "read_coach_context",
+            "call_id": "call-reload",
+            "arguments": '{"sections": ["profile", "training_state"]}',
+        }
+
+    @staticmethod
+    def reload_result() -> dict[str, object]:
+        return {
+            "ok": True,
+            "context": {"synthetic": "SYNTHETIC-CONTEXT-MARKER"},
+            "projection": {
+                "requested_sections": ["profile", "training_state"],
+                "characters": 123,
+                "complete": True,
+            },
+        }
+
+    def reload_state(self) -> StructuredCoachRoundState:
+        state = self.state()
+        state.tools = [{"name": "read_profile"}, {"name": "read_coach_context"}]
+        state.context_profile = "weekly_planning"
+        return state
+
+    @staticmethod
+    def reload_events(records) -> list:
+        return [
+            record
+            for record in records
+            if getattr(record, "event", None) == "coach_context_reload"
+        ]
+
+    def test_successful_context_reload_logs_counts_without_content(self) -> None:
+        state = self.reload_state()
+        self.execution.execute.return_value = self.reload_result()
+        response = {"id": "response-one", "output": [self.reload_call()]}
+
+        with self.assertLogs("intervals_coach", level="INFO") as logs:
+            self.service.run(
+                response, rounds=0, question="", cancelled=False, state=state
+            )
+
+        events = self.reload_events(logs.records)
+        self.assertEqual(len(events), 1)
+        record = events[0]
+        self.assertEqual(
+            record.context,
+            {
+                "context_profile": "weekly_planning",
+                "requested_sections": ["profile", "training_state"],
+                "characters": 123,
+                "complete": True,
+                "round": 1,
+            },
+        )
+        self.assertNotIn("SYNTHETIC-CONTEXT-MARKER", repr(vars(record)))
+        self.assertNotIn("SYNTHETIC-CONTEXT-MARKER", "\n".join(logs.output))
+
+    def test_formatted_context_reload_keeps_counts_in_context(self) -> None:
+        state = self.reload_state()
+        self.execution.execute.return_value = self.reload_result()
+        response = {"id": "response-one", "output": [self.reload_call()]}
+
+        with self.assertLogs("intervals_coach", level="INFO") as logs:
+            self.service.run(
+                response, rounds=0, question="", cancelled=False, state=state
+            )
+
+        formatter = JsonLogFormatter(Redactor(observability_tests._config))
+        (record,) = self.reload_events(logs.records)
+        text = formatter.format(record)
+        payload = json.loads(text)
+
+        self.assertEqual(payload["event"], "coach_context_reload")
+        self.assertEqual(
+            payload["context"],
+            {
+                "context_profile": "weekly_planning",
+                "requested_sections": ["profile", "training_state"],
+                "characters": 123,
+                "complete": True,
+                "round": 1,
+            },
+        )
+        self.assertNotIn("SYNTHETIC-CONTEXT-MARKER", text)
+
+    def test_cached_context_reload_does_not_log_event(self) -> None:
+        state = self.reload_state()
+        self.replay.lookup.return_value = {"result": self.reload_result()}
+
+        with self.assertNoLogs("intervals_coach", level="INFO"):
+            self.service._execute_tool_call(
+                self.reload_call(), state=state, question="", cancelled=False
+            )
+
+        self.execution.execute.assert_not_called()
+
+    def test_failed_context_reload_does_not_log_event(self) -> None:
+        state = self.reload_state()
+        self.execution.execute.side_effect = AppError(
+            400,
+            "synthetic invalid sections",
+            reason="invalid_context_sections",
+        )
+        self.failure.project.return_value = {
+            "ok": False,
+            "reason": "invalid_context_sections",
+        }
+
+        with self.assertNoLogs("intervals_coach", level="INFO"):
+            self.service._execute_tool_call(
+                self.reload_call(), state=state, question="", cancelled=False
+            )
+
+        self.failure.project.assert_called_once()
+
+    def test_other_tools_do_not_log_context_reload_event(self) -> None:
+        state = self.state()
+        self.execution.execute.return_value = self.reload_result()
+
+        with self.assertNoLogs("intervals_coach", level="INFO"):
+            self.service._execute_tool_call(
+                self.call(), state=state, question="", cancelled=False
+            )
 
 
 if __name__ == "__main__":

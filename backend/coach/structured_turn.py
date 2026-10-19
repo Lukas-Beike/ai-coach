@@ -12,7 +12,10 @@ from typing import Any
 from backend.coach.conversation import CoachAttachmentContextService
 from backend.coach.dialogue import CoachDialogueReadService
 from backend.coach.final_receipt import CoachFinalReceiptService
-from backend.coach.request_payload import CoachRequestPayloadService
+from backend.coach.request_payload import (
+    CoachRequestPayloadService,
+    request_context_selection,
+)
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundService,
@@ -115,6 +118,13 @@ class CoachStructuredTurnService:
                 if tool["name"] in self._deps.read_only_tools
             ]
         )
+        context_profile = request_context_selection(
+            message,
+            context,
+            command_receipts=command_receipts,
+            attachments=attachments,
+            has_prior_openai_attachments=has_prior_openai_attachments,
+        ).name
         model_instructions, request_payload = self._deps.payload.build(
             message=message,
             context=context,
@@ -161,6 +171,7 @@ class CoachStructuredTurnService:
             "attachments": attachments,
             "background_owned": background_owned,
             "response": response,
+            "context_profile": context_profile,
         }
 
     def _run_turn(
@@ -211,6 +222,7 @@ class CoachStructuredTurnService:
             background_owned=state["background_owned"],
             on_text_delta=on_text_delta,
             recovery_state=state["recovery_state"],
+            context_profile=state["context_profile"],
         )
         response, rounds, question, cancelled, _ = self._deps.rounds.run(
             state["response"],

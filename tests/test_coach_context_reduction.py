@@ -12,9 +12,11 @@ from backend.coach.context import (
 from backend.coach.context_selection import CoachContextSelection, select_coach_context
 from backend.coach.read_tools import CoachReadToolService
 from backend.errors import AppError
+from backend.observability import JsonLogFormatter, Redactor
 from tests import test_coach_request_payload as payload_tests
 from tests import test_coach_structured_context as context_tests
 from tests import test_coach_structured_tool_round as round_tests
+from tests import test_observability as observability_tests
 
 
 class CoachContextReductionTests(unittest.TestCase):
@@ -122,6 +124,42 @@ class CoachContextReductionTests(unittest.TestCase):
         record = captured.records[-1]
         self.assertEqual(record.event, "coach_request_sizes")
         self.assertNotIn("synthetic private note", str(record.__dict__))
+
+    def test_formatted_request_sizes_keep_counts_in_context(self):
+        fixture = payload_tests.CoachRequestPayloadTests()
+        fixture.setUp()
+        tools = [
+            {"name": name}
+            for name in (
+                "read_coach_context",
+                "read_profile",
+                "start_intervals_plan_sync",
+            )
+        ]
+        context = {
+            **fixture.context,
+            "messages": [
+                {"id": index, "content": "synthetic private note"}
+                for index in range(24)
+            ],
+        }
+        with self.assertLogs("intervals_coach", level="INFO") as captured:
+            fixture.build(message="How is recovery?", context=context, tools=tools)
+        (record,) = [
+            entry
+            for entry in captured.records
+            if getattr(entry, "event", None) == "coach_request_sizes"
+        ]
+        formatter = JsonLogFormatter(Redactor(observability_tests._config))
+        text = formatter.format(record)
+        payload = json.loads(text)
+        self.assertEqual(payload["event"], "coach_request_sizes")
+        self.assertEqual(
+            payload["context"]["context_profile"],
+            record.context["context_profile"],
+        )
+        self.assertEqual(payload["context"]["tool_count"], 3)
+        self.assertNotIn("synthetic private note", text)
 
     def test_successful_read_expands_only_tools_allowed_for_turn(self):
         fixture = round_tests.StructuredToolRoundTests()

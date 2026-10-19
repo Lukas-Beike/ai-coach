@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
+from typing import Any
 from unittest.mock import Mock
 
 from backend.coach.structured_response import CoachStructuredResponseService
@@ -19,11 +20,11 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self.service = CoachStructuredResponseService(
             self.transport, self.recovery, self.retry, self.jobs
         )
-        self.payload = {
+        self.payload: dict[str, Any] = {
             "input": [{"role": "user", "content": "synthetic"}],
             "model": "synthetic",
         }
-        self.options = {
+        self.options: dict[str, Any] = {
             "request_payload": self.payload,
             "context": {"synthetic": True},
             "message": "Synthetic question",
@@ -193,6 +194,136 @@ class CoachStructuredResponseTests(unittest.TestCase):
             self.service.respond(self.payload, **self.options)
 
         self.assertEqual(raised.exception.reason, "chat_cancelled")
+        self.transport.request.assert_called_once()
+
+    @staticmethod
+    def _incomplete(*output: dict) -> dict:
+        return {
+            "id": "synthetic-incomplete",
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": list(output),
+        }
+
+    def test_reasoning_only_token_exhaustion_repeats_with_the_larger_budget(
+        self,
+    ) -> None:
+        self.payload["max_output_tokens"] = 16_000
+        expected = {"id": "after-escalation", "status": "completed"}
+        responses = [self._incomplete({"type": "reasoning"}), expected]
+        sent: list[int] = []
+
+        def request(payload):
+            sent.append(payload["max_output_tokens"])
+            return responses.pop(0)
+
+        self.transport.request.side_effect = request
+
+        self.assertIs(self.service.respond(self.payload, **self.options), expected)
+
+        self.assertEqual(sent, [16_000, 32_000])
+        # Later tool rounds keep the larger budget.
+        self.assertEqual(self.payload["max_output_tokens"], 32_000)
+
+    def test_token_exhaustion_is_returned_when_text_or_a_tool_call_exists(
+        self,
+    ) -> None:
+        self.payload["max_output_tokens"] = 16_000
+        for item in (
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": "Teilantwort"}],
+            },
+            {"type": "function_call", "name": "read_profile", "call_id": "call-1"},
+        ):
+            with self.subTest(item=item["type"]):
+                self.transport.request.reset_mock()
+                response = self._incomplete(item)
+                self.transport.request.return_value = response
+
+                self.assertIs(
+                    self.service.respond(self.payload, **self.options), response
+                )
+                self.transport.request.assert_called_once()
+
+    def test_token_exhaustion_is_not_repeated_in_a_server_side_conversation(
+        self,
+    ) -> None:
+        self.payload["max_output_tokens"] = 16_000
+        self.payload["conversation"] = "conv-synthetic"
+        response = self._incomplete({"type": "reasoning"})
+        self.transport.request.return_value = response
+
+        self.assertIs(self.service.respond(self.payload, **self.options), response)
+
+        self.transport.request.assert_called_once()
+
+    def test_token_exhaustion_after_retryable_failures_still_gets_the_larger_budget(
+        self,
+    ) -> None:
+        self.payload["max_output_tokens"] = 16_000
+        self.retry.retry_delay.return_value = 0.01
+        expected = {"id": "after-escalation", "status": "completed"}
+        sent: list[int] = []
+        responses = [
+            AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded"),
+            AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded"),
+            self._incomplete({"type": "reasoning"}),
+            expected,
+        ]
+
+        def request(payload):
+            sent.append(payload["max_output_tokens"])
+            result = responses.pop(0)
+            if isinstance(result, AppError):
+                raise result
+            return result
+
+        self.transport.request.side_effect = request
+
+        self.assertIs(self.service.respond(self.payload, **self.options), expected)
+
+        self.assertEqual(sent, [16_000, 16_000, 16_000, 32_000])
+
+    def test_token_exhaustion_in_a_resumed_background_response_is_repeated(
+        self,
+    ) -> None:
+        self.payload["max_output_tokens"] = 16_000
+        self.options["background_owned"] = True
+        self.options["resume_id"] = "resp-prior"
+        expected = {"id": "after-escalation", "status": "completed"}
+        responses = [
+            AppError(
+                503, "Synthetic provider unavailable", reason="provider_unavailable"
+            ),
+            self._incomplete({"type": "reasoning"}),
+            expected,
+        ]
+        sent: list[int] = []
+
+        def background(payload, **_kwargs):
+            sent.append(payload["max_output_tokens"])
+            result = responses.pop(0)
+            if isinstance(result, AppError):
+                raise result
+            return result
+
+        self.transport.background_request.side_effect = background
+
+        self.assertIs(self.service.respond(self.payload, **self.options), expected)
+
+        self.assertEqual(sent, [16_000, 16_000, 32_000])
+        self.assertEqual(
+            self.transport.background_request.call_args.kwargs["response_id"], None
+        )
+
+    def test_token_exhaustion_is_not_repeated_at_the_larger_budget(self) -> None:
+        self.payload["max_output_tokens"] = 32_000
+        response = self._incomplete({"type": "reasoning"})
+        self.transport.request.return_value = response
+
+        self.assertIs(self.service.respond(self.payload, **self.options), response)
+
         self.transport.request.assert_called_once()
 
 

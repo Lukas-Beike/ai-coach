@@ -898,17 +898,16 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .planned-week-days { display: grid; }
 .planned-day { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px 16px; padding: 16px; border-top: 1px solid var(--line); background: var(--surface-raised); scroll-margin-top: 16px; }
 .planned-day.is-today { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-bright); }
-.planned-day-heading { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 5px; padding-top: 2px; grid-row: 1 / span 2; }
+.planned-day-heading { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 5px; padding-top: 2px; }
 .planned-day-heading h5 { margin: 0; color: var(--ink); font-size: .92rem; font-weight: 750; }
 .planned-day-heading time { color: var(--muted); font-size: .8rem; }
 .planned-day-heading time strong { display: block; color: var(--ink); font-size: 1.8rem; line-height: 1.15; font-weight: 500; }
 .planned-day-heading time span { display: block; margin-top: 3px; }
 .planned-today-label { color: var(--accent-bright); font-size: .7rem; font-weight: 750; }
 .planned-day-weather { margin-top: 5px; color: var(--muted); font-size: .68rem; line-height: 1.5; }
+.planned-day-flag { max-width: 100%; color: var(--muted); font-size: .68rem; line-height: 1.5; overflow-wrap: anywhere; }
 .planned-day-content { min-width: 0; grid-column: 2; }
 .planned-weather-hint { margin: 0 0 12px; padding: 8px 12px; border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--subtle); font-size: .7rem; line-height: 1.5; text-align: center; }
-.planned-day-insights { grid-column: 2; min-width: 0; }
-.planned-insights-title { margin: 0 0 4px; color: var(--subtle); font-size: .65rem; line-height: 1.5; font-weight: 400; }
 .planned-day-form { margin: 0 0 4px; color: var(--muted); font-size: .68rem; line-height: 1.5; overflow-wrap: anywhere; }
 .planned-day-metrics { display: flex; flex-wrap: wrap; gap: 3px 14px; margin: 0; }
 .planned-day-metrics > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 6px; }

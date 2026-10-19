@@ -10,6 +10,7 @@ from typing import Any
 
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.job_store import CoachJobStore
+from backend.coach.limits import COACH_LONG_PLAN_MAX_OUTPUT_TOKENS
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.response_transport import (
     CoachResponseTransport,
@@ -17,6 +18,7 @@ from backend.coach.response_transport import (
 )
 from backend.errors import AppError
 from backend.providers.openai_requests import RESUMABLE_POLL_REASONS
+from backend.providers.openai_responses import response_text
 
 
 @dataclass
@@ -41,11 +43,14 @@ class CoachStructuredResponseService:
         recovery: CoachConversationRecoveryService,
         retry_policy: CoachResponseRetryPolicy,
         jobs: CoachJobStore,
+        *,
+        reasoning_retry_max_output_tokens: int = COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
     ) -> None:
         self._transport = transport
         self._recovery = recovery
         self._retry_policy = retry_policy
         self._jobs = jobs
+        self._reasoning_retry_max_output_tokens = reasoning_retry_max_output_tokens
 
     def respond(
         self,
@@ -83,10 +88,11 @@ class CoachStructuredResponseService:
                 },
             )
 
-        for attempt in range(3):
+        attempt = 0
+        while attempt < 3:
             raise_if_chat_cancelled(cancel_event)
             try:
-                return self._send(
+                response = self._send(
                     payload,
                     resume_id=state.resume_id,
                     checkpoint=checkpoint,
@@ -104,36 +110,76 @@ class CoachStructuredResponseService:
                     cancel_event,
                     background_owned=background_owned,
                 )
-                if resumed is not None:
-                    return resumed
-                if self._recovery.recover_if_invalid(
-                    exc,
-                    payload,
-                    request_payload,
-                    context=context,
-                    message=message,
-                    command_receipts=command_receipts,
-                    attachments=attachments,
-                    client_turn_id=client_turn_id,
-                    recovery_state=recovery_state,
-                    request_delta_emitted=state.request_delta_emitted,
-                    attempt=attempt,
-                ):
+                if resumed is None:
+                    if not self._recovery.recover_if_invalid(
+                        exc,
+                        payload,
+                        request_payload,
+                        context=context,
+                        message=message,
+                        command_receipts=command_receipts,
+                        attachments=attachments,
+                        client_turn_id=client_turn_id,
+                        recovery_state=recovery_state,
+                        request_delta_emitted=state.request_delta_emitted,
+                        attempt=attempt,
+                    ):
+                        self._wait_before_retry(exc, state, cancel_event, attempt)
                     state.resume_id = ""
+                    attempt += 1
                     continue
-                delay = self._retry_policy.retry_delay(
-                    exc,
-                    attempt=attempt,
-                    request_delta_emitted=state.request_delta_emitted,
-                )
-                if delay is None:
-                    raise
-                state.resume_id = ""
-                self._retry_policy.wait(delay, cancel_event, attempt)
+                response = resumed
+            if not self._spent_on_reasoning(response, payload, state):
+                return response
+            # Reasoning used the whole budget before any text or tool call, so
+            # nothing was streamed or executed and the request can be repeated.
+            # The larger-budget request does not consume a transport retry, so
+            # it is always sent even after earlier retryable failures.
+            limit = self._reasoning_retry_max_output_tokens
+            payload = {**payload, "max_output_tokens": limit}
+            request_payload["max_output_tokens"] = limit
+            state.resume_id = ""
         raise AppError(
             502,
             "Der KI-Dienst konnte die Antwort nicht fertigstellen.",
             reason="response_failed",
+        )
+
+    def _wait_before_retry(
+        self,
+        exc: AppError,
+        state: _ResponseState,
+        cancel_event: threading.Event | None,
+        attempt: int,
+    ) -> None:
+        delay = self._retry_policy.retry_delay(
+            exc,
+            attempt=attempt,
+            request_delta_emitted=state.request_delta_emitted,
+        )
+        if delay is None:
+            raise exc
+        state.resume_id = ""
+        self._retry_policy.wait(delay, cancel_event, attempt)
+
+    def _spent_on_reasoning(
+        self, response: dict[str, Any], payload: dict[str, Any], state: _ResponseState
+    ) -> bool:
+        details = response.get("incomplete_details")
+        return (
+            response.get("status") == "incomplete"
+            and isinstance(details, dict)
+            and details.get("reason") == "max_output_tokens"
+            and not state.request_delta_emitted
+            # A server-side conversation already stored this input and output.
+            and not payload.get("conversation")
+            and not response_text(response)
+            and not any(
+                isinstance(item, dict) and item.get("type") == "function_call"
+                for item in response.get("output") or []
+            )
+            and (payload.get("max_output_tokens") or 0)
+            < self._reasoning_retry_max_output_tokens
         )
 
     def _send(

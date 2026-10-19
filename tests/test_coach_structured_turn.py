@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
+from backend.coach.request_payload import request_context_selection
 from backend.coach.structured_turn import (
     CoachStructuredTurnDependencies,
     CoachStructuredTurnService,
@@ -123,6 +124,30 @@ class StructuredTurnTests(unittest.TestCase):
         self.assertEqual(submitted["input"], [{"synthetic": "output"}])
         self.assertEqual(submitted["previous_response_id"], "response-one")
         self.assertEqual(self.response.respond.call_args.kwargs["resume_id"], "")
+
+    def test_round_state_carries_deterministic_context_profile(self) -> None:
+        message = "Plane die nächsten zwei Wochen neu"
+        context = {"synthetic": True}
+        expected = request_context_selection(
+            message,
+            context,
+            command_receipts=[],
+            attachments=[],
+            has_prior_openai_attachments=False,
+        ).name
+
+        self.service.run(
+            message,
+            intent={"allow_mutations": False},
+            conversation_id="synthetic-conversation",
+            client_turn_id="synthetic-turn",
+            session_csrf_hash="synthetic-session",
+            background_job=True,
+        )
+
+        self.assertEqual(expected, "weekly_planning")
+        state = self.rounds.run.call_args.kwargs["state"]
+        self.assertEqual(state.context_profile, expected)
 
     def test_failure_persists_safe_receipt_without_session_key(self) -> None:
         self.response.respond.side_effect = AppError(
