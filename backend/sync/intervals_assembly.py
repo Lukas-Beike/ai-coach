@@ -16,6 +16,7 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.providers.intervals import IntervalsApiClient
 from backend.runtime.ports import ActivityRowReader, CanonicalTableServing
+from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
@@ -153,6 +154,7 @@ class IntervalsSyncAssembly:
             utc_now=self._utc_now,
             configured=bool(config.intervals_api_key),
             references=ActivityReferences(self._database_manager()),
+            canonical=CanonicalDetailWriter(),
             read_planned_units=lambda: (
                 self._planned_unit_service().list(500)
                 if self._planned_unit_service

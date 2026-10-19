@@ -26,6 +26,7 @@ from backend.activities.detail_projection import (
     detailed_activity,
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
+from backend.activities.workout_profile import recorded_profile
 from backend.canonical.activity_detail import MAX_STREAM_POINTS
 from backend.errors import AppError, public_error_contract
 from backend.performance.power_profile import power_profile, running_profile
@@ -38,6 +39,7 @@ from backend.providers.intervals_activity_fields import (
     activity_detail_laps,
 )
 from backend.runtime.ports import ActivityRowReader
+from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -82,6 +84,7 @@ class ActivityDetailRefreshService:
         configured: bool,
         read_planned_units: Callable[[], list[dict[str, Any]]] = list,
         references: ActivityReferenceResolver | None = None,
+        canonical: CanonicalDetailWriter | None = None,
     ) -> None:
         self._api_client = api_client
         self._database_manager = database_manager
@@ -91,6 +94,7 @@ class ActivityDetailRefreshService:
         self._configured = configured
         self._read_planned_units = read_planned_units
         self._references = NoActivityReferences() if references is None else references
+        self._canonical = canonical
 
     def refresh(self, activity_id: str) -> dict[str, Any]:
         activity_id = normalize_activity_id(
@@ -157,7 +161,29 @@ class ActivityDetailRefreshService:
         }
         if len(json.dumps(record, allow_nan=False).encode()) > MAX_DETAIL_BYTES:
             raise AppError(502, "Die Detaildaten überschreiten die unterstützte Größe.")
-        self._store.save(activity_id, record)
+        if self._canonical is None:
+            self._store.save(activity_id, record)
+        else:
+            # One transaction: the kv record and the canonical rows commit together.
+            record = {**record, "calendar_profile": recorded_profile(projected)}
+            with self._database_manager.unit_of_work() as db:
+                written = self._canonical.write_fetch(
+                    db,
+                    activity_id=activity_id,
+                    detail=detail,
+                    streams=streams,
+                    record=record,
+                    now=observed_at,
+                )
+                self._store.save_in(db, activity_id, record)
+            if written.issues:
+                _LOGGER.warning(
+                    "activity detail mapping produced issues",
+                    extra={
+                        "event": "activity_detail_mapping_issues",
+                        "issues": written.issues,
+                    },
+                )
         return {"status": "completed", "activity_id": activity_id}
 
     def prefetch_recent(
