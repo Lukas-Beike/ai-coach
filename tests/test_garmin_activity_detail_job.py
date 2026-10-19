@@ -186,6 +186,19 @@ class GarminActivityDetailJobTests(unittest.TestCase):
         self.assertEqual(stored["laps"], stored_laps)
         self.assertEqual(datetime.fromisoformat(stored["streams"]), later)
 
+    def test_paused_part_makes_the_refresh_partial(self) -> None:
+        paused = _collected()
+        del paused["splits"]
+        paused["skipped"] = ["activity_splits"]
+        self.reader.fetch_activity_detail.return_value = paused
+
+        result = self.service().refresh(ACTIVITY)
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(
+            result["kinds"], ["heart_rate_zones", "power_zones", "streams"]
+        )
+
     def test_sets_carry_the_hash_of_the_stored_garmin_summary(self) -> None:
         self.service().refresh(ACTIVITY)
 

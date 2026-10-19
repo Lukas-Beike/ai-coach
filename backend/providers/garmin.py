@@ -635,11 +635,13 @@ def collect_garmin_activity_detail(
 ) -> dict[str, Any]:
     """Collect one Garmin activity's detail parts, keeping each part that succeeds.
 
-    Every part is a separate call. A paused part is skipped without a call, and a
-    failed part is omitted from the result and recorded in ``errors`` after
-    redaction. ``errors`` is present only when at least one part failed.
+    Every part is a separate call. A paused part is skipped without a call and
+    its capability is listed in ``skipped``; a failed part is omitted from the
+    result and recorded in ``errors`` after redaction. ``errors`` and ``skipped``
+    are present only when at least one part failed or was skipped.
     """
     payload: dict[str, Any] = {"activity_id": activity_id, "errors": []}
+    skipped: list[str] = []
     # (capability key, payload key, fetch). The capability key also names the
     # external call, matching ``_fetch_range``.
     parts: tuple[tuple[str, str, Callable[[], Any]], ...] = (
@@ -664,6 +666,7 @@ def collect_garmin_activity_detail(
     )
     for capability, key, fetch in parts:
         if capability_allowed is not None and not capability_allowed(capability):
+            skipped.append(capability)
             continue
         try:
             payload[key] = external_call(
@@ -677,6 +680,8 @@ def collect_garmin_activity_detail(
             _add_error(payload, capability, exc, redact, warn)
     if not payload["errors"]:
         del payload["errors"]
+    if skipped:
+        payload["skipped"] = skipped
     return payload
 
 
