@@ -115,6 +115,23 @@ class SessionAnalysisTests(unittest.TestCase):
             )
         )
 
+    def test_source_label_names_the_stream_provider(self):
+        result = aerobic_analysis(ride(), source_label="Garmin")
+        self.assertEqual("derived from Garmin original streams", result["source"])
+        self.assertEqual("Intervals.icu", result["provider_decoupling"]["source"])
+        self.assertEqual(
+            "derived from Intervals.icu original streams",
+            aerobic_analysis(ride())["source"],
+        )
+        activity = ride(list(range(121)))
+        activity["laps"] = [{"start_time": 0, "end_time": 120}]
+        targets = {"steps": [{"kind": "power", "target": "200W", "duration": 120}]}
+        result = interval_quality(activity, targets, source_label="Wahoo")
+        self.assertEqual(
+            "derived from Wahoo original streams and frozen local targets",
+            result["source"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

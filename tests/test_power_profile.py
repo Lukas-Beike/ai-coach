@@ -57,6 +57,21 @@ class PowerProfileTests(unittest.TestCase):
         running = running_profile({"type": "Run", "streams": streams})
         self.assertEqual("unknown", running["distance"][1]["status"])
 
+    def test_source_label_names_the_stream_provider(self):
+        ride = {"type": "Ride", "streams": {"time": [0, 5], "watts": [200, 200]}}
+        self.assertEqual(
+            "Wahoo original watts stream",
+            power_profile(ride, source_label="Wahoo")["source"],
+        )
+        run = {
+            "type": "Run",
+            "streams": {"time": [0, 1], "velocity_smooth": [3, 3], "distance": [0, 3]},
+        }
+        self.assertEqual(
+            "Garmin original speed/distance streams",
+            running_profile(run, source_label="Garmin")["source"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
