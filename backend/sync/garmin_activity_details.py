@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -137,7 +137,7 @@ class GarminActivityDetailService:
             now = self._utc_now()
             mapped = _map_collected(collected, recorded_by=recorded_by, now=now)
         # Malformed parts are dropped by the mapper, so they count like failures.
-        incomplete = bool(collected.get("errors") or mapped.issues)
+        incomplete = _incomplete(collected) or bool(mapped.issues)
         if not mapped.records:
             if incomplete:
                 # Every requested part failed: report the job as failed.
@@ -310,9 +310,7 @@ class GarminActivityDetailService:
                 outcome.retry,
                 provider_activity_id,
                 candidate["summary_sha256"],
-                incomplete=bool(
-                    collected.get("errors") or collected.get("rate_limited")
-                ),
+                incomplete=_incomplete(collected),
             )
         if collected.get("rate_limited"):
             # Keep the parts that arrived, then stop until the pause ends.
@@ -322,7 +320,7 @@ class GarminActivityDetailService:
         if mapped.records:
             if not stored:
                 outcome.skipped += 1
-        elif collected.get("errors"):
+        elif _incomplete(collected):
             # Nothing is marked, so a later sync retries this activity.
             outcome.status = "failed"
             return False
@@ -511,6 +509,15 @@ def _parse_retry(value: object) -> dict[str, tuple[str, int]]:
         ):
             retry[str(key)] = (entry[0], entry[1])
     return retry
+
+
+def _incomplete(collected: Mapping[str, Any]) -> bool:
+    """True when a part failed, was rate limited or was skipped while paused."""
+    return bool(
+        collected.get("errors")
+        or collected.get("rate_limited")
+        or collected.get("skipped")
+    )
 
 
 def _note_attempt(

@@ -439,6 +439,35 @@ class BackfillBatchTests(_Base):
         self.assertNotIn("retry", _stored_state(self.key_values))
         self.assertIn("laps", _stored_kinds(self.manager, "1001"))
 
+    def test_part_skipped_while_paused_is_retried(self) -> None:
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+        summary = _summary_hash(self.manager, "1001")
+        paused = _payload("1001")
+        paused.pop("splits")
+        paused["skipped"] = ["activity_splits"]
+
+        self.service(_Details({"1001": paused})).backfill()
+
+        self.assertEqual(
+            _stored_state(self.key_values)["retry"], {"1001": [summary, 1]}
+        )
+        reader = _Details({"1001": _payload("1001")})
+        self.service(reader).backfill()
+
+        self.assertEqual(reader.fetched, ["1001"])
+        self.assertNotIn("retry", _stored_state(self.key_values))
+
+    def test_fully_skipped_activity_is_not_marked_empty(self) -> None:
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+
+        result = self.service(
+            _Details({"1001": {"activity_id": "1001", "skipped": ["activity_details"]}})
+        ).backfill()
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(_stored_state(self.key_values)["empty"], {})
+        self.assertEqual(_candidate_ids(self.manager), ["1001"])
+
     def test_partial_fetch_retries_are_bounded_per_summary(self) -> None:
         _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
         summary = _summary_hash(self.manager, "1001")

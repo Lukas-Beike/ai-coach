@@ -176,18 +176,30 @@ class GarminActivityDetailCollectTests(unittest.TestCase):
 
         self.assertNotIn("hr_zones", payload)
         self.assertNotIn("errors", payload)
+        self.assertEqual(payload["skipped"], ["activity_hr_zones"])
         self.assertNotIn("get_activity_hr_in_timezones", [c[0] for c in client.calls])
         self.assertNotIn(
             "activity_hr_zones", [capability for _p, capability, _d in external.calls]
         )
         self.assertEqual(len(client.calls), 3)
 
-    def test_all_parts_paused_returns_only_activity_id(self):
+    def test_all_parts_paused_returns_only_the_skipped_parts(self):
         client = FakeClient()
 
         payload = self._collect(client, capability_allowed=lambda _capability: False)
 
-        self.assertEqual(payload, {"activity_id": ID})
+        self.assertEqual(
+            payload,
+            {
+                "activity_id": ID,
+                "skipped": [
+                    "activity_details",
+                    "activity_splits",
+                    "activity_hr_zones",
+                    "activity_power_zones",
+                ],
+            },
+        )
         self.assertEqual(client.calls, [])
 
     def test_every_part_failing_keeps_all_errors_in_order(self):
