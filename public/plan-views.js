@@ -120,14 +120,15 @@ function plannedPollenPeak(pollen) {
     const rank = dwd ? Number(String(value).split(/[-–]/).pop()) : Number(value);
     if (Number.isFinite(rank) && (!peak || rank > peak.rank)) peak = { name, value, rank };
   }
-  return peak && peak.rank >= (dwd ? 1 : PLANNED_CAMS_POLLEN_FLAG_MIN) ? peak : null;
+  const minRank = dwd ? 1 : PLANNED_CAMS_POLLEN_FLAG_MIN;
+  return peak && peak.rank >= minRank ? peak : null;
 }
 
 // Compact day-heading flags; an ordinary day yields none.
 function plannedWeatherFlags(weather) {
   if (!weather || typeof weather !== "object") return [];
   const flags = [];
-  const number = (value) => (value == null || value === "" ? NaN : Number(value));
+  const number = (value) => (value == null || value === "" ? Number.NaN : Number(value));
   const rain = number(weather.precipitation_probability_max);
   if (rain >= PLANNED_RAIN_FLAG_MIN_PERCENT) flags.push({ text: `💧 ${calendarMetricNumber(rain, " %")}`, label: `${calendarMetricNumber(rain)} Prozent Regenwahrscheinlichkeit` });
   const air = weather.air_quality && typeof weather.air_quality === "object" ? weather.air_quality : {};
