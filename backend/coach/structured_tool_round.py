@@ -78,6 +78,26 @@ class CoachStructuredToolRoundLimits:
     long_plan_max_output_tokens: int
 
 
+def _log_context_reload(
+    state: StructuredCoachRoundState, result: dict[str, Any], round_number: int
+) -> None:
+    """Log a successful context reload: counts and validated section names only."""
+    projection = result.get("projection") or {}
+    logging.getLogger("intervals_coach").info(
+        "Coach context reload",
+        extra={
+            "event": "coach_context_reload",
+            "context": {
+                "context_profile": state.context_profile,
+                "requested_sections": list(projection.get("requested_sections") or []),
+                "characters": projection.get("characters"),
+                "complete": projection.get("complete"),
+                "round": round_number,
+            },
+        },
+    )
+
+
 class CoachStructuredToolRoundService:
     """Own tool execution, durable round progress, and provider follow-up."""
 
@@ -176,23 +196,7 @@ class CoachStructuredToolRoundService:
                 if result is None:
                     return name, call_id, dict(_TURN_RELEASED), {"operation": name}
                 if name == "read_coach_context" and result.get("ok"):
-                    # Counts and validated section names only; never the context body.
-                    projection = result.get("projection") or {}
-                    logging.getLogger("intervals_coach").info(
-                        "Coach context reload",
-                        extra={
-                            "event": "coach_context_reload",
-                            "context": {
-                                "context_profile": state.context_profile,
-                                "requested_sections": list(
-                                    projection.get("requested_sections") or []
-                                ),
-                                "characters": projection.get("characters"),
-                                "complete": projection.get("complete"),
-                                "round": round_number,
-                            },
-                        },
-                    )
+                    _log_context_reload(state, result, round_number)
             if result.get("synchronous_refresh") or (
                 name == "get_sync_job" and result.get("ok")
             ):
