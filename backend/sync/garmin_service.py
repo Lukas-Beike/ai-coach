@@ -765,25 +765,9 @@ class GarminSyncService:
             and result.get("status") == "ok"
             and not (cancel_event is not None and cancel_event.is_set())
         ):
-            self._set_status(
-                operation_id,
-                "activity-details",
-                95,
-                "Garmin-Aktivitätsdetails werden geladen…",
+            self._backfill_activity_details(
+                self._activity_detail_backfill, operation_id, cancel_event, result
             )
-            try:
-                # Runs under the sync lock and gate held by this sync.
-                counts = self._activity_detail_backfill(cancel_event)
-                if counts is not None:
-                    result["activity_details"] = counts
-            except AppError as error:
-                if error.reason == "chat_cancelled":
-                    raise
-                _log_backfill_failure(error)
-            except Exception as error:  # noqa: BLE001 - the sync stays successful; never expose provider errors
-                _log_backfill_failure(error)
-            # A cancel during the backfill ends the sync as cancelled, not completed.
-            self._raise_if_cancelled(cancel_event)
         self._operation_state_writer.write(
             operation_id,
             "completed",
@@ -793,6 +777,33 @@ class GarminSyncService:
         )
         self._lifecycle_state.record_sync_finished()
         return result
+
+    def _backfill_activity_details(
+        self,
+        backfill: Callable[[threading.Event | None], dict[str, Any] | None],
+        operation_id: str,
+        cancel_event: threading.Event | None,
+        result: dict[str, Any],
+    ) -> None:
+        self._set_status(
+            operation_id,
+            "activity-details",
+            95,
+            "Garmin-Aktivitätsdetails werden geladen…",
+        )
+        try:
+            # Runs under the sync lock and gate held by this sync.
+            counts = backfill(cancel_event)
+            if counts is not None:
+                result["activity_details"] = counts
+        except AppError as error:
+            if error.reason == "chat_cancelled":
+                raise
+            _log_backfill_failure(error)
+        except Exception as error:  # noqa: BLE001 - the sync stays successful; never expose provider errors
+            _log_backfill_failure(error)
+        # A cancel during the backfill ends the sync as cancelled, not completed.
+        self._raise_if_cancelled(cancel_event)
 
     def _set_status(
         self, operation_id: str, phase: str, progress: int, message: str
