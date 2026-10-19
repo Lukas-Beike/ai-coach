@@ -5,15 +5,14 @@ import re
 from typing import Any
 
 from backend.activities.workout_text import WorkoutTextError, structured_steps
+from backend.activities.zone_settings import (
+    HR_ZONE_LIMITS,
+    POWER_ZONE_LIMITS,
+    ZoneSettings,
+    percent_zone,
+)
 from backend.providers.intervals_activity_keys import activity_ftp, activity_lthr
 
-# Upper zone limits (Z1..Z6; everything above is Z7) as percent of the threshold.
-_POWER_ZONE_LIMITS = (55, 75, 90, 105, 120, 150)
-_HR_ZONE_LIMITS = (68, 83, 94, 105, 120, 150)
-_PACE_ZONE_LIMITS = (77.5, 87.7, 94.3, 100, 103.4, 111.5)
-# Heart-rate steps are usually written as percent of max HR; threshold HR is
-# about 90 % of it.
-_LTHR_SHARE_OF_MAX_HR = 0.9
 _ZONE_TARGET = re.compile(r"Z([1-7])(?:\s*-\s*Z([1-7]))?(?:\s+(?:HR|PACE))?")
 
 
@@ -23,15 +22,15 @@ def _number(value: Any) -> float | None:
     )
 
 
-def _percent_zone(percent: float, limits: tuple[float, ...]) -> int:
-    return next((index for index, limit in enumerate(limits, 1) if percent <= limit), 7)
+def planned_profile(
+    workout: dict[str, Any], settings: ZoneSettings | None = None
+) -> dict[str, Any] | None:
+    """Profile of the planned steps; ``settings`` supplies the athlete's zones.
 
-
-def _power_zone(percent: float) -> int:
-    return _percent_zone(percent, _POWER_ZONE_LIMITS)
-
-
-def planned_profile(workout: dict[str, Any]) -> dict[str, Any] | None:
+    Absolute watt or bpm targets are colored from the athlete's FTP or LTHR and
+    the profile is then marked ``estimated``.
+    """
+    settings = settings or ZoneSettings()
     description = workout.get("description")
     if not isinstance(description, str) or len(description) > 20000:
         return None
@@ -46,13 +45,15 @@ def planned_profile(workout: dict[str, Any]) -> dict[str, Any] | None:
         return None
     segments = []
     units = set()
+    estimated = False
     for step in steps:
-        result = _planned_segment(step, axis)
+        result = _planned_segment(step, axis, settings)
         if result is None:
             return None
-        segment, unit = result
+        segment, unit, from_estimate = result
         segments.append(segment)
         units.add(unit)
+        estimated = estimated or from_estimate
     if len(units) != 1:
         # Steps of one kind may mix zone and percent targets (for example
         # "Z1 HR" and "86-89% HR"); the zone is their common axis.
@@ -65,12 +66,15 @@ def planned_profile(workout: dict[str, Any]) -> dict[str, Any] | None:
             for segment in segments
         ]
         units = {"zone"}
-    return {
+    profile: dict[str, Any] = {
         "source": "planned",
         "axis": axis,
         "unit": units.pop(),
         "segments": segments,
     }
+    if estimated:
+        profile["estimated"] = True
+    return profile
 
 
 def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
@@ -97,8 +101,8 @@ def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _planned_segment(
-    step: dict[str, Any], axis: str
-) -> tuple[dict[str, Any], str] | None:
+    step: dict[str, Any], axis: str, settings: ZoneSettings
+) -> tuple[dict[str, Any], str, bool] | None:
     target = step["target"]
     numbers = re.findall(r"\d+(?:\.\d+)?", target)
     if not numbers or ":" in target:
@@ -107,17 +111,20 @@ def _planned_segment(
     value = (low + high) / 2
     zone = _ZONE_TARGET.fullmatch(target)
     color: int | None = None
+    estimated = False
     if zone:
         color = int(zone[2] or zone[1])
         unit = "zone"
     elif "%" in target and step["kind"] in {"power", "hr", "pace"}:
-        color, unit = _percent_target_zone(step["kind"], target, value)
+        color, unit = _percent_target_zone(step["kind"], target, value, settings)
     else:
         unit = step["kind"]
         if "BPM" in target:
             unit = "bpm"
         elif "W" in target:
             unit = "W"
+        color = settings.absolute_zone(unit, value)
+        estimated = color is not None
     segment = {
         axis: step[axis],
         "value": low if step["ramp"] else value,
@@ -126,20 +133,19 @@ def _planned_segment(
         "label": target,
     }
 
-    return segment, unit
+    return segment, unit, estimated
 
 
-def _percent_target_zone(kind: str, target: str, percent: float) -> tuple[int, str]:
+def _percent_target_zone(
+    kind: str, target: str, percent: float, settings: ZoneSettings
+) -> tuple[int, str]:
     if kind == "power":
-        return _power_zone(percent), "%FTP"
+        return settings.power_zone(percent), "%FTP"
     if kind == "pace":
-        return _percent_zone(percent, _PACE_ZONE_LIMITS), "%PACE"
+        return settings.pace_zone(percent), "%PACE"
     if "LTHR" in target:
-        return _percent_zone(percent, _HR_ZONE_LIMITS), "%LTHR"
-    return (
-        _percent_zone(percent / _LTHR_SHARE_OF_MAX_HR, _HR_ZONE_LIMITS),
-        "%HR",
-    )
+        return settings.hr_zone_of_lthr(percent), "%LTHR"
+    return settings.hr_zone_of_max(percent), "%HR"
 
 
 def _profile_streams(
@@ -208,10 +214,8 @@ def _recorded_segment(
     zone = None
     if value is not None and threshold and threshold > 0:
         percent = value / threshold * 100
-        zone = (
-            _power_zone(percent)
-            if kind == "watts"
-            else _percent_zone(percent, _HR_ZONE_LIMITS)
+        zone = percent_zone(
+            percent, POWER_ZONE_LIMITS if kind == "watts" else HR_ZONE_LIMITS
         )
     label = "Missing"
     if value is not None:

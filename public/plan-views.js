@@ -623,7 +623,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const values = segments.flatMap((item) => [item.value, item.end_value]).filter((value) => value != null && Number.isFinite(value) && value >= 0);
     if (!total || !values.length) return null;
     const top = Math.max(...values, 1) * 1.1;
-    const label = profile.source === "recorded" ? "Aufgezeichnetes Belastungsprofil" : "Geplantes Intervallprofil";
+    const baseLabel = profile.source === "recorded" ? "Aufgezeichnetes Belastungsprofil" : "Geplantes Intervallprofil";
+    const label = profile.estimated ? `${baseLabel} (Zonen geschätzt aus FTP/LTHR)` : baseLabel;
     const svg = analysisSvg("svg", { viewBox: "0 0 300 56", role: "img", "aria-label": label, class: "calendar-workout-profile", preserveAspectRatio: "none" });
     svg.append(analysisSvg("title", {}, `${label} · ${axis === "distance" ? "Distanzachse" : "Zeitachse"} · ${profile.unit || ""}`));
     svg.append(analysisSvg("line", { x1: 0, x2: 300, y1: 54, y2: 54, class: "calendar-profile-baseline" }));

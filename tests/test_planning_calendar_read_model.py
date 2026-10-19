@@ -405,6 +405,36 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
             ],
         )
 
+    def test_planned_profiles_use_the_zone_settings_of_the_units_sport(self):
+        sport_settings = [
+            {"types": ["Ride"], "ftp": 250, "power_zones": [50, 70, 85, 100, 115, 140]},
+            {"types": ["Run"], "lthr": 170},
+        ]
+        ride = _unit("Ride", description="- 10m 200w")
+        run = _unit("Run", type="Run", description="- 10m 200w")
+
+        def project(settings):
+            result = project_planning_calendar(
+                [ride, run],
+                [],
+                {},
+                [],
+                [],
+                today=date(2026, 10, 10),
+                provider_window={},
+                default_name="Planned workout",
+                sport_settings=settings,
+            )
+            return {item["name"]: item for item in result["planned"]}
+
+        by_name = project(sport_settings)
+        profile = by_name["Ride"]["workout_profile"]
+        self.assertEqual([3], [row["zone"] for row in profile["segments"]])
+        self.assertTrue(profile["estimated"])
+        # No FTP is known for running, so its watt step stays uncolored.
+        self.assertIsNone(by_name["Run"]["workout_profile"]["segments"][0]["zone"])
+        self.assertIsNone(project(())["Ride"]["workout_profile"]["segments"][0]["zone"])
+
 
 if __name__ == "__main__":
     unittest.main()
