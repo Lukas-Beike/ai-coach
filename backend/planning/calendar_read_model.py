@@ -6,13 +6,13 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.activities import calendar_projection, grouping
-from backend.activities.identity import activity_sport
 from backend.activities.workout_profile import planned_profile
 from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import canonical, local
 from backend.planning import calendar as planning_calendar
 from backend.planning.conflicts import calendar_items_share_local_day
+from backend.planning.sport import planned_sport_environment
 from backend.weather import history
 
 
@@ -91,6 +91,11 @@ def snapshot_sport_settings(snapshot: Any) -> Any:
     return athlete.get("sport_settings") if isinstance(athlete, dict) else ()
 
 
+def _zone_settings(row: dict[str, Any], sport_settings: Any) -> ZoneSettings:
+    sport, environment = planned_sport_environment(row)
+    return ZoneSettings.from_sport_settings(sport_settings, sport, environment)
+
+
 def project_planning_calendar(
     local_planned: list[Any],
     activities: list[Any],
@@ -119,12 +124,7 @@ def project_planning_calendar(
     )
     weather_planned = [
         {**row, "workout_profile": profile}
-        if (
-            profile := planned_profile(
-                row,
-                ZoneSettings.from_sport_settings(sport_settings, activity_sport(row)),
-            )
-        )
+        if (profile := planned_profile(row, _zone_settings(row, sport_settings)))
         else row
         for row in weather_planned
     ]

@@ -43,17 +43,10 @@ def planned_profile(
     axis = "duration" if steps and "duration" in steps[0] else "distance"
     if not steps or any(axis not in step for step in steps):
         return None
-    segments = []
-    units = set()
-    estimated = False
-    for step in steps:
-        result = _planned_segment(step, axis, settings)
-        if result is None:
-            return None
-        segment, unit, from_estimate = result
-        segments.append(segment)
-        units.add(unit)
-        estimated = estimated or from_estimate
+    built = _planned_segments(steps, axis, settings)
+    if built is None:
+        return None
+    segments, units, estimated = built
     if len(units) != 1:
         zone_segments = _zone_segments(steps, segments)
         if zone_segments is None:
@@ -92,6 +85,23 @@ def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
         "unit": "W" if kind == "watts" else "bpm",
         "segments": segments,
     }
+
+
+def _planned_segments(
+    steps: list[dict[str, Any]], axis: str, settings: ZoneSettings
+) -> tuple[list[dict[str, Any]], set[str], bool] | None:
+    segments: list[dict[str, Any]] = []
+    units: set[str] = set()
+    estimated = False
+    for step in steps:
+        result = _planned_segment(step, axis, settings)
+        if result is None:
+            return None
+        segment, unit, from_estimate = result
+        segments.append(segment)
+        units.add(unit)
+        estimated = estimated or from_estimate
+    return segments, units, estimated
 
 
 def _zone_segments(

@@ -12,7 +12,7 @@ from itertools import pairwise
 from typing import Any
 
 from backend.canonical.sports import classify_sport_text
-from backend.canonical.vocabulary import Sport
+from backend.canonical.vocabulary import Environment, Sport
 
 # Upper zone limits (Z1..Z6; everything above is Z7) as percent of the threshold.
 POWER_ZONE_LIMITS = (55, 75, 90, 105, 120, 150)
@@ -21,11 +21,16 @@ PACE_ZONE_LIMITS = (77.5, 87.7, 94.3, 100, 103.4, 111.5)
 # Heart-rate steps are usually written as percent of max HR; threshold HR is
 # about 90 % of it.
 LTHR_SHARE_OF_MAX_HR = 0.9
-_ZONE_COUNT = len(POWER_ZONE_LIMITS)
+_MIN_ZONES = 3
+_MAX_ZONES = 7
 
 
 def percent_zone(percent: float, limits: tuple[float, ...]) -> int:
-    return next((index for index, limit in enumerate(limits, 1) if percent <= limit), 7)
+    """Zone number for ``percent``; everything above the last limit is the top zone."""
+    return next(
+        (index for index, limit in enumerate(limits, 1) if percent <= limit),
+        len(limits) + 1,
+    )
 
 
 def _number(value: Any) -> float | None:
@@ -37,13 +42,14 @@ def _number(value: Any) -> float | None:
 
 
 def _limits(value: Any, divisor: float = 1.0) -> tuple[float, ...] | None:
-    """The six ascending zone limits of an Intervals.icu zone list, or None.
+    """The ascending zone limits of an Intervals.icu zone list, or None.
 
-    The seventh entry is the open upper end (999) and is not needed.
+    The list has one entry per zone (3 to 7 zones are supported); the last entry
+    is the open upper end and is not needed.
     """
-    if not isinstance(value, list) or len(value) < _ZONE_COUNT:
+    if not isinstance(value, list) or not _MIN_ZONES <= len(value) <= _MAX_ZONES:
         return None
-    numbers = [_number(item) for item in value[:_ZONE_COUNT]]
+    numbers = [_number(item) for item in value[:-1]]
     if any(item is None for item in numbers):
         return None
     limits = tuple(item / divisor for item in numbers if item is not None)
@@ -63,25 +69,39 @@ class ZoneSettings:
     pace_limits: tuple[float, ...] = PACE_ZONE_LIMITS
 
     @classmethod
-    def from_sport_settings(cls, settings: Any, sport: Sport) -> ZoneSettings:
-        """Zone settings of the first Intervals.icu sport setting for ``sport``."""
+    def from_sport_settings(
+        cls,
+        settings: Any,
+        sport: Sport,
+        environment: Environment = Environment.UNKNOWN,
+    ) -> ZoneSettings:
+        """Zone settings of the first Intervals.icu sport setting for ``sport``.
+
+        Indoor and virtual workouts use the indoor FTP when the setting has one.
+        """
         for setting in settings if isinstance(settings, list) else ():
             types = setting.get("types") if isinstance(setting, dict) else None
             if isinstance(types, list) and any(
                 isinstance(item, str) and classify_sport_text(item) == sport
                 for item in types
             ):
-                return cls._from_setting(setting)
+                return cls._from_setting(setting, environment)
         return cls()
 
     @classmethod
-    def _from_setting(cls, setting: dict[str, Any]) -> ZoneSettings:
+    def _from_setting(
+        cls, setting: dict[str, Any], environment: Environment
+    ) -> ZoneSettings:
         lthr = _number(setting.get("lthr"))
+        indoor = environment in {Environment.INDOOR, Environment.VIRTUAL}
+        ftp = (_number(setting.get("indoor_ftp")) if indoor else None) or _number(
+            setting.get("ftp")
+        )
         # Heart-rate zones arrive as bpm limits; they need a threshold to become
         # a percentage of it.
         hr_limits = _limits(setting.get("hr_zones"), lthr / 100) if lthr else None
         return cls(
-            ftp=_number(setting.get("ftp")),
+            ftp=ftp,
             lthr=lthr,
             max_hr=_number(setting.get("max_hr")),
             power_limits=_limits(setting.get("power_zones")) or POWER_ZONE_LIMITS,

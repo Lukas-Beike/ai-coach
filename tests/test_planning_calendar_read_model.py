@@ -407,7 +407,11 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
 
     def test_planned_profiles_use_the_zone_settings_of_the_units_sport(self):
         sport_settings = [
-            {"types": ["Ride"], "ftp": 250, "power_zones": [50, 70, 85, 100, 115, 140]},
+            {
+                "types": ["Ride"],
+                "ftp": 250,
+                "power_zones": [50, 70, 85, 100, 115, 140, 999],
+            },
             {"types": ["Run"], "lthr": 170},
         ]
         ride = _unit("Ride", description="- 10m 200w")
@@ -434,6 +438,36 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
         # No FTP is known for running, so its watt step stays uncolored.
         self.assertIsNone(by_name["Run"]["workout_profile"]["segments"][0]["zone"])
         self.assertIsNone(project(())["Ride"]["workout_profile"]["segments"][0]["zone"])
+
+    def test_planned_profiles_use_the_canonical_sport_and_environment(self):
+        sport_settings = [
+            {"types": ["Ride", "VirtualRide"], "ftp": 250, "indoor_ftp": 200},
+            {"types": ["Run"], "lthr": 170},
+        ]
+        # "Strides" contains "ride" but is a run; the stored sport decides.
+        strides = _unit("Strides", type="Run", description="- 10m 150bpm")
+        indoor = _unit("Trainer", type="VirtualRide", description="- 10m 190w")
+        outdoor = _unit("Road", description="- 10m 190w")
+        result = project_planning_calendar(
+            [strides, indoor, outdoor],
+            [],
+            {},
+            [],
+            [],
+            today=date(2026, 10, 10),
+            provider_window={},
+            default_name="Planned workout",
+            sport_settings=sport_settings,
+        )
+        zones = {
+            item["name"]: item["workout_profile"]["segments"][0]["zone"]
+            for item in result["planned"]
+        }
+        # 150 bpm of a 170 bpm LTHR (88 %) is zone 3 and needs the run settings.
+        self.assertEqual(3, zones["Strides"])
+        # 190 W is 95 % of the 200 W indoor FTP but 76 % of the 250 W outdoor FTP.
+        self.assertEqual(4, zones["Trainer"])
+        self.assertEqual(3, zones["Road"])
 
 
 if __name__ == "__main__":

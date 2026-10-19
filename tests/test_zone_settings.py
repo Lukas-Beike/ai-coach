@@ -5,7 +5,7 @@ from backend.activities.zone_settings import (
     POWER_ZONE_LIMITS,
     ZoneSettings,
 )
-from backend.canonical.vocabulary import Sport
+from backend.canonical.vocabulary import Environment, Sport
 
 RIDE = {
     "types": ["Ride", "VirtualRide"],
@@ -48,7 +48,8 @@ class ZoneSettingsTests(unittest.TestCase):
     def test_invalid_zone_lists_fall_back_to_the_defaults(self):
         for zones in (
             "50,70",
-            [50, 70, 85],
+            [50, 999],
+            [50, 70, 85, 100, 115, 125, 140, 999],
             [50, 70, 85, 100, 115, None, 999],
             [50, 70, 70, 100, 115, 140, 999],
             [50, 70, 85, 100, 115, float("nan"), 999],
@@ -58,6 +59,34 @@ class ZoneSettingsTests(unittest.TestCase):
                 [{"types": ["Ride"], "power_zones": zones}], Sport.RIDE
             )
             self.assertEqual(POWER_ZONE_LIMITS, settings.power_limits, zones)
+
+    def test_zone_models_with_fewer_zones_keep_their_own_limits(self):
+        settings = ZoneSettings.from_sport_settings(
+            [{"types": ["Ride"], "ftp": 200, "power_zones": [55, 75, 90, 105, 999]}],
+            Sport.RIDE,
+        )
+        self.assertEqual((55, 75, 90, 105), settings.power_limits)
+        self.assertEqual(4, settings.power_zone(100))
+        # Above the last limit is the top zone of this model, not Z7.
+        self.assertEqual(5, settings.power_zone(130))
+        self.assertEqual(5, settings.absolute_zone("W", 260))
+
+    def test_indoor_workouts_use_the_indoor_ftp(self):
+        setting = {"types": ["Ride", "VirtualRide"], "ftp": 250, "indoor_ftp": 200}
+        for environment, ftp in (
+            (Environment.OUTDOOR, 250),
+            (Environment.UNKNOWN, 250),
+            (Environment.INDOOR, 200),
+            (Environment.VIRTUAL, 200),
+        ):
+            settings = ZoneSettings.from_sport_settings(
+                [setting], Sport.RIDE, environment
+            )
+            self.assertEqual(ftp, settings.ftp, environment)
+        no_indoor = ZoneSettings.from_sport_settings(
+            [{"types": ["Ride"], "ftp": 250}], Sport.RIDE, Environment.INDOOR
+        )
+        self.assertEqual(250, no_indoor.ftp)
 
     def test_heart_rate_zones_need_a_threshold(self):
         settings = ZoneSettings.from_sport_settings(
