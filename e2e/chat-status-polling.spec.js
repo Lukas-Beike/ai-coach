@@ -4,12 +4,26 @@ const { test, expect } = require("@playwright/test");
 // own timers run on Playwright's clock, and quiet observation windows are advanced with
 // runFor() instead of waiting on wall-clock time.
 
+function isStatusPoll(request) {
+  return new URL(request.url()).pathname === "/api/chat/status";
+}
+
 function recordStatusPolls(page) {
   const polls = [];
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/chat/status") polls.push(request.url());
+    if (isStatusPoll(request)) polls.push(request.url());
   });
   return polls;
+}
+
+function recordFinishedStatusPolls(page) {
+  const finished = [];
+  const record = (request) => {
+    if (isStatusPoll(request)) finished.push(request.url());
+  };
+  page.on("requestfinished", record);
+  page.on("requestfailed", record);
+  return finished;
 }
 
 // Request events reach the Node side asynchronously. A round trip to the page after the clock
@@ -77,6 +91,7 @@ test("reloading during a running Coach job without the event stream polls until 
 test("with the event stream connected, a running Coach job is checked again when its answer arrives @responsive", async ({ page }) => {
   await page.clock.install();
   const statusPolls = recordStatusPolls(page);
+  const finishedPolls = recordFinishedStatusPolls(page);
   let answered = false;
   await page.route("**/api/chat/status", async (route) => {
     if (!answered) {
@@ -96,8 +111,14 @@ test("with the event stream connected, a running Coach job is checked again when
   // response, so the test waits for the client's own stream-health flag before measuring. Every
   // assertion below observes requests and control state only.
   await expect.poll(() => page.evaluate(() => stateEventStreamHealthy())).toBe(true);
-  // A fast check queued before the stream was ready may still run once.
-  await advanceQuietWindow(page, 2_000);
+  // A fast check queued before the stream was ready may still run, and one that settles later
+  // can queue a recheck. Settle until no check is in flight and a fast-cadence window adds none.
+  for (let window = 0; window < 5; window += 1) {
+    const before = statusPolls.length;
+    await advanceQuietWindow(page, 2_000);
+    await expect.poll(() => statusPolls.length - finishedPolls.length).toBe(0);
+    if (statusPolls.length === before) break;
+  }
   const baseline = statusPolls.length;
   // A healthy stream replaces the frequent status polls with a slow safety check.
   await advanceQuietWindow(page, 5_000);
