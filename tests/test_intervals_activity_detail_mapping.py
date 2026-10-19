@@ -399,6 +399,23 @@ class IntervalsActivityDetailZoneTests(unittest.TestCase):
             result.issues, (_issue("icu_zone_times", IssueReason.INVALID_NUMBER),)
         )
 
+    def test_invalid_seconds_on_a_skipped_id_keep_the_distribution(self):
+        result = _fresh(
+            {
+                "id": ID,
+                "icu_zone_times": [
+                    {"id": "Z1", "secs": 100},
+                    {"id": "Z2", "secs": 50},
+                    {"id": "SS", "secs": None},
+                ],
+            }
+        )
+
+        zones = _only(result, ZoneDistribution)
+
+        self.assertEqual([bucket.label for bucket in zones.buckets], ["Z1", "Z2"])
+        self.assertEqual([bucket.seconds for bucket in zones.buckets], [100, 50])
+
     def test_zone_times_keeps_bounded_numbers_and_ids(self):
         self.assertEqual(zone_times("not a list"), [])
         self.assertEqual(

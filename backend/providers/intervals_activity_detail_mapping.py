@@ -540,19 +540,25 @@ def _lap_metrics(
             value = row.get(key)
             if value is None:
                 continue
-            number = coerce_number(value)
-            if number is not None and name == "intensity_pct":
-                number = _intensity_pct(number)
-            if number is not None and _lap_accepts(name, number):
-                metrics[name] = number
-                break
-            reason = (
-                IssueReason.INVALID_NUMBER
-                if number is None
-                else IssueReason.OUT_OF_RANGE
-            )
-            issues.append(MappingIssue(ref, key, reason))
+            number = _lap_metric(name, value)
+            if isinstance(number, IssueReason):
+                issues.append(MappingIssue(ref, key, number))
+                continue
+            metrics[name] = number
+            break
     return metrics
+
+
+def _lap_metric(name: str, value: object) -> float | IssueReason:
+    """Return one accepted lap metric, or the reason it is dropped."""
+    number = coerce_number(value)
+    if number is None:
+        return IssueReason.INVALID_NUMBER
+    if name == "intensity_pct":
+        number = _intensity_pct(number)
+    if not _lap_accepts(name, number):
+        return IssueReason.OUT_OF_RANGE
+    return number
 
 
 def _intensity_pct(value: float) -> float:
@@ -637,9 +643,17 @@ def _zone_payload_valid(
     if not isinstance(value, list):
         issues.append(MappingIssue(ref, key, IssueReason.INVALID_TYPE))
         return False
-    for item in value[:MAX_ZONES]:
-        if isinstance(item, dict) and _zone_number(item.get("secs")) is None:
-            # Dropping one bucket would renumber the zones after it.
-            issues.append(MappingIssue(ref, key, IssueReason.INVALID_NUMBER))
-            return False
+    if any(_bad_positional_bucket(item) for item in value[:MAX_ZONES]):
+        # Dropping one Z bucket would renumber the zones after it.
+        issues.append(MappingIssue(ref, key, IssueReason.INVALID_NUMBER))
+        return False
     return True
+
+
+def _bad_positional_bucket(item: object) -> bool:
+    """Whether a ``Z<n>`` bucket has invalid seconds; other ids are skipped anyway."""
+    return (
+        isinstance(item, dict)
+        and _ZONE_ID.fullmatch(str(item.get("id") or "")[:20]) is not None
+        and _zone_number(item.get("secs")) is None
+    )
