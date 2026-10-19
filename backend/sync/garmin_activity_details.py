@@ -4,7 +4,9 @@ Two entry points share one map-and-store path. ``refresh`` fetches the bounded
 detail sets of one Garmin activity on demand. ``backfill`` runs after a
 successful Garmin sync, under the sync lock, and fetches a small batch of recent
 activities, newest first, so the last 90 days fill up over several syncs. It
-pauses after a Garmin rate limit and skips manual activities. Kinds a payload
+pauses after a Garmin rate limit and skips manual activities. An activity whose
+fetch stored some parts while others failed is fetched again on later syncs, at
+most ``BACKFILL_RETRY_ATTEMPTS`` times per activity summary. Kinds a payload
 does not return keep their stored sets. Nothing is written back to Garmin.
 """
 
@@ -50,6 +52,7 @@ BACKFILL_BATCH_SIZE: Final = 10
 BACKFILL_WINDOW: Final = timedelta(days=90)
 BACKFILL_RATE_LIMIT_PAUSE: Final = timedelta(seconds=GARMIN_CAPABILITY_PAUSE_SECONDS)
 BACKFILL_STATE_KEY: Final = "garmin_activity_detail_backfill"
+BACKFILL_RETRY_ATTEMPTS: Final = 3
 DETAIL_CAPABILITIES: Final = (
     "activity_details",
     "activity_splits",
@@ -62,10 +65,14 @@ DETAIL_CAPABILITIES: Final = (
 class _BackfillState:
     paused_until: datetime | None = None
     empty: dict[str, str] = field(default_factory=dict)
+    # Activity id -> (summary hash, incomplete fetch attempts for that summary).
+    retry: dict[str, tuple[str, int]] = field(default_factory=dict)
 
 
 @dataclass
 class _BatchOutcome:
+    empty: dict[str, str]
+    retry: dict[str, tuple[str, int]]
     status: str = "completed"
     fetched: int = 0
     marked: int = 0
@@ -166,22 +173,29 @@ class GarminActivityDetailService:
             raise RuntimeError("Garmin activity detail backfill is not composed.")
         now = _aware(self._utc_now())
         state = self._load_backfill_state()
-        pending, empty = self._pending_candidates(state, since=now - BACKFILL_WINDOW)
+        pending, empty, retry = self._pending_candidates(
+            state, since=now - BACKFILL_WINDOW
+        )
         paused_until = state.paused_until
         if paused_until is not None and paused_until <= now:
             paused_until = None
         if paused_until is not None or not self._detail_capabilities_allowed():
-            self._save_backfill_state(paused_until=paused_until, empty=empty)
+            self._save_backfill_state(
+                paused_until=paused_until, empty=empty, retry=retry
+            )
             return _backfill_result("paused", remaining=len(pending))
         batch = pending[:BACKFILL_BATCH_SIZE]
         if not batch:
-            self._save_backfill_state(paused_until=None, empty=empty)
+            self._save_backfill_state(paused_until=None, empty=empty, retry=retry)
             return _backfill_result("completed")
 
-        outcome = self._fetch_batch(batch, empty, cancel_event)
+        outcome = _BatchOutcome(empty=empty, retry=retry)
+        self._fetch_batch(batch, outcome, cancel_event)
         if outcome.status == "completed" and _is_set(cancel_event):
             outcome.status = "cancelled"
-        self._save_backfill_state(paused_until=outcome.paused_until, empty=empty)
+        self._save_backfill_state(
+            paused_until=outcome.paused_until, empty=empty, retry=retry
+        )
         return _backfill_result(
             outcome.status,
             fetched=outcome.fetched,
@@ -191,10 +205,16 @@ class GarminActivityDetailService:
 
     def _pending_candidates(
         self, state: _BackfillState, *, since: datetime
-    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
-        """Return window candidates without a matching empty mark, and the window's marks."""
+    ) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, tuple[str, int]]]:
+        """Return pending window candidates plus the window's empty marks and retries."""
         with self._database_manager.reader() as db:
             universe = activity_detail_backfill_universe(db, GARMIN_ID, since=since)
+            window_ids = set(universe)
+            retry = {
+                provider_activity_id: value
+                for provider_activity_id, value in state.retry.items()
+                if provider_activity_id in window_ids
+            }
             # The limit covers every window record, so marks for empty activities
             # cannot push pending candidates out of the batch.
             candidates = activity_detail_backfill_candidates(
@@ -203,8 +223,12 @@ class GarminActivityDetailService:
                 ACTIVITY_RECORD_KIND,
                 since=since,
                 limit=len(universe),
+                retry_ids=[
+                    provider_activity_id
+                    for provider_activity_id, (_summary, attempts) in retry.items()
+                    if attempts < BACKFILL_RETRY_ATTEMPTS
+                ],
             )
-        window_ids = set(universe)
         empty = {
             provider_activity_id: value
             for provider_activity_id, value in state.empty.items()
@@ -215,17 +239,16 @@ class GarminActivityDetailService:
             for item in candidates
             if empty.get(item["provider_activity_id"]) != item["summary_sha256"]
         ]
-        return pending, empty
+        return pending, empty, retry
 
     def _fetch_batch(
         self,
         batch: list[dict[str, Any]],
-        empty: dict[str, str],
+        outcome: _BatchOutcome,
         cancel_event: threading.Event | None,
-    ) -> _BatchOutcome:
-        """Fetch and store one batch; ``empty`` gains marks for activities without details."""
+    ) -> None:
+        """Fetch and store one batch, updating counts, marks and retries in ``outcome``."""
         by_id = {item["provider_activity_id"]: item for item in batch}
-        outcome = _BatchOutcome()
         details = self._reader.fetch_activity_details(
             list(by_id), cancel_event=cancel_event
         )
@@ -235,7 +258,6 @@ class GarminActivityDetailService:
                     provider_activity_id,
                     collected,
                     by_id[provider_activity_id],
-                    empty,
                     outcome,
                 ):
                     break
@@ -263,14 +285,12 @@ class GarminActivityDetailService:
         finally:
             # Closing the generator persists the Garmin tokens on early stop.
             details.close()
-        return outcome
 
     def _store_collected(
         self,
         provider_activity_id: str,
         collected: dict[str, Any],
         candidate: dict[str, Any],
-        empty: dict[str, str],
         outcome: _BatchOutcome,
     ) -> bool:
         """Store one fetched activity; False when the batch must stop."""
@@ -280,26 +300,34 @@ class GarminActivityDetailService:
             recorded_by=_recorded_by(candidate["recorded_by"]),
             now=observed,
         )
+        stored = bool(mapped.records) and self._store_records(
+            provider_activity_id, mapped, now=observed
+        )
+        if stored:
+            outcome.fetched += 1
+        if stored or provider_activity_id in outcome.retry:
+            _note_attempt(
+                outcome.retry,
+                provider_activity_id,
+                candidate["summary_sha256"],
+                incomplete=bool(
+                    collected.get("errors") or collected.get("rate_limited")
+                ),
+            )
         if collected.get("rate_limited"):
             # Keep the parts that arrived, then stop until the pause ends.
-            if mapped.records and self._store_records(
-                provider_activity_id, mapped, now=observed
-            ):
-                outcome.fetched += 1
             outcome.paused_until = _aware(observed) + BACKFILL_RATE_LIMIT_PAUSE
             outcome.status = "rate_limited"
             return False
         if mapped.records:
-            if self._store_records(provider_activity_id, mapped, now=observed):
-                outcome.fetched += 1
-            else:
+            if not stored:
                 outcome.skipped += 1
         elif collected.get("errors"):
             # Nothing is marked, so a later sync retries this activity.
             outcome.status = "failed"
             return False
         else:
-            empty[provider_activity_id] = candidate["summary_sha256"]
+            outcome.empty[provider_activity_id] = candidate["summary_sha256"]
             outcome.marked += 1
         return True
 
@@ -345,10 +373,19 @@ class GarminActivityDetailService:
         return _parse_backfill_state(raw)
 
     def _save_backfill_state(
-        self, *, paused_until: datetime | None, empty: dict[str, str]
+        self,
+        *,
+        paused_until: datetime | None,
+        empty: dict[str, str],
+        retry: dict[str, tuple[str, int]],
     ) -> None:
         key_values = self._backfill_key_values()
         stored: dict[str, Any] = {"empty": dict(sorted(empty.items()))}
+        if retry:
+            stored["retry"] = {
+                key: [summary, attempts]
+                for key, (summary, attempts) in sorted(retry.items())
+            }
         if paused_until is not None:
             stored["paused_until"] = paused_until.isoformat()
         with self._database_manager.unit_of_work() as db:
@@ -453,8 +490,45 @@ def _parse_backfill_state(raw: object) -> _BackfillState:
         else {}
     )
     return _BackfillState(
-        paused_until=_parse_time(parsed.get("paused_until")), empty=empty
+        paused_until=_parse_time(parsed.get("paused_until")),
+        empty=empty,
+        retry=_parse_retry(parsed.get("retry")),
     )
+
+
+def _parse_retry(value: object) -> dict[str, tuple[str, int]]:
+    """Read retry entries; malformed entries are dropped."""
+    if not isinstance(value, dict):
+        return {}
+    retry: dict[str, tuple[str, int]] = {}
+    for key, entry in value.items():
+        if (
+            isinstance(entry, list)
+            and len(entry) == 2
+            and isinstance(entry[0], str)
+            and type(entry[1]) is int
+            and entry[1] > 0
+        ):
+            retry[str(key)] = (entry[0], entry[1])
+    return retry
+
+
+def _note_attempt(
+    retry: dict[str, tuple[str, int]],
+    provider_activity_id: str,
+    summary_sha256: str,
+    *,
+    incomplete: bool,
+) -> None:
+    """Count an incomplete fetch per summary hash, or clear the entry on success."""
+    if not incomplete:
+        retry.pop(provider_activity_id, None)
+        return
+    previous = retry.get(provider_activity_id)
+    attempts = (
+        previous[1] + 1 if previous is not None and previous[0] == summary_sha256 else 1
+    )
+    retry[provider_activity_id] = (summary_sha256, attempts)
 
 
 def _parse_time(value: object) -> datetime | None:

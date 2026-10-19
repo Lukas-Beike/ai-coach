@@ -29,6 +29,7 @@ from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_activity_details import (
     BACKFILL_BATCH_SIZE,
     BACKFILL_RATE_LIMIT_PAUSE,
+    BACKFILL_RETRY_ATTEMPTS,
     BACKFILL_STATE_KEY,
     BACKFILL_WINDOW,
     GarminActivityDetailService,
@@ -76,6 +77,14 @@ def _payload(activity_id: str, **extra: Any) -> dict[str, Any]:
     return collected
 
 
+def _partial(activity_id: str, **extra: Any) -> dict[str, Any]:
+    """A payload whose splits part failed while the other parts arrived."""
+    payload = _payload(activity_id, **extra)
+    payload.pop("splits", None)
+    payload["errors"] = [{"source": "activity_splits", "message": "synthetic"}]
+    return payload
+
+
 def _summary_hash(manager: Any, activity_id: str) -> str:
     with manager.reader() as db:
         return str(
@@ -102,10 +111,17 @@ def _set_summary_hash(
         )
 
 
-def _candidate_ids(manager: Any, *, limit: int = 100) -> list[str]:
+def _candidate_ids(
+    manager: Any, *, limit: int = 100, retry_ids: tuple[str, ...] = ()
+) -> list[str]:
     with manager.reader() as db:
         rows = activity_detail_backfill_candidates(
-            db, GARMIN_ID, ACTIVITY_RECORD_KIND, since=SINCE, limit=limit
+            db,
+            GARMIN_ID,
+            ACTIVITY_RECORD_KIND,
+            since=SINCE,
+            limit=limit,
+            retry_ids=retry_ids,
         )
     return [row["provider_activity_id"] for row in rows]
 
@@ -286,6 +302,18 @@ class BackfillCandidateTests(_Base):
 
         self.assertEqual(_candidate_ids(self.manager), [])
 
+    def test_retry_ids_keep_an_activity_with_current_sets_a_candidate(self) -> None:
+        _seed(
+            self.manager,
+            [("1001", "2026-10-02 07:00:00"), ("1002", "2026-10-01 07:00:00")],
+        )
+        self.service(
+            _Details({"1001": _payload("1001"), "1002": _payload("1002")})
+        ).backfill()
+
+        self.assertEqual(_candidate_ids(self.manager), [])
+        self.assertEqual(_candidate_ids(self.manager, retry_ids=("1002",)), ["1002"])
+
     def test_empty_marked_activity_stays_a_candidate_for_the_query(self) -> None:
         # Empty marks are a Python-side filter; the SQL query keeps the activity.
         _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
@@ -390,6 +418,66 @@ class BackfillBatchTests(_Base):
         self.assertEqual(_stored_kinds(self.manager, "1002"), [])
         paused = datetime.fromisoformat(_stored_state(self.key_values)["paused_until"])
         self.assertEqual(paused, NOW_AT + BACKFILL_RATE_LIMIT_PAUSE)
+
+    def test_partial_fetch_is_retried_until_it_completes(self) -> None:
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+        summary = _summary_hash(self.manager, "1001")
+
+        first = self.service(_Details({"1001": _partial("1001")})).backfill()
+
+        self.assertEqual(first["fetched"], 1)
+        self.assertEqual(
+            _stored_state(self.key_values)["retry"], {"1001": [summary, 1]}
+        )
+        self.assertNotIn("laps", _stored_kinds(self.manager, "1001"))
+
+        reader = _Details({"1001": _payload("1001")})
+        second = self.service(reader).backfill()
+
+        self.assertEqual(reader.fetched, ["1001"])
+        self.assertEqual(second["fetched"], 1)
+        self.assertNotIn("retry", _stored_state(self.key_values))
+        self.assertIn("laps", _stored_kinds(self.manager, "1001"))
+
+    def test_partial_fetch_retries_are_bounded_per_summary(self) -> None:
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+        summary = _summary_hash(self.manager, "1001")
+        for _attempt in range(BACKFILL_RETRY_ATTEMPTS):
+            self.service(_Details({"1001": _partial("1001")})).backfill()
+
+        reader = _Details({"1001": _partial("1001")})
+        result = self.service(reader).backfill()
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(reader.calls, [])
+        self.assertEqual(
+            _stored_state(self.key_values)["retry"],
+            {"1001": [summary, BACKFILL_RETRY_ATTEMPTS]},
+        )
+
+        # A changed summary makes the stored sets outdated and restarts the count.
+        _set_summary_hash(self.manager, "1001")
+        reader = _Details({"1001": _partial("1001")})
+        self.service(reader).backfill()
+
+        self.assertEqual(reader.fetched, ["1001"])
+        self.assertEqual(
+            _stored_state(self.key_values)["retry"], {"1001": [CHANGED_HASH, 1]}
+        )
+
+    def test_rate_limited_partial_fetch_is_retried_after_the_pause(self) -> None:
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+
+        self.service(_Details({"1001": _partial("1001", rate_limited=True)})).backfill()
+        self.now = (
+            NOW_AT + BACKFILL_RATE_LIMIT_PAUSE + timedelta(minutes=1)
+        ).isoformat()
+        reader = _Details({"1001": _payload("1001")})
+        result = self.service(reader).backfill()
+
+        self.assertEqual(reader.fetched, ["1001"])
+        self.assertEqual(result["status"], "completed")
+        self.assertNotIn("retry", _stored_state(self.key_values))
 
     def test_rate_limit_exception_pauses_without_failing(self) -> None:
         _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
@@ -661,6 +749,25 @@ class BackfillReaderLifecycleTests(_Base):
             NOW_AT + BACKFILL_RATE_LIMIT_PAUSE,
         )
         self.tokens.write_back.assert_called_once()
+
+    def test_429_on_one_part_skips_the_remaining_parts_of_the_activity(
+        self,
+    ) -> None:
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+        self.client.get_activity_details.side_effect = AppError(429, "synthetic")
+        reader = _real_reader(self.tokens, self.factory)
+
+        with patch(
+            "backend.sync.garmin_service.provider_http.external_call",
+            side_effect=lambda _service, _operation, call, _details, **_kwargs: call(),
+        ):
+            result = self.service(reader).backfill()
+
+        self.assertEqual(result["status"], "rate_limited")
+        self.client.get_activity_details.assert_called_once()
+        self.client.get_activity_splits.assert_not_called()
+        self.client.get_activity_hr_in_timezones.assert_not_called()
+        self.client.get_activity_power_in_timezones.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -207,7 +207,8 @@ class GarminRemoteReader:
 
         One client is authenticated for the whole batch, and the Garmin tokens are
         persisted when the generator finishes or is closed early. A payload gets
-        ``rate_limited: True`` when one of its parts hit a Garmin rate limit. The
+        ``rate_limited: True`` when one of its parts hit a Garmin rate limit; the
+        remaining parts of that activity are then skipped without a call. The
         generator returns without a payload once the cancel event is set.
         """
         call_external = self._external_call(cancel_event)
@@ -218,6 +219,12 @@ class GarminRemoteReader:
             if sync_job_error_class(error) == "rate_limited":
                 rate_limit_hits.append(capability)
             self._state_service.record_capability_failure(capability, error)
+
+        def allowed(capability: str) -> bool:
+            # After a 429, no further detail request is sent for this activity.
+            return not rate_limit_hits and bool(
+                self._state_service.capability_allowed(capability)
+            )
 
         try:
             for provider_activity_id in provider_activity_ids:
@@ -230,7 +237,7 @@ class GarminRemoteReader:
                     external_call=call_external,
                     redact=self._redactor,
                     warn=self._warn,
-                    capability_allowed=self._state_service.capability_allowed,
+                    capability_allowed=allowed,
                     capability_failure=record_failure,
                     capability_success=self._state_service.record_capability_success,
                 )

@@ -270,6 +270,7 @@ def activity_detail_backfill_candidates(
     *,
     since: datetime,
     limit: int,
+    retry_ids: Collection[str] = (),
 ) -> list[dict[str, str]]:
     """Return recent records whose details are missing or outdated, newest first.
 
@@ -281,7 +282,15 @@ def activity_detail_backfill_candidates(
     known hash counts as current. ``started_at`` and ``since`` are compared
     as instants (julianday), so stored UTC offsets order correctly. Each row
     carries the current summary hash, which is stored with any fetched details.
+    ``retry_ids`` qualify despite current sets, because their last fetch was
+    incomplete; the caller bounds how often they are retried.
     """
+    retry = sorted(set(retry_ids))
+    retry_clause = (
+        f" OR r.provider_activity_id IN ({', '.join('?' for _ in retry)})"
+        if retry
+        else ""
+    )
     rows = db.execute(
         "SELECT r.provider_activity_id, r.recorded_by, p.payload_hash AS summary_sha256 "
         "FROM activity_records AS r "
@@ -290,10 +299,11 @@ def activity_detail_backfill_candidates(
         "JOIN activity_sessions AS s ON s.activity_id = r.activity_id AND s.state <> ? "
         "WHERE r.provider = ? AND r.state = ? AND r.recorded_by <> ? "
         "AND julianday(r.started_at) >= julianday(?) "
-        "AND NOT EXISTS (SELECT 1 FROM activity_detail_sets AS d "
+        "AND (NOT EXISTS (SELECT 1 FROM activity_detail_sets AS d "
         "WHERE d.provider = r.provider AND d.provider_activity_id = r.provider_activity_id "
-        "AND (d.summary_sha256 IS NULL OR d.summary_sha256 = p.payload_hash)) "
-        "ORDER BY julianday(r.started_at) DESC, r.provider_activity_id LIMIT ?",
+        "AND (d.summary_sha256 IS NULL OR d.summary_sha256 = p.payload_hash))"
+        + retry_clause
+        + ") ORDER BY julianday(r.started_at) DESC, r.provider_activity_id LIMIT ?",
         (
             record_kind,
             ProviderRecordState.ACTIVE.value,
@@ -302,6 +312,7 @@ def activity_detail_backfill_candidates(
             ActivityRecordState.ACTIVE.value,
             RecordingOrigin.MANUAL.value,
             since.isoformat(),
+            *retry,
             limit,
         ),
     ).fetchall()
