@@ -623,7 +623,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const values = segments.flatMap((item) => [item.value, item.end_value]).filter((value) => value != null && Number.isFinite(value) && value >= 0);
     if (!total || !values.length) return null;
     const top = Math.max(...values, 1) * 1.1;
-    const label = profile.source === "recorded" ? "Aufgezeichnetes Belastungsprofil" : "Geplantes Intervallprofil";
+    const baseLabel = profile.source === "recorded" ? "Aufgezeichnetes Belastungsprofil" : "Geplantes Intervallprofil";
+    const label = profile.estimated ? `${baseLabel} (Zonen geschätzt aus FTP/LTHR)` : baseLabel;
     const svg = analysisSvg("svg", { viewBox: "0 0 300 56", role: "img", "aria-label": label, class: "calendar-workout-profile", preserveAspectRatio: "none" });
     svg.append(analysisSvg("title", {}, `${label} · ${axis === "distance" ? "Distanzachse" : "Zeitachse"} · ${profile.unit || ""}`));
     svg.append(analysisSvg("line", { x1: 0, x2: 300, y1: 54, y2: 54, class: "calendar-profile-baseline" }));
@@ -633,15 +634,20 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       if (!size) continue;
       const x = offset / total * 300, width = size / total * 300;
       offset += size;
-      if (item.value == null || item.end_value == null || !Number.isFinite(item.value) || !Number.isFinite(item.end_value)) continue;
-      const left = 54 - Math.max(0, item.value) / top * 50;
-      const right = 54 - Math.max(0, item.end_value) / top * 50;
-      const zone = Number.isInteger(item.zone) && item.zone >= 1 && item.zone <= 7 ? item.zone : "unknown";
-      const shape = analysisSvg("polygon", { points: `${x},54 ${x},${left} ${x + width},${right} ${x + width},54`, "data-zone": zone });
+      const shape = calendarProfileShape(item, x, width, top);
+      if (!shape) continue;
       shape.append(analysisSvg("title", {}, `${axis === "distance" ? distanceLabel(size) : formatDuration(size)} · ${item.label || ""}`));
       svg.append(shape);
     }
     return svg;
+  }
+
+  function calendarProfileShape(item, x, width, top) {
+    if (item.value == null || item.end_value == null || !Number.isFinite(item.value) || !Number.isFinite(item.end_value)) return null;
+    const left = 54 - Math.max(0, item.value) / top * 50;
+    const right = 54 - Math.max(0, item.end_value) / top * 50;
+    const zone = Number.isInteger(item.zone) && item.zone >= 1 && item.zone <= 7 ? item.zone : "unknown";
+    return analysisSvg("polygon", { points: `${x},54 ${x},${left} ${x + width},${right} ${x + width},54`, "data-zone": zone });
   }
 
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}) {

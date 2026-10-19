@@ -1,6 +1,7 @@
 import unittest
 
 from backend.activities.workout_profile import planned_profile, recorded_profile
+from backend.activities.zone_settings import ZoneSettings
 
 
 class WorkoutProfileTests(unittest.TestCase):
@@ -70,6 +71,79 @@ class WorkoutProfileTests(unittest.TestCase):
         profile = planned_profile({"description": "- 5m 150-160bpm"})
         self.assertIsNone(profile["segments"][0]["zone"])
         self.assertEqual("bpm", profile["unit"])
+
+    def test_absolute_targets_are_colored_from_thresholds_and_marked_estimated(self):
+        settings = ZoneSettings(ftp=250, lthr=170)
+        watts = planned_profile({"description": "- 5m 125w\n- 5m 240-260w"}, settings)
+        self.assertEqual([1, 4], [row["zone"] for row in watts["segments"]])
+        self.assertTrue(watts["estimated"])
+        bpm = planned_profile({"description": "- 5m 150-160bpm"}, settings)
+        self.assertEqual([3], [row["zone"] for row in bpm["segments"]])
+        self.assertTrue(bpm["estimated"])
+        # The matching threshold is required: no FTP, no watt zones.
+        only_lthr = planned_profile(
+            {"description": "- 5m 200w"}, ZoneSettings(lthr=170)
+        )
+        self.assertIsNone(only_lthr["segments"][0]["zone"])
+        self.assertNotIn("estimated", only_lthr)
+
+    def test_relative_targets_are_not_marked_estimated(self):
+        profile = planned_profile(
+            {"description": "- 5m 100%\n- 5m Z2"}, ZoneSettings(ftp=250, lthr=170)
+        )
+        self.assertNotIn("estimated", profile)
+
+    def test_repeated_distance_blocks_get_a_distance_profile(self):
+        profile = planned_profile(
+            {
+                "description": (
+                    "- 2km Z1 Pace\n\n3x\n- 1km Z4 Pace\n- 400mtr Z1 Pace\n\n"
+                    "- 1km Z1 Pace"
+                )
+            }
+        )
+        self.assertEqual("distance", profile["axis"])
+        self.assertEqual(
+            [2000, 1000, 400, 1000, 400, 1000, 400, 1000],
+            [row["distance"] for row in profile["segments"]],
+        )
+        self.assertEqual(
+            [1, 4, 1, 4, 1, 4, 1, 1], [row["zone"] for row in profile["segments"]]
+        )
+
+    def test_percent_targets_follow_custom_zone_limits(self):
+        description = "- 5m 70%\n- 5m 100%"
+        self.assertEqual(
+            [2, 4],
+            [
+                row["zone"]
+                for row in planned_profile({"description": description})["segments"]
+            ],
+        )
+        custom = ZoneSettings(power_limits=(50, 65, 80, 95, 110, 140))
+        self.assertEqual(
+            [3, 5],
+            [
+                row["zone"]
+                for row in planned_profile({"description": description}, custom)[
+                    "segments"
+                ]
+            ],
+        )
+
+    def test_heart_rate_percent_of_max_uses_the_athletes_max_heart_rate(self):
+        description = "- 5m 70% HR"
+        default = planned_profile({"description": description})
+        self.assertEqual(2, default["segments"][0]["zone"])
+        # 70 % of 200 bpm is 140 bpm, 82 % of a 170 bpm threshold.
+        known = planned_profile(
+            {"description": description}, ZoneSettings(lthr=170, max_hr=200)
+        )
+        self.assertEqual(2, known["segments"][0]["zone"])
+        low_threshold = planned_profile(
+            {"description": description}, ZoneSettings(lthr=140, max_hr=200)
+        )
+        self.assertEqual(4, low_threshold["segments"][0]["zone"])
 
     def test_recorded_heart_rate_profile_uses_the_activity_threshold(self):
         activity = {
