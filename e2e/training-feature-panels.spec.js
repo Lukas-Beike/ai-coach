@@ -51,25 +51,26 @@ test("@responsive chart readings keep their coordinates and legible labels", asy
 });
 
 test("@responsive training focus legend labels never overlap for lopsided shares", async ({ page }) => {
-  await page.goto("/#analysis/performance");
-  await expect(page.locator("#appShell")).toBeVisible();
-  const overlaps = await page.evaluate(() => {
+  await page.goto("/#analysis/load");
+  await expect(page.locator("#sessionPerformance")).toBeVisible();
+  const results = await page.evaluate(() => {
+    const categories = [["low_aerobic", "Leicht aerob"], ["high_aerobic", "Hoch aerob"], ["anaerobic", "Anaerob"]];
+    const root = document.querySelector("#sessionPerformance");
+    root.style.width = "250px"; // content width of the supported 320px viewport
     const measure = (loads) => {
-      const categories = [["low_aerobic", "Leicht aerob"], ["high_aerobic", "Hoch aerob"], ["anaerobic", "Anaerob"]];
       const report = { classified_sessions: 3, categories: Object.fromEntries(categories.map(([key], index) => [key, { load: loads[index] }])) };
-      const root = document.createElement("div");
-      document.querySelector("#analysisHistoryCharts").replaceChildren(root);
+      root.replaceChildren();
       appendTrainingFocusShare(report, categories, root);
-      const legend = root.querySelector(".training-focus-legend");
-      const boxes = [...legend.querySelectorAll("li")].map((item) => item.getBoundingClientRect());
-      const collisions = boxes.slice(1).filter((box, index) => box.left < boxes[index].right - 0.5).length;
-      return { collisions, proportional: legend.style.gridTemplateColumns !== "" };
+      const items = [...root.querySelectorAll(".training-focus-legend li")];
+      const cells = items.map((item) => item.getBoundingClientRect());
+      const texts = items.map((item) => [...item.children].map((node) => node.getBoundingClientRect()));
+      const spill = texts.flat().filter((box, index) => { const cell = cells[Math.floor(index / 2)]; return box.left < cell.left - 0.5 || box.right > cell.right + 0.5; }).length;
+      const overlap = texts.slice(1).filter((boxes, index) => Math.min(...boxes.map((box) => box.left)) < Math.max(...texts[index].map((box) => box.right)) - 0.5).length;
+      return { overlap, spill };
     };
-    return { lopsided: measure([95, 0, 5]), tiny: measure([99, 0.5, 0.5]), balanced: measure([40, 35, 25]) };
+    return Object.fromEntries([[95, 0, 5], [99, 0.5, 0.5], [20, 20, 60], [40, 35, 25]].map((loads) => [loads.join("/"), measure(loads)]));
   });
-  expect(overlaps.lopsided).toEqual({ collisions: 0, proportional: false });
-  expect(overlaps.tiny).toEqual({ collisions: 0, proportional: false });
-  expect(overlaps.balanced).toEqual({ collisions: 0, proportional: true });
+  for (const split of Object.values(results)) expect(split).toEqual({ overlap: 0, spill: 0 });
 });
 
 test("@responsive recovery, power, training focus, season and calendar profiles show local facts", async ({ page, request }) => {
