@@ -872,6 +872,37 @@ class StandardFixtureDataTests(unittest.TestCase):
                 )
             }
 
+    def test_v7_database_upgrades_with_the_distance_run_once(self):
+        name = "Tempolauf nach Distanz"
+
+        def run_count(server):
+            units = server.PLANNING_DATA.planned_unit().list(500)
+            return sum(unit.get("name") == name for unit in units)
+
+        with self._temporary_fixture_database("fixture-v8-upgrade-") as server:
+            fixture_runtime.initialise_fixture()
+            today = server.ATHLETE_CLOCK.now().date()
+            with (
+                patch.object(fixture_runtime, "FIXTURE_DEMO_SEED_VERSION", "7"),
+                patch.object(fixture_runtime, "_fixture_seed_distance_run"),
+            ):
+                fixture_runtime.seed_preview_demo()
+            before = run_count(server)
+
+            upgraded = fixture_runtime.seed_preview_demo()
+            after = run_count(server)
+            # A restart and a direct repeat must not add a second unit.
+            fixture_runtime.seed_preview_demo()
+            fixture_runtime._fixture_seed_distance_run(today)
+            repeated = run_count(server)
+
+        self.assertEqual(0, before)
+        self.assertEqual(
+            upgraded,
+            {"ready": True, "seed_version": fixture_runtime.FIXTURE_DEMO_SEED_VERSION},
+        )
+        self.assertEqual((1, 1), (after, repeated))
+
     def test_v5_database_upgrades_to_v6_scenarios_without_duplicates(self):
         with self._temporary_fixture_database("fixture-v6-upgrade-") as server:
             fixture_runtime.initialise_fixture()
