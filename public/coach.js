@@ -1902,7 +1902,10 @@ function scrollChatToResponseStart() {
     return;
   }
   state.chatResponseScrollPending = false;
+  // Scroll events run before animation frames: a reader who scrolls away in between keeps their position.
+  const following = state.chatFollowLatest;
   requestAnimationFrame(() => {
+    if (following && !state.chatFollowLatest) return;
     if (!panel.classList.contains("active")) {
       state.chatResponseScrollPending = true;
       return;
