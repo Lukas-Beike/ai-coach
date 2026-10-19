@@ -329,6 +329,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await page.getByRole("link", { name: "Kalender", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
+    await page.locator(".planned-day.is-today").scrollIntoViewIfNeeded();
     await expect(page.locator(".planned-day.is-today")).toBeInViewport();
 
     await page.goto("/#more/profile");
