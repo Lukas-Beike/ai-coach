@@ -497,6 +497,19 @@ class SelectorTests(CanonicalReadFixture):
                     self.read(self.table.observations, kind),
                 )
 
+    def test_metric_windows_are_empty_before_the_first_backfill(self) -> None:
+        self.assertEqual(self.read(make_selector(self).metric_windows), ())
+
+    def test_metric_windows_come_from_the_tables_after_completion(self) -> None:
+        populate(self)
+        selector = make_selector(self)
+
+        self.assertTrue(self.read(selector.metric_windows))
+        self.assertEqual(
+            self.read(selector.metric_windows),
+            self.read(self.table.metric_windows),
+        )
+
 
 class DiagnosticsTests(CanonicalReadFixture):
     def _summarize(self, reader: Any) -> dict[str, Any]:
