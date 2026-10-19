@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from itertools import pairwise
-from typing import Final
+from typing import Any, Final
 
 from backend.canonical.activity_detail import (
     MAX_LAP_NAME_LENGTH,
@@ -179,8 +179,8 @@ def map_intervals_activity_detail(
     require_instance(recorded_by, RecordingOrigin, "recorded_by")
     require_aware_datetime(retrieved_at, "retrieved_at")
     if not isinstance(detail, dict):
-        issue = MappingIssue(None, "detail", IssueReason.INVALID_TYPE)
-        return MappingResult(issues=(issue,))
+        invalid = MappingIssue(None, "detail", IssueReason.INVALID_TYPE)
+        return MappingResult(issues=(invalid,))
     activity_id, issue = _activity_id(detail.get("id"), "id", allow_int=True)
     if activity_id is None:
         return MappingResult(issues=(issue,) if issue is not None else ())
@@ -571,13 +571,15 @@ def _intensity_pct(value: float) -> float:
 
 def _lap_accepts(name: str, value: float) -> bool:
     """Whether ActivityLap accepts one metric, so its bounds are not repeated here."""
+    # ActivityLap takes one keyword per metric; the name is one of its float fields.
+    metric: dict[str, Any] = {name: value}
     try:
         ActivityLap(
             index=0,
             kind=LapKind.LAP,
             start_offset_s=0.0,
             end_offset_s=0.0,
-            **{name: value},
+            **metric,
         )
     except TypeError, ValueError:
         return False
