@@ -453,9 +453,8 @@ class BackfillBatchTests(_Base):
                 raise failures.pop()
             original_set(db, key, value)
 
-        self.key_values.set = failing_set  # type: ignore[method-assign]
-
-        result = self.service(_Details({"1001": _partial("1001")})).backfill()
+        with patch.object(self.key_values, "set", side_effect=failing_set):
+            result = self.service(_Details({"1001": _partial("1001")})).backfill()
 
         self.assertEqual(result["status"], "failed")
         self.assertEqual(_stored_kinds(self.manager, "1001"), [])
