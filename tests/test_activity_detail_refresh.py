@@ -222,6 +222,18 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
         self.api.get.assert_not_called()
 
+    def test_records_from_an_older_projection_are_loaded_again(self):
+        self.service().prefetch_recent()
+        with self.manager.unit_of_work() as db:
+            for row in self.rows[2:]:
+                record = self.store.get(row["id"])
+                record.pop("projection_version")
+                self.store.save_in(db, row["id"], record)
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_recent())
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
+
     def test_changed_summary_is_loaded_again(self):
         self.service().prefetch_recent()
         self.rows[-1] = {**self.rows[-1], "name": "Renamed in Intervals.icu"}

@@ -23,6 +23,7 @@ from backend.activities.activity_reference import (
 )
 from backend.activities.detail_projection import (
     COACH_ACTIVITY_DETAIL_STREAM_FIELDS,
+    DETAIL_PROJECTION_VERSION,
     detailed_activity,
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
@@ -135,6 +136,7 @@ class ActivityDetailRefreshService:
         )
         record = {
             "activity_id": activity_id,
+            "projection_version": DETAIL_PROJECTION_VERSION,
             "activity": projected,
             "source": "Intervals.icu",
             "observed_at": observed_at,
@@ -250,7 +252,11 @@ class ActivityDetailRefreshService:
         """Whether details match the summary or already failed for it."""
         stored = self._store.get(activity_id)
         failure = known_failures.get(activity_id)
-        if stored and stored.get("summary_sha256") == fingerprint:
+        if (
+            stored
+            and stored.get("summary_sha256") == fingerprint
+            and stored.get("projection_version") == DETAIL_PROJECTION_VERSION
+        ):
             # A summary that reverted to the stored version leaves a stale note.
             if failure:
                 self._store.clear_failure(activity_id)

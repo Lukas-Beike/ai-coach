@@ -102,6 +102,9 @@ COACH_ACTIVITY_DETAIL_LAP_FIELDS = (
     TRAINING_LOAD,
     INTENSITY,
 )
+# Raised when the projection gains a field that stored records lack; prefetch
+# then reloads the recent activities once.
+DETAIL_PROJECTION_VERSION = 2
 COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS = 2000
 COACH_ACTIVITY_DETAIL_MAX_LAPS = 200
 
