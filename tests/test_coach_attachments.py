@@ -85,6 +85,118 @@ def fit_records_fixture():
 FIT_RECORDS = fit_records_fixture()
 
 
+def fit_file(*messages):
+    """Build a FIT file from (global_number, [(field, size, base_type)], rows)."""
+    payload = b""
+    for local, (number, fields, rows) in enumerate(messages):
+        payload += bytes([0x40 | local, 0, 0]) + struct.pack("<H", number)
+        payload += bytes([len(fields)]) + b"".join(bytes(field) for field in fields)
+        payload += b"".join(bytes([local]) + row for row in rows)
+    header = (
+        bytes([12, 0x10])
+        + struct.pack("<H", 0)
+        + struct.pack("<I", len(payload))
+        + b".FIT"
+    )
+    return header + payload
+
+
+def raw_altitude(meters):
+    return (meters + 500) * 5
+
+
+class FitEnhancedFieldTests(unittest.TestCase):
+    def test_record_altitude_prefers_enhanced_field_when_valid(self):
+        enhanced_only = fit_file(
+            (
+                20,
+                [(78, 4, 6)],
+                [struct.pack("<I", raw_altitude(m)) for m in (100, 110, 105)],
+            )
+        )
+        base_only = fit_file(
+            (
+                20,
+                [(2, 2, 4)],
+                [struct.pack("<H", raw_altitude(m)) for m in (100, 120, 90)],
+            )
+        )
+        both = fit_file(
+            (
+                20,
+                [(2, 2, 4), (78, 4, 6)],
+                [
+                    struct.pack("<HI", raw_altitude(base), raw_altitude(enhanced))
+                    for base, enhanced in ((100, 100), (120, 110), (90, 105))
+                ],
+            )
+        )
+        invalid_enhanced = fit_file(
+            (
+                20,
+                [(2, 2, 4), (78, 4, 6)],
+                [
+                    struct.pack("<HI", raw_altitude(base), 0xFFFFFFFF)
+                    for base in (100, 120, 90)
+                ],
+            )
+        )
+        mixed_rows = fit_file(
+            (
+                20,
+                [(2, 2, 4), (78, 4, 6)],
+                [
+                    struct.pack("<HI", raw_altitude(100), raw_altitude(100)),
+                    struct.pack("<HI", raw_altitude(120), 0xFFFFFFFF),
+                    struct.pack("<HI", raw_altitude(90), raw_altitude(105)),
+                ],
+            )
+        )
+        for data, ascent, descent in (
+            (enhanced_only, 10, 5),
+            (base_only, 20, 30),
+            (both, 10, 5),
+            (invalid_enhanced, 20, 30),
+            (mixed_rows, 20, 15),
+        ):
+            with self.subTest(ascent=ascent, descent=descent):
+                summary = fit_summary(data)
+                self.assertEqual(summary["ascent_m"], ascent)
+                self.assertEqual(summary["descent_m"], descent)
+
+    def test_session_speed_prefers_enhanced_field_when_valid(self):
+        enhanced_only = fit_file(
+            (18, [(124, 4, 6), (125, 4, 6)], [struct.pack("<II", 6000, 9000)])
+        )
+        base_only = fit_file(
+            (18, [(14, 2, 4), (15, 2, 4)], [struct.pack("<HH", 5000, 8000)])
+        )
+        both = fit_file(
+            (
+                18,
+                [(14, 2, 4), (15, 2, 4), (124, 4, 6), (125, 4, 6)],
+                [struct.pack("<HHII", 5000, 8000, 6000, 9000)],
+            )
+        )
+        invalid_enhanced = fit_file(
+            (
+                18,
+                [(14, 2, 4), (15, 2, 4), (124, 4, 6), (125, 4, 6)],
+                [struct.pack("<HHII", 5000, 8000, 0xFFFFFFFF, 0xFFFFFFFF)],
+            )
+        )
+        for data, avg, max_speed in (
+            (enhanced_only, 21.6, 32.4),
+            (base_only, 18.0, 28.8),
+            (both, 21.6, 32.4),
+            (invalid_enhanced, 18.0, 28.8),
+        ):
+            with self.subTest(avg=avg, max_speed=max_speed):
+                summary = fit_summary(data)
+                self.assertAlmostEqual(summary["avg_speed_kmh"], avg, places=3)
+                self.assertAlmostEqual(summary["max_speed_kmh"], max_speed, places=3)
+
+
 class AttachmentTests(DialogueHarness, unittest.TestCase):
     def upload(self, data=GPX, name="route.gpx"):
         return {"name": name, "data": base64.b64encode(data).decode("ascii")}
