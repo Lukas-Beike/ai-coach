@@ -33,7 +33,11 @@ from backend.sync.daily import DailySyncMarkerService, daily_marker_key
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.refresh import ProviderRefreshTracker
-from backend.sync.wahoo_sync import WahooSyncClock, WahooSyncService
+from backend.sync.wahoo_sync import (
+    WahooSyncClock,
+    WahooSyncService,
+    WahooSyncStorage,
+)
 
 NOW = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
 ZONE = ZoneInfo("Europe/Berlin")
@@ -173,9 +177,11 @@ class WahooSyncCase(unittest.TestCase):
             config=lambda: self.config,
             connection=lambda: self.connection,
             source=lambda: self.source,
-            database_manager=lambda: self.database,
-            database_lock=threading.RLock(),
-            key_values=self.key_values,
+            storage=WahooSyncStorage(
+                database_manager=lambda: self.database,
+                database_lock=threading.RLock(),
+                key_values=self.key_values,
+            ),
             daily_markers=lambda: self.markers,
             observer=lambda: self.observer,
             registry=DEFAULT_PROVIDER_REGISTRY,

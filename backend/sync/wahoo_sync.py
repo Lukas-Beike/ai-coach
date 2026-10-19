@@ -86,6 +86,15 @@ class WahooSyncClock:
     zone: Callable[[], tzinfo | None]
 
 
+@dataclass(frozen=True)
+class WahooSyncStorage:
+    """The database, its write lock and the key/value state the sync writes."""
+
+    database_manager: Callable[[], DatabaseManager]
+    database_lock: AbstractContextManager[Any]
+    key_values: KeyValueRepository
+
+
 class WahooConnectionStatus(Protocol):
     """The token-free connection status the sync consults."""
 
@@ -117,9 +126,7 @@ class WahooSyncService:
         config: Callable[[], Config],
         connection: Callable[[], WahooConnectionStatus],
         source: Callable[[], WahooWorkoutSource],
-        database_manager: Callable[[], DatabaseManager],
-        database_lock: AbstractContextManager[Any],
-        key_values: KeyValueRepository,
+        storage: WahooSyncStorage,
         daily_markers: Callable[[], DailySyncMarkerService],
         observer: Callable[[], SyncOperationObserver],
         registry: ProviderRegistry,
@@ -132,10 +139,10 @@ class WahooSyncService:
         self._config = config
         self._connection = connection
         self._source = source
-        self._database_manager = database_manager
-        self._database_lock = database_lock
-        self._key_values = key_values
-        self._coverage = CanonicalCoverageStore(key_values)
+        self._database_manager = storage.database_manager
+        self._database_lock = storage.database_lock
+        self._key_values = storage.key_values
+        self._coverage = CanonicalCoverageStore(storage.key_values)
         self._daily_markers = daily_markers
         self._observer = observer
         self._registry = registry

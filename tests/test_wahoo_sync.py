@@ -21,6 +21,7 @@ from backend.sync.wahoo_sync import (
     SYNC_FAILED_MESSAGE,
     WahooSyncClock,
     WahooSyncService,
+    WahooSyncStorage,
 )
 from tests.wahoo_sync_fixture import (
     EARLIER_UTC,
@@ -291,9 +292,11 @@ class WindowAndResetGateTests(WahooSyncCase):
             config=lambda: self.config,
             connection=lambda: self.connection,
             source=lambda: self.source,
-            database_manager=lambda: self.database,
-            database_lock=threading.RLock(),
-            key_values=self.key_values,
+            storage=WahooSyncStorage(
+                database_manager=lambda: self.database,
+                database_lock=threading.RLock(),
+                key_values=self.key_values,
+            ),
             daily_markers=lambda: self.markers,
             observer=lambda: self.observer,
             registry=DEFAULT_PROVIDER_REGISTRY,
@@ -359,9 +362,11 @@ class DetailHookTests(WahooSyncCase):
             config=lambda: self.config,
             connection=lambda: self.connection,
             source=lambda: self.source,
-            database_manager=lambda: self.database,
-            database_lock=threading.RLock(),
-            key_values=self.key_values,
+            storage=WahooSyncStorage(
+                database_manager=lambda: self.database,
+                database_lock=threading.RLock(),
+                key_values=self.key_values,
+            ),
             daily_markers=lambda: self.markers,
             observer=lambda: self.observer,
             registry=DEFAULT_PROVIDER_REGISTRY,

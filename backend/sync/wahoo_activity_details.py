@@ -14,6 +14,7 @@ import json
 import logging
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final
 
@@ -52,6 +53,16 @@ DETAIL_IMPORT_BUDGET_SECONDS: Final = 120
 _RATE_LIMITED: Final = "rate_limited"
 
 
+@dataclass(frozen=True, slots=True)
+class _Pending:
+    """One workout whose current FIT file still has to be imported."""
+
+    workout_id: str
+    url: str
+    summary_sha256: str
+    attempts: int
+
+
 class WahooActivityDetailImport:
     """Download, map and store the FIT detail of the workouts of one sync run."""
 
@@ -88,76 +99,22 @@ class WahooActivityDetailImport:
         status = "ok"
         seen: set[str] = set()
         for row in workouts:
-            candidate = _candidate(row)
-            if candidate is None or candidate[0] in seen:
+            pending = self._pending(row, state, seen)
+            if pending is None:
                 counts["skipped"] += 1
                 continue
-            workout_id, url = candidate
-            seen.add(workout_id)
-            with self._database_manager().reader() as db:
-                link = activity_record_link(db, WAHOO_ID, workout_id)
-                summary_sha256 = active_provider_record_hash(
-                    db, WAHOO_ID, ACTIVITY_RECORD_KIND, workout_id
-                )
-                stored = detail_sets_for(db, WAHOO_ID, workout_id)
-            if (
-                link is None
-                or link["state"] != ActivityRecordState.ACTIVE.value
-                or summary_sha256 is None
-                or _already_stored(stored, summary_sha256)
-            ):
-                counts["skipped"] += 1
-                continue
-            entry = state.get(workout_id)
-            attempts = 0
-            if entry is not None and entry["summary_sha256"] == summary_sha256:
-                if entry["empty"] or entry["attempts"] >= MAX_DETAIL_ATTEMPTS:
-                    counts["skipped"] += 1
-                    continue
-                attempts = entry["attempts"]
             if downloads >= MAX_DETAIL_DOWNLOADS_PER_RUN:
                 break
             if self._monotonic() - started >= DETAIL_IMPORT_BUDGET_SECONDS:
                 status = "budget"
                 break
             downloads += 1
-            reason: str | None = None
-            data: bytes | None = None
-            try:
-                data = self._download(url)
-            except WahooFitUnavailable as error:
-                reason = error.reason
-            if reason == _RATE_LIMITED:
+            outcome, found = self._import_one(pending, state, retrieved_at)
+            issues += found
+            if outcome == _RATE_LIMITED:
                 status = _RATE_LIMITED
-                self._log_failure(reason)
                 break
-            if data is None:
-                counts["failed"] += 1
-                state[workout_id] = _entry(summary_sha256, attempts + 1, empty=False)
-                self._log_failure(reason or "unavailable")
-                continue
-            mapped = map_fit_activity_detail(
-                data,
-                provider_activity_id=workout_id,
-                provenance=_provenance(workout_id, retrieved_at),
-            )
-            issues += len(mapped.issues)
-            if not mapped.records:
-                if mapped.issues:
-                    counts["failed"] += 1
-                    state[workout_id] = _entry(
-                        summary_sha256, attempts + 1, empty=False
-                    )
-                    self._log_failure("no_records")
-                else:
-                    counts["empty"] += 1
-                    state[workout_id] = _entry(summary_sha256, 0, empty=True)
-                continue
-            if self._store(workout_id, summary_sha256, mapped.records, retrieved_at):
-                counts["stored"] += 1
-                state.pop(workout_id, None)
-            else:
-                counts["skipped"] += 1
+            counts[outcome] += 1
         if state != loaded:
             self._save_state(state)
         self._logger.info(
@@ -173,6 +130,75 @@ class WahooActivityDetailImport:
             },
         )
         return {"status": status, **counts}
+
+    def _pending(
+        self, row: object, state: dict[str, dict[str, Any]], seen: set[str]
+    ) -> _Pending | None:
+        """Return the download a workout still needs, or None when it is skipped."""
+        candidate = _candidate(row)
+        if candidate is None or candidate[0] in seen:
+            return None
+        workout_id, url = candidate
+        seen.add(workout_id)
+        with self._database_manager().reader() as db:
+            link = activity_record_link(db, WAHOO_ID, workout_id)
+            summary_sha256 = active_provider_record_hash(
+                db, WAHOO_ID, ACTIVITY_RECORD_KIND, workout_id
+            )
+            stored = detail_sets_for(db, WAHOO_ID, workout_id)
+        if (
+            link is None
+            or link["state"] != ActivityRecordState.ACTIVE.value
+            or summary_sha256 is None
+            or _already_stored(stored, summary_sha256)
+        ):
+            return None
+        entry = state.get(workout_id)
+        if entry is None or entry["summary_sha256"] != summary_sha256:
+            return _Pending(workout_id, url, summary_sha256, 0)
+        if entry["empty"] or entry["attempts"] >= MAX_DETAIL_ATTEMPTS:
+            return None
+        return _Pending(workout_id, url, summary_sha256, entry["attempts"])
+
+    def _import_one(
+        self,
+        pending: _Pending,
+        state: dict[str, dict[str, Any]],
+        retrieved_at: datetime,
+    ) -> tuple[str, int]:
+        """Download, map and store one workout; return its outcome and issue count."""
+        workout_id = pending.workout_id
+        try:
+            data = self._download(pending.url)
+        except WahooFitUnavailable as error:
+            self._log_failure(error.reason)
+            if error.reason == _RATE_LIMITED:
+                return _RATE_LIMITED, 0
+            state[workout_id] = _entry(
+                pending.summary_sha256, pending.attempts + 1, empty=False
+            )
+            return "failed", 0
+        mapped = map_fit_activity_detail(
+            data,
+            provider_activity_id=workout_id,
+            provenance=_provenance(workout_id, retrieved_at),
+        )
+        found = len(mapped.issues)
+        if mapped.records:
+            if not self._store(
+                workout_id, pending.summary_sha256, mapped.records, retrieved_at
+            ):
+                return "skipped", found
+            state.pop(workout_id, None)
+            return "stored", found
+        if mapped.issues:
+            state[workout_id] = _entry(
+                pending.summary_sha256, pending.attempts + 1, empty=False
+            )
+            self._log_failure("no_records")
+            return "failed", found
+        state[workout_id] = _entry(pending.summary_sha256, 0, empty=True)
+        return "empty", found
 
     def _store(
         self,

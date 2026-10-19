@@ -23,7 +23,11 @@ from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.wahoo_activity_details import WahooActivityDetailImport
 from backend.sync.wahoo_connection import WahooConnectionService
 from backend.sync.wahoo_plan_push import WahooPlanPushService
-from backend.sync.wahoo_sync import WahooSyncClock, WahooSyncService
+from backend.sync.wahoo_sync import (
+    WahooSyncClock,
+    WahooSyncService,
+    WahooSyncStorage,
+)
 from backend.sync.wahoo_workout_export import WahooWorkoutExport
 
 
@@ -74,9 +78,11 @@ class WahooSyncAssembly:
                     config=inputs.config,
                     connection=inputs.connection,
                     source=self.client,
-                    database_manager=inputs.database_manager,
-                    database_lock=inputs.database_lock,
-                    key_values=inputs.key_values,
+                    storage=WahooSyncStorage(
+                        database_manager=inputs.database_manager,
+                        database_lock=inputs.database_lock,
+                        key_values=inputs.key_values,
+                    ),
                     daily_markers=inputs.daily_markers,
                     observer=inputs.observer,
                     registry=inputs.registry,
