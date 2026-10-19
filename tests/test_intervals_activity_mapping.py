@@ -75,9 +75,10 @@ def load_fixture_rows() -> list[dict[str, Any]]:
 
 
 class ModuleContractTests(unittest.TestCase):
-    def test_mapper_version_is_three(self) -> None:
-        # Version 2 keeps elapsed_time as elapsed_duration_s; version 3 max_hr.
-        self.assertEqual(3, MAPPER_VERSION)
+    def test_mapper_version_is_four(self) -> None:
+        # Version 2 keeps elapsed_time as elapsed_duration_s; version 3 max_hr;
+        # version 4 manual source origin.
+        self.assertEqual(4, MAPPER_VERSION)
 
     def test_retrieved_at_must_be_timezone_aware(self) -> None:
         with self.assertRaises(ValueError):
@@ -622,6 +623,26 @@ class RecordingOriginTests(unittest.TestCase):
 
         self.assertEqual(RecordingOrigin.GARMIN, record.provenance.recorded_by)
 
+    def test_manual_source_wins_over_brand_text(self) -> None:
+        cases = (
+            (
+                {"source": "MANUAL", "device_name": "Garmin"},
+                RecordingOrigin.MANUAL,
+            ),
+            ({"source": "manual ", "device_name": "Wahoo"}, RecordingOrigin.MANUAL),
+            (
+                {"source": "  Manual\t", "external_id": "zwift-1"},
+                RecordingOrigin.MANUAL,
+            ),
+            (
+                {"source": "STRAVA", "device_name": "Garmin Edge"},
+                RecordingOrigin.GARMIN,
+            ),
+        )
+        for fields, expected in cases:
+            with self.subTest(fields=fields):
+                self.assertEqual(expected, map_one(**fields).provenance.recorded_by)
+
     def test_wahoo_and_garmin_agree_with_the_legacy_device_source(self) -> None:
         cases = (
             {"source": "WAHOO"},
@@ -644,6 +665,18 @@ class RecordingOriginTests(unittest.TestCase):
                     self.assertNotIn(
                         origin, {RecordingOrigin.WAHOO, RecordingOrigin.GARMIN}
                     )
+
+    def test_manual_source_agrees_with_the_legacy_device_source(self) -> None:
+        cases = (
+            {"source": "MANUAL", "device_name": "Garmin Forerunner"},
+            {"source": "manual ", "device_name": "Wahoo ELEMNT"},
+        )
+        for fields in cases:
+            with self.subTest(fields=fields):
+                self.assertIsNone(intervals_activity_device_source(fields))
+                self.assertEqual(
+                    RecordingOrigin.MANUAL, map_one(**fields).provenance.recorded_by
+                )
 
     def test_non_text_provenance_is_reported_and_unknown(self) -> None:
         result = map_rows([row(source=7)])

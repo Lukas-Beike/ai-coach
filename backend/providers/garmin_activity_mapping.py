@@ -71,8 +71,9 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
+# Version 4: a row with manualActivity exactly True is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
-MAPPER_VERSION: Final = 3
+MAPPER_VERSION: Final = 4
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -178,7 +179,7 @@ def _map_row(
         return None
     return ActivityRecord(
         activity_id=activity_id,
-        provenance=_provenance(activity_id, retrieved_at),
+        provenance=_provenance(activity_id, retrieved_at, _recorded_by(row)),
         sport=sport,
         environment=environment,
         started_at=started_at,
@@ -333,12 +334,21 @@ def _optional_number(
     return number
 
 
-def _provenance(activity_id: str, retrieved_at: datetime) -> Provenance:
+def _recorded_by(row: dict[str, object]) -> RecordingOrigin:
+    """Only an explicit boolean True marks a manual entry; anything else is GARMIN."""
+    if row.get("manualActivity") is True:
+        return RecordingOrigin.MANUAL
+    return RecordingOrigin.GARMIN
+
+
+def _provenance(
+    activity_id: str, retrieved_at: datetime, recorded_by: RecordingOrigin
+) -> Provenance:
     return Provenance(
         provider=ProviderId.GARMIN,
         source_kind=SourceKind.PROVIDER_REPORTED,
         source_record_id=activity_id,
-        recorded_by=RecordingOrigin.GARMIN,
+        recorded_by=recorded_by,
         retrieved_at=retrieved_at,
         label=GARMIN_LABEL,
     )

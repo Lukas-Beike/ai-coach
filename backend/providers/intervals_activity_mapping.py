@@ -39,10 +39,12 @@ terms fill in only an UNKNOWN environment from the type table. OUTDOOR is set
 only where the type name itself denotes an outdoor setting. No reader or fixture
 carries a trainer flag, so none is read.
 
-Recording origin comes from the source, device_name and external_id text. Brand
-terms are checked in the order wahoo, garmin, zwift, strava, manual, upload. The
-recording device therefore wins over a sync source such as Strava. The word
-"file" counts only as a whole word, so "profile" does not match.
+Recording origin comes from the source, device_name and external_id text. A
+source of exactly "manual", ignoring case and surrounding whitespace, is MANUAL
+before any brand term is checked. Other brand terms are checked in the order
+wahoo, garmin, zwift, strava, manual, upload. The recording device therefore
+wins over a sync source such as Strava. The word "file" counts only as a whole
+word, so "profile" does not match.
 """
 
 from __future__ import annotations
@@ -77,8 +79,9 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
+# Version 4: a source of exactly "manual" is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
-MAPPER_VERSION: Final = 3
+MAPPER_VERSION: Final = 4
 INTERVALS_LABEL: Final = "Intervals.icu"
 MAX_ACTIVITY_ID_LENGTH: Final = 200
 MAX_NAME_LENGTH: Final = 200
@@ -318,7 +321,10 @@ def _classify(type_name: str | None, identity: str) -> tuple[Sport, Environment]
     return sport, environment
 
 
-def _recording_origin(provenance_text: str) -> RecordingOrigin:
+def _recording_origin(source: str | None, provenance_text: str) -> RecordingOrigin:
+    # _ActivityRow.text already strips the source value.
+    if source is not None and source.casefold() == "manual":
+        return RecordingOrigin.MANUAL
     folded = provenance_text.casefold()
     for terms, origin in _RECORDING_ORIGIN_TERMS:
         if any(term in folded for term in terms):
@@ -344,10 +350,9 @@ def _map_row(
     if activity_id is None or started_at is None:
         return None
     sport, environment = _classify(reader.text("type"), _identity_text(row))
+    provenance = {key: reader.text(key) for key in _PROVENANCE_KEYS}
     provenance_text = " ".join(
-        value
-        for value in (reader.text(key) for key in _PROVENANCE_KEYS)
-        if value is not None
+        value for value in provenance.values() if value is not None
     )
     load = reader.number(_LOAD_KEYS, 0.0, MAX_ACTIVITY_LOAD)
     moving_time = reader.number(
@@ -362,7 +367,7 @@ def _map_row(
             provider=ProviderId.INTERVALS,
             source_kind=SourceKind.PROVIDER_REPORTED,
             source_record_id=activity_id,
-            recorded_by=_recording_origin(provenance_text),
+            recorded_by=_recording_origin(provenance["source"], provenance_text),
             retrieved_at=retrieved_at,
             label=INTERVALS_LABEL,
         ),

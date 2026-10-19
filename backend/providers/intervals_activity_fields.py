@@ -95,8 +95,11 @@ _DEVICE_SOURCE_FIELDS = ("source", "device_name", "external_id")
 
 
 def intervals_activity_device_source(activity: Any) -> RecordingOrigin | None:
-    """Return explicit Wahoo or Garmin provenance from an Intervals.icu activity."""
+    """Return explicit Wahoo or Garmin provenance; a manual source has none."""
     if not isinstance(activity, dict):
+        return None
+    source = activity.get("source")
+    if isinstance(source, str) and source.strip().casefold() == "manual":
         return None
     provenance = " ".join(
         str(activity.get(key) or "") for key in _DEVICE_SOURCE_FIELDS
