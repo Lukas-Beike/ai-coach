@@ -344,7 +344,7 @@ class AnalysisInputMappingTests(unittest.TestCase):
             ),
             alternatives=(),
         )
-        adapted = analysis_input(record(Sport.RIDE), None, laps)
+        adapted = analysis_input(record(Sport.RIDE, label="Record"), None, laps)
         self.assertEqual(
             [
                 {"start_time": 0.0, "end_time": 60.0},
@@ -352,6 +352,8 @@ class AnalysisInputMappingTests(unittest.TestCase):
             ],
             adapted.activity["laps"],
         )
+        self.assertEqual("Intervals.icu", adapted.label_for("laps"))
+        self.assertEqual("Record", adapted.source_label)
 
     def test_decoupling_is_passed_through(self) -> None:
         adapted = analysis_input(record(Sport.RIDE), None, None, decoupling=4.5)
@@ -379,6 +381,14 @@ class SourceLabelTests(unittest.TestCase):
         )
         adapted = analysis_input(record(Sport.RIDE), stream, None)
         self.assertEqual("Wahoo / Garmin", adapted.source_label)
+        self.assertEqual(
+            {"watts": "Wahoo", "heartrate": "Garmin"}, dict(adapted.channel_labels)
+        )
+        self.assertEqual("Wahoo", adapted.label_for("watts"))
+        self.assertEqual("Garmin / Wahoo", adapted.label_for("heartrate", "watts"))
+        self.assertEqual(
+            "Wahoo / Garmin", adapted.label_for("velocity_smooth", "distance")
+        )
 
     def test_repeated_provider_label_is_listed_once(self) -> None:
         garmin = candidate(
