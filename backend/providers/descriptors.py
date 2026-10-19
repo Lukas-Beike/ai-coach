@@ -372,8 +372,10 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             "garmin_full_resync_error",
         ),
         # historical_backfill is accepted here; backend/sync/jobs.py rejects it for
-        # providers that do not declare it.
-        job_types=frozenset({"refresh", "historical_backfill"}),
+        # providers that do not declare it. activity_details is the on-demand,
+        # read-only Garmin detail fetch for one activity (see
+        # backend/sync/garmin_activity_details.py); it is never scheduled.
+        job_types=frozenset({"refresh", "historical_backfill", "activity_details"}),
         # Refresh payload fields; backend/sync/jobs.py enforces them via the registry.
         refresh_fields=frozenset({"days", "reason", "end_date"}),
         default_sync_days=_GARMIN_DEFAULT_SYNC_DAYS,

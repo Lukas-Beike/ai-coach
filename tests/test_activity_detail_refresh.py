@@ -161,8 +161,14 @@ class ActivityDetailRefreshTests(unittest.TestCase):
             all_sync_days=-1,
         )
         self.assertEqual("CaseSensitive-1", envelope["payload"]["activity_id"])
+        garmin = normalize_sync_job_request(
+            "garmin",
+            "activity_details",
+            {"activity_id": "CaseSensitive-1"},
+            all_sync_days=-1,
+        )
+        self.assertEqual("CaseSensitive-1", garmin["payload"]["activity_id"])
         for provider, payload in (
-            ("garmin", {"activity_id": "x"}),
             ("intervals", {"activity_id": "../x"}),
             ("intervals", {"activity_id": "x", "remote_write": True}),
         ):

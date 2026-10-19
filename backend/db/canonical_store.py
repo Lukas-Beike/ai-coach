@@ -1341,6 +1341,48 @@ def activity_record_link(
     )
 
 
+def active_provider_record_hash(
+    db: Any, provider: str, record_kind: str, source_record_id: str
+) -> str | None:
+    """Return the payload hash of one active raw provider record, if stored."""
+    row = _fetch_row(
+        db,
+        "SELECT payload_hash FROM provider_records "
+        "WHERE provider = ? AND record_kind = ? AND source_record_id = ? "
+        "AND state = ?",
+        (provider, record_kind, source_record_id, ProviderRecordState.ACTIVE.value),
+    )
+    return None if row is None else str(row["payload_hash"])
+
+
+def activity_record_for_session(
+    db: Any, provider: str, activity_id: str
+) -> dict[str, Any] | None:
+    """Return the active provider record behind a session id or its merge alias.
+
+    The session must itself be active, or be a duplicate merged into
+    ``activity_id``; deleted sessions and non-active records never match.
+    """
+    return _fetch_row(
+        db,
+        "SELECT r.provider_activity_id, r.activity_id, r.recorded_by, r.state "
+        "FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.provider = ? AND r.state = ? "
+        "AND ((s.activity_id = ? AND s.state = ?) "
+        "OR (s.merged_into = ? AND s.state = ?)) "
+        "ORDER BY r.provider_activity_id LIMIT 1",
+        (
+            provider,
+            ActivityRecordState.ACTIVE.value,
+            activity_id,
+            ActivitySessionState.ACTIVE.value,
+            activity_id,
+            ActivitySessionState.DUPLICATE.value,
+        ),
+    )
+
+
 def _chunked(values: Sequence[str]) -> list[list[str]]:
     unique = list(dict.fromkeys(value for value in values if value))
     return [
