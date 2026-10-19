@@ -874,12 +874,14 @@ class ObservationMetricWindowTests(StoreFixture):
                     "provider": "intervals",
                     "metric": "ctl",
                     "observations": 1,
+                    "oldest": "2026-10-02",
                     "newest": "2026-10-02",
                 },
                 {
                     "provider": "intervals",
                     "metric": "weight",
                     "observations": 2,
+                    "oldest": "2026-10-01",
                     "newest": "2026-10-03",
                 },
             ],
@@ -921,7 +923,9 @@ class ObservationMetricWindowTests(StoreFixture):
 
         [row] = self.windows({"intervals": 2})
 
-        self.assertEqual(set(row), {"provider", "metric", "observations", "newest"})
+        self.assertEqual(
+            set(row), {"provider", "metric", "observations", "oldest", "newest"}
+        )
 
     def test_other_providers_are_not_counted(self) -> None:
         self.write(date(2026, 10, 1), mapper_version=2, provider=ProviderId.GARMIN)

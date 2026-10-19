@@ -25,7 +25,7 @@ date, which the ingest computed with the athlete's zone at write time.
 
 Mapping issue counts are not stored in the tables, so this reader does not
 implement ``coverage``. It serves ``metric_windows`` from the same rows as
-``observations``, as counts and newest days only. ``CanonicalReadSelector`` serves
+``observations``, as counts and oldest and newest days only. ``CanonicalReadSelector`` serves
 coverage from the summaries persisted at ingest.
 """
 
@@ -241,12 +241,13 @@ def _metric_window(row: Mapping[str, Any]) -> MetricWindow | None:
         provider=provider,
         metric=str(row["metric"]),
         observations=int(row["observations"]),
+        oldest_observed_on=date.fromisoformat(str(row["oldest"])),
         newest_observed_on=date.fromisoformat(str(row["newest"])),
     )
 
 
 def _provider_or_none(value: object) -> ProviderId | None:
     try:
-        return ProviderId(value)
+        return ProviderId(str(value))
     except ValueError:
         return None

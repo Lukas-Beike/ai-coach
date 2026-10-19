@@ -627,8 +627,9 @@ def observation_metric_windows(
 
     The rows are the ones ``current_observation_rows`` serves for the same
     ``versions`` and ``oldest_versions``, so the counts match what the tables serve.
-    Each dict holds ``provider``, ``metric``, ``observations`` and ``newest`` (the
-    latest ``observed_on`` as ISO text) and no other column.
+    Each dict holds ``provider``, ``metric``, ``observations``, ``oldest`` and
+    ``newest`` (the earliest and latest ``observed_on`` as ISO text) and no other
+    column.
     """
     if not versions:
         return []
@@ -636,7 +637,7 @@ def observation_metric_windows(
     return _fetch_all(
         db,
         "SELECT provider, metric, COUNT(*) AS observations, "
-        "MAX(observed_on) AS newest FROM observations "
+        "MIN(observed_on) AS oldest, MAX(observed_on) AS newest FROM observations "
         f"WHERE {version_clause} GROUP BY provider, metric",
         tuple(params),
     )

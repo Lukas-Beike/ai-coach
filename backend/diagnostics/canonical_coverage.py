@@ -14,13 +14,35 @@ from typing import Any, Final
 
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.mapping import IssueReason
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.runtime.ports import ProviderCoverageReader
 
 # A metric stalls when it has enough history to judge and its newest observation
-# trails its provider's newest observation by at least a week.
+# trails its provider's newest observation by at least a week and by three times
+# the mean spacing of its own observations, so metrics recorded on purpose only
+# weekly or monthly are not reported as stalled.
 STALL_MIN_OBSERVATIONS: Final = 5
 STALL_LAG_DAYS: Final = 7
+STALL_CADENCE_FACTOR: Final = 3
+# Event-driven metrics update only after a test or qualifying activity, so their
+# irregular gaps are never judged as stalls.
+EVENT_DRIVEN_METRICS: Final = frozenset(
+    kind.value
+    for kind in (
+        MetricKind.FTP,
+        MetricKind.EFTP,
+        MetricKind.THRESHOLD_HR,
+        MetricKind.MAX_HR,
+        MetricKind.VO2MAX,
+        MetricKind.THRESHOLD_PACE,
+        MetricKind.RUN_THRESHOLD_POWER,
+        MetricKind.RACE_PREDICTION_5K,
+        MetricKind.RACE_PREDICTION_10K,
+        MetricKind.RACE_PREDICTION_HALF,
+        MetricKind.RACE_PREDICTION_FULL,
+        MetricKind.ENDURANCE_SCORE,
+    )
+)
 
 
 def summarize_canonical_coverage(
@@ -83,8 +105,21 @@ def _metric_summaries(windows: Sequence[MetricWindow]) -> list[dict[str, Any]]:
                 "metric": window.metric,
                 "observations": window.observations,
                 "lag_days": lag_days,
-                "stalled": window.observations >= STALL_MIN_OBSERVATIONS
-                and lag_days >= STALL_LAG_DAYS,
+                "stalled": _is_stalled(window, lag_days),
             }
         )
     return summaries
+
+
+def _is_stalled(window: MetricWindow, lag_days: int) -> bool:
+    """Judge the lag against the metric's own cadence, never against a daily one."""
+    if (
+        window.metric in EVENT_DRIVEN_METRICS
+        or window.observations < STALL_MIN_OBSERVATIONS
+    ):
+        return False
+    # At least STALL_MIN_OBSERVATIONS observations, so the divisor is never zero.
+    gap_days = (window.newest_observed_on - window.oldest_observed_on).days / (
+        window.observations - 1
+    )
+    return lag_days >= max(STALL_LAG_DAYS, STALL_CADENCE_FACTOR * gap_days)

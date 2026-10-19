@@ -200,12 +200,30 @@ def window(
     metric: str,
     observations: int,
     newest: date,
+    oldest: date | None = None,
 ) -> MetricWindow:
+    """Daily observations ending on ``newest``, unless the test passes ``oldest``."""
     return MetricWindow(
         provider=provider,
         metric=metric,
         observations=observations,
+        oldest_observed_on=(
+            newest - timedelta(days=observations - 1) if oldest is None else oldest
+        ),
         newest_observed_on=newest,
+    )
+
+
+def weekly_window(
+    provider: ProviderId, metric: str, observations: int, newest: date
+) -> MetricWindow:
+    """Observations spaced seven days apart, ending on ``newest``."""
+    return window(
+        provider,
+        metric,
+        observations,
+        newest,
+        oldest=newest - timedelta(days=7 * (observations - 1)),
     )
 
 
@@ -265,6 +283,71 @@ class MetricWindowTests(unittest.TestCase):
 
         self.assertEqual(metrics["ctl"]["lag_days"], 6)
         self.assertFalse(metrics["ctl"]["stalled"])
+
+    def test_weekly_metric_within_its_cadence_is_not_stalled(self) -> None:
+        metrics = self.intervals_metrics(
+            weekly_window(
+                ProviderId.INTERVALS, "weight", 10, NEWEST - timedelta(days=10)
+            ),
+            window(ProviderId.INTERVALS, "ctl", 1, NEWEST),
+        )
+
+        self.assertEqual(
+            metrics["weight"],
+            {"metric": "weight", "observations": 10, "lag_days": 10, "stalled": False},
+        )
+
+    def test_weekly_metric_lagging_three_cadences_is_stalled(self) -> None:
+        metrics = self.intervals_metrics(
+            weekly_window(
+                ProviderId.INTERVALS, "weight", 10, NEWEST - timedelta(days=21)
+            ),
+            window(ProviderId.INTERVALS, "ctl", 1, NEWEST),
+        )
+
+        self.assertEqual(
+            metrics["weight"],
+            {"metric": "weight", "observations": 10, "lag_days": 21, "stalled": True},
+        )
+
+    def test_dense_metric_lagging_a_week_is_stalled(self) -> None:
+        metrics = self.intervals_metrics(
+            window(ProviderId.INTERVALS, "ctl", 10, NEWEST - timedelta(days=7)),
+            window(ProviderId.INTERVALS, "weight", 1, NEWEST),
+        )
+
+        self.assertEqual(metrics["ctl"]["lag_days"], 7)
+        self.assertTrue(metrics["ctl"]["stalled"])
+
+    def test_event_driven_metric_is_never_stalled_by_its_lag(self) -> None:
+        metrics = self.intervals_metrics(
+            window(ProviderId.INTERVALS, "ftp", 10, NEWEST - timedelta(days=60)),
+            window(ProviderId.INTERVALS, "ctl", 1, NEWEST),
+        )
+
+        self.assertEqual(
+            metrics["ftp"],
+            {"metric": "ftp", "observations": 10, "lag_days": 60, "stalled": False},
+        )
+
+    def test_non_event_daily_metric_with_a_long_lag_is_stalled(self) -> None:
+        metrics = self.intervals_metrics(
+            window(ProviderId.INTERVALS, "steps", 10, NEWEST - timedelta(days=10)),
+            window(ProviderId.INTERVALS, "ctl", 1, NEWEST),
+        )
+
+        self.assertEqual(metrics["steps"]["lag_days"], 10)
+        self.assertTrue(metrics["steps"]["stalled"])
+
+    def test_metric_window_rejects_an_oldest_day_after_the_newest(self) -> None:
+        with self.assertRaises(ValueError):
+            MetricWindow(
+                provider=ProviderId.INTERVALS,
+                metric="ctl",
+                observations=2,
+                oldest_observed_on=NEWEST + timedelta(days=1),
+                newest_observed_on=NEWEST,
+            )
 
     def test_empty_metric_windows_report_no_metrics(self) -> None:
         entry = providers_by_name(self.summary())[str(ProviderId.INTERVALS)]
