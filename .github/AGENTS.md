@@ -10,17 +10,15 @@ release/source/version agreement, and image digest verification. Workflow succes
 alone is not proof of merge, release publication, or healthy deployment.
 Use focused workflow regression tests and never bypass required checks.
 
-Native Codex review availability is checked by
-`.github/workflows/codex-review-watchdog.yml`: wait at most 180 seconds for a
-current Codex comment, post one `@codex review` fallback for a silent current
-head, then accept either the regular Codex review or an explicit exhausted
-usage response. Silence after the bounded fallback wait completes the check
-with a non-blocking review-unavailable result, never a completed review or an
-inferred usage-limit response. This check proves
-availability only; it never converts an incomplete review into a completed
-review.
+Gitar is the required hosted review check for `develop` and `main`. Require the
+`Gitar` context from the installed `gitar-bot` GitHub App (integration ID 827041)
+in both branch rulesets. Do not create a replacement success check or treat a
+missing, failed, or pending Gitar check as a completed review.
 
-Explicit integration and GitHub API failures remain blocking.
-Same-repository `ai-coach-release-bot[bot]` version PRs into `develop`
-and promotion PRs into `main` receive a narrowly guarded automation exception;
-all required CI checks and review-thread protections still apply.
+Every review conversation must be resolved before merge, including outdated
+threads and threads from other reviewers. Keep
+`required_review_thread_resolution: true` with no bypass actors in both rulesets.
+This applies to human, Dependabot, and release automation PRs alike. Fix or
+reconcile each finding before resolving its thread; never resolve it merely to
+unblock merging. Ordinary PR comments have no resolved state: complete their
+requested action or record the evidence-based disposition before merging.
