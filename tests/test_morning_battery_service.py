@@ -7,7 +7,7 @@ import json
 import threading
 import unittest
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import Mock
 
 from backend.performance.morning_battery_service import (
@@ -22,7 +22,7 @@ from backend.performance.morning_battery_service import (
 )
 
 CHECKIN_DATE = date(2026, 9, 4)
-NOW = datetime(2026, 9, 4, 6, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 4, 6, 0, tzinfo=UTC)
 
 
 class FakeLock:
@@ -449,7 +449,7 @@ class MorningBodyBatteryServiceTests(unittest.TestCase):
         early = Harness()
         early.fixture_is_available = True
         early_service = early.make_service(
-            local_now=lambda: datetime(2026, 9, 4, 4, 59, tzinfo=timezone.utc)
+            local_now=lambda: datetime(2026, 9, 4, 4, 59, tzinfo=UTC)
         )
         early_service.refresh()
         self.assertEqual(early.lock.acquire_calls, 0)

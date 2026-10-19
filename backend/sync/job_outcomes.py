@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from threading import Event
 from typing import Any
 
@@ -85,9 +85,9 @@ class SyncJobOutcomeService:
         )
         current_time = self._current_time()
         if current_time.tzinfo is None or current_time.utcoffset() is None:
-            current_time = current_time.replace(tzinfo=timezone.utc)
+            current_time = current_time.replace(tzinfo=UTC)
         available_at = (
-            current_time.astimezone(timezone.utc) + timedelta(seconds=delay)
+            current_time.astimezone(UTC) + timedelta(seconds=delay)
         ).isoformat()
         if self._job_store.requeue(job, error_class, detail, available_at):
             self._wake_event.set()

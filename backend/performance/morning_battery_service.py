@@ -7,7 +7,7 @@ import threading
 from collections.abc import Callable, Hashable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any, Protocol
 
 from backend.canonical.vocabulary import ProviderId
@@ -215,8 +215,8 @@ class MorningBatteryClock:
     def normalized_utc_now(self) -> datetime:
         now = self.utc_now()
         if now.tzinfo is None:
-            return now.replace(tzinfo=timezone.utc)
-        return now.astimezone(timezone.utc)
+            return now.replace(tzinfo=UTC)
+        return now.astimezone(UTC)
 
 
 @dataclass(frozen=True)

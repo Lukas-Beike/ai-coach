@@ -1,6 +1,6 @@
 import unittest
 from copy import deepcopy
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from backend.performance.morning_battery import (
     body_battery_samples,
@@ -10,7 +10,6 @@ from backend.performance.morning_battery import (
     timestamp,
 )
 
-UTC = timezone.utc
 CHECKIN_DATE = date(2026, 9, 4)
 
 

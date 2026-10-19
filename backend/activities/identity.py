@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from backend.canonical.sports import classify_sport_text, legacy_activity_family
@@ -28,7 +28,7 @@ def activity_datetime(value: Any) -> datetime | None:
     except TypeError, ValueError, OverflowError:
         return None
     if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
     return parsed
 
 

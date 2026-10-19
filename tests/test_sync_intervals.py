@@ -7,7 +7,7 @@ import tempfile
 import threading
 import unittest
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -123,7 +123,7 @@ class IntervalsSnapshotServiceTests(unittest.TestCase):
             refresh or self.refresh,
             library or self.library,
             lambda value: value,
-            lambda: datetime(2026, 9, 20, 8, tzinfo=timezone.utc),
+            lambda: datetime(2026, 9, 20, 8, tzinfo=UTC),
             date(2026, 9, 1),
             3,
             -1,
@@ -271,7 +271,7 @@ class IntervalsSnapshotServiceTests(unittest.TestCase):
             refresh,
             self.library,
             lambda value: f"safe:{value}",
-            lambda: datetime(2026, 9, 20, 8, tzinfo=timezone.utc),
+            lambda: datetime(2026, 9, 20, 8, tzinfo=UTC),
             date(2026, 9, 1),
             3,
             -1,

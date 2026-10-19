@@ -239,6 +239,8 @@ class RemotePlannedUnitReconciler:
         ]
         start_value = iso_date_prefix(str(calendar_start or ""))
         end_value = iso_date_prefix(str(calendar_end or ""))
+        window_start: str | None
+        window_end: str | None
         if re.fullmatch(_DATE_ONLY_PATTERN, start_value):
             window_start = start_value
         else:

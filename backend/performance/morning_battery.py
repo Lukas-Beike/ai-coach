@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from backend.canonical.decimal_text import comma_decimal_float
@@ -30,18 +30,16 @@ def timestamp(value: Any) -> datetime | None:
     if number is not None and math.isfinite(number):
         try:
             seconds = number / 1000 if number > 10_000_000_000 else number
-            return datetime.fromtimestamp(seconds, timezone.utc)
+            return datetime.fromtimestamp(seconds, UTC)
         except OSError, OverflowError, ValueError:
             return None
     if not isinstance(value, str):
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
-    return (
-        parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-    ).astimezone(timezone.utc)
+    return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).astimezone(UTC)
 
 
 def _first_present(record: dict[str, Any], fields: tuple[str, ...]) -> Any:
@@ -188,9 +186,9 @@ def cached_result(
         return {"status": "attempts_exhausted", "sleep_date": sleep_date}
     attempted = timestamp(record.get("attempted_at"))
     if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+        now = now.replace(tzinfo=UTC)
     else:
-        now = now.astimezone(timezone.utc)
+        now = now.astimezone(UTC)
     if attempted and (now - attempted).total_seconds() < retry_seconds:
         return {"status": "retry_wait", "sleep_date": sleep_date}
     return None

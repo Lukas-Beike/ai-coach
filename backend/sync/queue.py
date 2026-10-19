@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import threading
 from typing import Any
 
@@ -82,7 +83,7 @@ class SyncJobQueueService:
         payload: Any = None,
         *,
         requested_by: str = "system",
-        item_operations: list[dict[str, Any]] | None = None,
+        item_operations: builtins.list[dict[str, Any]] | None = None,
         available_at: str | None = None,
     ) -> dict[str, Any]:
         """Validate and persist a job while maintenance drains all side effects."""

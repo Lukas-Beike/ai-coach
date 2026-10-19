@@ -512,10 +512,7 @@ class GarminSyncStateService:
         state = self.capability_state(source)
         paused_until = str(state.get("paused_until") or "")
         try:
-            return (
-                datetime.fromisoformat(paused_until.replace("Z", "+00:00"))
-                <= self._current_time()
-            )
+            return datetime.fromisoformat(paused_until) <= self._current_time()
         except TypeError, ValueError:
             return True
 

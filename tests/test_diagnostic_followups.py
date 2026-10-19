@@ -4,7 +4,7 @@ import json
 import tempfile
 import unittest
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -105,7 +105,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             self.assertEqual(fetch.call_count, 1)
             snapshot = server.GARMIN_ASSEMBLY.payload_service().snapshot()
             snapshot["morning_body_battery"]["attempted_at"] = (
-                datetime.now(timezone.utc) - timedelta(minutes=16)
+                datetime.now(UTC) - timedelta(minutes=16)
             ).isoformat()
             server.key_value_service().set("garmin_snapshot", json.dumps(snapshot))
             ready = {

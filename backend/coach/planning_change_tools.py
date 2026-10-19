@@ -131,7 +131,7 @@ class CoachPlanningChangeToolService:
                     )
             elif change.get("local_id"):
                 local_id = str(change["local_id"]).strip()
-                allowed_scopes = (f"planned_unit:{local_id}",)
+                allowed_scopes: tuple[str, ...] = (f"planned_unit:{local_id}",)
                 if "local_plan_create" not in scope_values(intent):
                     allowed_scopes += ("local_plan",)
                 require_coach_scope(intent, *allowed_scopes)

@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from backend.errors import AppError, DatabaseBusyError
 from backend.runtime.events import StateEventBuffer
@@ -88,7 +88,7 @@ class SyncRefreshTests(unittest.TestCase):
         return manager, events, tracker
 
     def test_retry_at_is_bounded_and_stops_for_configuration_errors(self):
-        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        now = datetime(2026, 1, 1, tzinfo=UTC)
         retry = retry_at(
             [{"status": "error", "error_code": "timeout"}],
             current_error_code="timeout",
@@ -130,7 +130,7 @@ class SyncRefreshTests(unittest.TestCase):
             phase="complete",
             status="success",
             error_code=None,
-            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            now=datetime(2026, 1, 1, tzinfo=UTC),
             base_seconds=10,
             max_seconds=25,
         )
@@ -185,7 +185,7 @@ class SyncRefreshTests(unittest.TestCase):
             phase="complete",
             status="success",
             error_code=None,
-            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            now=datetime(2026, 1, 1, tzinfo=UTC),
             base_seconds=10,
             max_seconds=25,
         )
@@ -197,7 +197,7 @@ class SyncRefreshTests(unittest.TestCase):
         db.close()
 
     def test_tracker_start_commits_running_record_and_publishes_loading(self):
-        now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+        now = [datetime(2026, 1, 1, tzinfo=UTC)]
         manager, events, tracker = self.make_tracker(now)
 
         refresh_id = tracker.start("garmin", "data", "op-1", "manual")
@@ -231,7 +231,7 @@ class SyncRefreshTests(unittest.TestCase):
         )
 
     def test_tracker_finish_maps_statuses_and_sets_retry_from_finish_time(self):
-        now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+        now = [datetime(2026, 1, 1, tzinfo=UTC)]
         manager, events, tracker = self.make_tracker(now)
         partial_id = tracker.start("intervals", "activities", "op-1", "manual")
         now[0] += timedelta(minutes=1)
@@ -272,7 +272,7 @@ class SyncRefreshTests(unittest.TestCase):
         self.assertEqual(events.since()["events"][-1]["data"]["status"], "ready")
 
     def test_tracker_finish_unknown_id_publishes_no_event(self):
-        now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+        now = [datetime(2026, 1, 1, tzinfo=UTC)]
         _, events, tracker = self.make_tracker(now)
 
         tracker.finish("missing", "success", "complete")
@@ -280,7 +280,7 @@ class SyncRefreshTests(unittest.TestCase):
         self.assertEqual(events.since()["events"], [])
 
     def test_tracker_cleanup_enforces_retention_cutoff(self):
-        now = [datetime(2026, 1, 10, tzinfo=timezone.utc)]
+        now = [datetime(2026, 1, 10, tzinfo=UTC)]
         manager, _, tracker = self.make_tracker(now, retention_days=2, max_rows=10)
         manager.connection.execute(
             "INSERT INTO provider_refresh_history "
@@ -307,7 +307,7 @@ class SyncRefreshTests(unittest.TestCase):
         self.assertEqual(ids, {"recent", "refresh-0"})
 
     def test_tracker_cleanup_enforces_row_limit(self):
-        now = [datetime(2026, 1, 10, tzinfo=timezone.utc)]
+        now = [datetime(2026, 1, 10, tzinfo=UTC)]
         manager, _, tracker = self.make_tracker(now, max_rows=2)
         for refresh_id, started_at in (
             ("older", "2026-01-07T00:00:00+00:00"),

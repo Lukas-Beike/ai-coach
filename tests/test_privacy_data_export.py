@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -139,7 +139,7 @@ class PrivacyDataExportServiceTests(unittest.TestCase):
                 activity_feedback_service=EmptyService(),
                 adaptive_preview_service=EmptyService(),
                 external_calendar_reader=Calendar(),
-                local_now=lambda: datetime(2026, 9, 23, tzinfo=timezone.utc),
+                local_now=lambda: datetime(2026, 9, 23, tzinfo=UTC),
                 utc_now=lambda: "2026-09-23T00:00:00+00:00",
             )
         )

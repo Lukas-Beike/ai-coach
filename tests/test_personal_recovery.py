@@ -1,5 +1,5 @@
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from backend.athlete.profile import normalize_profile
 from backend.errors import AppError
@@ -125,33 +125,29 @@ class PersonalRecoveryTests(unittest.TestCase):
     def sleep_rows(
         self, count, *, start="2026-09-01T21:30:00Z", end="2026-09-02T05:30:00Z"
     ):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         result = []
         for index in range(count):
             day = self.today - timedelta(days=count - index)
-            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00")) + timedelta(
-                days=index
-            )
-            end_dt = datetime.fromisoformat(end.replace("Z", "+00:00")) + timedelta(
-                days=index
-            )
+            start_dt = datetime.fromisoformat(start) + timedelta(days=index)
+            end_dt = datetime.fromisoformat(end) + timedelta(days=index)
             result.append(
                 {
                     "calendarDate": day.isoformat(),
                     "sleepStartTimestampGMT": int(
-                        start_dt.replace(tzinfo=timezone.utc).timestamp() * 1000
+                        start_dt.replace(tzinfo=UTC).timestamp() * 1000
                     ),
                     "sleepEndTimestampGMT": int(
-                        end_dt.replace(tzinfo=timezone.utc).timestamp() * 1000
+                        end_dt.replace(tzinfo=UTC).timestamp() * 1000
                     ),
                 }
             )
         current_start = datetime.combine(
-            self.today - timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+            self.today - timedelta(days=1), datetime.min.time(), tzinfo=UTC
         ).replace(hour=21, minute=30)
         current_end = datetime.combine(
-            self.today, datetime.min.time(), tzinfo=timezone.utc
+            self.today, datetime.min.time(), tzinfo=UTC
         ).replace(hour=5, minute=30)
         result.append(
             {
@@ -189,10 +185,10 @@ class PersonalRecoveryTests(unittest.TestCase):
             14, start="2026-09-01T21:50:00Z", end="2026-09-02T05:50:00Z"
         )
         rows[1]["sleepStartTimestampGMT"] = int(
-            datetime(2026, 9, 1, 22, 10, tzinfo=timezone.utc).timestamp() * 1000
+            datetime(2026, 9, 1, 22, 10, tzinfo=UTC).timestamp() * 1000
         )
         rows[1]["sleepEndTimestampGMT"] = int(
-            datetime(2026, 9, 2, 6, 10, tzinfo=timezone.utc).timestamp() * 1000
+            datetime(2026, 9, 2, 6, 10, tzinfo=UTC).timestamp() * 1000
         )
         result = personal_recovery(
             [], {"sleep": rows}, {"timezone": "UTC"}, self.today
