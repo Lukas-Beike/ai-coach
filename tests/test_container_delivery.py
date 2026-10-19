@@ -219,7 +219,7 @@ class DemoContainerScriptTests(unittest.TestCase):
         self.assertEqual([call[0] for call in calls], ["ps", "run"])
 
     def test_run_arguments_keep_the_demo_on_loopback_and_disposable(self):
-        result, calls = self.run_script(
+        _, calls = self.run_script(
             "-Name", DEMO_NAME, "-SkipBuild", "-Port", "8099", fail=("run",)
         )
         run = next(call for call in calls if call[0] == "run")
@@ -230,7 +230,7 @@ class DemoContainerScriptTests(unittest.TestCase):
         self.assertFalse(any(argument.endswith(":/data") for argument in run))
 
     def test_persist_uses_a_named_volume_and_never_removes_volumes(self):
-        result, calls = self.run_script(
+        _, calls = self.run_script(
             "-Name",
             DEMO_NAME,
             "-SkipBuild",
