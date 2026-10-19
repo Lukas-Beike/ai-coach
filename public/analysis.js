@@ -1504,7 +1504,6 @@ function appendTrainingFocusShare(report, categories, root) {
     const bar = reportNode("div", null, "training-focus-share");
     bar.setAttribute("role", "img"); bar.setAttribute("aria-label", "Anteile leicht aerob, hoch aerob und anaerob an der bekannten Belastung");
     const legend = reportNode("ul", null, "training-focus-legend");
-    legend.style.gridTemplateColumns = categories.map(([key]) => `${Math.max(report.categories[key].load, 0.001)}fr`).join(" ");
     for (const [index, [key, label]] of categories.entries()) {
       const percent = total ? report.categories[key].load / total * 100 : 0;
       const part = reportNode("span"); part.dataset.color = String(index); part.style.width = `${percent}%`; bar.append(part);
