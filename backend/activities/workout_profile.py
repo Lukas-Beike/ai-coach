@@ -55,16 +55,10 @@ def planned_profile(
         units.add(unit)
         estimated = estimated or from_estimate
     if len(units) != 1:
-        # Steps of one kind may mix zone and percent targets (for example
-        # "Z1 HR" and "86-89% HR"); the zone is their common axis.
-        if len({step["kind"] for step in steps}) != 1 or any(
-            segment["zone"] is None for segment in segments
-        ):
+        zone_segments = _zone_segments(steps, segments)
+        if zone_segments is None:
             return None
-        segments = [
-            {**segment, "value": segment["zone"], "end_value": segment["zone"]}
-            for segment in segments
-        ]
+        segments = zone_segments
         units = {"zone"}
     profile: dict[str, Any] = {
         "source": "planned",
@@ -98,6 +92,21 @@ def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
         "unit": "W" if kind == "watts" else "bpm",
         "segments": segments,
     }
+
+
+def _zone_segments(
+    steps: list[dict[str, Any]], segments: list[dict[str, Any]]
+) -> list[dict[str, Any]] | None:
+    # Steps of one kind may mix zone and percent targets (for example
+    # "Z1 HR" and "86-89% HR"); the zone is their common axis.
+    if len({step["kind"] for step in steps}) != 1 or any(
+        segment["zone"] is None for segment in segments
+    ):
+        return None
+    return [
+        {**segment, "value": segment["zone"], "end_value": segment["zone"]}
+        for segment in segments
+    ]
 
 
 def _planned_segment(
