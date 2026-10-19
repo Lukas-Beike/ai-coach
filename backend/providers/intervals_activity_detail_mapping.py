@@ -128,7 +128,7 @@ _ZONE_KEYS: Final = (
     (ZONE_TIMES, ZoneMetric.POWER),
 )
 # Only Z1, Z2, ... buckets are positional; "SS" and other ids overlap them.
-_ZONE_ID: Final = re.compile(r"Z[0-9]+")
+_ZONE_ID: Final = re.compile(r"Z\d+", re.ASCII)
 
 
 def zone_times(value: object) -> list[object]:
@@ -385,22 +385,37 @@ def _pick_channel(
     for key in aliases:
         if key not in streams:
             continue
-        raw = streams[key]
-        if not isinstance(raw, list) or (length is not None and len(raw) != length):
-            if issue is None:
-                issue = MappingIssue(ref, key, IssueReason.INVALID_TYPE)
-            continue
-        # clean_series rejects booleans, so moving flags become 1.0 and 0.0 first.
-        values = (
-            [_moving_value(value) for value in raw]
-            if channel is StreamChannel.MOVING
-            else raw
+        points, alias_issue = _alias_points(
+            ref, channel, key, streams[key], length=length
         )
-        points, rejected = clean_series(channel, values)
-        if rejected and issue is None:
-            issue = MappingIssue(ref, key, IssueReason.OUT_OF_RANGE)
-        if any(point is not None for point in points):
+        if issue is None:
+            issue = alias_issue
+        if points is not None:
             return points, issue
+    return None, issue
+
+
+def _alias_points(
+    ref: str,
+    channel: StreamChannel,
+    key: str,
+    raw: object,
+    *,
+    length: int | None,
+) -> tuple[tuple[float | None, ...] | None, MappingIssue | None]:
+    """Return one alias's points if any is usable, and that alias's issue."""
+    if not isinstance(raw, list) or (length is not None and len(raw) != length):
+        return None, MappingIssue(ref, key, IssueReason.INVALID_TYPE)
+    # clean_series rejects booleans, so moving flags become 1.0 and 0.0 first.
+    values = (
+        [_moving_value(value) for value in raw]
+        if channel is StreamChannel.MOVING
+        else raw
+    )
+    points, rejected = clean_series(channel, values)
+    issue = MappingIssue(ref, key, IssueReason.OUT_OF_RANGE) if rejected else None
+    if any(point is not None for point in points):
+        return points, issue
     return None, issue
 
 
