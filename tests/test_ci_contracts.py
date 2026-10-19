@@ -1,5 +1,7 @@
 """Exercise source selection and shard discovery without remote CI side effects."""
 
+import fnmatch
+import functools
 import importlib.util
 import json
 import re
@@ -110,15 +112,18 @@ class WorkflowSourceTests(unittest.TestCase):
 
         shards = workflow.split("  test_shards:\n", 1)[1].split("  syntax:\n", 1)[0]
         self.assertIn("coverage run tests/run_tests.py --shard", shards)
+        self.assertIn('--total "$PYTHON_TEST_SHARDS"', shards)
         self.assertIn("python-coverage-${{ matrix.shard }}", shards)
         self.assertIn("include-hidden-files: true", shards)
         self.assertIn("if-no-files-found: error", shards)
         quality = workflow.split("  quality:\n", 1)[1].split("  image_sbom:\n", 1)[0]
         self.assertIn("pattern: python-coverage-*", quality)
-        self.assertIn("merge-multiple: true", quality)
-        self.assertIn("coverage combine coverage-data", quality)
+        self.assertNotIn("merge-multiple", quality)
+        self.assertIn('for shard in $(seq 1 "$PYTHON_TEST_SHARDS")', quality)
+        self.assertIn("::error::Test shard ${shard}", quality)
+        self.assertIn("coverage combine", quality)
         self.assertIn("coverage report", quality)
-        self.assertIn("-ne 4", quality)
+        self.assertNotIn("-ne 4", quality)
         self.assertIn("exit 1", quality)
         self.assertNotIn("coverage run", quality)
         self.assertNotIn("--fail-under", quality)
@@ -182,7 +187,7 @@ class WorkflowSourceTests(unittest.TestCase):
             encoding="utf-8"
         )
         checkout_refs = re.findall(r"^          ref: (.+)$", workflow, re.MULTILINE)
-        self.assertEqual(len(checkout_refs), 8)
+        self.assertEqual(len(checkout_refs), 9)
         self.assertTrue(all(ref == "${{ github.sha }}" for ref in checkout_refs[1:]))
         self.assertIn("'refs/heads/main' || github.sha", checkout_refs[0])
         self.assertNotIn("source_ref", workflow)
@@ -192,6 +197,68 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn(
             "github.ref == 'refs/heads/main' && inputs.publish_container == true",
             workflow,
+        )
+
+    def test_ci_image_is_built_once_and_shared_by_consumers(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(len(re.findall(r"docker build\s", workflow)), 1)
+        image = workflow.split("  image:\n", 1)[1].split("  test_shards:\n", 1)[0]
+        self.assertIn("docker build --tag ai-coach:ci .", image)
+        self.assertIn("needs: source\n", image)
+        upload = image.split("actions/upload-artifact@", 1)[1]
+        self.assertIn("name: ai-coach-ci-image", upload)
+        self.assertIn("retention-days: 1", upload)
+        consumers = {
+            "container_tests": (
+                workflow.split("  container_tests:\n", 1)[1].split("  test:\n", 1)[0],
+                "needs: [source, image]",
+            ),
+            "image_sbom": (
+                workflow.split("  image_sbom:\n", 1)[1].split("  e2e:\n", 1)[0],
+                "needs: [source, image]",
+            ),
+            "e2e": (
+                workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0],
+                "needs: [source, test, image]",
+            ),
+        }
+        for job, (text, needs) in consumers.items():
+            with self.subTest(job=job):
+                self.assertIn(needs, text)
+                self.assertIn("name: ai-coach-ci-image", text)
+                self.assertIn("gunzip -c ai-coach-ci-image.tar.gz | docker load", text)
+                self.assertNotIn("docker build", text)
+        self.assertIn("image: ai-coach:ci", consumers["image_sbom"][0])
+        self.assertIn("--workdir /app ai-coach:ci", consumers["container_tests"][0])
+
+    def test_e2e_selects_specs_with_playwright_list_not_file_grep(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
+        e2e = workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0]
+        self.assertNotIn("grep -q '@responsive'", e2e)
+        self.assertIn('--list --project "$project" --reporter=json', e2e)
+        self.assertIn("mapfile -t specs", e2e)
+
+    def test_ci_failure_artifacts_exclude_traces_and_auth_state(self):
+        root = Path(__file__).resolve().parents[1]
+        config = (root / "playwright.config.cjs").read_text(encoding="utf-8")
+        self.assertIn('trace: process.env.CI ? "off" : "retain-on-failure"', config)
+        self.assertNotIn('trace: "retain-on-failure"', config)
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
+        upload = workflow.split("name: Upload browser failure artifacts\n", 1)[1]
+        upload = upload.split("      - name:", 1)[0]
+        paths = upload.split("path: |\n", 1)[1].split("if-no-files-found:", 1)[0]
+        self.assertEqual(paths.split(), ["test-results/", "playwright-report/"])
+        # The login state lives outside both uploaded directories.
+        self.assertIn(
+            'path.join(__dirname, "playwright", ".auth", "user.json")', config
         )
 
     def test_browser_results_are_aggregated_before_publishing(self):
@@ -337,6 +404,188 @@ class DiscoveryTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(RuntimeError, "synthetic import failure"):
                 run_tests.discover_tests(root)
+
+
+@functools.cache
+def _discovered_suite():
+    """Discover the real suite once per process; imports are cached by name."""
+    return run_tests.discover_tests()
+
+
+def _native_shard_count():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/publish-container.yml").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r"(?m)^  PYTHON_TEST_SHARDS: '(\d+)'$", workflow)
+    if match is None:
+        raise AssertionError("PYTHON_TEST_SHARDS is not declared at workflow level")
+    return int(match.group(1))
+
+
+def _write_synthetic_module(root, name, class_sizes):
+    lines = ["import unittest", ""]
+    for class_name, count in class_sizes.items():
+        lines.append(f"class {class_name}(unittest.TestCase):")
+        lines.extend(f"    def test_{index:02d}(self): pass" for index in range(count))
+        lines.append("")
+    (root / f"test_{name}.py").write_text("\n".join(lines), encoding="utf-8")
+
+
+class ShardingContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Module names are unique so they cannot collide with the real suite or
+        # with modules imported earlier from another temporary directory.
+        directory = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(directory.cleanup)
+        root = Path(directory.name)
+        _write_synthetic_module(root, "shardfixture_alpha", {"A1": 3, "A2": 1})
+        _write_synthetic_module(root, "shardfixture_beta", {"B1": 5})
+        _write_synthetic_module(
+            root, "shardfixture_gamma", {"C1": 2, "C2": 2, "C3": 1}
+        )
+        _write_synthetic_module(
+            root, "shardfixture_delta", {"D1": 4, "D2": 1, "D3": 1}
+        )
+        cls.synthetic = run_tests.discover_tests(root)
+
+    def test_every_test_runs_exactly_once_across_shards(self):
+        for suite in (self.synthetic, _discovered_suite()):
+            expected = sorted(test.id() for test in suite)
+            for total in (1, 2, 3, 4, 5):
+                with self.subTest(total=total, tests=len(suite)):
+                    ids = [
+                        test.id()
+                        for shard in range(1, total + 1)
+                        for test in run_tests.select_shard(suite, shard, total)
+                    ]
+                    self.assertEqual(sorted(ids), expected)
+
+    def test_no_test_class_is_split_across_shards(self):
+        for suite in (self.synthetic, _discovered_suite()):
+            for total in (2, 3, 4):
+                owners = {}
+                for shard in range(1, total + 1):
+                    for test in run_tests.select_shard(suite, shard, total):
+                        owners.setdefault(run_tests.class_key(test), set()).add(shard)
+                with self.subTest(total=total):
+                    self.assertEqual(
+                        [key for key, shards in owners.items() if len(shards) > 1],
+                        [],
+                    )
+
+    def test_shards_are_deterministic_and_independent_of_input_order(self):
+        suite = self.synthetic
+        for shard in range(1, 4):
+            first = [test.id() for test in run_tests.select_shard(suite, shard, 3)]
+            again = [test.id() for test in run_tests.select_shard(suite, shard, 3)]
+            reversed_input = [
+                test.id()
+                for test in run_tests.select_shard(list(reversed(suite)), shard, 3)
+            ]
+            with self.subTest(shard=shard):
+                self.assertEqual(first, again)
+                self.assertEqual(sorted(first), sorted(reversed_input))
+
+    def test_largest_shard_is_within_the_greedy_balance_bound(self):
+        # Largest-first assignment guarantees max(load) <= mean + largest class.
+        suite = _discovered_suite()
+        sizes = {}
+        for test in suite:
+            key = run_tests.class_key(test)
+            sizes[key] = sizes.get(key, 0) + 1
+        total = _native_shard_count()
+        counts = [
+            len(run_tests.select_shard(suite, shard, total))
+            for shard in range(1, total + 1)
+        ]
+        mean = len(suite) / total
+        self.assertLessEqual(max(counts) - mean, max(sizes.values()))
+        self.assertLessEqual(max(counts) - min(counts), max(sizes.values()))
+
+    def test_native_shard_count_is_declared_once_and_matched_by_the_matrix(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
+        shards = workflow.split("  test_shards:\n", 1)[1].split("  syntax:\n", 1)[0]
+        matrix = re.search(r"shard: \[([0-9, ]+)\]", shards)
+        self.assertIsNotNone(matrix)
+        self.assertEqual(
+            [int(value) for value in matrix.group(1).split(",")],
+            list(range(1, _native_shard_count() + 1)),
+        )
+        self.assertNotIn("--total 4", workflow)
+        self.assertIn("AI_DOCS_REQUIRED: '1'", shards)
+        # Rulesets require the "Test shard N/<total>" check names.
+        self.assertIn(
+            f"name: Test shard ${{{{ matrix.shard }}}}/{_native_shard_count()}\n",
+            shards,
+        )
+
+
+class ContainerSuiteContractTests(unittest.TestCase):
+    def test_every_container_pattern_matches_a_discovered_module(self):
+        modules = {run_tests.module_name(test) for test in _discovered_suite()}
+        for pattern in run_tests.CONTAINER_SUITE_PATTERNS:
+            with self.subTest(pattern=pattern):
+                self.assertTrue(
+                    any(fnmatch.fnmatchcase(module, pattern) for module in modules),
+                    f"container pattern {pattern!r} matches no test module",
+                )
+
+    def test_container_suite_is_non_empty_and_narrower_than_the_full_suite(self):
+        suite = _discovered_suite()
+        container = run_tests.select_suite(suite, "container")
+        self.assertTrue(container)
+        self.assertLess(len(container), len(suite))
+        modules = {run_tests.module_name(test) for test in container}
+        for required in (
+            "test_container_delivery",
+            "test_db_manager",
+            "test_security_resource_limits",
+            "test_session_auth_cache",
+        ):
+            with self.subTest(module=required):
+                self.assertIn(required, modules)
+
+    def test_container_suite_is_selectable_from_the_command_line(self):
+        runner = Path(run_tests.__file__).resolve()
+        with tempfile.TemporaryDirectory() as directory:
+            output = subprocess.check_output(
+                [sys.executable, str(runner), "--list", "--suite", "container"],
+                cwd=directory,
+                text=True,
+                stderr=subprocess.PIPE,
+            )
+        ids = output.splitlines()
+        self.assertTrue(ids)
+        modules = {test_id.split(".", 1)[0] for test_id in ids}
+        self.assertTrue(
+            all(
+                any(fnmatch.fnmatchcase(module, p) for p in run_tests.CONTAINER_SUITE_PATTERNS)
+                for module in modules
+            )
+        )
+        self.assertEqual(len(ids), len(run_tests.select_suite(_discovered_suite(), "container")))
+
+    def test_container_job_runs_the_container_suite_with_matching_mounts(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
+        container = workflow.split("  container_tests:\n", 1)[1].split("  test:\n", 1)[0]
+        self.assertIn("python /review/tests/run_tests.py --suite container", container)
+        local = (root / "tests/run_sqlcipher_tests.ps1").read_text(encoding="utf-8")
+        # The local SQLCipher runner must keep running the full suite.
+        self.assertIn("python /review/tests/run_tests.py\n", local)
+        self.assertNotIn("--suite", local)
+        mount_pattern = r':(/[^":\s]+):ro"'
+        ci_targets = set(re.findall(mount_pattern, container))
+        local_targets = set(re.findall(mount_pattern, local))
+        self.assertIn("/review/scripts", ci_targets)
+        self.assertEqual(ci_targets - local_targets, set())
 
 
 @unittest.skipUnless(

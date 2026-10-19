@@ -1,5 +1,9 @@
 const { test, expect } = require("@playwright/test");
 
+// Coach status polling is timer-driven. The clock is installed before navigation so the app's
+// own timers run on Playwright's clock, and quiet observation windows are advanced with
+// runFor() instead of waiting on wall-clock time.
+
 function recordStatusPolls(page) {
   const polls = [];
   page.on("request", (request) => {
@@ -8,25 +12,38 @@ function recordStatusPolls(page) {
   return polls;
 }
 
-async function waitForStatusPollIdle(page) {
-  await expect.poll(() => page.evaluate(() => Boolean(state.chatStatusPollInFlight || state.chatStatusTimer))).toBe(false);
+// Request events reach the Node side asynchronously. A round trip to the page after the clock
+// fired its timers gives those events a chance to arrive before counts are compared.
+async function advanceQuietWindow(page, ms) {
+  await page.clock.runFor(ms);
+  await page.evaluate(() => undefined);
 }
 
+// The default poll cadence is 1.5s, so one window of that length lets any poll already
+// scheduled by a previous step fire and finish before a baseline is taken.
+async function settleStatusPolls(page) {
+  await advanceQuietWindow(page, 1_500);
+}
+
+const CHAT_FORM = "#chatForm";
+
 test("idle Coach status is not polled after bootstrap while another tab is open @responsive", async ({ page }) => {
+  await page.clock.install();
   const statusPolls = recordStatusPolls(page);
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
   await expect.poll(() => statusPolls.length).toBeGreaterThanOrEqual(1);
-  await waitForStatusPollIdle(page);
+  await settleStatusPolls(page);
   await page.getByRole("link", { name: "Kalender", exact: true }).click();
   await expect(page.locator("#workoutsPanel")).toBeVisible();
-  await waitForStatusPollIdle(page);
+  await settleStatusPolls(page);
   const baseline = statusPolls.length;
-  await page.waitForTimeout(6_000);
+  await advanceQuietWindow(page, 6_000);
   expect(statusPolls.length - baseline, "status polls while idle").toBe(0);
 });
 
 test("reloading during a running Coach job without the event stream polls until the job finishes, then stops @responsive", async ({ page }) => {
+  await page.clock.install();
   const statusPolls = recordStatusPolls(page);
   let runningResponses = 0;
   // Without the event stream, status polling is the only way to see the job finish.
@@ -47,16 +64,18 @@ test("reloading during a running Coach job without the event stream polls until 
   });
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
-  await expect.poll(() => page.evaluate(() => state.busy)).toBe(true);
+  // The busy state is the observable form control state, not the app's internal busy flag.
+  await expect(page.locator(CHAT_FORM)).toHaveClass(/is-busy/);
   await expect.poll(() => runningResponses).toBe(3);
-  await expect.poll(() => page.evaluate(() => state.busy)).toBe(false);
-  await waitForStatusPollIdle(page);
+  await expect(page.locator(CHAT_FORM)).not.toHaveClass(/is-busy/);
+  await settleStatusPolls(page);
   const baseline = statusPolls.length;
-  await page.waitForTimeout(6_000);
+  await advanceQuietWindow(page, 6_000);
   expect(statusPolls.length - baseline, "status polls after the job finished").toBe(0);
 });
 
 test("with the event stream connected, a running Coach job is checked again when its answer arrives @responsive", async ({ page }) => {
+  await page.clock.install();
   const statusPolls = recordStatusPolls(page);
   let answered = false;
   await page.route("**/api/chat/status", async (route) => {
@@ -72,30 +91,35 @@ test("with the event stream connected, a running Coach job is checked again when
   });
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
-  await expect.poll(() => page.evaluate(() => state.busy)).toBe(true);
+  await expect(page.locator(CHAT_FORM)).toHaveClass(/is-busy/);
+  // Justified internal probe: the SSE "ready" frame is neither a DOM change nor a distinct network
+  // response, so the test waits for the client's own stream-health flag before measuring. Every
+  // assertion below observes requests and control state only.
   await expect.poll(() => page.evaluate(() => stateEventStreamHealthy())).toBe(true);
   // A fast check queued before the stream was ready may still run once.
-  await page.waitForTimeout(2_000);
+  await advanceQuietWindow(page, 2_000);
   const baseline = statusPolls.length;
   // A healthy stream replaces the frequent status polls with a slow safety check.
-  await page.waitForTimeout(5_000);
+  await advanceQuietWindow(page, 5_000);
   expect(statusPolls.length - baseline, "status polls while the stream is connected").toBe(0);
   answered = true;
+  // Stimulus equivalent to an SSE "coach" message from the server; the stream itself is not controllable from the test.
   await page.evaluate(() => handleStateEvent({ type: "coach", lastEventId: "", data: JSON.stringify({ role: "assistant", message_id: 2 }) }));
-  await expect.poll(() => page.evaluate(() => state.busy)).toBe(false);
+  await expect(page.locator(CHAT_FORM)).not.toHaveClass(/is-busy/);
   expect(statusPolls.length - baseline, "the answer event checks the status once").toBe(1);
 });
 
 test("a Coach turn submitted elsewhere triggers one status check while idle @responsive", async ({ page }) => {
+  await page.clock.install();
   const statusPolls = recordStatusPolls(page);
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
   await expect.poll(() => statusPolls.length).toBeGreaterThanOrEqual(1);
-  await waitForStatusPollIdle(page);
+  await settleStatusPolls(page);
   const baseline = statusPolls.length;
   await page.evaluate(() => handleStateEvent({ type: "coach", lastEventId: "", data: JSON.stringify({ role: "user", message_id: 1 }) }));
   await expect.poll(() => statusPolls.length - baseline).toBe(1);
-  await waitForStatusPollIdle(page);
-  await page.waitForTimeout(6_000);
+  await settleStatusPolls(page);
+  await advanceQuietWindow(page, 6_000);
   expect(statusPolls.length - baseline, "only the event-triggered status check").toBe(1);
 });

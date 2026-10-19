@@ -25,6 +25,9 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Single source for the native unit-test shard count. The matrix below must
+  # list 1..PYTHON_TEST_SHARDS literally because `env` is unavailable in `strategy`.
+  PYTHON_TEST_SHARDS: '4'
 
 jobs:
   source:
@@ -51,14 +54,43 @@ jobs:
           EXPECTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || '' }}
         run: python .github/scripts/release_source.py
 
+  image:
+    needs: source
+    name: Build CI image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Build shared CI image
+        run: docker build --tag ai-coach:ci .
+      - name: Export shared CI image
+        run: docker save ai-coach:ci | gzip > ai-coach-ci-image.tar.gz
+      - name: Upload shared CI image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ai-coach-ci-image
+          path: ai-coach-ci-image.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
   test_shards:
     needs: source
+    # Ruleset-required check names: keep the denominator equal to PYTHON_TEST_SHARDS.
     name: Test shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
+    env:
+      # Fail on a missing AGENTS.md instead of silently skipping the AI docs contract.
+      AI_DOCS_REQUIRED: '1'
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,7 +104,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements.txt -r requirements-dev.txt
       - name: Run unit tests
-        run: coverage run tests/run_tests.py --shard "${{ matrix.shard }}" --total 4
+        run: coverage run tests/run_tests.py --shard "${{ matrix.shard }}" --total "$PYTHON_TEST_SHARDS"
       - name: Upload shard coverage
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -99,7 +131,7 @@ jobs:
         run: python -m compileall -q server.py backend tests
 
   container_tests:
-    needs: source
+    needs: [source, image]
     name: Container unit tests
     runs-on: ubuntu-latest
     steps:
@@ -108,8 +140,12 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
-      - name: Build isolated SQLCipher test image
-        run: docker build --tag ai-coach:test .
+      - name: Download shared CI image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ai-coach-ci-image
+      - name: Load shared CI image
+        run: gunzip -c ai-coach-ci-image.tar.gz | docker load
       - name: Run unit tests in the container
         run: >-
           docker run --rm --read-only --security-opt no-new-privileges:true --cap-drop=ALL
@@ -131,8 +167,8 @@ jobs:
           --volume "${GITHUB_WORKSPACE}/e2e:/review/e2e:ro"
           --volume "${GITHUB_WORKSPACE}/.github:/review/.github:ro"
           --volume "${GITHUB_WORKSPACE}/scripts:/review/scripts:ro"
-          --env PYTHONPATH=/app:/review/tests --workdir /app ai-coach:test
-          python /review/tests/run_tests.py
+          --env PYTHONPATH=/app:/review/tests --workdir /app ai-coach:ci
+          python /review/tests/run_tests.py --suite container
 
   test:
     if: always()
@@ -175,23 +211,32 @@ jobs:
       - name: Download shard coverage
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          # Keep each shard in its own directory so a missing shard is named.
           pattern: python-coverage-*
           path: coverage-data
-          merge-multiple: true
       - name: Enforce merged coverage ratchet
         run: |
           set -euo pipefail
-          if [[ "$(find coverage-data -name '.coverage.*' -type f | wc -l)" -ne 4 ]]; then
-            echo "Expected coverage data from all four test shards."
-            exit 1
-          fi
-          coverage combine coverage-data
+          combine_paths=()
+          for shard in $(seq 1 "$PYTHON_TEST_SHARDS"); do
+            directory="coverage-data/python-coverage-${shard}"
+            count=0
+            if [[ -d "$directory" ]]; then
+              count="$(find "$directory" -name '.coverage.*' -type f | wc -l)"
+            fi
+            if [[ "$count" -ne 1 ]]; then
+              echo "::error::Test shard ${shard} of ${PYTHON_TEST_SHARDS} produced ${count} coverage files in ${directory}; expected exactly one."
+              exit 1
+            fi
+            combine_paths+=("$directory")
+          done
+          coverage combine "${combine_paths[@]}"
           coverage report
       - name: Enforce repository quality ratchet
         run: python tools/quality_baseline.py
 
   image_sbom:
-    needs: source
+    needs: [source, image]
     name: Image SBOM
     runs-on: ubuntu-latest
     permissions:
@@ -203,12 +248,16 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
-      - name: Build isolated image for scanning
-        run: docker build --tag ai-coach:security .
+      - name: Download shared CI image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ai-coach-ci-image
+      - name: Load shared CI image
+        run: gunzip -c ai-coach-ci-image.tar.gz | docker load
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          image: ai-coach:security
+          image: ai-coach:ci
           format: spdx-json
           output-file: ai-coach-sbom.spdx.json
           upload-release-assets: false
@@ -221,7 +270,7 @@ jobs:
           retention-days: 30
   e2e:
     if: needs.test.result == 'success'
-    needs: [source, test]
+    needs: [source, test, image]
     name: Browser checks (${{ matrix.project }})
     runs-on: ubuntu-latest
     strategy:
@@ -258,41 +307,74 @@ jobs:
         run: ./node_modules/.bin/playwright install chromium
       - name: Install Chromium system dependencies
         run: ./node_modules/.bin/playwright install-deps chromium
-      - name: Build isolated application image
-        run: docker build --tag ai-coach:e2e .
+      - name: Download shared CI image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ai-coach-ci-image
+      - name: Load shared CI image
+        run: gunzip -c ai-coach-ci-image.tar.gz | docker load
       - name: Run browser smoke and accessibility checks
         shell: bash
         run: |
           set -euo pipefail
           project="${{ matrix.project }}"
-          specs=(e2e/*.spec.js)
+          prefix=ai-coach-e2e
+          base_port=8090
+          # Two fixture slots: spec i uses slot i % 2, so the next fixture can boot while this spec runs.
+          container_name() { echo "$prefix-$(($1 % 2))"; }
+          container_port() { echo "$((base_port + $1 % 2))"; }
+          # Playwright selects the files: desktop lists every file with tests, other projects
+          # keep only the tests whose titles match their config grep (@responsive).
+          spec_list="$(./node_modules/.bin/playwright test --list --project "$project" --reporter=json | node -e '
+            const chunks = [];
+            process.stdin.on("data", (chunk) => chunks.push(chunk));
+            process.stdin.on("end", () => {
+              const files = new Set();
+              const walk = (suite) => {
+                for (const spec of suite.specs || []) files.add(spec.file);
+                for (const child of suite.suites || []) walk(child);
+              };
+              for (const suite of JSON.parse(Buffer.concat(chunks).toString("utf8")).suites || []) walk(suite);
+              for (const file of [...files].sort()) console.log("e2e/" + file);
+            });
+          ')"
+          mapfile -t specs <<< "$spec_list"
+          if [[ "${#specs[@]}" -eq 0 || -z "${specs[0]}" ]]; then
+            echo "Playwright listed no browser specs for $project."
+            exit 1
+          fi
+          current=""
           cleanup() {
             result=$?
-            if [[ "$result" != "0" ]]; then
-              docker inspect --format 'fixture state={{.State.Status}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}}' ai-coach-e2e >&2 || true
-              docker logs ai-coach-e2e >&2 || true
+            if [[ "$result" != "0" && -n "$current" ]]; then
+              docker inspect --format 'fixture state={{.State.Status}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}}' "$current" >&2 || true
+              docker logs "$current" >&2 || true
             fi
-            docker rm --force ai-coach-e2e >/dev/null 2>&1 || true
+            docker rm --force "$prefix-0" >/dev/null 2>&1 || true
+            docker rm --force "$prefix-1" >/dev/null 2>&1 || true
             return "$result"
           }
           trap cleanup EXIT
-          for spec in "${specs[@]}"; do
-            # Desktop covers all contracts. Other jobs run only responsive files.
-            if [[ "$project" != "desktop" ]] && ! grep -q '@responsive' "$spec"; then
-              continue
-            fi
-            cleanup
-            docker run --detach --name ai-coach-e2e --publish 127.0.0.1:8090:8090 \
+          start_fixture() {
+            local index="$1" name port
+            name="$(container_name "$index")"
+            port="$(container_port "$index")"
+            docker rm --force "$name" >/dev/null 2>&1 || true
+            docker run --detach --name "$name" --publish "127.0.0.1:$port:8090" \
               --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
               --pids-limit=256 --memory=1g --cpus=2 --tmpfs /data:uid=100,gid=101,mode=0700 --tmpfs /tmp \
               --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
               --env AI_COACH_DISPOSABLE_FIXTURE=1 \
               --volume "${GITHUB_WORKSPACE}/e2e:/app/e2e:ro" \
-              ai-coach:e2e python /app/e2e/fixture_runtime.py >/dev/null
+              ai-coach:ci python /app/e2e/fixture_runtime.py >/dev/null
+          }
+          wait_healthy() {
+            local index="$1" spec="$2" port
+            port="$(container_port "$index")"
             for attempt in {1..90}; do
-              if curl --fail --silent http://127.0.0.1:8090/api/health >/dev/null && \
-                curl --fail --silent http://127.0.0.1:8090/ >/dev/null; then
-                break
+              if curl --fail --silent "http://127.0.0.1:$port/api/health" >/dev/null && \
+                curl --fail --silent "http://127.0.0.1:$port/" >/dev/null; then
+                return 0
               fi
               if [[ "$attempt" == "90" ]]; then
                 echo "The isolated fixture application did not become healthy for $project ($spec)."
@@ -300,10 +382,30 @@ jobs:
               fi
               sleep 0.5
             done
+          }
+          # Each spec gets a fresh disposable fixture because some specs delete data and sessions.
+          start_fixture 0
+          for i in "${!specs[@]}"; do
+            spec="${specs[$i]}"
+            name="$(container_name "$i")"
+            port="$(container_port "$i")"
+            current="$name"
+            wait_healthy "$i" "$spec"
+            if (( i + 1 < ${#specs[@]} )); then
+              # Point failure diagnostics at the prewarmed slot until it has started.
+              current="$(container_name "$((i + 1))")"
+              start_fixture "$((i + 1))"
+              current="$name"
+            fi
             spec_name="$(basename "$spec" .spec.js)"
             PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/$spec_name" \
+              E2E_BASE_URL="http://127.0.0.1:$port" \
               npm run test:e2e -- "$spec" --project "$project" --output "test-results/$spec_name"
+            docker rm --force "$name" >/dev/null 2>&1 || true
+            current=""
           done
+      # Traces are disabled in CI (playwright.config.cjs): CI artifacts are public and traces
+      # embed the fixture session. playwright/.auth is never uploaded.
       - name: Upload browser failure artifacts
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -316,7 +418,9 @@ jobs:
           retention-days: 7
       - name: Remove isolated fixture application
         if: always()
-        run: docker rm --force ai-coach-e2e >/dev/null 2>&1 || true
+        run: |
+          docker rm --force ai-coach-e2e-0 >/dev/null 2>&1 || true
+          docker rm --force ai-coach-e2e-1 >/dev/null 2>&1 || true
 
   browser:
     if: always()

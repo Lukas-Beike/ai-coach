@@ -20,6 +20,7 @@ from provider_runtime_fakes import (
     acme_freshness_source,
     fake_binding,
 )
+from support import make_config
 
 from backend.config import Config
 from backend.db import DatabaseManager, row_factory
@@ -53,28 +54,6 @@ ACME_AT_KEY = "acme_last_sync_at"
 ACME_ERROR_KEY = "acme_last_sync_error"
 
 
-def _config(**values: Any) -> Config:
-    """Return a real Config with inert values; no test reads a real .env."""
-    defaults: dict[str, Any] = {
-        "port": 8090,
-        "openai_api_key": "",
-        "openai_base_url": "https://api.openai.com/v1",
-        "openai_model": "model",
-        "intervals_api_key": "",
-        "intervals_athlete_id": "0",
-        "garmin_email": "",
-        "garmin_password": "",
-        "garmin_tokenstore": "unused",
-        "garmin_fixture_path": "",
-        "calendar_ical_url": "",
-        "app_password": "",
-        "secure_cookies": False,
-        "data_retention_days": -1,
-    }
-    defaults.update(values)
-    return Config(**defaults)
-
-
 def _inputs(
     *,
     config: Config | None = None,
@@ -89,7 +68,7 @@ def _inputs(
     merged_signals.update(signals or {})
     stored = dict(values or {})
     return FreshnessInputs(
-        config=_config() if config is None else config,
+        config=make_config() if config is None else config,
         get_value=stored.get,
         profile=dict(profile or {}),
         signals=merged_signals,
@@ -122,7 +101,7 @@ class DefaultFreshnessSourceTests(unittest.TestCase):
             with self.subTest(area=area):
                 source = sources[area]
                 inputs = _inputs(
-                    config=_config(intervals_api_key="configured"),
+                    config=make_config(intervals_api_key="configured"),
                     values={at_key: "stored-at", error_key: "stored-error"},
                 )
                 self.assertEqual(source.fallback_at(inputs), "stored-at")
@@ -133,10 +112,10 @@ class DefaultFreshnessSourceTests(unittest.TestCase):
     def test_garmin_is_configured_by_any_single_credential_source(self) -> None:
         source = DEFAULT_FRESHNESS_SOURCES[GARMIN_ID]["data"]
         cases: tuple[tuple[Config, dict[str, bool], bool], ...] = (
-            (_config(garmin_fixture_path="fixture"), {}, True),
-            (_config(garmin_email="athlete@example.test"), {}, True),
-            (_config(), {GARMIN_TOKENSTORE_SIGNAL: True}, True),
-            (_config(), {}, False),
+            (make_config(garmin_fixture_path="fixture"), {}, True),
+            (make_config(garmin_email="athlete@example.test"), {}, True),
+            (make_config(), {GARMIN_TOKENSTORE_SIGNAL: True}, True),
+            (make_config(), {}, False),
         )
         for config, signals, expected in cases:
             with self.subTest(config=config, signals=signals):
@@ -160,7 +139,7 @@ class DefaultFreshnessSourceTests(unittest.TestCase):
     def test_garmin_reads_missing_signals_as_absent_instead_of_raising(self) -> None:
         source = DEFAULT_FRESHNESS_SOURCES[GARMIN_ID]["data"]
         bare = FreshnessInputs(
-            config=_config(),
+            config=make_config(),
             get_value=lambda key: None,
             profile={},
             signals={},
@@ -207,7 +186,7 @@ class DefaultFreshnessSourceTests(unittest.TestCase):
     def test_calendar_reads_stored_settings_and_configured_url(self) -> None:
         source = DEFAULT_FRESHNESS_SOURCES[CALENDAR_ID]["events"]
         inputs = _inputs(
-            config=_config(calendar_ical_url="https://calendar.example.test/feed.ics"),
+            config=make_config(calendar_ical_url="https://calendar.example.test/feed.ics"),
             values={
                 "last_external_calendar_sync_at": "calendar-at",
                 "last_external_calendar_sync_error": "calendar-error",
@@ -290,7 +269,7 @@ class AcmeMockProjectionTests(_DatabaseCase):
         with self.manager.unit_of_work() as db:
             return provider_freshness_state(
                 db,
-                config=_config(),
+                config=make_config(),
                 get_value=lambda key: self.key_values.get(db, key),
                 profile=profile,
                 garmin_has_core_error=False,
@@ -344,7 +323,7 @@ class AcmeMockProjectionTests(_DatabaseCase):
         with self.manager.unit_of_work() as db:
             result = provider_freshness_state(
                 db,
-                config=_config(),
+                config=make_config(),
                 get_value=lambda key: None,
                 profile={},
                 garmin_has_core_error=False,
@@ -362,7 +341,7 @@ class AcmeMockProjectionTests(_DatabaseCase):
         ):
             provider_freshness_state(
                 db,
-                config=_config(),
+                config=make_config(),
                 get_value=lambda key: None,
                 profile={},
                 garmin_has_core_error=False,
@@ -379,7 +358,7 @@ class AcmeMockProjectionTests(_DatabaseCase):
         ):
             provider_freshness_state(
                 db,
-                config=_config(),
+                config=make_config(),
                 get_value=lambda key: None,
                 profile={},
                 garmin_has_core_error=False,
@@ -396,7 +375,7 @@ class AcmeMockStatusTests(_DatabaseCase):
         runtime = _acme_runtime(running=lambda: active["running"])
         self.set_values(**{ACME_AT_KEY: (NOW - timedelta(hours=3)).isoformat()})
         freshness = ProviderFreshnessService(
-            _config(),
+            make_config(),
             self.manager,
             self.key_values,
             lambda: NOW,
@@ -412,7 +391,7 @@ class AcmeMockStatusTests(_DatabaseCase):
         jobs = Mock()
         jobs.list.return_value = []
         status = SyncPublicStateService(
-            _config(garmin_tokenstore=str(Path(self.temporary_directory.name) / "t")),
+            make_config(garmin_tokenstore=str(Path(self.temporary_directory.name) / "t")),
             self.manager,
             self.key_values,
             freshness,
