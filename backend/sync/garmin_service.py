@@ -19,8 +19,10 @@ from backend.providers import garmin_morning
 from backend.providers import http as provider_http
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin import (
+    ExternalCall,
     GarminClientFactory,
     GarminCollectionOptions,
+    collect_garmin_activity_detail,
     collect_garmin_data,
 )
 from backend.sync.gates import ProviderResyncGate
@@ -159,52 +161,8 @@ class GarminRemoteReader:
             chunk_days=self._chunk_days,
             all_days=self._all_sync_days,
         )
-        client = self._client_factory.create(
-            self._config.garmin_email or None,
-            self._config.garmin_password or None,
-            return_on_mfa=True,
-        )
-        login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
-
-        def call_external(
-            service: str,
-            operation: str,
-            call: Callable[[], Any],
-            details: dict[str, Any] | None,
-        ) -> Any:
-            self._raise_if_cancelled(cancel_event)
-            result = provider_http.external_call(
-                service,
-                operation,
-                call,
-                details,
-                logger=self._logger,
-                diagnostic_capture=self._diagnostic_capture,
-                operation_context=operation_context(),
-            )
-            self._raise_if_cancelled(cancel_event)
-            return result
-
-        mfa_status, _ = call_external(
-            GARMIN_ID,
-            "login",
-            lambda: client.login(login_argument),
-            {
-                "email_configured": bool(self._config.garmin_email),
-                "tokenstore_exists": _garmin_tokenstore_present(
-                    self._config, self._garmin_tokens
-                ),
-            },
-        )
-        if mfa_status:
-            self._logger.warning(
-                "Garmin login requires MFA",
-                extra={
-                    "event": "garmin_mfa_required",
-                    "context": {"service": GARMIN_ID, "operation": "login"},
-                },
-            )
-            raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
+        call_external = self._external_call(cancel_event)
+        client, login_argument = self._authenticated_client(call_external)
 
         try:
             payload = collect_garmin_data(
@@ -237,6 +195,86 @@ class GarminRemoteReader:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
         self._raise_if_cancelled(cancel_event)
         return payload, windows
+
+    def fetch_activity_detail(
+        self,
+        provider_activity_id: str,
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        """Collect the bounded detail sets of one Garmin activity."""
+        call_external = self._external_call(cancel_event)
+        client, login_argument = self._authenticated_client(call_external)
+        try:
+            detail = collect_garmin_activity_detail(
+                client,
+                provider_activity_id,
+                external_call=call_external,
+                redact=self._redactor,
+                warn=self._warn,
+                capability_allowed=self._state_service.capability_allowed,
+                capability_failure=self._state_service.record_capability_failure,
+                capability_success=self._state_service.record_capability_success,
+            )
+        finally:
+            # Keep refreshed tokens even when a detail request fails.
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
+        self._raise_if_cancelled(cancel_event)
+        return detail
+
+    def _external_call(self, cancel_event: threading.Event | None) -> ExternalCall:
+        """Wrap SDK calls with the provider transport and cancellation checks."""
+
+        def call_external(
+            service: str,
+            operation: str,
+            call: Callable[[], Any],
+            details: dict[str, Any] | None,
+        ) -> Any:
+            self._raise_if_cancelled(cancel_event)
+            result = provider_http.external_call(
+                service,
+                operation,
+                call,
+                details,
+                logger=self._logger,
+                diagnostic_capture=self._diagnostic_capture,
+                operation_context=operation_context(),
+            )
+            self._raise_if_cancelled(cancel_event)
+            return result
+
+        return call_external
+
+    def _authenticated_client(self, call_external: ExternalCall) -> tuple[Any, str]:
+        """Create the SDK client and log in; MFA stops before any collection."""
+        client = self._client_factory.create(
+            self._config.garmin_email or None,
+            self._config.garmin_password or None,
+            return_on_mfa=True,
+        )
+        login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
+        mfa_status, _ = call_external(
+            GARMIN_ID,
+            "login",
+            lambda: client.login(login_argument),
+            {
+                "email_configured": bool(self._config.garmin_email),
+                "tokenstore_exists": _garmin_tokenstore_present(
+                    self._config, self._garmin_tokens
+                ),
+            },
+        )
+        if mfa_status:
+            self._logger.warning(
+                "Garmin login requires MFA",
+                extra={
+                    "event": "garmin_mfa_required",
+                    "context": {"service": GARMIN_ID, "operation": "login"},
+                },
+            )
+            raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
+        return client, login_argument
 
     def _warn(self, source: str, _message: str, error: BaseException) -> None:
         self._logger.warning(

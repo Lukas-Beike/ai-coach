@@ -323,17 +323,24 @@ class GarminSyncJobOwner:
         morning_body_battery_service: MorningBodyBatteryService,
         garmin_fixture_loader: GarminFixtureLoader,
         all_sync_days: int,
+        activity_detail_service: Any = None,
     ) -> None:
         self._historical_sync = historical_sync
         self._garmin_sync_service = garmin_sync_service
         self._morning_body_battery_service = morning_body_battery_service
         self._garmin_fixture_loader = garmin_fixture_loader
         self._all_sync_days = all_sync_days
+        self._activity_detail_service = activity_detail_service
 
     def execute(
         self, job: Mapping[str, Any], payload: dict[str, Any], reason: str
     ) -> dict[str, Any]:
         job_type = str(job.get("type") or "")
+        if job_type == "activity_details":
+            # One activity, read-only: no window, floor or morning follow-up.
+            if self._activity_detail_service is None:
+                raise AppError(503, "Aktivitätsdetails sind nicht verfügbar.")
+            return self._activity_detail_service.refresh(payload["activity_id"])
         days, historical_end = self._historical_sync.window(
             payload, job_type, lambda: self._sync_days(job_type)
         )

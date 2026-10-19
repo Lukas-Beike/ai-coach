@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 from backend.config import Config
+from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.providers import garmin as garmin_provider
 from backend.sync import garmin, garmin_service
+from backend.sync.garmin_activity_details import GarminActivityDetailService
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
     GarminProjectionService,
@@ -66,6 +69,22 @@ class GarminSyncControl:
     lock_wait_seconds: int
     morning_body_battery_service: Callable[[], MorningBodyBatteryService]
     metric_export: Callable[[], dict[str, Any] | None] | None = None
+
+
+@contextmanager
+def _non_blocking_garmin_guard(coordination: GarminSyncCoordination) -> Iterator[None]:
+    """Hold the resync gate and Garmin's shared lock without waiting for either."""
+    with coordination.operation():
+        if not coordination.acquire():
+            raise AppError(
+                503,
+                "Die aktuelle Garmin-Synchronisierung ist noch nicht abgeschlossen.",
+                reason="provider_busy",
+            )
+        try:
+            yield
+        finally:
+            coordination.release()
 
 
 class GarminAssembly:
@@ -190,11 +209,7 @@ class GarminAssembly:
                 self._redactor.redact_text,
             ),
             self._operation_observer(),
-            GarminSyncCoordination(
-                shared_garmin_sync_lock(),
-                self._resync_gate,
-                wait_seconds=self._lock_wait_seconds,
-            ),
+            self._sync_coordination(),
             GarminSyncLifecycleState(
                 self._database_manager(),
                 self._key_values,
@@ -202,6 +217,32 @@ class GarminAssembly:
                 self._logger,
             ),
             metric_export=self._metric_export,
+        )
+
+    def activity_detail_service(self) -> GarminActivityDetailService:
+        """Compose the on-demand Garmin activity detail refresh.
+
+        The guard shares Garmin's resync gate and lock with the sync service but
+        never waits: a busy provider answers 503 instead of queueing a second read.
+        While the Garmin fixture is active the detail fetch counts as not
+        configured, so fixture mode never reaches the real Garmin SDK.
+        """
+        fixture_loader = self.fixture_loader()
+        reader = self.remote_reader()
+        coordination = self._sync_coordination()
+        return GarminActivityDetailService(
+            database_manager=self._database_manager(),
+            reader=reader,
+            configured=lambda: fixture_loader.path() is None and reader.configured(),
+            guard=lambda: _non_blocking_garmin_guard(coordination),
+            utc_now=self._utc_now,
+        )
+
+    def _sync_coordination(self) -> GarminSyncCoordination:
+        return GarminSyncCoordination(
+            shared_garmin_sync_lock(),
+            self._resync_gate,
+            wait_seconds=self._lock_wait_seconds,
         )
 
     def projection_service(self) -> GarminProjectionService:

@@ -46,6 +46,7 @@ class GarminJobDependencies:
     sync_service: Callable[[], Any]
     morning_body_battery_service: Callable[[], Any]
     fixture_loader: Callable[[], Any]
+    activity_detail_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,9 @@ def build_garmin_owner(
         morning_body_battery_service=garmin.morning_body_battery_service(),
         garmin_fixture_loader=garmin.fixture_loader(),
         all_sync_days=all_sync_days,
+        activity_detail_service=garmin.activity_detail_service()
+        if garmin.activity_detail_service
+        else None,
     )
 
 
