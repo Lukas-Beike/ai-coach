@@ -5,7 +5,16 @@ import re
 from typing import Any
 
 from backend.activities.workout_text import WorkoutTextError, structured_steps
-from backend.providers.intervals_activity_keys import activity_ftp
+from backend.providers.intervals_activity_keys import activity_ftp, activity_lthr
+
+# Upper zone limits (Z1..Z6; everything above is Z7) as percent of the threshold.
+_POWER_ZONE_LIMITS = (55, 75, 90, 105, 120, 150)
+_HR_ZONE_LIMITS = (68, 83, 94, 105, 120, 150)
+_PACE_ZONE_LIMITS = (77.5, 87.7, 94.3, 100, 103.4, 111.5)
+# Heart-rate steps are usually written as percent of max HR; threshold HR is
+# about 90 % of it.
+_LTHR_SHARE_OF_MAX_HR = 0.9
+_ZONE_TARGET = re.compile(r"Z([1-7])(?:\s*-\s*Z([1-7]))?(?:\s+(?:HR|PACE))?")
 
 
 def _number(value: Any) -> float | None:
@@ -14,15 +23,12 @@ def _number(value: Any) -> float | None:
     )
 
 
+def _percent_zone(percent: float, limits: tuple[float, ...]) -> int:
+    return next((index for index, limit in enumerate(limits, 1) if percent <= limit), 7)
+
+
 def _power_zone(percent: float) -> int:
-    return next(
-        (
-            index
-            for index, limit in enumerate((55, 75, 90, 105, 120, 150), 1)
-            if percent <= limit
-        ),
-        7,
-    )
+    return _percent_zone(percent, _POWER_ZONE_LIMITS)
 
 
 def planned_profile(workout: dict[str, Any]) -> dict[str, Any] | None:
@@ -33,20 +39,38 @@ def planned_profile(workout: dict[str, Any]) -> dict[str, Any] | None:
         steps = structured_steps(description, str(workout.get("target") or "AUTO"))
     except WorkoutTextError:
         return None
-    if not steps or any("duration" not in step for step in steps):
+    # Steps are either all timed or all distance-based; the other kind has no
+    # common width axis, so a mixed list gets no profile.
+    axis = "duration" if steps and "duration" in steps[0] else "distance"
+    if not steps or any(axis not in step for step in steps):
         return None
     segments = []
     units = set()
     for step in steps:
-        result = _planned_segment(step)
+        result = _planned_segment(step, axis)
         if result is None:
             return None
         segment, unit = result
         segments.append(segment)
         units.add(unit)
     if len(units) != 1:
-        return None
-    return {"source": "planned", "unit": units.pop(), "segments": segments}
+        # Steps of one kind may mix zone and percent targets (for example
+        # "Z1 HR" and "86-89% HR"); the zone is their common axis.
+        if len({step["kind"] for step in steps}) != 1 or any(
+            segment["zone"] is None for segment in segments
+        ):
+            return None
+        segments = [
+            {**segment, "value": segment["zone"], "end_value": segment["zone"]}
+            for segment in segments
+        ]
+        units = {"zone"}
+    return {
+        "source": "planned",
+        "axis": axis,
+        "unit": units.pop(),
+        "segments": segments,
+    }
 
 
 def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
@@ -56,9 +80,11 @@ def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
     times, values, kind, start, end = streams
     width = (end - start) / 60
     totals, known = _bucket_totals(times, values, kind, start, end)
-    ftp = _number(activity_ftp(activity))
+    threshold = _number(
+        activity_ftp(activity) if kind == "watts" else activity_lthr(activity)
+    )
     segments = [
-        _recorded_segment(total, coverage, width, kind, ftp)
+        _recorded_segment(total, coverage, width, kind, threshold)
         for total, coverage in zip(totals, known, strict=True)
     ]
     if not any(item["value"] is not None for item in segments):
@@ -70,29 +96,30 @@ def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _planned_segment(step: dict[str, Any]) -> tuple[dict[str, Any], str] | None:
+def _planned_segment(
+    step: dict[str, Any], axis: str
+) -> tuple[dict[str, Any], str] | None:
     target = step["target"]
-    zone = re.fullmatch(r"Z([1-7])(?:\s+(?:HR|PACE))?", target)
     numbers = re.findall(r"\d+(?:\.\d+)?", target)
-    if not numbers:
+    if not numbers or ":" in target:
         return None
     low, high = float(numbers[0]), float(numbers[-1])
     value = (low + high) / 2
+    zone = _ZONE_TARGET.fullmatch(target)
+    color: int | None = None
     if zone:
-        color = int(zone[1])
+        color = int(zone[2] or zone[1])
         unit = "zone"
-    elif step["kind"] == "power" and "%" in target:
-        color = _power_zone(value)
-        unit = "%FTP"
+    elif "%" in target and step["kind"] in {"power", "hr", "pace"}:
+        color, unit = _percent_target_zone(step["kind"], target, value)
     else:
-        color = None
         unit = step["kind"]
         if "BPM" in target:
             unit = "bpm"
         elif "W" in target:
             unit = "W"
     segment = {
-        "duration": step["duration"],
+        axis: step[axis],
         "value": low if step["ramp"] else value,
         "end_value": high if step["ramp"] else value,
         "zone": color,
@@ -100,6 +127,19 @@ def _planned_segment(step: dict[str, Any]) -> tuple[dict[str, Any], str] | None:
     }
 
     return segment, unit
+
+
+def _percent_target_zone(kind: str, target: str, percent: float) -> tuple[int, str]:
+    if kind == "power":
+        return _power_zone(percent), "%FTP"
+    if kind == "pace":
+        return _percent_zone(percent, _PACE_ZONE_LIMITS), "%PACE"
+    if "LTHR" in target:
+        return _percent_zone(percent, _HR_ZONE_LIMITS), "%LTHR"
+    return (
+        _percent_zone(percent / _LTHR_SHARE_OF_MAX_HR, _HR_ZONE_LIMITS),
+        "%HR",
+    )
 
 
 def _profile_streams(
@@ -162,12 +202,17 @@ def _bucket_totals(
 
 
 def _recorded_segment(
-    total: float, coverage: float, width: float, kind: str, ftp: float | None
+    total: float, coverage: float, width: float, kind: str, threshold: float | None
 ) -> dict[str, Any]:
     value = total / coverage if coverage >= width * 0.8 else None
     zone = None
-    if value is not None and kind == "watts" and ftp and ftp > 0:
-        zone = _power_zone(value / ftp * 100)
+    if value is not None and threshold and threshold > 0:
+        percent = value / threshold * 100
+        zone = (
+            _power_zone(percent)
+            if kind == "watts"
+            else _percent_zone(percent, _HR_ZONE_LIMITS)
+        )
     label = "Missing"
     if value is not None:
         unit = "W" if kind == "watts" else "bpm"

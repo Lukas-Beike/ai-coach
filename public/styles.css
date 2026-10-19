@@ -85,13 +85,13 @@
   --recording-shadow: rgba(255, 69, 58, .15);
   --disabled-ink: #c9d6d2;
   --disabled-surface: #3b4a46;
-  --training-zone-2: #37b43c;
-  --training-zone-4: #ff9b40;
-  --training-zone-5: #e83b76;
-  --training-zone-7: #7b7389;
-  --training-zone-1: #3db3a0;
-  --training-zone-3: #ffda3e;
-  --training-zone-6: #8b5fe7;
+  --training-zone-2: #2db84b;
+  --training-zone-4: #ff7f0e;
+  --training-zone-5: #e8174f;
+  --training-zone-7: #6a6082;
+  --training-zone-1: #00a98f;
+  --training-zone-3: #ffcb0e;
+  --training-zone-6: #7a45e0;
   --calendar-profile-ink: #8c9895;
   --spinner-track: rgba(255, 255, 255, .35);
   --metric-border: rgba(255, 255, 255, .06);
@@ -786,7 +786,7 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .training-focus-row[data-zone="Z7"] { --zone-color: var(--training-zone-7); }
 .calendar-workout-profile { color: var(--calendar-profile-ink); display: block; width: 100%; height: 48px; margin: 5px 0 2px; overflow: hidden; }
 .calendar-profile-baseline { stroke: var(--line-strong); stroke-width: 1; }
-.calendar-workout-profile polygon { stroke: none; }
+.calendar-workout-profile polygon { fill: currentColor; stroke: none; }
 .calendar-workout-profile [data-zone="1"] { color: var(--training-zone-1); }
 .calendar-workout-profile [data-zone="2"] { color: var(--training-zone-2); }
 .calendar-workout-profile [data-zone="3"] { color: var(--training-zone-3); }
