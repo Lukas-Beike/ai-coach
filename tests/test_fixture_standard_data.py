@@ -2,10 +2,11 @@
 
 import json
 import os
+import sys
 import threading
 import unittest
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -13,16 +14,38 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+# Safe server setup first: temporary DATA_DIR, fake configuration, and no read of a real .env.
+from server_test_support import server
+
 from backend.calendar.ical_mapping import calendar_event_constraints
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
+from backend.http_api import auth as http_auth
 from backend.performance.body import body_history
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.daily_health import daily_energy_expenditure
 from backend.performance.garmin_metrics import garmin_performance_metrics
 from backend.providers.calendar import parse_ical_calendar
-from e2e import fixture_runtime
+
+# Importing the fixture rewrites os.environ and sys.path and replaces shared server
+# callables. Capture those replacements, restore the process state at once, and let
+# setUp re-apply the replacements for this module's tests only.
+_SERVER_HOOKS = (
+    (server.provider_http.JsonHttpClient, "request"),
+    (server.COACH_CONVERSATION, "provision_service"),
+    (server.COACH_CONVERSATION, "response_transport"),
+    (server, "initialise_database"),
+    (server.HTTP_API, "request_handler_class"),
+    (http_auth.RATE_LIMITER, "allow"),
+)
+with ExitStack() as stack:
+    for target, attribute in _SERVER_HOOKS:
+        stack.enter_context(patch.object(target, attribute, getattr(target, attribute)))
+    stack.enter_context(patch.dict(os.environ))
+    stack.enter_context(patch.object(sys, "path", list(sys.path)))
+    from e2e import fixture_runtime
+    _FIXTURE_HOOKS = [getattr(target, attribute) for target, attribute in _SERVER_HOOKS]
 
 V6_UNIT_NAMES = {
     "Fixture swim intervals",
@@ -31,9 +54,25 @@ V6_UNIT_NAMES = {
 }
 
 
+class FixtureImportIsolationTests(unittest.TestCase):
+    """Outside StandardFixtureDataTests, the fixture replacements must not apply."""
+
+    def test_fixture_hooks_and_environment_are_restored_after_import(self):
+        for (target, attribute), fixture_value in zip(_SERVER_HOOKS, _FIXTURE_HOOKS):
+            with self.subTest(attribute=attribute):
+                self.assertIsNot(getattr(target, attribute), fixture_value)
+        self.assertNotEqual(os.environ.get("DATA_DIR"), "/data/coach-fixture-data")
+        # The fixture always allows logins; other modules need the real rate limiter.
+        self.assertNotIn("allow", vars(http_auth.RATE_LIMITER))
+
+
 class StandardFixtureDataTests(unittest.TestCase):
     def setUp(self):
         self.today = date(2026, 10, 6)
+        for (target, attribute), value in zip(_SERVER_HOOKS, _FIXTURE_HOOKS):
+            patcher = patch.object(target, attribute, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def test_standard_performance_metrics_survive_provider_normalization(self):
         garmin = fixture_runtime._fixture_demo_garmin(

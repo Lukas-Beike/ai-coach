@@ -7,7 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.config import Config
+from support import make_config
+
 from backend.observability import Redactor
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.sync.garmin_projection_service import GarminProjectionService
@@ -83,9 +84,7 @@ class _GarminClientFactory:
 
 
 def _config(*, email="", fixture="", tokenstore="synthetic-tokenstore"):
-    return Config(
-        port=8090,
-        openai_api_key="",
+    return make_config(
         openai_base_url="",
         openai_model="",
         intervals_api_key="",
@@ -94,9 +93,7 @@ def _config(*, email="", fixture="", tokenstore="synthetic-tokenstore"):
         garmin_password="synthetic-garmin-password",
         garmin_tokenstore=tokenstore,
         garmin_fixture_path=fixture,
-        calendar_ical_url="",
         app_password="synthetic-app-password",
-        secure_cookies=False,
         data_retention_days=30,
     )
 

@@ -7,11 +7,12 @@ import threading
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
+
+from support import make_config
 
 from backend.config import Config
 from backend.errors import AppError
@@ -136,29 +137,17 @@ class _RemoteReader:
 
 
 def _config(**changes) -> Config:
-    config = Config(
-        port=8080,
-        openai_api_key="",
-        openai_base_url="",
-        openai_model="",
-        intervals_api_key="",
-        intervals_athlete_id="",
-        garmin_email="",
-        garmin_password="",
-        garmin_tokenstore="",
-        garmin_fixture_path="",
-        calendar_ical_url="",
-        app_password="",
-        secure_cookies=False,
-        data_retention_days=30,
-    )
     overrides: dict[str, Any] = {
+        "openai_base_url": "",
+        "openai_model": "",
+        "intervals_athlete_id": "",
+        "data_retention_days": 30,
         "garmin_email": "athlete@example.invalid",
         "garmin_password": "secret",
         "garmin_tokenstore": "missing-tokenstore",
     }
     overrides.update(changes)
-    return replace(config, **overrides)
+    return make_config(**overrides)
 
 
 class GarminSyncServiceTests(unittest.TestCase):

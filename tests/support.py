@@ -10,6 +10,7 @@ from typing import Any
 from unittest.mock import patch
 
 from backend.coach import streams as coach_streams
+from backend.config import Config
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.planning.context import compact_snapshot
 from backend.runtime import clock as runtime_clock
@@ -187,37 +188,53 @@ def create_test_session(server) -> str:
     return token
 
 
+def make_config(**overrides: Any) -> Config:
+    """Return a real, inert Config; tests never read a real .env."""
+    values: dict[str, Any] = {
+        "port": 8090,
+        "openai_api_key": "",
+        "openai_base_url": "https://api.openai.com/v1",
+        "openai_model": "model",
+        "intervals_api_key": "",
+        "intervals_athlete_id": "0",
+        "garmin_email": "",
+        "garmin_password": "",
+        "garmin_tokenstore": "unused",
+        "garmin_fixture_path": "",
+        "calendar_ical_url": "",
+        "app_password": "",
+        "secure_cookies": False,
+        "data_retention_days": -1,
+    }
+    values.update(overrides)
+    return Config(**values)
+
+
+def application_tables(db: Any) -> list[str]:
+    """Discover every application table so reset cannot drift from the schema."""
+    rows = db.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'table' AND substr(name, 1, 7) <> 'sqlite_' "
+        "ORDER BY name"
+    ).fetchall()
+    return [row["name"] for row in rows]
+
+
 def reset_application_state(server) -> None:
-    """Clear disposable application state without invoking a test case lifecycle."""
-    tables = (
-        "messages",
-        "coach_commands",
-        "coach_plan_artifacts",
-        "snapshots",
-        "training_plans",
-        "workout_library",
-        "planned_units",
-        "competitions",
-        "competition_sync_tombstones",
-        "remote_links",
-        "athlete_checkins",
-        "activity_feedback",
-        "plan_adjustments",
-        "coach_action_proposals",
-        "change_history",
-        "provider_refresh_history",
-        "sync_job_items",
-        "sync_jobs",
-        "provider_sync_cursors",
-        "public_event_candidates",
-        "public_event_sources",
-        "external_calendar_events",
-        "sessions",
-        "kv",
-    )
+    """Clear disposable application state without invoking a test case lifecycle.
+
+    All tables are emptied in one transaction with deferred foreign keys, so the
+    delete order is irrelevant. planning_state is re-seeded because a missing
+    singleton row is treated as database corruption by planning revision bumps.
+    """
     with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-        for table in tables:
-            db.execute(f"DELETE FROM {table}")
+        db.execute("PRAGMA defer_foreign_keys = ON")
+        for table in application_tables(db):
+            db.execute(f'DELETE FROM "{table}"')
+        db.execute(
+            "INSERT INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
+            (runtime_clock.utc_now(),),
+        )
     server.ATHLETE_DATA.profile().save({})
     coach_streams.CHAT_STREAM_REGISTRY.clear_state()
 

@@ -674,13 +674,32 @@ python -m compileall -q server.py backend tests
 ```
 
 #### Parallel Sharded CI Runner
-Run test shards matching the GitHub Actions CI pipeline:
+CI splits the native suite into `PYTHON_TEST_SHARDS` shards (currently 4). Each
+shard keeps every `TestCase` class whole, so class-level fixtures such as
+`ServerTestCase.setUpClass` run once per class. Classes are assigned largest-first
+to the least-loaded shard, so the assignment is deterministic and does not depend
+on discovery order. The quality job fails unless every shard uploads exactly one
+coverage file. Run one shard locally, or list its test IDs without running them:
 ```powershell
 python tests/run_tests.py --shard 1 --total 4
+python tests/run_tests.py --shard 1 --total 4 --list
+```
+
+#### Container-Sensitive Suite
+`--suite container` runs only the modules that depend on the container runtime:
+SQLCipher, the read-only non-root runtime, configuration, startup, security limits,
+privacy, and authentication sessions. The CI `container_tests` job runs this subset
+inside the built image. The default `--suite all` runs everything:
+```powershell
+python tests/run_tests.py --suite container --list
 ```
 
 #### Isolated SQLCipher Integration Tests
-Execute full SQLCipher container tests without exposing local host `.env` or data files:
+`tests/run_sqlcipher_tests.ps1` builds the image and runs the full native suite
+(`python /review/tests/run_tests.py`) in a read-only, network-less container, without
+exposing local host `.env` or data files. Only test inputs are mounted from the
+checkout, including `scripts/` read-only for the demo-container contract tests; the
+application code comes from the freshly built image:
 ```powershell
 ./tests/run_sqlcipher_tests.ps1
 ```
@@ -692,8 +711,15 @@ npm ci
 npm run test:e2e
 ```
 Functional contracts run once on desktop. Tests tagged `@responsive` also run on
-all four smaller viewports. CI runs the five projects in independent jobs, with
-a fresh disposable SQLCipher fixture per spec and one worker per invocation.
+all four smaller viewports. CI builds the application image once per run, shares
+it as the `ai-coach-ci-image` artifact with the native container, SBOM and browser
+jobs, and runs the five projects in independent jobs. Each project derives its spec
+list from `playwright test --list --project <project>`: desktop covers every spec
+file, and the other projects run only files whose test titles match `@responsive`.
+Each spec gets a fresh disposable SQLCipher fixture, and the next spec's fixture is
+prewarmed while the current one runs; there is one worker per invocation. Browser
+traces are local-only: CI turns them off because CI artifacts are public and traces
+embed the fixture session.
 Chromium downloads are cached by the locked dependency version; system
 dependencies are installed on every runner. Follow
 `.agents/skills/ai-coach-pwa-e2e/references/browser-validation.md` for safe local

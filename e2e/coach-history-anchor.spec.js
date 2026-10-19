@@ -35,6 +35,9 @@ async function openHistoryFixture(page) {
   await expect(page.locator("#appShell")).toBeVisible();
   await expect(page.locator(`#messages [data-message-id="${firstId}"]`)).toBeAttached();
   await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+  // The history observer ignores intersections until the initial jump to the latest message has
+  // run, and that jump would scroll a reader's earlier scroll back down.
+  await expect.poll(() => page.evaluate(() => !state.chatInitialScrollPending && !state.chatScrollRestoring)).toBe(true);
   await expect(page.locator('#messages [data-page-area="chat"]')).toBeAttached();
   return { firstId };
 }

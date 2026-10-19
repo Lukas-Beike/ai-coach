@@ -21,6 +21,7 @@ from canonical_read_support import (
     make_selector,
     populate,
 )
+from support import make_config
 
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
@@ -31,7 +32,6 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.coach.morning import GarminSleepObservations, ManualMorningCheckinService
-from backend.config import Config
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance import garmin_metrics, garmin_observations
@@ -90,25 +90,6 @@ class _Battery:
         return BODY_BATTERY
 
 
-def _config() -> Config:
-    return Config(
-        port=8090,
-        openai_api_key="",
-        openai_base_url="",
-        openai_model="",
-        intervals_api_key="",
-        intervals_athlete_id="",
-        garmin_email="",
-        garmin_password="synthetic-garmin-password",
-        garmin_tokenstore="synthetic-tokenstore",
-        garmin_fixture_path="synthetic-fixture.json",
-        calendar_ical_url="",
-        app_password="synthetic-app-password",
-        secure_cookies=False,
-        data_retention_days=30,
-    )
-
-
 class _Observations:
     """A fixed list of observations behind the reader port."""
 
@@ -142,7 +123,16 @@ class GarminReadFixture(CanonicalReadFixture):
 
     def _projection_service(self, *, canonical: bool) -> GarminProjectionService:
         selector = make_selector(self)
-        config = _config()
+        config = make_config(
+            openai_base_url="",
+            openai_model="",
+            intervals_athlete_id="",
+            garmin_password="synthetic-garmin-password",
+            garmin_tokenstore="synthetic-tokenstore",
+            garmin_fixture_path="synthetic-fixture.json",
+            app_password="synthetic-app-password",
+            data_retention_days=30,
+        )
         return GarminProjectionService(
             config=config,
             garmin_payload_service=self._payload_service(canonical=canonical),

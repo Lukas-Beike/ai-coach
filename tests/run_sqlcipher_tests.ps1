@@ -13,6 +13,7 @@ $e2eDirectory = Join-Path $repositoryRoot "e2e"
 $playwrightConfig = Join-Path $repositoryRoot "playwright.config.cjs"
 $githubDirectory = Join-Path $repositoryRoot ".github"
 $toolsDirectory = Join-Path $repositoryRoot "tools"
+$scriptsDirectory = Join-Path $repositoryRoot "scripts"
 $pyprojectFile = Join-Path $repositoryRoot "pyproject.toml"
 $dockerfile = Join-Path $repositoryRoot "Dockerfile"
 
@@ -53,6 +54,7 @@ Write-Host "Running the container unit-test suite with a read-only source mount.
     --volume "${githubDirectory}:/review/.github:ro" `
     --volume "${toolsDirectory}:/review/tools:ro" `
     --volume "${toolsDirectory}:/app/tools:ro" `
+    --volume "${scriptsDirectory}:/review/scripts:ro" `
     --env "PYTHONPATH=/app:/review/tests" `
     --workdir /app `
     $ImageTag `

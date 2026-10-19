@@ -33,9 +33,9 @@ from provider_runtime_fakes import (
     acme_descriptor,
     acme_freshness_source,
 )
+from support import make_config
 
 from backend.coach.authorization import request_target_enum
-from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
@@ -169,25 +169,6 @@ def _set_period(provider_id: str, days: Any, all_sync_days: int) -> int:
     raise ValueError(f"period out of range for {provider_id}")
 
 
-def _config(tokenstore: str) -> Config:
-    return Config(
-        port=8090,
-        openai_api_key="",
-        openai_base_url="https://api.openai.com/v1",
-        openai_model="model",
-        intervals_api_key="",
-        intervals_athlete_id="0",
-        garmin_email="",
-        garmin_password="",
-        garmin_tokenstore=tokenstore,
-        garmin_fixture_path="",
-        calendar_ical_url="",
-        app_password="",
-        secure_cookies=False,
-        data_retention_days=-1,
-    )
-
-
 class AcmeOrchestrationCase(unittest.TestCase):
     """Wire every real orchestration owner around one temporary database."""
 
@@ -202,7 +183,9 @@ class AcmeOrchestrationCase(unittest.TestCase):
         self.addCleanup(self.database.close)
         with self.database.unit_of_work() as db:
             initialize_schema(db)
-        self.config = _config(str(root / "garmin-tokenstore-not-created"))
+        self.config = make_config(
+            garmin_tokenstore=str(root / "garmin-tokenstore-not-created")
+        )
         self.key_values = KeyValueRepository(self.clock.iso)
         identifiers = iter(f"job-{index}" for index in range(1, 500))
         self.publisher = Mock(spec=StateEventBuffer)

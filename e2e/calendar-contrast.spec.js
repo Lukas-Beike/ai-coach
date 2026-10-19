@@ -60,7 +60,10 @@ test("@responsive coach planning notice meets AA contrast at rest and on hover i
     const rest = await new AxeBuilder({ page }).include("#coachAdaptivePlanningNotice").withRules(["color-contrast"]).analyze();
     expect(rest.violations).toEqual([]);
     await notice.locator("button").hover();
-    await page.waitForTimeout(250); // let the button's background transition (.16s) finish before axe reads colours
+    // Wait for the button's background transition (.16s) to finish before axe reads colours.
+    await notice.locator("button").evaluate(async (button) => {
+      await Promise.allSettled(button.getAnimations().map((animation) => animation.finished));
+    });
     const hovered = await new AxeBuilder({ page }).include("#coachAdaptivePlanningNotice").withRules(["color-contrast"]).analyze();
     expect(hovered.violations).toEqual([]);
   }

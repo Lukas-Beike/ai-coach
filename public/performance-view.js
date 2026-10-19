@@ -268,6 +268,7 @@ function currentPerformanceValues(metrics, history) {
 function renderCurrentPerformance(metrics, history) {
   metrics = currentPerformanceValues(metrics, history);
   const root = document.getElementById("currentPerformance");
+  rememberAnalysisSectionState(root);
   root.replaceChildren(reportNode("h3", "Aktuelle Leistungswerte"));
   const groups = [
     ["Allgemein", [["max_hr_bpm", "Maximale Herzfrequenz"]]],

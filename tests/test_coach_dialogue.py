@@ -4,8 +4,6 @@ These regressions verify execution, not a language model's recognition quality.
 """
 
 import json
-import shutil
-import subprocess
 import tempfile
 import unittest
 from datetime import UTC, datetime
@@ -1020,17 +1018,6 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         action = classify("save_coach_activity_feedback", ["activity_feedback"])
         self.assertEqual(action["authorization_scope"], ["activity_feedback"])
         self.assertEqual(action["intent"], "local_action")
-
-    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
-    def test_receipt_cards_show_only_unresolved_failures(self):
-        subprocess.run(
-            [
-                "node",
-                "--test",
-                str(Path(__file__).with_name("coach-receipts.test.cjs")),
-            ],
-            check=True,
-        )
 
     def test_coach_starts_with_tools_and_local_dialogue_without_classifier(self):
         result, model = self.turn(
