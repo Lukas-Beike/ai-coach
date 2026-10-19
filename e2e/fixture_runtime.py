@@ -2007,6 +2007,13 @@ def seed_preview_demo():
                 60,
                 "- 15m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 5m 50%\n- 15m 50%",
             ),
+            (
+                4,
+                "Tempolauf nach Distanz",
+                "Run",
+                45,
+                "- 2km Z1 Pace\n- 5km Z2 Pace\n- 1km 100% Pace",
+            ),
             (5, "Grundlagenausfahrt", "Ride", 90, "- 90m 65%"),
         ]
     ]

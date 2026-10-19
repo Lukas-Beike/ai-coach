@@ -207,6 +207,37 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator("#seasonPreparation").getByRole("button", { name: /Vorbereitung besprechen|Vorschau anfragen/ })).toHaveCount(0);
 });
 
+test("@responsive run workouts get zone profiles on the time and the distance axis", async ({ page, request }) => {
+  expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
+  await page.goto("/#plan/overview");
+  await expect(page.locator(".planned-week[open] .planned-day").first()).toBeVisible();
+  const profileOf = async (name) => {
+    const profile = page.locator(".planned-entry").filter({ hasText: name }).locator(".calendar-workout-profile[aria-label='Geplantes Intervallprofil']");
+    await expect(profile).toHaveCount(1);
+    await profile.evaluate((node) => {
+      for (let section = node.closest("details"); section; section = section.parentElement.closest("details")) section.open = true;
+    });
+    await expect(profile).toBeVisible();
+    return profile;
+  };
+
+  const timed = await profileOf("Lockerer Dauerlauf");
+  await expect(timed.locator("title").first()).toContainText("Zeitachse");
+  await expect(timed.locator("polygon")).toHaveAttribute("data-zone", "1");
+
+  const distance = await profileOf("Tempolauf nach Distanz");
+  await expect(distance.locator("title").first()).toContainText("Distanzachse");
+  await expect(distance.locator("polygon")).toHaveCount(3);
+  const shapes = await distance.evaluate((svg) => [...svg.querySelectorAll("polygon")].map((polygon) => {
+    const [first, , , last] = polygon.getAttribute("points").split(" ").map((point) => Number(point.split(",")[0]));
+    return { zone: polygon.dataset.zone, width: last - first, color: getComputedStyle(polygon).color };
+  }));
+  expect(shapes.map((shape) => shape.zone)).toEqual(["1", "2", "4"]);
+  // 2 km : 5 km : 1 km - widths follow the distance, not the number of steps.
+  expect(shapes.map((shape) => Math.round(shape.width / shapes[0].width * 10) / 10)).toEqual([1, 2.5, 0.5]);
+  expect(new Set(shapes.map((shape) => shape.color)).size).toBe(3);
+});
+
 test("@responsive equipment keeps local authority and groups archived sources", async ({ page }) => {
   await page.route("**/api/analysis/training-records", (route) => route.fulfill({ json: { equipment: {
     items: [
