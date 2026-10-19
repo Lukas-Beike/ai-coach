@@ -342,6 +342,28 @@ class GarminSyncServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status, 499)
         backfill.assert_not_called()
 
+    def test_cancel_during_the_backfill_ends_the_sync_as_cancelled(self):
+        def cancelled_backfill(event):
+            event.set()
+            return {"status": "cancelled", "fetched": 0, "empty": 0, "remaining": 1}
+
+        def raising_backfill(event):
+            event.set()
+            raise AppError(499, "synthetic", reason="chat_cancelled")
+
+        for backfill in (cancelled_backfill, raising_backfill):
+            with self.subTest(backfill=backfill.__name__):
+                service = self.make_service(activity_detail_backfill=backfill)
+                with self.assertRaises(AppError) as ctx:
+                    service.sync(cancel_event=threading.Event())
+
+                self.assertEqual(ctx.exception.status, 499)
+                self.assertEqual(
+                    self.writer.calls[-1][1:4], ("cancelled", "cancelled", 100)
+                )
+                self.assertNotIn("completed", [call[1] for call in self.writer.calls])
+                self.assertFalse(self.lock.locked())
+
     def test_backfill_failure_keeps_the_sync_successful_and_hides_the_error(self):
         backfill = Mock(side_effect=RuntimeError("PRIVATE-PROVIDER-PAYLOAD"))
 

@@ -374,27 +374,93 @@ class BackfillBatchTests(_Base):
         self.assertEqual(result["fetched"], 1)
         self.assertEqual(reader.fetched, ["1001"])
 
-    def test_malformed_only_activity_is_marked_so_the_batch_moves_on(self) -> None:
+    def test_malformed_only_activity_is_retried_then_passed_over(self) -> None:
         _seed(
             self.manager,
             [("1001", "2026-10-02 07:00:00"), ("1002", "2026-10-01 07:00:00")],
         )
-        reader = _Details(
-            {
-                "1001": {"activity_id": "1001", "hr_zones": "synthetic malformed"},
-                "1002": _payload("1002"),
-            }
-        )
+        summary = _summary_hash(self.manager, "1001")
+        responses = {
+            "1001": {"activity_id": "1001", "hr_zones": "synthetic malformed"},
+            "1002": _payload("1002"),
+        }
+        for _attempt in range(BACKFILL_RETRY_ATTEMPTS):
+            reader = _Details(responses)
+            result = self.service(reader).backfill()
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["empty"], 0)
+            self.assertEqual(reader.fetched, ["1001"])
 
+        reader = _Details(responses)
         result = self.service(reader).backfill()
-        again = _Details({})
-        self.service(again).backfill()
 
         self.assertEqual(
-            result, {"status": "completed", "fetched": 1, "empty": 1, "remaining": 0}
+            result, {"status": "completed", "fetched": 1, "empty": 0, "remaining": 0}
         )
-        self.assertEqual(reader.fetched, ["1001", "1002"])
-        self.assertEqual(again.calls, [])
+        self.assertEqual(reader.fetched, ["1002"])
+        state = _stored_state(self.key_values)
+        self.assertEqual(state["empty"], {})
+        self.assertEqual(state["retry"], {"1001": [summary, BACKFILL_RETRY_ATTEMPTS]})
+
+    def test_part_dropped_by_the_mapper_is_retried(self) -> None:
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+        summary = _summary_hash(self.manager, "1001")
+
+        first = self.service(
+            _Details({"1001": _payload("1001", hr_zones="synthetic malformed")})
+        ).backfill()
+
+        self.assertEqual(first["fetched"], 1)
+        self.assertNotIn("heart_rate_zones", _stored_kinds(self.manager, "1001"))
+        self.assertEqual(
+            _stored_state(self.key_values)["retry"], {"1001": [summary, 1]}
+        )
+
+        reader = _Details({"1001": _payload("1001")})
+        self.service(reader).backfill()
+
+        self.assertEqual(reader.fetched, ["1001"])
+        self.assertIn("heart_rate_zones", _stored_kinds(self.manager, "1001"))
+        self.assertNotIn("retry", _stored_state(self.key_values))
+
+    def test_retry_state_is_committed_with_the_detail_rows(self) -> None:
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+        summary = _summary_hash(self.manager, "1001")
+        service = self.service(_Details({"1001": _partial("1001")}))
+
+        # The run stops before its final state write.
+        with (
+            patch.object(
+                service, "_save_backfill_state", side_effect=RuntimeError("stop")
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            service.backfill()
+
+        self.assertIn("heart_rate_zones", _stored_kinds(self.manager, "1001"))
+        self.assertEqual(
+            _stored_state(self.key_values)["retry"], {"1001": [summary, 1]}
+        )
+        self.assertEqual(_candidate_ids(self.manager, retry_ids=("1001",)), ["1001"])
+
+    def test_failed_state_write_rolls_back_the_detail_rows(self) -> None:
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+        original_set = self.key_values.set
+        failures = [RuntimeError("synthetic state write failure")]
+
+        def failing_set(db: Any, key: str, value: str) -> None:
+            if failures:
+                raise failures.pop()
+            original_set(db, key, value)
+
+        self.key_values.set = failing_set  # type: ignore[method-assign]
+
+        result = self.service(_Details({"1001": _partial("1001")})).backfill()
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(_stored_kinds(self.manager, "1001"), [])
+        self.assertNotIn("retry", _stored_state(self.key_values))
+        self.assertEqual(_candidate_ids(self.manager), ["1001"])
 
     def test_rate_limit_keeps_arrived_parts_pauses_and_stops_the_batch(self) -> None:
         _seed(

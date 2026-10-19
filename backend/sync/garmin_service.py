@@ -562,6 +562,13 @@ class GarminSyncLifecycleState:
             self._key_value_repository.set(db, key, value)
 
 
+def _log_backfill_failure(error: Exception) -> None:
+    logging.getLogger(__name__).warning(
+        "Automatic Garmin activity detail backfill failed (%s)",
+        type(error).__name__,
+    )
+
+
 class GarminSyncService:
     """Own fixture and remote Garmin synchronization from gate to cleanup."""
 
@@ -769,11 +776,14 @@ class GarminSyncService:
                 counts = self._activity_detail_backfill(cancel_event)
                 if counts is not None:
                     result["activity_details"] = counts
+            except AppError as error:
+                if error.reason == "chat_cancelled":
+                    raise
+                _log_backfill_failure(error)
             except Exception as error:  # noqa: BLE001 - the sync stays successful; never expose provider errors
-                logging.getLogger(__name__).warning(
-                    "Automatic Garmin activity detail backfill failed (%s)",
-                    type(error).__name__,
-                )
+                _log_backfill_failure(error)
+            # A cancel during the backfill ends the sync as cancelled, not completed.
+            self._raise_if_cancelled(cancel_event)
         self._operation_state_writer.write(
             operation_id,
             "completed",

@@ -196,7 +196,7 @@ class GarminActivityDetailService:
         if outcome.status == "completed" and _is_set(cancel_event):
             outcome.status = "cancelled"
         self._save_backfill_state(
-            paused_until=outcome.paused_until, empty=empty, retry=retry
+            paused_until=outcome.paused_until, empty=outcome.empty, retry=outcome.retry
         )
         return _backfill_result(
             outcome.status,
@@ -305,19 +305,28 @@ class GarminActivityDetailService:
             recorded_by=_recorded_by(candidate["recorded_by"]),
             now=observed,
         )
+        # Malformed parts are dropped by the mapper, so they count like failures.
+        incomplete = _incomplete(collected) or bool(mapped.issues)
+        retry = dict(outcome.retry)
+        _note_attempt(
+            retry,
+            provider_activity_id,
+            candidate["summary_sha256"],
+            incomplete=incomplete,
+        )
+        # The retry entry is committed with the detail rows, so a stop before the
+        # final state write cannot leave a partial fetch looking complete.
         stored = bool(mapped.records) and self._store_records(
-            provider_activity_id, mapped, now=observed
+            provider_activity_id,
+            mapped,
+            now=observed,
+            backfill_state=(outcome.empty, retry),
         )
         if stored:
             outcome.fetched += 1
         # A rate limit that stored nothing says nothing about this activity.
         if stored or not collected.get("rate_limited"):
-            _note_attempt(
-                outcome.retry,
-                provider_activity_id,
-                candidate["summary_sha256"],
-                incomplete=_incomplete(collected),
-            )
+            outcome.retry = retry
         if collected.get("rate_limited"):
             # Keep the parts that arrived, then stop until the pause ends.
             outcome.paused_until = _aware(observed) + BACKFILL_RATE_LIMIT_PAUSE
@@ -326,7 +335,7 @@ class GarminActivityDetailService:
         if mapped.records:
             if not stored:
                 outcome.skipped += 1
-        elif _incomplete(collected):
+        elif incomplete:
             # Nothing is marked, so a later sync retries this activity.
             outcome.status = "failed"
             return False
@@ -336,9 +345,17 @@ class GarminActivityDetailService:
         return True
 
     def _store_records(
-        self, provider_activity_id: str, mapped: MappingResult[Any], *, now: str
+        self,
+        provider_activity_id: str,
+        mapped: MappingResult[Any],
+        *,
+        now: str,
+        backfill_state: tuple[dict[str, str], dict[str, tuple[str, int]]] | None = None,
     ) -> bool:
-        """Replace the mapped sets of one active record; False when it is no longer active."""
+        """Replace the mapped sets of one active record; False when it is no longer active.
+
+        ``backfill_state`` (empty marks, retries) is written in the same transaction.
+        """
         with self._database_manager.unit_of_work() as db:
             # Re-check inside the write transaction: the record may have been
             # deleted or merged while the provider call was running.
@@ -356,6 +373,13 @@ class GarminActivityDetailService:
                     mapper_version=MAPPER_VERSION,
                     summary_sha256=summary_sha256,
                     now=now,
+                )
+            if backfill_state is not None:
+                empty, retry = backfill_state
+                self._backfill_key_values().set(
+                    db,
+                    BACKFILL_STATE_KEY,
+                    _encode_backfill_state(paused_until=None, empty=empty, retry=retry),
                 )
         return True
 
@@ -384,16 +408,31 @@ class GarminActivityDetailService:
         retry: dict[str, tuple[str, int]],
     ) -> None:
         key_values = self._backfill_key_values()
-        stored: dict[str, Any] = {"empty": dict(sorted(empty.items()))}
-        if retry:
-            stored["retry"] = {
-                key: [summary, attempts]
-                for key, (summary, attempts) in sorted(retry.items())
-            }
-        if paused_until is not None:
-            stored["paused_until"] = paused_until.isoformat()
         with self._database_manager.unit_of_work() as db:
-            key_values.set(db, BACKFILL_STATE_KEY, json.dumps(stored, sort_keys=True))
+            key_values.set(
+                db,
+                BACKFILL_STATE_KEY,
+                _encode_backfill_state(
+                    paused_until=paused_until, empty=empty, retry=retry
+                ),
+            )
+
+
+def _encode_backfill_state(
+    *,
+    paused_until: datetime | None,
+    empty: dict[str, str],
+    retry: dict[str, tuple[str, int]],
+) -> str:
+    stored: dict[str, Any] = {"empty": dict(sorted(empty.items()))}
+    if retry:
+        stored["retry"] = {
+            key: [summary, attempts]
+            for key, (summary, attempts) in sorted(retry.items())
+        }
+    if paused_until is not None:
+        stored["paused_until"] = paused_until.isoformat()
+    return json.dumps(stored, sort_keys=True)
 
 
 def _map_collected(
