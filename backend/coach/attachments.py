@@ -72,6 +72,8 @@ _FIT_FIELD_SCALES = {
     (20, 5): ("distance_m", 100, 0),
     (20, 6): ("speed_m_s", 1000, 0),
     (20, 13): ("temperature_c", 1, 0),
+    (20, 73): ("enhanced_speed_m_s", 1000, 0),
+    (20, 78): ("enhanced_altitude_m", 5, -500),
     # session message
     (18, 2): ("timestamp", 1, 0),
     (18, 7): ("elapsed_time_s", 1000, 0),
@@ -90,6 +92,16 @@ _FIT_FIELD_SCALES = {
     (18, 34): ("normalized_power_w", 1, 0),
     (18, 35): ("training_stress_score", 10, 0),
     (18, 36): ("intensity_factor", 1000, 0),
+    (18, 124): ("enhanced_avg_speed_m_s", 1000, 0),
+    (18, 125): ("enhanced_max_speed_m_s", 1000, 0),
+}
+# Ordered candidates per base field: the FIT enhanced field is preferred per
+# message; invalid sentinels decode to None and fall through to the base field.
+_FIT_FIELD_PREFERENCES = {
+    (20, 2): (78, 2),
+    (20, 6): (73, 6),
+    (18, 14): (124, 14),
+    (18, 15): (125, 15),
 }
 _FIT_SPORTS = {
     0: "generic",
@@ -377,12 +389,23 @@ def _fit_metric(messages, message_number, field_number):
 
 
 def _fit_scaled(messages, message_number, field_number):
-    meta = _FIT_FIELD_SCALES.get((message_number, field_number))
-    values = _fit_metric(messages, message_number, field_number)
-    if not meta:
-        return values
-    _, scale, offset = meta
-    return [(value / scale) + offset for value in values]
+    """Return one scaled value per message, using the first valid candidate field."""
+    candidates = _FIT_FIELD_PREFERENCES.get(
+        (message_number, field_number), (field_number,)
+    )
+    values = []
+    for number, fields in messages:
+        if number != message_number:
+            continue
+        for candidate in candidates:
+            value = fields.get(candidate)
+            if isinstance(value, (int, float)) and math.isfinite(value):
+                _, scale, offset = _FIT_FIELD_SCALES.get(
+                    (message_number, candidate), (None, 1, 0)
+                )
+                values.append((value / scale) + offset)
+                break
+    return values
 
 
 _FIT_SESSION_METRICS = {
@@ -523,6 +546,15 @@ def _fit_add_record_extrema(messages, summary):
             summary[key] = max(values)
 
 
+def _fit_add_record_max_speed(messages, summary):
+    # Only the maximum is taken from records; average speed needs even sampling.
+    if "max_speed_kmh" in summary:
+        return
+    speeds = _fit_scaled(messages, 20, 6)
+    if speeds:
+        summary["max_speed_kmh"] = round(max(speeds) * 3.6, 3)
+
+
 def _fit_add_record_elevation(messages, summary):
     if "ascent_m" in summary and "descent_m" in summary:
         return
@@ -552,6 +584,7 @@ def fit_summary(data):
     _fit_add_record_timing(messages, summary)
     _fit_add_record_distance(messages, summary)
     _fit_add_record_extrema(messages, summary)
+    _fit_add_record_max_speed(messages, summary)
     _fit_add_record_elevation(messages, summary)
     summary["note"] = (
         "FIT-Werte stammen aus der hochgeladenen Aktivitätsdatei; fehlende Messwerte sind nicht verfügbar."
