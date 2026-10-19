@@ -559,16 +559,12 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(day.locator(".planned-day-health")).toBeVisible();
   await expect(day.locator(".planned-day-calendar")).toBeVisible();
   await expect(day.locator(".planned-entry")).toHaveCount(2);
-  await expect(day.locator(".planned-day-content .planned-day-insights")).toHaveCount(0);
-  await expect(day.locator(".planned-day-insights summary, .planned-day-insights details")).toHaveCount(0);
+  // Weather stays a small symbol in the day heading; its details live in the tooltip, not in a block of their own.
+  await expect(day.locator(".planned-day-insights, .planned-weather-detail, .planned-weather-metrics, .planned-air-quality")).toHaveCount(0);
   await expect(day.locator(".planned-day-metrics")).toHaveCount(0);
-  await expect(day.locator(".planned-weather-detail")).toHaveText("Leicht bewölkt · ⛅ 12° / 21°");
-  await expect(day.locator(".planned-weather-metrics")).toHaveText("0 % Regen · 14 km/h Wind SW · 25 km/h Böen");
-  await expect(day.locator(".planned-air-quality")).toHaveText("AQI 64 (schlecht) · UV 5,2 · Pollen: Birke 1-2");
-  await expect(day.locator(".planned-air-quality")).toHaveAttribute("title", /Deutscher Wetterdienst · Westfälische Tieflandsbucht/);
+  await expect(day.locator(".planned-day-weather")).toHaveAttribute("title", /Leicht bewölkt\n0 % Regen · 14 km\/h Wind SW · 25 km\/h Böen\nAQI 64 \(schlecht\) · UV 5,2 · Pollen: Birke 1-2/);
   await expect(day).not.toContainText("Emsdetten");
   await expect(day).not.toContainText("Open-Meteo");
-  await expect(day.locator(".planned-day-insights")).not.toContainText("Quellen:");
   await expect(day.locator(".planned-day-observations img")).toHaveCount(0);
   const previousDate = await page.evaluate((date) => addDateKey(date, -1), today);
   const previous = page.locator(`.planned-day[data-date="${previousDate}"]`);
@@ -586,8 +582,9 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("title", "Ausführung gegenüber Plan");
   await expect(page.locator(".planned-entry").filter({ hasText: "Grundlagenausfahrt" }).locator(".planned-execution")).toHaveCount(0);
   await expect(day.locator("xpath=ancestor::details[contains(@class,'planned-week')]//span[@class='planned-week-metrics']")).toContainText("Geplant");
-  await expect(previous.locator(".planned-weather-detail")).toHaveAttribute("title", /Gespeicherte Wettervorhersage/);
-  await expect(previous.locator(".planned-weather-metrics")).toHaveText("75 % Regen (max. 14:00 Uhr) · 21,1 km/h Wind");
+  await expect(day.locator(".planned-day-flag")).toHaveText(["AQI 64", "🌿 1-2"]);
+  await expect(previous.locator(".planned-day-flag")).toHaveText(["💧 75 %"]);
+  await expect(previous.locator(".planned-day-weather")).toHaveAttribute("title", /Gespeicherte Wettervorhersage\n75 % Regen \(max\. 14:00 Uhr\) · 21,1 km\/h Wind/);
   const workout = day.locator(".planned-entry").filter({ hasText: "Lockerer Dauerlauf mit Steigerungen" });
   await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 18:30 · 45 min");
   await expect(workout.locator(".planned-session-header")).toContainText("Laufen · 18:30");
@@ -619,9 +616,8 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   expect(await day.evaluate((element) => {
     const heading = element.querySelector(".planned-day-heading").getBoundingClientRect();
     const content = element.querySelector(".planned-day-content").getBoundingClientRect();
-    const insights = element.querySelector(".planned-day-insights").getBoundingClientRect();
     return heading.right <= content.left && element.scrollWidth <= element.clientWidth
-      && insights.bottom <= content.top && insights.left === content.left;
+      && content.top <= heading.top + 1;
   })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await day.screenshot({ path: testInfo.outputPath("planned-agenda.png") });
