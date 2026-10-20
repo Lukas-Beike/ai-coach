@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from contextlib import nullcontext
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import Mock, patch
 
 from backend.errors import AppError
@@ -22,6 +22,34 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         merged = merge_weight_snapshots([first, second], [first])
 
         self.assertEqual(merged, [first, second])
+
+    def test_refresh_merges_legacy_dict_and_raw_window_with_day_85_to_90_samples(self) -> None:
+        service, reader, _manager, writer, _coordination = self.make_service()
+        start = date(2026, 6, 26)
+        existing = {
+            "legacySnapshot": True,
+            "weighIns": [
+                {"date": (start + timedelta(days=offset)).isoformat(), "weight": 68 + offset / 10}
+                for offset in range(85, 91)
+            ],
+        }
+        incoming = {
+            "weighIns": [
+                {"date": "2026-09-19T07:00:00", "weight": 70.5},
+                {"date": "2026-09-19T19:00:00", "weight": 70.7},
+            ],
+            "unit": "kg",
+        }
+        service._payload_service.snapshot.return_value = {"weight": existing}
+        reader.fetch_nutrition_data.return_value = ([incoming], True)
+
+        result = service.refresh("weight", start, date(2026, 9, 24))
+
+        self.assertEqual(result["status"], "ok")
+        persisted = writer.write_nutrition_refresh.call_args.args[1]
+        self.assertEqual(persisted["weight"], [incoming, existing])
+        self.assertEqual(len(persisted["weight"][1]["weighIns"]), 6)
+        self.assertEqual(len(persisted["weight"][0]["weighIns"]), 2)
 
     def test_remote_energy_without_range_api_is_unsupported_without_daily_loop(self) -> None:
         reader = GarminRemoteReader.__new__(GarminRemoteReader)

@@ -140,10 +140,12 @@ def preserve_weight_response(value: Any) -> list[dict[str, Any]]:
 
 def merge_weight_snapshots(incoming: Any, previous: Any) -> list[Any]:
     """Merge raw weigh-in snapshots without collapsing same-day samples."""
-    values = [
-        *(incoming if isinstance(incoming, list) else []),
-        *(previous if isinstance(previous, list) else []),
-    ]
+    values = []
+    for source in (incoming, previous):
+        if isinstance(source, dict):
+            values.append(source)
+        elif isinstance(source, list):
+            values.extend(source)
     merged: list[Any] = []
     seen: set[str] = set()
     for value in values:

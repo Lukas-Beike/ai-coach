@@ -475,7 +475,12 @@ class GarminNutritionRefreshService:
                 for row in (existing if isinstance(existing, list) else [])
                 if not _record_date_in_range(row, start, end)
             ]
-        snapshot[source] = garmin_morning.merge_garmin_records(records, existing)
+        if source == "weight":
+            snapshot[source] = garmin_adapter.merge_weight_snapshots(
+                records, existing
+            )
+        else:
+            snapshot[source] = garmin_morning.merge_garmin_records(records, existing)
         self._mark_nutrition_freshness(
             snapshot, source, start, end, complete, fetched_at
         )
