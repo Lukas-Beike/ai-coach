@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from contextlib import nullcontext
 from datetime import date, timedelta
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from backend.errors import AppError
@@ -23,13 +24,18 @@ class GarminNutritionRefreshTests(unittest.TestCase):
 
         self.assertEqual(merged, [first, second])
 
-    def test_refresh_merges_legacy_dict_and_raw_window_with_day_85_to_90_samples(self) -> None:
+    def test_refresh_merges_legacy_dict_and_raw_window_with_day_85_to_90_samples(
+        self,
+    ) -> None:
         service, reader, _manager, writer, _coordination = self.make_service()
         start = date(2026, 6, 26)
         existing = {
             "legacySnapshot": True,
             "weighIns": [
-                {"date": (start + timedelta(days=offset)).isoformat(), "weight": 68 + offset / 10}
+                {
+                    "date": (start + timedelta(days=offset)).isoformat(),
+                    "weight": 68 + offset / 10,
+                }
                 for offset in range(85, 91)
             ],
         }
@@ -51,11 +57,15 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         self.assertEqual(len(persisted["weight"][1]["weighIns"]), 6)
         self.assertEqual(len(persisted["weight"][0]["weighIns"]), 2)
 
-    def test_remote_energy_without_range_api_is_unsupported_without_daily_loop(self) -> None:
-        reader = GarminRemoteReader.__new__(GarminRemoteReader)
+    def test_remote_energy_without_range_api_is_unsupported_without_daily_loop(
+        self,
+    ) -> None:
+        reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock(spec=["get_user_summary"])
         reader.configured = Mock(return_value=True)
-        reader._external_call = lambda _cancel: lambda _service, _operation, call, _details: call()
+        reader._external_call = lambda _cancel: (
+            lambda _service, _operation, call, _details: call()
+        )
         reader._authenticated_client = lambda _external: (client, "")
         reader._garmin_tokens = None
 
@@ -70,17 +80,22 @@ class GarminNutritionRefreshTests(unittest.TestCase):
     def test_targeted_writer_preserves_snapshot_sync_time_and_coverage(self) -> None:
         key_values = Mock()
         writer = GarminSnapshotWriter(key_values, lambda: None)
-        writer._coverage.persist = Mock()
+        cast(Any, writer._coverage).persist = Mock()
         snapshot = {"synced_at": "old", "daily_stats": [], "sleep": []}
         db = object()
         counters = Mock()
 
-        with patch(
-            "backend.sync.garmin_snapshot_writer.ingest_garmin_payload",
-            return_value=counters,
-        ), patch(
-            "backend.sync.garmin_snapshot_writer.garmin_payload_coverage",
-            side_effect=AssertionError("targeted refresh must not recompute coverage"),
+        with (
+            patch(
+                "backend.sync.garmin_snapshot_writer.ingest_garmin_payload",
+                return_value=counters,
+            ),
+            patch(
+                "backend.sync.garmin_snapshot_writer.garmin_payload_coverage",
+                side_effect=AssertionError(
+                    "targeted refresh must not recompute coverage"
+                ),
+            ),
         ):
             result = writer.write_nutrition_refresh(
                 db, snapshot, "daily_stats", "new", []
@@ -92,14 +107,16 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         key_values.set.assert_called_once()
 
     def test_remote_energy_refresh_prefers_one_range_request(self) -> None:
-        reader = GarminRemoteReader.__new__(GarminRemoteReader)
+        reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock()
         client.get_daily_summaries.return_value = [
             {"calendarDate": "2026-09-23", "totalKilocalories": 2000},
             {"calendarDate": "2026-09-24", "totalKilocalories": 2100},
         ]
         reader.configured = Mock(return_value=True)
-        reader._external_call = lambda _cancel: lambda _service, _operation, call, _details: call()
+        reader._external_call = lambda _cancel: (
+            lambda _service, _operation, call, _details: call()
+        )
         reader._authenticated_client = lambda _external: (client, "")
         reader._garmin_tokens = None
 
@@ -113,13 +130,15 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         client.get_user_summary.assert_not_called()
 
     def test_remote_body_refresh_uses_only_the_weight_range(self) -> None:
-        reader = GarminRemoteReader.__new__(GarminRemoteReader)
+        reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock()
         client.get_weigh_ins.return_value = {
             "weighIns": [{"date": "2026-09-24", "weight": 70.5}]
         }
         reader.configured = Mock(return_value=True)
-        reader._external_call = lambda _cancel: lambda _service, _operation, call, _details: call()
+        reader._external_call = lambda _cancel: (
+            lambda _service, _operation, call, _details: call()
+        )
         reader._authenticated_client = lambda _external: (client, "")
         reader._garmin_tokens = None
 
@@ -135,8 +154,10 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         client.get_weigh_ins.assert_called_once_with("2026-09-01", "2026-09-24")
         client.get_daily_summaries.assert_not_called()
 
-    def test_remote_body_refresh_preserves_raw_history_and_multiple_daily_samples(self) -> None:
-        reader = GarminRemoteReader.__new__(GarminRemoteReader)
+    def test_remote_body_refresh_preserves_raw_history_and_multiple_daily_samples(
+        self,
+    ) -> None:
+        reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock()
         raw = {
             "weighIns": [
@@ -149,7 +170,9 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         }
         client.get_weigh_ins.return_value = raw
         reader.configured = Mock(return_value=True)
-        reader._external_call = lambda _cancel: lambda _service, _operation, call, _details: call()
+        reader._external_call = lambda _cancel: (
+            lambda _service, _operation, call, _details: call()
+        )
         reader._authenticated_client = lambda _external: (client, "")
         reader._garmin_tokens = None
 
@@ -161,8 +184,10 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         self.assertEqual(records, [raw])
         self.assertEqual(len(records[0]["weighIns"]), 4)
 
-    def test_remote_body_refresh_keeps_body_fat_only_measurements_and_normalizes_date(self) -> None:
-        reader = GarminRemoteReader.__new__(GarminRemoteReader)
+    def test_remote_body_refresh_keeps_body_fat_only_measurements_and_normalizes_date(
+        self,
+    ) -> None:
+        reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock()
         client.get_weigh_ins.return_value = {
             "weighIns": [
@@ -175,7 +200,9 @@ class GarminNutritionRefreshTests(unittest.TestCase):
             ]
         }
         reader.configured = Mock(return_value=True)
-        reader._external_call = lambda _cancel: lambda _service, _operation, call, _details: call()
+        reader._external_call = lambda _cancel: (
+            lambda _service, _operation, call, _details: call()
+        )
         reader._authenticated_client = lambda _external: (client, "")
         reader._garmin_tokens = None
 
@@ -219,9 +246,7 @@ class GarminNutritionRefreshTests(unittest.TestCase):
     def test_refresh_reads_and_persists_only_the_selected_garmin_source(self) -> None:
         service, reader, manager, writer, coordination = self.make_service()
 
-        result = service.refresh(
-            "daily_stats", date(2026, 9, 24), date(2026, 9, 24)
-        )
+        result = service.refresh("daily_stats", date(2026, 9, 24), date(2026, 9, 24))
 
         self.assertEqual(result["status"], "ok")
         reader.fetch_nutrition_data.assert_called_once_with(
@@ -229,11 +254,16 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         )
         writer.write_nutrition_refresh.assert_called_once()
         persisted = writer.write_nutrition_refresh.call_args.args[1]
-        self.assertEqual(persisted["daily_stats"], [
-            {"calendarDate": "2026-09-24", "totalKilocalories": 2100},
-            {"calendarDate": "2026-09-23", "totalKilocalories": 2000},
-        ])
-        self.assertEqual(persisted["source_freshness"]["sleep"], {"freshness": "current"})
+        self.assertEqual(
+            persisted["daily_stats"],
+            [
+                {"calendarDate": "2026-09-24", "totalKilocalories": 2100},
+                {"calendarDate": "2026-09-23", "totalKilocalories": 2000},
+            ],
+        )
+        self.assertEqual(
+            persisted["source_freshness"]["sleep"], {"freshness": "current"}
+        )
         self.assertEqual(persisted["synced_at"], "2026-09-23T12:00:00Z")
         self.assertEqual(
             persisted["nutrition_refresh"]["daily_stats"]["2026-09-24"]["freshness"],
@@ -242,7 +272,9 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         manager.unit_of_work.assert_called_once()
         coordination.release.assert_called_once()
 
-    def test_empty_body_refresh_is_partial_and_retains_prior_measurement_as_stale(self) -> None:
+    def test_empty_body_refresh_is_partial_and_retains_prior_measurement_as_stale(
+        self,
+    ) -> None:
         service, reader, _manager, writer, _coordination = self.make_service()
         reader.fetch_nutrition_data.return_value = ([], True)
         snapshot = {
@@ -261,20 +293,22 @@ class GarminNutritionRefreshTests(unittest.TestCase):
             "partial",
         )
 
-    def test_provider_failure_returns_partial_without_persisting_stale_as_fresh(self) -> None:
+    def test_provider_failure_returns_partial_without_persisting_stale_as_fresh(
+        self,
+    ) -> None:
         service, reader, _manager, writer, _coordination = self.make_service()
         reader.fetch_nutrition_data.side_effect = RuntimeError("provider unavailable")
 
-        result = service.refresh(
-            "daily_stats", date(2026, 9, 24), date(2026, 9, 24)
-        )
+        result = service.refresh("daily_stats", date(2026, 9, 24), date(2026, 9, 24))
 
-        self.assertEqual(result, {"status": "partial", "reason": "provider_unavailable"})
+        self.assertEqual(
+            result, {"status": "partial", "reason": "provider_unavailable"}
+        )
         writer.write.assert_not_called()
 
     def test_unconfigured_provider_returns_explicit_partial_result(self) -> None:
         service, reader, _manager, writer, _coordination = self.make_service()
-        service._configured = lambda: False
+        cast(Any, service)._configured = lambda: False
 
         result = service.refresh("weight", date(2026, 9, 1), date(2026, 9, 24))
 

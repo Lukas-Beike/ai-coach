@@ -11,6 +11,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from types import MappingProxyType
+from typing import cast
 
 from backend.canonical.mapping import IssueReason, MappingIssue, MappingResult
 from backend.canonical.records import ActivityRecord, Observation
@@ -119,6 +120,16 @@ def summarize_provider(
 ) -> ProviderCoverage:
     """Summarize one provider's mapped records and mapping issues as counts."""
     days = [observation.observed_on for observation in observations.records]
+    activities_fetched = (
+        stored_at
+        if activities_retrieved_at is _DEFAULT_RETRIEVED_TIME
+        else cast(datetime | None, activities_retrieved_at)
+    )
+    observations_fetched = (
+        stored_at
+        if observations_retrieved_at is _DEFAULT_RETRIEVED_TIME
+        else cast(datetime | None, observations_retrieved_at)
+    )
     return ProviderCoverage(
         provider=provider,
         retrieved_at=stored_at,
@@ -127,16 +138,8 @@ def summarize_provider(
         issue_counts=count_issues((*activities.issues, *observations.issues)),
         first_observed_on=min(days, default=None),
         last_observed_on=max(days, default=None),
-        activities_retrieved_at=(
-            stored_at
-            if activities_retrieved_at is _DEFAULT_RETRIEVED_TIME
-            else activities_retrieved_at
-        ),
-        observations_retrieved_at=(
-            stored_at
-            if observations_retrieved_at is _DEFAULT_RETRIEVED_TIME
-            else observations_retrieved_at
-        ),
+        activities_retrieved_at=activities_fetched,
+        observations_retrieved_at=observations_fetched,
     )
 
 

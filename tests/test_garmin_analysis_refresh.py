@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from contextlib import nullcontext
 from datetime import date
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from backend.errors import AppError
@@ -29,7 +30,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         self.assertEqual(sources["recovery"]["daily_stats"][0], "get_daily_summaries")
 
     def test_recovery_keeps_resting_hr_days_after_one_day_fails(self) -> None:
-        reader = GarminRemoteReader.__new__(GarminRemoteReader)
+        reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock(spec=["get_heart_rates"])
         client.get_heart_rates.side_effect = [
             {"restingHeartRate": 48},
@@ -61,7 +62,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         reader._state_service.record_capability_failure.assert_called_once()
 
     def test_sessions_reader_requests_only_bounded_activities(self) -> None:
-        reader = GarminRemoteReader.__new__(GarminRemoteReader)
+        reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock(spec=["get_activities_by_date"])
         client.get_activities_by_date.return_value = [
             {"activityId": 1, "startTimeLocal": "2026-09-24 09:00:00"}
@@ -85,7 +86,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         )
 
     def test_reader_requests_only_the_selected_area_sources(self) -> None:
-        reader = GarminRemoteReader.__new__(GarminRemoteReader)
+        reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock(spec=["get_daily_training_status"])
         client.get_daily_training_status.return_value = {"calendarDate": "2026-09-24"}
         reader.configured = Mock(return_value=True)
