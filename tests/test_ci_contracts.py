@@ -410,6 +410,8 @@ class CodexReviewWorkflowTests(unittest.TestCase):
             "- name: Rebase eligible pull requests", 1
         )[0]
         self.assertIn("branches:\n      - develop", workflow)
+        self.assertIn("schedule:\n    - cron: '23 * * * *'", workflow)
+        self.assertNotIn("workflow_dispatch", workflow)
         self.assertNotIn("pull_request", workflow.split("jobs:", 1)[0])
         # The checkout is the pushed develop commit; PR files are only data.
         self.assertIn(
@@ -421,14 +423,19 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("ref=$head_sha", align)
         self.assertIn("env -u GH_TOKEN python tools/quality_baseline.py", align)
         self.assertIn("--align-versions", align)
-        self.assertIn('-f sha="$blob_sha"', align)
+        # The commit is rejected when the PR head moved after the reads.
+        self.assertIn("createCommitOnBranch", align)
+        self.assertIn("expectedHeadOid: $head", align)
+        self.assertIn('-f head="$head_sha"', align)
         self.assertIn(
-            'message="build(deps): align quality baseline tool versions"', align
+            'headline: "build(deps): align quality baseline tool versions"', align
         )
+        self.assertNotIn("--method PUT", align)
         self.assertNotIn("pip install", align)
         self.assertNotIn("git push", workflow)
         self.assertIn(
-            "if: ${{ !cancelled() && steps.branch-app-token.outcome == 'success' }}",
+            "if: ${{ !cancelled() && github.event_name == 'push' "
+            "&& steps.branch-app-token.outcome == 'success' }}",
             workflow,
         )
 

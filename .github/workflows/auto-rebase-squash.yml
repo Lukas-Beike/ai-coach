@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - develop
+  # Dependabot can open a tool bump after the last develop push; the schedule
+  # aligns it without waiting. Scheduled runs use the default branch, develop.
+  schedule:
+    - cron: '23 * * * *'
 
 permissions:
   contents: read
@@ -71,12 +75,11 @@ jobs:
             IFS=$'\t' read -r pull_request_number head_ref head_sha <<< "$pull_request"
             # The PR's two data files replace their copies in this throwaway
             # checkout; only trusted develop code runs. Read the exact head
-            # commit; the blob SHA makes the write fail if the branch moved.
+            # commit; expectedHeadOid rejects the write if the branch moved.
             if ! gh api "repos/$REPOSITORY/contents/requirements-dev.txt?ref=$head_sha" \
                 -H "Accept: application/vnd.github.raw+json" > requirements-dev.txt \
               || ! gh api "repos/$REPOSITORY/contents/$baseline_path?ref=$head_sha" \
                 -H "Accept: application/vnd.github.raw+json" > "$baseline_path" \
-              || ! blob_sha="$(gh api "repos/$REPOSITORY/contents/$baseline_path?ref=$head_sha" --jq .sha)" \
               || ! result="$(env -u GH_TOKEN python tools/quality_baseline.py --align-versions)"; then
               echo "::warning::Could not check the quality baseline of PR #$pull_request_number ($head_ref)."
               failed=$((failed + 1))
@@ -86,11 +89,20 @@ jobs:
               continue
             fi
             echo "Aligning quality baseline tool versions in PR #$pull_request_number ($head_ref)."
-            if ! gh api --method PUT "repos/$REPOSITORY/contents/$baseline_path" \
-              -f message="build(deps): align quality baseline tool versions" \
-              -f content="$(base64 -w0 "$baseline_path")" \
-              -f sha="$blob_sha" \
-              -f branch="$head_ref" > /dev/null; then
+            if ! gh api graphql \
+              -f query='mutation($repo: String!, $branch: String!, $head: GitObjectID!, $path: String!, $content: Base64String!) {
+                createCommitOnBranch(input: {
+                  branch: {repositoryNameWithOwner: $repo, branchName: $branch}
+                  expectedHeadOid: $head
+                  message: {headline: "build(deps): align quality baseline tool versions"}
+                  fileChanges: {additions: [{path: $path, contents: $content}]}
+                }) { commit { oid } }
+              }' \
+              -f repo="$REPOSITORY" \
+              -f branch="$head_ref" \
+              -f head="$head_sha" \
+              -f path="$baseline_path" \
+              -f content="$(base64 -w0 "$baseline_path")" > /dev/null; then
               echo "::warning::Could not align the quality baseline of PR #$pull_request_number ($head_ref)."
               failed=$((failed + 1))
             fi
@@ -101,8 +113,9 @@ jobs:
             exit 1
           fi
       - name: Rebase eligible pull requests
-        # A failed alignment must not block rebasing the other pull requests.
-        if: ${{ !cancelled() && steps.branch-app-token.outcome == 'success' }}
+        # A failed alignment must not block rebasing the other pull requests;
+        # only a develop push can make them stale.
+        if: ${{ !cancelled() && github.event_name == 'push' && steps.branch-app-token.outcome == 'success' }}
         env:
           # App-authored updates emit synchronize events and start fresh CI.
           GH_TOKEN: ${{ steps.branch-app-token.outputs.token }}
