@@ -134,28 +134,9 @@ def projected_metric(
 ) -> dict[str, Any]:
     points = metric_points(value, start=start, end=end)
     if metric == "training_readiness_history":
-        for point in points:
-            for field in garmin_perf_fields.PLANNING_READINESS_ALIASES:
-                candidate = point["values"].get(field)
-                if candidate is not None and 0 <= candidate <= 100:
-                    point["value"] = candidate
-                    break
-    if metric == "weekly_training_status":
-        by_date = {point["date"]: point for point in points}
-        for row in _records(value):
-            observed = _observed(row)
-            if observed is None or not start <= observed <= end:
-                continue
-            measured = acute_load_value(row)
-            if measured is None:
-                continue
-            point = by_date.setdefault(
-                observed.isoformat(),
-                {"date": observed.isoformat(), "values": {}, "source": GARMIN_SOURCE},
-            )
-            point["values"]["dailyTrainingLoadAcute"] = measured
-            point["value"] = measured
-        points = [by_date[key] for key in sorted(by_date)]
+        _readiness_values(points)
+    elif metric == "weekly_training_status":
+        points = _weekly_status_points(value, points, start, end)
     return {
         "status": "current" if points else "unavailable",
         "aggregation": aggregation,
@@ -166,3 +147,32 @@ def projected_metric(
         "fetched_at": synced_at,
         "metric": metric,
     }
+
+
+def _readiness_values(points: list[dict[str, Any]]) -> None:
+    for point in points:
+        for field in garmin_perf_fields.PLANNING_READINESS_ALIASES:
+            candidate = point["values"].get(field)
+            if candidate is not None and 0 <= candidate <= 100:
+                point["value"] = candidate
+                break
+
+
+def _weekly_status_points(
+    value: Any, points: list[dict[str, Any]], start: date, end: date
+) -> list[dict[str, Any]]:
+    by_date = {point["date"]: point for point in points}
+    for row in _records(value):
+        observed = _observed(row)
+        if observed is None or not start <= observed <= end:
+            continue
+        measured = acute_load_value(row)
+        if measured is None:
+            continue
+        point = by_date.setdefault(
+            observed.isoformat(),
+            {"date": observed.isoformat(), "values": {}, "source": GARMIN_SOURCE},
+        )
+        point["values"]["dailyTrainingLoadAcute"] = measured
+        point["value"] = measured
+    return [by_date[key] for key in sorted(by_date)]
