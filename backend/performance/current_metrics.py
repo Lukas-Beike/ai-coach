@@ -642,6 +642,21 @@ def current_performance_metrics(
         cycling_max_hr = garmin_metrics["cycling_max_hr_bpm"]
     if garmin_metrics["running_max_hr_bpm"]["value"] is not None:
         running_max_hr = garmin_metrics["running_max_hr_bpm"]
+    garmin_max_hr = [
+        garmin_metrics[key]
+        for key in ("cycling_max_hr_bpm", "running_max_hr_bpm")
+        if garmin_metrics[key]["value"] is not None
+    ]
+    max_hr = max(
+        garmin_max_hr
+        or [
+            item
+            for item in (cycling_max_hr, running_max_hr)
+            if item["value"] is not None
+        ],
+        key=lambda item: item["value"],
+        default=metric(None, "bpm", None),
+    )
     body_metrics = _performance_body_metrics(
         athlete, latest_wellness, profile, garmin_metrics, canonical
     )
@@ -662,5 +677,6 @@ def current_performance_metrics(
         ),
         "cycling_max_hr_bpm": cycling_max_hr,
         "running_max_hr_bpm": running_max_hr,
+        "max_hr_bpm": max_hr,
         **vo2_and_predictions,
     }

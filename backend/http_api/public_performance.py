@@ -12,6 +12,7 @@ from backend.performance.canonical_body import CanonicalBodyInputs, read_body_in
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
+    ReadOnceObservationReader,
     inputs_for_snapshot,
     performance_options,
     read_performance_inputs,
@@ -54,7 +55,9 @@ class PublicPerformanceStateService:
         with source.database_manager().read_snapshot() as db:
             snapshot = self._sync_state_repository.latest_snapshot()
             garmin = self._garmin_payload_service.snapshot_in(db)
-            reader = resolve_reader(source.observation_reader(), db)
+            reader = ReadOnceObservationReader(
+                resolve_reader(source.observation_reader(), db)
+            )
             canonical = read_performance_inputs(
                 reader,
                 db,
@@ -63,7 +66,9 @@ class PublicPerformanceStateService:
                 as_of=today,
             )
             body = _body_inputs(source, reader, db, today)
-            return self._project(snapshot, garmin, canonical, body, today)
+            return self._project(
+                snapshot, garmin, canonical, body, today, observations=reader
+            )
 
     def canonical_inputs(
         self, db: Any, snapshot: Any
@@ -92,6 +97,8 @@ class PublicPerformanceStateService:
         canonical: CanonicalPerformanceInputs | None,
         body: CanonicalBodyInputs | None,
         today: date,
+        *,
+        observations: ObservationReader | None = None,
     ) -> dict[str, Any]:
         profile = self._profile_service.get()
         performance = performance_context.current_performance_context(
@@ -124,8 +131,12 @@ class PublicPerformanceStateService:
         }
         return {
             "performance": performance,
-            ProviderId.GARMIN.value: self._garmin_projection_service.public_state(
-                garmin
+            ProviderId.GARMIN.value: (
+                self._garmin_projection_service.public_state(garmin)
+                if observations is None
+                else self._garmin_projection_service.public_state(
+                    garmin, observations=observations
+                )
             ),
         }
 

@@ -20,7 +20,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, Final, Protocol
 
 from backend.db.manager import background_writer
-from backend.errors import AppError
+from backend.errors import AppError, DatabaseBusyError
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill import BatchReport, CanonicalBackfill
 
@@ -103,6 +103,11 @@ class CanonicalBackfillWorker:
         while not self._stop_event.is_set():
             try:
                 report = self._run_batch(stage)
+            except DatabaseBusyError:
+                # A foreground sync may hold the writer longer than one wait.
+                # Resume the same batch after it releases the writer.
+                self._stop_event.wait(self._poll_seconds)
+                continue
             except AppError as exc:
                 if exc.reason != "maintenance":
                     self._fail(stage, name, exc)

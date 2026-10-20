@@ -46,6 +46,17 @@ test("ratio units such as W/bpm keep significant digits and small efficiencies a
   assert.equal(analysisValue(null, "W/bpm"), "unbekannt");
 });
 
+test("general maximum heart rate preserves the server provider selection", () => {
+  const { currentPerformanceValues } = loadFunctions("performance-view.js", ["currentPerformanceValues"]);
+  const selected = { value: 187, source_provider: "garmin" };
+  const values = currentPerformanceValues({
+    running_max_hr_bpm: selected,
+    cycling_max_hr_bpm: { value: 200, source_provider: "intervals" },
+    max_hr_bpm: selected,
+  });
+  assert.equal(values.max_hr_bpm, selected);
+});
+
 test("race prediction rows exclude body weight and empty states give a reason", () => {
   const { racePredictionRows, racePredictionEmptyReason } = loadFunctions("performance-view.js", ["racePredictionRows", "racePredictionEmptyReason"]);
   const rows = racePredictionRows({

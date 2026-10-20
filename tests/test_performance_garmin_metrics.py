@@ -97,7 +97,7 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         cases = (
             ("speedInMetersPerSecond", 3.8, 263),
             ("thresholdPace", "4:27", 267),
-            ("speed", 0.35833233, 280),
+            ("speed", 0.35833233, 279),
         )
         for key, value, expected in cases:
             with self.subTest(key=key):

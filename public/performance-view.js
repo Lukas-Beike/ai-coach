@@ -256,8 +256,6 @@ function performanceSection(root, title, items, detail = "") {
 
 function currentPerformanceValues(metrics, history) {
   const values = { ...metrics };
-  const pulse = [values.running_max_hr_bpm, values.cycling_max_hr_bpm].filter((item) => item?.value != null && Number.isFinite(Number(item.value))).sort((a, b) => Number(b.value) - Number(a.value))[0];
-  values.max_hr_bpm = pulse;
   const preferred = history?.body?.preferred_providers?.cycling_w_per_kg;
   const points = (history?.body?.windows?.["12w"]?.metrics?.cycling_w_per_kg || []).flatMap((item) => (item.points || []).filter(analysisValidPoint).map((point) => ({ ...point, source: item.source, ..."source_provider" in item ? { source_provider: item.source_provider } : {}, unit: "W/kg" }))).sort((a, b) => b.date.localeCompare(a.date) || Number(isPreferredSource(b, preferred)) - Number(isPreferredSource(a, preferred)));
   // The preferred provider's newest point wins even when another provider is newer; others only fill in when it has none.

@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any
 
 from backend.activities.identity import activity_kind
+from backend.canonical.mapping import coerce_comma_decimal_number
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import freshness as performance_freshness
 from backend.performance import garmin_observations, garmin_weight
@@ -44,7 +45,7 @@ def _garmin_numeric(value: Any) -> float | int | None:
                 "racePredictionTime",
             ),
         )
-    return _as_number(value)
+    return coerce_comma_decimal_number(value)
 
 
 def _garmin_vo2_value(value: Any) -> float | int | None:
@@ -167,15 +168,12 @@ def _garmin_pace_seconds(value: Any) -> float | int | None:
     number = _garmin_numeric(value)
     if number is None or number <= 0:
         return None
-    scaled_garmin_speed = number < 1
-    if scaled_garmin_speed:
+    if number < 1:
         pace = 100 / number
     elif number < 20:
         pace = 1000 / number
     else:
         pace = number
-    if scaled_garmin_speed:
-        pace = round(pace / 5) * 5
     return round(pace) if 120 <= pace <= 900 else None
 
 

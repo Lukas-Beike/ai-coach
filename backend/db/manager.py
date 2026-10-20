@@ -182,6 +182,9 @@ class DatabaseManager:
             if self.password and self.configure:
                 self.configure(connection, self.password)
             connection.execute("PRAGMA foreign_keys = ON")
+            # Bound each connection's page cache to 32 MiB. Canonical performance
+            # reads otherwise repeatedly decrypt pages on large athlete histories.
+            connection.execute("PRAGMA cache_size = -32768")
             if self.row_factory is not None:
                 connection.row_factory = self.row_factory
             return connection
