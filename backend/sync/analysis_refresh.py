@@ -74,13 +74,14 @@ class AnalysisRefreshService:
 
     def _refresh_garmin(self, area: str, days: int | None) -> dict[str, Any]:
         end = self._local_today()
-        window_days = (
-            42
-            if area == "sessions"
-            else 90
-            if area == "performance"
-            else days or (14 if area == "recovery" else 84)
-        )
+        if area == "sessions":
+            window_days = 42
+        elif area == "performance":
+            window_days = 90
+        elif area == "recovery":
+            window_days = days or 14
+        else:
+            window_days = days or 84
         start = end - timedelta(days=window_days - 1)
         return self._garmin_refresh().refresh(area, start, end)
 
