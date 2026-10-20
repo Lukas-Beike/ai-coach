@@ -125,8 +125,61 @@ class QualityBaselineTests(unittest.TestCase):
         self.assertFalse(any("format" in command for command in commands))
 
     def test_tool_version_drift_is_fatal(self):
-        with self.assertRaisesRegex(RuntimeError, "versions"):
+        with self.assertRaisesRegex(RuntimeError, "versions.*--align-versions"):
             quality_baseline.check(self.baseline, {"ruff": "9.0.0"}, [])
+
+    def test_alignment_records_only_the_pinned_tool_versions(self):
+        requirements = (
+            "mypy==2.5.0 \\\n    --hash=sha256:00\n"
+            "mypy-extensions==1.1.0 \\\n    --hash=sha256:11\n"
+            "ruff==0.17.1 \\\n    --hash=sha256:22\n"
+        )
+        baseline = {**self.baseline, "base": "b" * 40, "coverage_evidence": None}
+        aligned = quality_baseline.aligned_baseline(
+            json.dumps(baseline, indent=2) + "\n", requirements
+        )
+        self.assertEqual(
+            json.loads(aligned),
+            {**baseline, "versions": {"ruff": "0.17.1", "mypy": "2.5.0"}},
+        )
+        self.assertIsNone(quality_baseline.aligned_baseline(aligned, requirements))
+
+    def test_alignment_requires_both_pins_and_a_supported_baseline(self):
+        text = json.dumps(self.baseline)
+        with self.assertRaisesRegex(RuntimeError, "pinned mypy"):
+            quality_baseline.aligned_baseline(text, "ruff==0.17.1\nmypy>=2\n")
+        with self.assertRaisesRegex(RuntimeError, "not supported"):
+            quality_baseline.aligned_baseline(
+                json.dumps({**self.baseline, "schema": 2}), "ruff==1.0.0\nmypy==1.0.0\n"
+            )
+
+    def test_align_versions_cli_rewrites_only_the_given_baseline(self):
+        with tempfile.TemporaryDirectory() as temp:
+            baseline = Path(temp) / "baseline.json"
+            requirements = Path(temp) / "requirements-dev.txt"
+            baseline.write_text(json.dumps(self.baseline, indent=2) + "\n")
+            requirements.write_text("ruff==0.17.1\nmypy==2.4.0\n")
+            argv = [
+                "quality_baseline.py",
+                "--align-versions",
+                "--baseline-file",
+                str(baseline),
+                "--requirements",
+                str(requirements),
+            ]
+            output = io.StringIO()
+            with (
+                patch.object(sys, "argv", argv),
+                patch("tools.quality_baseline.collect") as collect,
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(quality_baseline.main(), 0)
+            collect.assert_not_called()
+            self.assertEqual(output.getvalue().strip(), "aligned")
+            self.assertEqual(
+                json.loads(baseline.read_text())["versions"],
+                {"ruff": "0.17.1", "mypy": "2.4.0"},
+            )
 
     def test_all_source_boundaries_and_new_files_are_discovered(self):
         with tempfile.TemporaryDirectory() as directory:

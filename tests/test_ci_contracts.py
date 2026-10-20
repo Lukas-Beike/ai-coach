@@ -267,7 +267,9 @@ class WorkflowSourceTests(unittest.TestCase):
         for project, shards in projects.items():
             with self.subTest(project=project):
                 count = shards[0][1]
-                self.assertEqual(sorted(shards), [(i, count) for i in range(1, count + 1)])
+                self.assertEqual(
+                    sorted(shards), [(i, count) for i in range(1, count + 1)]
+                )
         self.assertIn("index % shards === shard - 1", e2e)
         self.assertIn(
             "browser-test-artifacts-${{ matrix.project }}-${{ matrix.shard }}", e2e
@@ -398,6 +400,37 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertNotIn("actions/checkout", workflow)
         self.assertNotIn("--admin", workflow)
         self.assertNotIn("update-type", workflow)
+
+    def test_dependabot_tool_bumps_align_the_baseline_without_running_pr_code(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/auto-rebase-squash.yml").read_text(
+            encoding="utf-8"
+        )
+        align = workflow.split("- name: Align quality baseline", 1)[1].split(
+            "- name: Rebase eligible pull requests", 1
+        )[0]
+        self.assertIn("branches:\n      - develop", workflow)
+        self.assertNotIn("pull_request", workflow.split("jobs:", 1)[0])
+        # The checkout is the pushed develop commit; PR files are only data.
+        self.assertIn(
+            "persist-credentials: false\n          ref: ${{ github.sha }}", workflow
+        )
+        self.assertIn("--author app/dependabot", align)
+        self.assertIn('startswith("dependabot/")', align)
+        self.assertIn("select(.isCrossRepository == false)", align)
+        self.assertIn("ref=$head_sha", align)
+        self.assertIn("env -u GH_TOKEN python tools/quality_baseline.py", align)
+        self.assertIn("--align-versions", align)
+        self.assertIn('-f sha="$blob_sha"', align)
+        self.assertIn(
+            'message="build(deps): align quality baseline tool versions"', align
+        )
+        self.assertNotIn("pip install", align)
+        self.assertNotIn("git push", workflow)
+        self.assertIn(
+            "if: ${{ !cancelled() && steps.branch-app-token.outcome == 'success' }}",
+            workflow,
+        )
 
     def test_native_review_removes_legacy_release_dispatch(self):
         root = Path(__file__).resolve().parents[1]
@@ -571,7 +604,8 @@ class ShardingContractTests(unittest.TestCase):
         self.assertAlmostEqual(weights["test_shardfixture_delta.D3"], 0.75)
         first = run_tests.select_shard(suite, 1, 2, durations)
         self.assertEqual(
-            {run_tests.class_key(test) for test in first}, {"test_shardfixture_alpha.A1"}
+            {run_tests.class_key(test) for test in first},
+            {"test_shardfixture_alpha.A1"},
         )
         without = run_tests.class_weights(suite, {})
         self.assertEqual(without["test_shardfixture_beta.B1"], 5.0)

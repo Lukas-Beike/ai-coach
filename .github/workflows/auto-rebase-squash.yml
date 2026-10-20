@@ -24,7 +24,92 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
+      # Dependabot runs receive no secrets, so its ruff/mypy bumps are aligned
+      # here: trusted develop code reads the PR files as data and never runs them.
+      - name: Check out trusted develop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+      - name: Align quality baseline tool versions in Dependabot PRs
+        env:
+          GH_TOKEN: ${{ steps.branch-app-token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pull_request_rows="$(
+            gh pr list \
+              --repo "$REPOSITORY" \
+              --base develop \
+              --state open \
+              --author app/dependabot \
+              --limit 1000 \
+              --json number,headRefName,headRefOid,isCrossRepository \
+              --jq '
+                .[]
+                | select(.isCrossRepository == false)
+                | select(.headRefName | startswith("dependabot/"))
+                | [.number, .headRefName, .headRefOid]
+                | @tsv
+              '
+          )"
+          if [[ -z "$pull_request_rows" ]]; then
+            echo "No open Dependabot PR found."
+            exit 0
+          fi
+          mapfile -t pull_requests <<< "$pull_request_rows"
+
+          baseline_path=tests/fixtures/quality_baseline.json
+          work_dir="$(mktemp -d)"
+          failed=0
+          for pull_request in "${pull_requests[@]}"; do
+            IFS=$'\t' read -r pull_request_number head_ref head_sha <<< "$pull_request"
+            requirements="$work_dir/requirements-dev.txt"
+            baseline="$work_dir/quality_baseline.json"
+            # Read the exact head commit; the blob SHA makes the write fail if
+            # the branch moved after these reads.
+            if ! gh api "repos/$REPOSITORY/contents/requirements-dev.txt?ref=$head_sha" \
+                -H "Accept: application/vnd.github.raw+json" > "$requirements" \
+              || ! gh api "repos/$REPOSITORY/contents/$baseline_path?ref=$head_sha" \
+                -H "Accept: application/vnd.github.raw+json" > "$baseline" \
+              || ! blob_sha="$(gh api "repos/$REPOSITORY/contents/$baseline_path?ref=$head_sha" --jq .sha)" \
+              || ! result="$(
+                env -u GH_TOKEN python tools/quality_baseline.py \
+                  --align-versions \
+                  --baseline-file "$baseline" \
+                  --requirements "$requirements"
+              )"; then
+              echo "::warning::Could not check the quality baseline of PR #$pull_request_number ($head_ref)."
+              failed=$((failed + 1))
+              continue
+            fi
+            if [[ "$result" != "aligned" ]]; then
+              continue
+            fi
+            echo "Aligning quality baseline tool versions in PR #$pull_request_number ($head_ref)."
+            if ! gh api --method PUT "repos/$REPOSITORY/contents/$baseline_path" \
+              -f message="build(deps): align quality baseline tool versions" \
+              -f content="$(base64 -w0 "$baseline")" \
+              -f sha="$blob_sha" \
+              -f branch="$head_ref" > /dev/null; then
+              echo "::warning::Could not align the quality baseline of PR #$pull_request_number ($head_ref)."
+              failed=$((failed + 1))
+            fi
+          done
+
+          if ((failed > 0)); then
+            echo "Could not align $failed Dependabot pull request(s); see the warnings above."
+            exit 1
+          fi
       - name: Rebase eligible pull requests
+        # A failed alignment must not block rebasing the other pull requests.
+        if: ${{ !cancelled() && steps.branch-app-token.outcome == 'success' }}
         env:
           # App-authored updates emit synchronize events and start fresh CI.
           GH_TOKEN: ${{ steps.branch-app-token.outputs.token }}

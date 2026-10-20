@@ -15,6 +15,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "tests/fixtures/quality_baseline.json"
+REQUIREMENTS = ROOT / "requirements-dev.txt"
+TOOLS = ("ruff", "mypy")
 # Line and column are reported for humans but are not debt identity, so an
 # unrelated edit that moves a known diagnostic does not fail the ratchet.
 IDENTITY_FIELDS = ("tool", "path", "code", "message_sha256")
@@ -80,7 +82,7 @@ def collect(root: Path) -> tuple[dict[str, str], list[dict]]:
     if not files:
         raise RuntimeError("No Python source files discovered")
     versions = {}
-    for tool in ("ruff", "mypy"):
+    for tool in TOOLS:
         output = run([tool, "--version"], root, (0,))
         match = re.search(r"\b\d+\.\d+\.\d+\b", output)
         if not match:
@@ -148,9 +150,43 @@ def compare(expected: list[dict], actual: list[dict]) -> tuple[list[dict], list[
     return added, obsolete
 
 
+def pinned_versions(requirements: str) -> dict[str, str]:
+    versions = {}
+    for tool in TOOLS:
+        match = re.search(
+            rf"^{tool}==(\d+\.\d+\.\d+)(?![\w.])", requirements, flags=re.MULTILINE
+        )
+        if not match:
+            raise RuntimeError(f"Cannot identify the pinned {tool} version")
+        versions[tool] = match.group(1)
+    return versions
+
+
+def aligned_baseline(baseline_text: str, requirements: str) -> str | None:
+    """Return the baseline with pinned tool versions, or None when they already match.
+
+    Only the version record changes; CI still proves the diagnostics under the
+    new tools, so a bump that adds findings keeps failing for a person to fix.
+    """
+    baseline = json.loads(baseline_text)
+    if baseline.get("schema") != 1 or set(baseline.get("versions", {})) != set(TOOLS):
+        raise RuntimeError("Quality baseline schema or tools are not supported")
+    versions = pinned_versions(requirements)
+    if baseline["versions"] == versions:
+        return None
+    baseline["versions"] = versions
+    return json.dumps(baseline, indent=2) + "\n"
+
+
 def check(baseline: dict, versions: dict[str, str], diagnostics: list[dict]) -> int:
-    if baseline["schema"] != 1 or baseline["versions"] != versions:
-        raise RuntimeError("Quality baseline schema or tool versions do not match")
+    if baseline["schema"] != 1:
+        raise RuntimeError("Quality baseline schema does not match")
+    if baseline["versions"] != versions:
+        raise RuntimeError(
+            f"Quality baseline tool versions {baseline['versions']} do not match "
+            f"installed {versions}. Run `python tools/quality_baseline.py "
+            "--align-versions` and commit tests/fixtures/quality_baseline.json."
+        )
     if any(
         item.get("tool") not in {"ruff", "mypy"}
         for item in [*baseline["diagnostics"], *diagnostics]
@@ -179,7 +215,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--snapshot", action="store_true")
     parser.add_argument("--base")
+    parser.add_argument(
+        "--align-versions",
+        action="store_true",
+        help="record the requirements-dev.txt tool pins without running the tools",
+    )
+    parser.add_argument("--baseline-file", type=Path, default=BASELINE)
+    parser.add_argument("--requirements", type=Path, default=REQUIREMENTS)
     args = parser.parse_args()
+    if args.align_versions:
+        aligned = aligned_baseline(
+            args.baseline_file.read_text(encoding="utf-8"),
+            args.requirements.read_text(encoding="utf-8"),
+        )
+        if aligned is not None:
+            args.baseline_file.write_text(aligned, encoding="utf-8")
+        print("aligned" if aligned is not None else "unchanged")
+        return 0
     versions, diagnostics = collect(ROOT)
     if args.snapshot:
         if not args.base or not re.fullmatch(r"[0-9a-f]{40}", args.base):
@@ -192,8 +244,7 @@ def main() -> int:
                     "base": args.base,
                     "versions": versions,
                     "diagnostics": [
-                        identity(item)
-                        for item in sorted(diagnostics, key=identity_key)
+                        identity(item) for item in sorted(diagnostics, key=identity_key)
                     ],
                     "coverage_evidence": current.get("coverage_evidence"),
                 },
