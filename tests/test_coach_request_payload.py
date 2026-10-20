@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from typing import Any
 from unittest.mock import Mock
 
 from backend.coach import dialogue
@@ -123,9 +124,10 @@ class CoachRequestPayloadTests(unittest.TestCase):
                 with self.assertLogs("intervals_coach", level="INFO") as logs:
                     self.build(has_prior_openai_attachments=True, **overrides)
                 record = logs.records[0]
-                self.assertEqual(record.event, "coach_request_sizes")
-                self.assertEqual(record.context["attachment_mode"], expected)
-                self.assertNotIn("current turn", str(record.context))
+                self.assertEqual(getattr(record, "event", None), "coach_request_sizes")
+                context = getattr(record, "context", {})
+                self.assertEqual(context["attachment_mode"], expected)
+                self.assertNotIn("current turn", str(context))
 
     def test_advisory_request_adds_no_mutation_instruction(self) -> None:
         model_instructions, payload = self.build(allow_mutations=False)
@@ -196,7 +198,7 @@ class CoachRequestPayloadTests(unittest.TestCase):
         self,
     ) -> None:
         message = "Synthetic current question with spaces and \u00e4"
-        context = {
+        context: dict[str, Any] = {
             **self.context,
             "current_user_message_id": 24,
             "messages": [

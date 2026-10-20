@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from backend.coach.conversation import CoachAttachmentContextService
 from backend.db import DatabaseManager, row_factory
@@ -34,7 +35,7 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
         self.database_manager.close()
         self.temp_dir.cleanup()
 
-    def _message(self, message_id: int, attachments: list[dict[str, object]]) -> None:
+    def _message(self, message_id: int, attachments: list[dict[str, Any]]) -> None:
         with self.database_manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO messages(id, role, content, created_at, attachments) VALUES (?, 'user', '', '', ?)",
@@ -55,7 +56,14 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
         attachment = {"type": "image", "name": "today.png", "data": "raw"}
         self._message(1, [{"type": "gpx", "name": "route.gpx"}])
         self._message(2, [attachment])
-        self._command("prior", {"ai_provider": "openai", "user_message_id": 1})
+        self._command(
+            "prior",
+            {
+                "ai_provider": "openai",
+                "user_message_id": 1,
+                "openai_response_id": "resp-1",
+            },
+        )
 
         attachments, has_prior, within_window = self.service.load_for_receipt(
             {"user_message_id": 2}
@@ -81,12 +89,26 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
         self,
     ) -> None:
         self._message(1, [{"type": "image", "name": "old.png"}])
-        self._command("prior", {"ai_provider": "openai", "user_message_id": 1})
+        self._command(
+            "prior",
+            {
+                "ai_provider": "openai",
+                "user_message_id": 1,
+                "openai_response_id": "resp-1",
+            },
+        )
         for message_id in (2, 3, 4, 5):
             self._message(message_id, [])
         # The newest message is the attachment turn itself and counts too.
         self._message(6, [{"type": "image", "name": "new.png"}])
-        self._command("newer", {"ai_provider": "openai", "user_message_id": 6})
+        self._command(
+            "newer",
+            {
+                "ai_provider": "openai",
+                "user_message_id": 6,
+                "openai_response_id": "resp-6",
+            },
+        )
         self._message(7, [])
         self._message(8, [])
         self._message(9, [])
@@ -101,7 +123,14 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
         self,
     ) -> None:
         self._message(1, [{"type": "image", "name": "old.png"}])
-        self._command("prior", {"ai_provider": "openai", "user_message_id": 1})
+        self._command(
+            "prior",
+            {
+                "ai_provider": "openai",
+                "user_message_id": 1,
+                "openai_response_id": "resp-1",
+            },
+        )
         for message_id in (2, 3, 4, 5):
             self._message(message_id, [])
 
@@ -109,6 +138,17 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
         self.assertTrue(self.service.load_for_receipt({"user_message_id": 4})[2])
         self.assertFalse(self.service.load_for_receipt({"user_message_id": 5})[2])
         self.assertTrue(self.service.load_for_receipt({"user_message_id": 5})[1])
+
+    def test_retention_window_ignores_attachment_turns_that_never_reached_openai(
+        self,
+    ) -> None:
+        self._message(1, [{"type": "image", "name": "failed.png"}])
+        self._command("failed", {"ai_provider": "openai", "user_message_id": 1})
+        self._message(2, [])
+
+        self.assertEqual(
+            self.service.load_for_receipt({"user_message_id": 2}), ([], False, False)
+        )
 
     def test_retention_window_ignores_other_provider_attachment_turns(self) -> None:
         self._message(1, [{"type": "image", "name": "other.png"}])
@@ -125,7 +165,14 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
         self._message(1, [{"type": "image", "name": "old.png"}])
         self._message(2, [])
         self._message(3, [{"type": "image", "name": "later.png"}])
-        self._command("later", {"ai_provider": "openai", "user_message_id": 3})
+        self._command(
+            "later",
+            {
+                "ai_provider": "openai",
+                "user_message_id": 3,
+                "openai_response_id": "resp-3",
+            },
+        )
         self._command("text-id", {"ai_provider": "openai", "user_message_id": "1"})
         self._command("no-id", {"ai_provider": "openai"})
         self._command("list", {"ai_provider": "openai"})
@@ -136,7 +183,14 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
         _, has_prior, _ = self.service.load_for_receipt({"user_message_id": 2})
 
         self.assertFalse(has_prior)
-        self._command("prior", {"ai_provider": "openai", "user_message_id": 1})
+        self._command(
+            "prior",
+            {
+                "ai_provider": "openai",
+                "user_message_id": 1,
+                "openai_response_id": "resp-1",
+            },
+        )
         self.assertTrue(self.service.load_for_receipt({"user_message_id": 2})[1])
 
     def test_prior_detection_ignores_a_prior_message_without_attachments(
@@ -144,7 +198,14 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
     ) -> None:
         self._message(1, [])
         self._message(2, [])
-        self._command("prior", {"ai_provider": "openai", "user_message_id": 1})
+        self._command(
+            "prior",
+            {
+                "ai_provider": "openai",
+                "user_message_id": 1,
+                "openai_response_id": "resp-1",
+            },
+        )
 
         self.assertEqual(
             self.service.load_for_receipt({"user_message_id": 2}), ([], False, False)
