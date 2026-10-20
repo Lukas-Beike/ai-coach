@@ -243,43 +243,13 @@ def _collect_daily_stats(
         source, {"windows": len(windows), "records": 0, "complete": True}
     )
     for window_start, window_end in windows:
-        covered: set[str] = set()
-        range_fetch = getattr(client, "get_daily_summaries", None)
-        if source == "daily_stats" and callable(range_fetch):
-            try:
-                response = external_call(
-                    "garmin",
-                    source,
-                    partial(
-                        range_fetch, window_start.isoformat(), window_end.isoformat()
-                    ),
-                    {"start": window_start.isoformat(), "end": window_end.isoformat()},
-                )
-                records = response.get("data") if isinstance(response, dict) else None
-                if not isinstance(records, list) or any(
-                    not isinstance(row, dict) for row in records
-                ):
-                    raise ValueError("Invalid Garmin daily summaries response")
-                for row in records:
-                    day = (
-                        row.get("calendarDate")
-                        or row.get("summaryDate")
-                        or row.get("date")
-                    )
-                    try:
-                        observed = (
-                            date.fromisoformat(day[:10])
-                            if isinstance(day, str)
-                            else None
-                        )
-                    except ValueError:
-                        observed = None
-                    if observed is not None and window_start <= observed <= window_end:
-                        payload.setdefault(source, []).append(row)
-                        covered.add(observed.isoformat())
-                        stats["records"] = int(stats["records"]) + 1
-            except Exception:  # noqa: BLE001 - fall back to the existing per-day reader.
-                covered.clear()
+        covered = (
+            _collect_daily_summaries_window(
+                client, window_start, window_end, payload, stats, external_call
+            )
+            if source == "daily_stats"
+            else set()
+        )
         current = window_start
         while current <= window_end:
             if current.isoformat() not in covered:
@@ -287,6 +257,47 @@ def _collect_daily_stats(
                     fetch, current, payload, stats, external_call, redact, warn, source
                 )
             current += timedelta(days=1)
+
+
+def _collect_daily_summaries_window(
+    client: Any,
+    start: date,
+    end: date,
+    payload: dict[str, Any],
+    stats: dict[str, Any],
+    external_call: ExternalCall,
+) -> set[str]:
+    fetch = getattr(client, "get_daily_summaries", None)
+    if not callable(fetch):
+        return set()
+    try:
+        response = external_call(
+            "garmin",
+            "daily_stats",
+            partial(fetch, start.isoformat(), end.isoformat()),
+            {"start": start.isoformat(), "end": end.isoformat()},
+        )
+        records = response.get("data") if isinstance(response, dict) else None
+        if not isinstance(records, list) or any(
+            not isinstance(row, dict) for row in records
+        ):
+            return set()
+    except Exception:  # noqa: BLE001 - the per-day reader reports any actual gaps.
+        return set()
+    accepted: list[dict[str, Any]] = []
+    covered: set[str] = set()
+    for row in records:
+        day = row.get("calendarDate") or row.get("summaryDate") or row.get("date")
+        try:
+            observed = date.fromisoformat(day[:10]) if isinstance(day, str) else None
+        except ValueError:
+            observed = None
+        if observed is not None and start <= observed <= end:
+            accepted.append(row)
+            covered.add(observed.isoformat())
+    payload.setdefault("daily_stats", []).extend(accepted)
+    stats["records"] = int(stats["records"]) + len(accepted)
+    return covered
 
 
 def _collect_resting_hr(
