@@ -243,11 +243,49 @@ def _collect_daily_stats(
         source, {"windows": len(windows), "records": 0, "complete": True}
     )
     for window_start, window_end in windows:
+        covered: set[str] = set()
+        range_fetch = getattr(client, "get_daily_summaries", None)
+        if source == "daily_stats" and callable(range_fetch):
+            try:
+                response = external_call(
+                    "garmin",
+                    source,
+                    partial(
+                        range_fetch, window_start.isoformat(), window_end.isoformat()
+                    ),
+                    {"start": window_start.isoformat(), "end": window_end.isoformat()},
+                )
+                records = response.get("data") if isinstance(response, dict) else None
+                if not isinstance(records, list) or any(
+                    not isinstance(row, dict) for row in records
+                ):
+                    raise ValueError("Invalid Garmin daily summaries response")
+                for row in records:
+                    day = (
+                        row.get("calendarDate")
+                        or row.get("summaryDate")
+                        or row.get("date")
+                    )
+                    try:
+                        observed = (
+                            date.fromisoformat(day[:10])
+                            if isinstance(day, str)
+                            else None
+                        )
+                    except ValueError:
+                        observed = None
+                    if observed is not None and window_start <= observed <= window_end:
+                        payload.setdefault(source, []).append(row)
+                        covered.add(observed.isoformat())
+                        stats["records"] = int(stats["records"]) + 1
+            except Exception:  # noqa: BLE001 - fall back to the existing per-day reader.
+                covered.clear()
         current = window_start
         while current <= window_end:
-            _collect_daily_stats_day(
-                fetch, current, payload, stats, external_call, redact, warn, source
-            )
+            if current.isoformat() not in covered:
+                _collect_daily_stats_day(
+                    fetch, current, payload, stats, external_call, redact, warn, source
+                )
             current += timedelta(days=1)
 
 
@@ -430,6 +468,18 @@ def _collect_historic_metrics(
             ),
             "weekly",
         ),
+        (
+            "training_readiness_history",
+            getattr(client, "get_training_readiness_range", None),
+            lambda fetch: fetch(start.isoformat(), end.isoformat()),
+            "daily",
+        ),
+        (
+            "weekly_training_status",
+            getattr(client, "get_weekly_training_status", None),
+            lambda fetch: fetch(start.isoformat(), end.isoformat()),
+            "weekly",
+        ),
     )
     for key, fetch, invoke, aggregation in requests:
         stats = pagination.setdefault(
@@ -591,6 +641,27 @@ def _gear_activity_ids(
         return None
     if not isinstance(result, list):
         return None
+    if not result and callable(getattr(client, "connectapi", None)):
+        # 0.3.19 maps this endpoint's 404 to []. Check only ambiguous empty
+        # results against the same authenticated URL so genuine empty 200s clear links.
+        base = getattr(client, "garmin_connect_activities_baseurl", None)
+        if not isinstance(base, str):
+            return None
+        try:
+            verified = external_call(
+                "garmin",
+                "gear_activities",
+                lambda: client.connectapi(
+                    f"{base}{gear_uuid}/gear",
+                    params={"start": 0, "limit": GEAR_ACTIVITIES_LIMIT},
+                ),
+                None,
+            )
+        except Exception:  # noqa: BLE001 - a hidden 404 leaves old links stale.
+            return None
+        if not isinstance(verified, list):
+            return None
+        result = verified
     ids = list(
         dict.fromkeys(
             str(item["activityId"])

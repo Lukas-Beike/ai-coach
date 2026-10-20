@@ -791,17 +791,19 @@ function providerMetricStatus(status) {
 }
 
 function providerMetricLabel(key) {
-  return { endurance_score: "Ausdauer-Score", running_tolerance: "Lauf-Belastbarkeit" }[key] || key;
+  return { endurance_score: "Ausdauer-Score", running_tolerance: "Lauf-Belastbarkeit", training_readiness_history: "Trainingsbereitschaft", weekly_training_status: "Trainingsstatus · akute Belastung" }[key] || key;
 }
 
 function providerMetricUnit(key) {
-  return { endurance_score: "Punkte" }[key] || "";
+  return { endurance_score: "Punkte", training_readiness_history: "Punkte" }[key] || "";
 }
 
 function providerMetricValue(metric, values) {
   const fields = {
     endurance_score: ["overallScore", "enduranceScore", "score", "groupAverage"],
     running_tolerance: ["runningTolerance", "tolerance"],
+    training_readiness_history: ["trainingReadinessScore", "overallReadinessScore", "readinessScore"],
+    weekly_training_status: ["dailyTrainingLoadAcute", "acuteTrainingLoad"],
   }[metric] || [];
   for (const field of fields) {
     const value = values?.[field];
@@ -814,8 +816,9 @@ function renderProviderMetrics(metrics, root, start, end, missing) {
   Object.entries(metrics || {}).forEach(([key, item], index) => {
     const raw = (Array.isArray(item?.points) ? item.points : []).map((point) => ({ date: point?.date, value: providerMetricValue(key, point?.values) })).filter((point) => point.date && point.value !== undefined);
     if (!raw.some(analysisValidPoint)) { missing.push(providerMetricLabel(key)); return; }
-    const points = analysisWeeklyPerformancePoints(raw, start, end, false);
-    const series = [{ label: providerMetricLabel(key), legendLabel: providerMetricLabel(key), source: item.source, unit: providerMetricUnit(key), color: index, cadenceDays: 7, points, currentPoint: raw.filter((point) => point.date <= end).findLast(analysisValidPoint) }];
+    const daily = key === "training_readiness_history";
+    const points = daily ? raw.filter((point) => point.date >= start && point.date <= end) : analysisWeeklyPerformancePoints(raw, start, end, false);
+    const series = [{ label: providerMetricLabel(key), legendLabel: providerMetricLabel(key), source: item.source, unit: providerMetricUnit(key), color: index, cadenceDays: daily ? 1 : 7, points, currentPoint: raw.filter((point) => point.date <= end).findLast(analysisValidPoint) }];
     const chart = collectAnalysisChart(missing, providerMetricLabel(key), series, providerMetricUnit(key), start, end, "", { sparse: true, showLegend: false, calendarWeeks: true });
     if (!chart) return;
     chart.querySelector(".analysis-chart-legend")?.remove();

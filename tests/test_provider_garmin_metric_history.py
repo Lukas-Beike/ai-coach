@@ -3,14 +3,124 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-from backend.performance.garmin_metric_history import ftp_points, metric_points
-from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
+from backend.performance.garmin_metric_history import (
+    ftp_points,
+    metric_points,
+    projected_metric,
+)
+from backend.providers.garmin import (
+    GarminCollectionOptions,
+    _collect_daily_stats,
+    collect_garmin_data,
+)
 
 TODAY = date(2026, 10, 6)
 START = date(2026, 7, 9)
 
 
 class GarminHistoricMetricCollectorTests(unittest.TestCase):
+    def test_daily_summary_batch_fills_gaps_with_day_reader(self):
+        calls = []
+
+        class Client:
+            def get_activities_by_date(self, *_args):
+                return []
+
+            def get_daily_summaries(self, start, end):
+                calls.append(("batch", start, end))
+                return {"data": [{"calendarDate": start, "steps": 10}]}
+
+            def get_user_summary(self, day):
+                calls.append(("day", day))
+                return {"calendarDate": day, "steps": 20}
+
+        result = {"errors": []}
+        pagination = {}
+        _collect_daily_stats(
+            Client(),
+            [(date(2026, 10, 5), TODAY)],
+            result,
+            pagination,
+            lambda _service, _op, fn, _details: fn(),
+            str,
+            None,
+        )
+        self.assertEqual(
+            calls[:2],
+            [
+                ("batch", "2026-10-05", "2026-10-06"),
+                ("day", "2026-10-06"),
+            ],
+        )
+        self.assertEqual(len(result["daily_stats"]), 2)
+        self.assertTrue(pagination["daily_stats"]["complete"])
+
+    def test_daily_summary_batch_failure_keeps_partial_day_semantics(self):
+        class Client:
+            def get_daily_summaries(self, *_args):
+                raise RuntimeError("synthetic batch failure")
+
+            def get_user_summary(self, day):
+                if day == "2026-10-06":
+                    raise RuntimeError("synthetic day failure")
+                return {"calendarDate": day, "steps": 20}
+
+        result = {"errors": []}
+        pagination = {}
+        _collect_daily_stats(
+            Client(),
+            [(date(2026, 10, 5), TODAY)],
+            result,
+            pagination,
+            lambda _service, _op, fn, _details: fn(),
+            str,
+            None,
+        )
+        self.assertEqual(len(result["daily_stats"]), 1)
+        self.assertFalse(pagination["daily_stats"]["complete"])
+        self.assertEqual(result["errors"][0]["source"], "daily_stats")
+
+    def test_new_histories_are_isolated_and_bounded(self):
+        calls = []
+
+        class Client:
+            def get_activities_by_date(self, *_args):
+                return []
+
+            def get_training_readiness_range(self, start, end):
+                calls.append(("readiness", start, end))
+                return [{"calendarDate": end, "trainingReadinessScore": 74}]
+
+            def get_weekly_training_status(self, start, end):
+                calls.append(("weekly", start, end))
+                raise RuntimeError("synthetic unavailable")
+
+        result = collect_garmin_data(
+            Client(),
+            [(TODAY, TODAY)],
+            start=TODAY,
+            today=TODAY,
+            synced_at="sync",
+            external_call=lambda _service, _op, fn, _details: fn(),
+            redact=lambda _value: "redacted",
+            options=GarminCollectionOptions(
+                include_recovery=False,
+                include_current_metrics=False,
+                include_historic_metrics=True,
+            ),
+        )
+        self.assertEqual(
+            calls,
+            [
+                ("readiness", "2026-07-09", "2026-10-06"),
+                ("weekly", "2026-07-09", "2026-10-06"),
+            ],
+        )
+        self.assertEqual(
+            result["training_readiness_history"][0]["trainingReadinessScore"], 74
+        )
+        self.assertEqual(result["errors"][0]["source"], "weekly_training_status")
+
     def test_endurance_score_dto_range_is_unwrapped(self):
         points = metric_points(
             {
@@ -176,6 +286,43 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
 
 
 class GarminHistoricMetricNormalizationTests(unittest.TestCase):
+    def test_readiness_recalculations_and_weekly_status_project_with_dates(self):
+        readiness = metric_points(
+            [
+                {"calendarDate": "2026-10-05", "trainingReadinessScore": 60},
+                {"calendarDate": "2026-10-05", "trainingReadinessScore": 72},
+            ],
+            start=START,
+            end=TODAY,
+        )
+        weekly = metric_points(
+            {
+                "weeklyTrainingStatusDTOList": [
+                    {"calendarDate": "2026-10-05", "dailyTrainingLoadAcute": 80}
+                ]
+            },
+            start=START,
+            end=TODAY,
+        )
+        self.assertEqual(readiness[0]["values"]["trainingReadinessScore"], 72)
+        self.assertEqual(weekly[0]["values"]["dailyTrainingLoadAcute"], 80)
+        nested = projected_metric(
+            {
+                "weeklyTrainingStatus": [
+                    {
+                        "summaryDate": "2026-10-05",
+                        "acuteTrainingLoadDTO": {"acuteTrainingLoad": 81},
+                    }
+                ]
+            },
+            start=START,
+            end=TODAY,
+            aggregation="weekly",
+            metric="weekly_training_status",
+            synced_at="sync",
+        )
+        self.assertEqual(nested["points"][0]["values"]["dailyTrainingLoadAcute"], 81)
+
     def test_wire_range_formats_preserve_ftp_and_endurance_weeks(self):
         points = ftp_points(
             [

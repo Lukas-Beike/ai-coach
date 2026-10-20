@@ -62,6 +62,8 @@ GARMIN_METRIC_SOURCES = (
     "cycling_ftp_history",
     "endurance_score",
     "running_tolerance",
+    "training_readiness_history",
+    "weekly_training_status",
 )
 
 

@@ -424,6 +424,19 @@ class GarminPayloadServiceTests(unittest.TestCase):
             [row["activity_ids"] for row in _gear_inventory(empty, call)], [[], []]
         )
 
+    def test_sdk_empty_gear_result_requires_http_confirmation(self):
+        call = lambda service, operation, fetch, details: fetch()
+        client = self._gear_client(get_gear_activities=lambda identity, limit: [])
+        client.garmin_connect_activities_baseurl = (
+            "https://synthetic.invalid/activities/"
+        )
+        client.connectapi = Mock(side_effect=RuntimeError("synthetic 404"))
+        unknown = _gear_inventory(client, call)
+        self.assertTrue(all("activity_ids" not in row for row in unknown))
+        client.connectapi = Mock(return_value=[])
+        empty = _gear_inventory(client, call)
+        self.assertEqual([row["activity_ids"] for row in empty], [[], []])
+
     def test_gear_collection_flags_truncated_activity_lists(self):
         call = lambda service, operation, fetch, details: fetch()
         full = self._gear_client(

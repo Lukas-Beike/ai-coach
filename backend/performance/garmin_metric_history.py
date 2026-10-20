@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import comma_decimal_float
+from backend.performance.garmin_load import acute_load_value
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 GARMIN_SOURCE = "Garmin Connect"
@@ -47,6 +48,16 @@ def _records(value: Any) -> list[dict[str, Any]]:
                 if isinstance(item, dict)
             ]
         for key in ("enduranceScoreDTO", "enduranceScoreDTOList"):
+            nested = value.get(key)
+            if isinstance(nested, (dict, list)):
+                return _records(nested)
+        for key in (
+            "data",
+            "weeklyTrainingStatusDTO",
+            "weeklyTrainingStatusDTOList",
+            "weeklyTrainingStatus",
+            "trainingStatusDTOList",
+        ):
             nested = value.get(key)
             if isinstance(nested, (dict, list)):
                 return _records(nested)
@@ -122,6 +133,21 @@ def projected_metric(
     synced_at: Any,
 ) -> dict[str, Any]:
     points = metric_points(value, start=start, end=end)
+    if metric == "weekly_training_status":
+        by_date = {point["date"]: point for point in points}
+        for row in _records(value):
+            observed = _observed(row)
+            if observed is None or not start <= observed <= end:
+                continue
+            measured = acute_load_value(row)
+            if measured is None:
+                continue
+            point = by_date.setdefault(
+                observed.isoformat(),
+                {"date": observed.isoformat(), "values": {}, "source": GARMIN_SOURCE},
+            )
+            point["values"]["dailyTrainingLoadAcute"] = measured
+        points = [by_date[key] for key in sorted(by_date)]
     return {
         "status": "current" if points else "unavailable",
         "aggregation": aggregation,
