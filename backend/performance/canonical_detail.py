@@ -117,7 +117,15 @@ def _provider_text(record: ActivityRecord) -> str | None:
 def _labelled(item: StoredDetailSet, record: ActivityRecord) -> StoredDetailSet:
     """Attach the record's provenance label; stored sets do not keep labels."""
     provenance = replace(item.detail.provenance, label=record.provenance.label)
-    return replace(item, detail=replace(item.detail, provenance=provenance))
+    return StoredDetailSet(
+        provider=item.provider,
+        provider_activity_id=item.provider_activity_id,
+        activity_id=item.activity_id,
+        mapper_version=item.mapper_version,
+        summary_sha256=item.summary_sha256,
+        fetched_at=item.fetched_at,
+        detail=replace(item.detail, provenance=provenance),
+    )
 
 
 def _stored_payload(
