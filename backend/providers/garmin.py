@@ -7,11 +7,12 @@ and returns a bounded, provider-labelled collection result.
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from typing import Any
 
@@ -157,25 +158,176 @@ def preserve_weight_response(value: Any) -> list[dict[str, Any]]:
     raise ValueError("Invalid Garmin weight response")
 
 
-def merge_weight_snapshots(incoming: Any, previous: Any) -> list[Any]:
-    """Merge raw weigh-in snapshots without collapsing same-day samples."""
-    values = []
-    for source in (previous, incoming):
-        if isinstance(source, dict):
-            values.append(source)
-        elif isinstance(source, list):
-            values.extend(source)
-    merged: list[Any] = []
-    seen: set[str] = set()
-    for value in values:
-        if not isinstance(value, dict):
-            merged.append(value)
+_WEIGHT_SNAPSHOT_SECTIONS = ("weighIns", "weigh_ins", "weight")
+_WEIGHT_OPAQUE_SECTIONS_KEY = "_garmin_weight_opaque_sections"
+
+
+def _sort_weight_metadata_list(rows: list[Any]) -> None:
+    rows.sort(
+        key=lambda row: (
+            _weight_reading_order(row) if isinstance(row, dict) else (False, 0.0)
+        ),
+        reverse=True,
+    )
+
+
+def _merge_opaque_section_state(target: dict[str, list[Any]], value: Any) -> None:
+    if isinstance(value, dict) and isinstance(value.get("sections"), dict):
+        for name, rows in value["sections"].items():
+            if isinstance(rows, list):
+                for row in rows:
+                    _preserve_opaque_weight_section(target, name, row)
+        if "existing_value" in value:
+            _preserve_opaque_weight_section(
+                target, "_reserved_metadata", value["existing_value"]
+            )
+        return
+    _preserve_opaque_weight_section(target, "_reserved_metadata", value)
+
+
+def _merge_weight_metadata(
+    target: dict[str, Any], source: dict[str, Any], *, envelope: bool = False
+) -> None:
+    for key, value in source.items():
+        if envelope and (
+            key in _WEIGHT_SNAPSHOT_SECTIONS or key == _WEIGHT_OPAQUE_SECTIONS_KEY
+        ):
             continue
-        key = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
-        if key not in seen:
-            seen.add(key)
-            merged.append(value)
-    return merged
+        current = target.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            _merge_weight_metadata(current, value)
+        elif isinstance(current, list) and isinstance(value, list):
+            seen = {json.dumps(item, sort_keys=True, default=str) for item in current}
+            for item in value:
+                identity = json.dumps(item, sort_keys=True, default=str)
+                if identity not in seen:
+                    seen.add(identity)
+                    current.append(item)
+            _sort_weight_metadata_list(current)
+        else:
+            target[key] = copy.deepcopy(value)
+            if isinstance(target[key], list):
+                _sort_weight_metadata_list(target[key])
+
+
+def _weight_snapshot_documents(source: Any) -> list[dict[str, Any]]:
+    documents = [source] if isinstance(source, dict) else source
+    return (
+        [row for row in documents if isinstance(row, dict)]
+        if isinstance(documents, list)
+        else []
+    )
+
+
+def _weight_snapshot_identities(reading: dict[str, Any]) -> tuple[str, ...]:
+    identities = [
+        f"id:{key}:{reading[key]}"
+        for key in (
+            "samplePk",
+            "sample_pk",
+            "measurementId",
+            "measurement_id",
+            "weighInId",
+            "recordId",
+            "id",
+        )
+        if reading.get(key) not in (None, "")
+    ]
+    if identities:
+        return tuple(identities)
+    return (
+        "raw:" + json.dumps(reading, sort_keys=True, ensure_ascii=False, default=str),
+    )
+
+
+def _preserve_opaque_weight_section(
+    target: dict[str, list[Any]], name: str, value: Any
+) -> None:
+    rows = target.setdefault(name, [])
+    identity = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
+    if all(
+        json.dumps(row, sort_keys=True, ensure_ascii=False, default=str) != identity
+        for row in rows
+    ):
+        rows.append(copy.deepcopy(value))
+
+
+def _weight_reading_order(reading: dict[str, Any]) -> tuple[bool, float]:
+    for key in (
+        "timestampGMT",
+        "timestamp",
+        "measurementDate",
+        "calendarDate",
+        "summaryDate",
+        "date",
+    ):
+        value = reading.get(key)
+        try:
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                seconds = value / 1000 if value > 100_000_000_000 else value
+                return True, float(seconds)
+            if isinstance(value, str):
+                parsed = datetime.fromisoformat(value.strip())
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=UTC)
+                return True, parsed.timestamp()
+        except OverflowError, OSError, TypeError, ValueError:
+            continue
+    return False, 0.0
+
+
+def merge_weight_snapshots(incoming: Any, previous: Any) -> list[Any]:
+    """Merge unique raw weigh-ins into one envelope, with newest readings first."""
+    metadata: dict[str, Any] = {}
+    readings: list[dict[str, Any]] = []
+    opaque_sections: dict[str, list[Any]] = {}
+    previous_count = 0
+    for source, is_previous in ((previous, True), (incoming, False)):
+        for document in _weight_snapshot_documents(source):
+            flat_reading = any(
+                key in document for key in ("weight", "weightKg", "weight_kg")
+            ) and not any(
+                isinstance(document.get(name), list)
+                for name in _WEIGHT_SNAPSHOT_SECTIONS
+            )
+            if flat_reading:
+                readings.append(document)
+                continue
+            opaque_state = document.get(_WEIGHT_OPAQUE_SECTIONS_KEY)
+            if opaque_state is not None:
+                _merge_opaque_section_state(opaque_sections, opaque_state)
+            _merge_weight_metadata(metadata, document, envelope=True)
+            for name in _WEIGHT_SNAPSHOT_SECTIONS:
+                rows = document.get(name)
+                if isinstance(rows, list):
+                    readings.extend(row for row in rows if isinstance(row, dict))
+                elif document.get(name) is not None:
+                    _preserve_opaque_weight_section(
+                        opaque_sections, name, document[name]
+                    )
+        if is_previous:
+            previous_count = len(readings)
+
+    merged: list[dict[str, Any]] = []
+    positions: dict[str, int] = {}
+    for index, reading in enumerate(readings):
+        identities = _weight_snapshot_identities(reading)
+        position = next(
+            (positions[key] for key in identities if key in positions), None
+        )
+        if position is None:
+            position = len(merged)
+            merged.append(reading)
+        elif index >= previous_count:
+            merged[position] = reading
+        for key in identities:
+            positions[key] = position
+    merged.sort(key=_weight_reading_order, reverse=True)
+    envelope: dict[str, Any] = {"weight": merged}
+    envelope.update(metadata)
+    if opaque_sections:
+        envelope[_WEIGHT_OPAQUE_SECTIONS_KEY] = {"sections": opaque_sections}
+    return [envelope]
 
 
 def fetch_targeted_analysis(

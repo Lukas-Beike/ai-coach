@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import unittest
 from contextlib import nullcontext
 from datetime import date, timedelta
@@ -7,6 +8,8 @@ from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from backend.errors import AppError
+from backend.performance.body import body_history
+from backend.performance.garmin_weight import garmin_weight_records
 from backend.providers.garmin import merge_weight_snapshots
 from backend.sync.garmin_service import (
     GarminNutritionRefreshService,
@@ -22,7 +25,217 @@ class GarminNutritionRefreshTests(unittest.TestCase):
 
         merged = merge_weight_snapshots([first, second], [first])
 
-        self.assertEqual(merged, [first, second])
+        self.assertEqual(merged, [{"weight": [first, second]}])
+
+    def test_weight_snapshot_merge_preserves_shifted_history_and_keeps_it_walkable(
+        self,
+    ) -> None:
+        start = date(2026, 1, 1)
+        samples = [
+            {"date": (start + timedelta(days=day)).isoformat(), "weight": 70 + day / 10}
+            for day in range(90)
+        ]
+        snapshot = merge_weight_snapshots(
+            [{"weighIns": samples, "userProfile": {"weightUnit": "kg"}}], []
+        )
+
+        for window_start in (6, 12, 18, 24):
+            shifted = [
+                {
+                    "date": (start + timedelta(days=day)).isoformat(),
+                    "weight": 70 + day / 10,
+                }
+                for day in range(window_start, window_start + 84)
+            ]
+            snapshot = merge_weight_snapshots(
+                [{"weighIns": shifted, "userProfile": {"weightUnit": "kg"}}],
+                snapshot,
+            )
+            self.assertEqual(len(snapshot), 1)
+
+        rows = snapshot[0]["weight"]
+        days = {row["date"] for row in rows}
+        self.assertEqual(len(rows), 108)
+        self.assertTrue(
+            all(
+                (start + timedelta(days=day)).isoformat() in days
+                for day in range(85, 91)
+            )
+        )
+        self.assertIn((start + timedelta(days=107)).isoformat(), days)
+        self.assertEqual(len(garmin_weight_records({"weight": snapshot})), len(rows))
+
+    def test_large_history_retains_old_rows_and_walks_newest_rows_first(self) -> None:
+        start = date(2025, 1, 1)
+        samples = [
+            {
+                "date": (start + timedelta(days=day)).isoformat(),
+                "weight": 70 + day / 100,
+            }
+            for day in range(510)
+        ]
+
+        snapshot = merge_weight_snapshots(
+            [{"weighIns": samples, "dailyWeightSummaries": list(range(2100))}], []
+        )
+
+        rows = snapshot[0]["weight"]
+        walked = garmin_weight_records({"weight": snapshot})
+        self.assertEqual(len(rows), 510)
+        self.assertIn({"date": start.isoformat(), "weight": 70.0}, rows)
+        self.assertIn(((start + timedelta(days=509)).isoformat(), 75.09), walked)
+        self.assertNotIn((start.isoformat(), 70.0), walked)
+
+    def test_large_daily_weight_summaries_project_latest_weight_and_body_fat(
+        self,
+    ) -> None:
+        start = date(2025, 1, 1)
+        today = start + timedelta(days=599)
+        summaries = [
+            {
+                "summaryDate": (start + timedelta(days=day)).isoformat(),
+                "latestWeight": {"weight": 72000, "bodyFat": 17.0},
+            }
+            for day in range(600)
+        ]
+        correction = {
+            "summaryDate": today.isoformat(),
+            "latestWeight": {"weight": 73200, "bodyFat": 18.5},
+        }
+
+        merged = merge_weight_snapshots(
+            [{"dailyWeightSummaries": [correction]}],
+            [{"dailyWeightSummaries": summaries}],
+        )
+        projection = body_history({}, {"weight": merged}, today)
+        metrics = projection["windows"]["14d"]["metrics"]
+        weight_point = next(
+            row
+            for row in metrics["weight_kg"][1]["points"]
+            if row["date"] == today.isoformat()
+        )
+        body_fat_point = next(
+            row
+            for row in metrics["body_fat_pct"][1]["points"]
+            if row["date"] == today.isoformat()
+        )
+
+        self.assertEqual(len(merged[0]["dailyWeightSummaries"]), 601)
+        self.assertEqual(weight_point["value"], 73.2)
+        self.assertEqual(body_fat_point["value"], 18.5)
+
+    def test_weight_snapshot_merge_collects_all_alias_sections(self) -> None:
+        sections = {
+            "weighIns": [{"samplePk": 1, "date": "2026-10-10", "weight": 70}],
+            "weigh_ins": [{"samplePk": 2, "date": "2026-10-09", "weight": 69}],
+            "weight": [{"samplePk": 3, "date": "2026-10-08", "weight": 68}],
+        }
+
+        merged = merge_weight_snapshots([sections], [])
+
+        self.assertEqual({row["samplePk"] for row in merged[0]["weight"]}, {1, 2, 3})
+
+    def test_opaque_alias_does_not_overwrite_merged_readings(self) -> None:
+        legacy = {"weighIns": {"legacyPayload": {"raw": True}}}
+        current = {"weighIns": [{"samplePk": 9, "date": "2026-10-10", "weight": 70}]}
+        legacy_before = copy.deepcopy(legacy)
+        current_before = copy.deepcopy(current)
+
+        merged = merge_weight_snapshots([current], [legacy])
+
+        self.assertEqual(merged[0]["weight"], current["weighIns"])
+        self.assertEqual(
+            merged[0]["_garmin_weight_opaque_sections"]["sections"]["weighIns"],
+            [legacy["weighIns"]],
+        )
+        self.assertEqual(legacy, legacy_before)
+        self.assertEqual(current, current_before)
+        repeated = merge_weight_snapshots([current], merged)
+        self.assertEqual(
+            repeated[0]["_garmin_weight_opaque_sections"],
+            merged[0]["_garmin_weight_opaque_sections"],
+        )
+
+    def test_weight_snapshot_merge_replaces_timestamped_corrections_and_keeps_metadata(
+        self,
+    ) -> None:
+        prior = {
+            "weighIns": [
+                {
+                    "samplePk": 17,
+                    "timestampGMT": "2026-10-10T07:00:00Z",
+                    "weight": 70.0,
+                    "metadata": {"scale": {"source": "garmin"}},
+                },
+                {"samplePk": 33, "date": "2026-10-09", "weight": 69.8},
+                {"date": "2026-10-10", "weight": 70.3},
+            ],
+            "userProfile": {"weightUnit": "kg", "weight": 70.0, "region": "EU"},
+            "dailyWeightSummaries": [{"date": "2026-10-09", "weight": 69.8}],
+            "rawExtension": {"version": 1, "samples": [{"field": "old"}]},
+        }
+        correction = {
+            "weighIns": [
+                {
+                    "samplePk": 17,
+                    "timestampGMT": "2026-10-10T07:00:00Z",
+                    "weight": 70.1,
+                    "metadata": {"scale": {"source": "garmin", "corrected": True}},
+                },
+                {
+                    "samplePk": 18,
+                    "timestampGMT": "2026-10-10T07:00:00Z",
+                    "weight": 70.2,
+                },
+                {
+                    "recordId": 17,
+                    "timestampGMT": "2026-10-10T07:00:00Z",
+                    "weight": 70.4,
+                },
+                {"samplePk": 33, "date": "2026-10-09", "weight": 69.9},
+                {
+                    "timestamp": "2026-10-10T19:00:00Z",
+                    "date": "2026-10-10",
+                    "weight": 70.5,
+                },
+            ],
+            "userProfile": {"weightUnit": "kg", "region": "EU", "locale": "de"},
+            "dailyWeightSummaries": [{"date": "2026-10-10", "weight": 70.1}],
+            "rawExtension": {"version": 2, "samples": [{"field": "new"}]},
+        }
+        prior_before = copy.deepcopy(prior)
+        correction_before = copy.deepcopy(correction)
+
+        merged = merge_weight_snapshots([correction], [prior])
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(len(merged[0]["weight"]), 6)
+        corrected = next(
+            row for row in merged[0]["weight"] if row.get("samplePk") == 17
+        )
+        self.assertEqual(corrected["weight"], 70.1)
+        self.assertEqual(
+            next(
+                row["weight"]
+                for row in merged[0]["weight"]
+                if row.get("samplePk") == 33
+            ),
+            69.9,
+        )
+        self.assertIn(
+            70.2,
+            [row["weight"] for row in merged[0]["weight"] if row.get("samplePk") == 18],
+        )
+        self.assertTrue(any(row.get("recordId") == 17 for row in merged[0]["weight"]))
+        self.assertTrue(corrected["metadata"]["scale"]["corrected"])
+        self.assertEqual(merged[0]["userProfile"]["region"], "EU")
+        self.assertEqual(merged[0]["userProfile"]["weight"], 70.0)
+        self.assertEqual(merged[0]["userProfile"]["locale"], "de")
+        self.assertEqual(len(merged[0]["dailyWeightSummaries"]), 2)
+        self.assertEqual(merged[0]["rawExtension"]["version"], 2)
+        self.assertEqual(len(merged[0]["rawExtension"]["samples"]), 2)
+        self.assertEqual(prior, prior_before)
+        self.assertEqual(correction, correction_before)
 
     def test_refresh_merges_legacy_dict_and_raw_window_with_day_85_to_90_samples(
         self,
@@ -53,9 +266,10 @@ class GarminNutritionRefreshTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "ok")
         persisted = writer.write_nutrition_refresh.call_args.args[1]
-        self.assertEqual(persisted["weight"], [existing, incoming])
-        self.assertEqual(len(persisted["weight"][0]["weighIns"]), 6)
-        self.assertEqual(len(persisted["weight"][1]["weighIns"]), 2)
+        self.assertEqual(len(persisted["weight"]), 1)
+        self.assertTrue(persisted["weight"][0]["legacySnapshot"])
+        self.assertEqual(persisted["weight"][0]["unit"], "kg")
+        self.assertEqual(len(persisted["weight"][0]["weight"]), 8)
 
     def test_remote_energy_without_range_api_is_unsupported_without_daily_loop(
         self,
@@ -287,7 +501,10 @@ class GarminNutritionRefreshTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "partial")
         persisted = writer.write_nutrition_refresh.call_args.args[1]
-        self.assertEqual(persisted["weight"], [{"date": "2026-09-20", "weight": 70.0}])
+        self.assertEqual(
+            persisted["weight"],
+            [{"weight": [{"date": "2026-09-20", "weight": 70.0}]}],
+        )
         self.assertEqual(
             persisted["nutrition_refresh"]["weight"]["2026-09-24"]["freshness"],
             "partial",
