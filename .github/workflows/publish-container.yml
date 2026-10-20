@@ -269,17 +269,27 @@ jobs:
           if-no-files-found: error
           retention-days: 30
   e2e:
-    if: needs.test.result == 'success'
-    needs: [source, test, image]
-    name: Browser checks (${{ matrix.project }})
+    # Browser checks start as soon as the image exists, in parallel with the unit tests;
+    # publishing still requires both the test and browser aggregates.
+    needs: [source, image]
+    name: Browser checks (${{ matrix.project }}${{ matrix.shards > 1 && format(' {0}/{1}', matrix.shard, matrix.shards) || '' }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        project: [mobile-small, mobile, tablet, tablet-landscape, desktop]
+        # Desktop runs every functional contract, so its spec files are split round-robin.
+        include:
+          - { project: mobile-small, shard: 1, shards: 1 }
+          - { project: mobile, shard: 1, shards: 1 }
+          - { project: tablet, shard: 1, shards: 1 }
+          - { project: tablet-landscape, shard: 1, shards: 1 }
+          - { project: desktop, shard: 1, shards: 2 }
+          - { project: desktop, shard: 2, shards: 2 }
     env:
       # This is an isolated fixture credential, never a repository or provider secret.
       E2E_APP_PASSWORD: e2e-fixture-password-1234
+      SPEC_SHARD: ${{ matrix.shard }}
+      SPEC_SHARDS: ${{ matrix.shards }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -294,7 +304,7 @@ jobs:
       - name: Install browser test dependencies
         run: npm ci --ignore-scripts
       - name: Run Node unit tests
-        if: matrix.project == 'desktop'
+        if: matrix.project == 'desktop' && matrix.shard == 1
         run: node --test tests/*.cjs
       - name: Cache Chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -325,7 +335,8 @@ jobs:
           network_name() { echo "$prefix-net-$(($1 % 2))"; }
           container_port() { echo "$((base_port + $1 % 2))"; }
           # Playwright selects the files: desktop lists every file with tests, other projects
-          # keep only the tests whose titles match their config grep (@responsive).
+          # keep only the tests whose titles match their config grep (@responsive). A sharded
+          # project keeps every SPEC_SHARDS-th file of the sorted list, starting at SPEC_SHARD.
           spec_list="$(./node_modules/.bin/playwright test --list --project "$project" --reporter=json | node -e '
             const chunks = [];
             process.stdin.on("data", (chunk) => chunks.push(chunk));
@@ -336,12 +347,15 @@ jobs:
                 for (const child of suite.suites || []) walk(child);
               };
               for (const suite of JSON.parse(Buffer.concat(chunks).toString("utf8")).suites || []) walk(suite);
-              for (const file of [...files].sort()) console.log("e2e/" + file);
+              const shard = Number(process.env.SPEC_SHARD), shards = Number(process.env.SPEC_SHARDS);
+              [...files].sort().forEach((file, index) => {
+                if (index % shards === shard - 1) console.log("e2e/" + file);
+              });
             });
           ')"
           mapfile -t specs <<< "$spec_list"
           if [[ "${#specs[@]}" -eq 0 || -z "${specs[0]}" ]]; then
-            echo "Playwright listed no browser specs for $project."
+            echo "Playwright listed no browser specs for $project shard $SPEC_SHARD/$SPEC_SHARDS."
             exit 1
           fi
           current=""
@@ -427,7 +441,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: browser-test-artifacts-${{ matrix.project }}
+          name: browser-test-artifacts-${{ matrix.project }}-${{ matrix.shard }}
           path: |
             test-results/
             playwright-report/

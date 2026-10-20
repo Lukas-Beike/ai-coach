@@ -678,13 +678,22 @@ python -m compileall -q server.py backend tests
 #### Parallel Sharded CI Runner
 CI splits the native suite into `PYTHON_TEST_SHARDS` shards (currently 4). Each
 shard keeps every `TestCase` class whole, so class-level fixtures such as
-`ServerTestCase.setUpClass` run once per class. Classes are assigned largest-first
+`ServerTestCase.setUpClass` run once per class. Classes are assigned heaviest-first
 to the least-loaded shard, so the assignment is deterministic and does not depend
-on discovery order. The quality job fails unless every shard uploads exactly one
-coverage file. Run one shard locally, or list its test IDs without running them:
+on discovery order. A class weighs its recorded wall time from
+`tests/test_durations.json`; a class without a recording weighs its test count
+times the median recorded seconds per test. The quality job fails unless every
+shard uploads exactly one coverage file. Run one shard locally, or list its test
+IDs without running them:
 ```powershell
 python tests/run_tests.py --shard 1 --total 4
 python tests/run_tests.py --shard 1 --total 4 --list
+```
+Refresh the recording when shard times drift apart, with a full unsharded run in
+the image (the same read-only mounts as `tests/run_sqlcipher_tests.ps1`, plus a
+writable output path):
+```powershell
+python tests/run_tests.py --record-durations tests/test_durations.json
 ```
 
 #### Container-Sensitive Suite
@@ -715,9 +724,11 @@ npm run test:e2e
 Functional contracts run once on desktop. Tests tagged `@responsive` also run on
 all four smaller viewports. CI builds the application image once per run, shares
 it as the `ai-coach-ci-image` artifact with the native container, SBOM and browser
-jobs, and runs the five projects in independent jobs. Each project derives its spec
-list from `playwright test --list --project <project>`: desktop covers every spec
-file, and the other projects run only files whose test titles match `@responsive`.
+jobs, and runs the five projects in independent jobs that start as soon as the
+image exists, in parallel with the native tests; publishing still needs both. Each
+project derives its spec list from `playwright test --list --project <project>`:
+desktop covers every spec file, split round-robin over two jobs, and the other
+projects run only files whose test titles match `@responsive`.
 Each spec gets a fresh disposable SQLCipher fixture, and the next spec's fixture is
 prewarmed while the current one runs; there is one worker per invocation. Browser
 traces are local-only: CI turns them off because CI artifacts are public and traces
