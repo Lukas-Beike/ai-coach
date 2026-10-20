@@ -141,6 +141,8 @@ function renderActiveRoute(mainRoute, panelRoute) {
 
 function restoreRouteScroll(mainRoute, returningToChat, shouldFocusPlannedToday) {
   if (mainRoute === "coach") {
+    // A reader who scrolled away before leaving returns to their position, not to the reply start.
+    if (!state.chatFollowLatest) state.chatResponseScrollPending = false;
     if (state.chatResponseScrollPending) scrollChatToResponseStart();
     else if (state.chatInitialScrollPending || state.chatCacheSyncing) scrollChatToLatest();
     else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest();

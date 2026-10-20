@@ -659,7 +659,15 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
         self.assertEqual(projected["running_tolerance"]["observed_at"], "2026-05-04")
 
         fallback = analysis_history(None, {}, TODAY)["provider_metrics"]
-        self.assertEqual(set(fallback), {"endurance_score", "running_tolerance"})
+        self.assertEqual(
+            set(fallback),
+            {
+                "endurance_score",
+                "running_tolerance",
+                "training_readiness_history",
+                "weekly_training_status",
+            },
+        )
         self.assertEqual(fallback["endurance_score"]["status"], "unavailable")
         self.assertEqual(fallback["endurance_score"]["source"], GARMIN)
         self.assertEqual(fallback["endurance_score"]["points"], [])

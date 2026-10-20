@@ -57,6 +57,7 @@ function showLogin() {
   state.chatProposalRefreshInFlight = false;
   state.chatProposalRefreshQueued = false;
   state.chatInitialScrollPending = true;
+  state.chatFollowLatest = true;
   state.chatCacheSyncing = false;
   state.chatScrollY = null;
   state.chatScrollRestoring = false;

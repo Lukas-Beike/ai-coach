@@ -243,12 +243,61 @@ def _collect_daily_stats(
         source, {"windows": len(windows), "records": 0, "complete": True}
     )
     for window_start, window_end in windows:
+        covered = (
+            _collect_daily_summaries_window(
+                client, window_start, window_end, payload, stats, external_call
+            )
+            if source == "daily_stats"
+            else set()
+        )
         current = window_start
         while current <= window_end:
-            _collect_daily_stats_day(
-                fetch, current, payload, stats, external_call, redact, warn, source
-            )
+            if current.isoformat() not in covered:
+                _collect_daily_stats_day(
+                    fetch, current, payload, stats, external_call, redact, warn, source
+                )
             current += timedelta(days=1)
+
+
+def _collect_daily_summaries_window(
+    client: Any,
+    start: date,
+    end: date,
+    payload: dict[str, Any],
+    stats: dict[str, Any],
+    external_call: ExternalCall,
+) -> set[str]:
+    fetch = getattr(client, "get_daily_summaries", None)
+    if not callable(fetch):
+        return set()
+    try:
+        response = external_call(
+            "garmin",
+            "daily_stats",
+            partial(fetch, start.isoformat(), end.isoformat()),
+            {"start": start.isoformat(), "end": end.isoformat()},
+        )
+        records = response.get("data") if isinstance(response, dict) else response
+        if not isinstance(records, list) or any(
+            not isinstance(row, dict) for row in records
+        ):
+            return set()
+    except Exception:  # noqa: BLE001 - the per-day reader reports any actual gaps.
+        return set()
+    accepted: list[dict[str, Any]] = []
+    covered: set[str] = set()
+    for row in records:
+        day = row.get("calendarDate") or row.get("summaryDate") or row.get("date")
+        try:
+            observed = date.fromisoformat(day[:10]) if isinstance(day, str) else None
+        except ValueError:
+            observed = None
+        if observed is not None and start <= observed <= end:
+            accepted.append(row)
+            covered.add(observed.isoformat())
+    payload.setdefault("daily_stats", []).extend(accepted)
+    stats["records"] = int(stats["records"]) + len(accepted)
+    return covered
 
 
 def _collect_resting_hr(
@@ -430,6 +479,18 @@ def _collect_historic_metrics(
             ),
             "weekly",
         ),
+        (
+            "training_readiness_history",
+            getattr(client, "get_training_readiness_range", None),
+            lambda fetch: fetch(start.isoformat(), end.isoformat()),
+            "daily",
+        ),
+        (
+            "weekly_training_status",
+            getattr(client, "get_weekly_training_status", None),
+            lambda fetch: fetch(start.isoformat(), end.isoformat()),
+            "weekly",
+        ),
     )
     for key, fetch, invoke, aggregation in requests:
         stats = pagination.setdefault(
@@ -591,6 +652,27 @@ def _gear_activity_ids(
         return None
     if not isinstance(result, list):
         return None
+    if not result and callable(getattr(client, "connectapi", None)):
+        # 0.3.19 maps this endpoint's 404 to []. Check only ambiguous empty
+        # results against the same authenticated URL so genuine empty 200s clear links.
+        base = getattr(client, "garmin_connect_activities_baseurl", None)
+        if not isinstance(base, str):
+            return None
+        try:
+            verified = external_call(
+                "garmin",
+                "gear_activities",
+                lambda: client.connectapi(
+                    f"{base}{gear_uuid}/gear",
+                    params={"start": 0, "limit": GEAR_ACTIVITIES_LIMIT},
+                ),
+                None,
+            )
+        except Exception:  # noqa: BLE001 - a hidden 404 leaves old links stale.
+            return None
+        if not isinstance(verified, list):
+            return None
+        result = verified
     ids = list(
         dict.fromkeys(
             str(item["activityId"])

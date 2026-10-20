@@ -78,6 +78,8 @@ def _provider_metrics(
         for source, aggregation in (
             ("endurance_score", "weekly"),
             ("running_tolerance", "weekly"),
+            ("training_readiness_history", "daily"),
+            ("weekly_training_status", "weekly"),
         )
     }
 
