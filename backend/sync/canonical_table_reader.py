@@ -90,6 +90,16 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
         )
         return tuple(sorted((_activity(row) for row in rows), key=activity_order))
 
+    def session_activities(
+        self, db: Any, activity_id: str
+    ) -> tuple[ActivityRecord, ...]:
+        """Return the active records of one session and of sessions merged into it.
+
+        Same mapping and order as ``activities``. A deleted session returns nothing.
+        """
+        rows = canonical_store.session_activity_rows(db, activity_id)
+        return tuple(sorted((_activity(row) for row in rows), key=activity_order))
+
     def activity_rows(
         self,
         db: Any,
