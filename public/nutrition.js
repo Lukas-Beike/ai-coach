@@ -763,14 +763,23 @@ function isCurrentNutritionProductLoad(sequence, generation, expectedQuery) {
     && (expectedQuery === null || document.querySelector("#nutritionProductQuery").value.trim() === expectedQuery);
 }
 
+function prepareNutritionProductLookup(preserveLookup) {
+  if (preserveLookup) return;
+  nutritionLookupResultShown = false;
+  const lookup = document.querySelector("#nutritionLookupResult");
+  if (lookup) { lookup.hidden = true; lookup.replaceChildren(); }
+}
+
+function showNutritionProductLoadError(preserveLookup, sequence, generation, expectedQuery, error) {
+  if (!preserveLookup && isCurrentNutritionProductLoad(sequence, generation, expectedQuery)) {
+    document.querySelector("#nutritionProductStatus").textContent = `Produktsuche fehlgeschlagen: ${error.message}`;
+  }
+}
+
 async function loadNutritionProducts(query = "", { background = false, throwOnError = false, refresh = false, expectedQuery = null } = {}) {
   if (background && nutritionLookupResultShown && !refresh) return;
   const preserveLookup = refresh && nutritionLookupResultShown;
-  if (!preserveLookup) {
-    nutritionLookupResultShown = false;
-    const lookup = document.querySelector("#nutritionLookupResult");
-    if (lookup) { lookup.hidden = true; lookup.replaceChildren(); }
-  }
+  prepareNutritionProductLookup(preserveLookup);
   const sequence = ++nutritionProductLoadSequence;
   const generation = state.sessionGeneration;
   const status = document.querySelector("#nutritionProductStatus");
@@ -782,9 +791,7 @@ async function loadNutritionProducts(query = "", { background = false, throwOnEr
     renderNutritionProducts(result.products || []);
     if (!preserveLookup) status.textContent = result.products?.length ? "" : "Keine lokalen Produkte gefunden.";
   } catch (error) {
-    if (!preserveLookup && isCurrentNutritionProductLoad(sequence, generation, expectedQuery)) {
-      status.textContent = `Produktsuche fehlgeschlagen: ${error.message}`;
-    }
+    showNutritionProductLoadError(preserveLookup, sequence, generation, expectedQuery, error);
     if (throwOnError) throw error;
   }
 }
