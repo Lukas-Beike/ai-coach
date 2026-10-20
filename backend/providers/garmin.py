@@ -7,12 +7,15 @@ and returns a bounded, provider-labelled collection result.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, timedelta
 from functools import partial
 from typing import Any
+
+from backend.providers.descriptors import GARMIN_ID
 
 try:
     from garminconnect import Garmin as GarminClient
@@ -56,6 +59,241 @@ class GarminClientFactory:
         if return_on_mfa:
             return GarminClient(email, password, return_on_mfa=True)
         return GarminClient(email, password)
+
+
+def authenticate_client(
+    client_factory: GarminClientFactory,
+    email: str | None,
+    password: str | None,
+    login_argument: str,
+    *,
+    external_call: ExternalCall,
+    tokenstore_exists: bool,
+) -> tuple[Any, bool]:
+    """Create and authenticate one Garmin SDK client through provider transport."""
+    client = client_factory.create(email, password, return_on_mfa=True)
+    mfa_status, _ = external_call(
+        GARMIN_ID,
+        "login",
+        lambda: client.login(login_argument),
+        {
+            "email_configured": bool(email),
+            "tokenstore_exists": tokenstore_exists,
+        },
+    )
+    return client, bool(mfa_status)
+
+
+def targeted_analysis_sources() -> dict[str, dict[str, tuple[str | None, Any]]]:
+    """Return bounded targeted-read contracts supported by garminconnect 0.3.19.
+
+    The call shapes match the pinned SDK. At runtime, an SDK method absent from
+    the installed client remains an unsupported capability; never guess a
+    Garmin endpoint from a newer or unrelated client.
+    """
+    date_range = lambda method, first, last: method(first.isoformat(), last.isoformat())
+    latest_date = lambda method, _first, last: method(last.isoformat())
+    no_dates = lambda method, _first, _last: method()
+    return {
+        "sessions": {"activities": ("get_activities_by_date", date_range)},
+        "load": {
+            "activities": ("get_activities_by_date", date_range),
+            "training_load_activities": ("get_training_load_activities", date_range),
+            "daily_training_status": ("get_daily_training_status", latest_date),
+            "training_load_balance": ("get_training_four_week_load_balance", latest_date),
+            "weekly_training_status": ("get_weekly_training_status", date_range),
+        },
+        "performance": {
+            "cycling_ftp": ("get_cycling_ftp", no_dates),
+            "running_threshold": ("get_lactate_threshold", lambda method, _first, _last: method(latest=True)),
+            "race_predictions": ("get_race_predictions", no_dates),
+            "max_metrics": ("get_max_metrics_range", date_range),
+            "cycling_ftp_history": ("get_functional_threshold_power_range", lambda method, first, last: method(first.isoformat(), last.isoformat(), sport="CYCLING", aggregation="daily")),
+            "endurance_score": ("get_endurance_score", date_range),
+            "running_tolerance": ("get_running_tolerance", lambda method, first, last: method(first.isoformat(), last.isoformat(), aggregation="weekly")),
+            "training_readiness_history": ("get_training_readiness_range", date_range),
+            "weekly_training_status": ("get_weekly_training_status", date_range),
+        },
+        "recovery": {
+            "sleep": ("get_sleep_daily", date_range),
+            "hrv": ("get_hrv_data_range", date_range),
+            "readiness": ("get_training_readiness_range", date_range),
+            "daily_stats": ("get_daily_summaries", date_range),
+            "resting_hr": ("get_heart_rates", None),
+        },
+    }
+
+
+def preserve_weight_response(value: Any) -> list[dict[str, Any]]:
+    """Keep Garmin's raw weigh-in response intact for snapshot history.
+
+    ``get_weigh_ins`` is already bounded by its date arguments. The returned
+    object may contain historic samples and multiple measurements per day; the
+    owning snapshot projection, not transport, decides what to display.
+    """
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list) and all(isinstance(row, dict) for row in value):
+        return value
+    raise ValueError("Invalid Garmin weight response")
+
+
+def merge_weight_snapshots(incoming: Any, previous: Any) -> list[Any]:
+    """Merge raw weigh-in snapshots without collapsing same-day samples."""
+    values = [
+        *(incoming if isinstance(incoming, list) else []),
+        *(previous if isinstance(previous, list) else []),
+    ]
+    merged: list[Any] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, dict):
+            merged.append(value)
+            continue
+        key = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
+        if key not in seen:
+            seen.add(key)
+            merged.append(value)
+    return merged
+
+
+def fetch_targeted_analysis(
+    client: Any,
+    area: str,
+    start: date,
+    end: date,
+    *,
+    external_call: ExternalCall,
+    capability_allowed: Callable[[str], bool],
+    capability_failure: Callable[[str, BaseException], None],
+    capability_success: Callable[[str], None],
+    warn: WarningLogger,
+) -> tuple[dict[str, Any], dict[str, bool]]:
+    """Fetch and shape one bounded targeted analysis area from Garmin."""
+    sources = targeted_analysis_sources()[area]
+    payload: dict[str, Any] = {}
+    complete: dict[str, bool] = {}
+    for source, (method_name, invoke) in sources.items():
+        method = getattr(client, method_name, None) if method_name else None
+        if not callable(method) or not capability_allowed(source):
+            complete[source] = False
+            continue
+        if source == "resting_hr":
+            rows: list[dict[str, Any]] = []
+            failed = False
+            for offset in range((end - start).days + 1):
+                day = (start + timedelta(days=offset)).isoformat()
+
+                def fetch_day(
+                    day: str = day, method: Callable[..., Any] = method
+                ) -> Any:
+                    return method(day)
+
+                try:
+                    value = external_call(
+                        GARMIN_ID,
+                        source,
+                        fetch_day,
+                        {"date": day},
+                    )
+                    if not isinstance(value, dict):
+                        raise TypeError("Invalid Garmin resting_hr response")
+                    if not any(
+                        key in value for key in ("calendarDate", "date", "summaryDate")
+                    ):
+                        value = {"calendarDate": day, **value}
+                    rows.append(value)
+                except Exception as exc:  # noqa: BLE001 - retain successful days.
+                    failed = True
+                    capability_failure(source, exc)
+                    warn(source, "Garmin analysis source failed", exc)
+            if not failed:
+                capability_success(source)
+            payload[source] = rows
+            complete[source] = not failed
+            continue
+        try:
+            assert invoke is not None
+
+            def fetch(
+                invoke: Callable[..., Any] = invoke,
+                method: Callable[..., Any] = method,
+            ) -> Any:
+                return invoke(method, start, end)
+
+            value = external_call(
+                GARMIN_ID,
+                source,
+                fetch,
+                {"start": start.isoformat(), "end": end.isoformat()},
+            )
+            value = _normalize_targeted_analysis_response(source, value)
+        except Exception as exc:  # noqa: BLE001 - isolate provider failures per source.
+            capability_failure(source, exc)
+            warn(source, "Garmin analysis source failed", exc)
+            complete[source] = False
+            continue
+        capability_success(source)
+        payload[source] = value
+        complete[source] = True
+    return payload, complete
+
+
+def fetch_targeted_nutrition(
+    client: Any,
+    source: str,
+    start: date,
+    end: date,
+    *,
+    external_call: ExternalCall,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Fetch one bounded body measurement or daily energy range."""
+    method_name = "get_weigh_ins" if source == "weight" else "get_daily_summaries"
+    fetch = getattr(client, method_name, None)
+    if not callable(fetch):
+        raise NotImplementedError(f"Unsupported Garmin {source} range")
+    value = external_call(
+        GARMIN_ID,
+        source,
+        lambda: fetch(start.isoformat(), end.isoformat()),
+        {"start": start.isoformat(), "end": end.isoformat()},
+    )
+    if source == "weight":
+        return preserve_weight_response(value), True
+    records = value.get("data") if isinstance(value, dict) else value
+    if not isinstance(records, list) or any(
+        not isinstance(row, dict) for row in records
+    ):
+        raise ValueError("Invalid Garmin daily_stats response")
+    bounded = []
+    complete = True
+    for row in records:
+        raw_day = (
+            row.get("calendarDate") or row.get("summaryDate") or row.get("date")
+        )
+        try:
+            observed = date.fromisoformat(str(raw_day)[:10])
+        except ValueError:
+            complete = False
+            continue
+        if start <= observed <= end:
+            bounded.append(row)
+    return bounded, complete
+
+
+def _normalize_targeted_analysis_response(source: str, value: Any) -> Any:
+    if not isinstance(value, (dict, list)):
+        raise TypeError(f"Invalid Garmin {source} response")
+    if source == "daily_stats" and isinstance(value, dict):
+        value = value.get("data")
+    if source == "hrv" and isinstance(value, dict):
+        value = value.get("hrvSummaries")
+    if source in {"daily_stats", "hrv"} and (
+        not isinstance(value, list)
+        or any(not isinstance(row, dict) for row in value)
+    ):
+        raise TypeError(f"Invalid Garmin {source} response records")
+    return value
 
 
 def normalize_range_records(source: str, value: Any) -> list[dict[str, Any]]:

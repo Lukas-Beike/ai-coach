@@ -6,11 +6,28 @@ from datetime import date
 from unittest.mock import Mock, patch
 
 from backend.errors import AppError
+from backend.providers.garmin import targeted_analysis_sources
 from backend.sync.garmin_assembly import GarminAssembly
 from backend.sync.garmin_service import GarminAnalysisRefreshService, GarminRemoteReader
 
 
 class GarminAnalysisRefreshTests(unittest.TestCase):
+    def test_targeted_endpoint_map_uses_pinned_sdk_methods(self) -> None:
+        sources = targeted_analysis_sources()
+
+        self.assertEqual(
+            sources["recovery"]["readiness"][0], "get_training_readiness_range"
+        )
+        self.assertEqual(
+            sources["performance"]["weekly_training_status"][0],
+            "get_weekly_training_status",
+        )
+        self.assertEqual(
+            sources["load"]["daily_training_status"][0],
+            "get_daily_training_status",
+        )
+        self.assertEqual(sources["recovery"]["daily_stats"][0], "get_daily_summaries")
+
     def test_recovery_keeps_resting_hr_days_after_one_day_fails(self) -> None:
         reader = GarminRemoteReader.__new__(GarminRemoteReader)
         client = Mock(spec=["get_heart_rates"])

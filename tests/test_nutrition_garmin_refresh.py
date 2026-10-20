@@ -6,6 +6,7 @@ from datetime import date
 from unittest.mock import Mock, patch
 
 from backend.errors import AppError
+from backend.providers.garmin import merge_weight_snapshots
 from backend.sync.garmin_service import (
     GarminNutritionRefreshService,
     GarminRemoteReader,
@@ -14,6 +15,14 @@ from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 
 class GarminNutritionRefreshTests(unittest.TestCase):
+    def test_weight_snapshot_merge_keeps_distinct_samples_from_one_day(self) -> None:
+        first = {"date": "2026-09-24", "weight": 70.5, "timestamp": "07:00"}
+        second = {"date": "2026-09-24", "weight": 70.7, "timestamp": "19:00"}
+
+        merged = merge_weight_snapshots([first, second], [first])
+
+        self.assertEqual(merged, [first, second])
+
     def test_remote_energy_without_range_api_is_unsupported_without_daily_loop(self) -> None:
         reader = GarminRemoteReader.__new__(GarminRemoteReader)
         client = Mock(spec=["get_user_summary"])
@@ -93,20 +102,24 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         self.assertTrue(complete)
         self.assertEqual(
             records,
-            [{"calendarDate": "2026-09-24", "date": "2026-09-24", "weight": 70.5}],
+            [{"weighIns": [{"date": "2026-09-24", "weight": 70.5}]}],
         )
         client.get_weigh_ins.assert_called_once_with("2026-09-01", "2026-09-24")
         client.get_daily_summaries.assert_not_called()
 
-    def test_remote_body_refresh_filters_nested_out_of_range_records(self) -> None:
+    def test_remote_body_refresh_preserves_raw_history_and_multiple_daily_samples(self) -> None:
         reader = GarminRemoteReader.__new__(GarminRemoteReader)
         client = Mock()
-        client.get_weigh_ins.return_value = {
+        raw = {
             "weighIns": [
-                {"date": "2026-09-24", "weight": 70.5},
+                {"date": "2026-08-01", "weight": 68.2},
+                {"date": "2026-09-24T07:00:00", "weight": 70.5},
+                {"date": "2026-09-24T19:00:00", "weight": 70.7},
                 {"date": "2026-09-25", "weight": 71.0},
-            ]
+            ],
+            "userProfile": {"weightUnit": "kg"},
         }
+        client.get_weigh_ins.return_value = raw
         reader.configured = Mock(return_value=True)
         reader._external_call = lambda _cancel: lambda _service, _operation, call, _details: call()
         reader._authenticated_client = lambda _external: (client, "")
@@ -116,10 +129,9 @@ class GarminNutritionRefreshTests(unittest.TestCase):
             "weight", date(2026, 9, 24), date(2026, 9, 24)
         )
 
-        self.assertFalse(complete)
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["calendarDate"], "2026-09-24")
-        self.assertEqual(records[0]["weight"], 70.5)
+        self.assertTrue(complete)
+        self.assertEqual(records, [raw])
+        self.assertEqual(len(records[0]["weighIns"]), 4)
 
     def test_remote_body_refresh_keeps_body_fat_only_measurements_and_normalizes_date(self) -> None:
         reader = GarminRemoteReader.__new__(GarminRemoteReader)
@@ -145,9 +157,7 @@ class GarminNutritionRefreshTests(unittest.TestCase):
 
         self.assertTrue(complete)
         self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["bodyFat"], 18.5)
-        self.assertEqual(records[0]["bodyFatUnit"], "%")
-        self.assertEqual(records[0]["calendarDate"], "2026-09-24")
+        self.assertEqual(records, [client.get_weigh_ins.return_value])
 
     def make_service(self):
         reader = Mock()
