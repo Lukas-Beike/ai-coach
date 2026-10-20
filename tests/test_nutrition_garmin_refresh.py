@@ -102,7 +102,7 @@ class GarminNutritionRefreshTests(unittest.TestCase):
             )
 
         self.assertIs(result, counters)
-        writer._coverage.persist.assert_not_called()
+        cast(Any, writer._coverage).persist.assert_not_called()
         self.assertEqual(snapshot["synced_at"], "old")
         key_values.set.assert_called_once()
 
