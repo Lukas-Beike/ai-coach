@@ -12,13 +12,18 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.activities.detail_merge import (
-    DetailCandidate,
     MergedStreams,
     SetChoice,
+    clock_offset,
 )
 from backend.canonical.activity_detail import ActivityLapSet
 from backend.canonical.records import ActivityRecord, Provenance
-from backend.canonical.vocabulary import Environment, Sport, StreamChannel
+from backend.canonical.vocabulary import (
+    Environment,
+    ProviderId,
+    Sport,
+    StreamChannel,
+)
 
 # Canonical channels and the legacy stream keys the analysis reads them from.
 _STREAM_KEYS: tuple[tuple[StreamChannel, str], ...] = (
@@ -89,7 +94,15 @@ def _activity_type(record: ActivityRecord) -> str:
     if record.sport is Sport.RIDE:
         return "VirtualRide" if virtual else "Ride"
     if record.sport is Sport.RUN:
-        return "VirtualRun" if virtual else "Run"
+        if virtual:
+            return "VirtualRun"
+        # Intervals.icu names its outdoor trail runs "TrailRun"; other sources keep "Run".
+        if (
+            record.environment is Environment.OUTDOOR
+            and record.provenance.provider is ProviderId.INTERVALS
+        ):
+            return "TrailRun"
+        return "Run"
     return record.sport.value
 
 
@@ -130,7 +143,7 @@ def _laps(
     detail = laps.chosen.stored.detail
     if not isinstance(detail, ActivityLapSet):
         raise TypeError("analysis laps must come from a lap set")
-    offset = 0.0 if streams is None else _clock_offset(laps.chosen, streams.primary)
+    offset = 0.0 if streams is None else clock_offset(laps.chosen, streams.primary)
     if offset is None:
         return []
     return [
@@ -140,22 +153,6 @@ def _laps(
         }
         for lap in detail.laps
     ]
-
-
-def _clock_offset(candidate: DetailCandidate, primary: DetailCandidate) -> float | None:
-    """Seconds from the primary recording start to the candidate's start."""
-    if _same_recording(candidate, primary):
-        return 0.0
-    if candidate.started_at is None or primary.started_at is None:
-        return None
-    return (candidate.started_at - primary.started_at).total_seconds()
-
-
-def _same_recording(candidate: DetailCandidate, primary: DetailCandidate) -> bool:
-    return (candidate.stored.provider, candidate.stored.provider_activity_id) == (
-        primary.stored.provider,
-        primary.stored.provider_activity_id,
-    )
 
 
 def _label(provenance: Provenance) -> str:

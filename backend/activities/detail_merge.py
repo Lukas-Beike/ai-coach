@@ -136,6 +136,21 @@ def merge_details(candidates: Iterable[DetailCandidate]) -> MergedDetail:
     )
 
 
+def clock_offset(candidate: DetailCandidate, primary: DetailCandidate) -> float | None:
+    """Seconds from the primary recording start to the candidate's, None when unknown.
+
+    Sets of the same provider recording share its clock.
+    """
+    if (candidate.stored.provider, candidate.stored.provider_activity_id) == (
+        primary.stored.provider,
+        primary.stored.provider_activity_id,
+    ):
+        return 0.0
+    if candidate.started_at is None or primary.started_at is None:
+        return None
+    return (candidate.started_at - primary.started_at).total_seconds()
+
+
 def stream_average(streams: MergedStreams, channel: StreamChannel) -> float | None:
     """Mean of the channel's values, restricted to moving points when MOVING is shown."""
     if channel in (StreamChannel.TIME_S, StreamChannel.MOVING):

@@ -1,6 +1,7 @@
 """Canonical analysis input reproduces the legacy Intervals.icu analysis."""
 
 import copy
+import dataclasses
 import unittest
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -125,6 +126,14 @@ def record(
         avg_hr=120.0,
         avg_power=200.0,
         name="Synthetic",
+    )
+
+
+def as_provider(activity: ActivityRecord, provider: ProviderId) -> ActivityRecord:
+    """Return the same record attributed to another provider."""
+    return dataclasses.replace(
+        activity,
+        provenance=dataclasses.replace(activity.provenance, provider=provider),
     )
 
 
@@ -278,8 +287,11 @@ class GoldenParityTests(unittest.TestCase):
         )
 
     def test_run_analysis_matches_legacy_input(self) -> None:
+        # Intervals.icu "Run" activities map to an unknown environment.
         projected, merged = from_intervals(run_payload(), run_streams())
-        adapted = analysis_input(record(Sport.RUN), merged.streams, merged.laps)
+        adapted = analysis_input(
+            record(Sport.RUN, Environment.UNKNOWN), merged.streams, merged.laps
+        )
         legacy_running = running_profile(projected)
         self.assertEqual("ok", legacy_running["status"])
         self.assertEqual(
@@ -300,7 +312,7 @@ class AnalysisInputMappingTests(unittest.TestCase):
             (Sport.RIDE, Environment.OUTDOOR, "Ride"),
             (Sport.RIDE, Environment.INDOOR, "Ride"),
             (Sport.RIDE, Environment.VIRTUAL, "VirtualRide"),
-            (Sport.RUN, Environment.OUTDOOR, "Run"),
+            (Sport.RUN, Environment.UNKNOWN, "Run"),
             (Sport.RUN, Environment.VIRTUAL, "VirtualRun"),
             (Sport.SWIM, Environment.OUTDOOR, "swim"),
         )
@@ -308,6 +320,16 @@ class AnalysisInputMappingTests(unittest.TestCase):
             with self.subTest(sport=sport, environment=environment):
                 adapted = analysis_input(record(sport, environment), None, None)
                 self.assertEqual(expected, adapted.activity["type"])
+
+    def test_intervals_outdoor_runs_are_named_trail_runs(self) -> None:
+        adapted = analysis_input(record(Sport.RUN), None, None)
+        self.assertEqual("TrailRun", adapted.activity["type"])
+
+    def test_other_providers_keep_outdoor_runs_named_run(self) -> None:
+        adapted = analysis_input(
+            as_provider(record(Sport.RUN), ProviderId.WAHOO), None, None
+        )
+        self.assertEqual("Run", adapted.activity["type"])
 
     def test_moving_flags_map_to_booleans_and_gaps(self) -> None:
         source = candidate(

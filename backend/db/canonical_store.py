@@ -503,6 +503,33 @@ def active_activity_rows(
     )
 
 
+def session_activity_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:
+    """Return the active activity rows bundled in one session, for detail reads.
+
+    The record set mirrors ``activity_detail_store.detail_sets_for_session``: rows
+    of the session itself and of sessions merged into it. A deleted session returns
+    nothing. Invalid and deleted records are never returned.
+    """
+    return _fetch_all(
+        db,
+        f"SELECT {', '.join(_ACTIVITY_READ_COLUMNS)} FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.state = ? AND "
+        "(s.activity_id = ? OR (s.state = ? AND s.merged_into = ?)) "
+        "AND NOT EXISTS (SELECT 1 FROM activity_sessions AS owner "
+        "WHERE owner.activity_id = ? AND owner.state = ?) "
+        "ORDER BY r.started_at, r.provider, r.provider_activity_id",
+        (
+            ActivityRecordState.ACTIVE.value,
+            activity_id,
+            ActivitySessionState.DUPLICATE.value,
+            activity_id,
+            activity_id,
+            ActivitySessionState.DELETED.value,
+        ),
+    )
+
+
 def active_activity_payload_texts(
     db: Any,
     *,
