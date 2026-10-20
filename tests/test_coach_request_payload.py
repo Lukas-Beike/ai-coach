@@ -64,6 +64,69 @@ class CoachRequestPayloadTests(unittest.TestCase):
         self.assertIn("dialogue", json.loads(local["input"]))
         self.assertIn("Earlier image pixels are unavailable", local["instructions"])
 
+    def _dialogue_text(self, payload: dict) -> str:
+        """Dialogue JSON text of a payload whose input carries attachment parts."""
+        return payload["input"][0]["content"][0]["text"]
+
+    def test_attachment_turn_sends_dialogue_conversation_and_summary_notice(
+        self,
+    ) -> None:
+        attachment = {
+            "type": "image",
+            "name": "synthetic.png",
+            "mime": "image/png",
+            "data": "AAAA",
+        }
+        _, payload = self.build(
+            attachments=[attachment],
+            retain_openai_attachment_context=True,
+            has_prior_openai_attachments=True,
+        )
+
+        self.assertEqual(payload["conversation"], "conversation-1")
+        self.assertIn("dialogue", json.loads(self._dialogue_text(payload)))
+        self.assertIn("Earlier image pixels are unavailable", payload["instructions"])
+
+    def test_in_window_follow_up_keeps_conversation_without_dialogue_or_notice(
+        self,
+    ) -> None:
+        _, payload = self.build(
+            retain_openai_attachment_context=True,
+            has_prior_openai_attachments=True,
+        )
+
+        self.assertEqual(payload["conversation"], "conversation-1")
+        self.assertNotIn("dialogue", json.loads(payload["input"]))
+        self.assertNotIn(
+            "Earlier image pixels are unavailable", payload["instructions"]
+        )
+
+    def test_post_window_local_turn_sends_dialogue_and_notice_without_conversation(
+        self,
+    ) -> None:
+        _, payload = self.build(
+            retain_openai_attachment_context=False,
+            has_prior_openai_attachments=True,
+        )
+
+        self.assertNotIn("conversation", payload)
+        self.assertIn("dialogue", json.loads(payload["input"]))
+        self.assertIn("Earlier image pixels are unavailable", payload["instructions"])
+
+    def test_request_size_log_reports_attachment_mode_without_content(self) -> None:
+        cases = (
+            ({"retain_openai_attachment_context": True}, "retained"),
+            ({"retain_openai_attachment_context": False}, "local"),
+        )
+        for overrides, expected in cases:
+            with self.subTest(mode=expected):
+                with self.assertLogs("intervals_coach", level="INFO") as logs:
+                    self.build(has_prior_openai_attachments=True, **overrides)
+                record = logs.records[0]
+                self.assertEqual(record.event, "coach_request_sizes")
+                self.assertEqual(record.context["attachment_mode"], expected)
+                self.assertNotIn("current turn", str(record.context))
+
     def test_advisory_request_adds_no_mutation_instruction(self) -> None:
         model_instructions, payload = self.build(allow_mutations=False)
 

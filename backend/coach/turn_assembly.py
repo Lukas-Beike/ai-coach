@@ -179,6 +179,7 @@ class CoachTurnAssembly:
             CoachStructuredTurnDependencies(
                 opening=self.turn_opening_service(),
                 attachments=self._attachment_context_service(),
+                conversations=self._conversation_provision_service()(),
                 dialogue=self._dialogue_read_service(),
                 payload=self._request_payload_service(),
                 response=self.structured_response_service(),

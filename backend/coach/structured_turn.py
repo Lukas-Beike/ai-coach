@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from backend.coach.conversation import CoachAttachmentContextService
+from backend.coach.conversation import (
+    CoachAttachmentContextService,
+    CoachConversationProvisionService,
+)
 from backend.coach.dialogue import CoachDialogueReadService
 from backend.coach.final_receipt import CoachFinalReceiptService
 from backend.coach.request_payload import (
@@ -31,6 +34,7 @@ from backend.errors import AppError
 class CoachStructuredTurnDependencies:
     opening: CoachTurnOpeningService
     attachments: CoachAttachmentContextService
+    conversations: CoachConversationProvisionService
     dialogue: CoachDialogueReadService
     payload: CoachRequestPayloadService
     response: CoachStructuredResponseService
@@ -97,12 +101,17 @@ class CoachStructuredTurnService:
             session_csrf_hash=session_csrf_hash,
             model=model,
         )
-        attachments, has_prior_openai_attachments = (
+        attachments, has_prior_openai_attachments, within_attachment_window = (
             self._deps.attachments.load_for_receipt(receipt)
         )
-        retain_openai_attachment_context = bool(
-            attachments or has_prior_openai_attachments
-        )
+        retain_openai_attachment_context = bool(attachments or within_attachment_window)
+        if attachments and not receipt.get("openai_conversation_rotated"):
+            # Earlier image pixels stay in the old conversation; a fresh one keeps
+            # the retained context bounded. Resumes skip this via the stored flag.
+            conversation_id = self._deps.conversations.rotate(
+                client_turn_id, conversation_id
+            )
+            receipt["openai_conversation_rotated"] = True
         background_owned = background_job and receipt.get("mode") == "background"
         context = self._deps.dialogue.context(client_turn_id)
         self._deps.attachments.add_evidence(context)
@@ -172,6 +181,7 @@ class CoachStructuredTurnService:
             "background_owned": background_owned,
             "response": response,
             "context_profile": context_profile,
+            "conversation_id": conversation_id,
         }
 
     def _run_turn(
@@ -211,7 +221,7 @@ class CoachStructuredTurnService:
             sync_job_ids=sync_job_ids,
             context=context,
             allow_mutations=allow_mutations,
-            conversation_id=conversation_id,
+            conversation_id=state["conversation_id"],
             client_turn_id=client_turn_id,
             session_csrf_hash=session_csrf_hash,
             cancel_event=cancel_event,
