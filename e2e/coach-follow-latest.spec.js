@@ -124,6 +124,11 @@ test("returning to the Coach after scrolling away during a stream keeps the posi
   await expect(page.locator(".message.assistant.streaming")).toBeVisible();
   await page.mouse.wheel(0, -2000);
   await expect.poll(() => page.evaluate(() => state.chatFollowLatest)).toBe(false);
+  // The wheel scroll can land a frame after its event; read the position once it has settled.
+  await expect.poll(() => page.evaluate(() => {
+    const before = window.scrollY;
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(window.scrollY === before))));
+  })).toBe(true);
   const scrollAfterWheel = await page.evaluate(() => window.scrollY);
   // Leaving during the stream marks the reply start as pending; the reader's position must still win.
   await page.getByRole("link", { name: "Kalender", exact: true }).click();

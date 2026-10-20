@@ -175,10 +175,20 @@ test("a reader who scrolls before the start has loaded keeps their position @res
     .toEqual({ pending: true, ready: "interactive" });
 
   // The reader starts reading the cached messages before the page has finished loading.
+  // A wheel scroll can land frames after its event; read the position once it has settled.
+  const settledScroll = async () => {
+    await expect.poll(() => page.evaluate(() => {
+      const before = window.scrollY;
+      return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(window.scrollY === before))));
+    })).toBe(true);
+    return page.evaluate(() => window.scrollY);
+  };
   await page.mouse.wheel(0, 900);
+  const scrolledDown = await settledScroll();
   await page.mouse.wheel(0, -300);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(scrolledDown);
   await expect.poll(() => page.evaluate(() => state.chatFollowLatest)).toBe(false);
-  const readerScroll = await page.evaluate(() => window.scrollY);
+  const readerScroll = await settledScroll();
 
   releaseLoad();
   await expect.poll(() => page.evaluate(() => document.readyState)).toBe("complete");
