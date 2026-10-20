@@ -220,16 +220,14 @@ def main() -> int:
         action="store_true",
         help="record the requirements-dev.txt tool pins without running the tools",
     )
-    parser.add_argument("--baseline-file", type=Path, default=BASELINE)
-    parser.add_argument("--requirements", type=Path, default=REQUIREMENTS)
     args = parser.parse_args()
     if args.align_versions:
         aligned = aligned_baseline(
-            args.baseline_file.read_text(encoding="utf-8"),
-            args.requirements.read_text(encoding="utf-8"),
+            BASELINE.read_text(encoding="utf-8"),
+            REQUIREMENTS.read_text(encoding="utf-8"),
         )
         if aligned is not None:
-            args.baseline_file.write_text(aligned, encoding="utf-8")
+            BASELINE.write_text(aligned, encoding="utf-8")
         print("aligned" if aligned is not None else "unchanged")
         return 0
     versions, diagnostics = collect(ROOT)

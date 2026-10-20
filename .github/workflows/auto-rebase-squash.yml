@@ -66,25 +66,18 @@ jobs:
           mapfile -t pull_requests <<< "$pull_request_rows"
 
           baseline_path=tests/fixtures/quality_baseline.json
-          work_dir="$(mktemp -d)"
           failed=0
           for pull_request in "${pull_requests[@]}"; do
             IFS=$'\t' read -r pull_request_number head_ref head_sha <<< "$pull_request"
-            requirements="$work_dir/requirements-dev.txt"
-            baseline="$work_dir/quality_baseline.json"
-            # Read the exact head commit; the blob SHA makes the write fail if
-            # the branch moved after these reads.
+            # The PR's two data files replace their copies in this throwaway
+            # checkout; only trusted develop code runs. Read the exact head
+            # commit; the blob SHA makes the write fail if the branch moved.
             if ! gh api "repos/$REPOSITORY/contents/requirements-dev.txt?ref=$head_sha" \
-                -H "Accept: application/vnd.github.raw+json" > "$requirements" \
+                -H "Accept: application/vnd.github.raw+json" > requirements-dev.txt \
               || ! gh api "repos/$REPOSITORY/contents/$baseline_path?ref=$head_sha" \
-                -H "Accept: application/vnd.github.raw+json" > "$baseline" \
+                -H "Accept: application/vnd.github.raw+json" > "$baseline_path" \
               || ! blob_sha="$(gh api "repos/$REPOSITORY/contents/$baseline_path?ref=$head_sha" --jq .sha)" \
-              || ! result="$(
-                env -u GH_TOKEN python tools/quality_baseline.py \
-                  --align-versions \
-                  --baseline-file "$baseline" \
-                  --requirements "$requirements"
-              )"; then
+              || ! result="$(env -u GH_TOKEN python tools/quality_baseline.py --align-versions)"; then
               echo "::warning::Could not check the quality baseline of PR #$pull_request_number ($head_ref)."
               failed=$((failed + 1))
               continue
@@ -95,7 +88,7 @@ jobs:
             echo "Aligning quality baseline tool versions in PR #$pull_request_number ($head_ref)."
             if ! gh api --method PUT "repos/$REPOSITORY/contents/$baseline_path" \
               -f message="build(deps): align quality baseline tool versions" \
-              -f content="$(base64 -w0 "$baseline")" \
+              -f content="$(base64 -w0 "$baseline_path")" \
               -f sha="$blob_sha" \
               -f branch="$head_ref" > /dev/null; then
               echo "::warning::Could not align the quality baseline of PR #$pull_request_number ($head_ref)."

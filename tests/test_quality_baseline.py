@@ -153,23 +153,17 @@ class QualityBaselineTests(unittest.TestCase):
                 json.dumps({**self.baseline, "schema": 2}), "ruff==1.0.0\nmypy==1.0.0\n"
             )
 
-    def test_align_versions_cli_rewrites_only_the_given_baseline(self):
+    def test_align_versions_cli_rewrites_only_the_repository_baseline(self):
         with tempfile.TemporaryDirectory() as temp:
             baseline = Path(temp) / "baseline.json"
             requirements = Path(temp) / "requirements-dev.txt"
             baseline.write_text(json.dumps(self.baseline, indent=2) + "\n")
             requirements.write_text("ruff==0.17.1\nmypy==2.4.0\n")
-            argv = [
-                "quality_baseline.py",
-                "--align-versions",
-                "--baseline-file",
-                str(baseline),
-                "--requirements",
-                str(requirements),
-            ]
             output = io.StringIO()
             with (
-                patch.object(sys, "argv", argv),
+                patch.object(sys, "argv", ["quality_baseline.py", "--align-versions"]),
+                patch.object(quality_baseline, "BASELINE", baseline),
+                patch.object(quality_baseline, "REQUIREMENTS", requirements),
                 patch("tools.quality_baseline.collect") as collect,
                 contextlib.redirect_stdout(output),
             ):
