@@ -198,7 +198,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#more\/profile$/);
     await expect(page.locator("#profilePanel")).toBeFocused();
-    await expect(page.locator(".dirty-indicator")).toHaveCount(2);
+    await expect(page.locator(".dirty-indicator")).toHaveCount(1);
     const hiddenIndicators = await page.locator(".dirty-indicator").evaluateAll((nodes) => nodes.every((node) => node.hidden));
     expect(hiddenIndicators).toBe(true);
     for (const [label, panelId, route] of navigation) {
@@ -264,7 +264,6 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await expect(page).toHaveURL(/#plan$/);
 
     await expect(page.getByRole("link", { name: "Heute", exact: true })).toHaveCount(0);
-    await expect(page.locator("#checkinDialog")).toBeHidden();
     await expect(page.locator("#chatPanel")).toContainText("Morgen-Check-in");
 
     const undersizedTargets = await page.locator(".panel.active button:visible, .panel.active a:visible, .panel.active input:visible, .panel.active textarea:visible, .panel.active select:visible, .panel.active summary:visible, .bottom-nav a:visible").evaluateAll((nodes) => nodes

@@ -15,7 +15,6 @@ function render(data, { reloadRoute = true } = {}) {
   renderPlanned(data.training_calendar || data.planned || []);
   renderLibrary(data.library || []);
   renderProfile(data.profile);
-  renderCheckins(data.checkins || data.local_feedback?.recent || [], data.profile?.timezone);
   renderGarmin(data.garmin);
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
