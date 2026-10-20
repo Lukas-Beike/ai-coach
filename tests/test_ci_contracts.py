@@ -223,7 +223,7 @@ class WorkflowSourceTests(unittest.TestCase):
             ),
             "e2e": (
                 workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0],
-                "needs: [source, test, image]",
+                "needs: [source, image]",
             ),
         }
         for job, (text, needs) in consumers.items():
@@ -244,6 +244,35 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertNotIn("grep -q '@responsive'", e2e)
         self.assertIn('--list --project "$project" --reporter=json', e2e)
         self.assertIn("mapfile -t specs", e2e)
+
+    def test_e2e_runs_beside_unit_tests_and_shards_desktop_completely(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(
+            encoding="utf-8"
+        )
+        e2e = workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0]
+        # Browser checks no longer wait for the unit tests; publishing still needs both.
+        self.assertNotIn("needs.test", e2e)
+        self.assertIn("needs: [source, test, e2e, browser, quality]", workflow)
+        entries = re.findall(
+            r"- \{ project: ([a-z-]+), shard: (\d+), shards: (\d+) \}", e2e
+        )
+        projects = {}
+        for project, shard, shards in entries:
+            projects.setdefault(project, []).append((int(shard), int(shards)))
+        self.assertEqual(
+            set(projects),
+            {"mobile-small", "mobile", "tablet", "tablet-landscape", "desktop"},
+        )
+        for project, shards in projects.items():
+            with self.subTest(project=project):
+                count = shards[0][1]
+                self.assertEqual(sorted(shards), [(i, count) for i in range(1, count + 1)])
+        self.assertIn("index % shards === shard - 1", e2e)
+        self.assertIn(
+            "browser-test-artifacts-${{ matrix.project }}-${{ matrix.shard }}", e2e
+        )
+        self.assertIn("format(' {0}/{1}', matrix.shard, matrix.shards)", e2e)
 
     def test_e2e_fixtures_reuse_slot_networks_created_before_the_browser(self):
         root = Path(__file__).resolve().parents[1]
@@ -504,20 +533,58 @@ class ShardingContractTests(unittest.TestCase):
                 self.assertEqual(sorted(first), sorted(reversed_input))
 
     def test_largest_shard_is_within_the_greedy_balance_bound(self):
-        # Largest-first assignment guarantees max(load) <= mean + largest class.
+        # Heaviest-first assignment guarantees max(load) <= mean + heaviest class.
         suite = _discovered_suite()
-        sizes = {}
-        for test in suite:
-            key = run_tests.class_key(test)
-            sizes[key] = sizes.get(key, 0) + 1
+        weights = run_tests.class_weights(suite, run_tests.load_durations())
         total = _native_shard_count()
-        counts = [
-            len(run_tests.select_shard(suite, shard, total))
+        loads = [
+            sum(
+                weights[key]
+                for key in {
+                    run_tests.class_key(test)
+                    for test in run_tests.select_shard(suite, shard, total)
+                }
+            )
             for shard in range(1, total + 1)
         ]
-        mean = len(suite) / total
-        self.assertLessEqual(max(counts) - mean, max(sizes.values()))
-        self.assertLessEqual(max(counts) - min(counts), max(sizes.values()))
+        mean = sum(weights.values()) / total
+        self.assertLessEqual(max(loads) - mean, max(weights.values()) + 1e-9)
+        self.assertLessEqual(max(loads) - min(loads), max(weights.values()) + 1e-9)
+
+    def test_recorded_durations_outweigh_test_counts(self):
+        # B1 has the most tests, but A1 is recorded as the slowest class by far.
+        suite = self.synthetic
+        durations = {
+            f"test_shardfixture_{module}.{name}": 1.0
+            for module, names in {
+                "alpha": ("A2",),
+                "beta": ("B1",),
+                "gamma": ("C1", "C2", "C3"),
+                "delta": ("D1", "D2"),
+            }.items()
+            for name in names
+        }
+        durations["test_shardfixture_alpha.A1"] = 100.0
+        weights = run_tests.class_weights(suite, durations)
+        # Unrecorded D3 (one test) weighs the median recorded seconds per test:
+        # median(0.2, 0.25, 0.5, 0.5, 1, 1, 1, 33.3) = 0.75.
+        self.assertAlmostEqual(weights["test_shardfixture_delta.D3"], 0.75)
+        first = run_tests.select_shard(suite, 1, 2, durations)
+        self.assertEqual(
+            {run_tests.class_key(test) for test in first}, {"test_shardfixture_alpha.A1"}
+        )
+        without = run_tests.class_weights(suite, {})
+        self.assertEqual(without["test_shardfixture_beta.B1"], 5.0)
+
+    def test_recorded_durations_file_is_valid(self):
+        durations = run_tests.load_durations()
+        self.assertTrue(durations, "tests/test_durations.json is missing or empty")
+        self.assertTrue(all(seconds >= 0 for seconds in durations.values()))
+        self.assertEqual(list(durations), sorted(durations))
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(
+                run_tests.load_durations(Path(directory) / "missing.json"), {}
+            )
 
     def test_native_shard_count_is_declared_once_and_matched_by_the_matrix(self):
         root = Path(__file__).resolve().parents[1]
@@ -601,7 +668,7 @@ class ContainerSuiteContractTests(unittest.TestCase):
         self.assertIn("python /review/tests/run_tests.py --suite container", container)
         local = (root / "tests/run_sqlcipher_tests.ps1").read_text(encoding="utf-8")
         # The local SQLCipher runner must keep running the full suite.
-        self.assertIn("python /review/tests/run_tests.py\n", local)
+        self.assertIn("python /review/tests/run_tests.py @runnerArguments\n", local)
         self.assertNotIn("--suite", local)
         mount_pattern = r':(/[^":\s]+):ro"'
         ci_targets = set(re.findall(mount_pattern, container))
