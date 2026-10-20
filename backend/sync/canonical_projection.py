@@ -56,6 +56,8 @@ class _Source:
     stored_at: datetime | None
     activities: MappingResult[ActivityRecord]
     observations: MappingResult[Observation]
+    activities_retrieved_at: datetime | None
+    observations_retrieved_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,8 +206,20 @@ class CanonicalSnapshotProjection(
         snapshot = self._intervals_snapshot(db)
         fallback = self._clock()
         intervals_stored = stored_retrieved_at(snapshot, zone=zone)
+        activities_stored = (
+            stored_retrieved_at(
+                {"synced_at": snapshot.get("activities_synced_at")}, zone=zone
+            )
+            if isinstance(snapshot, dict) and "activities_synced_at" in snapshot
+            else intervals_stored
+        )
         garmin_stored = stored_retrieved_at(payload, zone=zone)
-        intervals_activities, intervals_observations = project_intervals_snapshot(
+        intervals_activities, _unused_observations = project_intervals_snapshot(
+            snapshot,
+            zone=zone,
+            retrieved_at=_or_else(activities_stored, fallback),
+        )
+        _unused_activities, intervals_observations = project_intervals_snapshot(
             snapshot,
             zone=zone,
             retrieved_at=_or_else(intervals_stored, fallback),
@@ -221,12 +235,16 @@ class CanonicalSnapshotProjection(
                 intervals_stored,
                 intervals_activities,
                 intervals_observations,
+                activities_stored,
+                intervals_stored,
             ),
             _Source(
                 ProviderId.GARMIN,
                 garmin_stored,
                 garmin_activities,
                 garmin_observations,
+                garmin_stored,
+                garmin_stored,
             ),
         )
         return _Projection(
@@ -243,7 +261,11 @@ class CanonicalSnapshotProjection(
                 )
             ),
             coverage=tuple(_coverage(source) for source in sources),
-            clock_dependent=intervals_stored is None or garmin_stored is None,
+            clock_dependent=(
+                activities_stored is None
+                or intervals_stored is None
+                or garmin_stored is None
+            ),
         )
 
 
@@ -274,5 +296,10 @@ def _row_in_range(
 
 def _coverage(source: _Source) -> ProviderCoverage:
     return summarize_provider(
-        source.provider, source.stored_at, source.activities, source.observations
+        source.provider,
+        source.stored_at,
+        source.activities,
+        source.observations,
+        activities_retrieved_at=source.activities_retrieved_at,
+        observations_retrieved_at=source.observations_retrieved_at,
     )

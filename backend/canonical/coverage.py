@@ -21,6 +21,8 @@ from backend.canonical.validation import (
 )
 from backend.canonical.vocabulary import ProviderId
 
+_DEFAULT_RETRIEVED_TIME = object()
+
 
 def _require_count(value: object, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
@@ -66,10 +68,16 @@ class ProviderCoverage:
     issue_counts: Mapping[IssueReason, int]
     first_observed_on: date | None
     last_observed_on: date | None
+    activities_retrieved_at: datetime | None = None
+    observations_retrieved_at: datetime | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.provider, ProviderId, "provider")
         optional_aware_datetime(self.retrieved_at, "retrieved_at")
+        optional_aware_datetime(self.activities_retrieved_at, "activities_retrieved_at")
+        optional_aware_datetime(
+            self.observations_retrieved_at, "observations_retrieved_at"
+        )
         _require_count(self.activity_count, "activity_count")
         _require_count(self.observation_count, "observation_count")
         object.__setattr__(self, "issue_counts", _copy_issue_counts(self.issue_counts))
@@ -105,6 +113,9 @@ def summarize_provider(
     stored_at: datetime | None,
     activities: MappingResult[ActivityRecord],
     observations: MappingResult[Observation],
+    *,
+    activities_retrieved_at: datetime | None | object = _DEFAULT_RETRIEVED_TIME,
+    observations_retrieved_at: datetime | None | object = _DEFAULT_RETRIEVED_TIME,
 ) -> ProviderCoverage:
     """Summarize one provider's mapped records and mapping issues as counts."""
     days = [observation.observed_on for observation in observations.records]
@@ -116,6 +127,16 @@ def summarize_provider(
         issue_counts=count_issues((*activities.issues, *observations.issues)),
         first_observed_on=min(days, default=None),
         last_observed_on=max(days, default=None),
+        activities_retrieved_at=(
+            stored_at
+            if activities_retrieved_at is _DEFAULT_RETRIEVED_TIME
+            else activities_retrieved_at
+        ),
+        observations_retrieved_at=(
+            stored_at
+            if observations_retrieved_at is _DEFAULT_RETRIEVED_TIME
+            else observations_retrieved_at
+        ),
     )
 
 

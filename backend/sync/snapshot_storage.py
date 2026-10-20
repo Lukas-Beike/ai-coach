@@ -88,7 +88,7 @@ class SnapshotStorage:
         snapshot: dict[str, Any],
         *,
         zone: tzinfo,
-        update_full_sync: bool = True,
+        update_full_sync: bool | None = True,
         activity_days: int | None = None,
     ) -> None:
         """Store the snapshot in the caller's unit of work, stripped when tables serve.

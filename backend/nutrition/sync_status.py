@@ -18,6 +18,7 @@ from backend.performance.daily_health import (
     daily_energy_expenditure,
     read_daily_health_by_date,
 )
+from backend.providers.garmin_fields import GARMIN_DATE_ALIASES
 from backend.runtime.ports import ObservationReader
 
 
@@ -227,13 +228,17 @@ def _filter_targeted_missing_energy(
     if not isinstance(targeted, dict):
         return measured
     records = snapshot.get("daily_stats")
-    observed_dates = {
-        str(record.get(key))[:10]
-        for record in records
-        if isinstance(record, dict)
-        for key in ("calendarDate", "summaryDate", "date")
-        if record.get(key)
-    } if isinstance(records, list) else set()
+    observed_dates = (
+        {
+            str(record.get(key))[:10]
+            for record in records
+            if isinstance(record, dict)
+            for key in GARMIN_DATE_ALIASES
+            if record.get(key)
+        }
+        if isinstance(records, list)
+        else set()
+    )
     result = dict(measured)
     for day in dates:
         refresh = targeted.get(day)

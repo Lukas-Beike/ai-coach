@@ -62,6 +62,8 @@ function renderNutritionSegments(route) {
   const week = route === "nutrition/week";
   const products = route === "nutrition/products";
   const body = route === "nutrition/body";
+  const names = { "nutrition/diary": "Tagebuch", "nutrition/week": "Verlauf", "nutrition/body": "Body", "nutrition/products": "Produkte" };
+  document.querySelector("#nutritionRefreshButton").setAttribute("aria-label", `Ernährung aktualisieren: ${names[route] || "Tagebuch"}`);
   document.querySelector("#nutritionDiary").hidden = week || products || body;
   document.querySelector("#bodyAnalysisCharts").hidden = !body;
   document.querySelector("#nutritionStatus").hidden = week || products || body;
@@ -325,6 +327,7 @@ function renderNutritionHistoryPeriod() {
   root.querySelectorAll("button").forEach((button, index) => {
     button.setAttribute("aria-pressed", String(["fortnight", "twelveWeeks"][index] === nutritionHistoryPeriod));
   });
+  document.querySelector("#nutritionRefreshButton").setAttribute("aria-label", `Ernährung aktualisieren: Verlauf, ${nutritionHistoryPeriod === "twelveWeeks" ? "12 Wochen" : "14 Tage"}`);
 }
 
 function nutritionChartDays(days) {
@@ -410,13 +413,13 @@ function showCachedNutritionView(path, renderView) {
   } catch { return false; }
 }
 
-async function loadNutritionWeek(sequence, generation) {
+async function loadNutritionWeek(sequence, generation, preserve = false, expectedRoute = null, expectedView = null, throwOnError = false) {
   const path = `/api/nutrition/week?days=${nutritionHistoryPeriod === "twelveWeeks" ? 84 : 14}`;
   renderNutritionHistoryPeriod();
   const cacheEpoch = viewCacheEpoch;
   const status = document.querySelector("#nutritionWeekStatus");
   const cached = showCachedNutritionView(path, renderNutritionWeek);
-  if (!cached) {
+  if (!cached && !preserve) {
     status.textContent = "Wochenübersicht wird geladen…";
     document.querySelector("#nutritionWeekTotals").replaceChildren();
     document.querySelector("#nutritionWeekDays").replaceChildren();
@@ -427,11 +430,12 @@ async function loadNutritionWeek(sequence, generation) {
   }
   try {
     const week = await api(path);
-    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration || cacheEpoch !== viewCacheEpoch) return;
+    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration || cacheEpoch !== viewCacheEpoch || (expectedRoute && state.route !== expectedRoute) || (expectedView && nutritionHistoryPeriod !== expectedView)) return;
     renderNutritionWeek(week);
     rememberViewCache(path, week, cacheEpoch);
   } catch (error) {
-    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) status.textContent = cached ? `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}` : `Wochenübersicht konnte nicht geladen werden: ${error.message}`;
+    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration && (!expectedRoute || state.route === expectedRoute) && (!expectedView || nutritionHistoryPeriod === expectedView)) status.textContent = cached ? `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}` : `Wochenübersicht konnte nicht geladen werden: ${error.message}`;
+    if (throwOnError) throw error;
   }
 }
 
@@ -446,11 +450,11 @@ function renderNutritionDay(day) {
   document.querySelector("#nutritionEntries").replaceChildren(...day.entries.map((item) => nutritionCard(item, false)));
 }
 
-async function loadNutrition() {
+async function loadNutrition({ preserve = false, expectedRoute = null, expectedDate = null, throwOnError = false } = {}) {
   const sequence = ++nutritionLoadSequence;
   const generation = state.sessionGeneration;
   if (state.route === "nutrition/body") return;
-  if (state.route === "nutrition/week") { void loadNutritionWeek(sequence, generation); return; }
+  if (state.route === "nutrition/week") return loadNutritionWeek(sequence, generation, preserve, expectedRoute, expectedDate, throwOnError);
   const dateInput = document.querySelector("#nutritionDate");
   const status = document.querySelector("#nutritionStatus");
   const path = dateInput.value ? `/api/nutrition/day?date=${encodeURIComponent(dateInput.value)}` : "/api/nutrition/day";
@@ -458,7 +462,7 @@ async function loadNutrition() {
   const cacheEpoch = viewCacheEpoch;
   const cacheKey = `/api/nutrition/day?date=${encodeURIComponent(dateInput.value || todayIso())}`;
   const cached = showCachedNutritionView(cacheKey, renderNutritionDay);
-  if (!cached) {
+  if (!cached && !preserve) {
     status.textContent = "Ernährung wird geladen…";
     clearNutritionExpenditure();
     document.querySelector("#nutritionEntries").replaceChildren();
@@ -466,19 +470,20 @@ async function loadNutrition() {
   }
   try {
     const day = await api(path);
-    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration || cacheEpoch !== viewCacheEpoch) return;
+    if (sequence !== nutritionLoadSequence || generation !== state.sessionGeneration || cacheEpoch !== viewCacheEpoch || (expectedRoute && state.route !== expectedRoute) || (expectedDate && dateInput.value !== expectedDate)) return;
     renderNutritionDay(day);
     rememberViewCache(`/api/nutrition/day?date=${encodeURIComponent(day.date)}`, day, cacheEpoch);
   } catch (error) {
-    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration) {
+    if (sequence === nutritionLoadSequence && generation === state.sessionGeneration && (!expectedRoute || state.route === expectedRoute) && (!expectedDate || dateInput.value === expectedDate)) {
       if (cached) {
         status.textContent = `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}`;
         nutritionExpenditureSection().querySelector("#nutritionExpenditureStatus").textContent = `Gespeicherter Stand. Tagesverbrauch konnte nicht aktualisiert werden: ${error.message}`;
       } else {
         status.textContent = `Ernährung konnte nicht geladen werden: ${error.message}`;
-        clearNutritionExpenditure(`Tagesverbrauch konnte nicht geladen werden: ${error.message}`);
+        clearNutritionExpenditure(`Tagesverbrauch konnte nicht geladen werden: ${error.message}`);
       }
-    }
+      if (throwOnError) throw error;
+    }
   }
 }
 
@@ -495,6 +500,36 @@ for (const [id, offset] of [["nutritionPrevious", -1], ["nutritionNext", 1]]) {
 }
 document.querySelector("#nutritionToday").addEventListener("click", () => { document.querySelector("#nutritionDate").value = ""; void loadNutrition(); });
 
+const nutritionRefresh = AppViewRefresh.create({
+  api,
+  waitForJob: (...args) => waitForSyncJob(...args),
+  getRoute: () => state.route,
+  getRequest: (route) => {
+    const path = "/api/nutrition/refresh";
+    if (route === "nutrition/products") return { path, body: { area: "products" } };
+    if (route === "nutrition/body") return { path, body: { area: "body" } };
+    if (route === "nutrition/week") return { path, body: { area: "week", days: nutritionHistoryPeriod === "twelveWeeks" ? 84 : 14 } };
+    return { path, body: { area: "diary", date: document.querySelector("#nutritionDate").value || todayIso() } };
+  },
+  getViewKey: (route) => route === "nutrition/week" ? nutritionHistoryPeriod : route === "nutrition/diary" ? document.querySelector("#nutritionDate").value : route === "nutrition/products" ? document.querySelector("#nutritionProductQuery").value.trim() : null,
+  reload: (route, request) => {
+    if (route === "nutrition/products") {
+      const query = document.querySelector("#nutritionProductQuery").value.trim();
+      return loadNutritionProducts(query, { background: true, throwOnError: true, refresh: true, expectedQuery: query });
+    }
+    if (route === "nutrition/body") return api("/api/performance").then((result) => {
+      if (state.route !== route) return;
+      state.data.performance = result.performance || result;
+      renderBodyAnalysis(state.data.performance?.history?.body);
+    });
+    if (route === "nutrition/week") return loadNutrition({ preserve: true, expectedRoute: route, expectedDate: nutritionHistoryPeriod, throwOnError: true });
+    return loadNutrition({ preserve: true, expectedRoute: route, expectedDate: document.querySelector("#nutritionDate").value, throwOnError: true });
+  },
+  button: document.querySelector("#nutritionRefreshButton"),
+  status: document.querySelector("#nutritionRefreshStatus"),
+});
+document.querySelector("#nutritionRefreshButton").addEventListener("click", () => void nutritionRefresh());
+
 function resetNutritionView() {
   ++nutritionLoadSequence;
   ++nutritionProductLoadSequence;
@@ -504,7 +539,8 @@ function resetNutritionView() {
   document.querySelector("#nutritionProductUseDialog")?.close();
   nutritionProductForUse = null;
   document.querySelector("#nutritionDate").value = "";
-  for (const id of ["nutritionWeekPeriod", "nutritionWeekStatus", "nutritionWeekTotals", "nutritionWeekDays", "nutritionWeekChart", "nutritionEntries", "nutritionTotals", "nutritionStatus", "nutritionProducts", "nutritionProductStatus", "nutritionExpenditureTotals", "nutritionExpenditureStatus", "nutritionExpenditureDate"]) document.getElementById(id)?.replaceChildren();
+  for (const id of ["nutritionWeekPeriod", "nutritionWeekStatus", "nutritionWeekTotals", "nutritionWeekDays", "nutritionWeekChart", "nutritionEntries", "nutritionTotals", "nutritionStatus", "nutritionProducts", "nutritionLookupResult", "nutritionProductStatus", "nutritionExpenditureTotals", "nutritionExpenditureStatus", "nutritionExpenditureDate"]) document.getElementById(id)?.replaceChildren();
+  document.querySelector("#nutritionLookupResult").hidden = true;
   document.querySelector("#nutritionWeekChartSection").hidden = true;
   const editor = document.querySelector("#nutritionExtraction"); if (editor) { editor.replaceChildren(); editor.hidden = true; }
   const query = document.querySelector("#nutritionProductQuery"); if (query) query.value = "";
@@ -640,8 +676,8 @@ function appendNutritionProductActions(card, product, local) {
   }
 }
 
-function renderNutritionProducts(products, { local = true } = {}) {
-  const target = document.querySelector("#nutritionProducts");
+function renderNutritionProducts(products, { local = true, targetId = "#nutritionProducts" } = {}) {
+  const target = document.querySelector(targetId);
   if (!target) return;
   target.replaceChildren();
   if (!products?.length) { target.textContent = "Keine lokalen Produkte gefunden."; return; }
@@ -692,20 +728,25 @@ async function createNutritionProductDraft() {
   jumpToLatestMessages();
 }
 
-async function loadNutritionProducts(query = "", { background = false } = {}) {
-  if (background && nutritionLookupResultShown) return;
-  nutritionLookupResultShown = false;
+async function loadNutritionProducts(query = "", { background = false, throwOnError = false, refresh = false, expectedQuery = null } = {}) {
+  if (background && nutritionLookupResultShown && !refresh) return;
+  const preserveLookup = refresh && nutritionLookupResultShown;
+  if (!preserveLookup) {
+    nutritionLookupResultShown = false;
+    const lookup = document.querySelector("#nutritionLookupResult");
+    if (lookup) { lookup.hidden = true; lookup.replaceChildren(); }
+  }
   const sequence = ++nutritionProductLoadSequence;
   const generation = state.sessionGeneration;
   const status = document.querySelector("#nutritionProductStatus");
   try {
-    status.textContent = "Produkte werden gesucht …";
+    if (!preserveLookup) status.textContent = "Produkte werden gesucht …";
     const params = query ? `?q=${encodeURIComponent(query)}` : "";
     const result = await api(`/api/nutrition/products${params}`);
-    if (sequence !== nutritionProductLoadSequence || generation !== state.sessionGeneration) return;
-    renderNutritionProducts(result.products || []);
-    status.textContent = result.products?.length ? "" : "Keine lokalen Produkte gefunden.";
-  } catch (error) { if (sequence === nutritionProductLoadSequence && generation === state.sessionGeneration) status.textContent = `Produktsuche fehlgeschlagen: ${error.message}`; }
+    if (sequence !== nutritionProductLoadSequence || generation !== state.sessionGeneration || (expectedQuery !== null && document.querySelector("#nutritionProductQuery").value.trim() !== expectedQuery)) return;
+    renderNutritionProducts(result.products || []);
+    if (!preserveLookup) status.textContent = result.products?.length ? "" : "Keine lokalen Produkte gefunden.";
+  } catch (error) { if (sequence === nutritionProductLoadSequence && generation === state.sessionGeneration && !preserveLookup && (expectedQuery === null || document.querySelector("#nutritionProductQuery").value.trim() === expectedQuery)) status.textContent = `Produktsuche fehlgeschlagen: ${error.message}`; if (throwOnError) throw error; }
 }
 
 async function saveNutritionProduct(product) {
@@ -758,7 +799,9 @@ async function lookupNutritionProduct(barcode) {
     nutritionLookupResultShown = true;
     const product = result.product || result.foods?.[0] || result.products?.[0] || null;
     const isLocal = result.local !== false && result.source !== "open_food_facts";
-    renderNutritionProducts(product ? [{ ...product, local: isLocal }] : [], { local: isLocal });
+    const lookup = document.querySelector("#nutritionLookupResult");
+    if (lookup) lookup.hidden = false;
+    renderNutritionProducts(product ? [{ ...product, local: isLocal }] : [], { local: isLocal, targetId: "#nutritionLookupResult" });
     document.querySelector("#nutritionProductStatus").textContent = isLocal ? "Lokales Produkt gefunden." : "Online-Treffer gefunden. Prüfe ihn und speichere ihn lokal.";
     if (product && !isLocal) await saveNutritionProduct(normalizeNutritionProduct({ ...product, source: result.source || product.source || "open_food_facts" }));
   } catch (error) { if (generation === state.sessionGeneration) document.querySelector("#nutritionBarcodeStatus").textContent = `Produktsuche fehlgeschlagen: ${error.message}`; }

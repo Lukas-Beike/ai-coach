@@ -1037,6 +1037,17 @@ class ServerFrontendTests(ServerTestCase):
             "public, max-age=31536000, immutable",
         )
 
+    def test_view_refresh_asset_is_served_as_immutable_javascript(self):
+        response = StaticAssetService(server.PUBLIC_DIR).render(
+            "/view-refresh.js", asset_ref("/view-refresh.js"), None
+        )
+        self.assertEqual(response.status, 200)
+        self.assertIn("javascript", dict(response.headers)["Content-Type"])
+        self.assertEqual(
+            dict(response.headers)["Cache-Control"],
+            "public, max-age=31536000, immutable",
+        )
+
     def test_nutrition_source_label_leaves_sync_state_to_card(self):
         source = (server.PUBLIC_DIR / "nutrition.js").read_text(encoding="utf-8")
         self.assertIn("return sourceLabel;", source)
@@ -1243,6 +1254,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(f'"{asset_ref("/coach.js")}"', source)
         self.assertIn(f'"{asset_ref("/app.js")}"', source)
         self.assertIn(f'"{asset_ref("/nutrition.js")}"', source)
+        self.assertIn(f'"{asset_ref("/view-refresh.js")}"', source)
         self.assertIn(f'"{asset_ref("/icon.svg")}"', source)
         self.assertIn(f'"{asset_ref("/styles.css")}"', source)
         self.assertIn('pathname.startsWith("/api/")', source)

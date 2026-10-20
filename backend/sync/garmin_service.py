@@ -26,7 +26,14 @@ from backend.providers.garmin import (
     collect_garmin_activity_detail,
     collect_garmin_data,
 )
-from backend.providers.garmin_fields import GARMIN_BODY_FAT_ALIASES
+from backend.providers.garmin_fields import (
+    GARMIN_BODY_FAT_ALIASES,
+    GARMIN_CALENDAR_DATE_KEY,
+    GARMIN_DATE_ALIASES,
+    GARMIN_EXTENDED_DATE_ALIASES,
+    GARMIN_HRV_SUMMARIES_KEY,
+    GARMIN_MEASUREMENT_DATE_ALIASES,
+)
 from backend.providers.garmin_weight_walk import (
     BODY_FAT_SKIP_KEYS,
     WALK_DATE_KEYS,
@@ -284,16 +291,23 @@ class GarminRemoteReader:
         if source not in {"daily_stats", "weight"}:
             raise ValueError("Unsupported Garmin nutrition source")
         if not self.configured():
-            raise AppError(503, "Garmin ist nicht konfiguriert.", reason="not_configured")
+            raise AppError(
+                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
+            )
         call_external = self._external_call(None)
         client, login_argument = self._authenticated_client(call_external)
         try:
             if source == "weight":
                 fetch = getattr(client, "get_weigh_ins", None)
                 if not callable(fetch):
-                    raise AppError(503, "Garmin-Körperdaten sind nicht verfügbar.", reason="not_supported")
+                    raise AppError(
+                        503,
+                        "Garmin-Körperdaten sind nicht verfügbar.",
+                        reason="not_supported",
+                    )
                 value = call_external(
-                    "garmin", source,
+                    GARMIN_ID,
+                    source,
                     lambda: fetch(start.isoformat(), end.isoformat()),
                     {"start": start.isoformat(), "end": end.isoformat()},
                 )
@@ -305,7 +319,8 @@ class GarminRemoteReader:
             fetch_range = getattr(client, "get_daily_summaries", None)
             if callable(fetch_range):
                 value = call_external(
-                    "garmin", source,
+                    GARMIN_ID,
+                    source,
                     lambda: fetch_range(start.isoformat(), end.isoformat()),
                     {"start": start.isoformat(), "end": end.isoformat()},
                 )
@@ -324,6 +339,209 @@ class GarminRemoteReader:
         finally:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 
+    def fetch_analysis_data(
+        self, area: str, start: date, end: date
+    ) -> tuple[dict[str, Any], dict[str, bool]]:
+        """Read only the Garmin sources used by one Analyse subarea."""
+        sources: dict[
+            str, dict[str, tuple[str, Callable[[Any, date, date], Any] | None]]
+        ] = {
+            "sessions": {
+                "activities": (
+                    "get_activities_by_date",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+            },
+            "load": {
+                "activities": (
+                    "get_activities_by_date",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+                "training_load_activities": (
+                    "get_training_load_activities",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+                "daily_training_status": (
+                    "get_daily_training_status",
+                    lambda method, _first, last: method(last.isoformat()),
+                ),
+                "training_load_balance": (
+                    "get_training_four_week_load_balance",
+                    lambda method, _first, last: method(last.isoformat()),
+                ),
+                "weekly_training_status": (
+                    "get_weekly_training_status",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+            },
+            "performance": {
+                "cycling_ftp": (
+                    "get_cycling_ftp",
+                    lambda method, _first, _last: method(),
+                ),
+                "running_threshold": (
+                    "get_lactate_threshold",
+                    lambda method, _first, _last: method(latest=True),
+                ),
+                "race_predictions": (
+                    "get_race_predictions",
+                    lambda method, _first, _last: method(),
+                ),
+                "max_metrics": (
+                    "get_max_metrics_range",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+                "cycling_ftp_history": (
+                    "get_functional_threshold_power_range",
+                    lambda method, first, last: method(
+                        first.isoformat(),
+                        last.isoformat(),
+                        sport="CYCLING",
+                        aggregation="daily",
+                    ),
+                ),
+                "endurance_score": (
+                    "get_endurance_score",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+                "running_tolerance": (
+                    "get_running_tolerance",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat(), aggregation="weekly"
+                    ),
+                ),
+                "training_readiness_history": (
+                    "get_training_readiness_range",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+                "weekly_training_status": (
+                    "get_weekly_training_status",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+            },
+            "recovery": {
+                "sleep": (
+                    "get_sleep_daily",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+                "hrv": (
+                    "get_hrv_data_range",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+                "readiness": (
+                    "get_training_readiness_range",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+                "daily_stats": (
+                    "get_daily_summaries",
+                    lambda method, first, last: method(
+                        first.isoformat(), last.isoformat()
+                    ),
+                ),
+                "resting_hr": (
+                    "get_heart_rates",
+                    None,
+                ),
+            },
+        }
+        if area not in sources or start > end or (end - start).days > 89:
+            raise AppError(400, "Ungültiger Analyse-Aktualisierungsbereich.")
+        if not self.configured():
+            raise AppError(
+                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
+            )
+        call_external = self._external_call(None)
+        client, login_argument = self._authenticated_client(call_external)
+        payload: dict[str, Any] = {}
+        complete: dict[str, bool] = {}
+        try:
+            for source, (method_name, invoke) in sources[area].items():
+                method = getattr(client, method_name, None)
+                if not callable(method):
+                    complete[source] = False
+                    continue
+                if not self._state_service.capability_allowed(source):
+                    complete[source] = False
+                    continue
+                if source == "resting_hr":
+                    rows: list[dict[str, Any]] = []
+                    failed = False
+                    for offset in range((end - start).days + 1):
+                        day = (start + timedelta(days=offset)).isoformat()
+                        try:
+                            value = call_external(
+                                GARMIN_ID,
+                                source,
+                                lambda day=day, method=method: method(day),
+                                {"date": day},
+                            )
+                            if not isinstance(value, dict):
+                                raise TypeError("Invalid Garmin resting_hr response")
+                            if not any(key in value for key in GARMIN_DATE_ALIASES):
+                                value = {GARMIN_CALENDAR_DATE_KEY: day, **value}
+                            rows.append(value)
+                        except Exception as exc:  # noqa: BLE001 - retain successful days.
+                            failed = True
+                            self._state_service.record_capability_failure(source, exc)
+                            self._warn(source, "Garmin analysis source failed", exc)
+                    payload[source] = rows
+                    complete[source] = not failed
+                    if not failed:
+                        self._state_service.record_capability_success(source)
+                    continue
+                try:
+                    assert invoke is not None
+                    value = call_external(
+                        GARMIN_ID,
+                        source,
+                        lambda method=method, invoke=invoke: invoke(method, start, end),
+                        {"start": start.isoformat(), "end": end.isoformat()},
+                    )
+                    if not isinstance(value, (dict, list)):
+                        raise TypeError(f"Invalid Garmin {source} response")
+                    if source == "daily_stats" and isinstance(value, dict):
+                        value = value.get("data")
+                    if source == "hrv" and isinstance(value, dict):
+                        value = value.get(GARMIN_HRV_SUMMARIES_KEY)
+                    if source in {"daily_stats", "hrv", "resting_hr"} and (
+                        not isinstance(value, list)
+                        or any(not isinstance(row, dict) for row in value)
+                    ):
+                        raise TypeError(f"Invalid Garmin {source} response records")
+                    payload[source] = value
+                    complete[source] = True
+                except Exception as exc:  # noqa: BLE001 - provider errors are isolated per source.
+                    self._state_service.record_capability_failure(source, exc)
+                    self._warn(source, "Garmin analysis source failed", exc)
+                    complete[source] = False
+                else:
+                    self._state_service.record_capability_success(source)
+        finally:
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
+        return payload, complete
+
     @staticmethod
     def _bounded_records(
         records: list[dict[str, Any]], source: str, start: date, end: date
@@ -334,14 +552,21 @@ class GarminRemoteReader:
             invalid_day = object()
 
             def resolve_day(record: Mapping[str, Any]) -> date | object | None:
-                raw = next((record.get(key) for key in WALK_DATE_KEYS if record.get(key) is not None), None)
+                raw = next(
+                    (
+                        record.get(key)
+                        for key in WALK_DATE_KEYS
+                        if record.get(key) is not None
+                    ),
+                    None,
+                )
                 if raw is None:
                     return None
                 try:
                     if isinstance(raw, (int, float)) and raw > 100_000_000_000:
                         return datetime.fromtimestamp(raw / 1000, UTC).date()
                     return date.fromisoformat(str(raw)[:10])
-                except (OverflowError, OSError, ValueError):
+                except OverflowError, OSError, ValueError:
                     return invalid_day
 
             for walked in walk_records(
@@ -373,9 +598,11 @@ class GarminRemoteReader:
                             **{
                                 key: value
                                 for key, value in walked.record.items()
-                                if isinstance(value, str | int | float | bool | type(None))
+                                if isinstance(
+                                    value, str | int | float | bool | type(None)
+                                )
                             },
-                            "calendarDate": walked.day.isoformat(),
+                            GARMIN_CALENDAR_DATE_KEY: walked.day.isoformat(),
                         }
                     )
                 else:
@@ -386,9 +613,9 @@ class GarminRemoteReader:
         bounded_daily: list[dict[str, Any]] = []
         complete = True
         keys = (
-            ("calendarDate", "summaryDate", "date")
+            GARMIN_DATE_ALIASES
             if source == "daily_stats"
-            else ("date", "calendarDate", "summaryDate", "measurementTime", "timestamp")
+            else GARMIN_MEASUREMENT_DATE_ALIASES
         )
         for record in records:
             raw = next((record.get(key) for key in keys if record.get(key)), None)
@@ -424,7 +651,6 @@ class GarminRemoteReader:
             return result
 
         return call_external
-
 
     def _authenticated_client(self, call_external: ExternalCall) -> tuple[Any, str]:
         """Create the SDK client and log in; MFA stops before any collection."""
@@ -500,12 +726,20 @@ class GarminNutritionRefreshService:
             return {"status": "partial", "reason": "not_configured"}
         with self._coordination.operation():
             if not self._coordination.acquire():
-                raise AppError(503, "Garmin wird bereits aktualisiert.", reason="provider_busy")
+                raise AppError(
+                    503, "Garmin wird bereits aktualisiert.", reason="provider_busy"
+                )
             try:
                 try:
-                    records, complete = self._reader.fetch_nutrition_data(source, start, end)
+                    records, complete = self._reader.fetch_nutrition_data(
+                        source, start, end
+                    )
                 except AppError as exc:
-                    if exc.reason in {"not_configured", "not_supported", "library_unavailable"}:
+                    if exc.reason in {
+                        "not_configured",
+                        "not_supported",
+                        "library_unavailable",
+                    }:
                         return {"status": "partial", "reason": exc.reason}
                     raise
                 except Exception:  # noqa: BLE001 - provider errors stay out of HTTP responses
@@ -521,9 +755,13 @@ class GarminNutritionRefreshService:
                         for row in (existing if isinstance(existing, list) else [])
                         if not _record_date_in_range(row, start, end)
                     ]
-                snapshot[source] = garmin_morning.merge_garmin_records(records, existing)
+                snapshot[source] = garmin_morning.merge_garmin_records(
+                    records, existing
+                )
                 if complete:
-                    snapshot.setdefault("nutrition_refresh", {}).setdefault(source, {}).update(
+                    snapshot.setdefault("nutrition_refresh", {}).setdefault(
+                        source, {}
+                    ).update(
                         {
                             (start + timedelta(days=offset)).isoformat(): {
                                 "freshness": "current",
@@ -533,7 +771,9 @@ class GarminNutritionRefreshService:
                         }
                     )
                 else:
-                    snapshot.setdefault("nutrition_refresh", {}).setdefault(source, {}).update(
+                    snapshot.setdefault("nutrition_refresh", {}).setdefault(
+                        source, {}
+                    ).update(
                         {
                             (start + timedelta(days=offset)).isoformat(): {
                                 "freshness": "partial",
@@ -566,15 +806,148 @@ class GarminNutritionRefreshService:
                 self._coordination.release()
 
 
+class GarminAnalysisRefreshService:
+    """Refresh only the Garmin endpoints used by one Analyse subarea."""
+
+    def __init__(
+        self,
+        reader: GarminRemoteReader,
+        database_manager: DatabaseManager,
+        snapshot_writer: GarminSnapshotWriter,
+        payload_service: Any,
+        coordination: GarminSyncCoordination,
+        utc_now: Callable[[], str],
+        configured: Callable[[], bool],
+    ) -> None:
+        self._reader = reader
+        self._database_manager = database_manager
+        self._snapshot_writer = snapshot_writer
+        self._payload_service = payload_service
+        self._coordination = coordination
+        self._utc_now = utc_now
+        self._configured = configured
+
+    def refresh(self, area: str, start: date, end: date) -> dict[str, Any]:
+        if (
+            area not in {"sessions", "load", "performance", "recovery"}
+            or start > end
+            or (end - start).days > 89
+        ):
+            raise AppError(400, "Ungültiger Analyse-Aktualisierungsbereich.")
+        if not self._configured():
+            return {"status": "partial", "reason": "not_configured", "area": area}
+        with self._coordination.operation():
+            if not self._coordination.acquire():
+                raise AppError(
+                    503, "Garmin wird bereits aktualisiert.", reason="provider_busy"
+                )
+            try:
+                try:
+                    fetched, sources_complete = self._reader.fetch_analysis_data(
+                        area, start, end
+                    )
+                except AppError as exc:
+                    if exc.reason in {
+                        "not_configured",
+                        "not_supported",
+                        "library_unavailable",
+                    }:
+                        return {"status": "partial", "reason": exc.reason, "area": area}
+                    raise
+                except Exception:  # noqa: BLE001 - provider errors stay out of HTTP responses.
+                    return {
+                        "status": "partial",
+                        "reason": "provider_unavailable",
+                        "area": area,
+                    }
+                fetched_at = self._utc_now()
+                snapshot = self._payload_service.snapshot()
+                freshness = snapshot.setdefault("source_freshness", {})
+                pagination = snapshot.setdefault("provider_sync", {}).setdefault(
+                    "pagination", {}
+                )
+                for source, is_complete in sources_complete.items():
+                    incoming = fetched.get(source)
+                    old = snapshot.get(source)
+                    if incoming is not None:
+                        if isinstance(incoming, list):
+                            previous = old if isinstance(old, list) else []
+                            retained = (
+                                [
+                                    row
+                                    for row in previous
+                                    if not _record_date_in_range(row, start, end)
+                                ]
+                                if is_complete
+                                else previous
+                            )
+                            snapshot[source] = garmin_morning.merge_garmin_records(
+                                incoming, retained
+                            )
+                        elif is_complete or not isinstance(old, dict):
+                            snapshot[source] = incoming
+                        else:
+                            snapshot[source] = {**old, **incoming}
+                    previous_freshness = freshness.get(source, {})
+                    if incoming is None:
+                        freshness[source] = {
+                            **previous_freshness,
+                            "freshness": "stale",
+                        }
+                    else:
+                        freshness[source] = {
+                            **previous_freshness,
+                            "freshness": "current" if is_complete else "partial",
+                            "fetched_at": fetched_at,
+                            "window_start": start.isoformat(),
+                            "window_end": end.isoformat(),
+                        }
+                    pagination[source] = {
+                        **pagination.get(source, {}),
+                        "complete": is_complete,
+                        "records": len(incoming)
+                        if isinstance(incoming, list)
+                        else int(incoming is not None),
+                        "window_start": start.isoformat(),
+                        "window_end": end.isoformat(),
+                    }
+                snapshot.setdefault("provider_sync", {}).setdefault("analysis", {})[
+                    area
+                ] = {
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "complete": bool(sources_complete)
+                    and all(sources_complete.values()),
+                    "sources": dict(sources_complete),
+                    "fetched_at": fetched_at,
+                }
+                with self._database_manager.unit_of_work() as db:
+                    self._snapshot_writer.write_analysis_refresh(
+                        db, snapshot, fetched_at, fetched
+                    )
+                complete = bool(sources_complete) and all(sources_complete.values())
+                return {
+                    "status": "ok" if complete else "partial",
+                    "source": "Garmin Connect",
+                    "area": area,
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "sources": dict(sources_complete),
+                    "records": sum(
+                        len(value) if isinstance(value, list) else 1
+                        for value in fetched.values()
+                    ),
+                    "synced_at": fetched_at,
+                }
+            finally:
+                self._coordination.release()
+
+
 def _record_date_in_range(record: Any, start: date, end: date) -> bool:
     if not isinstance(record, dict):
         return False
     raw = next(
-        (
-            record.get(key)
-            for key in ("calendarDate", "summaryDate", "date", "measurementTime", "timestamp")
-            if record.get(key)
-        ),
+        (record.get(key) for key in GARMIN_EXTENDED_DATE_ALIASES if record.get(key)),
         None,
     )
     try:

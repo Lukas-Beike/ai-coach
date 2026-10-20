@@ -18,6 +18,7 @@ from backend.providers.intervals import IntervalsApiClient
 from backend.runtime.ports import ActivityRowReader, CanonicalTableServing
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.activity_details import ActivityDetailRefreshService
+from backend.sync.analysis_sessions import AnalysisSessionsRefreshService
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.intervals import (
@@ -188,6 +189,26 @@ class IntervalsSyncAssembly:
             self._intervals_resync_gate,
             zone_provider=lambda: self._athlete_clock().now().tzinfo,
             snapshot_storage=self.snapshot_storage(),
+        )
+
+    def analysis_sessions_service(self) -> AnalysisSessionsRefreshService:
+        """Create the bounded recent-summary refresh used by Analysis sessions."""
+        config = self._config()
+        return AnalysisSessionsRefreshService(
+            config=config,
+            database_manager=self._database_manager(),
+            provider_client=IntervalsApiClient(
+                api_key=config.intervals_api_key, request=self._request()
+            ),
+            event_publisher=self._event_buffer,
+            observer=self._operation_observer(),
+            resync_gate=self._intervals_resync_gate,
+            zone_provider=lambda: self._athlete_clock().now().tzinfo,
+            utc_now=self._utc_now,
+            all_sync_days=self._all_sync_days,
+            earliest_date=self._sync_earliest_date,
+            snapshot_storage=self.snapshot_storage(),
+            lock=self._intervals_sync_lock,
         )
 
     def snapshot_reader(self) -> IntervalsSnapshotReader:

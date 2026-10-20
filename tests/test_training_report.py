@@ -578,3 +578,29 @@ class TrainingReportTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(AppError):
                 route.handle(Mock(), path)
         reports.assert_not_called()
+
+    def test_analysis_refresh_authenticates_and_delegates_selected_area(self):
+        auth = Mock()
+        refresh = Mock()
+        refresh.refresh.return_value = {"area": "recovery", "status": "partial"}
+        handler = Mock()
+        handler.read_json.return_value = {"area": "recovery"}
+        route = AnalysisRoutes(lambda: auth, Mock(), lambda: refresh)
+
+        self.assertTrue(route.handle_post(handler, "/api/analysis/refresh"))
+
+        auth.require_auth.assert_called_once_with(handler)
+        refresh.refresh.assert_called_once_with("recovery", days=None)
+        handler.send_json.assert_called_once_with(200, refresh.refresh.return_value)
+
+    def test_analysis_refresh_rejects_unknown_area(self):
+        from backend.errors import AppError
+
+        handler = Mock()
+        handler.read_json.return_value = {"area": "everything"}
+        route = AnalysisRoutes(lambda: Mock(), Mock(), Mock())
+
+        with self.assertRaises(AppError) as raised:
+            route.handle_post(handler, "/api/analysis/refresh")
+
+        self.assertEqual(400, raised.exception.status)
