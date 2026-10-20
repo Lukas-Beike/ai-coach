@@ -100,17 +100,36 @@ def targeted_analysis_sources() -> dict[str, dict[str, tuple[str | None, Any]]]:
             "activities": ("get_activities_by_date", date_range),
             "training_load_activities": ("get_training_load_activities", date_range),
             "daily_training_status": ("get_daily_training_status", latest_date),
-            "training_load_balance": ("get_training_four_week_load_balance", latest_date),
+            "training_load_balance": (
+                "get_training_four_week_load_balance",
+                latest_date,
+            ),
             "weekly_training_status": ("get_weekly_training_status", date_range),
         },
         "performance": {
             "cycling_ftp": ("get_cycling_ftp", no_dates),
-            "running_threshold": ("get_lactate_threshold", lambda method, _first, _last: method(latest=True)),
+            "running_threshold": (
+                "get_lactate_threshold",
+                lambda method, _first, _last: method(latest=True),
+            ),
             "race_predictions": ("get_race_predictions", no_dates),
             "max_metrics": ("get_max_metrics_range", date_range),
-            "cycling_ftp_history": ("get_functional_threshold_power_range", lambda method, first, last: method(first.isoformat(), last.isoformat(), sport="CYCLING", aggregation="daily")),
+            "cycling_ftp_history": (
+                "get_functional_threshold_power_range",
+                lambda method, first, last: method(
+                    first.isoformat(),
+                    last.isoformat(),
+                    sport="CYCLING",
+                    aggregation="daily",
+                ),
+            ),
             "endurance_score": ("get_endurance_score", date_range),
-            "running_tolerance": ("get_running_tolerance", lambda method, first, last: method(first.isoformat(), last.isoformat(), aggregation="weekly")),
+            "running_tolerance": (
+                "get_running_tolerance",
+                lambda method, first, last: method(
+                    first.isoformat(), last.isoformat(), aggregation="weekly"
+                ),
+            ),
             "training_readiness_history": ("get_training_readiness_range", date_range),
             "weekly_training_status": ("get_weekly_training_status", date_range),
         },
@@ -141,7 +160,7 @@ def preserve_weight_response(value: Any) -> list[dict[str, Any]]:
 def merge_weight_snapshots(incoming: Any, previous: Any) -> list[Any]:
     """Merge raw weigh-in snapshots without collapsing same-day samples."""
     values = []
-    for source in (incoming, previous):
+    for source in (previous, incoming):
         if isinstance(source, dict):
             values.append(source)
         elif isinstance(source, list):
@@ -270,9 +289,7 @@ def fetch_targeted_nutrition(
     bounded = []
     complete = True
     for row in records:
-        raw_day = (
-            row.get("calendarDate") or row.get("summaryDate") or row.get("date")
-        )
+        raw_day = row.get("calendarDate") or row.get("summaryDate") or row.get("date")
         try:
             observed = date.fromisoformat(str(raw_day)[:10])
         except ValueError:
@@ -291,8 +308,7 @@ def _normalize_targeted_analysis_response(source: str, value: Any) -> Any:
     if source == "hrv" and isinstance(value, dict):
         value = value.get("hrvSummaries")
     if source in {"daily_stats", "hrv"} and (
-        not isinstance(value, list)
-        or any(not isinstance(row, dict) for row in value)
+        not isinstance(value, list) or any(not isinstance(row, dict) for row in value)
     ):
         raise TypeError(f"Invalid Garmin {source} response records")
     return value

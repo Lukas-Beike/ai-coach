@@ -53,9 +53,9 @@ class GarminNutritionRefreshTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "ok")
         persisted = writer.write_nutrition_refresh.call_args.args[1]
-        self.assertEqual(persisted["weight"], [incoming, existing])
-        self.assertEqual(len(persisted["weight"][1]["weighIns"]), 6)
-        self.assertEqual(len(persisted["weight"][0]["weighIns"]), 2)
+        self.assertEqual(persisted["weight"], [existing, incoming])
+        self.assertEqual(len(persisted["weight"][0]["weighIns"]), 6)
+        self.assertEqual(len(persisted["weight"][1]["weighIns"]), 2)
 
     def test_remote_energy_without_range_api_is_unsupported_without_daily_loop(
         self,
