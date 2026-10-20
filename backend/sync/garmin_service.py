@@ -53,6 +53,62 @@ GARMIN_AUTOMATIC_SYNC_DAYS = 2
 GARMIN_SYNC_LOCK = threading.Lock()
 
 
+def _analysis_sources() -> dict[
+    str, dict[str, tuple[str, Callable[[Any, date, date], Any] | None]]
+]:
+    """Map each analysis area to the bounded Garmin SDK calls it needs."""
+    date_range = lambda method, first, last: method(first.isoformat(), last.isoformat())
+    latest_date = lambda method, _first, last: method(last.isoformat())
+    no_dates = lambda method, _first, _last: method()
+    return {
+        "sessions": {"activities": ("get_activities_by_date", date_range)},
+        "load": {
+            "activities": ("get_activities_by_date", date_range),
+            "training_load_activities": ("get_training_load_activities", date_range),
+            "daily_training_status": ("get_daily_training_status", latest_date),
+            "training_load_balance": (
+                "get_training_four_week_load_balance",
+                latest_date,
+            ),
+            "weekly_training_status": ("get_weekly_training_status", date_range),
+        },
+        "performance": {
+            "cycling_ftp": ("get_cycling_ftp", no_dates),
+            "running_threshold": (
+                "get_lactate_threshold",
+                lambda method, _first, _last: method(latest=True),
+            ),
+            "race_predictions": ("get_race_predictions", no_dates),
+            "max_metrics": ("get_max_metrics_range", date_range),
+            "cycling_ftp_history": (
+                "get_functional_threshold_power_range",
+                lambda method, first, last: method(
+                    first.isoformat(),
+                    last.isoformat(),
+                    sport="CYCLING",
+                    aggregation="daily",
+                ),
+            ),
+            "endurance_score": ("get_endurance_score", date_range),
+            "running_tolerance": (
+                "get_running_tolerance",
+                lambda method, first, last: method(
+                    first.isoformat(), last.isoformat(), aggregation="weekly"
+                ),
+            ),
+            "training_readiness_history": ("get_training_readiness_range", date_range),
+            "weekly_training_status": ("get_weekly_training_status", date_range),
+        },
+        "recovery": {
+            "sleep": ("get_sleep_daily", date_range),
+            "hrv": ("get_hrv_data_range", date_range),
+            "readiness": ("get_training_readiness_range", date_range),
+            "daily_stats": ("get_daily_summaries", date_range),
+            "resting_hr": ("get_heart_rates", None),
+        },
+    }
+
+
 def shared_garmin_sync_lock() -> threading.Lock:
     """Return the one lock shared by normal and morning Garmin reads."""
     return GARMIN_SYNC_LOCK
@@ -343,129 +399,7 @@ class GarminRemoteReader:
         self, area: str, start: date, end: date
     ) -> tuple[dict[str, Any], dict[str, bool]]:
         """Read only the Garmin sources used by one Analyse subarea."""
-        sources: dict[
-            str, dict[str, tuple[str, Callable[[Any, date, date], Any] | None]]
-        ] = {
-            "sessions": {
-                "activities": (
-                    "get_activities_by_date",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-            },
-            "load": {
-                "activities": (
-                    "get_activities_by_date",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-                "training_load_activities": (
-                    "get_training_load_activities",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-                "daily_training_status": (
-                    "get_daily_training_status",
-                    lambda method, _first, last: method(last.isoformat()),
-                ),
-                "training_load_balance": (
-                    "get_training_four_week_load_balance",
-                    lambda method, _first, last: method(last.isoformat()),
-                ),
-                "weekly_training_status": (
-                    "get_weekly_training_status",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-            },
-            "performance": {
-                "cycling_ftp": (
-                    "get_cycling_ftp",
-                    lambda method, _first, _last: method(),
-                ),
-                "running_threshold": (
-                    "get_lactate_threshold",
-                    lambda method, _first, _last: method(latest=True),
-                ),
-                "race_predictions": (
-                    "get_race_predictions",
-                    lambda method, _first, _last: method(),
-                ),
-                "max_metrics": (
-                    "get_max_metrics_range",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-                "cycling_ftp_history": (
-                    "get_functional_threshold_power_range",
-                    lambda method, first, last: method(
-                        first.isoformat(),
-                        last.isoformat(),
-                        sport="CYCLING",
-                        aggregation="daily",
-                    ),
-                ),
-                "endurance_score": (
-                    "get_endurance_score",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-                "running_tolerance": (
-                    "get_running_tolerance",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat(), aggregation="weekly"
-                    ),
-                ),
-                "training_readiness_history": (
-                    "get_training_readiness_range",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-                "weekly_training_status": (
-                    "get_weekly_training_status",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-            },
-            "recovery": {
-                "sleep": (
-                    "get_sleep_daily",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-                "hrv": (
-                    "get_hrv_data_range",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-                "readiness": (
-                    "get_training_readiness_range",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-                "daily_stats": (
-                    "get_daily_summaries",
-                    lambda method, first, last: method(
-                        first.isoformat(), last.isoformat()
-                    ),
-                ),
-                "resting_hr": (
-                    "get_heart_rates",
-                    None,
-                ),
-            },
-        }
+        sources = _analysis_sources()
         if area not in sources or start > end or (end - start).days > 89:
             raise AppError(400, "Ungültiger Analyse-Aktualisierungsbereich.")
         if not self.configured():
@@ -478,138 +412,164 @@ class GarminRemoteReader:
         complete: dict[str, bool] = {}
         try:
             for source, (method_name, invoke) in sources[area].items():
-                method = getattr(client, method_name, None)
-                if not callable(method):
-                    complete[source] = False
-                    continue
-                if not self._state_service.capability_allowed(source):
-                    complete[source] = False
-                    continue
-                if source == "resting_hr":
-                    rows: list[dict[str, Any]] = []
-                    failed = False
-                    for offset in range((end - start).days + 1):
-                        day = (start + timedelta(days=offset)).isoformat()
-                        try:
-                            value = call_external(
-                                GARMIN_ID,
-                                source,
-                                lambda day=day, method=method: method(day),
-                                {"date": day},
-                            )
-                            if not isinstance(value, dict):
-                                raise TypeError("Invalid Garmin resting_hr response")
-                            if not any(key in value for key in GARMIN_DATE_ALIASES):
-                                value = {GARMIN_CALENDAR_DATE_KEY: day, **value}
-                            rows.append(value)
-                        except Exception as exc:  # noqa: BLE001 - retain successful days.
-                            failed = True
-                            self._state_service.record_capability_failure(source, exc)
-                            self._warn(source, "Garmin analysis source failed", exc)
-                    payload[source] = rows
-                    complete[source] = not failed
-                    if not failed:
-                        self._state_service.record_capability_success(source)
-                    continue
-                try:
-                    assert invoke is not None
-                    value = call_external(
-                        GARMIN_ID,
-                        source,
-                        lambda method=method, invoke=invoke: invoke(method, start, end),
-                        {"start": start.isoformat(), "end": end.isoformat()},
-                    )
-                    if not isinstance(value, (dict, list)):
-                        raise TypeError(f"Invalid Garmin {source} response")
-                    if source == "daily_stats" and isinstance(value, dict):
-                        value = value.get("data")
-                    if source == "hrv" and isinstance(value, dict):
-                        value = value.get(GARMIN_HRV_SUMMARIES_KEY)
-                    if source in {"daily_stats", "hrv", "resting_hr"} and (
-                        not isinstance(value, list)
-                        or any(not isinstance(row, dict) for row in value)
-                    ):
-                        raise TypeError(f"Invalid Garmin {source} response records")
+                value, is_complete = self._fetch_analysis_source(
+                    client, call_external, source, method_name, invoke, start, end
+                )
+                if value is not None:
                     payload[source] = value
-                    complete[source] = True
-                except Exception as exc:  # noqa: BLE001 - provider errors are isolated per source.
-                    self._state_service.record_capability_failure(source, exc)
-                    self._warn(source, "Garmin analysis source failed", exc)
-                    complete[source] = False
-                else:
-                    self._state_service.record_capability_success(source)
+                complete[source] = is_complete
         finally:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
         return payload, complete
+
+    def _fetch_analysis_source(
+        self,
+        client: Any,
+        call_external: ExternalCall,
+        source: str,
+        method_name: str,
+        invoke: Callable[[Any, date, date], Any] | None,
+        start: date,
+        end: date,
+    ) -> tuple[Any | None, bool]:
+        method = getattr(client, method_name, None)
+        if not callable(method) or not self._state_service.capability_allowed(source):
+            return None, False
+        if source == "resting_hr":
+            return self._fetch_resting_heart_rates(
+                call_external, source, method, start, end
+            )
+        try:
+            assert invoke is not None
+            value = call_external(
+                GARMIN_ID,
+                source,
+                lambda: invoke(method, start, end),
+                {"start": start.isoformat(), "end": end.isoformat()},
+            )
+            value = self._normalize_analysis_response(source, value)
+        except Exception as exc:  # noqa: BLE001 - isolate provider failures per source.
+            self._state_service.record_capability_failure(source, exc)
+            self._warn(source, "Garmin analysis source failed", exc)
+            return None, False
+        self._state_service.record_capability_success(source)
+        return value, True
+
+    def _fetch_resting_heart_rates(
+        self,
+        call_external: ExternalCall,
+        source: str,
+        method: Callable[..., Any],
+        start: date,
+        end: date,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        rows: list[dict[str, Any]] = []
+        failed = False
+        for offset in range((end - start).days + 1):
+            day = (start + timedelta(days=offset)).isoformat()
+            try:
+                value = call_external(
+                    GARMIN_ID, source, lambda day=day: method(day), {"date": day}
+                )
+                if not isinstance(value, dict):
+                    raise TypeError("Invalid Garmin resting_hr response")
+                if not any(key in value for key in GARMIN_DATE_ALIASES):
+                    value = {GARMIN_CALENDAR_DATE_KEY: day, **value}
+                rows.append(value)
+            except Exception as exc:  # noqa: BLE001 - retain successful days.
+                failed = True
+                self._state_service.record_capability_failure(source, exc)
+                self._warn(source, "Garmin analysis source failed", exc)
+        if not failed:
+            self._state_service.record_capability_success(source)
+        return rows, not failed
+
+    @staticmethod
+    def _normalize_analysis_response(source: str, value: Any) -> Any:
+        if not isinstance(value, (dict, list)):
+            raise TypeError(f"Invalid Garmin {source} response")
+        if source == "daily_stats" and isinstance(value, dict):
+            value = value.get("data")
+        if source == "hrv" and isinstance(value, dict):
+            value = value.get(GARMIN_HRV_SUMMARIES_KEY)
+        if source in {"daily_stats", "hrv"} and (
+            not isinstance(value, list)
+            or any(not isinstance(row, dict) for row in value)
+        ):
+            raise TypeError(f"Invalid Garmin {source} response records")
+        return value
 
     @staticmethod
     def _bounded_records(
         records: list[dict[str, Any]], source: str, start: date, end: date
     ) -> tuple[list[dict[str, Any]], bool]:
         if source == "weight":
-            bounded: list[dict[str, Any]] = []
-            complete = True
-            invalid_day = object()
+            return GarminRemoteReader._bounded_weight_records(records, start, end)
+        return GarminRemoteReader._bounded_daily_records(records, source, start, end)
 
-            def resolve_day(record: Mapping[str, Any]) -> date | object | None:
-                raw = next(
-                    (
-                        record.get(key)
-                        for key in WALK_DATE_KEYS
-                        if record.get(key) is not None
-                    ),
-                    None,
-                )
-                if raw is None:
-                    return None
-                try:
-                    if isinstance(raw, (int, float)) and raw > 100_000_000_000:
-                        return datetime.fromtimestamp(raw / 1000, UTC).date()
-                    return date.fromisoformat(str(raw)[:10])
-                except OverflowError, OSError, ValueError:
-                    return invalid_day
+    @staticmethod
+    def _bounded_weight_records(
+        records: list[dict[str, Any]], start: date, end: date
+    ) -> tuple[list[dict[str, Any]], bool]:
+        bounded: list[dict[str, Any]] = []
+        complete = True
+        invalid_day = object()
 
-            for walked in walk_records(
-                records,
-                skip_keys=WEIGHT_SKIP_KEYS | BODY_FAT_SKIP_KEYS,
-                resolve_day=resolve_day,
+        def resolve_day(record: Mapping[str, Any]) -> date | object | None:
+            raw = next(
+                (
+                    record.get(key)
+                    for key in WALK_DATE_KEYS
+                    if record.get(key) is not None
+                ),
+                None,
+            )
+            if raw is None:
+                return None
+            try:
+                if isinstance(raw, (int, float)) and raw > 100_000_000_000:
+                    return datetime.fromtimestamp(raw / 1000, UTC).date()
+                return date.fromisoformat(str(raw)[:10])
+            except OverflowError, OSError, ValueError:
+                return invalid_day
+
+        value_keys = {"weight", "weightkg", "value"} | {
+            alnum_key(key) for key in GARMIN_BODY_FAT_ALIASES
+        }
+        for walked in walk_records(
+            records,
+            skip_keys=WEIGHT_SKIP_KEYS | BODY_FAT_SKIP_KEYS,
+            resolve_day=resolve_day,
+        ):
+            if not any(
+                alnum_key(key) in value_keys
+                and isinstance(value, (int, float, str))
+                and not isinstance(value, bool)
+                for key, value in walked.record.items()
             ):
-                value_keys = {"weight", "weightkg", "value"} | {
-                    alnum_key(key) for key in GARMIN_BODY_FAT_ALIASES
-                }
-                measure = next(
-                    (
-                        value
-                        for key, value in walked.record.items()
-                        if alnum_key(key) in value_keys
-                        and isinstance(value, (int, float, str))
-                        and not isinstance(value, bool)
-                    ),
-                    None,
-                )
-                if measure is None:
-                    continue
-                if not isinstance(walked.day, date):
-                    complete = False
-                    continue
-                if start <= walked.day <= end:
-                    bounded.append(
-                        {
-                            **{
-                                key: value
-                                for key, value in walked.record.items()
-                                if isinstance(
-                                    value, str | int | float | bool | type(None)
-                                )
-                            },
-                            GARMIN_CALENDAR_DATE_KEY: walked.day.isoformat(),
-                        }
-                    )
-                else:
-                    complete = False
-            if not bounded:
+                continue
+            if not isinstance(walked.day, date):
                 complete = False
-            return bounded, complete
+                continue
+            if start <= walked.day <= end:
+                bounded.append(
+                    {
+                        **{
+                            key: value
+                            for key, value in walked.record.items()
+                            if isinstance(value, str | int | float | bool | type(None))
+                        },
+                        GARMIN_CALENDAR_DATE_KEY: walked.day.isoformat(),
+                    }
+                )
+            else:
+                complete = False
+        return bounded, complete and bool(bounded)
+
+    @staticmethod
+    def _bounded_daily_records(
+        records: list[dict[str, Any]], source: str, start: date, end: date
+    ) -> tuple[list[dict[str, Any]], bool]:
         bounded_daily: list[dict[str, Any]] = []
         complete = True
         keys = (
@@ -748,51 +708,9 @@ class GarminNutritionRefreshService:
                 if source == "weight" and not records:
                     complete = False
                 snapshot = self._payload_service.snapshot()
-                existing = snapshot.get(source)
-                if complete and source == "daily_stats":
-                    existing = [
-                        row
-                        for row in (existing if isinstance(existing, list) else [])
-                        if not _record_date_in_range(row, start, end)
-                    ]
-                snapshot[source] = garmin_morning.merge_garmin_records(
-                    records, existing
+                self._apply_nutrition_refresh(
+                    snapshot, source, start, end, records, complete, fetched_at
                 )
-                if complete:
-                    snapshot.setdefault("nutrition_refresh", {}).setdefault(
-                        source, {}
-                    ).update(
-                        {
-                            (start + timedelta(days=offset)).isoformat(): {
-                                "freshness": "current",
-                                "fetched_at": fetched_at,
-                            }
-                            for offset in range((end - start).days + 1)
-                        }
-                    )
-                else:
-                    snapshot.setdefault("nutrition_refresh", {}).setdefault(
-                        source, {}
-                    ).update(
-                        {
-                            (start + timedelta(days=offset)).isoformat(): {
-                                "freshness": "partial",
-                                "fetched_at": fetched_at,
-                            }
-                            for offset in range((end - start).days + 1)
-                        }
-                    )
-                snapshot.setdefault("provider_sync", {}).setdefault("nutrition", {})[
-                    source
-                ] = {
-                    "start": start.isoformat(),
-                    "end": end.isoformat(),
-                    "complete": complete,
-                }
-                with self._database_manager.unit_of_work() as db:
-                    self._snapshot_writer.write_nutrition_refresh(
-                        db, snapshot, source, fetched_at, records
-                    )
                 return {
                     "status": "ok" if complete else "partial",
                     "source": "Garmin Connect",
@@ -804,6 +722,57 @@ class GarminNutritionRefreshService:
                 }
             finally:
                 self._coordination.release()
+
+    def _apply_nutrition_refresh(
+        self,
+        snapshot: dict[str, Any],
+        source: str,
+        start: date,
+        end: date,
+        records: list[dict[str, Any]],
+        complete: bool,
+        fetched_at: str,
+    ) -> None:
+        existing = snapshot.get(source)
+        if complete and source == "daily_stats":
+            existing = [
+                row
+                for row in (existing if isinstance(existing, list) else [])
+                if not _record_date_in_range(row, start, end)
+            ]
+        snapshot[source] = garmin_morning.merge_garmin_records(records, existing)
+        self._mark_nutrition_freshness(
+            snapshot, source, start, end, complete, fetched_at
+        )
+        snapshot.setdefault("provider_sync", {}).setdefault("nutrition", {})[source] = {
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "complete": complete,
+        }
+        with self._database_manager.unit_of_work() as db:
+            self._snapshot_writer.write_nutrition_refresh(
+                db, snapshot, source, fetched_at, records
+            )
+
+    @staticmethod
+    def _mark_nutrition_freshness(
+        snapshot: dict[str, Any],
+        source: str,
+        start: date,
+        end: date,
+        complete: bool,
+        fetched_at: str,
+    ) -> None:
+        freshness = "current" if complete else "partial"
+        snapshot.setdefault("nutrition_refresh", {}).setdefault(source, {}).update(
+            {
+                (start + timedelta(days=offset)).isoformat(): {
+                    "freshness": freshness,
+                    "fetched_at": fetched_at,
+                }
+                for offset in range((end - start).days + 1)
+            }
+        )
 
 
 class GarminAnalysisRefreshService:
@@ -862,69 +831,9 @@ class GarminAnalysisRefreshService:
                     }
                 fetched_at = self._utc_now()
                 snapshot = self._payload_service.snapshot()
-                freshness = snapshot.setdefault("source_freshness", {})
-                pagination = snapshot.setdefault("provider_sync", {}).setdefault(
-                    "pagination", {}
+                self._apply_analysis_refresh(
+                    snapshot, area, start, end, fetched, sources_complete, fetched_at
                 )
-                for source, is_complete in sources_complete.items():
-                    incoming = fetched.get(source)
-                    old = snapshot.get(source)
-                    if incoming is not None:
-                        if isinstance(incoming, list):
-                            previous = old if isinstance(old, list) else []
-                            retained = (
-                                [
-                                    row
-                                    for row in previous
-                                    if not _record_date_in_range(row, start, end)
-                                ]
-                                if is_complete
-                                else previous
-                            )
-                            snapshot[source] = garmin_morning.merge_garmin_records(
-                                incoming, retained
-                            )
-                        elif is_complete or not isinstance(old, dict):
-                            snapshot[source] = incoming
-                        else:
-                            snapshot[source] = {**old, **incoming}
-                    previous_freshness = freshness.get(source, {})
-                    if incoming is None:
-                        freshness[source] = {
-                            **previous_freshness,
-                            "freshness": "stale",
-                        }
-                    else:
-                        freshness[source] = {
-                            **previous_freshness,
-                            "freshness": "current" if is_complete else "partial",
-                            "fetched_at": fetched_at,
-                            "window_start": start.isoformat(),
-                            "window_end": end.isoformat(),
-                        }
-                    pagination[source] = {
-                        **pagination.get(source, {}),
-                        "complete": is_complete,
-                        "records": len(incoming)
-                        if isinstance(incoming, list)
-                        else int(incoming is not None),
-                        "window_start": start.isoformat(),
-                        "window_end": end.isoformat(),
-                    }
-                snapshot.setdefault("provider_sync", {}).setdefault("analysis", {})[
-                    area
-                ] = {
-                    "start": start.isoformat(),
-                    "end": end.isoformat(),
-                    "complete": bool(sources_complete)
-                    and all(sources_complete.values()),
-                    "sources": dict(sources_complete),
-                    "fetched_at": fetched_at,
-                }
-                with self._database_manager.unit_of_work() as db:
-                    self._snapshot_writer.write_analysis_refresh(
-                        db, snapshot, fetched_at, fetched
-                    )
                 complete = bool(sources_complete) and all(sources_complete.values())
                 return {
                     "status": "ok" if complete else "partial",
@@ -941,6 +850,104 @@ class GarminAnalysisRefreshService:
                 }
             finally:
                 self._coordination.release()
+
+    def _apply_analysis_refresh(
+        self,
+        snapshot: dict[str, Any],
+        area: str,
+        start: date,
+        end: date,
+        fetched: dict[str, Any],
+        sources_complete: dict[str, bool],
+        fetched_at: str,
+    ) -> None:
+        freshness = snapshot.setdefault("source_freshness", {})
+        pagination = snapshot.setdefault("provider_sync", {}).setdefault(
+            "pagination", {}
+        )
+        for source, is_complete in sources_complete.items():
+            incoming = fetched.get(source)
+            self._merge_analysis_source(
+                snapshot, source, incoming, is_complete, start, end
+            )
+            self._record_analysis_source_status(
+                freshness,
+                pagination,
+                source,
+                incoming,
+                is_complete,
+                start,
+                end,
+                fetched_at,
+            )
+        snapshot.setdefault("provider_sync", {}).setdefault("analysis", {})[area] = {
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "complete": bool(sources_complete) and all(sources_complete.values()),
+            "sources": dict(sources_complete),
+            "fetched_at": fetched_at,
+        }
+        with self._database_manager.unit_of_work() as db:
+            self._snapshot_writer.write_analysis_refresh(
+                db, snapshot, fetched_at, fetched
+            )
+
+    @staticmethod
+    def _merge_analysis_source(
+        snapshot: dict[str, Any],
+        source: str,
+        incoming: Any,
+        is_complete: bool,
+        start: date,
+        end: date,
+    ) -> None:
+        if incoming is None:
+            return
+        old = snapshot.get(source)
+        if isinstance(incoming, list):
+            previous = old if isinstance(old, list) else []
+            retained = (
+                [row for row in previous if not _record_date_in_range(row, start, end)]
+                if is_complete
+                else previous
+            )
+            snapshot[source] = garmin_morning.merge_garmin_records(incoming, retained)
+        elif is_complete or not isinstance(old, dict):
+            snapshot[source] = incoming
+        else:
+            snapshot[source] = {**old, **incoming}
+
+    @staticmethod
+    def _record_analysis_source_status(
+        freshness: dict[str, Any],
+        pagination: dict[str, Any],
+        source: str,
+        incoming: Any,
+        is_complete: bool,
+        start: date,
+        end: date,
+        fetched_at: str,
+    ) -> None:
+        previous = freshness.get(source, {})
+        if incoming is None:
+            freshness[source] = {**previous, "freshness": "stale"}
+        else:
+            freshness[source] = {
+                **previous,
+                "freshness": "current" if is_complete else "partial",
+                "fetched_at": fetched_at,
+                "window_start": start.isoformat(),
+                "window_end": end.isoformat(),
+            }
+        pagination[source] = {
+            **pagination.get(source, {}),
+            "complete": is_complete,
+            "records": len(incoming)
+            if isinstance(incoming, list)
+            else int(incoming is not None),
+            "window_start": start.isoformat(),
+            "window_end": end.isoformat(),
+        }
 
 
 def _record_date_in_range(record: Any, start: date, end: date) -> bool:

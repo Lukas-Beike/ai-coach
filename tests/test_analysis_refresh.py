@@ -82,6 +82,18 @@ class AnalysisRefreshTests(unittest.TestCase):
         )
         self.assertEqual("ok", result["status"])
 
+    def test_truncated_intervals_result_is_incomplete_without_partial_status(self):
+        service, intervals, _sessions, _garmin = self.make_service()
+        intervals.refresh.return_value = {"status": "ok", "truncated": True}
+
+        result = service.refresh("load")
+
+        self.assertEqual("partial", result["status"])
+        self.assertEqual(
+            ["Intervals.icu-Belastungsdaten"], result["incomplete_sources"]
+        )
+        self.assertEqual(["Intervals.icu-Belastungsdaten"], result["truncated_sources"])
+
     def test_no_garmin_source_is_not_reported_as_refreshed(self):
         service, _intervals, _sessions, garmin = self.make_service()
         garmin.refresh.return_value = {

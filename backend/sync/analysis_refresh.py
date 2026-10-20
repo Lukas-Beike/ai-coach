@@ -32,63 +32,14 @@ class AnalysisRefreshService:
         self._local_today = local_today
 
     def refresh(self, area: str, *, days: int | None = None) -> dict[str, Any]:
-        if area not in _SOURCE_NAMES:
-            raise AppError(400, "Ungültiger Analysebereich.")
-        if days is not None and (
-            area not in {"load", "recovery"} or days not in {14, 84}
-        ):
-            raise AppError(400, "Ungültiger Analysezeitraum.")
+        _validate_request(area, days)
         names = _SOURCE_NAMES[area]
-        outcomes: dict[str, dict[str, Any]] = {}
-        if area == "sessions":
-            intervals_refresh = lambda: self._sessions_refresh().refresh()
-        else:
-            intervals_refresh = lambda: self._performance_refresh().refresh(
-                include_power_profile=area == "performance"
-            )
-        for name, action in (
-            (names[0], intervals_refresh),
-            (names[1], lambda: self._refresh_garmin(area, days)),
-        ):
-            try:
-                outcomes[name] = action()
-            except Exception:  # noqa: BLE001 - keep optional provider failures scoped.
-                outcomes[name] = {"status": "failed"}
-
-        refreshed = [
-            name
-            for name, result in outcomes.items()
-            if result.get("status") in {"ok", "partial"}
-            and (name != names[1] or any(result.get("sources", {}).values()))
-        ]
-        incomplete = [
-            name for name in refreshed if outcomes[name].get("status") == "partial"
-        ]
-        pending = [
-            name
-            for name, result in outcomes.items()
-            if result.get("status") == "already_running"
-        ]
-        missing = [
-            name for name in names if name not in refreshed and name not in pending
-        ]
+        outcomes = self._run_refreshes(area, days, names)
+        refreshed, incomplete, pending, missing = _classify_outcomes(names, outcomes)
         intervals = outcomes[names[0]]
-        if intervals.get("truncated") and names[0] not in incomplete:
-            incomplete.append(names[0])
-        if intervals.get("reconciliation_pending") and names[0] not in incomplete:
-            incomplete.append(names[0])
-        status = (
-            "ok"
-            if len(refreshed) == len(names) and not incomplete
-            else "partial"
-            if refreshed
-            else "already_running"
-            if pending
-            else "failed"
-        )
         return {
             "area": area,
-            "status": status,
+            "status": _overall_status(len(names), refreshed, incomplete, pending),
             "refreshed_sources": refreshed,
             "incomplete_sources": incomplete,
             "pending_sources": pending,
@@ -99,6 +50,27 @@ class AnalysisRefreshService:
                 for name, result in outcomes.items()
             },
         }
+
+    def _run_refreshes(
+        self, area: str, days: int | None, names: tuple[str, str]
+    ) -> dict[str, dict[str, Any]]:
+        outcomes: dict[str, dict[str, Any]] = {}
+        for name, action in (
+            (names[0], lambda: self._refresh_intervals(area)),
+            (names[1], lambda: self._refresh_garmin(area, days)),
+        ):
+            try:
+                outcomes[name] = action()
+            except Exception:  # noqa: BLE001 - keep optional provider failures scoped.
+                outcomes[name] = {"status": "failed"}
+        return outcomes
+
+    def _refresh_intervals(self, area: str) -> dict[str, Any]:
+        if area == "sessions":
+            return self._sessions_refresh().refresh()
+        return self._performance_refresh().refresh(
+            include_power_profile=area == "performance"
+        )
 
     def _refresh_garmin(self, area: str, days: int | None) -> dict[str, Any]:
         end = self._local_today()
@@ -111,3 +83,51 @@ class AnalysisRefreshService:
         )
         start = end - timedelta(days=window_days - 1)
         return self._garmin_refresh().refresh(area, start, end)
+
+
+def _validate_request(area: str, days: int | None) -> None:
+    if area not in _SOURCE_NAMES:
+        raise AppError(400, "Ung\u00fcltiger Analysebereich.")
+    if days is not None and (area not in {"load", "recovery"} or days not in {14, 84}):
+        raise AppError(400, "Ung\u00fcltiger Analysezeitraum.")
+
+
+def _classify_outcomes(
+    names: tuple[str, str], outcomes: dict[str, dict[str, Any]]
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    refreshed = [
+        name
+        for name, result in outcomes.items()
+        if result.get("status") in {"ok", "partial"}
+        and (name == names[0] or any(result.get("sources", {}).values()))
+    ]
+    incomplete = [
+        name for name in refreshed if outcomes[name].get("status") == "partial"
+    ]
+    intervals = outcomes[names[0]]
+    if (
+        intervals.get("truncated") or intervals.get("reconciliation_pending")
+    ) and names[0] not in incomplete:
+        incomplete.append(names[0])
+    pending = [
+        name
+        for name, result in outcomes.items()
+        if result.get("status") == "already_running"
+    ]
+    missing = [name for name in names if name not in refreshed and name not in pending]
+    return refreshed, incomplete, pending, missing
+
+
+def _overall_status(
+    source_count: int,
+    refreshed: list[str],
+    incomplete: list[str],
+    pending: list[str],
+) -> str:
+    if len(refreshed) == source_count and not incomplete:
+        return "ok"
+    if refreshed:
+        return "partial"
+    if pending:
+        return "already_running"
+    return "failed"

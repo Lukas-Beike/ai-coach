@@ -158,19 +158,7 @@ def daily_energy_expenditure(
         if values["total_kcal"] is not None or values["active_kcal"] is not None:
             source = str(measured.get("source") or source)
     has_measurement = any(value is not None for value in values.values())
-    source_freshness = snapshot.get("source_freshness")
-    if not isinstance(source_freshness, dict):
-        source_freshness = {}
-    freshness = source_freshness.get("daily_stats")
-    if not isinstance(freshness, dict):
-        freshness = {}
-    nutrition_refresh = snapshot.get("nutrition_refresh")
-    if isinstance(nutrition_refresh, dict):
-        daily_refresh = nutrition_refresh.get("daily_stats")
-        if isinstance(daily_refresh, dict):
-            requested_refresh = daily_refresh.get(requested_date)
-            if isinstance(requested_refresh, dict):
-                freshness = requested_refresh
+    freshness = _requested_day_freshness(snapshot, requested_date)
     result = {
         **values,
         **_projected_expenditure(snapshot, values, day, current_date),
@@ -189,6 +177,27 @@ def daily_energy_expenditure(
     else:
         result.update({"measurement_status": "unknown", "measurement_age_days": None})
     return result
+
+
+def _requested_day_freshness(
+    snapshot: dict[str, Any], requested_date: str
+) -> dict[str, Any]:
+    source_freshness = snapshot.get("source_freshness")
+    freshness = _mapping_value(source_freshness, "daily_stats")
+    nutrition_refresh = snapshot.get("nutrition_refresh")
+    daily_refresh = _mapping_value(nutrition_refresh, "daily_stats")
+    if requested_date in daily_refresh and isinstance(
+        daily_refresh[requested_date], dict
+    ):
+        return daily_refresh[requested_date]
+    return freshness
+
+
+def _mapping_value(value: Any, key: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    nested = value.get(key)
+    return nested if isinstance(nested, dict) else {}
 
 
 def _window_values(

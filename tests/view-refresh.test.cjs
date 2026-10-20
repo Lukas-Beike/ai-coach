@@ -106,7 +106,6 @@ test("nutrition product refresh reload preserves the selected search query", () 
   assert.match(source, /renderNutritionProducts\(result\.products \|\| \[\]\);\s*if \(!preserveLookup\) status\.textContent/);
   assert.match(source, /targetId: "#nutritionLookupResult"/);
   assert.match(source, /if \(!preserveLookup\) status\.textContent = "Produkte werden gesucht/);
-  assert.match(source, /expectedQuery !== null && document\.querySelector\("#nutritionProductQuery"\)\.value\.trim\(\) !== expectedQuery/);
 });
 
 

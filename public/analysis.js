@@ -1114,11 +1114,10 @@ const analysisRefresh = AppViewRefresh.create({
   getRoute: () => state.route,
   getRequest: (route) => {
     const area = route.split("/")[1] || "performance";
-    const days = area === "load" ? (analysisHistoryPeriod === "fortnight" ? 14 : 84)
-      : area === "recovery" ? (recoveryHistoryPeriod === "fortnight" ? 14 : 84) : null;
+    const days = analysisRefreshDays(area);
     return { path: "/api/analysis/refresh", body: { area, ...(days ? { days } : {}) } };
   },
-  getViewKey: (route) => route === "analysis/load" ? analysisHistoryPeriod : route === "analysis/recovery" ? recoveryHistoryPeriod : null,
+  getViewKey: analysisRefreshViewKey,
   reload: async (route) => {
     const result = await api("/api/performance");
     if (state.route !== route || !state.data) return;
@@ -1136,6 +1135,18 @@ const analysisRefresh = AppViewRefresh.create({
   button: document.getElementById("analysisRefreshButton"),
   status: document.getElementById("analysisRefreshStatus"),
 });
+
+function analysisRefreshDays(area) {
+  if (area === "load") return analysisHistoryPeriod === "fortnight" ? 14 : 84;
+  if (area === "recovery") return recoveryHistoryPeriod === "fortnight" ? 14 : 84;
+  return null;
+}
+
+function analysisRefreshViewKey(route) {
+  if (route === "analysis/load") return analysisHistoryPeriod;
+  if (route === "analysis/recovery") return recoveryHistoryPeriod;
+  return null;
+}
 document.getElementById("analysisRefreshButton").addEventListener("click", () => void analysisRefresh());
 
 function selectedRecoveryBaselines(report) {
