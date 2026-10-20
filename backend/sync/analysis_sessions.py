@@ -106,54 +106,57 @@ class AnalysisSessionsRefreshService:
                 all_sync_days=self._all_sync_days,
                 synced_at=fetched_at,
             )
-            existing = self._snapshot_storage.merge_base() or {}
-            zone = self._zone_provider() or UTC
-            deletion_window = intervals_deletion_window(
-                today=end,
-                activity_days=RECENT_ACTIVITY_DAYS,
-                all_sync_days=RECENT_ACTIVITY_DAYS + 1,
-                earliest_date=self._earliest_date,
-            )
-            previous_raw = existing.get("raw_provider_data")
-            if not isinstance(previous_raw, dict):
-                previous_raw = {}
-            merged = dict(existing)
-            merged["synced_at"] = existing.get("synced_at") or fetched_at
-            truncated = len(payload) == RECENT_ACTIVITY_LIMIT
-            merged["activities_synced_at"] = existing.get(
-                "activities_synced_at", existing.get("synced_at")
-            )
-            merged["recent_activities"] = self._merge_activity_rows(
-                recent["recent_activities"],
-                existing.get("recent_activities"),
-                deletion_window.start,
-                deletion_window.end,
-                fetched_at,
-                zone,
-                truncated=truncated,
-            )
-            merged["raw_provider_data"] = {
-                **previous_raw,
-                "activities": self._merge_activity_rows(
-                    payload,
-                    previous_raw.get("activities"),
+            with self._database_manager.unit_of_work() as db:
+                # Read the merge base under the write transaction so a concurrent
+                # performance refresh cannot be overwritten by this stale snapshot.
+                existing = self._snapshot_storage.merge_base(db) or {}
+                zone = self._zone_provider() or UTC
+                deletion_window = intervals_deletion_window(
+                    today=end,
+                    activity_days=RECENT_ACTIVITY_DAYS,
+                    all_sync_days=RECENT_ACTIVITY_DAYS + 1,
+                    earliest_date=self._earliest_date,
+                )
+                previous_raw = existing.get("raw_provider_data")
+                if not isinstance(previous_raw, dict):
+                    previous_raw = {}
+                merged = dict(existing)
+                merged["synced_at"] = existing.get("synced_at") or fetched_at
+                truncated = len(payload) == RECENT_ACTIVITY_LIMIT
+                merged["activities_synced_at"] = existing.get(
+                    "activities_synced_at", existing.get("synced_at")
+                )
+                merged["recent_activities"] = self._merge_activity_rows(
+                    recent["recent_activities"],
+                    existing.get("recent_activities"),
                     deletion_window.start,
                     deletion_window.end,
                     fetched_at,
                     zone,
                     truncated=truncated,
-                ),
-            }
-            merged["provider_sync"] = {
-                **(existing.get("provider_sync") or {}),
-                "analysis_activity_refresh": {
-                    "start": start.isoformat(),
-                    "end": end.isoformat(),
-                    "records": len(payload),
-                    "limit": RECENT_ACTIVITY_LIMIT,
-                },
-            }
-            with self._database_manager.unit_of_work() as db:
+                )
+                merged["raw_provider_data"] = {
+                    **previous_raw,
+                    "activities": self._merge_activity_rows(
+                        payload,
+                        previous_raw.get("activities"),
+                        deletion_window.start,
+                        deletion_window.end,
+                        fetched_at,
+                        zone,
+                        truncated=truncated,
+                    ),
+                }
+                merged["provider_sync"] = {
+                    **(existing.get("provider_sync") or {}),
+                    "analysis_activity_refresh": {
+                        "start": start.isoformat(),
+                        "end": end.isoformat(),
+                        "records": len(payload),
+                        "limit": RECENT_ACTIVITY_LIMIT,
+                    },
+                }
+
                 ingest_snapshot = {
                     **recent,
                     "raw_provider_data": {"activities": payload},

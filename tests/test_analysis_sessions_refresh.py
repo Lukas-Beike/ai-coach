@@ -62,10 +62,13 @@ class AnalysisSessionsRefreshTests(unittest.TestCase):
             },
         }
         storage = Mock()
-        storage.merge_base.return_value = previous
         manager = MagicMock()
         db = Mock()
         manager.unit_of_work.return_value.__enter__.return_value = db
+        latest = {**previous, "concurrent_performance_refresh": "committed"}
+        storage.merge_base.side_effect = lambda transaction: latest if transaction is db else (
+            AssertionError("merge read escaped transaction")
+        )
         observer_scope = SimpleNamespace(result=None)
         observer = Mock()
         observer.observe.return_value = nullcontext(observer_scope)
@@ -107,6 +110,7 @@ class AnalysisSessionsRefreshTests(unittest.TestCase):
             provider.get.call_args.args,
         )
         self.assertEqual("partial", result["status"])
+        storage.merge_base.assert_called_once_with(db)
         self.assertEqual(42, result["window_days"])
         self.assertEqual(500, result["limit"])
         self.assertFalse(result["truncated"])
@@ -125,6 +129,7 @@ class AnalysisSessionsRefreshTests(unittest.TestCase):
             [row["id"] for row in saved["raw_provider_data"]["activities"]],
         )
         self.assertEqual(previous["recent_wellness"], saved["recent_wellness"])
+        self.assertEqual("committed", saved["concurrent_performance_refresh"])
         self.assertEqual(previous["upcoming_calendar"], saved["upcoming_calendar"])
         self.assertIsNone(storage.save.call_args.kwargs["update_full_sync"])
         coverage_persist.assert_not_called()
