@@ -3,6 +3,7 @@ import tempfile
 import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from backend.db.manager import (
@@ -16,6 +17,30 @@ from backend.errors import DATABASE_BUSY_MESSAGE, DatabaseBusyError
 
 
 class DatabaseManagerTests(unittest.TestCase):
+    def test_page_cache_budget_applies_to_writer_and_each_reader(self):
+        with tempfile.TemporaryDirectory() as root:
+            manager = self.make_manager(root)
+            self.addCleanup(manager.close)
+            with manager.unit_of_work() as writer:
+                self.assertEqual(
+                    writer.execute("PRAGMA cache_size").fetchone()[0], -32768
+                )
+            with manager.reader() as first:
+
+                def check_other_reader():
+                    with manager.reader() as second:
+                        self.assertIsNot(first, second)
+                        return second.execute("PRAGMA cache_size").fetchone()[0]
+
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    self.assertEqual(
+                        pool.submit(check_other_reader).result(timeout=5), -32768
+                    )
+                self.assertEqual(
+                    first.execute("PRAGMA cache_size").fetchone()[0], -32768
+                )
+            manager.close()
+
     def make_manager(self, root: str) -> DatabaseManager:
         return DatabaseManager(
             Path(root) / "test.db", sqlite3, reader_count=4, row_factory=sqlite3.Row

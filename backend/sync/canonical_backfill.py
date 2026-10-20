@@ -313,6 +313,14 @@ class CanonicalBackfill:
                 reproject_after=0,
                 reproject_current=None,
             )
+        if state["phase"] == _REPROJECT and state.get("reproject_versions") != versions:
+            # A new mapper must revisit rows already passed by an interrupted run,
+            # not only restart the raw record at its current cursor.
+            state.update(
+                reproject_after=0,
+                reproject_current=None,
+                reproject_versions=versions,
+            )
         state["status"] = BackfillStatus.RUNNING
         now = self._clock()
         if state["phase"] == _INGEST:

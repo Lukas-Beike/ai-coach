@@ -12,6 +12,7 @@ import copy
 import unittest
 from datetime import date, timedelta
 from typing import Any
+from unittest.mock import Mock
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
@@ -19,6 +20,7 @@ from backend.canonical.vocabulary import MetricKind
 from backend.performance import chart_history
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
+    ReadOnceObservationReader,
     read_performance_inputs,
 )
 from backend.performance.canonical_sections import (
@@ -28,6 +30,7 @@ from backend.performance.canonical_sections import (
     wellness_rows,
 )
 from backend.performance.context import current_performance_context
+from backend.performance.garmin_canonical import read_garmin_state
 from backend.performance.training_report import training_report
 
 TODAY = date(2026, 10, 12)
@@ -114,6 +117,25 @@ class _StartRecorder:
 
 
 class ActivityWindowTests(unittest.TestCase):
+    def test_performance_and_garmin_status_share_one_read_per_metric(self) -> None:
+        source = Mock(spec=["observations"])
+        source.observations.return_value = ()
+        reader = ReadOnceObservationReader(source)
+        db = object()
+
+        read_performance_inputs(
+            reader, db, {}, activity_reader=_StartRecorder(), as_of=TODAY
+        )
+        reads = source.observations.call_count
+        read_garmin_state(reader, db)
+        reader.observations(db, MetricKind.WEIGHT, start=TODAY - timedelta(days=7))
+        reader.observations(db, MetricKind.BODY_FAT, end=TODAY)
+
+        self.assertGreater(reads, 0)
+        self.assertEqual(source.observations.call_count, reads)
+        kinds = [call.args[1] for call in source.observations.call_args_list]
+        self.assertEqual(len(kinds), len(set(kinds)))
+
     def _start(self, wellness_days: list[str]) -> date | None:
         rows = _StartRecorder()
         snapshot = {"recent_wellness": [{"id": day} for day in wellness_days]}

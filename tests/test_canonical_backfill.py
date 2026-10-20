@@ -25,7 +25,7 @@ from backend.db import manager as manager_module
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.diagnostics.canonical_backfill import summarize_canonical_backfill
-from backend.errors import AppError
+from backend.errors import AppError, DatabaseBusyError
 from backend.providers import canonical_plans
 from backend.providers.canonical_plans import (
     intervals_snapshot_ingest_plan,
@@ -820,6 +820,77 @@ class ReprojectionTests(BackfillFixture):
         key = (INTERVALS, ACTIVITY_KIND)
         return {key: canonical_plans._MAPPER_VERSIONS[key] + 1}
 
+    def test_previous_garmin_health_projection_repairs_scaled_pace_and_missing_ftp(
+        self,
+    ) -> None:
+        plan = canonical_plans.garmin_ingest_plan(
+            garmin_payload(
+                running_threshold={
+                    "speed_and_heart_rate": {"speed": 0.35833233, "heartRate": 161}
+                },
+                cycling_ftp={
+                    "calendarDate": "2026-10-03T13:38:07.0",
+                    "functionalThresholdPower": 306,
+                },
+            ),
+            zone=ZONE,
+        )
+        current = canonical_plans.GARMIN_HEALTH_VERSION
+        # Version 5 kept the scaled speed as m/s and rejected the FTP timestamp.
+        old_observations = tuple(
+            replace(
+                item,
+                mapper_version=5,
+                observation=(
+                    replace(
+                        item.observation,
+                        value=replace(item.observation.value, value=0.35833233),
+                    )
+                    if item.observation.kind is MetricKind.THRESHOLD_PACE
+                    else item.observation
+                ),
+            )
+            for item in plan.observations
+            if item.observation.kind is not MetricKind.FTP
+        )
+        old_plan = replace(
+            plan,
+            raw_records=tuple(
+                replace(row, mapper_version=5) for row in plan.raw_records
+            ),
+            observations=old_observations,
+        )
+        with self.manager.unit_of_work() as db:
+            ingest_plan(
+                db,
+                old_plan,
+                retrieved_at=canonical_plans.garmin_payload_retrieved_at(
+                    garmin_payload(), zone=ZONE
+                )
+                or self.fail("retrieval time"),
+                deletion_window=None,
+                zone=ZONE,
+            )
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        rows = self.rows(
+            "SELECT metric, value, mapper_version FROM observations ORDER BY metric"
+        )
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(
+            {row["metric"]: row["value"] for row in rows},
+            {"ftp": 306.0, "threshold_hr": 161.0, "threshold_pace": 3.5833233},
+        )
+        self.assertEqual({row["mapper_version"] for row in rows}, {current})
+        self.run_to_completion(backfill)
+        self.assertEqual(
+            self.rows(
+                "SELECT metric, value, mapper_version FROM observations ORDER BY metric"
+            ),
+            rows,
+        )
+
     def test_higher_version_reprojects_only_that_record_kind(self) -> None:
         backfill = self.populate()
         bumped = self.bumped_activity_version()
@@ -1006,9 +1077,7 @@ class ReprojectionTests(BackfillFixture):
         self.assertEqual(
             {
                 row["provider"]: canonical_store.activity_max_hr(row["details"])
-                for row in self.rows(
-                    "SELECT provider, details FROM activity_records"
-                )
+                for row in self.rows("SELECT provider, details FROM activity_records")
             },
             {INTERVALS: 171.0, GARMIN: 168.0},
         )
@@ -1768,7 +1837,13 @@ class ReprojectionTests(BackfillFixture):
         self,
     ) -> None:
         backfill = self.make_backfill(batch_size=100)
-        self.set_garmin(self.manager, garmin_payload(weight=synthetic_weights(300)))
+        self.set_garmin(
+            self.manager,
+            garmin_payload(
+                resting_hr={"calendarDate": "2026-09-19", "restingHeartRate": 49},
+                weight=synthetic_weights(300),
+            ),
+        )
         self.run_to_completion(backfill)
         key = (GARMIN, HEALTH_KIND)
         version = canonical_plans._MAPPER_VERSIONS[key]
@@ -1937,6 +2012,19 @@ class WorkerTests(BackfillFixture):
         backfill = Mock()
         backfill.run_batch.side_effect = [
             AppError(503, "maintenance", reason="maintenance"),
+            BatchReport(items=0, done=True),
+        ]
+        self.make_worker(backfill).run_loop()
+
+        self.assertEqual(backfill.run_batch.call_count, 2)
+        backfill.mark_failed.assert_not_called()
+
+    def test_writer_contention_waits_and_retries_without_failing_the_backfill(
+        self,
+    ) -> None:
+        backfill = Mock()
+        backfill.run_batch.side_effect = [
+            DatabaseBusyError("writer"),
             BatchReport(items=0, done=True),
         ]
         self.make_worker(backfill).run_loop()

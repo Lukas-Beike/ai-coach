@@ -1,9 +1,10 @@
 """Training report coverage and historical zone contracts."""
 
 import unittest
-from datetime import date
-from unittest.mock import Mock
+from datetime import date, timedelta
+from unittest.mock import Mock, patch
 
+from backend.activities.duplicates import intervals_cycling_activities_match
 from backend.errors import AppError
 from backend.http_api.analysis import AnalysisRoutes
 from backend.performance.report_service import (
@@ -14,7 +15,7 @@ from backend.performance.report_service import (
     TrainingSeasonReadService,
 )
 from backend.performance.season_inputs import SeasonSource
-from backend.performance.training_report import training_report
+from backend.performance.training_report import deduplicated_rows, training_report
 from backend.planning.season_preparation import load_scenarios, season_preparation
 
 
@@ -52,6 +53,59 @@ def _empty_season_source():
 
 
 class TrainingReportTests(unittest.TestCase):
+    def test_duplicate_search_does_not_compare_unrelated_history(self):
+        rows = [
+            {
+                "id": f"wahoo-{index}",
+                "type": "Ride",
+                "source": "Wahoo",
+                "start_date_local": (
+                    date(2026, 1, 1) + timedelta(days=index)
+                ).isoformat()
+                + "T00:00:00",
+                "moving_time": 3600,
+                "distance": 30000,
+            }
+            for index in range(100)
+        ]
+        rows.append({**rows[-1], "id": "garmin", "source": "Garmin"})
+        with patch(
+            "backend.performance.training_report.intervals_cycling_activities_match",
+            wraps=intervals_cycling_activities_match,
+        ) as match:
+            kept, dropped = deduplicated_rows(rows)
+
+        self.assertEqual(dropped, 1)
+        self.assertEqual(len(kept), 100)
+        self.assertLessEqual(match.call_count, 2)
+
+    def test_duplicate_search_keeps_time_window_edges_and_invalid_dates(self):
+        for wahoo_start, garmin_start in (
+            ("2026-10-01T23:45:00", "2026-10-02T00:15:00"),
+            ("2026-10-02T02:00:00+02:00", "2026-10-02T00:30:00Z"),
+            ("0001-01-01T00:00:00", "0001-01-01T00:00:00"),
+            ("9999-12-31T23:59:59", "9999-12-31T23:59:59"),
+            ("invalid", "2026-10-01T08:00:00"),
+        ):
+            with self.subTest(wahoo_start=wahoo_start, garmin_start=garmin_start):
+                base = {"type": "Ride", "moving_time": 3600, "distance": 30000}
+                wahoo = {
+                    **base,
+                    "id": "wahoo",
+                    "source": "Wahoo",
+                    "start_date_local": wahoo_start,
+                }
+                garmin = {
+                    **base,
+                    "id": "garmin",
+                    "source": "Garmin",
+                    "start_date_local": garmin_start,
+                }
+                expected = intervals_cycling_activities_match(wahoo, garmin)
+                kept, dropped = deduplicated_rows([wahoo, garmin])
+                self.assertEqual(dropped, int(expected))
+                self.assertEqual(len(kept), 2 - int(expected))
+
     def test_power_profile_windows_keep_sport_provenance_and_cache_gaps(self):
         records = [
             {

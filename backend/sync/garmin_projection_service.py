@@ -101,21 +101,28 @@ class GarminProjectionService:
         with self._database_manager.reader() as db:
             return read_garmin_state(sources.observations(), db)
 
-    def _canonical_read(self) -> tuple[GarminCanonicalState | None, list[Any]]:
+    def _canonical_read(
+        self, observations: ObservationReader | None = None
+    ) -> tuple[GarminCanonicalState | None, list[Any]]:
         """Read the Garmin observations and Intervals.icu rows from one source."""
         sources = self._canonical
         if sources is None:
             return None, self._intervals_rows_legacy()
         with self._database_manager.reader() as db:
-            state = read_garmin_state(sources.observations(), db)
+            state = read_garmin_state(observations or sources.observations(), db)
             rows = list(sources.activity_rows().activity_rows(db))
         return state, rows
 
-    def public_state(self, snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    def public_state(
+        self,
+        snapshot: dict[str, Any] | None = None,
+        *,
+        observations: ObservationReader | None = None,
+    ) -> dict[str, Any]:
         """Project the Garmin status; ``snapshot`` reuses the caller's own read."""
         if snapshot is None:
             snapshot = self._garmin_payload_service.snapshot()
-        state, intervals_rows = self._canonical_read()
+        state, intervals_rows = self._canonical_read(observations)
         performance_metrics = performance_garmin_metrics.garmin_performance_metrics(
             snapshot,
             self._local_now().date(),

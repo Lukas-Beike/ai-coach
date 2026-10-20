@@ -35,11 +35,13 @@ from backend.coach.morning import GarminSleepObservations, ManualMorningCheckinS
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance import garmin_metrics, garmin_observations
+from backend.performance.current_metrics import current_performance_metrics
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     read_garmin_sleep_day,
     read_garmin_state,
 )
+from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
@@ -482,6 +484,52 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
         self.assertEqual(pace(4.0), 250)
         self.assertIsNone(pace(0.5))
         self.assertIsNone(pace(14.0))
+
+    def test_collected_scaled_pace_and_undated_ftp_reach_current_metrics(self) -> None:
+        payload = {
+            "running_threshold": {
+                "speed_and_heart_rate": {"speed": 0.35833233, "heartRate": 161}
+            },
+            "cycling_ftp": {
+                "calendarDate": "2026-10-03T13:38:07.0",
+                "functionalThresholdPower": 306,
+            },
+        }
+        mapped = map_garmin_health(payload, zone=UTC, retrieved_at=LOCAL_NOW)
+        canonical = self._metrics(list(mapped.records))
+        metrics = garmin_metrics.garmin_performance_metrics(payload, TODAY, canonical)
+        legacy = garmin_metrics.garmin_performance_metrics(payload, TODAY)
+
+        self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 279)
+        self.assertEqual(
+            metrics["run_threshold_pace_seconds_per_km"]["value"],
+            legacy["run_threshold_pace_seconds_per_km"]["value"],
+        )
+        self.assertEqual(metrics["run_threshold_hr_bpm"]["value"], 161)
+        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 306)
+
+        current = current_performance_metrics(
+            {
+                "athlete": {
+                    "sport_settings": [
+                        {"types": ["Ride"], "ftp": 400},
+                        {"types": ["Run"], "threshold_pace": 1000 / 267},
+                    ]
+                }
+            },
+            {},
+            metrics,
+        )
+        for key, expected in (
+            ("cycling_ftp_watts", 306),
+            ("run_threshold_pace_seconds_per_km", 279),
+            ("run_threshold_hr_bpm", 161),
+        ):
+            with self.subTest(key=key):
+                self.assertEqual(current[key]["value"], expected)
+                self.assertEqual(
+                    current[key]["source_provider"], ProviderId.GARMIN.value
+                )
 
     def test_newer_generic_vo2max_replaces_an_older_running_value(self) -> None:
         older_running = self._observation(
