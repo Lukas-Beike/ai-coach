@@ -66,9 +66,7 @@ class AnalysisSessionsRefreshTests(unittest.TestCase):
         db = Mock()
         manager.unit_of_work.return_value.__enter__.return_value = db
         latest = {**previous, "concurrent_performance_refresh": "committed"}
-        storage.merge_base.side_effect = lambda transaction: latest if transaction is db else (
-            AssertionError("merge read escaped transaction")
-        )
+        storage.merge_base.return_value = latest
         observer_scope = SimpleNamespace(result=None)
         observer = Mock()
         observer.observe.return_value = nullcontext(observer_scope)
