@@ -69,6 +69,25 @@ class UnresolvedCoachStepsTests(unittest.TestCase):
             unresolved_coach_steps([legacy_json_scope, same_legacy_scope]), []
         )
 
+    def test_missing_scope_object_is_repaired_only_by_the_same_effect(self):
+        failed = {
+            "tool": "save_competition",
+            "step_key": "first",
+            "scope_repair_key": "same-effect",
+            "request": {"target": "local_plan", "scope": ["competition:missing"]},
+            "result": {"ok": False, "reason": "request_object_missing"},
+        }
+        retry = {
+            "tool": "save_competition",
+            "step_key": "second",
+            "scope_repair_key": "same-effect",
+            "request": {"target": "local_plan", "scope": ["local_competitions"]},
+            "result": {"ok": True},
+        }
+        self.assertEqual(unresolved_coach_steps([failed, retry]), [])
+        other = {**retry, "scope_repair_key": "other-effect"}
+        self.assertEqual(unresolved_coach_steps([failed, other]), [failed])
+
     def test_profile_conflict_requires_exact_profile_fields(self):
         failed = {
             "tool": "update_profile",

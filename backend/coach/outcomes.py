@@ -262,7 +262,7 @@ def _coach_steps_repaired(previous: dict[str, Any], current: dict[str, Any]) -> 
         return False
     scope_key = previous.get("scope_repair_key")
     if (
-        _result(previous).get("reason") == "request_scope"
+        _result(previous).get("reason") in {"request_scope", "request_object_missing"}
         and scope_key
         and scope_key == current.get("scope_repair_key")
     ):
