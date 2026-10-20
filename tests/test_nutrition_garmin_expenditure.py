@@ -128,6 +128,43 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
         self.assertTrue(summary["energy_expenditure"]["provisional"])
         self.assertIsNone(summary["energy_expenditure"]["total_kcal"])
 
+    def test_targeted_nutrition_refresh_freshness_is_scoped_to_requested_day(self) -> None:
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
+                (
+                    "garmin_snapshot",
+                    json.dumps(
+                        {
+                            "daily_stats": [
+                                {"calendarDate": "2026-09-23", "totalKilocalories": 2000},
+                                {"calendarDate": "2026-09-24", "totalKilocalories": 2100},
+                            ],
+                            "source_freshness": {
+                                "daily_stats": {"freshness": "current", "fetched_at": "older"}
+                            },
+                            "nutrition_refresh": {
+                                "daily_stats": {
+                                    "2026-09-23": {
+                                        "freshness": "partial",
+                                        "fetched_at": "targeted-read",
+                                    }
+                                }
+                            },
+                        }
+                    ),
+                    self.fixed_now,
+                ),
+            )
+
+        requested = self.service.get_day_summary("2026-09-23")["energy_expenditure"]
+        untouched = self.service.get_day_summary("2026-09-24")["energy_expenditure"]
+
+        self.assertEqual(requested["freshness"], "partial")
+        self.assertEqual(requested["fetched_at"], "targeted-read")
+        self.assertEqual(untouched["freshness"], "current")
+        self.assertEqual(untouched["fetched_at"], "older")
+
     def test_week_uses_closed_days_and_only_paired_values_for_balance(self) -> None:
         for day, kcal, carbs in [
             ("2026-09-17", 2200, 200),

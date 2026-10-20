@@ -277,6 +277,20 @@ class IntervalsSnapshotReaderTests(unittest.TestCase):
         self.assertEqual(snapshot["upcoming_calendar"][0]["id"], "e1")
         self.assertEqual(set(snapshot["raw_provider_data"]), {"athlete", "wellness"})
 
+    def test_analysis_wellness_refresh_skips_power_curves(self):
+        api = FakeIntervalsApi(rows={"performance_wellness": [{"id": "w1", "ctl": 5}]})
+        reader = make_reader(api)
+
+        snapshot = reader.fetch_performance_snapshot(
+            {"cycling_power_profile": {"status": "ok"}},
+            include_power_profile=False,
+        )
+
+        self.assertEqual(
+            [call[0] for call in api.calls], ["get", "performance_wellness"]
+        )
+        self.assertNotIn("cycling_power_profile", snapshot)
+
     def test_power_curves_sync_combines_rides_and_retains_on_optional_failure(self):
         api = FakeIntervalsApi(
             rows={

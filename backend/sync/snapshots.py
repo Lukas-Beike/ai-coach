@@ -14,6 +14,11 @@ def merge_performance_snapshot(
 ) -> dict[str, Any]:
     """Apply performance-owned fields to the latest complete provider snapshot."""
     merged = dict(current or {})
+    merged["activities_synced_at"] = (
+        current.get("activities_synced_at", current.get("synced_at"))
+        if isinstance(current, dict)
+        else None
+    )
     merged["synced_at"] = performance["synced_at"]
     merged["athlete"] = performance.get("athlete", {})
     if "cycling_power_profile" in performance:
@@ -117,7 +122,7 @@ def save_snapshot(
     snapshot: dict[str, Any],
     repository: Any,
     *,
-    update_full_sync: bool,
+    update_full_sync: bool | None,
     activity_days: int | None,
     set_value: Callable[[str, str, Any], None],
     activity_count: int | None = None,
@@ -128,10 +133,10 @@ def save_snapshot(
         repository.save(
             db, snapshot, snapshot["synced_at"], activity_count=activity_count
         )
-    if update_full_sync:
+    if update_full_sync is True:
         set_value("last_sync_at", snapshot["synced_at"], db)
         set_value("last_sync_error", "", db)
         if activity_days is not None:
             set_value("last_sync_activity_days", str(activity_days), db)
-    else:
+    elif update_full_sync is False:
         set_value("last_performance_refresh_at", snapshot["synced_at"], db)

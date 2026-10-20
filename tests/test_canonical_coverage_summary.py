@@ -29,6 +29,8 @@ SUMMARY_VOCABULARY = {
     "providers",
     "provider",
     "sync_time_stored",
+    "activity_sync_time_stored",
+    "observation_sync_time_stored",
     "activities",
     "observations",
     "issues",
@@ -85,10 +87,14 @@ class CanonicalCoverageSummaryTests(unittest.TestCase):
         intervals = providers[str(ProviderId.INTERVALS)]
         garmin = providers[str(ProviderId.GARMIN)]
         self.assertEqual(intervals["sync_time_stored"], True)
+        self.assertEqual(intervals["activity_sync_time_stored"], True)
+        self.assertEqual(intervals["observation_sync_time_stored"], True)
         self.assertEqual(intervals["activities"], 5)
         self.assertEqual(intervals["observations"], 39)
         self.assertEqual(intervals["issues"][str(IssueReason.UNSUPPORTED)], 0)
         self.assertEqual(garmin["sync_time_stored"], True)
+        self.assertEqual(garmin["activity_sync_time_stored"], True)
+        self.assertEqual(garmin["observation_sync_time_stored"], True)
         self.assertEqual(garmin["activities"], 2)
         self.assertEqual(garmin["observations"], 19)
         self.assertEqual(garmin["issues"][str(IssueReason.UNSUPPORTED)], 2)
@@ -121,6 +127,8 @@ class CanonicalCoverageSummaryTests(unittest.TestCase):
                     {
                         "provider": str(ProviderId.GARMIN),
                         "sync_time_stored": False,
+                        "activity_sync_time_stored": False,
+                        "observation_sync_time_stored": False,
                         "activities": 4,
                         "observations": 9,
                         "issues": {

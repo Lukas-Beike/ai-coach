@@ -21,6 +21,8 @@ from backend.sync.garmin_projection_service import (
     GarminProjectionService,
 )
 from backend.sync.garmin_service import (
+    GarminAnalysisRefreshService,
+    GarminNutritionRefreshService,
     GarminRemoteReader,
     GarminSyncCoordination,
     GarminSyncLifecycleState,
@@ -239,6 +241,40 @@ class GarminAssembly:
             utc_now=self._utc_now,
             key_values=self._key_values,
             capability_allowed=self.sync_state_service().capability_allowed,
+        )
+
+    def nutrition_refresh_service(self) -> GarminNutritionRefreshService:
+        """Compose bounded Garmin reads used by nutrition, without a full sync."""
+        fixture_loader = self.fixture_loader()
+        reader = self.remote_reader()
+        return GarminNutritionRefreshService(
+            reader=reader,
+            database_manager=self._database_manager(),
+            snapshot_writer=GarminSnapshotWriter(
+                self._key_values,
+                lambda: self._athlete_clock.now().tzinfo,
+            ),
+            payload_service=self.payload_service(),
+            coordination=self._sync_coordination(),
+            utc_now=self._utc_now,
+            configured=lambda: fixture_loader.path() is None and reader.configured(),
+        )
+
+    def analysis_refresh_service(self) -> GarminAnalysisRefreshService:
+        """Compose bounded Garmin reads used by Analyse without a full sync."""
+        fixture_loader = self.fixture_loader()
+        reader = self.remote_reader()
+        return GarminAnalysisRefreshService(
+            reader=reader,
+            database_manager=self._database_manager(),
+            snapshot_writer=GarminSnapshotWriter(
+                self._key_values,
+                lambda: self._athlete_clock.now().tzinfo,
+            ),
+            payload_service=self.payload_service(),
+            coordination=self._sync_coordination(),
+            utc_now=self._utc_now,
+            configured=lambda: fixture_loader.path() is None and reader.configured(),
         )
 
     def _sync_coordination(self) -> GarminSyncCoordination:

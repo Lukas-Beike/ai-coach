@@ -288,6 +288,22 @@ class GarminDailyHealthTests(unittest.TestCase):
                 self.assertIsNone(result["projected_total_kcal"])
                 self.assertEqual(result["total_kcal"], 1203)
 
+    def test_requested_day_freshness_overrides_source_freshness(self):
+        result = daily_energy_expenditure(
+            {
+                "source_freshness": {"daily_stats": {"freshness": "stale"}},
+                "nutrition_refresh": {
+                    "daily_stats": {
+                        "2026-10-14": {"freshness": "partial", "fetched_at": "today"}
+                    }
+                },
+            },
+            "2026-10-14",
+            date(2026, 10, 15),
+        )
+        self.assertEqual("partial", result["freshness"])
+        self.assertEqual("today", result["fetched_at"])
+
     def test_nested_records_aliases_and_same_date_merge(self):
         snapshot = {
             "daily_stats": {

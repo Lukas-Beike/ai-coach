@@ -18,6 +18,7 @@ from backend.performance.daily_health import (
     daily_energy_expenditure,
     read_daily_health_by_date,
 )
+from backend.providers.garmin_fields import GARMIN_DATE_ALIASES
 from backend.runtime.ports import ObservationReader
 
 
@@ -53,6 +54,10 @@ class NutritionSyncStatusService:
             garmin_snapshot = {}
         if not isinstance(garmin_snapshot, dict):
             garmin_snapshot = {}
+        if measured is not None:
+            measured = _filter_targeted_missing_energy(
+                measured, garmin_snapshot, [validated_date]
+            )
         summary["energy_expenditure"] = daily_energy_expenditure(
             garmin_snapshot,
             validated_date,
@@ -98,6 +103,10 @@ class NutritionSyncStatusService:
             snapshot = json.loads(serialized or "{}")
         except TypeError, ValueError:
             snapshot = {}
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        if measured is not None:
+            measured = _filter_targeted_missing_energy(measured, snapshot, dates)
         days = []
         for summary in summaries:
             expenditure = daily_energy_expenditure(
@@ -204,3 +213,39 @@ def _week_day(summary: dict[str, Any], expenditure: dict[str, Any]) -> dict[str,
             for key in ("carbs_g", "protein_g", "fat_g")
         },
     }
+
+
+def _filter_targeted_missing_energy(
+    measured: dict[str, dict[str, Any]], snapshot: dict[str, Any], dates: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Do not reuse older canonical observations after a complete empty day read."""
+    nutrition_refresh = snapshot.get("nutrition_refresh")
+    targeted = (
+        nutrition_refresh.get("daily_stats", {})
+        if isinstance(nutrition_refresh, dict)
+        else {}
+    )
+    if not isinstance(targeted, dict):
+        return measured
+    records = snapshot.get("daily_stats")
+    observed_dates = (
+        {
+            str(record.get(key))[:10]
+            for record in records
+            if isinstance(record, dict)
+            for key in GARMIN_DATE_ALIASES
+            if record.get(key)
+        }
+        if isinstance(records, list)
+        else set()
+    )
+    result = dict(measured)
+    for day in dates:
+        refresh = targeted.get(day)
+        if (
+            isinstance(refresh, dict)
+            and refresh.get("freshness") == "current"
+            and day not in observed_dates
+        ):
+            result[day] = {}
+    return result

@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=327">
+  <link rel="stylesheet" href="/styles.css?v=330">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -122,6 +122,7 @@
       <section id="dataPanel" class="panel" aria-label="Analyse">
         <div class="section-heading">
           <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Leistung, Belastung, Erholung und Einheiten</span></div>
+          <div class="view-refresh"><button type="button" class="icon-button" id="analysisRefreshButton" aria-label="Analyse aktualisieren: Leistung"><svg aria-hidden="true"><use href="#icon-refresh"></use></svg></button><output id="analysisRefreshStatus" aria-live="polite"></output></div>
         </div>
         <nav class="plan-segment-nav" aria-label="Analysebereiche">
           <a href="#analysis/load" data-analysis-segment="load">Belastung</a>
@@ -143,7 +144,7 @@
       </section>
 
       <section id="nutritionPanel" class="panel" aria-label="Ernährung">
-        <div class="panel-heading"><div><span class="eyebrow">ERNÄHRUNG</span><h2>Ernährung</h2><span class="tab-sync-detail">Erfassen und ändern über deinen Coach</span></div></div>
+        <div class="section-heading"><div><span class="eyebrow">ERNÄHRUNG</span><h2>Ernährung</h2><span class="tab-sync-detail">Erfassen und ändern über deinen Coach</span></div><div class="view-refresh"><button type="button" class="icon-button" id="nutritionRefreshButton" aria-label="Ernährung aktualisieren: Tagebuch"><svg aria-hidden="true"><use href="#icon-refresh"></use></svg></button><output id="nutritionRefreshStatus" aria-live="polite"></output></div></div>
         <nav class="plan-segment-nav" aria-label="Ernährungsbereiche">
           <a href="#nutrition/diary" data-nutrition-segment="diary">Tagebuch</a>
           <a href="#nutrition/week" data-nutrition-segment="week">Verlauf</a>
@@ -167,6 +168,7 @@
             <div class="nutrition-search-row"><input id="nutritionProductQuery" type="search" autocomplete="off" placeholder="Name, Marke oder EAN"><button type="submit" class="secondary-button">Suchen</button></div>
           </form>
           <output id="nutritionProductStatus" class="tab-sync-detail" aria-live="polite"></output>
+          <div id="nutritionLookupResult" class="nutrition-list" hidden></div>
           <div id="nutritionProducts" class="nutrition-list"></div>
           <div id="nutritionExtraction" class="nutrition-product-editor" hidden></div>
         </div>
@@ -562,9 +564,10 @@
   <script src="/shared.js?v=17" defer></script>
   <script src="/auth.js?v=12" defer></script>
   <script src="/sync-status.js?v=12" defer></script>
+  <script src="/view-refresh.js?v=3" defer></script>
   <script src="/notifications.js?v=4" defer></script>
-  <script src="/nutrition.js?v=34" defer></script>
-  <script src="/analysis.js?v=126" defer></script>
+  <script src="/nutrition.js?v=38" defer></script>
+  <script src="/analysis.js?v=129" defer></script>
   <script src="/activity-details.js?v=16" defer></script>
   <script src="/activity-analysis.js?v=3" defer></script>
   <script src="/performance-view.js?v=24" defer></script>
@@ -574,6 +577,6 @@
   <script src="/wahoo-connection.js?v=4" defer></script>
   <script src="/provider-connections.js?v=1" defer></script>
   <script src="/settings.js?v=9" defer></script>
-  <script src="/app.js?v=289" defer></script>
+  <script src="/app.js?v=290" defer></script>
 </body>
 </html>

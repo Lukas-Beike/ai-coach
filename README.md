@@ -1009,3 +1009,5 @@ Android-Gerät noch nicht verifiziert.
 Beim Erfassen eines Verzehrs berechnet der Server die Werte aus dem lokalen
 Produkt und speichert einen unveränderlichen Nährwert-Snapshot im Tagebuch;
 spätere Produktänderungen ändern keine früheren Einträge.
+
+Analyse und Ernährung lassen sich über das Aktualisierungssymbol im jeweiligen Kopfbereich einzeln auffrischen. Analyse lädt für den gewählten Bereich begrenzte Intervals.icu- und Garmin-Daten; Belastung und Erholung verwenden den ausgewählten Zeitraum. Ernährung lädt für Tagebuch oder Verlauf den ausgewählten Tag beziehungsweise Zeitraum, für Body gezielt Garmin-Körperdaten und für Produkte nur lokale Einträge. Dabei wird nichts zu Intervals.icu geschrieben. Laufende Aktualisierungen behalten die angezeigten Werte bei; fehlende Quellen oder unvollständige Aktivitätsfenster werden als Teil-Ergebnis gekennzeichnet.

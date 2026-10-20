@@ -69,6 +69,7 @@ from backend.performance.report_service import (
     TrainingSeasonReadService,
 )
 from backend.planning.season_preparation import load_scenarios, season_preparation
+from backend.sync.analysis_refresh import AnalysisRefreshService
 
 
 @dataclass(frozen=True)
@@ -224,6 +225,8 @@ class HttpSyncServices:
     job_queue: Callable[[], Any]
     state_repository: Callable[[], Any]
     performance_refresh: Callable[[], Any]
+    analysis_sessions_refresh: Callable[[], Any]
+    garmin_analysis_refresh: Callable[[], Any]
     full_resync: Callable[[], Any]
     period_defaults: Any
     all_sync_days: int
@@ -236,6 +239,7 @@ class HttpNutritionServices:
     meal_library: Callable[[], Any]
     intervals_sync: Callable[[], Any]
     audio_transcription: Callable[[], Any]
+    refresh: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -356,6 +360,8 @@ class HttpApiAssembly:
         sync_job_queue_service = sync.job_queue
         sync_state_repository = sync.state_repository
         performance_refresh_service = sync.performance_refresh
+        analysis_sessions_refresh_service = sync.analysis_sessions_refresh
+        garmin_analysis_refresh_service = sync.garmin_analysis_refresh
         full_provider_resync_service = sync.full_resync
         sync_period_defaults = sync.period_defaults
         all_sync_days = sync.all_sync_days
@@ -363,6 +369,7 @@ class HttpApiAssembly:
         diary_service = nutrition.diary
         meal_library_service = nutrition.meal_library
         audio_transcription_client = nutrition.audio_transcription
+        nutrition_refresh_service = nutrition.refresh
         self._database_manager = database_manager
         self._data_dir = data_dir
         self._readiness_maintenance_gate = readiness_maintenance_gate
@@ -482,7 +489,14 @@ class HttpApiAssembly:
 
         self.training_reports = training_report_services
         self.analysis_routes = AnalysisRoutes(
-            session_auth_service, self.training_reports
+            session_auth_service,
+            self.training_reports,
+            lambda: AnalysisRefreshService(
+                performance_refresh_service,
+                analysis_sessions_refresh_service,
+                garmin_analysis_refresh_service,
+                local_today,
+            ),
         )
         self.history_undo_post_routes = HistoryUndoPostRoutes(
             history_undo_service,
@@ -565,6 +579,8 @@ class HttpApiAssembly:
             diary_service,
             meal_library_service,
             sync_job_queue_service,
+            nutrition_refresh_service,
+            athlete_clock.now,
         )
         self.nutrition_put_routes = NutritionPutRoutes(
             diary_service, meal_library_service

@@ -29,7 +29,7 @@ function harness(apiImpl) {
     normalizeNutritionProduct: (product) => product,
   });
   vm.runInContext(
-    `let nutritionProductLoadSequence = 0;\nlet nutritionLookupResultShown = false;\n${slice("async function loadNutritionProducts", "async function saveNutritionProduct")}\n${slice("async function lookupNutritionProduct", "function stopNutritionBarcode")}`,
+    `let nutritionProductLoadSequence = 0;\nlet nutritionLookupResultShown = false;\n${slice("function isCurrentNutritionProductLoad", "async function saveNutritionProduct")}\n${slice("async function lookupNutritionProduct", "function stopNutritionBarcode")}`,
     context,
   );
   return { context, elements, rendered };

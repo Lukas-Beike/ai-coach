@@ -1088,6 +1088,8 @@ function renderSeasonEvents(season, generation) {
 
 function renderAnalysisSegments(route = state.route) {
   const segment = { "analysis/load": "load", "analysis/recovery": "recovery", "analysis/sessions": "sessions" }[route] || "performance";
+  const labels = { performance: "Leistung", load: "Belastung", recovery: "Erholung", sessions: "Einheiten" };
+  document.getElementById("analysisRefreshButton").setAttribute("aria-label", `Analyse aktualisieren: ${labels[segment]}`);
   document.getElementById("analysisHistoryCharts").hidden = segment !== "performance";
   document.getElementById("currentPerformance").hidden = segment !== "performance";
   const endurance = document.getElementById("performanceEnduranceCharts");
@@ -1105,6 +1107,47 @@ function renderAnalysisSegments(route = state.route) {
     if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
   });
 }
+
+const analysisRefresh = AppViewRefresh.create({
+  api,
+  waitForJob: (...args) => waitForSyncJob(...args),
+  getRoute: () => state.route,
+  getRequest: (route) => {
+    const area = route.split("/")[1] || "performance";
+    const days = analysisRefreshDays(area);
+    return { path: "/api/analysis/refresh", body: { area, ...(days ? { days } : {}) } };
+  },
+  getViewKey: analysisRefreshViewKey,
+  reload: async (route) => {
+    const result = await api("/api/performance");
+    if (state.route !== route || !state.data) return;
+    state.data.performance = result.performance || result;
+    const performance = state.data.performance;
+    clearAnalysisReportCache();
+    if (route === "analysis/recovery") renderPersonalRecovery(performance.personal_recovery);
+    else if (route === "analysis/sessions") await ActivityAnalysis.render();
+    else {
+      renderAnalysisHistory(performance.history);
+      if (route === "analysis/load") renderTrainingFocus(performance.training_focus_periods?.[analysisHistoryPeriod] || performance.training_focus);
+      else renderPerformance(performance, { refreshCharts: false });
+    }
+  },
+  button: document.getElementById("analysisRefreshButton"),
+  status: document.getElementById("analysisRefreshStatus"),
+});
+
+function analysisRefreshDays(area) {
+  if (area === "load") return analysisHistoryPeriod === "fortnight" ? 14 : 84;
+  if (area === "recovery") return recoveryHistoryPeriod === "fortnight" ? 14 : 84;
+  return null;
+}
+
+function analysisRefreshViewKey(route) {
+  if (route === "analysis/load") return analysisHistoryPeriod;
+  if (route === "analysis/recovery") return recoveryHistoryPeriod;
+  return null;
+}
+document.getElementById("analysisRefreshButton").addEventListener("click", () => void analysisRefresh());
 
 function selectedRecoveryBaselines(report) {
   const preferred = report?.preferred_providers || {};

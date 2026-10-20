@@ -196,6 +196,38 @@ class PerformanceCanonicalIngestTests(unittest.TestCase):
             before,
         )
 
+    def test_performance_coverage_keeps_activity_freshness_while_updating_wellness(
+        self,
+    ):
+        activity_time = "2026-10-09T06:00:00+00:00"
+        snapshot = {
+            "synced_at": activity_time,
+            "activities_synced_at": activity_time,
+            "raw_provider_data": {
+                "activities": [
+                    {
+                        "id": "i-1",
+                        "start_date_local": "2026-10-05T07:00:00",
+                        "type": "Ride",
+                    }
+                ]
+            },
+        }
+        self.sync_state.save_snapshot(snapshot)
+
+        self.service._refresh_inner()
+
+        with self.manager.reader() as db:
+            stored = CanonicalCoverageStore(self.key_values).load(
+                db, ProviderId.INTERVALS, zone=ZONE
+            )
+        self.assertIsNotNone(stored)
+        self.assertEqual(
+            datetime.fromisoformat(activity_time), stored.activities_retrieved_at
+        )
+        self.assertEqual(datetime.fromisoformat(NOW), stored.observations_retrieved_at)
+        self.assertGreater(stored.observation_count, 0)
+
     def test_refresh_persists_coverage_equal_to_the_legacy_projection(self) -> None:
         self.service._refresh_inner()
         projection = CanonicalSnapshotProjection(
@@ -345,6 +377,8 @@ class PersistedCoverageTests(CanonicalReadFixture):
                 "mapper_versions",
                 "zone",
                 "retrieved_at",
+                "activities_retrieved_at",
+                "observations_retrieved_at",
                 "activity_count",
                 "observation_count",
                 "issue_counts",
