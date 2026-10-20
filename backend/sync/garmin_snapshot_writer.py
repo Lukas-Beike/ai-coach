@@ -18,7 +18,10 @@ from backend.sync.canonical_coverage_store import (
     CanonicalCoverageStore,
     garmin_payload_coverage,
 )
-from backend.sync.canonical_ingest import CanonicalIngestCounters, ingest_garmin_payload
+from backend.sync.canonical_ingest import (
+    CanonicalIngestCounters,
+    ingest_garmin_payload,
+)
 
 GARMIN_SNAPSHOT_KEY: Final = "garmin_snapshot"
 
@@ -44,5 +47,29 @@ class GarminSnapshotWriter:
             db,
             GARMIN_SNAPSHOT_KEY,
             json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        )
+        return counters
+
+    def write_nutrition_refresh(
+        self,
+        db: Any,
+        snapshot: Mapping[str, Any],
+        source: str,
+        fetched_at: str,
+        refreshed_records: list[dict[str, Any]],
+    ) -> CanonicalIngestCounters:
+        """Ingest one refreshed nutrition source without restamping other sections."""
+        if source not in {"daily_stats", "weight"}:
+            raise ValueError("Unsupported Garmin nutrition source")
+        zone = self._zone_provider() or UTC
+        payload = {
+            "synced_at": fetched_at,
+            source: refreshed_records,
+        }
+        counters = ingest_garmin_payload(db, payload, zone=zone)
+        self._key_values.set(
+            db,
+            GARMIN_SNAPSHOT_KEY,
+            json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")),
         )
         return counters

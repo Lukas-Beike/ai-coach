@@ -2148,6 +2148,7 @@ HTTP_API = HttpApiAssembly(
                 meal_library=NUTRITION_ASSEMBLY.meal_library_service,
                 intervals_sync=NUTRITION_ASSEMBLY.intervals_sync_service,
                 audio_transcription=MODEL_TRANSPORT.audio_transcription_client,
+                refresh=GARMIN_ASSEMBLY.nutrition_refresh_service,
             ),
             wahoo=WAHOO_CONNECTION.service,
             metric_export=lambda: METRIC_EXPORT,

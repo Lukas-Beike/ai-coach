@@ -236,6 +236,7 @@ class HttpNutritionServices:
     meal_library: Callable[[], Any]
     intervals_sync: Callable[[], Any]
     audio_transcription: Callable[[], Any]
+    refresh: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -363,6 +364,7 @@ class HttpApiAssembly:
         diary_service = nutrition.diary
         meal_library_service = nutrition.meal_library
         audio_transcription_client = nutrition.audio_transcription
+        nutrition_refresh_service = nutrition.refresh
         self._database_manager = database_manager
         self._data_dir = data_dir
         self._readiness_maintenance_gate = readiness_maintenance_gate
@@ -565,6 +567,8 @@ class HttpApiAssembly:
             diary_service,
             meal_library_service,
             sync_job_queue_service,
+            nutrition_refresh_service,
+            athlete_clock.now,
         )
         self.nutrition_put_routes = NutritionPutRoutes(
             diary_service, meal_library_service

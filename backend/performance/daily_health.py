@@ -164,6 +164,13 @@ def daily_energy_expenditure(
     freshness = source_freshness.get("daily_stats")
     if not isinstance(freshness, dict):
         freshness = {}
+    nutrition_refresh = snapshot.get("nutrition_refresh")
+    if isinstance(nutrition_refresh, dict):
+        daily_refresh = nutrition_refresh.get("daily_stats")
+        if isinstance(daily_refresh, dict):
+            requested_refresh = daily_refresh.get(requested_date)
+            if isinstance(requested_refresh, dict):
+                freshness = requested_refresh
     result = {
         **values,
         **_projected_expenditure(snapshot, values, day, current_date),

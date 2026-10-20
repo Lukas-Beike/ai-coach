@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -12,6 +12,7 @@ from backend.errors import AppError
 from backend.http_api.auth import SessionAuthService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
+from backend.nutrition.models import validate_iso_date
 
 NUTRITION_ENTRY_PATH = "/api/nutrition/entry"
 NUTRITION_PRODUCTS_PATH = "/api/nutrition/products"
@@ -102,16 +103,21 @@ class NutritionPostRoutes:
         diary_service: Callable[[], NutritionDiaryService],
         meal_library_service: Callable[[], NutritionMealLibraryService],
         sync_job_queue: Callable[[], Any],
+        nutrition_refresh_service: Callable[[], Any] | None = None,
+        local_now: Callable[[], datetime] | None = None,
     ) -> None:
         self._diary_service = diary_service
         self._meal_library_service = meal_library_service
         self._sync_job_queue = sync_job_queue
+        self._nutrition_refresh_service = nutrition_refresh_service
+        self._local_now = local_now or datetime.now
 
     def handle(self, handler: Any, path: str) -> bool:
         routes = {
             NUTRITION_ENTRY_PATH: self._create,
             f"{NUTRITION_ENTRY_PATH}/delete": self._delete,
             "/api/nutrition/sync": self._sync,
+            "/api/nutrition/refresh": self._refresh,
             NUTRITION_PRODUCTS_PATH: self._save_product,
             f"{NUTRITION_PRODUCTS_PATH}/lookup": self._lookup_product,
             f"{NUTRITION_PRODUCTS_PATH}/extract": self._extract_product,
@@ -151,12 +157,74 @@ class NutritionPostRoutes:
         )
         handler.send_json(
             202,
-            {
-                "ok": True,
-                "status": "queued",
-                "sync_job_id": job["id"],
-            },
+            {"ok": True, "status": "queued", "sync_job_id": job["id"]},
         )
+
+    def _refresh(self, handler: Any) -> None:
+        payload = _read_object(handler)
+        area = payload.get("area")
+        if area not in {"diary", "week", "body", "products"}:
+            raise AppError(400, "Ungültiger Ernährungsbereich.")
+        if set(payload) - {"area", "date", "days"}:
+            raise AppError(400, INVALID_BODY)
+
+        if area == "diary":
+            meal_date = validate_iso_date(
+                payload.get("date") or self._local_now().date().isoformat()
+            )
+            expenditure = self._refresh_provider("daily_stats", meal_date, meal_date)
+            summary = self._diary_service().get_day_summary(meal_date)
+            if expenditure.get("status") != "ok":
+                summary["energy_expenditure"]["freshness"] = "partial"
+            handler.send_json(
+                200,
+                {
+                    "ok": True,
+                    "area": area,
+                    "status": expenditure.get("status", "partial"),
+                    "meal_status": "local",
+                    "summary": summary,
+                    "expenditure_refresh": expenditure,
+                },
+            )
+            return
+        if area == "products":
+            products = self._meal_library_service().list_products()
+            handler.send_json(
+                200,
+                {"ok": True, "area": area, "status": "local", "products": products},
+            )
+            return
+
+        days = payload.get("days", 14 if area == "week" else 84)
+        if type(days) is not int or days not in {14, 84}:
+            raise AppError(400, "Der Zeitraum muss 14 oder 84 Tage umfassen.")
+        default_end = self._local_now().date()
+        if area == "week" and "date" not in payload:
+            default_end -= timedelta(days=1)
+        end = validate_iso_date(payload.get("date") or default_end.isoformat())
+        end_date = date.fromisoformat(end)
+        today = self._local_now().date()
+        if end_date > today:
+            raise AppError(400, "Das Datum darf nicht in der Zukunft liegen.")
+        start = end_date - timedelta(days=days - 1)
+        source = "daily_stats" if area == "week" else "weight"
+        result = self._refresh_provider(source, start.isoformat(), end)
+        handler.send_json(200, {"ok": True, "area": area, **result})
+
+    def _refresh_provider(self, source: str, start: str, end: str) -> dict[str, Any]:
+        if self._nutrition_refresh_service is None:
+            return {"status": "partial", "reason": "not_configured"}
+        try:
+            return self._nutrition_refresh_service().refresh(
+                source,
+                date.fromisoformat(start),
+                date.fromisoformat(end),
+            )
+        except AppError as exc:
+            if exc.reason not in {"not_configured", "not_supported", "library_unavailable"}:
+                raise
+            return {"status": "partial", "reason": exc.reason}
 
     def _save_product(self, handler: Any) -> None:
         payload = _read_object(handler)
