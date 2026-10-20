@@ -117,3 +117,28 @@ test("a scrollbar drag upward during a stream stops following without a wheel ge
   await expect(jump).toBeVisible();
   await expect(jump.locator(".chat-jump-label")).toHaveText("Neue Antwort");
 });
+
+test("returning to the Coach after scrolling away during a stream keeps the position @responsive", async ({ page }) => {
+  await openCoach(page);
+  await sendSlowStream(page);
+  await expect(page.locator(".message.assistant.streaming")).toBeVisible();
+  await page.mouse.wheel(0, -2000);
+  await expect.poll(() => page.evaluate(() => state.chatFollowLatest)).toBe(false);
+  // The wheel scroll can land a frame after its event; read the position once it has settled.
+  await expect.poll(() => page.evaluate(() => {
+    const before = window.scrollY;
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(window.scrollY === before))));
+  })).toBe(true);
+  const scrollAfterWheel = await page.evaluate(() => window.scrollY);
+  // Leaving during the stream marks the reply start as pending; the reader's position must still win.
+  await page.getByRole("link", { name: "Kalender", exact: true }).click();
+  await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
+  await page.getByRole("link", { name: "Coach", exact: true }).click();
+  await expect(page.locator("#chatPanel")).toHaveClass(/active/);
+  await waitForStreamToFinish(page);
+  await expect.poll(() => page.evaluate(() => !state.chatScrollRestoring && !state.chatResponseScrollPending)).toBe(true);
+  expect(Math.abs(await page.evaluate(() => window.scrollY) - scrollAfterWheel)).toBeLessThanOrEqual(2);
+  await expect(page.locator("#chatJumpToComposer")).toBeVisible();
+  // The finished reply refreshes the start data, which may still be on its way when the page closes.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
