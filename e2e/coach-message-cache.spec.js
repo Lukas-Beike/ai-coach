@@ -131,6 +131,76 @@ test("cached latest messages show before the start answers and older ones page i
   expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
 });
 
+test("a reader who scrolls before the start has loaded keeps their position @responsive", async ({ page }) => {
+  let delayed = false;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const waitForGate = () => Promise.race([gate, new Promise((resolve) => setTimeout(resolve, RELEASE_TIMEOUT_MS))]);
+  let releaseLoad;
+  const loadGate = new Promise((resolve) => { releaseLoad = resolve; });
+
+  await page.route("**/api/chat/history?*", async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    if (delayed && !params.get("cursor")) await waitForGate();
+    await route.fulfill({ json: historyPage(params.get("cursor"), Number(params.get("limit") || FIRST_PAGE_SIZE)) });
+  });
+  await page.route("**/api/bootstrap*", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    if (Array.isArray(body.messages)) {
+      const first = historyPage(null, FIRST_PAGE_SIZE);
+      Object.assign(body, { messages: first.messages, messages_next_cursor: first.next_cursor, messages_generation: GENERATION });
+    }
+    if (delayed) await waitForGate();
+    await route.fulfill({ response, json: body });
+  });
+  // A still-loading image holds the page's load event, which the first jump to the newest message waits for.
+  await page.route("**/api/e2e-hold-load", async (route) => {
+    await Promise.race([loadGate, new Promise((resolve) => setTimeout(resolve, RELEASE_TIMEOUT_MS))]);
+    await route.fulfill({ status: 204 });
+  });
+
+  await page.goto("/#coach");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+  await expect(page.locator(`#messages [data-message-id="${LAST_ID}"]`)).toBeAttached();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("coach-chat-cache") || "null")?.messages?.at(-1)?.id ?? null)).toBe(LAST_ID);
+  await expect.poll(() => page.evaluate(() => Boolean(localStorage.getItem("coach-state-snapshot")))).toBe(true);
+
+  delayed = true;
+  await page.addInitScript(() => {
+    document.addEventListener("DOMContentLoaded", () => {
+      const image = document.createElement("img");
+      image.src = "/api/e2e-hold-load";
+      image.alt = "";
+      image.hidden = true;
+      document.body.append(image);
+    });
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.locator("#appShell")).toBeVisible();
+  await expect(page.locator(`#messages [data-message-id="${LAST_ID}"]`)).toBeAttached();
+  expect(await page.evaluate(() => ({ pending: state.chatInitialScrollPending, ready: document.readyState })))
+    .toEqual({ pending: true, ready: "interactive" });
+
+  // The reader starts reading the cached messages before the page has finished loading.
+  await page.mouse.wheel(0, 900);
+  await page.mouse.wheel(0, -300);
+  await expect.poll(() => page.evaluate(() => state.chatFollowLatest)).toBe(false);
+  const readerScroll = await page.evaluate(() => window.scrollY);
+
+  releaseLoad();
+  await expect.poll(() => page.evaluate(() => document.readyState)).toBe("complete");
+  await expect.poll(() => page.evaluate(() => state.chatInitialScrollPending)).toBe(false);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect(Math.abs(await page.evaluate(() => window.scrollY) - readerScroll)).toBeLessThanOrEqual(2);
+
+  release();
+  await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+  // Later start requests may still be held when the page closes.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 test("a failed fresh chat load ends the sync note and keeps the cached messages @responsive", async ({ page }) => {
   let failing = false;
   await page.route("**/api/chat/history?*", async (route) => {
