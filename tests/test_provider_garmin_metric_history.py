@@ -28,7 +28,7 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
 
             def get_daily_summaries(self, start, end):
                 calls.append(("batch", start, end))
-                return {"data": [{"calendarDate": start, "steps": 10}]}
+                return [{"calendarDate": start, "steps": 10}]
 
             def get_user_summary(self, day):
                 calls.append(("day", day))

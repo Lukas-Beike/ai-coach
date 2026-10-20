@@ -277,7 +277,7 @@ def _collect_daily_summaries_window(
             partial(fetch, start.isoformat(), end.isoformat()),
             {"start": start.isoformat(), "end": end.isoformat()},
         )
-        records = response.get("data") if isinstance(response, dict) else None
+        records = response.get("data") if isinstance(response, dict) else response
         if not isinstance(records, list) or any(
             not isinstance(row, dict) for row in records
         ):
