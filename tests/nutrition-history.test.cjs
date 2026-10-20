@@ -1,0 +1,30 @@
+﻿const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+const { test } = require("node:test");
+const source = fs.readFileSync("public/nutrition.js", "utf8");
+const start = source.indexOf("function nutritionChartDays(");
+const end = source.indexOf("function renderNutritionWeek(", start);
+const context = vm.createContext({});
+vm.runInContext(source.slice(start, end), context);
+
+test("weekly chart averages observed days independently and preserves empty weeks", () => {
+  const days = Array.from({ length: 84 }, (_, index) => ({ date: new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10), intake_kcal: null, expenditure_kcal: null }));
+  days[0].intake_kcal = 0;
+  days[1].intake_kcal = 2000;
+  days[1].expenditure_kcal = 2400;
+  days[83].expenditure_kcal = 2100;
+  const weeks = context.nutritionChartDays(days);
+  assert.equal(weeks.length, 12);
+  assert.equal(weeks[0].intake_kcal, 1000);
+  assert.equal(weeks[0].intake_kcal_days, 2);
+  assert.equal(weeks[0].expenditure_kcal_days, 1);
+  assert.equal(weeks[1].intake_kcal_days, 0);
+  assert.equal(weeks[0].expenditure_kcal, 2400);
+  assert.equal(weeks[1].intake_kcal, null);
+  assert.equal(weeks[1].expenditure_kcal, null);
+  assert.equal(weeks[11].expenditure_kcal, 2100);
+  assert.equal(weeks[0].date, days[0].date);
+  assert.equal(weeks[11].end_date, days[83].date);
+  assert.equal(context.nutritionChartDays(days.slice(0, 14)).length, 14);
+});

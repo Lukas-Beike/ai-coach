@@ -403,8 +403,8 @@ class NutritionDiaryService:
     def get_day_summary(self, meal_date: str) -> dict[str, Any]:
         return self._sync_status.get_day_summary(meal_date)
 
-    def get_week_summary(self) -> dict[str, Any]:
-        return self._sync_status.get_week_summary()
+    def get_week_summary(self, days: int = 7) -> dict[str, Any]:
+        return self._sync_status.get_week_summary(days)
 
     def get_sync_snapshot(self, meal_date: str) -> dict[str, Any]:
         return self._sync_status.get_sync_snapshot(meal_date)

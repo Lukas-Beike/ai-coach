@@ -3,7 +3,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from canonical_daily_health_support import MappedDailyReader
@@ -184,6 +184,31 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
         self.assertEqual(
             week["days"][0]["energy_expenditure"]["source"], "Garmin Connect"
         )
+
+    def test_history_periods_keep_closed_days_and_missing_values(self) -> None:
+        for count in (14, 84):
+            with self.subTest(days=count):
+                summary = self.service.get_week_summary(count)
+                self.assertEqual(len(summary["days"]), count)
+                self.assertEqual(
+                    summary["start_date"],
+                    (datetime(2026, 9, 24, tzinfo=UTC) - timedelta(days=count))
+                    .date()
+                    .isoformat(),
+                )
+                self.assertEqual(summary["end_date"], "2026-09-23")
+                self.assertIsNone(summary["balance_kcal"])
+                self.assertEqual(summary["balance_days"], 0)
+                self.assertTrue(
+                    all(day["intake_kcal"] is None for day in summary["days"])
+                )
+
+    def test_history_rejects_unsupported_periods(self) -> None:
+        from backend.errors import AppError
+
+        for count in (0, 15, 85, True, "14"):
+            with self.subTest(days=count), self.assertRaises(AppError):
+                self.service.get_week_summary(count)
 
     def test_empty_week_does_not_invent_zero_intake_or_macros(self) -> None:
         week = self.service.get_week_summary()
