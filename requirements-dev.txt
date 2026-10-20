@@ -494,9 +494,9 @@ curl-cffi==0.16.3 \
     # via
     #   -r requirements.in
     #   garminconnect
-garminconnect==0.3.18 \
-    --hash=sha256:8e4921ce1c75b80c86f0e47e1ba4d030d8b01d5c3ff79ec29926d5fd31a02853 \
-    --hash=sha256:a6acd253a0c836213a86ca2f038453559df5b453ebff7f7e7b72118dddb3a581
+garminconnect==0.3.19 \
+    --hash=sha256:3479408049f39192e8e479600fbea5cae3b57b73d268075e2f8cdb82f852b6ae \
+    --hash=sha256:bf9b10661637b3a78b860f1d3885a9100c52f90a6c76862d04401ab0285e497b
     # via -r requirements.in
 idna==3.19 \
     --hash=sha256:5e0811a4383b21dc5838069f801c4fb62113b7447663d2530d2bd6e77b49bf15 \
