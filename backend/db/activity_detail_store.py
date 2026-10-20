@@ -442,6 +442,24 @@ def analysis_rows_for(
     return rows
 
 
+def analysis_row_for_record(
+    db: Any, provider: str, provider_activity_id: str
+) -> dict[str, Any] | None:
+    """Return the stored analysis of the session that holds one provider record.
+
+    A session merged into another keeps its analysis row under its own id.
+    """
+    row = db.execute(
+        "SELECT r.activity_id FROM activity_records AS r "
+        "JOIN activity_detail_analysis AS a ON a.activity_id = r.activity_id "
+        "WHERE r.provider = ? AND r.provider_activity_id = ?",
+        (provider, provider_activity_id),
+    ).fetchone()
+    if row is None:
+        return None
+    return analysis_rows_for(db, [row["activity_id"]]).get(row["activity_id"])
+
+
 def stream_export_rows(db: Any) -> Iterable[dict[str, Any]]:
     """Yield every stored stream channel with decoded points for the privacy export.
 

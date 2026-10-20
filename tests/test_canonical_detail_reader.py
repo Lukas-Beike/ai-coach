@@ -239,6 +239,51 @@ class CanonicalDetailReaderTests(unittest.TestCase):
 
         self.assertEqual(4.2, aerobic["provider_decoupling"]["value"])
 
+    def test_analysis_of_a_merged_intervals_session_is_read(self) -> None:
+        self.add_session("act_5")
+        self.add_record(GARMIN, "g-ride-98", "act_5")
+        self.store_streams(GARMIN, "g-ride-98", {HR: heart_rate(), POWER: power()})
+        self.add_session("act_6", "duplicate", merged_into="act_5")
+        self.add_record(INTERVALS, "i-ride-98", "act_6")
+        self.store_streams(
+            INTERVALS,
+            "i-ride-98",
+            {HR: heart_rate(), POWER: power()},
+            recorded_by=RecordingOrigin.WAHOO,
+        )
+        save_analysis(
+            self.db,
+            "act_6",
+            analysis_version=1,
+            input_sha256="0" * 64,
+            payload={
+                "session_analysis": {"aerobic": {"provider_decoupling": {"value": 4.2}}}
+            },
+            now=STAMP,
+        )
+
+        aerobic = self.read("act_5")["analysis"]["aerobic"]
+
+        self.assertEqual(4.2, aerobic["provider_decoupling"]["value"])
+
+    def test_stored_sets_carry_the_labels_of_their_records(self) -> None:
+        self.ride_session()
+
+        doc = self.read("act_1")
+
+        labels = {
+            item["provider"]: item["label"] for item in doc["detail_data"]["providers"]
+        }
+        sources = [
+            doc["streams"]["source"],
+            doc["laps"]["source"],
+            *(channel["source"] for channel in doc["streams"]["channels"].values()),
+        ]
+        self.assertEqual({"intervals", "garmin"}, {s["provider"] for s in sources})
+        for source in sources:
+            self.assertIsNotNone(source["label"])
+            self.assertEqual(labels[source["provider"]], source["label"])
+
     def test_sets_without_a_matching_session_record_are_skipped(self) -> None:
         self.ride_session()
         intervals_only = CanonicalDetailReader(

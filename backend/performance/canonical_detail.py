@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Any, Protocol
 
 from backend.activities.detail_contract import activity_detail_contract, measured_order
@@ -17,6 +18,7 @@ from backend.activities.detail_merge import DetailCandidate, merge_details
 from backend.canonical.records import ActivityRecord
 from backend.canonical.vocabulary import ProviderId
 from backend.db import activity_detail_store
+from backend.db.activity_detail_store import StoredDetailSet
 from backend.performance.analysis_input import analysis_input
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
@@ -55,7 +57,7 @@ class CanonicalDetailReader:
             if record is not None:
                 candidates.append(
                     DetailCandidate(
-                        stored=item,
+                        stored=_labelled(item, record),
                         started_at=record.started_at,
                         device_type=record.device_type,
                     )
@@ -66,7 +68,7 @@ class CanonicalDetailReader:
             (r for r in ordered if r.provenance.provider is ProviderId.INTERVALS),
             ordered[0],
         )
-        payload = _stored_payload(db, activity_id)
+        payload = _stored_payload(db, activity_id, analysis_record)
         adapted = analysis_input(
             analysis_record,
             merged.streams,
@@ -101,7 +103,7 @@ class CanonicalDetailReader:
             activity_id,
             records,
             merged,
-            stored,
+            [candidate.stored for candidate in candidates],
             analysis=analysis,
             refreshable=self._refreshable,
         )
@@ -112,8 +114,28 @@ def _provider_text(record: ActivityRecord) -> str | None:
     return None if provider is None else provider.value
 
 
-def _stored_payload(db: Any, activity_id: str) -> dict[str, Any]:
-    row = activity_detail_store.analysis_rows_for(db, [activity_id]).get(activity_id)
+def _labelled(item: StoredDetailSet, record: ActivityRecord) -> StoredDetailSet:
+    """Attach the record's provenance label; stored sets do not keep labels."""
+    provenance = replace(item.detail.provenance, label=record.provenance.label)
+    return replace(item, detail=replace(item.detail, provenance=provenance))
+
+
+def _stored_payload(
+    db: Any, activity_id: str, record: ActivityRecord
+) -> dict[str, Any]:
+    """Return the stored analysis of the record's own session, else the session's."""
+    provider = _provider_text(record)
+    row = (
+        None
+        if provider is None
+        else activity_detail_store.analysis_row_for_record(
+            db, provider, record.activity_id
+        )
+    )
+    if row is None:
+        row = activity_detail_store.analysis_rows_for(db, [activity_id]).get(
+            activity_id
+        )
     if row is None:
         return {}
     payload = row.get("payload")
