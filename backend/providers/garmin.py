@@ -193,21 +193,29 @@ def _merge_weight_metadata(
             key in _WEIGHT_SNAPSHOT_SECTIONS or key == _WEIGHT_OPAQUE_SECTIONS_KEY
         ):
             continue
-        current = target.get(key)
-        if isinstance(current, dict) and isinstance(value, dict):
-            _merge_weight_metadata(current, value)
-        elif isinstance(current, list) and isinstance(value, list):
-            seen = {json.dumps(item, sort_keys=True, default=str) for item in current}
-            for item in value:
-                identity = json.dumps(item, sort_keys=True, default=str)
-                if identity not in seen:
-                    seen.add(identity)
-                    current.append(item)
-            _sort_weight_metadata_list(current)
-        else:
-            target[key] = copy.deepcopy(value)
-            if isinstance(target[key], list):
-                _sort_weight_metadata_list(target[key])
+        _merge_weight_metadata_value(target, key, value)
+
+
+def _merge_weight_metadata_value(target: dict[str, Any], key: str, value: Any) -> None:
+    current = target.get(key)
+    if isinstance(current, dict) and isinstance(value, dict):
+        _merge_weight_metadata(current, value)
+    elif isinstance(current, list) and isinstance(value, list):
+        _merge_weight_metadata_lists(current, value)
+    else:
+        target[key] = copy.deepcopy(value)
+        if isinstance(target[key], list):
+            _sort_weight_metadata_list(target[key])
+
+
+def _merge_weight_metadata_lists(target: list[Any], source: list[Any]) -> None:
+    seen = {json.dumps(item, sort_keys=True, default=str) for item in target}
+    for item in source:
+        identity = json.dumps(item, sort_keys=True, default=str)
+        if identity not in seen:
+            seen.add(identity)
+            target.append(item)
+    _sort_weight_metadata_list(target)
 
 
 def _weight_snapshot_documents(source: Any) -> list[dict[str, Any]]:
@@ -217,6 +225,56 @@ def _weight_snapshot_documents(source: Any) -> list[dict[str, Any]]:
         if isinstance(documents, list)
         else []
     )
+
+
+def _is_flat_weight_reading(document: dict[str, Any]) -> bool:
+    return any(
+        key in document for key in ("weight", "weightKg", "weight_kg")
+    ) and not any(
+        isinstance(document.get(name), list) for name in _WEIGHT_SNAPSHOT_SECTIONS
+    )
+
+
+def _collect_weight_document(
+    document: dict[str, Any],
+    readings: list[dict[str, Any]],
+    metadata: dict[str, Any],
+    opaque_sections: dict[str, list[Any]],
+) -> None:
+    if _is_flat_weight_reading(document):
+        readings.append(document)
+        return
+    opaque_state = document.get(_WEIGHT_OPAQUE_SECTIONS_KEY)
+    if opaque_state is not None:
+        _merge_opaque_section_state(opaque_sections, opaque_state)
+    _merge_weight_metadata(metadata, document, envelope=True)
+    for name in _WEIGHT_SNAPSHOT_SECTIONS:
+        rows = document.get(name)
+        if isinstance(rows, list):
+            readings.extend(row for row in rows if isinstance(row, dict))
+        elif document.get(name) is not None:
+            _preserve_opaque_weight_section(opaque_sections, name, document[name])
+
+
+def _merge_weight_readings(
+    readings: list[dict[str, Any]], previous_count: int
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    positions: dict[str, int] = {}
+    for index, reading in enumerate(readings):
+        identities = _weight_snapshot_identities(reading)
+        position = next(
+            (positions[key] for key in identities if key in positions), None
+        )
+        if position is None:
+            position = len(merged)
+            merged.append(reading)
+        elif index >= previous_count:
+            merged[position] = reading
+        for key in identities:
+            positions[key] = position
+    merged.sort(key=_weight_reading_order, reverse=True)
+    return merged
 
 
 def _weight_snapshot_identities(reading: dict[str, Any]) -> tuple[str, ...]:
@@ -284,46 +342,13 @@ def merge_weight_snapshots(incoming: Any, previous: Any) -> list[Any]:
     previous_count = 0
     for source, is_previous in ((previous, True), (incoming, False)):
         for document in _weight_snapshot_documents(source):
-            flat_reading = any(
-                key in document for key in ("weight", "weightKg", "weight_kg")
-            ) and not any(
-                isinstance(document.get(name), list)
-                for name in _WEIGHT_SNAPSHOT_SECTIONS
-            )
-            if flat_reading:
-                readings.append(document)
-                continue
-            opaque_state = document.get(_WEIGHT_OPAQUE_SECTIONS_KEY)
-            if opaque_state is not None:
-                _merge_opaque_section_state(opaque_sections, opaque_state)
-            _merge_weight_metadata(metadata, document, envelope=True)
-            for name in _WEIGHT_SNAPSHOT_SECTIONS:
-                rows = document.get(name)
-                if isinstance(rows, list):
-                    readings.extend(row for row in rows if isinstance(row, dict))
-                elif document.get(name) is not None:
-                    _preserve_opaque_weight_section(
-                        opaque_sections, name, document[name]
-                    )
+            _collect_weight_document(document, readings, metadata, opaque_sections)
         if is_previous:
             previous_count = len(readings)
 
-    merged: list[dict[str, Any]] = []
-    positions: dict[str, int] = {}
-    for index, reading in enumerate(readings):
-        identities = _weight_snapshot_identities(reading)
-        position = next(
-            (positions[key] for key in identities if key in positions), None
-        )
-        if position is None:
-            position = len(merged)
-            merged.append(reading)
-        elif index >= previous_count:
-            merged[position] = reading
-        for key in identities:
-            positions[key] = position
-    merged.sort(key=_weight_reading_order, reverse=True)
-    envelope: dict[str, Any] = {"weight": merged}
+    envelope: dict[str, Any] = {
+        "weight": _merge_weight_readings(readings, previous_count)
+    }
     envelope.update(metadata)
     if opaque_sections:
         envelope[_WEIGHT_OPAQUE_SECTIONS_KEY] = {"sections": opaque_sections}
