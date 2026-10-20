@@ -293,8 +293,10 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
       expect(mobileDock.composerAboveNavigation, "composer stays above fixed navigation").toBe(true);
       expect(mobileDock.chipsOverflow, "quick-start chips are horizontally scrollable").toBe(true);
       expect(mobileDock.overflowCue).toBe('"›"');
-      await page.evaluate(() => document.documentElement.classList.add("chat-keyboard-open"));
+      // Add the class and measure in one task: a pending viewport-layout frame
+      // would otherwise remove it again, since the input is not focused.
       const keyboardDock = await page.evaluate(() => {
+        document.documentElement.classList.add("chat-keyboard-open");
         const composer = document.querySelector("#chatForm").getBoundingClientRect();
         const viewportBottom = (visualViewport?.offsetTop || 0) + (visualViewport?.height || innerHeight);
         return {
