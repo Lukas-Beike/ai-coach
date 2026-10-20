@@ -9,6 +9,9 @@ Preserve current-head review evidence, resolved feedback, protected-branch PRs,
 release/source/version agreement, and image digest verification. Workflow success
 alone is not proof of merge, release publication, or healthy deployment.
 Use focused workflow regression tests and never bypass required checks.
+Ruff/mypy bumps must keep `tests/fixtures/quality_baseline.json` versions in
+step with `requirements-dev.txt` (`tools/quality_baseline.py --align-versions`);
+the auto-rebase workflow aligns Dependabot PRs from trusted `develop` code only.
 
 Gitar is the required hosted review check for `develop` and `main`. Require the
 `Gitar` context from the installed `gitar-bot` GitHub App (integration ID 827041)
