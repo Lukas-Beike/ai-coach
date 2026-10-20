@@ -898,7 +898,7 @@ function renderBodyAnalysis(body) {
   const overview = reportNode("section", null, "analysis-chart-card");
   const table = reportNode("table", null, "current-performance-table");
   table.dataset.bodyOverview = "";
-  table.append(reportNode("caption", "Aktuelle Körperwerte"));
+  table.append(reportNode("caption", "Zuletzt gemessene Körperwerte"));
   const rows = reportNode("tbody");
   for (const [metric, title, unit] of metrics) {
     const readings = Object.values(body?.windows || {}).flatMap((window) => (window.metrics?.[metric] || [])
@@ -1087,12 +1087,11 @@ function renderSeasonEvents(season, generation) {
 }
 
 function renderAnalysisSegments(route = state.route) {
-  const segment = { "analysis/load": "load", "analysis/body": "body", "analysis/recovery": "recovery", "analysis/sessions": "sessions" }[route] || "performance";
+  const segment = { "analysis/load": "load", "analysis/recovery": "recovery", "analysis/sessions": "sessions" }[route] || "performance";
   document.getElementById("analysisHistoryCharts").hidden = segment !== "performance";
   document.getElementById("currentPerformance").hidden = segment !== "performance";
   const endurance = document.getElementById("performanceEnduranceCharts");
   endurance.hidden = segment !== "performance" || !endurance.childElementCount;
-  document.getElementById("bodyAnalysisCharts").hidden = segment !== "body";
   document.getElementById("performancePredictions").hidden = segment !== "performance" || !document.getElementById("performancePredictions").childElementCount;
   document.getElementById("analysisLoadPeriod").hidden = segment !== "load";
   document.getElementById("sessionPerformance").hidden = segment !== "load";

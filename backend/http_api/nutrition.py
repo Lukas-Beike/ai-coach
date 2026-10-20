@@ -46,8 +46,12 @@ class NutritionGetRoutes:
         self._session_auth_service().require_auth(handler)
         query = parse_qs(urlparse(handler.path).query)
         if path == "/api/nutrition/week":
+            try:
+                days = int(query.get("days", ["7"])[0])
+            except ValueError:
+                raise AppError(400, "Ungültiger Zeitraum.") from None
             handler.send_json(
-                200, {"ok": True, **self._diary_service().get_week_summary()}
+                200, {"ok": True, **self._diary_service().get_week_summary(days)}
             )
             return True
         if path == NUTRITION_PRODUCTS_PATH:
