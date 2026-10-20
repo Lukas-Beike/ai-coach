@@ -86,12 +86,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_coach_request_payload.py",
-      "code": "arg-type",
-      "message_sha256": "248119b31631b4bbce11bca5f2fa6b4eb6d5d6b51cfae662bd814f551f4c3896"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_planning_competition_sync_plan.py",
       "code": "arg-type",
       "message_sha256": "27a3bd9479f940a49bec8ff4328e542d11cd49f6cb59c7a4f91c2c71d2406efb"
@@ -980,12 +974,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_coach_request_payload.py",
-      "code": "index",
-      "message_sha256": "20cbbc295cdb534102f13264762ddc8c7798c0a87c1d65677b7c010d3a54a96a"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_training_plan_artifact_service.py",
       "code": "index",
       "message_sha256": "52d7b68dd02a25163d0b0c386fadaad8cfbfd51bddd8576f290cb86876f85e47"
@@ -1193,36 +1181,6 @@
       "path": "tests/test_coach_tool_preparation.py",
       "code": "index",
       "message_sha256": "c137d8e31a4faf360fc543a5a1e758f33b869db1645f246e1d09e86fb7a7d940"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_request_payload.py",
-      "code": "index",
-      "message_sha256": "c650cb6fdb97181bb1fe92f76cfcb26c43e2e75da13e3bd6810e03f7c81db909"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_attachment_context.py",
-      "code": "list-item",
-      "message_sha256": "3fbad926607747d193ca8c03ab0ddeaa7830ef0a937b33516fb5d95f4c600484"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_attachment_context.py",
-      "code": "list-item",
-      "message_sha256": "a5ab97917c52be2c83cdaee803ee4a1d6131477ea65b6abdb05de96bbc953539"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_attachment_context.py",
-      "code": "list-item",
-      "message_sha256": "b64b3b3fc34f29fe64f54e8faec8e6c92330709db85939d38fd2998caab2f5bb"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_attachment_context.py",
-      "code": "list-item",
-      "message_sha256": "c7eb94fdd7c8c7c856097235467eaaa07040cb3af8d1f7b03549f0810c985f6a"
     },
     {
       "tool": "mypy",
