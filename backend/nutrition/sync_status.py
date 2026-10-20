@@ -79,11 +79,14 @@ class NutritionSyncStatusService:
         with self._db_lock, self._database_manager.unit_of_work() as db:
             return self._nutrition_repository.day_sync_snapshot(db, validated_date)
 
-    def get_week_summary(self) -> dict[str, Any]:
-        """Compare logged intake with measured expenditure for seven closed days."""
+    def get_week_summary(self, day_count: int = 7) -> dict[str, Any]:
+        """Compare logged intake with measured expenditure for closed days."""
+        if type(day_count) is not int or day_count not in (7, 14, 84):
+            raise AppError(400, "Zeitraum muss 7, 14 oder 84 Tage umfassen.")
         today = self._local_now().date()
         dates = [
-            (today - timedelta(days=offset)).isoformat() for offset in range(7, 0, -1)
+            (today - timedelta(days=offset)).isoformat()
+            for offset in range(day_count, 0, -1)
         ]
         with self._database_manager.read_snapshot() as db:
             summaries = [

@@ -39,10 +39,13 @@ test("@responsive Body plots measurements and W/kg appears only in the cycling t
     data.performance.history = bodyHistory();
     await route.fulfill({ response, json: data });
   });
-  await page.goto("/#analysis/body");
+  await page.goto("/#nutrition/body");
   await expect(page.locator("#appShell")).toBeVisible();
   const root = page.locator("#bodyAnalysisCharts");
   await expect(root).toBeVisible();
+  await expect(page.locator('[data-analysis-segment="body"]')).toHaveCount(0);
+  await expect(page.locator('[data-nutrition-segment="body"]')).toHaveAttribute("aria-current", "page");
+  await expect(page.locator("#nutritionDiary")).toBeHidden();
   await expect(root.locator("[data-body-metric]")).toHaveCount(2);
   await expect(root.locator("[data-body-metric='weight_kg'] svg")).toHaveCount(1);
   const overview = root.locator("[data-body-overview]");
@@ -83,4 +86,30 @@ test("@responsive Body plots measurements and W/kg appears only in the cycling t
   await expect(page.locator("#currentPerformance [data-metric='cycling_w_per_kg'] td")).toHaveText("5,2 W/kg");
   expect((await new AxeBuilder({ page }).include("#analysisHistoryCharts").analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("@responsive Body keeps old measurements dated and long gaps empty", async ({ page }) => {
+  await page.route("**/api/performance", async (route) => {
+    const response = await route.fetch();
+    const data = await response.json();
+    const history = bodyHistory();
+    for (const window of Object.values(history.body.windows)) {
+      for (const metric of ["weight_kg", "body_fat_pct"]) {
+        for (const series of window.metrics[metric]) {
+          series.points = series.points.filter((point) => ["2026-07-15", "2026-08-14"].includes(point.date));
+        }
+      }
+    }
+    data.performance.history = history;
+    await route.fulfill({ response, json: data });
+  });
+  await page.goto("/#nutrition/body");
+  const root = page.locator("#bodyAnalysisCharts");
+  await expect(root.locator("[data-body-overview] caption")).toHaveText("Zuletzt gemessene Körperwerte");
+  await expect(root.locator("[data-body-overview] th small")).toHaveText(["14.08.2026", "14.08.2026"]);
+  await expect(root.locator("[data-body-metric='weight_kg'] circle[data-series='0']")).toHaveCount(2);
+  await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
+  await expect(root.locator("[data-body-metric]")).toHaveCount(0);
+  await expect(root.locator("p.empty")).toHaveText("Keine Daten: Gewicht, Körperfett");
+  await expect(root.locator("[data-body-overview] th small")).toHaveText(["14.08.2026", "14.08.2026"]);
 });

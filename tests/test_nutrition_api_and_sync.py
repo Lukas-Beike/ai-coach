@@ -42,6 +42,17 @@ class NutritionHttpApiTests(unittest.TestCase):
             meal_library_service=lambda: self.meal_library_service,
         )
 
+    def test_history_period_is_forwarded_after_authentication(self) -> None:
+        self.diary_service.get_week_summary.return_value = {"days": []}
+        for count in (7, 14, 84):
+            self.handler.path = f"/api/nutrition/week?days={count}"
+            self.assertTrue(self.get_routes.handle(self.handler, "/api/nutrition/week"))
+            self.auth.require_auth.assert_called_with(self.handler)
+            self.diary_service.get_week_summary.assert_called_with(count)
+        self.handler.path = "/api/nutrition/week?days=invalid"
+        with self.assertRaises(AppError):
+            self.get_routes.handle(self.handler, "/api/nutrition/week")
+
     def test_templates_route_requires_authentication(self) -> None:
         self.handler.path = "/api/nutrition/templates"
         self.meal_library_service.list_templates.return_value = [{"id": "template-1"}]

@@ -126,13 +126,11 @@
         <nav class="plan-segment-nav" aria-label="Analysebereiche">
           <a href="#analysis/load" data-analysis-segment="load">Belastung</a>
           <a href="#analysis/performance" data-analysis-segment="performance">Leistung</a>
-          <a href="#analysis/body" data-analysis-segment="body">Body</a>
           <a href="#analysis/recovery" data-analysis-segment="recovery">Erholung</a>
           <a href="#analysis/sessions" data-analysis-segment="sessions">Einheiten</a>
         </nav>
         <div id="analysisLoadPeriod" hidden></div>
         <section id="sessionPerformance"class="analysis-chart-card" aria-label="Trainingsfokus"></section>
-        <section id="bodyAnalysisCharts" class="analysis-history-charts" aria-label="Body-Analyse" hidden></section>
         <section id="activityAnalysis" class="activity-analysis" aria-label="Einzelne Einheiten" hidden></section>
         <section id="personalRecovery" class="analysis-history-charts" aria-label="Persönliche Erholung" hidden></section>
         <div id="analysisLoadCharts" class="analysis-history-charts" aria-label="Garmin-Trainingsbelastung" hidden></div>
@@ -148,9 +146,11 @@
         <div class="panel-heading"><div><span class="eyebrow">ERNÄHRUNG</span><h2>Ernährung</h2><span class="tab-sync-detail">Erfassen und ändern über deinen Coach</span></div></div>
         <nav class="plan-segment-nav" aria-label="Ernährungsbereiche">
           <a href="#nutrition/diary" data-nutrition-segment="diary">Tagebuch</a>
-          <a href="#nutrition/week" data-nutrition-segment="week">Letzte 7 Tage</a>
+          <a href="#nutrition/week" data-nutrition-segment="week">Verlauf</a>
+          <a href="#nutrition/body" data-nutrition-segment="body">Body</a>
           <a href="#nutrition/products" data-nutrition-segment="products">Produkte</a>
         </nav>
+        <section id="bodyAnalysisCharts" class="analysis-history-charts" aria-label="Body-Analyse" hidden></section>
         <output id="nutritionStatus" class="tab-sync-detail"></output>
         <section id="nutritionProductsPanel" aria-label="Produktbibliothek" hidden>
         <div class="nutrition-tools" aria-label="Produkte erfassen">
@@ -172,7 +172,8 @@
         </div>
         </section>
         <section id="nutritionWeek" class="nutrition-tools" aria-labelledby="nutritionWeekHeading" hidden>
-            <h3 id="nutritionWeekHeading">Letzte 7 Tage</h3>
+            <h3 id="nutritionWeekHeading">Ernährungsverlauf</h3>
+            <div id="nutritionHistoryPeriod"></div>
             <p id="nutritionWeekPeriod" class="fine-print"></p>
             <output id="nutritionWeekStatus" class="tab-sync-detail" aria-live="polite"></output>
             <div id="nutritionWeekTotals" class="nutrition-totals"></div>
@@ -181,8 +182,8 @@
               <p class="nutrition-week-legend"><span>Aufnahme</span><span>Verbrauch</span></p>
               <div id="nutritionWeekChart" class="nutrition-week-chart-days"></div>
             </div>
-            <details id="nutritionWeekDetails" hidden><summary>Tageswerte anzeigen</summary><div class="nutrition-week-table"><table aria-label="Ernährung der letzten 7 Tage"><thead><tr><th scope="col">Tag</th><th scope="col">Aufnahme<br>kcal</th><th scope="col">Verbrauch<br>kcal</th><th scope="col">Bilanz<br>kcal</th></tr></thead><tbody id="nutritionWeekDays"></tbody></table></div></details>
-            <p class="fine-print">Sieben abgeschlossene Tage bis gestern. Aufnahme aus deinem Tagebuch, Verbrauch aus Garmin Connect. Die Bilanz setzt vollständig erfasste Mahlzeiten voraus. Fehlende Werte zählen nicht als null; Makro-Durchschnitte berücksichtigen nur Tage mit vollständigen Angaben für das jeweilige Makro.</p>
+            <details id="nutritionWeekDetails" hidden><summary>Tageswerte anzeigen</summary><div class="nutrition-week-table"><table aria-label="Ernährung im gewählten Zeitraum"><thead><tr><th scope="col">Tag</th><th scope="col">Aufnahme<br>kcal</th><th scope="col">Verbrauch<br>kcal</th><th scope="col">Bilanz<br>kcal</th></tr></thead><tbody id="nutritionWeekDays"></tbody></table></div></details>
+            <p class="fine-print">Abgeschlossene Tage bis gestern. Die 12-Wochen-Ansicht zeigt im Diagramm Wochendurchschnitte aus den jeweils vorhandenen Tageswerten. Aufnahme aus deinem Tagebuch, Verbrauch aus Garmin Connect. Die Bilanz gilt nur für Tage mit erfasster Aufnahme und Verbrauch. Ohne Tracking bleibt die Aufnahme unbekannt; der Verbrauch wird trotzdem angezeigt. Auch an erfassten Tagen setzt die Bilanz vollständig erfasste Mahlzeiten voraus. Wochendurchschnitte können auf unterschiedlichen Tagen beruhen und ergeben deshalb keine Kalorienbilanz. Fehlende Werte zählen nicht als null; Makro-Durchschnitte berücksichtigen nur Tage mit vollständigen Angaben für das jeweilige Makro.</p>
         </section>
         <section id="nutritionDiary" aria-label="Ernährungstagebuch">
           <div class="nutrition-toolbar"><button class="secondary-button" type="button" id="nutritionPrevious" aria-label="Vorheriger Tag">←</button><label>Tag <input type="date" id="nutritionDate"></label><button class="secondary-button" type="button" id="nutritionNext" aria-label="Nächster Tag">→</button><button class="secondary-button" type="button" id="nutritionToday">Heute</button></div>
@@ -551,7 +552,7 @@
     </div>
   </dialog>
   <script src="/api.js?v=224" defer></script>
-  <script src="/navigation.js?v=234" defer></script>
+  <script src="/navigation.js?v=235" defer></script>
   <script src="/state.js?v=225" defer></script>
   <script src="/views.js?v=230" defer></script>
   <script src="/plan-views.js?v=16" defer></script>
@@ -562,8 +563,8 @@
   <script src="/auth.js?v=12" defer></script>
   <script src="/sync-status.js?v=12" defer></script>
   <script src="/notifications.js?v=4" defer></script>
-  <script src="/nutrition.js?v=31" defer></script>
-  <script src="/analysis.js?v=124" defer></script>
+  <script src="/nutrition.js?v=34" defer></script>
+  <script src="/analysis.js?v=126" defer></script>
   <script src="/activity-details.js?v=16" defer></script>
   <script src="/activity-analysis.js?v=3" defer></script>
   <script src="/performance-view.js?v=23" defer></script>
