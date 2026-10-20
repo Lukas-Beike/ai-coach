@@ -2,6 +2,7 @@ import copy
 import unittest
 
 from backend.activities.detail_projection import detailed_activity
+from backend.activities.workout_profile import recorded_profile
 
 
 class ActivityDetailProjectionTests(unittest.TestCase):
@@ -27,6 +28,17 @@ class ActivityDetailProjectionTests(unittest.TestCase):
         self.assertNotIn("decoupling", result)
         self.assertNotIn("raw_payload", result)
         self.assertNotIn("metadata", result)
+
+    def test_lthr_survives_the_projection_so_recorded_heart_rate_gets_zones(self):
+        activity = {
+            "lthr": 170,
+            "streams": {"time": list(range(61)), "heartrate": [140] * 61},
+        }
+
+        projected = detailed_activity(activity)
+
+        self.assertEqual(projected["lthr"], 170)
+        self.assertEqual(2, recorded_profile(projected)["segments"][0]["zone"])
 
     def test_stream_allowlist_downsampling_and_endpoints(self):
         points = list(range(3000))
@@ -63,9 +75,13 @@ class ActivityDetailProjectionTests(unittest.TestCase):
 
         result = detailed_activity(activity)
 
-        self.assertEqual(result["icu_hr_zone_times"][:6], [600, 300.5, None, None, None, 1])
+        self.assertEqual(
+            result["icu_hr_zone_times"][:6], [600, 300.5, None, None, None, 1]
+        )
         self.assertEqual(len(result["icu_hr_zone_times"]), 20)
-        self.assertEqual(result["icu_zone_times"], [{"id": "Z1" + "x" * 18, "secs": 300}, None])
+        self.assertEqual(
+            result["icu_zone_times"], [{"id": "Z1" + "x" * 18, "secs": 300}, None]
+        )
 
     def test_laps_allowlist_bounds_and_malformed_values(self):
         laps = (

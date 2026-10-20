@@ -73,6 +73,14 @@ class ActivityDeviceSourceTests(unittest.TestCase):
             intervals_activity_device_source({"name": "Wahoo", "device": "Garmin"})
         )
 
+    def test_manual_source_has_no_device_even_with_brand_text(self) -> None:
+        for activity in (
+            {"source": "MANUAL", "device_name": "Garmin Forerunner"},
+            {"source": " manual ", "device_name": "Wahoo ELEMNT"},
+        ):
+            with self.subTest(activity=activity):
+                self.assertIsNone(intervals_activity_device_source(activity))
+
 
 class ActivityInputImmutabilityTests(unittest.TestCase):
     def test_identity_helpers_do_not_mutate_input(self) -> None:

@@ -4,7 +4,7 @@ The Garmin snapshot synchronizer owns persistence and freshness state.  This
 module only reads the supplied snapshot and never reaches into that state.
 """
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
@@ -21,11 +21,7 @@ def _garmin_record_date(value: Any) -> str | None:
         if value <= 100_000_000_000:
             return None
         try:
-            return (
-                datetime.fromtimestamp(float(value) / 1000, timezone.utc)
-                .date()
-                .isoformat()
-            )
+            return datetime.fromtimestamp(float(value) / 1000, UTC).date().isoformat()
         except OverflowError, OSError, ValueError:
             return None
     try:

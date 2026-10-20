@@ -20,11 +20,13 @@ Run from the repository root. Follow the current isolated runtime commands in
 5. The configured projects are `mobile-small`, `mobile`, `tablet`,
    `tablet-landscape`, and `desktop`. Run `npm run test:e2e` for a normal full
    matrix, or run the CI-equivalent isolated loop when a spec mutates state:
-   execute every `e2e/*.spec.js` on desktop and only files containing
-   `@responsive` on the other projects, recreating the disposable fixture runtime
-   before every pair. The non-desktop projects select only `@responsive` tests.
-   Keep the configured single worker within each run; the CI loop provides
-   isolation across runs, not parallel safety.
+   take the spec list for each project from
+   `./node_modules/.bin/playwright test --list --project <project> --reporter=json`
+   (not a file grep): desktop lists every spec file, and the other projects list
+   only files whose test titles match `@responsive`. Run each spec against its own
+   fresh disposable fixture runtime, prewarming the next one. The non-desktop
+   projects select only `@responsive` tests. Keep the configured single worker
+   within each run; the CI loop provides isolation across runs, not parallel safety.
 6. Use the product-native preview for manual inspection when available. Inspect
    DOM, console/network failures, screenshot-level alignment, reduced motion,
    login, fresh PWA/offline assets, safe Markdown, keyboard behavior, opt-in
@@ -35,6 +37,8 @@ Run from the repository root. Follow the current isolated runtime commands in
    authentication-state cleanup inside verified generated directories.
 
 Never attach Playwright authenticated storage state to a report. Preserve only
-sanitized fixture screenshots, traces, or video. A failed or unavailable runtime
+sanitized fixture screenshots or video; traces embed the session and stay local.
+CI artifacts exclude traces (`trace` is off when `CI` is set) and never include
+`playwright/.auth`. A failed or unavailable runtime
 check must remain failed, blocked, or not run, not silently replaced by static
 source inspection.

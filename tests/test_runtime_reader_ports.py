@@ -7,7 +7,7 @@ import unittest
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
-from backend.canonical.coverage import ProviderCoverage
+from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.local_time import local_date
 from backend.canonical.mapping import IssueReason
 from backend.canonical.records import (
@@ -135,6 +135,9 @@ class FakeProviderCoverageReader:
             ),
         )
 
+    def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
+        return ()
+
 
 class ActivityReaderPortTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -220,6 +223,11 @@ class ProviderCoverageReaderPortTests(unittest.TestCase):
         self.assertEqual(1, len(coverage))
         self.assertEqual(2, coverage[0].issue_counts[IssueReason.INVALID_NUMBER])
 
+    def test_metric_windows_hold_counts_and_days_only(self) -> None:
+        reader: ProviderCoverageReader = FakeProviderCoverageReader()
+
+        self.assertEqual((), reader.metric_windows(FAKE_DB))
+
 
 class PortSignatureTests(unittest.TestCase):
     """Pin public parameter names so readers and fakes cannot drift apart."""
@@ -257,6 +265,12 @@ class PortSignatureTests(unittest.TestCase):
         self.assertEqual(
             ["self", "db"],
             list(inspect.signature(ProviderCoverageReader.coverage).parameters),
+        )
+
+    def test_metric_windows_signature(self) -> None:
+        self.assertEqual(
+            ["self", "db"],
+            list(inspect.signature(ProviderCoverageReader.metric_windows).parameters),
         )
 
 

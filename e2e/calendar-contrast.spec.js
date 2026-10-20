@@ -55,12 +55,20 @@ test("@responsive coach planning notice meets AA contrast at rest and on hover i
   for (const theme of ["dark", "light"]) {
     await page.evaluate((selected) => { document.documentElement.dataset.theme = selected; }, theme);
     await page.mouse.move(0, 0);
+    // Theme changes and leaving hover also transition the button background.
+    // Measure the resting colour only after these transitions have finished.
+    await notice.locator("button").evaluate(async (button) => {
+      await Promise.allSettled(button.getAnimations().map((animation) => animation.finished));
+    });
     // Axe reports the coach button as "incomplete" because the chat background behind the notice is a gradient;
     // only violations are asserted here, and the colour pairs are enforced by tests/test_css_design_tokens.py.
     const rest = await new AxeBuilder({ page }).include("#coachAdaptivePlanningNotice").withRules(["color-contrast"]).analyze();
     expect(rest.violations).toEqual([]);
     await notice.locator("button").hover();
-    await page.waitForTimeout(250); // let the button's background transition (.16s) finish before axe reads colours
+    // Wait for the button's background transition (.16s) to finish before axe reads colours.
+    await notice.locator("button").evaluate(async (button) => {
+      await Promise.allSettled(button.getAnimations().map((animation) => animation.finished));
+    });
     const hovered = await new AxeBuilder({ page }).include("#coachAdaptivePlanningNotice").withRules(["color-contrast"]).analyze();
     expect(hovered.violations).toEqual([]);
   }

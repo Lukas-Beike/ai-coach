@@ -461,7 +461,7 @@ async function finishChatStream(context) {
   }
   if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
   await refreshCompletedChatStream(context);
-  if (completed && state.chatFollowLatest) scrollChatToResponseStart();
+  if (completed) scrollChatToResponseStart();
   if (completed) markChatContentArrived();
   invalidateContextPreview();
   return completed ? "completed" : "failed";
@@ -1154,7 +1154,8 @@ function updateChatJumpLabel(jump) {
 // Only a real upward gesture leaves the latest content; programmatic scrolls never reach these listeners.
 let chatTouchLastY = null;
 function chatUserScrolledAway() {
-  if (!$("#chatPanel")?.classList.contains("active")) return;
+  // The login and loading screens hide the shell, so a gesture there scrolls no chat.
+  if (!$("#chatPanel")?.classList.contains("active") || $("#appShell")?.hidden) return;
   state.chatFollowLatest = false;
   updateChatComposerVisibility();
 }
@@ -1890,11 +1891,16 @@ function scheduleChatStreamRender(scrollToStart = false) {
       if (!shouldScrollToStart) keepChatStreamInView(streaming);
       markChatContentArrived();
     }
-    if (shouldScrollToStart && state.chatFollowLatest) scrollChatToResponseStart();
+    if (shouldScrollToStart) scrollChatToResponseStart();
   });
 }
 
 function scrollChatToResponseStart() {
+  // A reader who scrolled away keeps their position; the jump button leads to the reply.
+  if (!state.chatFollowLatest) {
+    state.chatResponseScrollPending = false;
+    return;
+  }
   const panel = $("#chatPanel");
   const root = $("#messages");
   if (!panel?.classList.contains("active") || !root) {
@@ -1903,6 +1909,8 @@ function scrollChatToResponseStart() {
   }
   state.chatResponseScrollPending = false;
   requestAnimationFrame(() => {
+    // Scroll events run before animation frames: a reader who scrolls away in between keeps their position.
+    if (!state.chatFollowLatest) return;
     if (!panel.classList.contains("active")) {
       state.chatResponseScrollPending = true;
       return;
@@ -1945,7 +1953,15 @@ function scrollChatToLatest() {
   const panel = $("#chatPanel");
   const root = $("#messages");
   if (!panel?.classList.contains("active") || !root) return;
+  // Calls queued for the first jump stay first-jump calls, even when another one in the same frame ends it.
+  const initialJump = state.chatInitialScrollPending;
   requestAnimationFrame(() => {
+    // A reader who scrolls before the start has loaded keeps their position instead of the first jump.
+    if (initialJump && !state.chatFollowLatest) {
+      state.chatInitialScrollPending = false;
+      updateChatComposerVisibility();
+      return;
+    }
     if (state.chatInitialScrollPending && ((!state.initialStateLoaded && !state.chatCacheSyncing) || document.readyState !== "complete")) return;
     root.scrollTop = root.scrollHeight;
     chatScrollAnchors.messages = root.scrollTop;
@@ -2187,6 +2203,8 @@ function applyChatResult(payload, result, chatContentVersion) {
   const nextAssistantKey = latestAssistantMessageKey(messages);
   if (state.initialStateLoaded && AppRouter.baseRoute() !== "coach" && nextAssistantKey && nextAssistantKey !== previousAssistantKey) {
     state.chatResponseScrollPending = true;
+    // A reply from elsewhere outranks the position left behind; the reader's own reply keeps it.
+    if (!state.chatRequest && !state.chatServerOperationId) state.chatFollowLatest = true;
     const nextAssistant = [...messages].reverse().find((message) => message.role === "assistant");
     state.chatResponseMessageId = nextAssistant?.id ?? null;
   }

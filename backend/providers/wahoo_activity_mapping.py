@@ -136,6 +136,11 @@ def _positive(value: float | None) -> float | None:
     return value if value else None
 
 
+def wahoo_workout_id(row: Mapping[str, object]) -> str | None:
+    """Return the canonical activity id of one workout row, or None when invalid."""
+    return _WorkoutRow(row, []).workout_id()
+
+
 def raw_workout_for_storage(row: object) -> object:
     """Return the workout as it is stored in the raw record.
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, date
 from pathlib import Path
@@ -19,12 +19,15 @@ from backend.providers import garmin_morning
 from backend.providers import http as provider_http
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin import (
+    ExternalCall,
     GarminClientFactory,
     GarminCollectionOptions,
+    collect_garmin_activity_detail,
     collect_garmin_data,
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver, operation_context
+from backend.sync.refresh import sync_job_error_class
 from backend.sync.status import SyncOperationStateWriter
 from backend.sync.windows import split_date_windows
 
@@ -159,52 +162,8 @@ class GarminRemoteReader:
             chunk_days=self._chunk_days,
             all_days=self._all_sync_days,
         )
-        client = self._client_factory.create(
-            self._config.garmin_email or None,
-            self._config.garmin_password or None,
-            return_on_mfa=True,
-        )
-        login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
-
-        def call_external(
-            service: str,
-            operation: str,
-            call: Callable[[], Any],
-            details: dict[str, Any] | None,
-        ) -> Any:
-            self._raise_if_cancelled(cancel_event)
-            result = provider_http.external_call(
-                service,
-                operation,
-                call,
-                details,
-                logger=self._logger,
-                diagnostic_capture=self._diagnostic_capture,
-                operation_context=operation_context(),
-            )
-            self._raise_if_cancelled(cancel_event)
-            return result
-
-        mfa_status, _ = call_external(
-            GARMIN_ID,
-            "login",
-            lambda: client.login(login_argument),
-            {
-                "email_configured": bool(self._config.garmin_email),
-                "tokenstore_exists": _garmin_tokenstore_present(
-                    self._config, self._garmin_tokens
-                ),
-            },
-        )
-        if mfa_status:
-            self._logger.warning(
-                "Garmin login requires MFA",
-                extra={
-                    "event": "garmin_mfa_required",
-                    "context": {"service": GARMIN_ID, "operation": "login"},
-                },
-            )
-            raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
+        call_external = self._external_call(cancel_event)
+        client, login_argument = self._authenticated_client(call_external)
 
         try:
             payload = collect_garmin_data(
@@ -237,6 +196,130 @@ class GarminRemoteReader:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
         self._raise_if_cancelled(cancel_event)
         return payload, windows
+
+    def fetch_activity_details(
+        self,
+        provider_activity_ids: Sequence[str],
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> Generator[tuple[str, dict[str, Any]]]:
+        """Collect the bounded detail sets of several Garmin activities.
+
+        One client is authenticated for the whole batch, and the Garmin tokens are
+        persisted when the generator finishes or is closed early. A payload gets
+        ``rate_limited: True`` when one of its parts hit a Garmin rate limit; the
+        remaining parts of that activity are then skipped without a call. The
+        generator returns without a payload once the cancel event is set.
+        """
+        call_external = self._external_call(cancel_event)
+        client, login_argument = self._authenticated_client(call_external)
+        rate_limit_hits: list[str] = []
+
+        def record_failure(capability: str, error: BaseException) -> None:
+            if sync_job_error_class(error) == "rate_limited":
+                rate_limit_hits.append(capability)
+            self._state_service.record_capability_failure(capability, error)
+
+        def allowed(capability: str) -> bool:
+            # After a 429, no further detail request is sent for this activity.
+            return not rate_limit_hits and bool(
+                self._state_service.capability_allowed(capability)
+            )
+
+        try:
+            for provider_activity_id in provider_activity_ids:
+                if cancel_event is not None and cancel_event.is_set():
+                    return
+                rate_limit_hits.clear()
+                detail = collect_garmin_activity_detail(
+                    client,
+                    provider_activity_id,
+                    external_call=call_external,
+                    redact=self._redactor,
+                    warn=self._warn,
+                    capability_allowed=allowed,
+                    capability_failure=record_failure,
+                    capability_success=self._state_service.record_capability_success,
+                )
+                if rate_limit_hits:
+                    detail["rate_limited"] = True
+                yield provider_activity_id, detail
+        finally:
+            # Keep refreshed tokens even when a detail request fails or the consumer stops early.
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
+
+    def fetch_activity_detail(
+        self,
+        provider_activity_id: str,
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        """Collect the bounded detail sets of one Garmin activity."""
+        details = self.fetch_activity_details(
+            [provider_activity_id], cancel_event=cancel_event
+        )
+        try:
+            item = next(details, None)
+        finally:
+            details.close()
+        self._raise_if_cancelled(cancel_event)
+        if item is None:
+            raise RuntimeError("Garmin activity detail batch produced no payload.")
+        return item[1]
+
+    def _external_call(self, cancel_event: threading.Event | None) -> ExternalCall:
+        """Wrap SDK calls with the provider transport and cancellation checks."""
+
+        def call_external(
+            service: str,
+            operation: str,
+            call: Callable[[], Any],
+            details: dict[str, Any] | None,
+        ) -> Any:
+            self._raise_if_cancelled(cancel_event)
+            result = provider_http.external_call(
+                service,
+                operation,
+                call,
+                details,
+                logger=self._logger,
+                diagnostic_capture=self._diagnostic_capture,
+                operation_context=operation_context(),
+            )
+            self._raise_if_cancelled(cancel_event)
+            return result
+
+        return call_external
+
+    def _authenticated_client(self, call_external: ExternalCall) -> tuple[Any, str]:
+        """Create the SDK client and log in; MFA stops before any collection."""
+        client = self._client_factory.create(
+            self._config.garmin_email or None,
+            self._config.garmin_password or None,
+            return_on_mfa=True,
+        )
+        login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
+        mfa_status, _ = call_external(
+            GARMIN_ID,
+            "login",
+            lambda: client.login(login_argument),
+            {
+                "email_configured": bool(self._config.garmin_email),
+                "tokenstore_exists": _garmin_tokenstore_present(
+                    self._config, self._garmin_tokens
+                ),
+            },
+        )
+        if mfa_status:
+            self._logger.warning(
+                "Garmin login requires MFA",
+                extra={
+                    "event": "garmin_mfa_required",
+                    "context": {"service": GARMIN_ID, "operation": "login"},
+                },
+            )
+            raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
+        return client, login_argument
 
     def _warn(self, source: str, _message: str, error: BaseException) -> None:
         self._logger.warning(
@@ -479,6 +562,13 @@ class GarminSyncLifecycleState:
             self._key_value_repository.set(db, key, value)
 
 
+def _log_backfill_failure(error: Exception) -> None:
+    logging.getLogger(__name__).warning(
+        "Automatic Garmin activity detail backfill failed (%s)",
+        type(error).__name__,
+    )
+
+
 class GarminSyncService:
     """Own fixture and remote Garmin synchronization from gate to cleanup."""
 
@@ -492,6 +582,10 @@ class GarminSyncService:
         coordination: GarminSyncCoordination,
         lifecycle_state: GarminSyncLifecycleState,
         metric_export: Callable[[], dict[str, Any] | None] | None = None,
+        activity_detail_backfill: Callable[
+            [threading.Event | None], dict[str, Any] | None
+        ]
+        | None = None,
     ) -> None:
         self._source = source
         self._payload_service = payload_service
@@ -501,6 +595,7 @@ class GarminSyncService:
         self._coordination = coordination
         self._lifecycle_state = lifecycle_state
         self._metric_export = metric_export
+        self._activity_detail_backfill = activity_detail_backfill
 
     def running(self) -> bool:
         return self._coordination.running()
@@ -663,6 +758,16 @@ class GarminSyncService:
                 export_message = "Automatischer Messwert-Abgleich mit Intervals.icu fehlgeschlagen; erneuter Versuch beim nächsten Garmin-Sync."
                 self._lifecycle_state.record_metric_export_status(export_message)
                 message += f" {export_message}"
+        if (
+            self._activity_detail_backfill is not None
+            and source != "fixture"
+            and end_date is None
+            and result.get("status") == "ok"
+            and not (cancel_event is not None and cancel_event.is_set())
+        ):
+            self._backfill_activity_details(
+                self._activity_detail_backfill, operation_id, cancel_event, result
+            )
         self._operation_state_writer.write(
             operation_id,
             "completed",
@@ -672,6 +777,33 @@ class GarminSyncService:
         )
         self._lifecycle_state.record_sync_finished()
         return result
+
+    def _backfill_activity_details(
+        self,
+        backfill: Callable[[threading.Event | None], dict[str, Any] | None],
+        operation_id: str,
+        cancel_event: threading.Event | None,
+        result: dict[str, Any],
+    ) -> None:
+        self._set_status(
+            operation_id,
+            "activity-details",
+            95,
+            "Garmin-Aktivitätsdetails werden geladen…",
+        )
+        try:
+            # Runs under the sync lock and gate held by this sync.
+            counts = backfill(cancel_event)
+            if counts is not None:
+                result["activity_details"] = counts
+        except AppError as error:
+            if error.reason == "chat_cancelled":
+                raise
+            _log_backfill_failure(error)
+        except Exception as error:  # noqa: BLE001 - the sync stays successful; never expose provider errors
+            _log_backfill_failure(error)
+        # A cancel during the backfill ends the sync as cancelled, not completed.
+        self._raise_if_cancelled(cancel_event)
 
     def _set_status(
         self, operation_id: str, phase: str, progress: int, message: str

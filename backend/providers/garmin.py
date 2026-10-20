@@ -243,12 +243,61 @@ def _collect_daily_stats(
         source, {"windows": len(windows), "records": 0, "complete": True}
     )
     for window_start, window_end in windows:
+        covered = (
+            _collect_daily_summaries_window(
+                client, window_start, window_end, payload, stats, external_call
+            )
+            if source == "daily_stats"
+            else set()
+        )
         current = window_start
         while current <= window_end:
-            _collect_daily_stats_day(
-                fetch, current, payload, stats, external_call, redact, warn, source
-            )
+            if current.isoformat() not in covered:
+                _collect_daily_stats_day(
+                    fetch, current, payload, stats, external_call, redact, warn, source
+                )
             current += timedelta(days=1)
+
+
+def _collect_daily_summaries_window(
+    client: Any,
+    start: date,
+    end: date,
+    payload: dict[str, Any],
+    stats: dict[str, Any],
+    external_call: ExternalCall,
+) -> set[str]:
+    fetch = getattr(client, "get_daily_summaries", None)
+    if not callable(fetch):
+        return set()
+    try:
+        response = external_call(
+            "garmin",
+            "daily_stats",
+            partial(fetch, start.isoformat(), end.isoformat()),
+            {"start": start.isoformat(), "end": end.isoformat()},
+        )
+        records = response.get("data") if isinstance(response, dict) else response
+        if not isinstance(records, list) or any(
+            not isinstance(row, dict) for row in records
+        ):
+            return set()
+    except Exception:  # noqa: BLE001 - the per-day reader reports any actual gaps.
+        return set()
+    accepted: list[dict[str, Any]] = []
+    covered: set[str] = set()
+    for row in records:
+        day = row.get("calendarDate") or row.get("summaryDate") or row.get("date")
+        try:
+            observed = date.fromisoformat(day[:10]) if isinstance(day, str) else None
+        except ValueError:
+            observed = None
+        if observed is not None and start <= observed <= end:
+            accepted.append(row)
+            covered.add(observed.isoformat())
+    payload.setdefault("daily_stats", []).extend(accepted)
+    stats["records"] = int(stats["records"]) + len(accepted)
+    return covered
 
 
 def _collect_resting_hr(
@@ -430,6 +479,18 @@ def _collect_historic_metrics(
             ),
             "weekly",
         ),
+        (
+            "training_readiness_history",
+            getattr(client, "get_training_readiness_range", None),
+            lambda fetch: fetch(start.isoformat(), end.isoformat()),
+            "daily",
+        ),
+        (
+            "weekly_training_status",
+            getattr(client, "get_weekly_training_status", None),
+            lambda fetch: fetch(start.isoformat(), end.isoformat()),
+            "weekly",
+        ),
     )
     for key, fetch, invoke, aggregation in requests:
         stats = pagination.setdefault(
@@ -591,6 +652,27 @@ def _gear_activity_ids(
         return None
     if not isinstance(result, list):
         return None
+    if not result and callable(getattr(client, "connectapi", None)):
+        # 0.3.19 maps this endpoint's 404 to []. Check only ambiguous empty
+        # results against the same authenticated URL so genuine empty 200s clear links.
+        base = getattr(client, "garmin_connect_activities_baseurl", None)
+        if not isinstance(base, str):
+            return None
+        try:
+            verified = external_call(
+                "garmin",
+                "gear_activities",
+                lambda: client.connectapi(
+                    f"{base}{gear_uuid}/gear",
+                    params={"start": 0, "limit": GEAR_ACTIVITIES_LIMIT},
+                ),
+                None,
+            )
+        except Exception:  # noqa: BLE001 - a hidden 404 leaves old links stale.
+            return None
+        if not isinstance(verified, list):
+            return None
+        result = verified
     ids = list(
         dict.fromkeys(
             str(item["activityId"])
@@ -617,6 +699,72 @@ def _collect_optional_metric(
         payload[key] = external_call("garmin", key, fetch, details)
     except Exception as exc:  # noqa: BLE001 - SDK errors vary; retain other sources and redact.
         _add_error(payload, key, exc, redact, warn)
+
+
+ACTIVITY_DETAIL_MAX_CHART_POINTS = 2000
+
+
+def collect_garmin_activity_detail(
+    client: Any,
+    activity_id: str,
+    *,
+    external_call: ExternalCall,
+    redact: Redact,
+    warn: WarningLogger | None = None,
+    capability_allowed: CapabilityAllowed | None = None,
+    capability_failure: CapabilityFailure | None = None,
+    capability_success: CapabilitySuccess | None = None,
+) -> dict[str, Any]:
+    """Collect one Garmin activity's detail parts, keeping each part that succeeds.
+
+    Every part is a separate call. A paused part is skipped without a call and
+    its capability is listed in ``skipped``; a failed part is omitted from the
+    result and recorded in ``errors`` after redaction. ``errors`` and ``skipped``
+    are present only when at least one part failed or was skipped.
+    """
+    payload: dict[str, Any] = {"activity_id": activity_id, "errors": []}
+    skipped: list[str] = []
+    # (capability key, payload key, fetch). The capability key also names the
+    # external call, matching ``_fetch_range``.
+    parts: tuple[tuple[str, str, Callable[[], Any]], ...] = (
+        (
+            "activity_details",
+            "details",
+            lambda: client.get_activity_details(
+                activity_id, maxchart=ACTIVITY_DETAIL_MAX_CHART_POINTS
+            ),
+        ),
+        ("activity_splits", "splits", lambda: client.get_activity_splits(activity_id)),
+        (
+            "activity_hr_zones",
+            "hr_zones",
+            lambda: client.get_activity_hr_in_timezones(activity_id),
+        ),
+        (
+            "activity_power_zones",
+            "power_zones",
+            lambda: client.get_activity_power_in_timezones(activity_id),
+        ),
+    )
+    for capability, key, fetch in parts:
+        if capability_allowed is not None and not capability_allowed(capability):
+            skipped.append(capability)
+            continue
+        try:
+            payload[key] = external_call(
+                "garmin", capability, fetch, {"activity_id": activity_id}
+            )
+            if capability_success is not None:
+                capability_success(capability)
+        except Exception as exc:  # noqa: BLE001 - SDK errors vary; keep other parts and redact.
+            if capability_failure is not None:
+                capability_failure(capability, exc)
+            _add_error(payload, capability, exc, redact, warn)
+    if not payload["errors"]:
+        del payload["errors"]
+    if skipped:
+        payload["skipped"] = skipped
+    return payload
 
 
 def _validate_current_metrics(

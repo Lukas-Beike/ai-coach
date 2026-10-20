@@ -9,7 +9,8 @@ import uuid
 from datetime import UTC, datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
-FIXTURE_DEMO_SEED_VERSION = "7"
+FIXTURE_DEMO_SEED_VERSION = "8"
+FIXTURE_RATIONALE = "Synthetische Vorschau"
 FIXTURE_TRAINING_FEATURES_SEED_VERSION = "1"
 # canned keeps the canned Coach replies; offline simulates an unreachable OpenAI.
 FIXTURE_OPENAI_MODES = ("canned", "offline")
@@ -1763,7 +1764,7 @@ def _fixture_v6_units(today):
                 "description": description,
                 "icu_training_load": load,
                 "target": "AUTO",
-                "rationale": "Synthetische Vorschau",
+                "rationale": FIXTURE_RATIONALE,
             },
         )
         for name, offset, title, sport, duration, description, load in specs
@@ -1842,6 +1843,33 @@ def _fixture_seed_v6(today):
     return True
 
 
+def _fixture_seed_distance_run(today):
+    """Add the distance-based run once, on the first free day from day 4 on.
+
+    Reused fixtures already hold other units and markers around that day.
+    """
+    name = "Tempolauf nach Distanz"
+    units = server.PLANNING_DATA.planned_unit().list(500)
+    if any(unit.get("name") == name for unit in units):
+        return
+    for offset in range(4, 15):
+        workout = {
+            "date": (today + timedelta(days=offset)).isoformat(),
+            "name": name,
+            "sport": "Run",
+            "duration_minutes": 45,
+            "description": "- 2km Z1 Pace\n- 5km Z2 Pace\n- 1km 100% Pace",
+            "target": "AUTO",
+            "rationale": FIXTURE_RATIONALE,
+        }
+        try:
+            server.PLANNING_WORKFLOWS.local_plan_creation_service().save([workout])
+            return
+        except server.AppError as error:
+            if error.reason != "plan_date_conflict":
+                raise
+
+
 def _upgrade_preview_demo(today):
     """Add the expanded standard-fixture records without duplicating v1 data."""
     with server.database_manager().unit_of_work() as db:
@@ -1908,6 +1936,8 @@ def _upgrade_preview_demo(today):
     _fixture_seed_calendar(today)
     _fixture_seed_wave2(today, snapshot, garmin)
     _fixture_seed_v6(today)
+    if _fixture_database_is_real():
+        _fixture_seed_distance_run(today)
     with server.database_manager().unit_of_work() as db:
         server.KEY_VALUE_REPOSITORY.set(
             db, "preview_demo_seed_version", FIXTURE_DEMO_SEED_VERSION
@@ -1996,7 +2026,7 @@ def seed_preview_demo():
             "duration_minutes": duration,
             "description": description,
             "target": "AUTO",
-            "rationale": "Synthetische Vorschau",
+            "rationale": FIXTURE_RATIONALE,
         }
         for offset, name, sport, duration, description in [
             (2, "Lockerer Dauerlauf", "Run", 40, "- 40m Z1 HR"),
@@ -2011,6 +2041,7 @@ def seed_preview_demo():
         ]
     ]
     server.PLANNING_WORKFLOWS.local_plan_creation_service().save(workouts)
+    _fixture_seed_distance_run(today)
     history = demo_performance_history(today)
     garmin = _fixture_demo_garmin(today, history)
     _fixture_seed_equipment(today, garmin)

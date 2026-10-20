@@ -9,8 +9,9 @@ import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
+
+from support import make_config
 
 from backend.config import Config
 from backend.db.manager import DatabaseManager
@@ -22,27 +23,6 @@ from backend.sync.freshness import (
 )
 
 NOW = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
-
-
-def _config(**values: str) -> Config:
-    defaults: dict[str, Any] = {
-        "port": 8090,
-        "openai_api_key": "",
-        "openai_base_url": "https://api.openai.com/v1",
-        "openai_model": "model",
-        "intervals_api_key": "",
-        "intervals_athlete_id": "0",
-        "garmin_email": "",
-        "garmin_password": "",
-        "garmin_tokenstore": "unused",
-        "garmin_fixture_path": "",
-        "calendar_ical_url": "",
-        "app_password": "",
-        "secure_cookies": False,
-        "data_retention_days": -1,
-    }
-    defaults.update(values)
-    return Config(**defaults)
 
 
 def _create_tables(db: sqlite3.Connection) -> None:
@@ -129,14 +109,14 @@ class ProviderFreshnessTests(unittest.TestCase):
 
     def _service(self, config: Config | None = None, now=NOW):
         return ProviderFreshnessService(
-            config or _config(), self.manager, self.key_values, lambda: now
+            config or make_config(), self.manager, self.key_values, lambda: now
         )
 
     def test_order_labels_configuration_and_read_only_contract(self):
         db = self.db
         result = provider_freshness_state(
             db,
-            config=_config(
+            config=make_config(
                 intervals_api_key="intervals",
                 garmin_email="athlete@example.test",
                 calendar_ical_url="https://calendar.test/i.ics",
@@ -249,7 +229,7 @@ class ProviderFreshnessTests(unittest.TestCase):
         }
         result = provider_freshness_state(
             db,
-            config=_config(
+            config=make_config(
                 intervals_api_key="yes", garmin_email="athlete@example.test"
             ),
             get_value=_values(values),
@@ -272,7 +252,7 @@ class ProviderFreshnessTests(unittest.TestCase):
 
         unconfigured = provider_freshness_state(
             db,
-            config=_config(),
+            config=make_config(),
             get_value=_values({"last_sync_error": "old_sync_error"}),
             profile={},
             garmin_has_core_error=False,
@@ -300,7 +280,7 @@ class ProviderFreshnessTests(unittest.TestCase):
             )
         result = provider_freshness_state(
             db,
-            config=_config(intervals_api_key="yes"),
+            config=make_config(intervals_api_key="yes"),
             get_value=_values({}),
             profile={},
             garmin_has_core_error=False,
@@ -335,7 +315,7 @@ class ProviderFreshnessTests(unittest.TestCase):
         )
         result = provider_freshness_state(
             db,
-            config=_config(intervals_api_key="yes", garmin_tokenstore="unused"),
+            config=make_config(intervals_api_key="yes", garmin_tokenstore="unused"),
             get_value=_values(
                 {
                     "weather_cache": json.dumps({"fetched_at": "2026-09-15T11:30:00Z"}),
@@ -373,7 +353,7 @@ class ProviderFreshnessTests(unittest.TestCase):
         db.commit()
         result = provider_freshness_state(
             db,
-            config=_config(intervals_api_key="yes"),
+            config=make_config(intervals_api_key="yes"),
             get_value=_values({}),
             profile={},
             garmin_has_core_error=False,
@@ -422,7 +402,7 @@ class ProviderFreshnessTests(unittest.TestCase):
         offset_now = datetime(2026, 9, 15, 14, 0, tzinfo=timezone(timedelta(hours=2)))
         now_calls = []
         service = ProviderFreshnessService(
-            _config(intervals_api_key="configured"),
+            make_config(intervals_api_key="configured"),
             self.manager,
             self.key_values,
             lambda: now_calls.append(offset_now) or offset_now,
@@ -483,7 +463,7 @@ class ProviderFreshnessTests(unittest.TestCase):
                 rows,
             )
 
-        self._service(_config(intervals_api_key="configured")).current(
+        self._service(make_config(intervals_api_key="configured")).current(
             profile={}, garmin_has_core_error=False, garmin_tokenstore_exists=False
         )
         with self.manager.unit_of_work() as db:

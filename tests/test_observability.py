@@ -13,6 +13,8 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlparse
 
+from support import make_config
+
 import backend
 from backend.config import Config
 from backend.http_api.handler import RequestHandler
@@ -34,14 +36,10 @@ from backend.observability import (
 
 
 def _config(**updates: str) -> Config:
+    """Synthetic secret-bearing values; redaction tests assert they are masked."""
     values: dict[str, Any] = {
-        "port": 8090,
         "openai_api_key": "synthetic-openai-value",
-        "openai_base_url": "https://api.openai.com/v1",
         "openai_model": "test-model",
-        "legacy_" + "provider_key": "synthetic-legacy-value",
-        "legacy_" + "model": "test-model",
-        "legacy_" + "provider": "",
         "intervals_api_key": "synthetic-intervals-value",
         "intervals_athlete_id": "synthetic-athlete",
         "garmin_email": "synthetic@example.invalid",
@@ -50,14 +48,9 @@ def _config(**updates: str) -> Config:
         "garmin_fixture_path": "synthetic-fixture.json",
         "calendar_ical_url": "https://calendar-user:calendar-password@calendar.example.invalid/feed?token=synthetic-calendar-token",
         "app_password": "synthetic-app-password",
-        "secure_cookies": False,
-        "data_retention_days": -1,
     }
     values.update(updates)
-    values.pop("legacy_provider_key", None)
-    values.pop("legacy_model", None)
-    values.pop("legacy_provider", None)
-    return Config(**values)
+    return make_config(**values)
 
 
 class _KeyValueStore:

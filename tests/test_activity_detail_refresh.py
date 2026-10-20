@@ -8,9 +8,11 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from activity_row_support import FixedActivityRows
+from canonical_detail_support import open_manager, seed_intervals_activity
 
 from backend.activities.detail_store import ActivityDetailStore
 from backend.errors import AppError, ProviderErrorClassifier, provider_error
+from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.activity_details import (
     MAX_STREAM_POINTS,
     ActivityDetailRefreshService,
@@ -83,6 +85,30 @@ class ActivityDetailRefreshTests(unittest.TestCase):
         self.api.post.assert_not_called()
         self.api.put.assert_not_called()
 
+    def test_streams_request_uses_extension_and_documented_stream_types(self):
+        self.api.get.side_effect = self.responses()
+        self.service.refresh("CaseSensitive-1")
+        path, params = self.api.get.call_args_list[1].args
+        self.assertEqual("/activity/CaseSensitive-1/streams.json", path)
+        self.assertEqual(
+            "time,distance,altitude,grade_smooth,velocity_smooth,"
+            "watts,heartrate,cadence,temp,moving",
+            params["types"],
+        )
+
+    def test_provider_temp_stream_is_stored_as_temperature(self):
+        self.api.get.side_effect = [
+            {"id": "CaseSensitive-1"},
+            [
+                {"type": "time", "data": [0, 1]},
+                {"type": "temp", "data": [14, 15]},
+            ],
+        ]
+        self.service.refresh("CaseSensitive-1")
+        streams = self.store.get("CaseSensitive-1")["activity"]["streams"]
+        self.assertEqual([14, 15], streams["temperature"])
+        self.assertNotIn("temp", streams)
+
     def test_failed_second_fetch_preserves_previous_record(self):
         self.api.get.side_effect = self.responses()
         self.service.refresh("CaseSensitive-1")
@@ -135,8 +161,14 @@ class ActivityDetailRefreshTests(unittest.TestCase):
             all_sync_days=-1,
         )
         self.assertEqual("CaseSensitive-1", envelope["payload"]["activity_id"])
+        garmin = normalize_sync_job_request(
+            "garmin",
+            "activity_details",
+            {"activity_id": "CaseSensitive-1"},
+            all_sync_days=-1,
+        )
+        self.assertEqual("CaseSensitive-1", garmin["payload"]["activity_id"])
         for provider, payload in (
-            ("garmin", {"activity_id": "x"}),
             ("intervals", {"activity_id": "../x"}),
             ("intervals", {"activity_id": "x", "remote_write": True}),
         ):
@@ -165,7 +197,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
 
     def provider(self, path, params):
         activity_id = path.split("/")[2]
-        if path.endswith("/streams"):
+        if path.endswith("/streams.json"):
             return [{"type": "time", "data": [0, 1]}]
         return {"id": activity_id}
 
@@ -183,7 +215,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         return [
             call.args[0].split("/")[2]
             for call in self.api.get.call_args_list
-            if not call.args[0].endswith("/streams")
+            if not call.args[0].endswith("/streams.json")
         ]
 
     def test_loads_only_the_ten_newest_activities_once(self):
@@ -195,6 +227,18 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.api.get.reset_mock()
         self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
         self.api.get.assert_not_called()
+
+    def test_records_from_an_older_projection_are_loaded_again(self):
+        self.service().prefetch_recent()
+        with self.manager.unit_of_work() as db:
+            for row in self.rows[2:]:
+                record = self.store.get(row["id"])
+                record.pop("projection_version")
+                self.store.save_in(db, row["id"], record)
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_recent())
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
 
     def test_changed_summary_is_loaded_again(self):
         self.service().prefetch_recent()
@@ -344,3 +388,60 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
             self.service(configured=False).prefetch_recent(),
         )
         self.api.get.assert_not_called()
+
+
+class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
+    """A refresh writes the kv record and its canonical rows in one transaction."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.manager = open_manager(self.directory.name)
+        self.addCleanup(self.manager.close)
+        seed_intervals_activity(self.manager, "9001")
+        self.store = ActivityDetailStore(self.manager)
+        self.api = Mock()
+        self.api.get.side_effect = [
+            {"id": "9001", "name": "Synthetic ride", "moving_time": 1000},
+            [
+                {"type": "time", "data": [0, 1, 2]},
+                {"type": "watts", "data": [200, 210, 220]},
+            ],
+        ]
+
+    def service(self, canonical):
+        return ActivityDetailRefreshService(
+            api_client=self.api,
+            database_manager=self.manager,
+            row_reader=FixedActivityRows([{"id": "9001"}]),
+            store=self.store,
+            utc_now=lambda: "2026-10-02T08:00:00Z",
+            configured=True,
+            canonical=canonical,
+        )
+
+    def canonical_rows(self):
+        with self.manager.reader() as db:
+            row = db.execute(
+                "SELECT COUNT(*) AS n FROM activity_detail_sets "
+                "WHERE provider_activity_id = ?",
+                ("9001",),
+            ).fetchone()
+        return row["n"]
+
+    def test_refresh_writes_canonical_rows_with_the_kv_record(self):
+        result = self.service(CanonicalDetailWriter()).refresh("9001")
+        self.assertEqual("completed", result["status"])
+        self.assertIsNotNone(self.store.get("9001"))
+        self.assertGreater(self.canonical_rows(), 0)
+
+    def test_failed_canonical_write_leaves_neither_record_nor_rows(self):
+        class RaisingWriter(CanonicalDetailWriter):
+            def write_fetch(self, db, **kwargs):
+                super().write_fetch(db, **kwargs)
+                raise RuntimeError("simulated canonical failure")
+
+        with self.assertRaises(RuntimeError):
+            self.service(RaisingWriter()).refresh("9001")
+        self.assertIsNone(self.store.get("9001"))
+        self.assertEqual(0, self.canonical_rows())

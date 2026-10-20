@@ -1,0 +1,21 @@
+{
+  "activityId": 123456789,
+  "metricDescriptors": [
+    {"metricsIndex": 0, "key": "sumDuration"},
+    {"metricsIndex": 1, "key": "sumDistance"},
+    {"metricsIndex": 2, "key": "directHeartRate"},
+    {"metricsIndex": 3, "key": "directBikeCadence"},
+    {"metricsIndex": 4, "key": "directPower"},
+    {"metricsIndex": 5, "key": "directElevation"},
+    {"metricsIndex": 6, "key": "directSpeed"},
+    {"metricsIndex": 7, "key": "directRunCadence"},
+    {"metricsIndex": 8, "key": "directAirTemperature"},
+    {"metricsIndex": 9, "key": "directVerticalSpeed"}
+  ],
+  "activityDetailMetrics": [
+    {"metrics": [0.0, 0.0, 96.0, 84.0, 0.0, 120.0, 0.0, null, 17.5, 0.0]},
+    {"metrics": [1.0, 3.4, 110.0, 86.0, 150.0, 120.4, 3.4, null, 17.5, 0.1]},
+    {"metrics": [2.0, 7.1, 131.0, 88.0, 210.0, 120.9, 3.7, null, 17.6, 0.0]},
+    {"metrics": [3.0, 11.2, 147.0, 90.0, 245.0, 121.3, 4.1, null, 17.6, -0.1]}
+  ]
+}

@@ -2023,5 +2023,68 @@ class WorkerTests(BackfillFixture):
         worker.stop()
 
 
+class FollowupStageTests(unittest.TestCase):
+    """Follow-up stages run after the canonical backfill, each with its own failure record."""
+
+    class Stage:
+        def __init__(self, name, log, *, fail=False):
+            self.name = name
+            self.log = log
+            self.fail = fail
+            self.failed = False
+
+        @property
+        def stage(self):
+            return self.name
+
+        def run_batch(self, db):
+            self.log.append(self.name)
+            if self.fail:
+                raise RuntimeError("simulated follow-up failure")
+            return BatchReport(items=0, done=True)
+
+        def mark_failed(self, db):
+            self.failed = True
+
+    def run_worker(self, canonical, followups):
+        worker = CanonicalBackfillWorker(
+            backfill=canonical,
+            database=lambda: FakeDatabase(),
+            maintenance_gate=MaintenanceGate(),
+            poll_seconds=0,
+            followups=followups,
+        )
+        worker.run_loop()
+
+    def test_followups_run_after_the_canonical_backfill_in_order(self):
+        log = []
+        canonical = self.Stage("canonical", log)
+        first = self.Stage("first", log)
+        second = self.Stage("second", log)
+        self.run_worker(canonical, [first, second])
+        self.assertEqual(["canonical", "first", "second"], log)
+        self.assertFalse(canonical.failed or first.failed or second.failed)
+
+    def test_followup_failure_marks_only_that_followup(self):
+        log = []
+        canonical = self.Stage("canonical", log)
+        broken = self.Stage("broken", log, fail=True)
+        later = self.Stage("later", log)
+        self.run_worker(canonical, [broken, later])
+        self.assertTrue(broken.failed)
+        self.assertFalse(canonical.failed)
+        self.assertFalse(later.failed)
+        self.assertNotIn("later", log)
+
+    def test_canonical_failure_skips_the_followups(self):
+        log = []
+        canonical = self.Stage("canonical", log, fail=True)
+        followup = self.Stage("followup", log)
+        self.run_worker(canonical, [followup])
+        self.assertTrue(canonical.failed)
+        self.assertEqual(["canonical"], log)
+        self.assertFalse(followup.failed)
+
+
 if __name__ == "__main__":
     unittest.main()

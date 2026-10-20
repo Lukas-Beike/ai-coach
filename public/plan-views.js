@@ -614,42 +614,40 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (metrics.textContent) cardSummary.append(metrics);
   }
 
-  let calendarProfileSequence = 0;
-
   function calendarWorkoutProfile(profile) {
     const segments = profile?.segments;
     if (!Array.isArray(segments) || !segments.length || segments.length > 1000) return null;
-    const total = segments.reduce((sum, item) => sum + (Number.isFinite(item.duration) && item.duration > 0 ? item.duration : 0), 0);
+    const axis = profile.axis === "distance" ? "distance" : "duration";
+    const extent = (item) => (Number.isFinite(item[axis]) && item[axis] > 0 ? item[axis] : 0);
+    const total = segments.reduce((sum, item) => sum + extent(item), 0);
     const values = segments.flatMap((item) => [item.value, item.end_value]).filter((value) => value != null && Number.isFinite(value) && value >= 0);
     if (!total || !values.length) return null;
     const top = Math.max(...values, 1) * 1.1;
-    const label = profile.source === "recorded" ? "Aufgezeichnetes Belastungsprofil" : "Geplantes Intervallprofil";
+    const baseLabel = profile.source === "recorded" ? "Aufgezeichnetes Belastungsprofil" : "Geplantes Intervallprofil";
+    const label = profile.estimated ? `${baseLabel} (Zonen geschätzt aus FTP/LTHR)` : baseLabel;
     const svg = analysisSvg("svg", { viewBox: "0 0 300 56", role: "img", "aria-label": label, class: "calendar-workout-profile", preserveAspectRatio: "none" });
-    const gradientPrefix = `calendar-profile-${++calendarProfileSequence}`;
-    const defs = analysisSvg("defs");
-    for (const zone of [1, 2, 3, 4, 5, 6, 7, "unknown"]) {
-      const gradient = analysisSvg("linearGradient", { id: `${gradientPrefix}-${zone}`, x1: 0, y1: 0, x2: 0, y2: 1, "data-zone": zone });
-      gradient.append(analysisSvg("stop", { offset: "0%", "stop-color": "currentColor" }));
-      gradient.append(analysisSvg("stop", { offset: "100%", "stop-color": "currentColor", "stop-opacity": .35 }));
-      defs.append(gradient);
-    }
-    svg.append(defs);
-    svg.append(analysisSvg("title", {}, `${label} · Zeitachse · ${profile.unit || ""}`));
+    svg.append(analysisSvg("title", {}, `${label} · ${axis === "distance" ? "Distanzachse" : "Zeitachse"} · ${profile.unit || ""}`));
     svg.append(analysisSvg("line", { x1: 0, x2: 300, y1: 54, y2: 54, class: "calendar-profile-baseline" }));
     let offset = 0;
     for (const item of segments) {
-      if (!Number.isFinite(item.duration) || item.duration <= 0) continue;
-      const x = offset / total * 300, width = item.duration / total * 300;
-      offset += item.duration;
-      if (item.value == null || item.end_value == null || !Number.isFinite(item.value) || !Number.isFinite(item.end_value)) continue;
-      const left = 54 - Math.max(0, item.value) / top * 50;
-      const right = 54 - Math.max(0, item.end_value) / top * 50;
-      const zone = Number.isInteger(item.zone) && item.zone >= 1 && item.zone <= 7 ? item.zone : "unknown";
-      const shape = analysisSvg("polygon", { points: `${x},54 ${x},${left} ${x + width},${right} ${x + width},54`, "data-zone": zone, fill: `url(#${gradientPrefix}-${zone})` });
-      shape.append(analysisSvg("title", {}, `${formatDuration(item.duration)} · ${item.label || ""}`));
+      const size = extent(item);
+      if (!size) continue;
+      const x = offset / total * 300, width = size / total * 300;
+      offset += size;
+      const shape = calendarProfileShape(item, x, width, top);
+      if (!shape) continue;
+      shape.append(analysisSvg("title", {}, `${axis === "distance" ? distanceLabel(size) : formatDuration(size)} · ${item.label || ""}`));
       svg.append(shape);
     }
     return svg;
+  }
+
+  function calendarProfileShape(item, x, width, top) {
+    if (item.value == null || item.end_value == null || !Number.isFinite(item.value) || !Number.isFinite(item.end_value)) return null;
+    const left = 54 - Math.max(0, item.value) / top * 50;
+    const right = 54 - Math.max(0, item.end_value) / top * 50;
+    const zone = Number.isInteger(item.zone) && item.zone >= 1 && item.zone <= 7 ? item.zone : "unknown";
+    return analysisSvg("polygon", { points: `${x},54 ${x},${left} ${x + width},${right} ${x + width},54`, "data-zone": zone });
   }
 
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}) {

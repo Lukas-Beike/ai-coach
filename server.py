@@ -461,7 +461,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.11"
+APP_VERSION = "1.13.12"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -1567,6 +1567,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         sync_service=GARMIN_ASSEMBLY.sync_service,
         morning_body_battery_service=morning_body_battery_service,
         fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
+        activity_detail_service=GARMIN_ASSEMBLY.activity_detail_service,
     ),
     calendar_weather=CalendarWeatherJobDependencies(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,

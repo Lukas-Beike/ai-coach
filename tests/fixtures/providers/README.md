@@ -27,6 +27,11 @@ without a live account.
   three exceptions: `body_battery` is fetched by the morning path,
   `user_profile` supplies the gear profile id, and `gear_stats` is the usage
   response for each gear row.
+- `garmin/activity_detail/`: the per-activity detail parts, `details.json`
+  (streams), `splits.json` (laps), `hr_zones.json` and `power_zones.json`. They
+  live in a subdirectory on purpose: the non-recursive `garmin/*.json` check
+  would reject them. They feed `collect_garmin_activity_detail` shapes into
+  `backend.providers.garmin_activity_detail_mapping`.
 
 ## How the tests use them
 

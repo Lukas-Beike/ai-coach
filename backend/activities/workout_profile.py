@@ -5,7 +5,15 @@ import re
 from typing import Any
 
 from backend.activities.workout_text import WorkoutTextError, structured_steps
-from backend.providers.intervals_activity_keys import activity_ftp
+from backend.activities.zone_settings import (
+    HR_ZONE_LIMITS,
+    POWER_ZONE_LIMITS,
+    ZoneSettings,
+    percent_zone,
+)
+from backend.providers.intervals_activity_keys import activity_ftp, activity_lthr
+
+_ZONE_TARGET = re.compile(r"Z([1-7])(?:\s*-\s*Z([1-7]))?(?:\s+(?:HR|PACE))?")
 
 
 def _number(value: Any) -> float | None:
@@ -14,18 +22,15 @@ def _number(value: Any) -> float | None:
     )
 
 
-def _power_zone(percent: float) -> int:
-    return next(
-        (
-            index
-            for index, limit in enumerate((55, 75, 90, 105, 120, 150), 1)
-            if percent <= limit
-        ),
-        7,
-    )
+def planned_profile(
+    workout: dict[str, Any], settings: ZoneSettings | None = None
+) -> dict[str, Any] | None:
+    """Profile of the planned steps; ``settings`` supplies the athlete's zones.
 
-
-def planned_profile(workout: dict[str, Any]) -> dict[str, Any] | None:
+    Absolute watt or bpm targets are colored from the athlete's FTP or LTHR and
+    the profile is then marked ``estimated``.
+    """
+    settings = settings or ZoneSettings()
     description = workout.get("description")
     if not isinstance(description, str) or len(description) > 20000:
         return None
@@ -33,20 +38,30 @@ def planned_profile(workout: dict[str, Any]) -> dict[str, Any] | None:
         steps = structured_steps(description, str(workout.get("target") or "AUTO"))
     except WorkoutTextError:
         return None
-    if not steps or any("duration" not in step for step in steps):
+    # Steps are either all timed or all distance-based; the other kind has no
+    # common width axis, so a mixed list gets no profile.
+    axis = "duration" if steps and "duration" in steps[0] else "distance"
+    if not steps or any(axis not in step for step in steps):
         return None
-    segments = []
-    units = set()
-    for step in steps:
-        result = _planned_segment(step)
-        if result is None:
-            return None
-        segment, unit = result
-        segments.append(segment)
-        units.add(unit)
+    built = _planned_segments(steps, axis, settings)
+    if built is None:
+        return None
+    segments, units, estimated = built
     if len(units) != 1:
-        return None
-    return {"source": "planned", "unit": units.pop(), "segments": segments}
+        zone_segments = _zone_segments(steps, segments)
+        if zone_segments is None:
+            return None
+        segments = zone_segments
+        units = {"zone"}
+    profile: dict[str, Any] = {
+        "source": "planned",
+        "axis": axis,
+        "unit": units.pop(),
+        "segments": segments,
+    }
+    if estimated:
+        profile["estimated"] = True
+    return profile
 
 
 def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
@@ -56,9 +71,11 @@ def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
     times, values, kind, start, end = streams
     width = (end - start) / 60
     totals, known = _bucket_totals(times, values, kind, start, end)
-    ftp = _number(activity_ftp(activity))
+    threshold = _number(
+        activity_ftp(activity) if kind == "watts" else activity_lthr(activity)
+    )
     segments = [
-        _recorded_segment(total, coverage, width, kind, ftp)
+        _recorded_segment(total, coverage, width, kind, threshold)
         for total, coverage in zip(totals, known, strict=True)
     ]
     if not any(item["value"] is not None for item in segments):
@@ -70,36 +87,84 @@ def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _planned_segment(step: dict[str, Any]) -> tuple[dict[str, Any], str] | None:
+def _planned_segments(
+    steps: list[dict[str, Any]], axis: str, settings: ZoneSettings
+) -> tuple[list[dict[str, Any]], set[str], bool] | None:
+    segments: list[dict[str, Any]] = []
+    units: set[str] = set()
+    estimated = False
+    for step in steps:
+        result = _planned_segment(step, axis, settings)
+        if result is None:
+            return None
+        segment, unit, from_estimate = result
+        segments.append(segment)
+        units.add(unit)
+        estimated = estimated or from_estimate
+    return segments, units, estimated
+
+
+def _zone_segments(
+    steps: list[dict[str, Any]], segments: list[dict[str, Any]]
+) -> list[dict[str, Any]] | None:
+    # Steps of one kind may mix zone and percent targets (for example
+    # "Z1 HR" and "86-89% HR"); the zone is their common axis.
+    if len({step["kind"] for step in steps}) != 1 or any(
+        segment["zone"] is None for segment in segments
+    ):
+        return None
+    return [
+        {**segment, "value": segment["zone"], "end_value": segment["zone"]}
+        for segment in segments
+    ]
+
+
+def _planned_segment(
+    step: dict[str, Any], axis: str, settings: ZoneSettings
+) -> tuple[dict[str, Any], str, bool] | None:
     target = step["target"]
-    zone = re.fullmatch(r"Z([1-7])(?:\s+(?:HR|PACE))?", target)
     numbers = re.findall(r"\d+(?:\.\d+)?", target)
-    if not numbers:
+    if not numbers or ":" in target:
         return None
     low, high = float(numbers[0]), float(numbers[-1])
     value = (low + high) / 2
+    zone = _ZONE_TARGET.fullmatch(target)
+    color: int | None = None
+    estimated = False
     if zone:
-        color = int(zone[1])
+        color = int(zone[2] or zone[1])
         unit = "zone"
-    elif step["kind"] == "power" and "%" in target:
-        color = _power_zone(value)
-        unit = "%FTP"
+    elif "%" in target and step["kind"] in {"power", "hr", "pace"}:
+        color, unit = _percent_target_zone(step["kind"], target, value, settings)
     else:
-        color = None
         unit = step["kind"]
         if "BPM" in target:
             unit = "bpm"
         elif "W" in target:
             unit = "W"
+        color = settings.absolute_zone(unit, value)
+        estimated = color is not None
     segment = {
-        "duration": step["duration"],
+        axis: step[axis],
         "value": low if step["ramp"] else value,
         "end_value": high if step["ramp"] else value,
         "zone": color,
         "label": target,
     }
 
-    return segment, unit
+    return segment, unit, estimated
+
+
+def _percent_target_zone(
+    kind: str, target: str, percent: float, settings: ZoneSettings
+) -> tuple[int, str]:
+    if kind == "power":
+        return settings.power_zone(percent), "%FTP"
+    if kind == "pace":
+        return settings.pace_zone(percent), "%PACE"
+    if "LTHR" in target:
+        return settings.hr_zone_of_lthr(percent), "%LTHR"
+    return settings.hr_zone_of_max(percent), "%HR"
 
 
 def _profile_streams(
@@ -162,12 +227,15 @@ def _bucket_totals(
 
 
 def _recorded_segment(
-    total: float, coverage: float, width: float, kind: str, ftp: float | None
+    total: float, coverage: float, width: float, kind: str, threshold: float | None
 ) -> dict[str, Any]:
     value = total / coverage if coverage >= width * 0.8 else None
     zone = None
-    if value is not None and kind == "watts" and ftp and ftp > 0:
-        zone = _power_zone(value / ftp * 100)
+    if value is not None and threshold and threshold > 0:
+        percent = value / threshold * 100
+        zone = percent_zone(
+            percent, POWER_ZONE_LIMITS if kind == "watts" else HR_ZONE_LIMITS
+        )
     label = "Missing"
     if value is not None:
         unit = "W" if kind == "watts" else "bpm"

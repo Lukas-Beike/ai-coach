@@ -54,7 +54,7 @@ def activity_day(row: dict[str, Any], timezone: str = "UTC") -> str:
     absolute = row.get("start_date")
     if absolute:
         try:
-            started = datetime.fromisoformat(str(absolute).replace("Z", "+00:00"))
+            started = datetime.fromisoformat(str(absolute))
             if started.tzinfo is not None:
                 return started.astimezone(ZoneInfo(timezone)).date().isoformat()
         except ValueError, ZoneInfoNotFoundError:

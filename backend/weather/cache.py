@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from backend.weather import projection, recommendations
@@ -45,12 +45,12 @@ def _failure_count(failure: dict[str, Any]) -> int:
 
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _parse_utc(value: Any) -> datetime:
-    return _as_utc(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+    return _as_utc(datetime.fromisoformat(str(value)))
 
 
 def cache_state(

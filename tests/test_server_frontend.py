@@ -1074,7 +1074,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('endurance_score: "Ausdauer-Score"', analysis)
         self.assertNotIn("Endurance Score", analysis)
         self.assertNotIn("Running Tolerance", analysis)
-        self.assertIn('return { endurance_score: "Punkte" }[key] || "";', analysis)
+        self.assertIn('training_readiness_history: "Punkte"', analysis)
         self.assertIn("unit: providerMetricUnit(key)", analysis)
         self.assertIn("SPORT_LABELS[item.sport] || item.sport", analysis)
         self.assertIn(

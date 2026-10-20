@@ -12,8 +12,9 @@ import unittest
 from datetime import UTC, datetime
 from typing import Any
 
+from support import make_config
+
 from backend.canonical.vocabulary import MetricKind
-from backend.config import Config
 from backend.http_api.sync_commands import PROVIDER_NOT_CONFIGURED_MESSAGES
 from backend.providers.descriptors import (
     DEFAULT_PROVIDER_DESCRIPTORS,
@@ -63,25 +64,6 @@ PREVIOUS_PROJECTION: list[tuple[str, str, str, bool]] = [
     ("calendar", "events", "Gemeinsamer Kalender", True),
     ("wahoo", "activities", "Wahoo", True),
 ]
-
-
-def _config() -> Config:
-    return Config(
-        port=8090,
-        openai_api_key="",
-        openai_base_url="https://api.openai.com/v1",
-        openai_model="model",
-        intervals_api_key="",
-        intervals_athlete_id="0",
-        garmin_email="",
-        garmin_password="",
-        garmin_tokenstore="unused",
-        garmin_fixture_path="",
-        calendar_ical_url="",
-        app_password="",
-        secure_cookies=False,
-        data_retention_days=-1,
-    )
 
 
 def _empty_database() -> sqlite3.Connection:
@@ -156,7 +138,7 @@ class DefaultDescriptorParityTests(unittest.TestCase):
         self.addCleanup(db.close)
         result = provider_freshness_state(
             db,
-            config=_config(),
+            config=make_config(),
             get_value=lambda key: None,
             profile={},
             garmin_has_core_error=False,
@@ -432,7 +414,7 @@ INTERVALS_JOB_TYPES = frozenset(
 )
 PREVIOUS_JOB_SUPPORT: dict[str, frozenset[str]] = {
     "intervals": INTERVALS_JOB_TYPES,
-    "garmin": frozenset({"refresh", "historical_backfill"}),
+    "garmin": frozenset({"refresh", "historical_backfill", "activity_details"}),
     "calendar": frozenset({"refresh"}),
     "weather": frozenset({"refresh"}),
     "wahoo": frozenset({"refresh", "plan_push"}),

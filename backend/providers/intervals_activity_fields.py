@@ -61,6 +61,21 @@ REMOTE_EVENT_METRIC_KEYS = (
 )
 # Query that asks the activity detail endpoint to include interval rows.
 ACTIVITY_DETAIL_PARAMS = {"intervals": "true"}
+# Stream names the Intervals.icu streams endpoint knows; it answers 422 to others.
+ACTIVITY_DETAIL_STREAM_TYPES = (
+    "time",
+    "distance",
+    "altitude",
+    "grade_smooth",
+    "velocity_smooth",
+    "watts",
+    "heartrate",
+    "cadence",
+    "temp",
+    "moving",
+)
+# Provider stream names the app stores under its own name.
+ACTIVITY_DETAIL_STREAM_ALIASES = {"temp": "temperature"}
 
 
 def activity_detail_laps(detail: dict[str, Any]) -> Any:
@@ -80,8 +95,11 @@ _DEVICE_SOURCE_FIELDS = ("source", "device_name", "external_id")
 
 
 def intervals_activity_device_source(activity: Any) -> RecordingOrigin | None:
-    """Return explicit Wahoo or Garmin provenance from an Intervals.icu activity."""
+    """Return explicit Wahoo or Garmin provenance; a manual source has none."""
     if not isinstance(activity, dict):
+        return None
+    source = activity.get("source")
+    if isinstance(source, str) and source.strip().casefold() == "manual":
         return None
     provenance = " ".join(
         str(activity.get(key) or "") for key in _DEVICE_SOURCE_FIELDS

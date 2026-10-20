@@ -27,18 +27,20 @@ function historyPage(cursor, limit) {
   return { messages, generation: GENERATION, next_cursor: start > 0 ? cursorFor(messages[0].id) : null, proposed_actions: [] };
 }
 
-test("cached latest messages show before the start answers and older ones page in @responsive", async ({ page }) => {
-  const requestedCursors = [];
-  let delayed = false;
+// A gate the test opens; it opens by itself after RELEASE_TIMEOUT_MS so a failing test cannot hang.
+function heldGate() {
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
-  const waitForGate = () => Promise.race([gate, new Promise((resolve) => setTimeout(resolve, RELEASE_TIMEOUT_MS))]);
+  return { release, wait: () => Promise.race([gate, new Promise((resolve) => setTimeout(resolve, RELEASE_TIMEOUT_MS))]) };
+}
 
+// Serves the conversation; while isDelayed() holds, the start answers wait for the gate.
+async function routeConversation(page, isDelayed, waitForGate, onCursor = () => {}) {
   await page.route("**/api/chat/history?*", async (route) => {
     const params = new URL(route.request().url()).searchParams;
     const cursor = params.get("cursor");
-    if (cursor) requestedCursors.push(cursor);
-    if (delayed && !cursor) await waitForGate();
+    if (cursor) onCursor(cursor);
+    if (isDelayed() && !cursor) await waitForGate();
     await route.fulfill({ json: historyPage(cursor, Number(params.get("limit") || FIRST_PAGE_SIZE)) });
   });
   await page.route("**/api/bootstrap*", async (route) => {
@@ -48,9 +50,16 @@ test("cached latest messages show before the start answers and older ones page i
       const first = historyPage(null, FIRST_PAGE_SIZE);
       Object.assign(body, { messages: first.messages, messages_next_cursor: first.next_cursor, messages_generation: GENERATION });
     }
-    if (delayed) await waitForGate();
+    if (isDelayed()) await waitForGate();
     await route.fulfill({ response, json: body });
   });
+}
+
+test("cached latest messages show before the start answers and older ones page in @responsive", async ({ page }) => {
+  const requestedCursors = [];
+  let delayed = false;
+  const { release, wait } = heldGate();
+  await routeConversation(page, () => delayed, wait, (cursor) => requestedCursors.push(cursor));
 
   await page.goto("/#coach");
   await expect(page.locator("#appShell")).toBeVisible();
@@ -129,6 +138,68 @@ test("cached latest messages show before the start answers and older ones page i
     document.querySelector(`#messages [data-message-id="${messageId}"]`).getBoundingClientRect().top
   ), firstShownId);
   expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
+});
+
+test("a reader who scrolls before the start has loaded keeps their position @responsive", async ({ page }) => {
+  let delayed = false;
+  const { release, wait } = heldGate();
+  const { release: releaseLoad, wait: waitForLoad } = heldGate();
+  await routeConversation(page, () => delayed, wait);
+  // A still-loading image holds the page's load event, which the first jump to the newest message waits for.
+  await page.route("**/api/e2e-hold-load", async (route) => {
+    await waitForLoad();
+    await route.fulfill({ status: 204 });
+  });
+
+  await page.goto("/#coach");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+  await expect(page.locator(`#messages [data-message-id="${LAST_ID}"]`)).toBeAttached();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("coach-chat-cache") || "null")?.messages?.at(-1)?.id ?? null)).toBe(LAST_ID);
+  await expect.poll(() => page.evaluate(() => Boolean(localStorage.getItem("coach-state-snapshot")))).toBe(true);
+
+  delayed = true;
+  await page.addInitScript(() => {
+    document.addEventListener("DOMContentLoaded", () => {
+      const image = document.createElement("img");
+      image.src = "/api/e2e-hold-load";
+      image.alt = "";
+      image.hidden = true;
+      document.body.append(image);
+    });
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.locator("#appShell")).toBeVisible();
+  await expect(page.locator(`#messages [data-message-id="${LAST_ID}"]`)).toBeAttached();
+  expect(await page.evaluate(() => ({ pending: state.chatInitialScrollPending, ready: document.readyState })))
+    .toEqual({ pending: true, ready: "interactive" });
+
+  // The reader starts reading the cached messages before the page has finished loading.
+  // A wheel scroll can land frames after its event; read the position once it has settled.
+  const settledScroll = async () => {
+    await expect.poll(() => page.evaluate(() => {
+      const before = window.scrollY;
+      return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(window.scrollY === before))));
+    })).toBe(true);
+    return page.evaluate(() => window.scrollY);
+  };
+  await page.mouse.wheel(0, 900);
+  const scrolledDown = await settledScroll();
+  await page.mouse.wheel(0, -300);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(scrolledDown);
+  await expect.poll(() => page.evaluate(() => state.chatFollowLatest)).toBe(false);
+  const readerScroll = await settledScroll();
+
+  releaseLoad();
+  await expect.poll(() => page.evaluate(() => document.readyState)).toBe("complete");
+  await expect.poll(() => page.evaluate(() => state.chatInitialScrollPending)).toBe(false);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect(Math.abs(await page.evaluate(() => window.scrollY) - readerScroll)).toBeLessThanOrEqual(2);
+
+  release();
+  await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+  // Later start requests may still be held when the page closes.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("a failed fresh chat load ends the sync note and keeps the cached messages @responsive", async ({ page }) => {

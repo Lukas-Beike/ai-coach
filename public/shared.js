@@ -141,6 +141,8 @@ function renderActiveRoute(mainRoute, panelRoute) {
 
 function restoreRouteScroll(mainRoute, returningToChat, shouldFocusPlannedToday) {
   if (mainRoute === "coach") {
+    // A reader who scrolled away before leaving returns to their position, not to the reply start.
+    if (!state.chatFollowLatest) state.chatResponseScrollPending = false;
     if (state.chatResponseScrollPending) scrollChatToResponseStart();
     else if (state.chatInitialScrollPending || state.chatCacheSyncing) scrollChatToLatest();
     else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest();
@@ -369,7 +371,8 @@ async function api(path, options = {}) {
     if (generation === state.sessionGeneration) showLogin();
   });
   if (generation !== state.sessionGeneration) throw new DOMException("Session ended", "AbortError");
-  renderConnectivityStatus(true);
+  // A response clears a server-unreachable notice; while the browser reports offline the notice stays.
+  renderConnectivityStatus();
   return result;
 }
 

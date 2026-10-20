@@ -4,7 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from provider_runtime_fakes import ACME_ID, acme_descriptor
@@ -92,7 +92,7 @@ class DailySyncMarkerServiceTests(unittest.TestCase):
                 self.assertFalse(self.service.is_due(source, self.local_time))
 
     def test_explicit_and_default_now_are_supported(self):
-        explicit = datetime(2026, 9, 21, 1, tzinfo=timezone.utc)
+        explicit = datetime(2026, 9, 21, 1, tzinfo=UTC)
 
         self.service.mark("intervals", explicit)
         self.assertFalse(self.service.is_due("intervals", explicit))
@@ -106,7 +106,7 @@ class DailySyncMarkerServiceTests(unittest.TestCase):
 
     def test_timezone_aware_marker_uses_the_same_instant_across_zones(self):
         local = datetime(2026, 1, 1, 0, 30, tzinfo=timezone(timedelta(hours=14)))
-        same_instant_utc = local.astimezone(timezone.utc)
+        same_instant_utc = local.astimezone(UTC)
 
         self.service.mark("calendar", local)
 

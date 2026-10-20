@@ -14,6 +14,7 @@ from backend.canonical.mapping import IssueReason, MappingIssue, MappingResult
 from backend.canonical.records import ActivityRecord
 from backend.canonical.sports import legacy_activity_family
 from backend.canonical.vocabulary import (
+    DeviceType,
     Environment,
     LoadModel,
     ProviderId,
@@ -75,9 +76,10 @@ def load_fixture_rows() -> list[dict[str, Any]]:
 
 
 class ModuleContractTests(unittest.TestCase):
-    def test_mapper_version_is_three(self) -> None:
-        # Version 2 keeps elapsed_time as elapsed_duration_s; version 3 max_hr.
-        self.assertEqual(3, MAPPER_VERSION)
+    def test_mapper_version_is_five(self) -> None:
+        # Version 2 keeps elapsed_time as elapsed_duration_s; version 3 max_hr;
+        # version 4 manual source origin; version 5 extremes and device type.
+        self.assertEqual(5, MAPPER_VERSION)
 
     def test_retrieved_at_must_be_timezone_aware(self) -> None:
         with self.assertRaises(ValueError):
@@ -622,6 +624,26 @@ class RecordingOriginTests(unittest.TestCase):
 
         self.assertEqual(RecordingOrigin.GARMIN, record.provenance.recorded_by)
 
+    def test_manual_source_wins_over_brand_text(self) -> None:
+        cases = (
+            (
+                {"source": "MANUAL", "device_name": "Garmin"},
+                RecordingOrigin.MANUAL,
+            ),
+            ({"source": "manual ", "device_name": "Wahoo"}, RecordingOrigin.MANUAL),
+            (
+                {"source": "  Manual\t", "external_id": "zwift-1"},
+                RecordingOrigin.MANUAL,
+            ),
+            (
+                {"source": "STRAVA", "device_name": "Garmin Edge"},
+                RecordingOrigin.GARMIN,
+            ),
+        )
+        for fields, expected in cases:
+            with self.subTest(fields=fields):
+                self.assertEqual(expected, map_one(**fields).provenance.recorded_by)
+
     def test_wahoo_and_garmin_agree_with_the_legacy_device_source(self) -> None:
         cases = (
             {"source": "WAHOO"},
@@ -645,6 +667,18 @@ class RecordingOriginTests(unittest.TestCase):
                         origin, {RecordingOrigin.WAHOO, RecordingOrigin.GARMIN}
                     )
 
+    def test_manual_source_agrees_with_the_legacy_device_source(self) -> None:
+        cases = (
+            {"source": "MANUAL", "device_name": "Garmin Forerunner"},
+            {"source": "manual ", "device_name": "Wahoo ELEMNT"},
+        )
+        for fields in cases:
+            with self.subTest(fields=fields):
+                self.assertIsNone(intervals_activity_device_source(fields))
+                self.assertEqual(
+                    RecordingOrigin.MANUAL, map_one(**fields).provenance.recorded_by
+                )
+
     def test_non_text_provenance_is_reported_and_unknown(self) -> None:
         result = map_rows([row(source=7)])
 
@@ -667,6 +701,70 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual("i-prov", provenance.source_record_id)
         self.assertEqual(RETRIEVED_AT, provenance.retrieved_at)
         self.assertEqual("Intervals.icu", provenance.label)
+
+
+class ExtremeAndDeviceTypeTests(unittest.TestCase):
+    def test_maximum_speed_and_power_are_mapped(self) -> None:
+        record = map_one(max_speed=21.0, max_watts=1_050)
+
+        self.assertEqual(21.0, record.max_speed_mps)
+        self.assertEqual(1_050.0, record.max_power_w)
+
+    def test_absent_extremes_and_device_are_none(self) -> None:
+        record = map_one()
+
+        self.assertIsNone(record.max_speed_mps)
+        self.assertIsNone(record.max_power_w)
+        self.assertIsNone(record.device_type)
+
+    def test_device_type_is_read_from_the_device_name(self) -> None:
+        cases = (
+            ("Garmin Edge 530", DeviceType.BIKE_COMPUTER),
+            ("ELEMNT BOLT", DeviceType.BIKE_COMPUTER),
+            ("Edge and Forerunner", DeviceType.BIKE_COMPUTER),
+            ("Forerunner 965", DeviceType.WATCH),
+            ("fēnix 7", DeviceType.WATCH),
+            ("Apple Watch Ultra", DeviceType.WATCH),
+            ("COROS PACE 3", DeviceType.WATCH),
+            ("Polar Vantage V3", DeviceType.WATCH),
+            ("Suunto Race S", DeviceType.WATCH),
+            ("COROS DURA", DeviceType.BIKE_COMPUTER),
+            ("Polar V650", DeviceType.BIKE_COMPUTER),
+            ("Bryton Rider 750", DeviceType.BIKE_COMPUTER),
+            ("COROS", None),
+            ("Polar", None),
+            ("Suunto Smart Sensor", None),
+            ("Synthetic Head Unit", None),
+            ("Hedgehog Tracker", None),
+        )
+        for device_name, expected in cases:
+            with self.subTest(device_name=device_name):
+                self.assertEqual(expected, map_one(device_name=device_name).device_type)
+
+    def test_out_of_range_extremes_become_none_with_issue(self) -> None:
+        cases = (
+            ({"max_speed": 101.0}, "max_speed_mps", "max_speed"),
+            ({"max_speed": -1.0}, "max_speed_mps", "max_speed"),
+            ({"max_watts": 5_001}, "max_power_w", "max_watts"),
+        )
+        for fields, attribute, field in cases:
+            with self.subTest(field=field, value=next(iter(fields.values()))):
+                result = map_rows([row(**fields)])
+
+                self.assertIsNone(getattr(result.records[0], attribute))
+                self.assertEqual(
+                    (MappingIssue("i-test", field, IssueReason.OUT_OF_RANGE),),
+                    result.issues,
+                )
+
+    def test_non_text_device_name_is_reported_and_none(self) -> None:
+        result = map_rows([row(device_name=5)])
+
+        self.assertIsNone(result.records[0].device_type)
+        self.assertIn(
+            MappingIssue("i-test", "device_name", IssueReason.INVALID_TYPE),
+            result.issues,
+        )
 
 
 class MalformedInputTests(unittest.TestCase):

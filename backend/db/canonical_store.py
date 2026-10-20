@@ -20,6 +20,7 @@ from backend.canonical.vocabulary import (
     ActivityLinkKind,
     ActivityRecordState,
     ActivitySessionState,
+    DeviceType,
     MetricKind,
     ProviderId,
     ProviderRecordState,
@@ -32,6 +33,13 @@ OBSERVATION_DETAILS: Final = "{}"
 ACTIVITY_DETAILS: Final = "{}"
 _ELAPSED_DURATION_KEY: Final = "elapsed_duration_s"
 _MAX_HR_KEY: Final = "max_hr"
+_MAX_SPEED_KEY: Final = "max_speed_mps"
+_MAX_POWER_KEY: Final = "max_power_w"
+_MIN_HR_KEY: Final = "min_hr"
+_ELEVATION_HIGH_KEY: Final = "elevation_high_m"
+_ELEVATION_LOW_KEY: Final = "elevation_low_m"
+_STEPS_KEY: Final = "steps"
+_DEVICE_TYPE_KEY: Final = "device_type"
 _PROVIDER_RECORD_EXISTS: Final = (
     "SELECT 1 AS present FROM provider_records "
     "WHERE provider = ? AND record_kind = ? AND source_record_id = ?"
@@ -495,6 +503,33 @@ def active_activity_rows(
     )
 
 
+def session_activity_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:
+    """Return the active activity rows bundled in one session, for detail reads.
+
+    The record set mirrors ``activity_detail_store.detail_sets_for_session``: rows
+    of the session itself and of sessions merged into it. A deleted session returns
+    nothing. Invalid and deleted records are never returned.
+    """
+    return _fetch_all(
+        db,
+        f"SELECT {', '.join(_ACTIVITY_READ_COLUMNS)} FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.state = ? AND "
+        "(s.activity_id = ? OR (s.state = ? AND s.merged_into = ?)) "
+        "AND NOT EXISTS (SELECT 1 FROM activity_sessions AS owner "
+        "WHERE owner.activity_id = ? AND owner.state = ?) "
+        "ORDER BY r.started_at, r.provider, r.provider_activity_id",
+        (
+            ActivityRecordState.ACTIVE.value,
+            activity_id,
+            ActivitySessionState.DUPLICATE.value,
+            activity_id,
+            activity_id,
+            ActivitySessionState.DELETED.value,
+        ),
+    )
+
+
 def active_activity_payload_texts(
     db: Any,
     *,
@@ -549,6 +584,25 @@ def active_activity_payload_texts(
     return [str(row["payload"]) for row in rows]
 
 
+def _current_version_clause(
+    versions: Mapping[str, int], oldest_versions: Mapping[str, int] | None
+) -> tuple[str, list[object]]:
+    """Return the parenthesised provider and version-window clause with its parameters.
+
+    A provider's rows count from the lower of its oldest pending version and its
+    current version up to the current one. Without ``oldest_versions`` the window
+    is the current version alone.
+    """
+    lowest = oldest_versions or {}
+    provider_clause = " OR ".join(
+        "(provider = ? AND mapper_version BETWEEN ? AND ?)" for _ in versions
+    )
+    params: list[object] = []
+    for provider, version in versions.items():
+        params.extend((provider, min(lowest.get(provider, version), version), version))
+    return f"({provider_clause})", params
+
+
 def current_observation_rows(
     db: Any,
     metric: str,
@@ -570,14 +624,9 @@ def current_observation_rows(
     is pending. Rows below the oldest version were retired by an earlier mapper
     and stay hidden.
     """
-    lowest = oldest_versions or {}
-    provider_clause = " OR ".join(
-        "(provider = ? AND mapper_version BETWEEN ? AND ?)" for _ in versions
-    )
-    params: list[object] = [metric]
-    for provider, version in versions.items():
-        params.extend((provider, min(lowest.get(provider, version), version), version))
-    clauses = ["metric = ?", f"({provider_clause})"]
+    version_clause, version_params = _current_version_clause(versions, oldest_versions)
+    params: list[object] = [metric, *version_params]
+    clauses = ["metric = ?", version_clause]
     if start is not None:
         clauses.append("observed_on >= ?")
         params.append(start)
@@ -591,6 +640,32 @@ def current_observation_rows(
         db,
         f"SELECT {', '.join(_OBSERVATION_READ_COLUMNS)} FROM observations "
         f"WHERE {' AND '.join(clauses)} ORDER BY observed_on, id",
+        tuple(params),
+    )
+
+
+def observation_metric_windows(
+    db: Any,
+    versions: Mapping[str, int],
+    *,
+    oldest_versions: Mapping[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    """Return the count and newest observed day of each provider metric, without values.
+
+    The rows are the ones ``current_observation_rows`` serves for the same
+    ``versions`` and ``oldest_versions``, so the counts match what the tables serve.
+    Each dict holds ``provider``, ``metric``, ``observations``, ``oldest`` and
+    ``newest`` (the earliest and latest ``observed_on`` as ISO text) and no other
+    column.
+    """
+    if not versions:
+        return []
+    version_clause, params = _current_version_clause(versions, oldest_versions)
+    return _fetch_all(
+        db,
+        "SELECT provider, metric, COUNT(*) AS observations, "
+        "MIN(observed_on) AS oldest, MAX(observed_on) AS newest FROM observations "
+        f"WHERE {version_clause} GROUP BY provider, metric",
         tuple(params),
     )
 
@@ -1016,6 +1091,16 @@ def _activity_details(record: ActivityRecord) -> str:
         for key, value in (
             (_ELAPSED_DURATION_KEY, record.elapsed_duration_s),
             (_MAX_HR_KEY, record.max_hr),
+            (_MAX_SPEED_KEY, record.max_speed_mps),
+            (_MAX_POWER_KEY, record.max_power_w),
+            (_MIN_HR_KEY, record.min_hr),
+            (_ELEVATION_HIGH_KEY, record.elevation_high_m),
+            (_ELEVATION_LOW_KEY, record.elevation_low_m),
+            (_STEPS_KEY, record.steps),
+            (
+                _DEVICE_TYPE_KEY,
+                None if record.device_type is None else record.device_type.value,
+            ),
         )
         if value is not None
     }
@@ -1034,17 +1119,65 @@ def activity_max_hr(details: object) -> float | None:
     return _activity_detail_number(details, _MAX_HR_KEY)
 
 
+def activity_max_speed(details: object) -> float | None:
+    """Return the maximum speed in metres per second stored in the details, if any."""
+    return _activity_detail_number(details, _MAX_SPEED_KEY)
+
+
+def activity_max_power(details: object) -> float | None:
+    """Return the maximum power in watts stored in an activity's details, if any."""
+    return _activity_detail_number(details, _MAX_POWER_KEY)
+
+
+def activity_min_hr(details: object) -> float | None:
+    """Return the minimum heart rate stored in an activity's details, if any."""
+    return _activity_detail_number(details, _MIN_HR_KEY)
+
+
+def activity_elevation_high(details: object) -> float | None:
+    """Return the highest elevation in metres stored in the details, if any."""
+    return _activity_detail_number(details, _ELEVATION_HIGH_KEY)
+
+
+def activity_elevation_low(details: object) -> float | None:
+    """Return the lowest elevation in metres stored in an activity's details, if any."""
+    return _activity_detail_number(details, _ELEVATION_LOW_KEY)
+
+
+def activity_steps(details: object) -> float | None:
+    """Return the step count stored in an activity's details, if any."""
+    return _activity_detail_number(details, _STEPS_KEY)
+
+
+def activity_device_type(details: object) -> DeviceType | None:
+    """Return the recording device type stored in an activity's details, if any.
+
+    A missing, non-text or unknown value is None; it never raises.
+    """
+    value = _activity_detail_value(details, _DEVICE_TYPE_KEY)
+    if not isinstance(value, str):
+        return None
+    try:
+        return DeviceType(value)
+    except ValueError:
+        return None
+
+
 def _activity_detail_number(details: object, key: str) -> float | None:
+    value = _activity_detail_value(details, key)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _activity_detail_value(details: object, key: str) -> object:
     if not isinstance(details, str):
         return None
     try:
         loaded = json.loads(details)
     except ValueError, RecursionError:
         return None
-    value = loaded.get(key) if isinstance(loaded, dict) else None
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    return float(value)
+    return loaded.get(key) if isinstance(loaded, dict) else None
 
 
 def _observation_values(
@@ -1221,6 +1354,60 @@ def activity_local_ids(
         ):
             local_ids[row["provider_activity_id"]] = row["activity_id"]
     return local_ids
+
+
+def activity_record_link(
+    db: Any, provider: str, provider_activity_id: str
+) -> dict[str, Any] | None:
+    """Return the local session id, origin and state of one provider activity record."""
+    return _fetch_row(
+        db,
+        "SELECT activity_id, recorded_by, state FROM activity_records "
+        "WHERE provider = ? AND provider_activity_id = ?",
+        (provider, provider_activity_id),
+    )
+
+
+def active_provider_record_hash(
+    db: Any, provider: str, record_kind: str, source_record_id: str
+) -> str | None:
+    """Return the payload hash of one active raw provider record, if stored."""
+    row = _fetch_row(
+        db,
+        "SELECT payload_hash FROM provider_records "
+        "WHERE provider = ? AND record_kind = ? AND source_record_id = ? "
+        "AND state = ?",
+        (provider, record_kind, source_record_id, ProviderRecordState.ACTIVE.value),
+    )
+    return None if row is None else str(row["payload_hash"])
+
+
+def activity_record_for_session(
+    db: Any, provider: str, activity_id: str
+) -> dict[str, Any] | None:
+    """Return the active provider record behind a session id or its merge alias.
+
+    The session must itself be active, or be a duplicate merged into
+    ``activity_id``; deleted sessions and non-active records never match.
+    """
+    return _fetch_row(
+        db,
+        "SELECT r.provider_activity_id, r.activity_id, r.recorded_by, r.state "
+        "FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.provider = ? AND r.state = ? "
+        "AND ((s.activity_id = ? AND s.state = ?) "
+        "OR (s.merged_into = ? AND s.state = ?)) "
+        "ORDER BY r.provider_activity_id LIMIT 1",
+        (
+            provider,
+            ActivityRecordState.ACTIVE.value,
+            activity_id,
+            ActivitySessionState.ACTIVE.value,
+            activity_id,
+            ActivitySessionState.DUPLICATE.value,
+        ),
+    )
 
 
 def _chunked(values: Sequence[str]) -> list[list[str]]:

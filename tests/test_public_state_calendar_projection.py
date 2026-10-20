@@ -121,6 +121,7 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
             today=date(2026, 9, 23),
             provider_window=calendar_window,
             default_name="Geplante Einheit",
+            sport_settings=(),
         )
         self.assertEqual(result.checkins, checkins)
         self.assertEqual(result.competitions, competitions)

@@ -89,6 +89,27 @@ class ActivityMatchingTests(unittest.TestCase):
         }
         self.assertEqual(match_planned_workouts(planned, [protected]), {1: protected})
 
+    def test_activity_paired_to_an_unlisted_event_still_matches_by_day_and_sport(self):
+        # The pairing points at a remote calendar event the local planned list does
+        # not hold, so the activity must not be left as an extra.
+        unit = {
+            "id": "local-unit",
+            "category": "WORKOUT",
+            "type": "VirtualRide",
+            "date": "2026-09-20",
+            "moving_time": 2700,
+        }
+        remote_paired = {
+            "id": "ride",
+            "paired_event_id": "remote-event",
+            "type": "VirtualRide",
+            "start_date_local": "2026-09-20T09:00:00",
+            "moving_time": 2760,
+        }
+        self.assertEqual(
+            match_planned_workouts([unit], [remote_paired]), {0: remote_paired}
+        )
+
     def test_unpaired_matching_is_same_date_same_sport_and_nearest_start(self):
         event = {
             "category": "WORKOUT",
@@ -110,7 +131,10 @@ class ActivityMatchingTests(unittest.TestCase):
             {"id": "near", "type": "Run", "start_date_local": "2026-09-20T10:01:00"},
         ]
         self.assertEqual(
-            _unpaired_activity_match(event, activities, set(range(len(activities)))), 3
+            _unpaired_activity_match(
+                event, activities, set(range(len(activities))), frozenset()
+            ),
+            3,
         )
 
     def test_unpaired_matching_has_deterministic_index_tie_break(self):
@@ -119,7 +143,9 @@ class ActivityMatchingTests(unittest.TestCase):
             {"id": "first", "type": "Run", "start_date_local": "2026-09-20"},
             {"id": "second", "type": "Run", "start_date_local": "2026-09-20"},
         ]
-        self.assertEqual(_unpaired_activity_match(event, activities, {0, 1}), 0)
+        self.assertEqual(
+            _unpaired_activity_match(event, activities, {0, 1}, frozenset()), 0
+        )
 
     def test_canonical_sports_beyond_legacy_families_match_the_same_sport(self):
         for planned_start in ("2026-09-20T10:00:00", "2026-09-20"):

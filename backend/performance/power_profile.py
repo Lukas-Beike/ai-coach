@@ -5,6 +5,7 @@ from itertools import pairwise
 from typing import Any
 
 from backend.performance.session_analysis import _number
+from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 
 POWER_DURATIONS = (5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600)
 LEGACY_POWER_DURATIONS = (5, 60, 300, 1200)
@@ -12,10 +13,12 @@ RUNNING_DURATIONS = (60, 300, 1200)
 RUNNING_DISTANCES = (1000, 5000)
 
 
-def power_profile(activity: dict[str, Any]) -> dict[str, Any]:
+def power_profile(
+    activity: dict[str, Any], *, source_label: str = INTERVALS_LABEL
+) -> dict[str, Any]:
     base = {
         "method": "original-stream-integral-v1",
-        "source": "Intervals.icu original watts stream",
+        "source": f"{source_label} original watts stream",
         "scope": "Beobachtete Bestwerte dieser Aufzeichnung; keine FTP-, CP- oder W'-Schätzung.",
     }
     streams = activity.get("streams") or {}
@@ -51,13 +54,15 @@ def power_profile(activity: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def running_profile(activity: dict[str, Any]) -> dict[str, Any]:
+def running_profile(
+    activity: dict[str, Any], *, source_label: str = INTERVALS_LABEL
+) -> dict[str, Any]:
     """Return observed running speed and distance efforts with exact coverage."""
     base = {
         "name": "running_best_efforts",
         "type": "running",
         "method": "original-stream-running-v1",
-        "source": "Intervals.icu original speed/distance streams",
+        "source": f"{source_label} original speed/distance streams",
         "scope": "Beobachtete Laufbelastungen; Lücken und Pausen bleiben unbekannt.",
     }
     if activity.get("type") not in {"Run", "VirtualRun", "TrailRun"}:

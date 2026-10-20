@@ -5,7 +5,7 @@ import threading
 import time
 import unittest
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -214,8 +214,8 @@ class ServerRuntimeTests(ServerTestCase):
                 },
             }
         )
-        self.assertEqual(start, datetime(2026, 9, 3, 21, 30, tzinfo=timezone.utc))
-        self.assertEqual(end, datetime(2026, 9, 4, 5, 45, tzinfo=timezone.utc))
+        self.assertEqual(start, datetime(2026, 9, 3, 21, 30, tzinfo=UTC))
+        self.assertEqual(end, datetime(2026, 9, 4, 5, 45, tzinfo=UTC))
 
     def test_background_worker_forwards_live_deltas_and_completion_to_attached_stream(
         self,

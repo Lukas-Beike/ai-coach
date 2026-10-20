@@ -148,7 +148,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 - **Reliable Hash-Based Navigation**: Accessible URL routing (`#coach`, `#plan`, `#analysis`, `#more`) preserving browser history, deep links, and screen-reader announcements.
 - **Immutable Static Asset Caching**: Versioned static asset serving with one-year immutable cache headers, accompanied by instant service worker cache eviction on updates.
 - **Resilient Offline App Shell**: Pre-cached application shell allowing view navigation and inspection of previously loaded training data during network drops. Changes are not queued while offline: saving shows a connection message and nothing is sent later.
-- **Instant Start from Device Data**: The last loaded training state is stored on this device and shown immediately at every start, before the session check and fresh data complete; each area is shown and stored on the device as soon as its own data arrives, without waiting for slower areas; an area that fails to load keeps its previously stored data. Nutrition and season views likewise show their last loaded data while they refresh. The latest 20 Coach messages are stored on the device as soon as they are shown, so a start shows the current conversation even when the rest of the stored state is older; earlier messages load when scrolling up. While the Coach shows these stored messages the chat stays at the newest one and a "Nachrichten werden synchronisiert…" note replaces the jump-to-latest button until the fresh messages have loaded or the load has failed. If the network is slow, the cached app page starts after 2.5 seconds, and an offline start keeps the stored data and checks the session again every 15 seconds or as soon as the network returns. After an app update the start shows an "Update wird verarbeitet…" loading screen until the fresh start data arrives; if the server cannot be reached, the previous data is shown instead. Logout, an expired session and a privacy deletion remove this device data.
+- **Instant Start from Device Data**: The last loaded training state is stored on this device and shown immediately at every start, before the session check and fresh data complete; each area is shown and stored on the device as soon as its own data arrives, without waiting for slower areas; an area that fails to load keeps its previously stored data. Nutrition and season views likewise show their last loaded data while they refresh. The latest 20 Coach messages are stored on the device as soon as they are shown, so a start shows the current conversation even when the rest of the stored state is older; earlier messages load when scrolling up. While the Coach shows these stored messages the chat stays at the newest one, unless the athlete has already scrolled the chat, and a "Nachrichten werden synchronisiert…" note replaces the jump-to-latest button until the fresh messages have loaded or the load has failed. If the network is slow, the cached app page starts after 2.5 seconds, and an offline start keeps the stored data and checks the session again every 15 seconds or as soon as the network returns. After an app update the start shows an "Update wird verarbeitet…" loading screen until the fresh start data arrives; if the server cannot be reached, the previous data is shown instead. Logout, an expired session and a privacy deletion remove this device data.
 - **Auto-Reconnecting SSE Streaming**: Server-Sent Events stream with exponential backoff (capping at 30 seconds) ensuring smooth recovery after connection drops.
 - **Touch-Friendly Collapsible Views**: Ergonomic mobile interface featuring collapsible profile headers, compact calendar cards, and thumb-friendly bottom navigation.
 - **Light and Dark Appearance**: Choose the system setting, light mode, or dark mode under More → Appearance; the choice is stored on this device.
@@ -445,6 +445,7 @@ The app can connect to Wahoo through OAuth and reads its workouts. Library worko
 6. Tokens are stored in the encrypted database, refreshed with rotation before expiry, and excluded from exports, diagnostics and coach context. The state JSON reports only `configured`, `connected`, `scope` and `connected_at`.
 7. **What is synced:** Wahoo is polled only; no webhooks are used. Once connected, the startup and daily schedulers enqueue a Wahoo refresh (default window 84 days). Workouts are stored as canonical activities with the provider `wahoo` and local dates, including duration, moving time, distance, ascent, average heart rate, cadence and power, normalized power, work (kJ) and the Training Stress Score as a separate TSS load model that is never summed with Intervals.icu or Garmin load. Calories and speed stay only in the raw record, and the workout file download URL is not stored. The sync status shows them as "Wahoo". While connected, the Wahoo card offers "Jetzt synchronisieren" (`POST /api/wahoo/sync`, queues a refresh over the default window) and "Vollständig neu synchronisieren" (`POST /api/wahoo/full-resync`, re-reads the maximum window of 90 days). The full resync deletes no local data and never writes to Wahoo; if Wahoo holds more workouts than one run can read, the newest are stored and the resync is reported as failed instead of complete. While it runs, scheduled and manual Wahoo syncs and plan exports are rejected with a busy message. A disconnected account is skipped with the not-connected message; stored activities are kept. Two threshold reads follow the same run: `power_zones_read` supplies the newest cycling FTP and `user_read` the profile weight. They are the lowest-priority sources for current FTP and weight, after Garmin and Intervals.icu. A Wahoo FTP or weight observed more than 90 days before the athlete's local today is not used as the current value; it stays stored for history. A read whose scope was not granted is skipped, and a 403 or 404 on either read is non-fatal while the workouts are still stored; any other failure stops the run.
 8. **Explicit plan export.** A library workout is uploaded to Wahoo as a plan only by the explicit library synchronization action with the target `wahoo` (`POST /api/sync/jobs` with `{"provider": "wahoo", "type": "plan_push", "payload": {"entries": [...]}}`, using the same session and CSRF protections and the same preview hash as Intervals.icu). Intervals.icu stays the default target; the Coach and adaptive replanning never export to Wahoo. The Wahoo plan id is kept in the local remote links, so a second sync updates the same plan instead of creating a duplicate, and a plan deleted at Wahoo is created again. Without a connected Wahoo account the request is rejected with a reconnect hint and nothing is written. Wahoo plans support cycling and running workouts with time-based steps and absolute targets (`W` or `BPM`, or a pace for runs). Ramps, zone targets, other sports, and percentage targets (which need an FTP or heart-rate reference that is not synchronized to Wahoo) are rejected for that workout with a clear message; the other selected workouts still sync. Format reference: <https://cloud-api.wahooligan.com/docs/plan-json-format.pdf>.
+9. **Workout files.** After a sync, the FIT files of at most 10 workouts per run are downloaded read-only and kept as full-resolution streams and laps, a failed download is retried at most three times per workout version and an empty file is not retried; the signed download link is never stored or logged.
 
 ---
 
@@ -469,6 +470,7 @@ Conversational turns are persisted in `coach_commands`; provider synchronization
 ### Provider Data Handling
 - **Intervals.icu Activity Pull**: Ingests new completed workouts with full telemetry (duration, distance, TSS, HR zones, power curves). Large imports are safely fetched in paginated windows.
 - **Garmin Sleep Gate & Body Battery**: Morning synchronization deliberately halts until Garmin's sleep window completes. Body Battery tracking captures the final pre-sleep value and the wake-up value within 60 minutes of rising, retrying up to 3 times with 15-minute intervals.
+- **Garmin Activity Details**: After each successful automatic or manual Garmin sync, the details of up to ten recent Garmin activities from the last 90 days load automatically, newest first and read-only; the backfill pauses after a Garmin rate limit, and manual activities are skipped.
 - **Open-Meteo Weather**: Forecasts are fetched for the athlete's coordinates and cached for 3 hours. For locations in Germany, the first two days use the DWD ICON-D2 model; other locations and the remaining days up to 14 use ECMWF IFS HRES. Air quality comes from the Open-Meteo Air Quality API; the DWD pollen region is resolved from the coordinates through the DWD GeoServer and its levels are read from the DWD open-data feed. Both sources are optional: a failure is logged and the weather forecast is still cached. Attribution: Open-Meteo.com, Copernicus Atmosphere Monitoring Service, and Deutscher Wetterdienst (CC BY 4.0).
 - **iCalendar (ICS) Life Constraints**: The external feed is parsed up to 8 weeks out. Events containing `[NO_TRAINING]`, `[NO_INTENSITY]`, or `[SHORT_ONLY]` in their description are tagged as training constraints.
 
@@ -674,13 +676,43 @@ python -m compileall -q server.py backend tests
 ```
 
 #### Parallel Sharded CI Runner
-Run test shards matching the GitHub Actions CI pipeline:
+CI splits the native suite into `PYTHON_TEST_SHARDS` shards (currently 4). Each
+shard keeps every `TestCase` class whole, so class-level fixtures such as
+`ServerTestCase.setUpClass` run once per class. Classes are assigned heaviest-first
+to the least-loaded shard, so the assignment is deterministic and does not depend
+on discovery order. A class weighs its recorded wall time from
+`tests/test_durations.json`; a class without a recording weighs its test count
+times the median recorded seconds per test. The quality job fails unless every
+shard uploads exactly one coverage file. Run one shard locally, or list its test
+IDs without running them:
 ```powershell
 python tests/run_tests.py --shard 1 --total 4
+python tests/run_tests.py --shard 1 --total 4 --list
+```
+Refresh the recording when shard times drift apart, with a full unsharded run in
+the image. The Windows runner uses the same read-only mounts and writes the file
+into the given directory, which then replaces `tests/test_durations.json`:
+```powershell
+New-Item -ItemType Directory -Force $env:TEMP\durations | Out-Null
+.\tests\run_sqlcipher_tests.ps1 -RecordDurationsDirectory $env:TEMP\durations
+Copy-Item $env:TEMP\durations\test_durations.json tests\test_durations.json
+```
+
+#### Container-Sensitive Suite
+`--suite container` runs only the modules that depend on the container runtime:
+SQLCipher, the read-only non-root runtime, configuration, startup, security limits,
+privacy, and authentication sessions. The CI `container_tests` job runs this subset
+inside the built image. The default `--suite all` runs everything:
+```powershell
+python tests/run_tests.py --suite container --list
 ```
 
 #### Isolated SQLCipher Integration Tests
-Execute full SQLCipher container tests without exposing local host `.env` or data files:
+`tests/run_sqlcipher_tests.ps1` builds the image and runs the full native suite
+(`python /review/tests/run_tests.py`) in a read-only, network-less container, without
+exposing local host `.env` or data files. Only test inputs are mounted from the
+checkout, including `scripts/` read-only for the demo-container contract tests; the
+application code comes from the freshly built image:
 ```powershell
 ./tests/run_sqlcipher_tests.ps1
 ```
@@ -692,8 +724,17 @@ npm ci
 npm run test:e2e
 ```
 Functional contracts run once on desktop. Tests tagged `@responsive` also run on
-all four smaller viewports. CI runs the five projects in independent jobs, with
-a fresh disposable SQLCipher fixture per spec and one worker per invocation.
+all four smaller viewports. CI builds the application image once per run, shares
+it as the `ai-coach-ci-image` artifact with the native container, SBOM and browser
+jobs, and runs the five projects in independent jobs that start as soon as the
+image exists, in parallel with the native tests; publishing still needs both. Each
+project derives its spec list from `playwright test --list --project <project>`:
+desktop covers every spec file, split round-robin over two jobs, and the other
+projects run only files whose test titles match `@responsive`.
+Each spec gets a fresh disposable SQLCipher fixture, and the next spec's fixture is
+prewarmed while the current one runs; there is one worker per invocation. Browser
+traces are local-only: CI turns them off because CI artifacts are public and traces
+embed the fixture session.
 Chromium downloads are cached by the locked dependency version; system
 dependencies are installed on every runner. Follow
 `.agents/skills/ai-coach-pwa-e2e/references/browser-validation.md` for safe local
@@ -844,10 +885,10 @@ pip-compile --allow-unsafe --generate-hashes --output-file=requirements.txt requ
 pip-compile --allow-unsafe --generate-hashes --output-file=requirements-dev.txt requirements-dev.in
 ```
 
-### Continuous Integration & Native Codex Reviews
+### Continuous Integration & Gitar Reviews
 - **Conventional Commits**: All commit messages and pull request titles must follow the Conventional Commits specification (e.g., `feat(coach): add structured response support` or `fix(sync): resolve Garmin sleep retry backoff`).
 
-- **Native Codex Reviews**: In [Codex Settings](https://chatgpt.com/codex/settings/code-review), enable automatic code review for this repository and select the trigger for new PRs and subsequent pushes. The watchdog waits at most three minutes for a native Codex comment. If none appears, it posts one `@codex review` fallback for that PR commit, then waits up to three minutes for the regular review or explicit exhausted-usage response. The latter grants an availability exception. Continued silence after the bounded fallback wait is non-blocking and reported as review unavailable, never a completed review or proof of exhausted credits. Explicit integration failures and GitHub API errors remain blocking. Trusted same-repository release-bot version and promotion PRs receive an automation exception. All other required checks and review-thread protections remain enforced. A later Codex comment or submitted review automatically reruns the check and recovers a late response. Inspect the reviewed commit and resolve all findings before merging. Local `codex review --base origin/develop` is an optional preflight. Require the `Codex review availability` context in each protected branch's ruleset. Account-level activation must be verified in Codex Settings. Copilot automatic review is disabled in repository rulesets.
+- **Gitar Reviews**: The installed Gitar GitHub App provides the required `Gitar` check for the current PR head. Both `develop` and `main` rulesets require this context from `gitar-bot` (integration ID `827041`), alongside the existing CI checks. Missing, pending, or failed Gitar checks block merging; there is no Codex watchdog or automatic `@codex review` fallback. Both rulesets require all review conversations to be resolved, including outdated threads and findings from other reviewers, with no bypass actors or exceptions for dependency/release bots. Fix or reconcile findings before resolving threads. Ordinary PR comments have no resolved state: complete their requested action or record an evidence-based disposition before merging. Hosted automatic review settings are managed in Gitar; disable the former automatic Codex review in [Codex Settings](https://chatgpt.com/codex/settings/code-review) if it is still enabled. Local review remains optional additional evidence.
 - **Dependency Updates**: Dependabot updates pip, npm, Docker and GitHub Actions on `develop`. Squash auto-merge is enabled for patch, minor and major updates; protected-branch checks and review-thread resolution still apply. The privileged auto-merge workflow never checks out or executes PR code.
 - **Automated Daily Releases**: At 03:00 UTC, an automated workflow inspects `develop`. If new commits exist, it creates a version-bump PR and a promotion PR to protected `main`. Both branches require native, SQLCipher container, quality and browser checks without bypass actors. After successful main tests, the workflow creates an immutable GitHub release and publishes the container. The container digest is signed and verified before promoting `latest`; the version tag and `latest` must resolve to that same digest. A read-only release preflight also verifies `APP_VERSION` before its tag exists. Actions use read-only default permissions, with explicit job-level write permissions where needed.
 
@@ -891,7 +932,7 @@ The **Body** section starts with a two-row table of the latest measured weight a
 
 Erholung shows the latest fourteen days including today without a period selector, using three aligned charts with independent scales for sleep duration, nightly HRV and resting heart rate. Daily sleep is shown as bars starting at zero, with an average line; hours are formatted as hours and minutes. HRV and resting heart rate show the existing source-specific 42-day personal quartiles only when at least 14 comparable earlier measurements support them; provisional ranges and insufficient or stale baselines remain explicit. Every day retains its original observation; missing days remain gaps, and no missing measurement counts as zero. Each metric uses one source and measurement method: the freshest series wins, with Intervals.icu preferred on equal dates and Garmin used when fresher or unavailable from Intervals.icu. Sources, measurement dates and coverage remain available in tooltips; tap or keyboard-activate a day for details, or open the original-value table. Chart legends show only metric names. Values, dates, sources, coverage, changes and explanatory notes are available in legend and point tooltips; expandable tables retain the original values. Personal reference ranges use a green background band. Recovery bands update with new observations; load and performance charts do not show personal reference bands. Mixed-unit secondary axes have been removed. Personal deviations and positive TSB do not constitute a medical or training clearance.
 
-Charts preserve provider provenance and observation dates. Garmin performance metrics have no Intervals.icu fallback; eFTP uses Intervals.icu estimates and never manually configured FTP. Numeric labels are reduced when they would overlap, without removing data points. Tap a day or open Werte ansehen for complete values. Sleep shows minimum and maximum below the plot and its average beside the dashed line. HRV and resting-heart-rate personal reference bands use earlier 42-day matching measurements, with at least fourteen observations (provisional below 28). These are personal quartiles, not medical or sport-wide targets. Historical availability depends on the sync window. Charts are read-only and never trigger provider requests.
+Charts preserve provider provenance and observation dates. Garmin performance metrics have no Intervals.icu fallback; eFTP uses Intervals.icu estimates and never manually configured FTP. Numeric labels are reduced when they would overlap, without removing data points. Tap a day or open Werte ansehen for complete values. Sleep shows minimum and maximum below the plot and its average beside the dashed line. HRV and resting-heart-rate personal reference bands use earlier 42-day matching measurements, with at least fourteen observations (provisional below 28). These are personal quartiles, not medical or sport-wide targets. Where Garmin provides them, the analysis also shows dated training readiness and weekly training load history; missing values remain gaps. Historical availability depends on the sync window. Charts are read-only and never trigger provider requests.
 
 ### Aktivitätsdetails
 
@@ -915,7 +956,7 @@ unterstützten Grenze von 172.800 Punkten und 24 MiB je Aktivität.
 
 Equipment and maintenance has its own More section, separate from Profile. Coach-managed local equipment records are authoritative for lifecycle actions, including assignment, maintenance, archive and restore; archived items are kept in collapsed archive groups. Garmin inventory and per-item statistics supply linked usage readings and status context without taking over the local lifecycle. The Garmin sync also reads, per gear item and read-only, the activities Garmin lists for it (up to 1000, stored as `activity_ids` in the existing Garmin snapshot; an item with more Garmin activities links only the 1000 Garmin returns. A failed or unsupported read keeps the item's last known list, marked stale; without one, the item links nothing, which means unknown rather than empty). While an item's list is truncated or stale, maintenance intervals counted from its sessions, which are hours and a component's distance, show partial coverage and no not-due result; a Garmin item's distance interval still uses Garmin's own total. The equipment read lists at most 2000 assignments, explicit ones first, but usage counts all of them. Those Garmin activities are matched to Intervals.icu activities through the stored activity matches and through an Intervals.icu `external_id` equal to the Garmin activity id, and count as sessions and hours of the Garmin-linked main item without a manual assignment, once per session after duplicate removal and without a sport check. An activity Garmin lists for several main items, for example a bike and a power meter, links to each of them, as in Garmin's own totals. An explicit assignment, including an explicit unassignment, always overrides every Garmin link of that activity. Garmin mileage still comes from the Garmin inventory total. A still-open imported item the athlete has not saved and that has no components takes the sport that at least three quarters of all its linked activities, unknown types included, and at least three of them name; an athlete-chosen or earlier sport is never replaced, and an item with components or an ambiguous mix stays open. Garmin's `maximumMeters` is a lifetime target used for target/progress display, not additional distance: it is never added to Garmin's usage counter or assigned activity distances. A progress bar appears only when a valid target is known. Failed Garmin reads retain the last successful inventory, while a successful empty inventory clears the mirrored Garmin list.
 
-Calendar cards include a compact interval profile when explicit timed workout steps or current locally cached original samples are available. Width represents time, height represents intensity, and known zones supply colors. Recorded sample gaps remain empty; stale detail profiles are excluded. Absolute targets without known historical zones use neutral colors. No provider requests are triggered by rendering the calendar.
+Calendar cards include a compact interval profile when explicit timed workout steps or current locally cached original samples are available. Width represents time, height represents intensity, and known zones supply colors. Recorded sample gaps remain empty; stale detail profiles are excluded. Zone limits follow the synced Intervals.icu sport settings of the unit's sport (3 to 7 zones; indoor and virtual units use the indoor FTP) and fall back to the standard limits. Absolute watt or bpm targets are colored as an estimate from the sport's FTP or LTHR and the card says so; without that threshold they use neutral colors. No provider requests are triggered by rendering the calendar.
 
 Die Ernährungsnavigation enthält das Tagebuch, gespeicherte Mahlzeiten und die Produktbibliothek. Das Erfassen eines lokalen Produkts erstellt einen bearbeitbaren Coach-Entwurf; es wird nichts automatisch gesendet oder gespeichert. Coach-Anfragen bleiben über die Hauptnavigation verfügbar.
 

@@ -7,6 +7,7 @@ account, network, real data directory or encryption key is involved.
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -22,6 +23,7 @@ from backend.canonical.records import (
     Provenance,
 )
 from backend.canonical.vocabulary import (
+    DeviceType,
     Environment,
     LoadModel,
     MetricKind,
@@ -764,6 +766,176 @@ class ActivityMetricStoreTests(StoreFixture):
         self.assertEqual(
             61.0, canonical_store.activity_elapsed_duration('{"elapsed_duration_s":61}')
         )
+
+    def test_extremes_and_device_type_round_trip_through_the_details(self) -> None:
+        def write(record: ActivityRecord) -> WriteOutcome:
+            return canonical_store.upsert_activity_record(
+                self.db,
+                record,
+                local_date=date(2026, 6, 1),
+                mapper_version=5,
+                fetched_at=STAMP,
+                now=STAMP,
+            )
+
+        record = replace(
+            activity("walk-1"),
+            max_speed_mps=7.5,
+            max_power_w=1100.0,
+            min_hr=52.0,
+            elevation_high_m=812.0,
+            elevation_low_m=-3.0,
+            steps=12000.0,
+            device_type=DeviceType.WATCH,
+        )
+        self.assertIs(WriteOutcome.WRITTEN, write(record))
+        self.assertIs(WriteOutcome.UNCHANGED, write(record))
+        details = self.one("SELECT details FROM activity_records")[0]
+        self.assertEqual(
+            {
+                "device_type",
+                "elevation_high_m",
+                "elevation_low_m",
+                "max_power_w",
+                "max_speed_mps",
+                "min_hr",
+                "steps",
+            },
+            set(json.loads(details)),
+        )
+        row = canonical_store.active_activity_rows(self.db)[0]
+        details = row["details"]
+        self.assertEqual(7.5, canonical_store.activity_max_speed(details))
+        self.assertEqual(1100.0, canonical_store.activity_max_power(details))
+        self.assertEqual(52.0, canonical_store.activity_min_hr(details))
+        self.assertEqual(812.0, canonical_store.activity_elevation_high(details))
+        self.assertEqual(-3.0, canonical_store.activity_elevation_low(details))
+        self.assertEqual(12000.0, canonical_store.activity_steps(details))
+        self.assertIs(DeviceType.WATCH, canonical_store.activity_device_type(details))
+
+        self.assertIs(WriteOutcome.UPDATED, write(activity("walk-1")))
+        self.assertEqual(
+            canonical_store.ACTIVITY_DETAILS,
+            self.one("SELECT details FROM activity_records")[0],
+        )
+
+    def test_unreadable_extremes_and_device_type_are_none(self) -> None:
+        for details in (
+            None,
+            "{",
+            '{"device_type":"tablet"}',
+            '{"device_type":5}',
+            '{"max_speed_mps":"7"}',
+            '{"steps":true}',
+        ):
+            with self.subTest(details=details):
+                self.assertIsNone(canonical_store.activity_device_type(details))
+                self.assertIsNone(canonical_store.activity_max_speed(details))
+                self.assertIsNone(canonical_store.activity_steps(details))
+
+
+class ObservationMetricWindowTests(StoreFixture):
+    """Counts and newest days per metric follow the rows the tables serve."""
+
+    def write(
+        self,
+        observed_on: date,
+        *,
+        mapper_version: int,
+        kind: MetricKind = MetricKind.WEIGHT,
+        provider: ProviderId = ProviderId.INTERVALS,
+    ) -> None:
+        canonical_store.upsert_observation(
+            self.db,
+            observation(kind=kind, observed_on=observed_on, provider=provider),
+            mapper_version=mapper_version,
+            now=STAMP,
+        )
+
+    def windows(
+        self,
+        versions: dict[str, int],
+        oldest_versions: dict[str, int] | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = canonical_store.observation_metric_windows(
+            self.db, versions, oldest_versions=oldest_versions
+        )
+        return sorted(rows, key=lambda row: row["metric"])
+
+    def test_current_rows_are_counted_with_their_newest_day(self) -> None:
+        self.write(date(2026, 10, 1), mapper_version=2)
+        self.write(date(2026, 10, 3), mapper_version=2)
+        self.write(date(2026, 10, 2), mapper_version=2, kind=MetricKind.CTL)
+
+        self.assertEqual(
+            self.windows({"intervals": 2}),
+            [
+                {
+                    "provider": "intervals",
+                    "metric": "ctl",
+                    "observations": 1,
+                    "oldest": "2026-10-02",
+                    "newest": "2026-10-02",
+                },
+                {
+                    "provider": "intervals",
+                    "metric": "weight",
+                    "observations": 2,
+                    "oldest": "2026-10-01",
+                    "newest": "2026-10-03",
+                },
+            ],
+        )
+
+    def test_superseded_rows_are_not_counted_and_do_not_move_the_newest_day(
+        self,
+    ) -> None:
+        self.write(date(2026, 10, 1), mapper_version=2)
+        self.write(date(2026, 10, 5), mapper_version=1)
+
+        [row] = self.windows({"intervals": 2})
+
+        self.assertEqual(row["observations"], 1)
+        self.assertEqual(row["newest"], "2026-10-01")
+
+    def test_same_natural_key_at_a_newer_version_counts_once(self) -> None:
+        self.write(date(2026, 10, 1), mapper_version=1)
+        self.write(date(2026, 10, 1), mapper_version=2)
+
+        [row] = self.windows({"intervals": 2})
+
+        self.assertEqual(row["observations"], 1)
+
+    def test_pending_reprojection_counts_rows_from_the_oldest_version(self) -> None:
+        self.write(date(2026, 10, 1), mapper_version=1)
+        self.write(date(2026, 10, 2), mapper_version=2)
+        self.write(date(2026, 10, 3), mapper_version=3)
+
+        [row] = self.windows({"intervals": 3}, {"intervals": 2})
+
+        self.assertEqual(row["observations"], 2)
+        self.assertEqual(row["newest"], "2026-10-03")
+        [without_window] = self.windows({"intervals": 3})
+        self.assertEqual(without_window["observations"], 1)
+
+    def test_only_provider_metric_and_window_columns_are_selected(self) -> None:
+        self.write(date(2026, 10, 1), mapper_version=2)
+
+        [row] = self.windows({"intervals": 2})
+
+        self.assertEqual(
+            set(row), {"provider", "metric", "observations", "oldest", "newest"}
+        )
+
+    def test_other_providers_are_not_counted(self) -> None:
+        self.write(date(2026, 10, 1), mapper_version=2, provider=ProviderId.GARMIN)
+
+        self.assertEqual(self.windows({"intervals": 2}), [])
+
+    def test_no_versions_yield_no_windows(self) -> None:
+        self.write(date(2026, 10, 1), mapper_version=2)
+
+        self.assertEqual(self.windows({}), [])
 
 
 if __name__ == "__main__":

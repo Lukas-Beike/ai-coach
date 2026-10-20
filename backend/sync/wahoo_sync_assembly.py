@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -14,13 +15,19 @@ from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.providers.wahoo_client import WahooClient
+from backend.providers.wahoo_fit_download import download_wahoo_fit
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import ProviderRegistry
+from backend.sync.wahoo_activity_details import WahooActivityDetailImport
 from backend.sync.wahoo_connection import WahooConnectionService
 from backend.sync.wahoo_plan_push import WahooPlanPushService
-from backend.sync.wahoo_sync import WahooSyncClock, WahooSyncService
+from backend.sync.wahoo_sync import (
+    WahooSyncClock,
+    WahooSyncService,
+    WahooSyncStorage,
+)
 from backend.sync.wahoo_workout_export import WahooWorkoutExport
 
 
@@ -49,6 +56,7 @@ class WahooSyncAssembly:
         self._inputs = inputs
         self._service: WahooSyncService | None = None
         self._plan_push: WahooPlanPushService | None = None
+        self._details: WahooActivityDetailImport | None = None
         self._lock = threading.Lock()
 
     def client(self) -> WahooClient:
@@ -70,17 +78,35 @@ class WahooSyncAssembly:
                     config=inputs.config,
                     connection=inputs.connection,
                     source=self.client,
-                    database_manager=inputs.database_manager,
-                    database_lock=inputs.database_lock,
-                    key_values=inputs.key_values,
+                    storage=WahooSyncStorage(
+                        database_manager=inputs.database_manager,
+                        database_lock=inputs.database_lock,
+                        key_values=inputs.key_values,
+                    ),
                     daily_markers=inputs.daily_markers,
                     observer=inputs.observer,
                     registry=inputs.registry,
                     clock=WahooSyncClock(inputs.now, inputs.zone_provider),
                     logger=inputs.logger,
                     gate=inputs.resync_gate,
+                    details=self.activity_detail_import,
                 )
             return self._service
+
+    def activity_detail_import(self) -> WahooActivityDetailImport:
+        """Share one detail importer; it runs only after a sync has committed."""
+        with self._lock:
+            if self._details is None:
+                inputs = self._inputs
+                self._details = WahooActivityDetailImport(
+                    database_manager=inputs.database_manager,
+                    database_lock=inputs.database_lock,
+                    key_values=inputs.key_values,
+                    download=download_wahoo_fit,
+                    monotonic=time.monotonic,
+                    logger=inputs.logger,
+                )
+            return self._details
 
     def workout_export(self) -> WahooWorkoutExport:
         """Create the library export target; the client resolves per remote call."""

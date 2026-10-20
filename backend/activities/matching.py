@@ -103,14 +103,24 @@ def _paired_activity_match(
     )
 
 
-def _is_unpaired(activity: dict[str, Any]) -> bool:
-    return _first_present(activity, ("paired_event_id", "pairedEventId")) in (None, "")
+def _is_unpaired(activity: dict[str, Any], planned_ids: frozenset[str]) -> bool:
+    """Return whether the activity is free to match by day and sport.
+
+    An activity paired to an event that is not in the planned list (a remote
+    calendar event the local library does not hold) is free; one paired to a
+    listed event belongs to that event only.
+    """
+    paired_id = _first_present(activity, ("paired_event_id", "pairedEventId"))
+    return paired_id is None or str(paired_id) not in planned_ids
 
 
 def _same_day_candidates(
-    event: dict[str, Any], activity_rows: list[dict[str, Any]], unused: set[int]
+    event: dict[str, Any],
+    activity_rows: list[dict[str, Any]],
+    unused: set[int],
+    planned_ids: frozenset[str],
 ) -> list[int]:
-    """Return unused, unpaired activities on the unit's day and canonical sport."""
+    """Return unused, unclaimed activities on the unit's day and canonical sport."""
     event_sport = _activity_sport(event)
     if event_sport == Sport.OTHER:
         return []
@@ -118,7 +128,7 @@ def _same_day_candidates(
     return [
         activity_index
         for activity_index in unused
-        if _is_unpaired(activity_rows[activity_index])
+        if _is_unpaired(activity_rows[activity_index], planned_ids)
         and record_date(
             _first_present(activity_rows[activity_index], _ACTIVITY_START_FIELDS)
         )
@@ -185,11 +195,14 @@ def _best_fit_date_only_matches(
     units: list[tuple[int, dict[str, Any]]],
     activity_rows: list[dict[str, Any]],
     unused: set[int],
+    planned_ids: frozenset[str],
 ) -> dict[int, int]:
     """Assign date-only units to activities one-to-one, best-ranked pairs first."""
     ranked: list[tuple[tuple[Any, ...], int, int]] = []
     for unit_index, unit in units:
-        for activity_index in _same_day_candidates(unit, activity_rows, unused):
+        for activity_index in _same_day_candidates(
+            unit, activity_rows, unused, planned_ids
+        ):
             rank = _best_fit_rank(unit, activity_rows[activity_index], activity_index)
             ranked.append((rank, unit_index, activity_index))
     assignments: dict[int, int] = {}
@@ -203,12 +216,15 @@ def _best_fit_date_only_matches(
 
 
 def _unpaired_activity_match(
-    event: dict[str, Any], activity_rows: list[dict[str, Any]], unused: set[int]
+    event: dict[str, Any],
+    activity_rows: list[dict[str, Any]],
+    unused: set[int],
+    planned_ids: frozenset[str],
 ) -> int | None:
     event_start = _activity_datetime(_first_present(event, _UNIT_START_FIELDS))
     candidates = [
         (_start_distance(activity_rows[index], event_start), index)
-        for index in _same_day_candidates(event, activity_rows, unused)
+        for index in _same_day_candidates(event, activity_rows, unused, planned_ids)
     ]
     return min(candidates)[1] if candidates else None
 
@@ -222,6 +238,11 @@ def match_planned_workouts(
     matches: dict[int, dict[str, Any]] = {}
     workout_rows = _planned_workout_rows(planned)
     by_paired_id = _activities_by_paired_event_id(activity_rows)
+    planned_ids = frozenset(
+        str(event_id)
+        for event in planned
+        if (event_id := _first_present(event, ("id", "event_id"))) is not None
+    )
 
     # paired_event_id is the reliable Intervals.icu association.
     for event_index, event in workout_rows:
@@ -248,15 +269,18 @@ def match_planned_workouts(
 
     # Manually logged units with a start time keep the nearest-start rule.
     for event_index, event in timed_units:
-        selected_index = _unpaired_activity_match(event, activity_rows, unused)
+        selected_index = _unpaired_activity_match(
+            event, activity_rows, unused, planned_ids
+        )
         if selected_index is not None:
             matches[event_index] = activity_rows[selected_index]
             unused.remove(selected_index)
 
     # Date-only units are paired by best fit, so input order cannot decide who wins
-    # a same-day activity. Pairing is one-to-one and never steals a paired activity.
+    # a same-day activity. Pairing is one-to-one and never steals an activity that
+    # is paired to a listed event.
     for event_index, activity_index in _best_fit_date_only_matches(
-        date_only_units, activity_rows, unused
+        date_only_units, activity_rows, unused, planned_ids
     ).items():
         matches[event_index] = activity_rows[activity_index]
         unused.remove(activity_index)

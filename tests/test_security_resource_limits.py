@@ -8,7 +8,7 @@ import socket
 import threading
 import time
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -32,19 +32,19 @@ class CalendarResourceLimitsTests(unittest.TestCase):
                 CountedDateTime.comparisons += 1
                 return super().__eq__(other)
 
-        start = CountedDateTime(2026, 9, 1, tzinfo=timezone.utc)
+        start = CountedDateTime(2026, 9, 1, tzinfo=UTC)
         values = [start + timedelta(minutes=i) for i in range(800)]
         event = {"uid": "synthetic", "start": start, "rdates": values + values}
         records = list(
             calendar_provider._ical_instances(
-                event, date(2026, 9, 1), date(2026, 9, 2), timezone.utc
+                event, date(2026, 9, 1), date(2026, 9, 2), UTC
             )
         )
         self.assertEqual(len(records), 800)
         self.assertLessEqual(CountedDateTime.comparisons, len(values) * 4)
 
     def test_folded_and_repeated_rdates_bound_record_construction(self):
-        start = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        start = datetime(2026, 9, 1, tzinfo=UTC)
         values = [
             (start + timedelta(minutes=i)).strftime("%Y%m%dT%H%M%SZ")
             for i in range(1002)
@@ -67,13 +67,13 @@ class CalendarResourceLimitsTests(unittest.TestCase):
                 self.assertRaises(AppError) as caught,
             ):
                 calendar_provider.parse_ical_calendar(
-                    payload, local_zone=timezone.utc, today=start.date()
+                    payload, local_zone=UTC, today=start.date()
                 )
             self.assertEqual(caught.exception.status, 400)
             self.assertLessEqual(identifiers.call_count, 1001)
 
     def test_rdate_limit_counts_only_unique_surviving_window_instances(self):
-        start = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        start = datetime(2026, 9, 1, tzinfo=UTC)
         excluded = [start + timedelta(minutes=i) for i in range(1500)]
         kept = start + timedelta(days=2)
         event = {
@@ -84,13 +84,13 @@ class CalendarResourceLimitsTests(unittest.TestCase):
         }
         records = list(
             calendar_provider._ical_instances(
-                event, start.date(), kept.date(), timezone.utc, {excluded[-1]}
+                event, start.date(), kept.date(), UTC, {excluded[-1]}
             )
         )
         self.assertEqual([item["start_local"] for item in records], [kept.isoformat()])
 
     def test_duplicate_components_preserve_global_capacity_and_first_wins(self):
-        start = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        start = datetime(2026, 9, 1, tzinfo=UTC)
         values = [
             (start + timedelta(minutes=i)).strftime("%Y%m%dT%H%M%SZ")
             for i in range(1000)
@@ -106,7 +106,7 @@ class CalendarResourceLimitsTests(unittest.TestCase):
             + "END:VCALENDAR\r\n"
         ).encode()
         records = calendar_provider.parse_ical_calendar(
-            payload, local_zone=timezone.utc, today=start.date()
+            payload, local_zone=UTC, today=start.date()
         )
         self.assertEqual(len(records), 1000)
         self.assertEqual({item["name"] for item in records}, {"first"})
@@ -128,7 +128,7 @@ class CalendarResourceLimitsTests(unittest.TestCase):
         events = [CountedEvent(uid=str(i)) for i in range(200)]
         with patch.object(calendar_provider, "_ical_add_result_instances") as expand:
             calendar_provider._ical_add_master_results(
-                {}, events, date(2026, 9, 1), date(2026, 9, 2), timezone.utc
+                {}, events, date(2026, 9, 1), date(2026, 9, 2), UTC
             )
         self.assertEqual(expand.call_count, 200)
         self.assertLessEqual(CountedEvent.uid_reads, 600)
@@ -149,7 +149,7 @@ class CalendarResourceLimitsTests(unittest.TestCase):
                 self.assertRaises(AppError) as caught,
             ):
                 calendar_provider.parse_ical_calendar(
-                    payload, local_zone=timezone.utc, today=date(2026, 9, 1)
+                    payload, local_zone=UTC, today=date(2026, 9, 1)
                 )
             self.assertEqual(caught.exception.status, 400)
 
@@ -371,7 +371,7 @@ class HttpResourceLimitsTests(unittest.TestCase):
                     time.sleep(0.3)
                     self.send_response(200)
                     self.end_headers()
-                except TimeoutError, AppError:
+                except (TimeoutError, AppError):
                     self.close_connection = True
                 finally:
                     completed.set()

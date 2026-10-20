@@ -8,18 +8,20 @@ module.exports = defineConfig({
   globalSetup: "./e2e/auth.setup.js",
   timeout: 60_000,
   expect: { timeout: 30_000 },
-  fullyParallel: true,
   // Keep one worker because the scenarios share and deliberately manipulate fixture data.
   workers: 1,
   forbidOnly: !!process.env.CI,
+  // Retries stay on in CI for diagnostics; a test that passes only on retry is reported as failed.
   retries: process.env.CI ? 1 : 0,
+  failOnFlakyTests: !!process.env.CI,
   reporter: process.env.CI
     ? [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]]
     : "list",
   use: {
     baseURL: process.env.E2E_BASE_URL || "http://127.0.0.1:8090",
     storageState: authStatePath,
-    trace: "retain-on-failure",
+    // CI failure artifacts are public and traces embed the fixture session, so traces stay local.
+    trace: process.env.CI ? "off" : "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },

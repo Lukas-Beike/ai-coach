@@ -258,12 +258,17 @@ def _provider_metrics(
     # the scalar fields and weekly records shown here; running tolerance has no kind.
     cached = garmin.get("provider_metrics") or {}
     metrics = dict(cached) if isinstance(cached, dict) else {}
-    for key in ("endurance_score", "running_tolerance"):
+    for key, aggregation in (
+        ("endurance_score", "weekly"),
+        ("running_tolerance", "weekly"),
+        ("training_readiness_history", "daily"),
+        ("weekly_training_status", "weekly"),
+    ):
         data = garmin_metric_history.projected_metric(
             garmin.get(key),
             start=start,
             end=today,
-            aggregation="weekly",
+            aggregation=aggregation,
             metric=key,
             synced_at=garmin.get("synced_at"),
         )

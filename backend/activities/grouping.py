@@ -49,7 +49,7 @@ def _cycling_intervals_share_group(
 def _cycling_event_edges(
     intervals: list[tuple[datetime, datetime, bool] | None],
 ) -> list[set[int]]:
-    edges = [set() for _ in intervals]
+    edges: list[set[int]] = [set() for _ in intervals]
     for left_index, left in enumerate(intervals):
         if left is None:
             continue

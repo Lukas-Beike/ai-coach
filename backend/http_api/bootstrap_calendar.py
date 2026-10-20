@@ -90,6 +90,7 @@ class PublicStateCalendarProjection:
             today=self._today(),
             provider_window=calendar_window,
             default_name=self._default_workout_name,
+            sport_settings=calendar_read_model.snapshot_sport_settings(snapshot),
         )
         for key in ("training_calendar", "planned"):
             if key in calendar_projection:

@@ -1,7 +1,7 @@
 """Server integration tests for athlete."""
 
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -51,7 +51,7 @@ class ServerAthleteTests(ServerTestCase):
         self.assertNotIn("weekly_availability", context)
 
     def test_checkin_uses_local_date_and_rejects_future_dates(self):
-        fixed_now = datetime(2026, 8, 31, 23, 30, tzinfo=timezone.utc)
+        fixed_now = datetime(2026, 8, 31, 23, 30, tzinfo=UTC)
         with patch.object(server.ATHLETE_CLOCK, "now", return_value=fixed_now):
             self.assertEqual(
                 normalize_checkin({}, today=fixed_now.date())["checkin_date"],

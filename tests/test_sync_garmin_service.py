@@ -7,11 +7,12 @@ import threading
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
+
+from support import make_config
 
 from backend.config import Config
 from backend.errors import AppError
@@ -136,29 +137,17 @@ class _RemoteReader:
 
 
 def _config(**changes) -> Config:
-    config = Config(
-        port=8080,
-        openai_api_key="",
-        openai_base_url="",
-        openai_model="",
-        intervals_api_key="",
-        intervals_athlete_id="",
-        garmin_email="",
-        garmin_password="",
-        garmin_tokenstore="",
-        garmin_fixture_path="",
-        calendar_ical_url="",
-        app_password="",
-        secure_cookies=False,
-        data_retention_days=30,
-    )
     overrides: dict[str, Any] = {
+        "openai_base_url": "",
+        "openai_model": "",
+        "intervals_athlete_id": "",
+        "data_retention_days": 30,
         "garmin_email": "athlete@example.invalid",
         "garmin_password": "secret",
         "garmin_tokenstore": "missing-tokenstore",
     }
     overrides.update(changes)
-    return replace(config, **overrides)
+    return make_config(**overrides)
 
 
 class GarminSyncServiceTests(unittest.TestCase):
@@ -173,6 +162,7 @@ class GarminSyncServiceTests(unittest.TestCase):
         wait_seconds: float = 0.1,
         local_today: Callable[[], date] | None = None,
         metric_export=None,
+        activity_detail_backfill=None,
     ):
         self.database = _Database()
         self.key_values = _KeyValues()
@@ -208,6 +198,7 @@ class GarminSyncServiceTests(unittest.TestCase):
             ),
             self.lifecycle_state,
             metric_export=metric_export,
+            activity_detail_backfill=activity_detail_backfill,
         )
 
     def test_successful_current_sync_exports_and_reports_metrics(self):
@@ -292,6 +283,102 @@ class GarminSyncServiceTests(unittest.TestCase):
             ),
         )
         self.assertEqual(self.key_values.values["garmin_sync_status"], "")
+
+    def test_backfill_runs_after_a_successful_remote_sync_and_reports_counts(self):
+        counts = {"status": "completed", "fetched": 2, "empty": 0, "remaining": 0}
+        backfill = Mock(return_value=counts)
+
+        result = self.make_service(activity_detail_backfill=backfill).sync()
+
+        backfill.assert_called_once()
+        self.assertIsNone(backfill.call_args.args[0])
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["activity_details"], counts)
+        self.assertIn("activity-details", [call[2] for call in self.writer.calls])
+        self.assertEqual(self.writer.calls[-1][1:4], ("completed", "complete", 100))
+        self.assertFalse(self.lock.locked())
+
+    def test_backfill_is_skipped_for_fixture_historical_partial_and_cancelled_syncs(
+        self,
+    ):
+        backfill = Mock(return_value={"status": "completed"})
+        self.make_service(
+            activity_detail_backfill=backfill,
+            fixture=_FixtureLoader(Path("fixture.json"), {"synced_at": "test"}),
+        ).sync()
+        self.make_service(activity_detail_backfill=backfill).sync(
+            end_date=date(2026, 9, 20)
+        )
+        partial = _StateService()
+        partial.persist_payload = Mock(return_value={"status": "partial"})
+        self.make_service(activity_detail_backfill=backfill, state=partial).sync()
+        backfill.assert_not_called()
+
+        event = threading.Event()
+
+        class _CancellingRemote(_RemoteReader):
+            def fetch(
+                self,
+                days,
+                end_date,
+                *,
+                status,
+                cancel_event=None,
+                include_recovery=None,
+            ):
+                event.set()
+                return super().fetch(
+                    days,
+                    end_date,
+                    status=status,
+                    cancel_event=cancel_event,
+                    include_recovery=include_recovery,
+                )
+
+        with self.assertRaises(AppError) as ctx:
+            self.make_service(
+                activity_detail_backfill=backfill, remote=_CancellingRemote()
+            ).sync(cancel_event=event)
+        self.assertEqual(ctx.exception.status, 499)
+        backfill.assert_not_called()
+
+    def test_cancel_during_the_backfill_ends_the_sync_as_cancelled(self):
+        def cancelled_backfill(event):
+            event.set()
+            return {"status": "cancelled", "fetched": 0, "empty": 0, "remaining": 1}
+
+        def raising_backfill(event):
+            event.set()
+            raise AppError(499, "synthetic", reason="chat_cancelled")
+
+        for backfill in (cancelled_backfill, raising_backfill):
+            with self.subTest(backfill=backfill.__name__):
+                service = self.make_service(activity_detail_backfill=backfill)
+                with self.assertRaises(AppError) as ctx:
+                    service.sync(cancel_event=threading.Event())
+
+                self.assertEqual(ctx.exception.status, 499)
+                self.assertEqual(
+                    self.writer.calls[-1][1:4], ("cancelled", "cancelled", 100)
+                )
+                self.assertNotIn("completed", [call[1] for call in self.writer.calls])
+                self.assertFalse(self.lock.locked())
+
+    def test_backfill_failure_keeps_the_sync_successful_and_hides_the_error(self):
+        backfill = Mock(side_effect=RuntimeError("PRIVATE-PROVIDER-PAYLOAD"))
+
+        with self.assertLogs("backend.sync.garmin_service", "WARNING") as logs:
+            result = self.make_service(activity_detail_backfill=backfill).sync()
+
+        self.assertEqual(result["status"], "ok")
+        self.assertNotIn("activity_details", result)
+        self.assertIn("RuntimeError", logs.output[0])
+        self.assertNotIn(
+            "PRIVATE-PROVIDER-PAYLOAD",
+            str(logs.output) + str(self.writer.calls) + str(result),
+        )
+        self.assertEqual(self.writer.calls[-1][1:4], ("completed", "complete", 100))
+        self.assertFalse(self.lock.locked())
 
     def test_fixture_fallback_end_uses_local_today_after_payload_preparation(self):
         for fixture_payload in (

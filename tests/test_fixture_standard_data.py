@@ -2,10 +2,11 @@
 
 import json
 import os
+import sys
 import threading
 import unittest
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -13,16 +14,38 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+# Safe server setup first: temporary DATA_DIR, fake configuration, and no read of a real .env.
+from server_test_support import server
+
 from backend.calendar.ical_mapping import calendar_event_constraints
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
+from backend.http_api import auth as http_auth
 from backend.performance.body import body_history
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.daily_health import daily_energy_expenditure
 from backend.performance.garmin_metrics import garmin_performance_metrics
 from backend.providers.calendar import parse_ical_calendar
-from e2e import fixture_runtime
+
+# Importing the fixture rewrites os.environ and sys.path and replaces shared server
+# callables. Capture those replacements, restore the process state at once, and let
+# setUp re-apply the replacements for this module's tests only.
+_SERVER_HOOKS = (
+    (server.provider_http.JsonHttpClient, "request"),
+    (server.COACH_CONVERSATION, "provision_service"),
+    (server.COACH_CONVERSATION, "response_transport"),
+    (server, "initialise_database"),
+    (server.HTTP_API, "request_handler_class"),
+    (http_auth.RATE_LIMITER, "allow"),
+)
+with ExitStack() as stack:
+    for target, attribute in _SERVER_HOOKS:
+        stack.enter_context(patch.object(target, attribute, getattr(target, attribute)))
+    stack.enter_context(patch.dict(os.environ))
+    stack.enter_context(patch.object(sys, "path", list(sys.path)))
+    from e2e import fixture_runtime
+    _FIXTURE_HOOKS = [getattr(target, attribute) for target, attribute in _SERVER_HOOKS]
 
 V6_UNIT_NAMES = {
     "Fixture swim intervals",
@@ -31,10 +54,50 @@ V6_UNIT_NAMES = {
 }
 
 
-class StandardFixtureDataTests(unittest.TestCase):
+class FixtureImportIsolationTests(unittest.TestCase):
+    """Outside StandardFixtureTestCase subclasses, the fixture replacements must not apply."""
+
+    def test_fixture_hooks_and_environment_are_restored_after_import(self):
+        for (target, attribute), fixture_value in zip(_SERVER_HOOKS, _FIXTURE_HOOKS):
+            with self.subTest(attribute=attribute):
+                self.assertIsNot(getattr(target, attribute), fixture_value)
+        self.assertNotEqual(os.environ.get("DATA_DIR"), "/data/coach-fixture-data")
+        # The fixture always allows logins; other modules need the real rate limiter.
+        self.assertNotIn("allow", vars(http_auth.RATE_LIMITER))
+
+
+class StandardFixtureTestCase(unittest.TestCase):
+    """Applies the fixture replacements per test. Full demo seeds take seconds each, so
+    the seeding tests are split over several classes that CI shards can balance."""
+
     def setUp(self):
         self.today = date(2026, 10, 6)
+        for (target, attribute), value in zip(_SERVER_HOOKS, _FIXTURE_HOOKS):
+            patcher = patch.object(target, attribute, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
+    @contextmanager
+    def _temporary_fixture_database(self, prefix):
+        server = fixture_runtime.server
+        original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)
+        with TemporaryDirectory(prefix=prefix) as directory:
+            root = Path(directory)
+            try:
+                DATABASE_MANAGER_CACHE.reset()
+                server.CONFIG = replace(server.CONFIG, app_password="")
+                server.DATA_DIR = root
+                server.DB_PATH = root / "fixture.db"
+                server.LOG_PATH = root / "fixture.log"
+                yield server
+            finally:
+                DATABASE_MANAGER_CACHE.reset()
+                server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH = (
+                    original
+                )
+
+
+class StandardFixtureDataTests(StandardFixtureTestCase):
     def test_standard_performance_metrics_survive_provider_normalization(self):
         garmin = fixture_runtime._fixture_demo_garmin(
             self.today, fixture_runtime.demo_performance_history(self.today)
@@ -571,6 +634,8 @@ class StandardFixtureDataTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 499)
         self.assertEqual(raised.exception.reason, "chat_cancelled")
 
+
+class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
     def test_auto_seeded_restarts_and_explicit_seeds_keep_data_stable(self):
         server = fixture_runtime.server
         original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)
@@ -644,25 +709,6 @@ class StandardFixtureDataTests(unittest.TestCase):
     def _garmin_snapshot(server):
         with server.database_manager().unit_of_work() as db:
             return json.loads(server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot"))
-
-    @contextmanager
-    def _temporary_fixture_database(self, prefix):
-        server = fixture_runtime.server
-        original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)
-        with TemporaryDirectory(prefix=prefix) as directory:
-            root = Path(directory)
-            try:
-                DATABASE_MANAGER_CACHE.reset()
-                server.CONFIG = replace(server.CONFIG, app_password="")
-                server.DATA_DIR = root
-                server.DB_PATH = root / "fixture.db"
-                server.LOG_PATH = root / "fixture.log"
-                yield server
-            finally:
-                DATABASE_MANAGER_CACHE.reset()
-                server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH = (
-                    original
-                )
 
     def test_reseeding_on_a_later_date_moves_the_single_cycling_target(self):
         seed_day = self.today
@@ -833,6 +879,37 @@ class StandardFixtureDataTests(unittest.TestCase):
                 )
             }
 
+    def test_v7_database_upgrades_with_the_distance_run_once(self):
+        name = "Tempolauf nach Distanz"
+
+        def run_count(server):
+            units = server.PLANNING_DATA.planned_unit().list(500)
+            return sum(unit.get("name") == name for unit in units)
+
+        with self._temporary_fixture_database("fixture-v8-upgrade-") as server:
+            fixture_runtime.initialise_fixture()
+            today = server.ATHLETE_CLOCK.now().date()
+            with (
+                patch.object(fixture_runtime, "FIXTURE_DEMO_SEED_VERSION", "7"),
+                patch.object(fixture_runtime, "_fixture_seed_distance_run"),
+            ):
+                fixture_runtime.seed_preview_demo()
+            before = run_count(server)
+
+            upgraded = fixture_runtime.seed_preview_demo()
+            after = run_count(server)
+            # A restart and a direct repeat must not add a second unit.
+            fixture_runtime.seed_preview_demo()
+            fixture_runtime._fixture_seed_distance_run(today)
+            repeated = run_count(server)
+
+        self.assertEqual(0, before)
+        self.assertEqual(
+            upgraded,
+            {"ready": True, "seed_version": fixture_runtime.FIXTURE_DEMO_SEED_VERSION},
+        )
+        self.assertEqual((1, 1), (after, repeated))
+
     def test_v5_database_upgrades_to_v6_scenarios_without_duplicates(self):
         with self._temporary_fixture_database("fixture-v6-upgrade-") as server:
             fixture_runtime.initialise_fixture()
@@ -982,6 +1059,8 @@ class StandardFixtureDataTests(unittest.TestCase):
             snapshot = json.loads(server.SNAPSHOT_REPOSITORY.latest_payload(db))
         return sorted(str(item["id"]) for item in snapshot["recent_activities"])
 
+
+class StandardFixtureStagingTests(StandardFixtureTestCase):
     def test_staged_plan_never_collides_with_seeded_units_on_any_weekday(self):
         server = fixture_runtime.server
         original = (server.CONFIG, server.DATA_DIR, server.DB_PATH, server.LOG_PATH)

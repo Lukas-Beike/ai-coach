@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import threading
 from typing import Any
 
@@ -10,6 +11,7 @@ from backend.activities.activity_reference import (
     NoActivityReferences,
 )
 from backend.errors import AppError
+from backend.providers.descriptors import INTERVALS_ID
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.daily import DailySyncMarkerService
@@ -81,12 +83,12 @@ class SyncJobQueueService:
         payload: Any = None,
         *,
         requested_by: str = "system",
-        item_operations: list[dict[str, Any]] | None = None,
+        item_operations: builtins.list[dict[str, Any]] | None = None,
         available_at: str | None = None,
     ) -> dict[str, Any]:
         """Validate and persist a job while maintenance drains all side effects."""
         with self._maintenance_gate.operation():
-            payload = self._resolve_activity_reference(job_type, payload)
+            payload = self._resolve_activity_reference(provider, job_type, payload)
             try:
                 envelope = normalize_sync_job_request(
                     provider,
@@ -118,10 +120,16 @@ class SyncJobQueueService:
                 self._daily_sync_markers.mark_attempt(envelope["provider"])
             return result
 
-    def _resolve_activity_reference(self, job_type: str, payload: Any) -> Any:
-        """Store activity jobs under the provider id so duplicates coalesce."""
+    def _resolve_activity_reference(
+        self, provider: str, job_type: str, payload: Any
+    ) -> Any:
+        """Store Intervals activity jobs under the provider id so duplicates coalesce.
+
+        Garmin ids are already provider ids, so their payloads pass unchanged.
+        """
         if (
-            job_type != "activity_details"
+            provider != INTERVALS_ID
+            or job_type != "activity_details"
             or not isinstance(payload, dict)
             or "activity_id" not in payload
         ):

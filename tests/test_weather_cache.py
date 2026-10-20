@@ -1,7 +1,7 @@
 import json
 import math
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from backend.weather.cache import (
     cache_state,
@@ -14,7 +14,7 @@ from backend.weather.cache import (
 
 class WeatherCacheTests(unittest.TestCase):
     def setUp(self):
-        self.now = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
+        self.now = datetime(2026, 9, 20, 12, tzinfo=UTC)
 
     def cached_value(self, *, fetched_at="2026-09-20T11:00:00Z", **overrides):
         value = {

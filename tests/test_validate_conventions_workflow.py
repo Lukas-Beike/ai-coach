@@ -51,7 +51,7 @@ def find_bash():
         probe = subprocess.run(
             [candidate, "-c", "exit 0"], capture_output=True, check=False, timeout=30
         )
-    except OSError, subprocess.SubprocessError:
+    except (OSError, subprocess.SubprocessError):
         return None
     return candidate if probe.returncode == 0 else None
 

@@ -37,7 +37,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Final
 
-from backend.canonical.coverage import ProviderCoverage
+from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.db.repositories import KeyValueRepository
@@ -166,6 +166,14 @@ class CanonicalReadSelector(
             )
             + live
         )
+
+    def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
+        """Return per-metric counts from the source that serves observations.
+
+        Before the first completed backfill the legacy source keeps no per-metric
+        data, so nothing is reported; afterwards the serving tables are counted.
+        """
+        return self._source(db).metric_windows(db)
 
     def serves_tables(self, db: Any) -> bool:
         """Return True while observation and activity reads come from the tables."""

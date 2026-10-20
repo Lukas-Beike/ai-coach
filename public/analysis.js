@@ -526,6 +526,11 @@ function makeAnalysisSectionCollapsible(section, key) {
   return section;
 }
 
+function rememberAnalysisSectionState(...roots) {
+  // The toggle event fires asynchronously, so a render right after a click must read the live state.
+  for (const root of roots) root.querySelectorAll("details[data-analysis-section]").forEach((details) => analysisSectionState.set(details.dataset.analysisSection, details.open));
+}
+
 function analysisChartGroup(title, charts, series, note) {
   const group = reportNode("section", null, "analysis-chart-card analysis-chart-stack");
   const heading = reportNode("h3");
@@ -669,6 +674,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   renderBodyAnalysis(history?.body);
   const openDetails = new Set([...root.querySelectorAll("details[open]"), ...loadRoot.querySelectorAll("details[open]"), ...enduranceRoot.querySelectorAll("details[open]")].map((details) => `${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`));
   const periodRoot = document.getElementById("analysisLoadPeriod");
+  rememberAnalysisSectionState(root, loadRoot, enduranceRoot);
   root.replaceChildren(); loadRoot.replaceChildren(); enduranceRoot.replaceChildren(); periodRoot.replaceChildren();
   if (!history?.start || !history?.end) {
     // Without a history window there are no charts, so no empty sport groups; the async tables stay attached.
@@ -785,11 +791,11 @@ function providerMetricStatus(status) {
 }
 
 function providerMetricLabel(key) {
-  return { endurance_score: "Ausdauer-Score", running_tolerance: "Lauf-Belastbarkeit" }[key] || key;
+  return { endurance_score: "Ausdauer-Score", running_tolerance: "Lauf-Belastbarkeit", training_readiness_history: "Trainingsbereitschaft", weekly_training_status: "Trainingsstatus · akute Belastung" }[key] || key;
 }
 
 function providerMetricUnit(key) {
-  return { endurance_score: "Punkte" }[key] || "";
+  return { endurance_score: "Punkte", training_readiness_history: "Punkte" }[key] || "";
 }
 
 function providerMetricValue(metric, values) {
@@ -806,10 +812,12 @@ function providerMetricValue(metric, values) {
 
 function renderProviderMetrics(metrics, root, start, end, missing) {
   Object.entries(metrics || {}).forEach(([key, item], index) => {
-    const raw = (Array.isArray(item?.points) ? item.points : []).map((point) => ({ date: point?.date, value: providerMetricValue(key, point?.values) })).filter((point) => point.date && point.value !== undefined);
+    const projected = key === "training_readiness_history" || key === "weekly_training_status";
+    const raw = (Array.isArray(item?.points) ? item.points : []).map((point) => ({ date: point?.date, value: projected ? point?.value : providerMetricValue(key, point?.values) })).filter((point) => point.date && typeof point.value === "number" && Number.isFinite(point.value));
     if (!raw.some(analysisValidPoint)) { missing.push(providerMetricLabel(key)); return; }
-    const points = analysisWeeklyPerformancePoints(raw, start, end, false);
-    const series = [{ label: providerMetricLabel(key), legendLabel: providerMetricLabel(key), source: item.source, unit: providerMetricUnit(key), color: index, cadenceDays: 7, points, currentPoint: raw.filter((point) => point.date <= end).findLast(analysisValidPoint) }];
+    const daily = key === "training_readiness_history";
+    const points = daily ? raw.filter((point) => point.date >= start && point.date <= end) : analysisWeeklyPerformancePoints(raw, start, end, false);
+    const series = [{ label: providerMetricLabel(key), legendLabel: providerMetricLabel(key), source: item.source, unit: providerMetricUnit(key), color: index, cadenceDays: daily ? 1 : 7, points, currentPoint: raw.filter((point) => point.date <= end).findLast(analysisValidPoint) }];
     const chart = collectAnalysisChart(missing, providerMetricLabel(key), series, providerMetricUnit(key), start, end, "", { sparse: true, showLegend: false, calendarWeeks: true });
     if (!chart) return;
     chart.querySelector(".analysis-chart-legend")?.remove();
@@ -1498,7 +1506,6 @@ function appendTrainingFocusShare(report, categories, root) {
     const bar = reportNode("div", null, "training-focus-share");
     bar.setAttribute("role", "img"); bar.setAttribute("aria-label", "Anteile leicht aerob, hoch aerob und anaerob an der bekannten Belastung");
     const legend = reportNode("ul", null, "training-focus-legend");
-    legend.style.gridTemplateColumns = categories.map(([key]) => `${Math.max(report.categories[key].load, 0.001)}fr`).join(" ");
     for (const [index, [key, label]] of categories.entries()) {
       const percent = total ? report.categories[key].load / total * 100 : 0;
       const part = reportNode("span"); part.dataset.color = String(index); part.style.width = `${percent}%`; bar.append(part);

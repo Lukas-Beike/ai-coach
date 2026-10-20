@@ -3,7 +3,7 @@
 import json
 import unittest
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -630,7 +630,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             patch.object(
                 server.ATHLETE_CLOCK,
                 "now",
-                return_value=datetime(2026, 9, 2, tzinfo=timezone.utc),
+                return_value=datetime(2026, 9, 2, tzinfo=UTC),
             ),
             patch.object(
                 server.PLANNING_WORKFLOWS,
@@ -880,7 +880,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         with patch.object(
             server.ATHLETE_CLOCK,
             "now",
-            return_value=datetime(2026, 8, 26, 20, 0, tzinfo=timezone.utc),
+            return_value=datetime(2026, 8, 26, 20, 0, tzinfo=UTC),
         ):
             enriched, _ = activity_calendar_projection.planning_compliance_state(
                 planned, activities, today
@@ -947,7 +947,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             patch.object(
                 server.ATHLETE_CLOCK,
                 "now",
-                return_value=datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc),
+                return_value=datetime(2026, 8, 26, 12, 0, tzinfo=UTC),
             ),
         ):
             result = server.PUBLIC_STATE.plan_state_service().read(local_only=True)

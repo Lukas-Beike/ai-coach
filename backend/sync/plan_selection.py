@@ -161,7 +161,7 @@ class StructuredPlanSyncService:
                 raise AppError(
                     403, _ALL_PENDING_SCOPE_ERROR, reason="intent_scope_denied"
                 )
-            groups = (("local_plan",),)
+            groups: tuple[tuple[str, ...], ...] = (("local_plan",),)
         else:
             groups = self._scope_groups(normalized, intent)
         if authorized_ids and normalized_ids != authorized_ids:
