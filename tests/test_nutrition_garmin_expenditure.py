@@ -5,6 +5,7 @@ import threading
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from canonical_daily_health_support import MappedDailyReader
 from nutrition_service_support import build_nutrition_services
@@ -206,7 +207,8 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
     def test_history_rejects_unsupported_periods(self) -> None:
         from backend.errors import AppError
 
-        for count in (0, 15, 85, True, "14"):
+        invalid_periods: tuple[Any, ...] = (0, 15, 85, True, "14")
+        for count in invalid_periods:
             with self.subTest(days=count), self.assertRaises(AppError):
                 self.service.get_week_summary(count)
 

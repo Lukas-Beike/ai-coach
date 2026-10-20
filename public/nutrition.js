@@ -380,7 +380,7 @@ function renderNutritionWeek(week) {
       series.setAttribute("aria-label", `${label}: ${amount.textContent}${value == null ? " (keine Daten)" : ""}`);
       if (day.end_date) {
         const coverage = document.createElement("small");
-        coverage.textContent = `${day[`${key}_days`]} von 7 Tagen`;
+        coverage.textContent = `${day[key + "_days"]} von 7 Tagen`;
         series.setAttribute("aria-label", `${label}: ${amount.textContent}, ${coverage.textContent}`);
         amount.append(document.createElement("br"), coverage);
       }
