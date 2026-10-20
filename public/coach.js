@@ -2203,6 +2203,8 @@ function applyChatResult(payload, result, chatContentVersion) {
   const nextAssistantKey = latestAssistantMessageKey(messages);
   if (state.initialStateLoaded && AppRouter.baseRoute() !== "coach" && nextAssistantKey && nextAssistantKey !== previousAssistantKey) {
     state.chatResponseScrollPending = true;
+    // A reply from elsewhere outranks the position left behind; the reader's own reply keeps it.
+    if (!state.chatRequest && !state.chatServerOperationId) state.chatFollowLatest = true;
     const nextAssistant = [...messages].reverse().find((message) => message.role === "assistant");
     state.chatResponseMessageId = nextAssistant?.id ?? null;
   }

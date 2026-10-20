@@ -27,18 +27,20 @@ function historyPage(cursor, limit) {
   return { messages, generation: GENERATION, next_cursor: start > 0 ? cursorFor(messages[0].id) : null, proposed_actions: [] };
 }
 
-test("cached latest messages show before the start answers and older ones page in @responsive", async ({ page }) => {
-  const requestedCursors = [];
-  let delayed = false;
+// A gate the test opens; it opens by itself after RELEASE_TIMEOUT_MS so a failing test cannot hang.
+function heldGate() {
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
-  const waitForGate = () => Promise.race([gate, new Promise((resolve) => setTimeout(resolve, RELEASE_TIMEOUT_MS))]);
+  return { release, wait: () => Promise.race([gate, new Promise((resolve) => setTimeout(resolve, RELEASE_TIMEOUT_MS))]) };
+}
 
+// Serves the conversation; while isDelayed() holds, the start answers wait for the gate.
+async function routeConversation(page, isDelayed, waitForGate, onCursor = () => {}) {
   await page.route("**/api/chat/history?*", async (route) => {
     const params = new URL(route.request().url()).searchParams;
     const cursor = params.get("cursor");
-    if (cursor) requestedCursors.push(cursor);
-    if (delayed && !cursor) await waitForGate();
+    if (cursor) onCursor(cursor);
+    if (isDelayed() && !cursor) await waitForGate();
     await route.fulfill({ json: historyPage(cursor, Number(params.get("limit") || FIRST_PAGE_SIZE)) });
   });
   await page.route("**/api/bootstrap*", async (route) => {
@@ -48,9 +50,16 @@ test("cached latest messages show before the start answers and older ones page i
       const first = historyPage(null, FIRST_PAGE_SIZE);
       Object.assign(body, { messages: first.messages, messages_next_cursor: first.next_cursor, messages_generation: GENERATION });
     }
-    if (delayed) await waitForGate();
+    if (isDelayed()) await waitForGate();
     await route.fulfill({ response, json: body });
   });
+}
+
+test("cached latest messages show before the start answers and older ones page in @responsive", async ({ page }) => {
+  const requestedCursors = [];
+  let delayed = false;
+  const { release, wait } = heldGate();
+  await routeConversation(page, () => delayed, wait, (cursor) => requestedCursors.push(cursor));
 
   await page.goto("/#coach");
   await expect(page.locator("#appShell")).toBeVisible();
@@ -133,30 +142,12 @@ test("cached latest messages show before the start answers and older ones page i
 
 test("a reader who scrolls before the start has loaded keeps their position @responsive", async ({ page }) => {
   let delayed = false;
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const waitForGate = () => Promise.race([gate, new Promise((resolve) => setTimeout(resolve, RELEASE_TIMEOUT_MS))]);
-  let releaseLoad;
-  const loadGate = new Promise((resolve) => { releaseLoad = resolve; });
-
-  await page.route("**/api/chat/history?*", async (route) => {
-    const params = new URL(route.request().url()).searchParams;
-    if (delayed && !params.get("cursor")) await waitForGate();
-    await route.fulfill({ json: historyPage(params.get("cursor"), Number(params.get("limit") || FIRST_PAGE_SIZE)) });
-  });
-  await page.route("**/api/bootstrap*", async (route) => {
-    const response = await route.fetch();
-    const body = await response.json();
-    if (Array.isArray(body.messages)) {
-      const first = historyPage(null, FIRST_PAGE_SIZE);
-      Object.assign(body, { messages: first.messages, messages_next_cursor: first.next_cursor, messages_generation: GENERATION });
-    }
-    if (delayed) await waitForGate();
-    await route.fulfill({ response, json: body });
-  });
+  const { release, wait } = heldGate();
+  const { release: releaseLoad, wait: waitForLoad } = heldGate();
+  await routeConversation(page, () => delayed, wait);
   // A still-loading image holds the page's load event, which the first jump to the newest message waits for.
   await page.route("**/api/e2e-hold-load", async (route) => {
-    await Promise.race([loadGate, new Promise((resolve) => setTimeout(resolve, RELEASE_TIMEOUT_MS))]);
+    await waitForLoad();
     await route.fulfill({ status: 204 });
   });
 
