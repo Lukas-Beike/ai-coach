@@ -200,64 +200,101 @@ def fetch_targeted_analysis(
             complete[source] = False
             continue
         if source == "resting_hr":
-            rows: list[dict[str, Any]] = []
-            failed = False
-            for offset in range((end - start).days + 1):
-                day = (start + timedelta(days=offset)).isoformat()
-
-                def fetch_day(
-                    day: str = day, method: Callable[..., Any] = method
-                ) -> Any:
-                    return method(day)
-
-                try:
-                    value = external_call(
-                        GARMIN_ID,
-                        source,
-                        fetch_day,
-                        {"date": day},
-                    )
-                    if not isinstance(value, dict):
-                        raise TypeError("Invalid Garmin resting_hr response")
-                    if not any(
-                        key in value for key in ("calendarDate", "date", "summaryDate")
-                    ):
-                        value = {"calendarDate": day, **value}
-                    rows.append(value)
-                except Exception as exc:  # noqa: BLE001 - retain successful days.
-                    failed = True
-                    capability_failure(source, exc)
-                    warn(source, "Garmin analysis source failed", exc)
-            if not failed:
-                capability_success(source)
-            payload[source] = rows
-            complete[source] = not failed
-            continue
-        try:
-            assert invoke is not None
-
-            def fetch(
-                invoke: Callable[..., Any] = invoke,
-                method: Callable[..., Any] = method,
-            ) -> Any:
-                return invoke(method, start, end)
-
-            value = external_call(
-                GARMIN_ID,
-                source,
-                fetch,
-                {"start": start.isoformat(), "end": end.isoformat()},
+            payload[source], complete[source] = _fetch_resting_hr_days(
+                method,
+                start,
+                end,
+                external_call=external_call,
+                capability_failure=capability_failure,
+                capability_success=capability_success,
+                warn=warn,
             )
-            value = _normalize_targeted_analysis_response(source, value)
-        except Exception as exc:  # noqa: BLE001 - isolate provider failures per source.
+            continue
+        value, complete[source] = _fetch_analysis_range(
+            source,
+            method,
+            invoke,
+            start,
+            end,
+            external_call=external_call,
+            capability_failure=capability_failure,
+            capability_success=capability_success,
+            warn=warn,
+        )
+        if complete[source]:
+            payload[source] = value
+    return payload, complete
+
+
+def _fetch_resting_hr_days(
+    method: Callable[..., Any],
+    start: date,
+    end: date,
+    *,
+    external_call: ExternalCall,
+    capability_failure: Callable[[str, BaseException], None],
+    capability_success: Callable[[str], None],
+    warn: WarningLogger,
+) -> tuple[list[dict[str, Any]], bool]:
+    source = "resting_hr"
+    rows: list[dict[str, Any]] = []
+    failed = False
+    for offset in range((end - start).days + 1):
+        day = (start + timedelta(days=offset)).isoformat()
+
+        def fetch_day(day: str = day, method: Callable[..., Any] = method) -> Any:
+            return method(day)
+
+        try:
+            value = external_call(GARMIN_ID, source, fetch_day, {"date": day})
+            if not isinstance(value, dict):
+                raise TypeError("Invalid Garmin resting_hr response")
+            if not any(key in value for key in ("calendarDate", "date", "summaryDate")):
+                value = {"calendarDate": day, **value}
+            rows.append(value)
+        except Exception as exc:  # noqa: BLE001 - retain successful days.
+            failed = True
             capability_failure(source, exc)
             warn(source, "Garmin analysis source failed", exc)
-            complete[source] = False
-            continue
+    if not failed:
         capability_success(source)
-        payload[source] = value
-        complete[source] = True
-    return payload, complete
+    return rows, not failed
+
+
+def _fetch_analysis_range(
+    source: str,
+    method: Callable[..., Any],
+    invoke: Callable[..., Any] | None,
+    start: date,
+    end: date,
+    *,
+    external_call: ExternalCall,
+    capability_failure: Callable[[str, BaseException], None],
+    capability_success: Callable[[str], None],
+    warn: WarningLogger,
+) -> tuple[Any, bool]:
+    try:
+        assert invoke is not None
+
+        def fetch(
+            invoke: Callable[..., Any] = invoke,
+            method: Callable[..., Any] = method,
+        ) -> Any:
+            return invoke(method, start, end)
+
+        value = external_call(
+            GARMIN_ID,
+            source,
+            fetch,
+            {"start": start.isoformat(), "end": end.isoformat()},
+        )
+        value = _normalize_targeted_analysis_response(source, value)
+    except Exception as exc:  # noqa: BLE001 - isolate provider failures per source.
+        capability_failure(source, exc)
+        warn(source, "Garmin analysis source failed", exc)
+        return None, False
+    capability_success(source)
+    return value, True
 
 
 def fetch_targeted_nutrition(
