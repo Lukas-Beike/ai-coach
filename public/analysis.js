@@ -802,8 +802,6 @@ function providerMetricValue(metric, values) {
   const fields = {
     endurance_score: ["overallScore", "enduranceScore", "score", "groupAverage"],
     running_tolerance: ["runningTolerance", "tolerance"],
-    training_readiness_history: ["trainingReadinessScore", "overallReadinessScore", "readinessScore"],
-    weekly_training_status: ["dailyTrainingLoadAcute", "acuteTrainingLoad"],
   }[metric] || [];
   for (const field of fields) {
     const value = values?.[field];
@@ -814,7 +812,8 @@ function providerMetricValue(metric, values) {
 
 function renderProviderMetrics(metrics, root, start, end, missing) {
   Object.entries(metrics || {}).forEach(([key, item], index) => {
-    const raw = (Array.isArray(item?.points) ? item.points : []).map((point) => ({ date: point?.date, value: providerMetricValue(key, point?.values) })).filter((point) => point.date && point.value !== undefined);
+    const projected = key === "training_readiness_history" || key === "weekly_training_status";
+    const raw = (Array.isArray(item?.points) ? item.points : []).map((point) => ({ date: point?.date, value: projected ? point?.value : providerMetricValue(key, point?.values) })).filter((point) => point.date && typeof point.value === "number" && Number.isFinite(point.value));
     if (!raw.some(analysisValidPoint)) { missing.push(providerMetricLabel(key)); return; }
     const daily = key === "training_readiness_history";
     const points = daily ? raw.filter((point) => point.date >= start && point.date <= end) : analysisWeeklyPerformancePoints(raw, start, end, false);

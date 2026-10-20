@@ -373,8 +373,8 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
       provider_metrics: {
         endurance_score: { source: "Garmin Connect", aggregation: "weekly", unit: "unknown", status: "stale", points: [{ date: "2026-09-28", values: { enduranceScore: 712 } }] },
         running_tolerance: { source: "Garmin Connect", aggregation: "weekly", unit: "unknown", status: "failed", points: [] },
-        training_readiness_history: { source: "Garmin Connect", aggregation: "daily", unit: "unknown", status: "current", points: [{ date: "2026-09-30", values: { trainingReadinessScore: 72 } }] },
-        weekly_training_status: { source: "Garmin Connect", aggregation: "weekly", unit: "unknown", status: "current", points: [{ date: "2026-09-28", values: { dailyTrainingLoadAcute: 80 } }] },
+        training_readiness_history: { source: "Garmin Connect", aggregation: "daily", unit: "unknown", status: "current", points: [{ date: "2026-09-30", value: 72 }] },
+        weekly_training_status: { source: "Garmin Connect", aggregation: "weekly", unit: "unknown", status: "current", points: [{ date: "2026-09-28", value: 80 }] },
       },
     },
     personal_recovery: {

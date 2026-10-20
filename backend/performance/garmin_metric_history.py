@@ -133,6 +133,13 @@ def projected_metric(
     synced_at: Any,
 ) -> dict[str, Any]:
     points = metric_points(value, start=start, end=end)
+    if metric == "training_readiness_history":
+        for point in points:
+            for field in garmin_perf_fields.PLANNING_READINESS_ALIASES:
+                candidate = point["values"].get(field)
+                if candidate is not None and 0 <= candidate <= 100:
+                    point["value"] = candidate
+                    break
     if metric == "weekly_training_status":
         by_date = {point["date"]: point for point in points}
         for row in _records(value):
@@ -147,6 +154,7 @@ def projected_metric(
                 {"date": observed.isoformat(), "values": {}, "source": GARMIN_SOURCE},
             )
             point["values"]["dailyTrainingLoadAcute"] = measured
+            point["value"] = measured
         points = [by_date[key] for key in sorted(by_date)]
     return {
         "status": "current" if points else "unavailable",

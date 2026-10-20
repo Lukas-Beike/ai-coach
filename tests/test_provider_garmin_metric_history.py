@@ -322,6 +322,16 @@ class GarminHistoricMetricNormalizationTests(unittest.TestCase):
             synced_at="sync",
         )
         self.assertEqual(nested["points"][0]["values"]["dailyTrainingLoadAcute"], 81)
+        self.assertEqual(nested["points"][0]["value"], 81)
+        projected_readiness = projected_metric(
+            [{"calendarDate": "2026-10-05", "trainingReadinessScore": 72}],
+            start=START,
+            end=TODAY,
+            aggregation="daily",
+            metric="training_readiness_history",
+            synced_at="sync",
+        )
+        self.assertEqual(projected_readiness["points"][0]["value"], 72)
 
     def test_wire_range_formats_preserve_ftp_and_endurance_weeks(self):
         points = ftp_points(
