@@ -64,6 +64,28 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(receipts[0]["result"]["status"], "saved")
 
+    def test_save_claim_without_a_write_step_is_flagged(self):
+        read = {"tool": "read_nutrition", "result": {"ok": True}}
+        for claim in (
+            "Als Snack für heute erfasst: 113 g Apfel.",
+            "Ich habe den Eintrag gespeichert.",
+        ):
+            with self.subTest(claim=claim):
+                _, text, _ = self.finalize(self.response(claim), [dict(read)])
+                self.assertTrue(text.startswith(claim))
+                self.assertIn("nichts gespeichert", text)
+
+    def test_save_claim_is_not_flagged_when_backed_or_not_a_claim(self):
+        read = {"tool": "read_nutrition", "result": {"ok": True}}
+        _, backed, _ = self.finalize(
+            self.response("Ich habe den Eintrag gespeichert."), [self.success()]
+        )
+        _, quoted, _ = self.finalize(
+            self.response("Heute erfasst: 113 g Apfel."), [read]
+        )
+        self.assertEqual(backed, "Ich habe den Eintrag gespeichert.")
+        self.assertEqual(quoted, "Heute erfasst: 113 g Apfel.")
+
     def test_local_nutrition_approval_uses_local_only_wording(self):
         _, text, _ = self.finalize(
             self.response(""),

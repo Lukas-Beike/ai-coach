@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -374,6 +375,28 @@ def _approval_message(
     )
 
 
+_SAVE_CLAIM = re.compile(
+    r"\bich habe\b[^.\n]{0,160}\b(?:erfasst|gespeichert|eingetragen|angelegt|hinzugefügt)\b"
+    r"|^\s*(?:als|für)\b[^.:\n]{0,80}\b(?:erfasst|gespeichert|eingetragen)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _unbacked_save_notice(text: str, effects: list[dict[str, Any]]) -> str:
+    """Flag a first-person save claim in a turn that saved nothing.
+
+    The text stays: an earlier diary entry may be quoted legitimately, so only
+    the missing write is stated.
+    """
+    if effects or not _SAVE_CLAIM.search(text):
+        return text
+    return (
+        text
+        + "\nHinweis: In dieser Antwort wurde nichts gespeichert. "
+        + "Bitte sende die Anfrage erneut, wenn etwas erfasst werden soll."
+    )
+
+
 def _fallback_message(text: str, effects: list[dict[str, Any]]) -> str:
     if text:
         return text
@@ -472,6 +495,8 @@ class CoachStructuredOutcomeService:
         text = _approval_message(
             text, question, awaiting_approval, effects, command_receipts
         )
+        if not (question or failures or awaiting_approval or incomplete_answer):
+            text = _unbacked_save_notice(text, effects)
         text = _fallback_message(text, effects)
         return text, incomplete_answer, missing_answer
 
