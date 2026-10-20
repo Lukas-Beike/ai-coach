@@ -121,8 +121,10 @@ class CoachRequestPayloadService:
         model_instructions = compose_model_instructions(
             training_context,
             allow_mutations=allow_mutations,
-            attachment_summary=not retain_openai_attachment_context
-            and has_prior_openai_attachments,
+            # Earlier pixels are gone once the conversation rotates or leaves the
+            # window, so the summary notice applies to every turn after an upload.
+            attachment_summary=has_prior_openai_attachments
+            and (not retain_openai_attachment_context or bool(attachments)),
         )
         projected_dialogue = compact_coach_dialogue(context, selection)
         dialogue_input = {
@@ -130,7 +132,9 @@ class CoachRequestPayloadService:
             "current_message": message,
             "confirmed_steps": model_confirmed_steps(command_receipts),
         }
-        if retain_openai_attachment_context and has_prior_openai_attachments:
+        # An in-window follow-up already has the rotated conversation's context;
+        # only an attachment turn needs the full local dialogue as well.
+        if retain_openai_attachment_context and not attachments:
             dialogue_input = {
                 "current_message": message,
                 "confirmed_steps": model_confirmed_steps(command_receipts),
@@ -172,6 +176,9 @@ class CoachRequestPayloadService:
                 "event": "coach_request_sizes",
                 "context": {
                     "context_profile": selection.name,
+                    "attachment_mode": "retained"
+                    if retain_openai_attachment_context
+                    else "local",
                     "instruction_characters": len(payload["instructions"]),
                     "input_characters": len(
                         json.dumps(payload["input"], ensure_ascii=False)

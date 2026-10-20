@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import uuid
 from collections.abc import Callable
@@ -18,16 +19,40 @@ from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.events import StateEventBuffer
 
 MESSAGE_ATTACHMENTS_QUERY = "SELECT attachments FROM messages WHERE id=?"
-# A prior Coach turn sent attachments to OpenAI. Receipts are filtered in SQL so a
-# turn does not decode every stored receipt; the CASE guards skip malformed JSON.
-PRIOR_OPENAI_ATTACHMENTS_QUERY = (
-    "SELECT 1 FROM coach_commands JOIN messages ON messages.id="
-    "json_extract(CASE WHEN json_valid(receipt) THEN receipt END, '$.user_message_id') "
+# User messages after the latest earlier attachment turn that keep the OpenAI
+# conversation (counting the current message) before local dialogue takes over.
+ATTACHMENT_RETENTION_USER_MESSAGES = 3
+# The latest prior Coach turn that sent attachments to OpenAI, and how many user
+# messages (including the current one) follow it. Receipts are filtered in SQL so
+# a turn does not decode every stored receipt; the CASE guards skip malformed JSON.
+PRIOR_OPENAI_ATTACHMENT_QUERY = (
+    "WITH prior AS (SELECT MAX(messages.id) AS id FROM coach_commands JOIN messages "
+    "ON messages.id=json_extract(CASE WHEN json_valid(receipt) THEN receipt END, "
+    "'$.user_message_id') "
     "WHERE json_type(CASE WHEN json_valid(receipt) THEN receipt END, "
     "'$.user_message_id')='integer' "
     "AND json_extract(CASE WHEN json_valid(receipt) THEN receipt END, "
     "'$.ai_provider')=? "
-    "AND messages.id<? AND messages.attachments!='[]' LIMIT 1"
+    "AND (json_type(CASE WHEN json_valid(receipt) THEN receipt END, "
+    "'$.openai_response_id')='text' "
+    "OR json_extract(CASE WHEN json_valid(receipt) THEN receipt END, "
+    "'$.openai_reached')=1 "
+    "OR json_extract(CASE WHEN json_valid(receipt) THEN receipt END, "
+    "'$.status')='completed') "
+    "AND messages.id<? AND messages.attachments!='[]') "
+    "SELECT prior.id AS id, (SELECT COUNT(*) FROM messages WHERE role='user' "
+    "AND messages.id<=? AND messages.id>prior.id) AS turns FROM prior"
+)
+CONVERSATION_IN_USE_QUERY = (
+    "SELECT 1 FROM coach_commands WHERE conversation_id=? AND client_turn_id!=? LIMIT 1"
+)
+MARK_CONVERSATION_ROTATED_QUERY = (
+    "UPDATE coach_commands SET receipt=json_set(receipt, "
+    "'$.openai_conversation_rotated', json('true')) WHERE client_turn_id=?"
+)
+ROTATE_CONVERSATION_QUERY = (
+    "UPDATE coach_commands SET conversation_id=?, receipt=json_set(receipt, "
+    "'$.openai_conversation_rotated', json('true')) WHERE client_turn_id=?"
 )
 # Attachment items without their encoded file data, which evidence never shows.
 ATTACHMENT_EVIDENCE_QUERY = (
@@ -187,7 +212,7 @@ class CoachConversationResetService:
 
 
 class CoachConversationProvisionService:
-    """Provision and persist an OpenAI conversation identifier."""
+    """Provision, rotate, and persist OpenAI conversation identifiers."""
 
     def __init__(
         self,
@@ -196,17 +221,17 @@ class CoachConversationProvisionService:
         openai_responses_client: OpenAIResponsesClient,
         db_lock: Any,
         uuid_factory: Callable[[], uuid.UUID],
+        *,
+        logger: logging.Logger | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._key_values = key_value_repository
         self._client = openai_responses_client
         self._db_lock = db_lock
+        self._logger = logger or logging.getLogger(__name__)
+        self.remote_delete_thread: threading.Thread | None = None
 
-    def ensure(self) -> str:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
-            existing = self._key_values.get(db, "openai_conversation_id")
-        if existing:
-            return existing
+    def _create_remote(self) -> str:
         result = self._client.request(
             "/conversations",
             {"metadata": {"app": "intervals-coach", "purpose": "personal-coach"}},
@@ -214,9 +239,58 @@ class CoachConversationProvisionService:
         conversation_id = result.get("id")
         if not isinstance(conversation_id, str):
             raise AppError(502, "OpenAI hat keine Konversations-ID zurückgegeben.")
+        return conversation_id
+
+    def ensure(self) -> str:
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            existing = self._key_values.get(db, "openai_conversation_id")
+        if existing:
+            return existing
+        conversation_id = self._create_remote()
         with self._db_lock, self._database_manager.unit_of_work() as db:
             self._key_values.set(db, "openai_conversation_id", conversation_id)
         return conversation_id
+
+    def rotate(self, client_turn_id: str, current_conversation_id: str) -> str:
+        """Start a fresh OpenAI conversation for an attachment turn.
+
+        An unused conversation is kept and only flagged. A used one is replaced
+        and deleted remotely in the background; the flag makes resumes idempotent.
+        """
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            in_use = db.execute(
+                CONVERSATION_IN_USE_QUERY, (current_conversation_id, client_turn_id)
+            ).fetchone()
+            if not in_use:
+                db.execute(MARK_CONVERSATION_ROTATED_QUERY, (client_turn_id,))
+                return current_conversation_id
+        rotated_id = self._create_remote()
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            self._key_values.set(db, "openai_conversation_id", rotated_id)
+            db.execute(ROTATE_CONVERSATION_QUERY, (rotated_id, client_turn_id))
+        self._start_remote_delete(current_conversation_id)
+        return rotated_id
+
+    def _delete_remote(self, conversation_id: str) -> None:
+        try:
+            self._client.delete_conversation(conversation_id)
+        except Exception:
+            self._logger.warning(
+                "Replaced OpenAI conversation could not be deleted after rotation",
+                extra={"event": "openai_rotation_remote_delete_failed"},
+                exc_info=True,
+            )
+
+    def _start_remote_delete(self, conversation_id: str) -> None:
+        if not conversation_id:
+            return
+        self.remote_delete_thread = threading.Thread(
+            target=self._delete_remote,
+            args=(conversation_id,),
+            name="coach-rotation-remote-delete",
+            daemon=True,
+        )
+        self.remote_delete_thread.start()
 
 
 class CoachAttachmentContextService:
@@ -227,24 +301,32 @@ class CoachAttachmentContextService:
 
     def load_for_receipt(
         self, receipt: dict[str, Any]
-    ) -> tuple[list[dict[str, Any]], bool]:
+    ) -> tuple[list[dict[str, Any]], bool, bool]:
+        """Return current attachments, whether any earlier OpenAI turn sent some,
+        and whether that earlier attachment turn is still inside the retention window."""
+        message_id = receipt.get("user_message_id") or 0
         with self._database_manager.reader() as db:
             attachment_row = db.execute(
                 MESSAGE_ATTACHMENTS_QUERY, (receipt.get("user_message_id"),)
             ).fetchone()
-            has_prior = bool(
-                db.execute(
-                    PRIOR_OPENAI_ATTACHMENTS_QUERY,
-                    (AI_PROVIDER, receipt.get("user_message_id") or 0),
-                ).fetchone()
-            )
+            prior = db.execute(
+                PRIOR_OPENAI_ATTACHMENT_QUERY, (AI_PROVIDER, message_id, message_id)
+            ).fetchone()
+        has_prior = bool(prior and prior["id"] is not None)
+        within_window = bool(
+            has_prior and prior["turns"] <= ATTACHMENT_RETENTION_USER_MESSAGES
+        )
         try:
             attachments = (
                 json.loads(attachment_row["attachments"]) if attachment_row else []
             )
         except TypeError, json.JSONDecodeError:
             attachments = []
-        return (attachments if isinstance(attachments, list) else []), has_prior
+        return (
+            (attachments if isinstance(attachments, list) else []),
+            has_prior,
+            within_window,
+        )
 
     def add_evidence(self, context: dict[str, Any]) -> None:
         with self._database_manager.reader() as db:
