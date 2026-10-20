@@ -690,10 +690,12 @@ python tests/run_tests.py --shard 1 --total 4
 python tests/run_tests.py --shard 1 --total 4 --list
 ```
 Refresh the recording when shard times drift apart, with a full unsharded run in
-the image (the same read-only mounts as `tests/run_sqlcipher_tests.ps1`, plus a
-writable output path):
+the image. The Windows runner uses the same read-only mounts and writes the file
+into the given directory, which then replaces `tests/test_durations.json`:
 ```powershell
-python tests/run_tests.py --record-durations tests/test_durations.json
+New-Item -ItemType Directory -Force $env:TEMP\durations | Out-Null
+.\tests\run_sqlcipher_tests.ps1 -RecordDurationsDirectory $env:TEMP\durations
+Copy-Item $env:TEMP\durations\test_durations.json tests\test_durations.json
 ```
 
 #### Container-Sensitive Suite

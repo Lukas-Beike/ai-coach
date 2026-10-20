@@ -668,7 +668,7 @@ class ContainerSuiteContractTests(unittest.TestCase):
         self.assertIn("python /review/tests/run_tests.py --suite container", container)
         local = (root / "tests/run_sqlcipher_tests.ps1").read_text(encoding="utf-8")
         # The local SQLCipher runner must keep running the full suite.
-        self.assertIn("python /review/tests/run_tests.py\n", local)
+        self.assertIn("python /review/tests/run_tests.py @runnerArguments\n", local)
         self.assertNotIn("--suite", local)
         mount_pattern = r':(/[^":\s]+):ro"'
         ci_targets = set(re.findall(mount_pattern, container))

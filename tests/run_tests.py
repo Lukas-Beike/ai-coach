@@ -205,6 +205,7 @@ def main() -> int:
         f"{result.testsRun} run, {len(result.skipped)} skipped in {elapsed:.2f}s"
     )
     if args.record_durations:
+        assert isinstance(result, ClassTimingResult)
         recorded = {
             key: round(seconds, 3)
             for key, seconds in sorted(result.class_seconds.items())
