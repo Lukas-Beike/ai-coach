@@ -443,10 +443,6 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .analysis-chart-table caption { padding: 8px; text-align: left; color: var(--muted); }
 .analysis-chart-table th, .analysis-chart-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; }
 
-.analysis-segment-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.analysis-segment-heading > div { display: grid; gap: 4px; min-width: 0; }
-.analysis-segment-heading h3 { margin: 0; color: var(--ink); font-size: 1.05rem; }
-.analysis-segment-heading .tab-sync-detail { margin: 0; text-align: right; }
 .skeleton-stack { display: grid; gap: 10px; width: min(100%, 640px); margin: auto; padding: 28px 8px; }
 .skeleton-row { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--translucent-surface); }
 .skeleton-avatar { flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%; }

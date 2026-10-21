@@ -450,12 +450,8 @@
       // An unchanged sync keeps opened sessions and loaded pages in place.
       if (key === list.key && root.querySelector(".activity-analysis-list")) return;
       list = { key, cursor: null, epoch: list.epoch + 1 };
-      const heading = node("div", null, "analysis-segment-heading");
-      const intro = node("div");
-      intro.append(node("h3", "Einheiten"), node("p", "Einheit aufklappen für Kennzahlen, Verlaufsdiagramme, Zonen und Runden.", "muted"));
-      heading.append(intro);
       const items = node("div", null, "activity-analysis-list");
-      root.replaceChildren(heading, items);
+      root.replaceChildren(items);
       if (!payload.activities?.length) items.append(node("p", "Noch keine abgeschlossenen Einheiten synchronisiert.", "muted"));
       appendPage(root, payload);
     } catch (error) {
