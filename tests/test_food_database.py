@@ -182,7 +182,33 @@ class OpenFoodFactsTests(unittest.TestCase):
                 client.search("Synthetic food")
             self.assertEqual(raised.exception.reason, "food_database_rate_limited")
             self.assertNotIn("Synthetic", str(raised.exception))
+            self.assertNotIn(chr(0xFFFC), raised.exception.message)
         self.assertEqual(opener.call_count, 1)
         clock.return_value = 61
         opener.side_effect = lambda request, timeout: response({"products": []})
         self.assertEqual(client.search("Synthetic food"), [])
+
+    def test_search_rate_limit_does_not_block_product_lookups(self):
+        def opener(request, timeout):
+            if "/cgi/search.pl" in request.full_url:
+                raise HTTPError(request.full_url, 429, "Too Many", {}, None)
+            return response({"product": product()})
+
+        client = OpenFoodFactsClient(opener=opener, clock=Mock(return_value=0))
+        with self.assertRaises(AppError):
+            client.search("Synthetic food")
+        self.assertEqual(client.product("1234567890123")["id"], "off:1234567890123")
+
+    def test_overload_is_unavailable_without_backoff(self):
+        opener = Mock(
+            side_effect=HTTPError(
+                "https://world.openfoodfacts.org/", 503, "x", {}, None
+            )
+        )
+        client = OpenFoodFactsClient(opener=opener, clock=Mock(return_value=0))
+        for _ in range(2):
+            with self.assertRaises(AppError) as raised:
+                client.search("Synthetic food")
+            self.assertEqual(raised.exception.status, 502)
+            self.assertEqual(raised.exception.reason, "food_database_unavailable")
+        self.assertEqual(opener.call_count, 2)
